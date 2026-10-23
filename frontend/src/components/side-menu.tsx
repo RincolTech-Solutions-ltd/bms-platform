@@ -1,6 +1,7 @@
 import { Link, useRouterState } from '@tanstack/react-router';
 import { type KeyboardEvent, type ReactNode, type TouchEvent, createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
+import { BusyAnnouncer, BusyButton } from '../app/ui/BusyButton';
 import { useTour } from '../tour/host';
 import { icons } from './icons';
 
@@ -10,7 +11,10 @@ import { icons } from './icons';
 // one (aria-current) cannot drift apart. The drawer closes on the backdrop, Escape, a left swipe or a chosen link, keeps focus
 // inside while open and gives it back to the menu button; any change of page closes it. Between 720 and 1023px the sidebar starts
 // folded, from 1024px unfolded, until the person chooses. A tour step that points at one of the data-tour anchors opens the drawer,
-// or unfolds the folded sidebar, for as long as the step is shown, without taking focus from the tour card.
+// or unfolds the folded sidebar, for as long as the step is shown, without taking focus from the tour card. When the links name two or
+// more sections (issue #471, a business with both Shop and Lending), each section's links sit under a heading that folds them, the
+// folded ones kept per person on the device; the links of no section stay above and below them. With one section the list is flat.
+// A folded section shows its links while the page is one of them, or while a tour step points into it.
 
 const PHONE = '(max-width: 719px)';
 const NARROW = '(max-width: 1023px)';
@@ -45,6 +49,17 @@ export interface MenuLink {
   group?: ReactNode;
   /** The paths of the group's links: on one of them this item is drawn as the section and the group's link as the current one. */
   groupPaths?: string[];
+  /** The id of the MenuSection it belongs to; none for the links every business shares. */
+  section?: string;
+}
+
+/** A headed, foldable part of the menu (issue #471), shown only when the links name two or more sections. */
+export interface MenuSection {
+  id: string;
+  label: string;
+  icon: ReactNode;
+  /** The data-tour ids inside its links' groups: a tour step on one of them unfolds the section. */
+  tours?: string[];
 }
 
 const FOCUSABLE = 'a[href], button:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -52,6 +67,11 @@ const SWIPE = 50;
 
 // True inside the folded sidebar, so a group's links fold with the items above them.
 const Folded = createContext(false);
+
+/** True inside the folded sidebar: what the sidebar shows above its links keeps only its picture, as the links keep their icons. */
+export function useFolded(): boolean {
+  return useContext(Folded);
+}
 
 const under = (pathname: string, path: string) => pathname === path || pathname.startsWith(`${path}/`);
 
@@ -77,19 +97,114 @@ export function MenuItemLink({ to, label, icon, tour, exact, groupPaths }: { to:
   );
 }
 
-/** The list of areas both the sidebar and the drawer draw, the groups under their item. */
-function MenuLinks({ label, tour, links, folded = false }: { label: string; tour?: string; links: MenuLink[]; folded?: boolean }) {
+function MenuItems({ links }: { links: MenuLink[] }) {
+  return (
+    <ul>
+      {links.map((l) => (
+        <li key={l.to}>
+          <MenuItemLink to={l.to} label={l.label} icon={l.icon} tour={l.tour} exact={l.exact} groupPaths={l.groupPaths} />
+          {l.group}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const sectionsKey = (person: string) => `bms.menu.sections.${person}`;
+
+// The ids of the sections the person folded, kept on the device per person.
+function readFoldedSections(person: string): string[] {
+  try {
+    const kept: unknown = JSON.parse(window.localStorage.getItem(sectionsKey(person)) ?? '[]');
+    return Array.isArray(kept) ? kept.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function keepFoldedSections(person: string, ids: string[]) {
+  try {
+    window.localStorage.setItem(sectionsKey(person), JSON.stringify(ids));
+  } catch {
+    // Storage blocked: the sections stay as chosen until the page is reloaded.
+  }
+}
+
+/**
+ * One section's heading, a button that folds its links, and the links. Unfolded while the page is one of its links or their groups,
+ * so the current link is never hidden, and while a tour step points into it.
+ */
+function MenuSectionBlock({ section, links, folded, onFold }: { section: MenuSection; links: MenuLink[]; folded: boolean; onFold: (fold: boolean) => void }) {
+  const iconsOnly = useContext(Folded);
+  const list = useId();
+  const { target } = useTour();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const anchors = [...links.map((l) => l.tour), ...(section.tours ?? [])].filter(Boolean);
+  const here = links.some((l) => (l.exact ? pathname === l.to : under(pathname, l.to)) || !!l.groupPaths?.some((path) => under(pathname, path)));
+  const forced = here || (target !== undefined && anchors.includes(target));
+  // As in SideNav, a press while the section is held open wins for that tour step and page. Another step, the tour ending or
+  // another page forgets the press, so the section is held open again.
+  const [pressed, setPressed] = useState(false);
+  const [pressAt, setPressAt] = useState({ target, pathname });
+  if (pressAt.target !== target || pressAt.pathname !== pathname) {
+    setPressAt({ target, pathname });
+    setPressed(false);
+  }
+  const shut = folded && (!forced || pressed);
+
+  // From what the person sees: a press on a held-open section folds it, and the choice is kept.
+  function toggle() {
+    onFold(!shut);
+    if (forced) setPressed(true);
+  }
+
+  return (
+    <div className="side-menu-block">
+      <button type="button" className="side-menu-heading" aria-expanded={!shut} aria-controls={list} title={iconsOnly ? section.label : undefined} onClick={toggle}>
+        {section.icon}
+        <span className={iconsOnly ? 'visually-hidden' : undefined}>{section.label}</span>
+        {!iconsOnly && <span className="side-menu-caret" aria-hidden="true" />}
+      </button>
+      <div id={list} hidden={shut}>
+        <MenuItems links={links} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The list of areas both the sidebar and the drawer draw, the groups under their item. With links in two or more `sections`, the
+ * shared links before the first sectioned one come first, then each section under its heading, then the other shared links.
+ */
+function MenuLinks({ label, tour, links, folded = false, sections = [], person = '' }: { label: string; tour?: string; links: MenuLink[]; folded?: boolean; sections?: MenuSection[]; person?: string }) {
+  const [kept, setKept] = useState(() => ({ person, ids: readFoldedSections(person) }));
+  // Another person signed in on the device: their own folded sections, read again.
+  const shut = kept.person === person ? kept.ids : readFoldedSections(person);
+  if (kept.person !== person) setKept({ person, ids: shut });
+  const used = sections.filter((s) => links.some((l) => l.section === s.id));
+  const grouped = used.length > 1;
+  const first = links.findIndex((l) => l.section !== undefined);
+
+  function fold(id: string, folding: boolean) {
+    const next = folding ? [...shut.filter((s) => s !== id), id] : shut.filter((s) => s !== id);
+    keepFoldedSections(person, next);
+    setKept({ person, ids: next });
+  }
+
   return (
     <Folded.Provider value={folded}>
       <nav className="side-menu-links" aria-label={label} data-tour={tour}>
-        <ul>
-          {links.map((l) => (
-            <li key={l.to}>
-              <MenuItemLink to={l.to} label={l.label} icon={l.icon} tour={l.tour} exact={l.exact} groupPaths={l.groupPaths} />
-              {l.group}
-            </li>
-          ))}
-        </ul>
+        {grouped ? (
+          <>
+            <MenuItems links={links.slice(0, first)} />
+            {used.map((s) => (
+              <MenuSectionBlock key={s.id} section={s} links={links.filter((l) => l.section === s.id)} folded={shut.includes(s.id)} onFold={(folding) => fold(s.id, folding)} />
+            ))}
+            <MenuItems links={links.slice(first).filter((l) => l.section === undefined)} />
+          </>
+        ) : (
+          <MenuItems links={links} />
+        )}
       </nav>
     </Folded.Provider>
   );
@@ -117,21 +232,33 @@ function keepFolded(folded: boolean) {
 
 /**
  * The sidebar from 720px: the same list as the drawer, about 240px wide, or 64px of icons when folded. It starts folded below
- * 1024px and unfolded from there; once the person folds or unfolds it, that choice is kept on the device.
+ * 1024px and unfolded from there; once the person folds or unfolds it, that choice is kept on the device. `head` is shown above
+ * the links, as in the drawer (the shop in use, issue #461).
  */
-export function SideNav({ label, tour, links, tours = [] }: { label: string; tour?: string; links: MenuLink[]; tours?: string[] }) {
+export function SideNav({ label, tour, links, tours = [], sections, person, head }: { label: string; tour?: string; links: MenuLink[]; tours?: string[]; sections?: MenuSection[]; person?: string; head?: ReactNode }) {
   const [choice, setChoice] = useState(readFolded);
   const narrow = useMedia(NARROW);
   const folded = choice ?? narrow;
   const root = useRef<HTMLDivElement>(null);
   const { target } = useTour();
   const anchors = [tour, ...links.map((l) => l.tour), ...tours].filter(Boolean);
-  // Unfolded while a tour step points into it, so the step can show the label it talks about.
-  const shownFolded = folded && !(target !== undefined && anchors.includes(target));
+  const forTour = target !== undefined && anchors.includes(target);
+  // A press during a tour step wins for that step. A step that points somewhere else, or the tour ending, forgets the press, so
+  // the next step, going back to this one, or the next run of the tour unfolds it again.
+  const [pressed, setPressed] = useState(false);
+  const [pressTarget, setPressTarget] = useState(target);
+  if (pressTarget !== target) {
+    setPressTarget(target);
+    setPressed(false);
+  }
+  // Unfolded while a tour step points into it, so the step can show the label it talks about, unless the person pressed.
+  const shownFolded = folded && (!forTour || pressed);
 
+  // From what the person sees: unfolded for a tour step, a press folds it, and the choice is kept.
   function toggle() {
-    keepFolded(!folded);
-    setChoice(!folded);
+    keepFolded(!shownFolded);
+    setChoice(!shownFolded);
+    if (forTour) setPressed(true);
   }
 
   // Narrowed to a phone while the focus is in the sidebar: it goes to the menu button that now holds the list. A layout effect, so
@@ -155,13 +282,18 @@ export function SideNav({ label, tour, links, tours = [] }: { label: string; tou
       >
         {icons.menu}
       </button>
-      <MenuLinks label={label} tour={tour} links={links} folded={shownFolded} />
+      {head && <Folded.Provider value={shownFolded}>{head}</Folded.Provider>}
+      <MenuLinks label={label} tour={tour} links={links} folded={shownFolded} sections={sections} person={person} />
     </div>
   );
 }
 
-/** The menu button and its drawer. `label` names the list of links, `tour` is its data-tour id, `tours` the ids inside the groups. */
-export function SideMenu({ label, tour, links, name, onSignOut, tours = [] }: { label: string; tour?: string; links: MenuLink[]; name?: string; onSignOut: () => void; tours?: string[] }) {
+/**
+ * The menu button and its drawer. `label` names the list of links, `tour` is its data-tour id, `tours` the ids inside the groups,
+ * `sections` the headed parts, `person` whose folded sections are kept and `busy` holds Sign out while signing out runs.
+ * `head` what is shown above the links (the shop in use, issue #461).
+ */
+export function SideMenu({ label, tour, links, name, onSignOut, busy = false, tours = [], sections, person, head }: { label: string; tour?: string; links: MenuLink[]; name?: string; onSignOut: () => void; busy?: boolean; tours?: string[]; sections?: MenuSection[]; person?: string; head?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const heading = useId();
   const button = useRef<HTMLButtonElement>(null);
@@ -227,7 +359,8 @@ export function SideMenu({ label, tour, links, name, onSignOut, tours = [] }: { 
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (!open || event.key !== 'Tab') return;
-    const controls = Array.from(panel.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
+    // The links of a folded section are in the page but hidden: they take no part in the cycle.
+    const controls = Array.from(panel.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []).filter((el) => !el.closest('[hidden]'));
     if (controls.length === 0) return;
     const at = controls.indexOf(document.activeElement as HTMLElement);
     const next = event.shiftKey ? (at <= 0 ? controls.length - 1 : at - 1) : at === controls.length - 1 ? 0 : at + 1;
@@ -251,11 +384,17 @@ export function SideMenu({ label, tour, links, name, onSignOut, tours = [] }: { 
         ref={panel}
         className="side-menu-panel"
         role="dialog"
-        aria-modal="true"
+        aria-modal={open ? 'true' : undefined}
         aria-labelledby={heading}
         onKeyDown={onKeyDown}
         onClick={(event) => {
-          if (open && event.target instanceof Element && event.target.closest('a')) close();
+          const link = event.target instanceof Element ? event.target.closest('a') : null;
+          if (!open || !link) return;
+          // A link to another page opens it here, and it keeps its own scroll, not the old page's position. The same page, or a
+          // link opened elsewhere (Ctrl, Cmd, Shift or a middle click), leaves this page, so its position comes back.
+          const elsewhere = event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0;
+          if (link.pathname !== pathname && !elsewhere) restoreScroll.current = false;
+          close();
         }}
         onTouchStart={(event) => {
           const touch = event.touches[0];
@@ -269,16 +408,20 @@ export function SideMenu({ label, tour, links, name, onSignOut, tours = [] }: { 
             {icons.close}
           </button>
         </div>
-        <MenuLinks label={label} tour={tour} links={links} />
+        {head}
+        <MenuLinks label={label} tour={tour} links={links} sections={sections} person={person} />
         <div className="side-menu-foot">
           <span className="staff-user">
             <span className="avatar">{icons.user}</span>
             <span className="staff-user-name">{name}</span>
           </span>
-          <button type="button" className="btn-ghost" onClick={onSignOut}>
+          <BusyButton type="button" className="btn-ghost" busy={busy} onClick={onSignOut}>
             {icons.signOut}
             <span>Sign out</span>
-          </button>
+          </BusyButton>
+          {/* The drawer the person opened is aria-modal, which hides the shell's announcer, so it carries its own while open and
+              the shell's steps aside, so there is one Working at a time. */}
+          {open && <BusyAnnouncer modal />}
         </div>
       </div>
     </div>

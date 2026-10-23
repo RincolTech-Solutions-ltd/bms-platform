@@ -3,7 +3,7 @@
 ## Status
 
 Accepted (Hillary Arinda, Dev Lead, 22 Oct 2026, issue #466; the penalty default of decision 6 is his to change later).
-Migration `V91`. FR-EXL-01 to FR-EXL-09. Builds on ADR-004 (integer money and the double-entry ledger), ADR-015
+Migration `V89`. FR-EXL-01 to FR-EXL-09. Builds on ADR-004 (integer money and the double-entry ledger), ADR-015
 (maker-checker actions registered by their modules), ADR-026 (loan servicing: allocation rows by repayment), ADR-062
 (the Owner of a business) and the arrears run of #270 (penalties start at the business's first run).
 
@@ -61,7 +61,7 @@ fit every lending business, not one register.
    operator sets for a business with a reason, both audited. A business with no Owner has no administrator who sets it:
    403 `owner_only` for all of them, unlike the other Owner-only acts of ADR-062, and the operator sets it; until set, it is the business date of the first sign-in of
    an administrator, stored at that sign-in (`go_live_source` `first_admin_sign_in`, audited
-   `core.settings.go_live_defaulted`) so that later sign-ins, removed roles or sessions never move it; V91 stores it for a
+   `core.settings.go_live_defaulted`) so that later sign-ins, removed roles or sessions never move it; V89 stores it for a
    business whose administrators signed in before. Once the business has lending in the app's books (any lending journal
    entry, or an approved bring-in), the Owner moves the date only earlier (422 `go_live_locked`): a later date would let
    a loan disbursed after go-live come in as if from paper. Only the platform operator moves it later then, with a

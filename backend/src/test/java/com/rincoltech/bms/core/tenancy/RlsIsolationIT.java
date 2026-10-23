@@ -126,6 +126,10 @@ class RlsIsolationIT {
                         """)
                 .params(logo, t.tenantId(), t.tenantId(), "tenants/" + t.tenantId() + "/upload/rls/" + logo + ".png")
                 .update();
+        // A shop's own logo (migration V85, #461): the second branch points at the tenant's logo document.
+        owner.sql("UPDATE branches SET logo_document_id = ? WHERE id = ?")
+                .params(logo, t.secondBranch())
+                .update();
         owner.sql("""
                         INSERT INTO lending_member_documents (id, tenant_id, member_id, doc_kind, document_id, uploaded_by)
                         VALUES (?, ?, ?, 'other', ?, ?)
@@ -432,6 +436,25 @@ class RlsIsolationIT {
                                'Test write-off', ?, ?
                           FROM retail_sales s WHERE s.tenant_id = ? LIMIT 1
                         """).params(t.tenantId(), entry, user, t.tenantId()).update();
+        // Retail sales offline (ADR-067, #458): a clash of the fixture sale, a refused offline sale reported by a
+        // device and a sale waiting on a phone.
+        // JUSTIFICATION-A3: a fixture row for each new table; the isolation test needs one row per tenant table.
+        owner.sql("""
+                        INSERT INTO retail_sale_clashes (id, tenant_id, sale_id, branch_id, kind, words)
+                        SELECT gen_random_uuid(), ?, s.id, s.branch_id, 'clock_ahead', 'Test clock ahead'
+                          FROM retail_sales s WHERE s.tenant_id = ? LIMIT 1
+                        """).params(t.tenantId(), t.tenantId()).update();
+        owner.sql("""
+                        INSERT INTO retail_offline_failures (id, tenant_id, client_sale_id, branch_id, made_by, occurred_at,
+                                                             payment_method, total_minor, request, code, message)
+                        VALUES (gen_random_uuid(), ?, gen_random_uuid(), ?, ?, now(), 'cash', 100, '{}', 'period_closed',
+                                'Test refusal')
+                        """).params(t.tenantId(), t.headOffice(), user).update();
+        owner.sql("""
+                        INSERT INTO retail_offline_waiting (id, tenant_id, client_sale_id, branch_id, made_by, occurred_at,
+                                                            total_minor, reported_by)
+                        VALUES (gen_random_uuid(), ?, gen_random_uuid(), ?, ?, now(), 100, ?)
+                        """).params(t.tenantId(), t.headOffice(), user, user).update();
         // Optional purchasing (ADR-033, #198): an order and its line, a receipt against it and its line, a supplier
         // invoice
         // with its line and entry, a payment with its allocation, and the tolerances.
@@ -990,6 +1013,43 @@ class RlsIsolationIT {
                         INSERT INTO feedback_items (id, tenant_id, sender_user_id, kind, message, app_version)
                         VALUES (?, ?, ?, 'idea', 'Test feedback message', 'test (abc123)')
                         """).params(UUID.randomUUID(), t.tenantId(), user).update();
+        // A barcode on a product (migration V87, #345).
+        owner.sql("""
+                        INSERT INTO retail_product_barcodes (id, tenant_id, product_id, code, format)
+                        VALUES (?, ?, ?, 'TEST-RLS-01', 'code128')
+                        """).params(UUID.randomUUID(), t.tenantId(), retailProduct).update();
+    }
+
+    /**
+     * Shop logos (V85, #461): bound to A, no branch of B and its logo is read, and A cannot point one of its branches at a
+     * document of B (the key is on the tenant and the document).
+     */
+    @Test
+    void shopLogosAreIsolatedPerTenant() throws SQLException {
+        long ofB = asApp(
+                a.tenantId(),
+                c -> count(
+                        c,
+                        "SELECT count(*) FROM branches WHERE logo_document_id IS NOT NULL AND tenant_id = ?",
+                        b.tenantId()));
+        long ofA =
+                asApp(a.tenantId(), c -> count(c, "SELECT count(*) FROM branches WHERE logo_document_id IS NOT NULL"));
+        assertThat(ofB).isZero();
+        assertThat(ofA).isOne();
+        UUID logoOfB = TestDatabase.owner()
+                .sql("SELECT logo_document_id FROM branches WHERE id = ?")
+                .param(b.secondBranch())
+                .query(UUID.class)
+                .single();
+        assertThatThrownBy(() -> asApp(a.tenantId(), c -> {
+                    try (PreparedStatement ps =
+                            c.prepareStatement("UPDATE branches SET logo_document_id = ? WHERE id = ?")) {
+                        ps.setObject(1, logoOfB);
+                        ps.setObject(2, a.secondBranch());
+                        return ps.executeUpdate();
+                    }
+                }))
+                .hasStackTraceContaining("branches_logo_fk");
     }
 
     /**

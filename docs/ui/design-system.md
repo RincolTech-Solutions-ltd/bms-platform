@@ -1,6 +1,6 @@
 # Design system
 
-**Status:** Draft · **Chore:** #95, #106 (visual polish), #429 (light and dark theme), #455 (phone side menu) · **Chapter:** `docs/sdd/11-member-channels.md` section 11.2.6 · **Builds on:** #87 (tenant branding, FR-TEN-08)
+**Status:** Draft · **Chore:** #95, #106 (visual polish), #429 (light and dark theme), #455 (phone side menu), #471 (menu sections and Home cards) · **Chapter:** `docs/sdd/11-member-channels.md` section 11.2.6 · **Builds on:** #87 (tenant branding, FR-TEN-08)
 
 The look of the PWA: calm, trustworthy business software in Rincol Tech blue. One design layer serves the
 landing page, the sign-in family, the staff area, every retail screen, the member portal and the platform
@@ -75,6 +75,7 @@ The platform host and a tenant without a colour show the Rincol blue.
 | Secondary button | `<button>` | The default; 44px tall. Pressed: it sinks to 98% and darkens. Disabled (`disabled` or `aria-disabled="true"`): flat grey with muted text |
 | Primary button | `.btn-primary` (retail: `.rt-primary`; #87: `.btn-brand`) | One per view, the main action, at the bottom of a form |
 | Danger, ghost | `.btn-danger`, `.btn-ghost` | Reject or destroy; quiet actions such as Remove and Sign out |
+| Busy button | `<BusyButton busy={save.isPending} className="btn-primary">Save</BusyButton>` (`app/ui/BusyButton.tsx`, `.busy-button`, `.busy-spinner`; #456) | Every button that writes (POST, PUT, PATCH, DELETE: a sale, a payment, an invitation, a setting, a sign-in, an approval). While busy it keeps its label (never swap it for Saving or Sending: the spinner shows the work), shows a small spinner placed absolutely in its end padding (the width does not jump; while busy the end padding is at least 1.1em, so the spinner never covers the label; `.btn-sm`, tighter than that, has the same 1.1em end padding when idle too, so it keeps its width as well), and is `aria-busy="true"` and `aria-disabled="true"` rather than `disabled`, so it keeps keyboard focus while its own press guard drops every press. It has no live region of its own: the one `BusyAnnouncer` the app shell mounts says Working once while any button is busy (twenty rows sharing one flag are announced once) and clears when the last is done. An `aria-modal` dialog hides the shell's announcer, so the phone menu drawer mounts its own `<BusyAnnouncer modal />` inside itself while the person has it open, and Sign out there is heard; while it is mounted the shell's announcer renders nothing, so there is only one Working live region at a time. A press holds it until busy shows, or until an `onClick` that awaits has settled (released in a `finally`, so a throw cannot stick it) and two tasks have passed, and for at most 10 seconds when busy never shows, so a double click sends once; a submit of its form that gets through (from code or another submit button) holds it the same way, so two submits in one task send once, and while busy its form drops an Enter re-submit. Under reduced motion the spinner is a pulsing dot. Takes every `<button>` prop |
 | Link as button | `<Link className="btn btn-primary">` | Sizes `.btn-lg`, `.btn-sm` (still 44px tall), `.btn-block` |
 | Field | `<label>Text<input/></label>` or `<label htmlFor>` then the input | Label above, `.field-hint` and `.field-error` under it; `aria-invalid="true"` turns the edge red; a focused field shows the focus edge and halo however it got focus, and a wrapping label turns the link colour |
 | Choice row | `<label><input type="radio"/>Text</label>` | The whole row is the tap target; the chosen row is tinted |
@@ -87,6 +88,7 @@ The platform host and a tenant without a colour show the Rincol blue.
 | Side menu | `SideNav` and `SideMenu` (`components/side-menu.tsx`), `.side-nav`, `.side-nav-folded`, `.menu-button`, `.side-menu`, `.side-menu-panel`, `.side-menu-group` | The one navigation of the staff area and the operator portal: a sidebar from 720px that folds to icons, a drawer of the same items below it (see Navigation) |
 | Breadcrumbs | `StaffBreadcrumbs` (`components/breadcrumbs.tsx`): `<nav aria-label="Breadcrumb">` with an `<ol>` | One trail under the staff bar from the routes' `crumb` labels (FR-UXN-01); the last item is `aria-current="page"`; below 720px only Back to the parent and the current page |
 | Category group | `GroupControls`, `GroupedBodies`, `GroupedCards` (`areas/staff/retail/category-groups.tsx`), `.cat-head` | A list in expandable category sections: a full-width header button (`aria-expanded`, `aria-controls`) with the count and subtotal, a Group by category switch, Expand all and Collapse all (FR-UXN-02) |
+| Home cards | `HomeCards` (`areas/staff/home-cards.tsx`), `.home-cards`, `.home-card`, `.home-figures` | Home's card per module the business uses (#471, FR-UXN-05, ADR-072): a `.card` headed with the module's menu icon and name, its figures as a `dl` (label muted, value large and semibold, a count as a hint), and a link to the module; a grid of columns at least 280px wide, so one column on a phone |
 | Retail shortcuts | `RetailMenuGroup` (`areas/staff/retail/nav.tsx`) | Up to five retail shortcuts the user may use, as a group under Retail in the side menu on every size (#455, which removed the retail bottom bar) |
 | Tile | `.tile-grid` of `.tile` | Retail home: icon, label, hint; two per row on a phone |
 | Stat tile | `.an-stats` of `.an-stat` (`.an-stat-label`, `.an-stat-value`, a `.hint`) | The retail dashboard: a figure with its label, two per row on a phone and four from 720px; `.an-placeholder` (dashed) marks a slot for a figure that does not exist yet and shows no number |
@@ -113,6 +115,8 @@ The platform host and a tenant without a colour show the Rincol blue.
 | Tour anchor | `data-tour="<id>"` on the element a tour step lights up | Stable ids, never a CSS class; `tour/tours.test.tsx` fails when one disappears |
 | Tour rules (issue #292) | `tour/model.ts` `autoTourFor`, `host.tsx` | At most one tour starts by itself per page load; the rest wait for the next visit. A user with no tour history gets only the first-run (Welcome) tour, and every "New:" tour is marked seen for them at that moment, since they have nothing to compare against. One "Do not show tours again" checkbox (progress key `tours-off`) stops every automatic tour, "New:" ones included; Help still replays any tour |
 | Help | `HelpMenu` in the staff bar | A `dialog.sheet` with Take the tour and Show me this page |
+| Sync status (issue #458, ADR-067) | `SyncStatus` in `frontend/src/offline/sync-status.tsx`, mounted in the staff bar before Help; `.sync-status`, `.sync-dot`, `.sync-dot-offline`, `.sync-dot-syncing`, `.sync-word`, `.sync-count` (`.sync-long`, `.sync-short`), `.sync-list`, `.sync-row`, `.sync-row-failed`, `.sync-reason` | A 12px dot, `--color-success` online, `--color-text-muted` offline, `--color-warning` while sending (a slow pulse, still with `prefers-reduced-motion`), with the state as visible text beside it (Online, Offline, Syncing) and "3 waiting to sync" ("3 waiting" at 480px and below). The button's accessible name says the state, the count and the failed ones ("Offline, 3 waiting to sync, 1 failed"), so colour never carries the meaning alone (WCAG 1.4.1); it is 44px high and keeps its size on a phone. Tapping it opens a `dialog.sheet` (a bottom sheet below 560px): the queued and failed sales with the time, branch, way of paying, total and the reason of a failure, Send again, Sync now, and for a manager the sales other phones could not record (Send it again, Discard with a reason) and the open clashes (Mark resolved with a note). It lives in the staff bar, not the shell's header, so it never sits beside the theme selector or a phone menu. Drawn only for a person who sells |
+| Sign-out warning (issue #458) | `SignOutWarning` in `frontend/src/offline/sign-out-warning.tsx` | A `dialog.sheet` when sales wait: "3 sales are waiting to sync.", Sync now, Keep them and sign out, Cancel |
 
 ## Navigation (#455)
 
@@ -137,24 +141,44 @@ query, so the number is the token.
   longer). The page becomes two columns (`.nav-layout`, `.nav-layout-main`): the content takes the remaining width, centred up
   to `--content-width`, and clips the staff bar's full-bleed band, so nothing scrolls sideways at 1024px. It comes first in the
   page, so Tab reaches the menu before the content. Sign out stays in the staff bar.
+- **Sections for a business with Shop and Lending (#471, FR-UXN-04):** each item of `staffAreas` names its module with
+  `section` (`shop` for Retail, `lending` for Loans, Members, Collateral, Savings, Investments, Insights and the AI assistant),
+  and the layout passes `STAFF_SECTIONS` (Shop with the `stock` icon, Lending with its own `lending` icon, a coin on an open hand, since `banking` is Receive payments'). When the links name two
+  sections, `MenuLinks` draws the shared items before the first sectioned one (Home, Approvals), then each section, then the
+  other shared items (Reports, SMS, Receive payments, Users, Notifications, Feedback, Business set-up). A section is a
+  `.side-menu-block` with a rule above it and a heading button (`.side-menu-heading`: small muted capitals, its icon, a caret,
+  `aria-expanded`, `aria-controls` on the list) that folds its links; folded, the links stay in the page under `hidden`, and the
+  drawer's Tab cycle skips any control inside a `[hidden]` ancestor. The folded sections are kept per person in `localStorage`
+  under `bms.menu.sections.<user id>` (a list of ids, read and written inside `try`/`catch`), read again when another person
+  signs in. A folded section shows its links while the page is one of them or of their groups (`groupPaths`), and while a tour
+  step points at one of its links or its `tours` (`retail-nav` for Shop). The heading acts on what the person sees, as the
+  sidebar button does: a press on a section held open folds it and wins until the page or the tour step changes. In the folded
+  sidebar the heading is its icon, with the label as its accessible name and `title`. With one section, or none, the list stays
+  flat with no heading, as before. On a phone the one-tap Sell is there only while retail is on, and Sale stays in Shop too.
 - **Folding the sidebar:** a button at its top (the `menu` icon, the constant name `aria-label="Menu labels"`, `aria-expanded`
   true while the labels show, a `title` that says Show or Hide menu labels) folds it to 64px of icons and back. It starts
   folded between 720 and 1023px and unfolded from 1024px. A folded item keeps its label as its accessible name (a
   `visually-hidden` span) and as its `title` tooltip, the retail group too. Once the person folds or unfolds it, the choice is
   kept per device in `localStorage` under `bms.sidebar` (`folded` or `open`; nothing kept means the width decides), read and
   written inside `try`/`catch`, so a browser that blocks storage still folds until the page is reloaded. The width changes
-  over `--motion`, and not at all under reduced motion.
+  over `--motion`, and not at all under reduced motion. A tour step that points into a folded sidebar unfolds it while the step
+  shows. The button acts on what the person sees and the press wins for the rest of that step: pressed during the step, the
+  sidebar folds (or unfolds again on a second press) at once, with `aria-expanded`, the `side-nav-folded` class and the
+  `title` following, and the choice is kept in `bms.sidebar`. A step that points somewhere else, or the tour ending, forgets the press: the next step that points into the sidebar, going back to the step, or the next run of the tour unfolds it again.
 - **Below 720px, the drawer** (`SideMenu`): a menu button (`.menu-button`, the `menu` icon, `aria-label="Menu"`) at the top
   left of the staff bar opens the list in a side drawer from the left: 85% of the width, at most 320px, over a dimmed backdrop
-  (`--color-scrim`). The person's name and Sign out sit at the bottom (one button in `SideMenu`, with an `onSignOut` prop). It
+  (`--color-scrim`). The person's name and Sign out sit at the bottom (one `BusyButton` in `SideMenu`, with an `onSignOut` prop and a `busy`
+  prop held true while signing out runs, like Sign out in the bar). It
   closes on the backdrop, Escape, a left swipe on the drawer (50px, more sideways than down), a chosen link, or any change of
   page (the back button, a tour, a redirect).
 - **One-tap Sell on a phone:** beside the menu button, a primary Sell button (`.staff-sell`, a link to the sale screen) for
-  anyone who can sell (`useSells`), so a sale is one tap as it was on the bottom bar. From 720px Sale is in the sidebar instead.
-- **Drawer accessibility:** the drawer is `role="dialog"` with `aria-modal="true"` and the heading Menu; focus moves to its
+  anyone who can sell (`useSells`), so a sale is one tap as it was on the bottom bar. With branch roles on, it waits until the
+  roles are read, so it never flashes up for a session whose every branch is a store. From 720px Sale is in the sidebar instead.
+- **Drawer accessibility:** the drawer is `role="dialog"` with the heading Menu, and `aria-modal="true"` only while the person
+  opened it (a tour step that opens it leaves the page reachable); focus moves to its
   first control, Tab and Shift+Tab stay inside, and focus returns to the menu button on close. The menu button carries
   `aria-expanded`. The page behind does not scroll: `body.side-menu-open` fixes the body at the scroll position (iOS Safari
-  ignores `overflow` on the body), and closing gives the position back, except after a change of page. If the window widens
+  ignores `overflow` on the body), and closing gives the position back, except after a change of page or a tapped link. If the window widens
   past the phone width while the drawer is open, the drawer, its backdrop and the lock go, and focus moves to the sidebar's
   first link; narrowing with focus in the sidebar moves it to the menu button.
 - **Phone edges, motion and theme:** the drawer pads itself with `env(safe-area-inset-top)`, `-bottom` and `-left` and slides
@@ -251,11 +275,25 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
 4. Money through `formatMinor` (`src/components/money.ts`), in `.num` cells.
 5. A tenant colour is applied for you; never write a brand colour. Draw with the colour roles, never a palette token, so
    the screen follows the theme (see Light and dark theme above); check a new screen in both.
-6. Give the main controls of a new screen `data-tour` ids and add the screen's steps to
+6. A button that writes is a `BusyButton` with the mutation's `isPending` (or the screen's own submitting state) as
+   `busy`; never a plain `<button disabled={save.isPending}>`. Its label stays the same while busy: no
+   `{save.isPending ? 'Saving' : 'Save'}` and no busy label prop. Read-only buttons (refresh, filters, tabs, navigation,
+   opening a dialog) stay plain, and so does a Cancel that only waits, with `/* busy-exempt: <reason> */` in its tag. A
+   mutation that needs no busy button of its own (a save as you type, a switch that says Working itself, cards that
+   show their own busy state) has `// busy-exempt: <reason>` in the `//` comment lines directly above its
+   `const ... = useMutation(` line. `src/app/ui/busy-guard.test.ts` fails a mutation that a press (onClick, onSubmit or
+   a component callback, directly or through a local function) sends unless its pending flag reaches a `busy={...}`
+   attribute in that file, that comment exempts it (a comment with no reason does not), or the guard's `ALLOWED` list
+   names it with a reason. It is a text heuristic: it checks that the flag reaches some `busy=` in the file, not that
+   it is the busy of the button that sends.
+7. Give the main controls of a new screen `data-tour` ids and add the screen's steps to
    `frontend/src/tour/tours.ts` (a page tour at least), with plain, short sentences.
 
 ## Checks
 
+- `npm test` runs the busy guard (`src/app/ui/busy-guard.test.ts`, #456: every mutation a press sends, including
+  `useMutation<T>(`, destructured ones and local hooks that return one, hands its pending flag to `busy`, and no plain
+  button is disabled by a pending state; fixture tests prove it fails both wrong shapes) and `BusyButton.dom.test.tsx`.
 - `npm test` runs the token contrast test and the design guard (`src/app/ui/design-guard.test.ts`: no
   `<style>` element, no inline HTML, and no hex colour in a component or a design layer stylesheet, and no palette token that would not follow the theme);
   `src/app/theme-mode.dom.test.tsx` covers the three choices, persistence, following the system, the pre-paint script and the

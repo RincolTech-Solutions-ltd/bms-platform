@@ -346,6 +346,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/branches/{branch_id}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A shop's own logo image (public, cacheable) */
+        get: operations["getBranchLogo"];
+        /** Upload or replace a shop's own logo: the rules of the business logo, PNG, JPEG or WebP, 1 MB, 128 px or more (issue #461, ADR-068) */
+        put: operations["uploadBranchLogo"];
+        post?: never;
+        /** Remove a shop's own logo; it shows the business logo again and the file is kept (issue #461) */
+        delete: operations["removeBranchLogo"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/branches/{branch_id}/reopen": {
         parameters: {
             query?: never;
@@ -1441,6 +1460,23 @@ export interface paths {
         put?: never;
         /** Create a draft application (FR-ORG-01) */
         post: operations["createLoan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/loans/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Home's Lending card: loans due today and in arrears, with what is owed (issue #471) */
+        get: operations["getLoanHomeSummary"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4347,6 +4383,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/offline-failures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reported offline sales in the caller's branch scope, open and retry by default (ADR-067) */
+        get: operations["listRetailOfflineFailures"];
+        put?: never;
+        /** Report a sale made offline that the server refused, for a manager to decide (ADR-067); idempotent on the client sale id */
+        post: operations["reportRetailOfflineFailure"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/offline-failures/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's own reported offline sales: these client sale ids, or every one open or waiting to be sent again (ADR-067) */
+        get: operations["listMyRetailOfflineFailures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/offline-failures/{failure_id}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Discard a refused offline sale with a reason; it is never recorded; audited (ADR-067). The caller's own sale only by an administrator, with self_discard_reason */
+        post: operations["discardRetailOfflineFailure"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/offline-failures/{failure_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask the device that reported it to send the sale again (ADR-067); audited */
+        post: operations["retryRetailOfflineFailure"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/offline-waiting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sales waiting on a phone in the caller's branch scope, oldest first (ADR-067) */
+        get: operations["listRetailOfflineWaiting"];
+        put?: never;
+        /** A phone tells which sales other people left queued on it, in short, so managers see them waiting (ADR-067); upserted on the client sale id */
+        post: operations["reportRetailOfflineWaiting"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/orders": {
         parameters: {
             query?: never;
@@ -4786,6 +4909,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/products/barcodes/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make a Code 128 label code for each item that has no made code yet; idempotent (#345) */
+        post: operations["generateRetailBarcodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/products/by-barcode/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The active item a scanned barcode belongs to; with branch_id, with that branch's balance (#345) */
+        get: operations["findRetailProductByBarcode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/products/import": {
         parameters: {
             query?: never;
@@ -4836,6 +4993,41 @@ export interface paths {
         head?: never;
         /** Edit a product's non-price fields */
         patch: operations["updateRetailProduct"];
+        trace?: never;
+    };
+    "/api/v1/retail/products/{product_id}/barcodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The barcodes of an item (#345) */
+        get: operations["listRetailProductBarcodes"];
+        put?: never;
+        /** Add a barcode to an item or one of its pack sizes; check digits are checked (#345) */
+        post: operations["addRetailProductBarcode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/products/{product_id}/barcodes/{barcode_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a barcode from an item (#345) */
+        delete: operations["removeRetailProductBarcode"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/retail/products/{product_id}/family": {
@@ -5575,6 +5767,40 @@ export interface paths {
         put?: never;
         /** Void a return as a whole by reversal (issue #201); M. 200 when voided, 202 when it waits for a checker */
         post: operations["voidRetailReturn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/sale-clashes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Clashes of sales recorded offline in the caller's branch scope, newest first (ADR-067) */
+        get: operations["listRetailSaleClashes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/sale-clashes/{clash_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve a clash with a note, once; audited (ADR-067). Nothing else changes */
+        post: operations["resolveRetailSaleClash"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7142,6 +7368,8 @@ export interface components {
             id?: string;
             is_head_office?: boolean;
             location?: string;
+            /** @description Same-origin URL of the shop's own logo, versioned by its document id, or null: the shop shows the business logo (issue #461, ADR-068) */
+            logo_url?: string;
             name?: string;
             /** @description false for a Store: it holds stock and takes transfers but does not sell (ADR-048) */
             sells_goods?: boolean;
@@ -8811,6 +9039,35 @@ export interface components {
             member_id: string;
             relationship?: string;
         };
+        /** @description The Lending card on Home (issue #471, ADR-072): active loans in the caller's lending.loans.read scope and in the business's currency, read live from the schedule, not from the nightly arrears run */
+        LoanHomeSummary: {
+            currency?: string;
+            /**
+             * Format: date
+             * @description The business date the figures are for
+             */
+            date?: string;
+            /**
+             * Format: int32
+             * @description Loans with an instalment due today that is not fully paid
+             */
+            due_today_count?: number;
+            /**
+             * Format: int64
+             * @description What is still owed on the instalments due today
+             */
+            due_today_minor?: number;
+            /**
+             * Format: int32
+             * @description Loans with an instalment due before today that is not fully paid
+             */
+            in_arrears_count?: number;
+            /**
+             * Format: int64
+             * @description What is still owed on the instalments due before today
+             */
+            in_arrears_minor?: number;
+        };
         LoanListItem: {
             /** Format: int64 */
             approved_principal_minor?: number;
@@ -9165,6 +9422,8 @@ export interface components {
             /** Format: uuid */
             id?: string;
             is_head_office?: boolean;
+            /** @description Same-origin URL of the shop's own logo, or null: show the business logo (#461, ADR-068) */
+            logo_url?: string;
             name?: string;
             /** @description false for a Store, a branch that holds stock but does not sell: the sale form, the default selling branch and the till skip it; restock, goods receipt, transfer and stock-take forms include it (#366) */
             sells_goods?: boolean;
@@ -10264,6 +10523,54 @@ export interface components {
             /** Format: date */
             business_date?: string;
             reference?: string;
+        };
+        /** @description Issue #345: one barcode of a product, for its base unit or one pack size */
+        RetailBarcode: {
+            code?: string;
+            /** @description ean13, ean8, upca or code128 */
+            format?: string;
+            /** @description True for a Code 128 code the system made for the product's labels */
+            generated?: boolean;
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            product_id?: string;
+            /** @description The name of that pack's unit */
+            unit?: string;
+            /**
+             * Format: uuid
+             * @description The pack size this barcode is on; absent for the product's own unit
+             */
+            unit_id?: string;
+        };
+        /** @description Issue #345: the items to make a label code for */
+        RetailBarcodeGenerateRequest: {
+            product_ids: string[];
+        };
+        RetailBarcodeList: {
+            items?: components["schemas"]["RetailBarcode"][];
+        };
+        /** @description Issue #345: the active product a scanned barcode belongs to */
+        RetailBarcodeMatch: {
+            barcode?: components["schemas"]["RetailBarcode"];
+            product?: components["schemas"]["RetailProduct"];
+            /**
+             * Format: uuid
+             * @description The pack size the barcode is on, to add the line in that unit; absent for the base unit
+             */
+            unit_id?: string;
+        };
+        /** @description Issue #345: add a barcode to a product */
+        RetailBarcodeRequest: {
+            /** @description As printed or scanned; EAN-13, EAN-8 and UPC-A check digits are checked */
+            code: string;
+            /** @description ean13, ean8, upca or code128; by default read from the code (13, 12 or 8 digits, else Code 128) */
+            format?: string;
+            /**
+             * Format: uuid
+             * @description A pack size of the product (the units capability); absent for the product's own unit
+             */
+            unit_id?: string;
         };
         /** @description One entry per branch of the page, in the page's branch order */
         RetailBranchBalance: {
@@ -12390,6 +12697,112 @@ export interface components {
             top?: number;
             totals?: components["schemas"]["RetailMarginTotals"];
         };
+        RetailOfflineFailure: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: uuid */
+            client_sale_id?: string;
+            code?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            decided_at?: string;
+            /** Format: uuid */
+            decided_by?: string;
+            discard_reason?: string;
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            made_by?: string;
+            made_by_name?: string;
+            message?: string;
+            /** Format: date-time */
+            occurred_at?: string;
+            payment_method?: string;
+            request?: {
+                [key: string]: Record<string, never>;
+            };
+            /** Format: uuid */
+            sale_id?: string;
+            /** @description open, retry, discarded or recorded */
+            status?: string;
+            /** Format: int64 */
+            total_minor?: number;
+        };
+        RetailOfflineFailureDiscard: {
+            reason: string;
+            /** @description A second written reason, needed when an administrator (or the Owner) discards a sale they made themselves (ADR-067 decision 11 d); audited as self_discard */
+            self_discard_reason?: string;
+        };
+        RetailOfflineFailurePage: {
+            items?: components["schemas"]["RetailOfflineFailure"][];
+        };
+        /** @description A sale made offline that the server refused (ADR-067) */
+        RetailOfflineFailureRequest: {
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: uuid */
+            client_sale_id: string;
+            code: string;
+            message: string;
+            /** Format: date-time */
+            occurred_at: string;
+            payment_method: string;
+            /** @description The sale request exactly as the device holds it; at most 64 KB as JSON (413) */
+            request: {
+                [key: string]: Record<string, never>;
+            };
+            /** Format: int64 */
+            total_minor: number;
+        };
+        /** @description A sale waiting on a phone (ADR-067) */
+        RetailOfflineWaiting: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: uuid */
+            client_sale_id?: string;
+            /** Format: uuid */
+            made_by?: string;
+            made_by_name?: string;
+            /** Format: date-time */
+            occurred_at?: string;
+            /** Format: date-time */
+            reported_at?: string;
+            /** Format: uuid */
+            reported_by?: string;
+            reported_by_name?: string;
+            /** Format: int64 */
+            total_minor?: number;
+        };
+        RetailOfflineWaitingAccepted: {
+            /**
+             * Format: int32
+             * @description How many were kept; a sale already recorded or reported as refused is skipped
+             */
+            accepted?: number;
+        };
+        RetailOfflineWaitingPage: {
+            items?: components["schemas"]["RetailOfflineWaiting"][];
+        };
+        RetailOfflineWaitingRequest: {
+            items: components["schemas"]["RetailOfflineWaitingSale"][];
+        };
+        /** @description ADR-067: a sale queued on a phone by a person who is not signed in there now, in short */
+        RetailOfflineWaitingSale: {
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: uuid */
+            client_sale_id: string;
+            /**
+             * Format: uuid
+             * @description The person who made the sale (the seller)
+             */
+            made_by: string;
+            /** Format: date-time */
+            occurred_at: string;
+            /** Format: int64 */
+            total_minor: number;
+        };
         RetailOpenSale: {
             /** Format: int64 */
             balance_minor?: number;
@@ -13084,6 +13497,8 @@ export interface components {
         };
         RetailProduct: {
             active?: boolean;
+            /** @description Issue #345: the barcodes of this product and of its pack sizes, sent by the list, the get and the barcode lookup; scan any of them to find the product */
+            barcodes?: components["schemas"]["RetailBarcode"][];
             category?: string;
             /** Format: uuid */
             category_id?: string;
@@ -13843,6 +14258,7 @@ export interface components {
              * @description Issue #385: the delivery fee of the customer order this credit sale came from, left on the buyer's account and not yet paid: owed besides balance_minor, and written off with the sale
              */
             delivery_fee_owed_minor?: number;
+            device?: components["schemas"]["RetailSaleDevice"];
             /** Format: date */
             due_date?: string;
             historical?: boolean;
@@ -13877,6 +14293,52 @@ export interface components {
             /** Format: uuid */
             voided_by?: string;
             write_off?: components["schemas"]["RetailSaleWriteOffInfo"];
+        };
+        /** @description Something that changed while a sale was offline (ADR-067) */
+        RetailSaleClash: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: uuid */
+            id?: string;
+            /** @description stock_short, item_inactive, pack_inactive, price_changed, price_typed, below_cost, clock_ahead or clock_behind */
+            kind?: string;
+            /**
+             * Format: int32
+             * @description The sale line; absent for clock_ahead and clock_behind
+             */
+            line_no?: number;
+            /** Format: uuid */
+            product_id?: string;
+            resolution_note?: string;
+            /** Format: date-time */
+            resolved_at?: string;
+            /** Format: uuid */
+            resolved_by?: string;
+            /** Format: uuid */
+            sale_id?: string;
+            sale_no?: string;
+            /** @description What happened, in plain words; never a cost */
+            words?: string;
+        };
+        RetailSaleClashPage: {
+            items?: components["schemas"]["RetailSaleClash"][];
+        };
+        RetailSaleClashResolve: {
+            note: string;
+        };
+        /** @description How a sale came from a device (ADR-067) */
+        RetailSaleDevice: {
+            clashes?: components["schemas"]["RetailSaleClash"][];
+            /** Format: uuid */
+            client_sale_id?: string;
+            /**
+             * Format: date-time
+             * @description When the sale happened on the device, as recorded
+             */
+            occurred_at?: string;
+            recorded_offline?: boolean;
         };
         RetailSaleLine: {
             code?: string;
@@ -14020,6 +14482,11 @@ export interface components {
             branch_id?: string;
             buyer_contact?: string;
             buyer_name?: string;
+            /**
+             * Format: uuid
+             * @description ADR-067: the id the device made for this sale, unique per business. A second request with it, by the same person, answers the sale already recorded (Idempotent-Replayed), after the Idempotency-Key has expired too; by another person it is 422 client_sale_id_reused; with a different request (apart from occurred_at, recorded_offline and prices_as_of) 422 client_sale_conflict; the id of a refused offline sale a manager discarded 422 offline_sale_discarded
+             */
+            client_sale_id?: string;
             /** @description Why a credit sale above the buyer's credit limit goes ahead; needed (at least five characters) from a user who holds retail.credit.override, ignored when the sale is within the limit or the customer_accounts capability is off */
             credit_override_reason?: string;
             /** Format: uuid */
@@ -14030,12 +14497,24 @@ export interface components {
              */
             due_date?: string;
             lines: components["schemas"]["RetailSaleLineRequest"][];
+            /**
+             * Format: date-time
+             * @description ADR-067: when the sale happened on the device; the sale is dated that day in the business's time zone. Up to five minutes ahead is recorded as now; further ahead is 422 occurred_at_in_future, or for a sale recorded offline now with a clock_ahead clash
+             */
+            occurred_at?: string;
             payment_method: string;
             /**
              * Format: uuid
              * @description Price the sale from this list instead of the customer's own or the customer group's; needs retail.pricelist.use unless it is one of those (price_lists capability)
              */
             price_list_id?: string;
+            /**
+             * Format: date-time
+             * @description ADR-067: the server's time when the device last refreshed its prices. A device price equal to the catalogue or pack price in force then stands; an occurred_at before it means the phone clock was behind (clock_behind)
+             */
+            prices_as_of?: string;
+            /** @description ADR-067: the sale was taken with no network and its money is already in hand. Needs client_sale_id and occurred_at; never a credit sale. A short stock, an item or a pack switched off, a saved price that changed, a typed price the online rules would not take (price_typed), a price not above cost or a phone clock ahead or behind then records the sale with a clash instead of refusing it */
+            recorded_offline?: boolean;
             /**
              * Format: date
              * @description Defaults to today; not in the future
@@ -17670,6 +18149,146 @@ export interface operations {
             };
         };
     };
+    getBranchLogo: {
+        parameters: {
+            query?: {
+                v?: string;
+            };
+            header?: {
+                "If-None-Match"?: string;
+            };
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ETag still matches */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+            /** @description No such branch, no logo of its own, or an unknown host */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+            /** @description Storage cannot be read (logo_unavailable) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+        };
+    };
+    uploadBranchLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description No such branch in the caller's scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            /** @description The branch is closed (invalid_status_transition) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            /** @description Over 1 MB (file_too_large) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            /** @description Not PNG, JPEG or WebP, or not decodable (unsupported_file_type) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            /** @description svg_not_allowed, image_too_small, image_too_large (over 4 megapixels) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+        };
+    };
+    removeBranchLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No such branch in the caller's scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            /** @description The branch is closed (invalid_status_transition) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+        };
+    };
     reopenBranch: {
         parameters: {
             query?: never;
@@ -19654,6 +20273,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Loan"];
+                };
+            };
+        };
+    };
+    getLoanHomeSummary: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanHomeSummary"];
                 };
             };
         };
@@ -24658,6 +25299,169 @@ export interface operations {
             };
         };
     };
+    listRetailOfflineFailures: {
+        parameters: {
+            query?: {
+                status?: string[];
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOfflineFailurePage"];
+                };
+            };
+        };
+    };
+    reportRetailOfflineFailure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailOfflineFailureRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOfflineFailure"];
+                };
+            };
+        };
+    };
+    listMyRetailOfflineFailures: {
+        parameters: {
+            query?: {
+                client_sale_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOfflineFailurePage"];
+                };
+            };
+        };
+    };
+    discardRetailOfflineFailure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                failure_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailOfflineFailureDiscard"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOfflineFailure"];
+                };
+            };
+        };
+    };
+    retryRetailOfflineFailure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                failure_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOfflineFailure"];
+                };
+            };
+        };
+    };
+    listRetailOfflineWaiting: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOfflineWaitingPage"];
+                };
+            };
+        };
+    };
+    reportRetailOfflineWaiting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailOfflineWaitingRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOfflineWaitingAccepted"];
+                };
+            };
+        };
+    };
     listRetailOrders: {
         parameters: {
             query?: {
@@ -25493,6 +26297,54 @@ export interface operations {
             };
         };
     };
+    generateRetailBarcodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailBarcodeGenerateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBarcodeList"];
+                };
+            };
+        };
+    };
+    findRetailProductByBarcode: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+            };
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBarcodeMatch"];
+                };
+            };
+        };
+    };
     importRetailProducts: {
         parameters: {
             query?: {
@@ -25590,6 +26442,75 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["RetailProduct"];
                 };
+            };
+        };
+    };
+    listRetailProductBarcodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBarcodeList"];
+                };
+            };
+        };
+    };
+    addRetailProductBarcode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailBarcodeRequest"];
+            };
+        };
+        responses: {
+            /** @description The barcode added */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBarcode"];
+                };
+            };
+        };
+    };
+    removeRetailProductBarcode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+                barcode_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The barcode was removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -26855,6 +27776,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailReturnOutcome"];
+                };
+            };
+        };
+    };
+    listRetailSaleClashes: {
+        parameters: {
+            query?: {
+                status?: string;
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSaleClashPage"];
+                };
+            };
+        };
+    };
+    resolveRetailSaleClash: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clash_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailSaleClashResolve"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSaleClash"];
                 };
             };
         };

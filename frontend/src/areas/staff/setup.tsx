@@ -4,6 +4,7 @@ import { type ChangeEvent, useEffect, useRef, useState } from 'react';
 import { api, fetchSettings, problemOf, type TenantSettings } from '../../api/client';
 import { BRANDING_QUERY, appTitle, brandOf, useShellBrand } from '../../app/branding';
 import { checkColour, colourMessage, suggestColour } from '../../app/contrast';
+import { BusyButton } from '../../app/ui/BusyButton';
 import { NewIconNote, rememberIconVersion } from '../../install/NewIcon';
 import { useStaff } from './context';
 
@@ -12,6 +13,22 @@ import { useStaff } from './context';
 // colour rule is the same one the API enforces (app/contrast.ts), so the preview and the save agree.
 
 const ACCEPT = 'image/png,image/jpeg,image/webp';
+const HINT = { display: 'block', fontSize: '0.875em', opacity: 0.8 } as const;
+
+/** What the reports cover, in the words of the modules the business has on (issue #468); null modules means an older /me without the list. */
+export function reportsWording(modules: string[] | null | undefined): string {
+  const retail = !modules || modules.includes('retail');
+  const lending = !modules || modules.includes('lending');
+  if (retail && lending) return 'sales, stock, profit, portfolio at risk and others';
+  if (lending) return 'portfolio at risk and others';
+  if (retail) return 'sales, stock, profit and others';
+  return 'and others';
+}
+
+/** The business notices are all retail ones today, so a business without retail is not shown their page (issue #468). */
+export function hasRetail(modules: string[] | null | undefined): boolean {
+  return !modules || modules.includes('retail');
+}
 
 /** The dominant colour of a chosen image, from a small copy of it; null when it cannot be read. */
 async function suggestFrom(file: File): Promise<string | null> {
@@ -228,22 +245,44 @@ export function Setup() {
                 </li>
               ))}
           </ul>
-          <button disabled={busy} onClick={dismiss}>
+          <BusyButton busy={busy} onClick={dismiss}>
             Dismiss the checklist
-          </button>
+          </BusyButton>
         </section>
       )}
 
       <h2>Business</h2>
       <div style={{ display: 'grid', gap: 12, maxWidth: 480 }}>
-        <label data-tour="setup-name">
-          Business name
-          <input value={name} maxLength={100} onChange={(e) => setName(e.target.value)} style={{ display: 'block', width: '100%' }} />
-        </label>
-        <label>
-          Receipt footer
-          <textarea value={footer} maxLength={500} onChange={(e) => setFooter(e.target.value)} style={{ display: 'block', width: '100%' }} />
-        </label>
+        <div data-tour="setup-name">
+          <label>
+            Business name
+            <input value={name} maxLength={100} aria-describedby="name-hint" onChange={(e) => setName(e.target.value)} style={{ display: 'block', width: '100%' }} />
+          </label>
+          <span id="name-hint" style={HINT}>The name your staff and customers see on the app, receipts and text messages.</span>
+        </div>
+        <div>
+          <label>
+            Receipt footer
+            <textarea
+              value={footer}
+              maxLength={500}
+              placeholder="Thank you for shopping with us. Returns within 7 days with this receipt."
+              aria-describedby="footer-hint"
+              onChange={(e) => setFooter(e.target.value)}
+              style={{ display: 'block', width: '100%' }}
+              />
+          </label>
+          <span id="footer-hint" style={HINT}>
+            A short line printed at the bottom of every receipt, for example a thank-you, your phone or Instagram, or how returns work.
+          </span>
+        </div>
+        {footer.trim() !== '' && (
+          <div data-testid="footer-preview" role="group" aria-label="Bottom of a receipt" style={{ fontFamily: 'monospace', border: '1px dashed', padding: 8, maxWidth: 320, textAlign: 'center', whiteSpace: 'pre-wrap' }}>
+            <div>TOTAL ...</div>
+            <div>--------------------</div>
+            {footer.trim()}
+          </div>
+        )}
 
         <fieldset data-tour="setup-logo">
           <legend>Logo</legend>
@@ -259,18 +298,21 @@ export function Setup() {
             <input type="file" accept={ACCEPT} disabled={busy} onChange={upload} style={{ display: 'block' }} />
           </label>
           {current.logo_document_id && (
-            <button disabled={busy} onClick={removeLogo}>
+            <BusyButton busy={busy} onClick={removeLogo}>
               Remove the logo
-            </button>
+            </BusyButton>
           )}
           {iconSaved && current.logo_document_id && <NewIconNote name={appTitle(brand)} />}
         </fieldset>
 
         <fieldset data-tour="setup-colour">
           <legend>Theme colour</legend>
+          <p id="colour-hint" style={HINT}>
+            The colour of the app's top bar and buttons. The app picks white or dark text for it; colours where neither is readable are refused.
+          </p>
           <label>
             Colour
-            <input type="color" value={check.ok || check.reason === 'contrast' ? colour : '#0d5c75'} onChange={(e) => { setColour(e.target.value.toUpperCase()); setSuggested(false); }} aria-label="Pick a colour" />
+            <input type="color" value={check.ok || check.reason === 'contrast' ? colour : '#0d5c75'} onChange={(e) => { setColour(e.target.value.toUpperCase()); setSuggested(false); }} aria-label="Pick a colour" aria-describedby="colour-hint" />
           </label>{' '}
           <label>
             Hex
@@ -279,12 +321,12 @@ export function Setup() {
               placeholder="#0D5C75"
               maxLength={7}
               aria-invalid={colourProblem !== null}
-              aria-describedby={colourProblem ? 'colour-problem' : undefined}
+              aria-describedby={colourProblem ? 'colour-hint colour-problem' : 'colour-hint'}
               onChange={(e) => { setColour(e.target.value); setSuggested(false); }}
             />
           </label>{' '}
           {current.theme_primary && (
-            <button type="button" disabled={busy} onClick={() => { setColour(''); setSuggested(false); }}>
+            <button type="button" /* busy-exempt: only changes the form */ disabled={busy} onClick={() => { setColour(''); setSuggested(false); }}>
               Use the platform colour
             </button>
           )}
@@ -302,7 +344,7 @@ export function Setup() {
           <legend>Reports</legend>
           <label>
             <input type="checkbox" checked={current.reports_enabled === true} disabled={busy} onChange={(e) => setReports(e.target.checked)} />{' '}
-            Let staff run reports (portfolio at risk and others), prepared in the background and kept for 30 days
+            Let staff run reports ({reportsWording(me.modules)}), prepared in the background and kept for 30 days
           </label>
         </fieldset>
 
@@ -347,13 +389,15 @@ export function Setup() {
           </p>
         </fieldset>
 
-        <fieldset>
-          <legend>Notifications</legend>
-          <p>
-            <Link to={'/staff/setup/notifications' as never}>Notifications for the business</Link>: which notices your staff get on their phones (new
-            orders, low stock, credit to collect) and when the daily summary goes.
-          </p>
-        </fieldset>
+        {hasRetail(me.modules) && (
+          <fieldset>
+            <legend>Notifications</legend>
+            <p>
+              <Link to={'/staff/setup/notifications' as never}>Notifications for the business</Link>: which notices your staff get on their phones
+              (new orders, low stock, credit to collect) and when the daily summary goes.
+            </p>
+          </fieldset>
+        )}
 
         <fieldset>
           <legend>Text messages</legend>
@@ -362,9 +406,9 @@ export function Setup() {
           </p>
         </fieldset>
 
-        <button disabled={busy || (colour !== '' && !check.ok)} onClick={save} data-tour="setup-save">
+        <BusyButton busy={busy} disabled={colour !== '' && !check.ok} onClick={save} data-tour="setup-save">
           Save
-        </button>
+        </BusyButton>
         {message && <p role="status">{message}</p>}
       </div>
     </main>

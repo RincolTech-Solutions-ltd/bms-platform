@@ -8,7 +8,7 @@ import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/** SQL of the loans brought in from a paper register (ADR-071, migration V91). Row-level security supplies the tenant. */
+/** SQL of the loans brought in from a paper register (ADR-071, migration V89). Row-level security supplies the tenant. */
 @Repository
 class ExistingLoanRepository implements GoLiveDate.Dependent {
 
