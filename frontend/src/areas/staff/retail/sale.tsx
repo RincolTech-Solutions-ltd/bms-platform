@@ -112,8 +112,27 @@ export function tapFeedback() {
  * its button carrying the live total, so the amount and Record sale are always in reach; from 720px it sits under the total.
  */
 export function SaleBar({ children }: { children: ReactNode }) {
+  // While the bar sticks (a phone), its measured height is --bottom-bar on the page, so the toast rises above it and a field
+  // scrolled into view stops above it, without :has() and at any font size; cleared when the bar goes.
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    const root = document.documentElement;
+    if (!el) return;
+    const measure = () => {
+      if (getComputedStyle(el).position === 'sticky') root.style.setProperty('--bottom-bar', `${Math.ceil(el.getBoundingClientRect().height)}px`);
+      else root.style.removeProperty('--bottom-bar');
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(el);
+    return () => {
+      observer?.disconnect();
+      root.style.removeProperty('--bottom-bar');
+    };
+  }, []);
   return (
-    <div className="sale-bar" data-testid="sale-bar">
+    <div ref={ref} className="sale-bar" data-testid="sale-bar">
       {children}
     </div>
   );
@@ -371,6 +390,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
 
   return (
     <form
+      className="sale-form"
       onSubmit={(e) => {
         e.preventDefault();
         if (save.isPending || keep.isPending || (problem && !draft.sent)) return;

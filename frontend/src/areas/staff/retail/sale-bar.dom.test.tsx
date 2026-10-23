@@ -41,6 +41,7 @@ afterEach(() => {
   cleanup();
   sessionStorage.clear();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('the sale bar', () => {
@@ -62,6 +63,39 @@ describe('the sale bar', () => {
     await addItem('Test Lamp 15W');
     expect(document.querySelector('.rt-total-hero')?.textContent).toBe('Total UGX 39,000');
     expect(document.querySelector('.rt-total-amount')?.textContent).toBe('UGX 39,000');
+  });
+});
+
+describe('the bar height', () => {
+  it('is measured while the bar sticks, follows it as it grows, and is cleared when the bar goes', async () => {
+    let resized = () => undefined as void;
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb: () => void) {
+        resized = cb;
+      }
+      observe() {}
+      disconnect() {}
+    });
+    let height = 81;
+    const style = window.getComputedStyle;
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((el) => (el instanceof HTMLElement && el.dataset.testid === 'sale-bar' ? ({ position: 'sticky' } as CSSStyleDeclaration) : style(el)));
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ height }) as DOMRect);
+    const root = document.documentElement.style;
+    open();
+    await screen.findByTestId('sale-bar');
+    expect(root.getPropertyValue('--bottom-bar')).toBe('81px');
+    // A large system font or a longer label makes the button taller.
+    height = 104.5;
+    resized();
+    expect(root.getPropertyValue('--bottom-bar')).toBe('105px');
+    cleanup();
+    expect(root.getPropertyValue('--bottom-bar')).toBe('');
+  });
+
+  it('is not set where the bar sits in the form', async () => {
+    open();
+    await screen.findByTestId('sale-bar');
+    expect(document.documentElement.style.getPropertyValue('--bottom-bar')).toBe('');
   });
 });
 
@@ -113,11 +147,15 @@ describe('adding an item', () => {
 describe('the sale screen stylesheet', () => {
   const css = (file: string) => readFileSync(join(process.cwd(), 'src/app/ui', file), 'utf8');
 
-  it('sticks the bar full width to the bottom of a phone and lifts the toast above it', () => {
-    const phone = css('retail.css').match(/@media \(max-width: 719px\) \{\s*\.sale-bar \{([^}]*)\}[\s\S]*?:root:has\(\.sale-bar\) \{([^}]*)\}/);
+  it('sticks the bar full width to the bottom of a phone, lifts the toast above it and keeps focused fields clear of it', () => {
+    const retail = css('retail.css');
+    const phone = retail.match(/@media \(max-width: 719px\) \{\s*\.sale-bar \{([^}]*)\}/);
     expect(phone?.[1]).toMatch(/position: sticky;\s*bottom: 0;/);
     expect(phone?.[1]).toMatch(/margin: [^;]*calc\(-1 \* var\(--space-4\)\)/);
-    expect(phone?.[2]).toMatch(/--bottom-bar:/);
+    // The height comes from SaleBar's measure, never a fixed figure behind :has().
+    expect(retail).not.toMatch(/:has\(\.sale-bar\)/);
+    expect(retail).toMatch(/:root \{\s*scroll-padding-bottom: calc\(var\(--bottom-bar, 0px\)/);
+    expect(retail).toMatch(/\.sale-form \{\s*padding-bottom: var\(--bottom-bar, 0px\);/);
     expect(css('feedback.css')).toMatch(/\.toast \{[^}]*bottom: calc\([^;]*var\(--bottom-bar, 0px\)/);
   });
 
