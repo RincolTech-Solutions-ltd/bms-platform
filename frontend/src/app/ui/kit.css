@@ -103,6 +103,118 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Card: the one surface, white on the page grey with a hairline edge and the small shadow. A list inside runs to its edges. */
+.ui-card {
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.ui-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) 0;
+}
+
+.ui-card-title {
+  margin: 0;
+  font-size: var(--text-base);
+}
+
+.ui-card > :not(.ui-card-head, .row-list) {
+  margin: var(--space-4);
+}
+
+/* ListRow: title and one muted line on the left, the amount on the right, rows parted by a hairline. The whole row is the
+   target, at least 64px tall, and a press tints it at once. */
+.row-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row-list > li + li {
+  border-top: 1px solid var(--color-border);
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 64px;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-weight: var(--weight-regular);
+  text-align: left;
+  text-decoration: none;
+  box-shadow: none;
+}
+
+a.list-row:hover,
+button.list-row:hover:not(:disabled) {
+  background: var(--color-hover);
+  text-decoration: none;
+}
+
+a.list-row:active,
+button.list-row:active:not(:disabled) {
+  transform: none;
+  background: var(--color-neutral-tint);
+}
+
+a.list-row:focus-visible,
+button.list-row:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+  box-shadow: none;
+}
+
+.list-row-text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.list-row-title {
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.list-row-meta {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.list-row-amount {
+  flex: none;
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.list-row-chevron {
+  display: inline-flex;
+  flex: none;
+  margin-right: calc(var(--space-2) * -1);
+  color: var(--color-text-muted);
+}
+
+.list-row-chevron > svg {
+  width: 20px;
+  height: 20px;
+}
+
 /* The kit page (/staff/kit): one example under another, each under its heading. */
 .kit-example {
   margin-bottom: var(--space-6);

@@ -1,9 +1,11 @@
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
+import { Card, ListRow, RowList } from '../../../app/ui/ListRow';
 import { Field } from '../../../app/ui/Field';
 import { MoneyInput } from '../../../app/ui/MoneyInput';
 import { Segmented } from '../../../app/ui/Segmented';
 import { Stepper } from '../../../app/ui/Stepper';
+import { formatMinor } from '../../../components/money';
 import { isAdmin } from '../../../offline/offline-context';
 import { useStaff } from '../context';
 
@@ -26,6 +28,8 @@ const SHOW = [
   { value: 'out', label: 'Out of stock' },
   { value: 'low', label: 'Low stock' },
 ] as const;
+
+const ugx = (minor: number) => formatMinor(minor, 'UGX');
 
 function KitPage() {
   const { me } = useStaff();
@@ -68,6 +72,17 @@ function KitPage() {
 
       <Example title="MoneyInput" about="Whole shillings on the number keypad, with the commas drawn as you type.">
         <MoneyInput label="Amount paid" hint="What the buyer handed over." valueMinor={paid} onChange={setPaid} error={paid === null ? 'Type the amount paid.' : null} />
+      </Example>
+
+      <Example title="ListRow and Card" about="One row style for items, sales and people. The whole row is the target.">
+        <Card title="Today's sales">
+          <RowList label="Today's sales">
+            <ListRow title="Sale S-000101" meta="10:42, walk-in buyer" amount={ugx(12500)} to="/staff/kit" />
+            <ListRow title="Sale S-000102" meta="11:05, Sample Buyer, on credit" amount={ugx(184000)} to="/staff/kit" />
+            <ListRow title="Sample soap" meta="12 left in Main shop" amount={ugx(3000)} />
+            <ListRow title="Sample Person" meta="Seller, Main shop" onClick={() => undefined} />
+          </RowList>
+        </Card>
       </Example>
     </main>
   );
