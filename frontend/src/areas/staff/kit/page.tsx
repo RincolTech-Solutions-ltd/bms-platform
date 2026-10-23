@@ -1,11 +1,12 @@
 import { createLazyRoute } from '@tanstack/react-router';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Card, ListRow, RowList } from '../../../app/ui/ListRow';
 import { EmptyState } from '../../../app/ui/EmptyState';
 import { Field } from '../../../app/ui/Field';
 import { MoneyInput } from '../../../app/ui/MoneyInput';
 import { Segmented } from '../../../app/ui/Segmented';
 import { Sheet } from '../../../app/ui/Sheet';
+import { Skeleton } from '../../../app/ui/Skeleton';
 import { Stepper } from '../../../app/ui/Stepper';
 import { formatMinor } from '../../../components/money';
 import { isAdmin } from '../../../offline/offline-context';
@@ -32,6 +33,48 @@ const SHOW = [
 ] as const;
 
 const ugx = (minor: number) => formatMinor(minor, 'UGX');
+
+/** A pretend load of `ms`, started again by `round`, so the skeleton can be seen on the page. */
+function usePretendLoad(ms: number, round: number): boolean {
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (round === 0) return;
+    setLoading(true);
+    const timer = window.setTimeout(() => setLoading(false), ms);
+    return () => window.clearTimeout(timer);
+  }, [ms, round]);
+  return loading;
+}
+
+function SkeletonExample() {
+  const [round, setRound] = useState(0);
+  const [fresh, setFresh] = useState(0);
+  const loading = usePretendLoad(2500, round);
+  return (
+    <>
+      <div className="cluster">
+        <button type="button" onClick={() => { setFresh((n) => n + 1); setRound((n) => n + 1); }}>
+          Load a new list
+        </button>
+        <button type="button" disabled={round === 0} onClick={() => setRound((n) => n + 1)}>
+          Reload this list
+        </button>
+      </div>
+      <Card>
+        <Skeleton key={fresh} loading={loading} rows={3}>
+          {round > 0 ? (
+            <RowList label="Loaded sales">
+              <ListRow title="Sale S-000103" meta="12:10, walk-in buyer" amount={ugx(7000)} />
+              <ListRow title="Sale S-000104" meta="12:31, walk-in buyer" amount={ugx(45500)} />
+            </RowList>
+          ) : (
+            <EmptyState text="Press Load a new list. It takes 2.5 seconds." />
+          )}
+        </Skeleton>
+      </Card>
+    </>
+  );
+}
 
 function KitPage() {
   const { me } = useStaff();
@@ -118,6 +161,10 @@ function KitPage() {
         <Card>
           <EmptyState text="No sales today yet." action={{ label: 'Record a sale', to: '/staff/retail/sale' }} />
         </Card>
+      </Example>
+
+      <Example title="Skeleton" about="Nothing for the first second, then grey rows. A reload keeps the list on the screen.">
+        <SkeletonExample />
       </Example>
     </main>
   );
