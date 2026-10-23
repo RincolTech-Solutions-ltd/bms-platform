@@ -8,6 +8,7 @@ import { Segmented } from '../../../app/ui/Segmented';
 import { Sheet } from '../../../app/ui/Sheet';
 import { Skeleton } from '../../../app/ui/Skeleton';
 import { Stepper } from '../../../app/ui/Stepper';
+import { SuccessScreen } from '../../../app/ui/SuccessScreen';
 import { formatMinor } from '../../../components/money';
 import { isAdmin } from '../../../offline/offline-context';
 import { useStaff } from '../context';
@@ -34,16 +35,15 @@ const SHOW = [
 
 const ugx = (minor: number) => formatMinor(minor, 'UGX');
 
-/** A pretend load of `ms`, started again by `round`, so the skeleton can be seen on the page. */
+/** A pretend load of `ms`, started again by each new `round`, so the skeleton can be seen on the page. */
 function usePretendLoad(ms: number, round: number): boolean {
-  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(0);
   useEffect(() => {
     if (round === 0) return;
-    setLoading(true);
-    const timer = window.setTimeout(() => setLoading(false), ms);
+    const timer = window.setTimeout(() => setDone(round), ms);
     return () => window.clearTimeout(timer);
   }, [ms, round]);
-  return loading;
+  return round > done;
 }
 
 function SkeletonExample() {
@@ -84,6 +84,7 @@ function KitPage() {
   const [paid, setPaid] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
   const [method, setMethod] = useState('Cash');
+  const [done, setDone] = useState(0);
   if (!isAdmin(me)) {
     return (
       <main>
@@ -165,6 +166,24 @@ function KitPage() {
 
       <Example title="Skeleton" about="Nothing for the first second, then grey rows. A reload keeps the list on the screen.">
         <SkeletonExample />
+      </Example>
+
+      <Example title="SuccessScreen" about="After a sale or a payment: the check, the amount, then what to do next.">
+        <button type="button" onClick={() => setDone((n) => n + 1)}>
+          Draw the check again
+        </button>
+        <Card>
+          <SuccessScreen
+            key={done}
+            title="Sale recorded"
+            amount={ugx(57500)}
+            detail="Paid by mobile money. Receipt S-000105."
+            actions={[
+              { label: 'New sale', onClick: () => setDone((n) => n + 1) },
+              { label: 'Send the receipt', onClick: () => setDone((n) => n + 1) },
+            ]}
+          />
+        </Card>
       </Example>
     </main>
   );

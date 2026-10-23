@@ -360,6 +360,161 @@ button.list-row:focus-visible {
   }
 }
 
+/* EmptyState: one muted line and one action, centred in the space the list would take. */
+.empty-line {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+}
+
+.empty-line > p {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+/* Skeleton: rows in the shape of a list that breathe by opacity; under reduced motion they hold still. */
+.skeleton-row {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+}
+
+.skeleton-row + .skeleton-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.skeleton-bar {
+  display: block;
+  width: 60%;
+  height: 14px;
+  border-radius: var(--radius);
+  background: var(--color-neutral-tint);
+  animation: kit-breathe 1.2s var(--ease-out) infinite alternate;
+}
+
+.skeleton-bar-short {
+  width: 35%;
+}
+
+@keyframes kit-breathe {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.5;
+  }
+}
+
+/* SuccessScreen: centred, the ring arriving in 200ms and the check drawn left to right in 400ms (a wipe of two opposite
+   transforms, so only transform moves), then the amount at the display size. */
+.success-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6) 0;
+  text-align: center;
+}
+
+.success-screen > h1 {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xl);
+}
+
+.success-screen > h1:focus {
+  outline: none;
+}
+
+.success-mark {
+  position: relative;
+  width: 72px;
+  height: 72px;
+}
+
+.success-mark svg {
+  display: block;
+  width: 72px;
+  height: 72px;
+}
+
+.success-ring {
+  fill: var(--color-success-tint);
+  animation: kit-pop var(--motion) var(--ease-out) both;
+}
+
+.success-tick {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  animation: kit-wipe 400ms var(--ease-out) var(--motion-fast) both;
+}
+
+.success-tick-inner {
+  display: block;
+  animation: kit-unwipe 400ms var(--ease-out) var(--motion-fast) both;
+}
+
+.success-tick path {
+  fill: none;
+  stroke: var(--color-success);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.success-amount {
+  margin: 0;
+  font-size: var(--text-display);
+  font-weight: var(--weight-display);
+  line-height: var(--leading-tight);
+  font-variant-numeric: tabular-nums;
+}
+
+.success-detail {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.success-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(100%, 360px);
+  margin-top: var(--space-4);
+}
+
+@keyframes kit-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes kit-wipe {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes kit-unwipe {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
 /* The kit page (/staff/kit): one example under another, each under its heading. */
 .kit-example {
   margin-bottom: var(--space-6);
