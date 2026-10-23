@@ -463,10 +463,7 @@ class DataExportIT extends LendingBookSupport {
                 "Test Buyer S",
                 LocalDate.of(2026, 10, 8),
                 Instant.parse("2026-10-08T08:00:00Z"));
-        TestDatabase.owner()
-                .sql("UPDATE tenants SET status = 'suspended' WHERE id = ?")
-                .param(s.t().tenantId())
-                .update();
+        ended(s.t(), 0);
         UUID user = s.api().userId();
         XlsxReader x = workbook(s.t(), user, export(s.t(), user));
         assertThat(x.sheet("Sales").text("C2")).isEqualTo("S-0001");
@@ -487,10 +484,7 @@ class DataExportIT extends LendingBookSupport {
         JsonNode run = export(s.t(), user);
         assertReady(run, "the data export");
         // The subscription ends: the business is read only (FR-TEN-06) and drops out of the active tenants.
-        TestDatabase.owner()
-                .sql("UPDATE tenants SET status = 'suspended' WHERE id = ?")
-                .param(s.t().tenantId())
-                .update();
+        ended(s.t(), 0);
         String documentId = run.get("document_id").asString();
 
         clock.set(TestReports.START.plus(java.time.Duration.ofDays(29)));
@@ -508,6 +502,33 @@ class DataExportIT extends LendingBookSupport {
                 call(HttpMethod.POST, "/api/v1/documents/" + documentId + "/download-url", s.t(), user, PERM);
         assertThat(gone.getStatusCode().value()).isEqualTo(410);
         assertThat(gone.getBody().get("code").asString()).isEqualTo("report_expired");
+    }
+
+    @Test
+    void aBusinessTheOperatorSuspendedNeitherDownloadsItsDataNorGetsTheWeeklyEmail() throws Exception {
+        Shop s = shop("DXP");
+        owner(s.t());
+        UUID user = s.api().userId();
+        JsonNode run = export(s.t(), user);
+        assertReady(run, "the data export");
+        // The operator's suspension (ADR-073): unlike an end by the Owner's cancellation, nothing is taken away.
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET status = 'suspended' WHERE id = ?")
+                .param(s.t().tenantId())
+                .update();
+        ResponseEntity<JsonNode> asked = ask(s.t(), user, PERM);
+        assertThat(asked.getStatusCode().value()).isEqualTo(423);
+        assertThat(asked.getBody().get("code").asString()).isEqualTo("tenant_suspended");
+        ResponseEntity<JsonNode> link = call(
+                HttpMethod.POST,
+                "/api/v1/documents/" + run.get("document_id").asString() + "/download-url",
+                s.t(),
+                user,
+                PERM);
+        assertThat(link.getStatusCode().value()).isEqualTo(423);
+        weekly.tick();
+        assertThat(count("SELECT count(*) FROM data_export_weekly WHERE tenant_id = ?", s.t().tenantId()))
+                .isZero();
     }
 
     static UUID uuid(JsonNode run) {
@@ -737,20 +758,21 @@ class DataExportIT extends LendingBookSupport {
                 .containsExactly(DataExportWeekly.NOT_MADE);
     }
 
-    /** The subscription ended {@code daysAgo} days before the test clock, as the operator's audit records it. */
-    void ended(TestDatabase.Fixture t, int daysAgo) {
+    /** The Owner's cancellation took effect {@code daysAgo} days before the test clock (V90: cancelled, ended_on). */
+    static void ended(TestDatabase.Fixture t, int daysAgo) {
+        LocalDate on =
+                LocalDate.ofInstant(TestReports.START, java.time.ZoneOffset.UTC).minusDays(daysAgo);
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO subscriptions (id, tenant_id, plan_id, status, ended_on)
+                        SELECT ?, t.id, t.plan_id, 'cancelled', ? FROM tenants t WHERE t.id = ?
+                        ON CONFLICT (tenant_id) DO UPDATE SET status = 'cancelled', ended_on = EXCLUDED.ended_on
+                        """)
+                .params(UUID.randomUUID(), on, t.tenantId())
+                .update();
         TestDatabase.owner()
                 .sql("UPDATE tenants SET status = 'suspended' WHERE id = ?")
                 .param(t.tenantId())
-                .update();
-        TestDatabase.owner()
-                .sql("INSERT INTO platform_audit_log (id, occurred_at, action, tenant_id, data)"
-                        + " VALUES (?, ?, 'platform.tenant.subscription_changed', ?,"
-                        + " '{\"before\": \"active\", \"after\": \"cancelled\"}'::jsonb)")
-                .params(
-                        UUID.randomUUID(),
-                        Timestamp.from(TestReports.START.minus(java.time.Duration.ofDays(daysAgo))),
-                        t.tenantId())
                 .update();
     }
 

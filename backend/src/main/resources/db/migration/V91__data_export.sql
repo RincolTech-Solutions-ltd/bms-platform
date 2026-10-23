@@ -2,13 +2,14 @@
 -- (referrals), V89 (existing loans) and V90 (the self-serve plan) are claimed before it, V92 (billing) after it. Flyway runs with outOfOrder off, so this file merges after those claims; if it must merge
 -- sooner it is renumbered to the next free number at merge time.
 --
--- Expand only, safe on a populated database. One permission, two new tenant tables, the three runner functions of V49
--- replaced so that a business whose subscription has ended (a suspended tenant, read only under FR-TEN-06) still gets its
--- own workbook made, and a new function so that its files still expire. No existing table, column, constraint or row changes.
+-- Expand only, safe on a populated database. One permission, two new tenant tables, and a new function so that the files
+-- of a business that is not active still expire. The runner's functions stay as V90 left them: a business ended by its
+-- Owner's cancellation still gets its own workbook made, a business the operator suspended never does. No existing table,
+-- column, constraint, function or row changes.
 --
 -- Locks, said plainly. Flyway runs this file in one transaction. CREATE TABLE with foreign keys takes SHARE ROW EXCLUSIVE
 -- on tenants, users and report_runs until the commit (reads go on; the new tables are empty, so the cost is the wait for the
--- lock). CREATE OR REPLACE FUNCTION only changes catalogue rows. lock_timeout is five seconds as in V26 and V80: if a lock
+-- lock). CREATE FUNCTION only changes catalogue rows. lock_timeout is five seconds as in V26 and V80: if a lock
 -- cannot be had at once the migration fails and is retried, rather than every writer queueing behind it.
 
 SET LOCAL lock_timeout = '5s';
@@ -64,24 +65,17 @@ SELECT bms_apply_tenant_rls('data_export_weekly');
 SELECT bms_grant_app('data_export_weekly', 'SELECT, INSERT');
 GRANT UPDATE (status, attached, reason, finished_at) ON data_export_weekly TO bms_app;
 
--- The businesses the weekly email goes to (ADR-074 decision 7): every active one, and one whose subscription has ended (a
--- suspended tenant, read only) for 90 days after the end, so a business that is leaving gets its copies while it decides.
--- The end is the last move of the subscription into suspended or cancelled from a working status in the operator's audit
--- (every such move is written there, V2 and V75), else the subscription's or the tenant's last change, else its creation.
--- Ids only, executable by bms_app only.
+-- The businesses the weekly email goes to (ADR-074 decision 7): every active one, and one that ended by its Owner's
+-- cancellation (V90: suspended, its subscription cancelled with ended_on) for 90 days after ended_on, so a business that
+-- is leaving gets its copies while it decides. A business the operator suspended gets none, whatever its scheduled
+-- cancellation. Ids only, executable by bms_app only.
 CREATE FUNCTION app_data_export_weekly_tenants(p_now timestamptz) RETURNS SETOF uuid
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
     SELECT t.id FROM tenants t
+      LEFT JOIN subscriptions s ON s.tenant_id = t.id
      WHERE t.status = 'active'
-        OR (t.status = 'suspended'
-            AND coalesce(
-                    (SELECT max(a.occurred_at) FROM platform_audit_log a
-                      WHERE a.tenant_id = t.id AND a.action = 'platform.tenant.subscription_changed'
-                        AND a.data ->> 'after' IN ('suspended', 'cancelled')
-                        AND coalesce(a.data ->> 'before', '') NOT IN ('suspended', 'cancelled')),
-                    (SELECT s.updated_at FROM subscriptions s WHERE s.tenant_id = t.id),
-                    t.updated_at,
-                    t.created_at) > p_now - interval '90 days')
+        OR (t.status = 'suspended' AND s.status = 'cancelled' AND s.ended_on IS NOT NULL
+            AND s.ended_on > (p_now AT TIME ZONE t.timezone)::date - 90)
      ORDER BY t.id
 $$;
 REVOKE ALL ON FUNCTION app_data_export_weekly_tenants(timestamptz) FROM PUBLIC;
@@ -98,34 +92,6 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 $$;
 REVOKE ALL ON FUNCTION app_data_export_weekly_email_status(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_data_export_weekly_email_status(uuid) TO bms_app;
-
--- ---------------------------------------------------------------------------------------------
--- The runner's functions of V49, now over active and suspended tenants. A suspended business is read only: it cannot queue
--- a report (every write but the data export's own queue answers 423), and making a file of its own data changes none of it.
--- Signatures, owners and grants are unchanged.
--- ---------------------------------------------------------------------------------------------
-
-CREATE OR REPLACE FUNCTION app_count_running_report_runs() RETURNS integer
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
-    SELECT count(*)::integer FROM report_runs r JOIN tenants t ON t.id = r.tenant_id
-     WHERE r.status = 'running' AND t.status IN ('active', 'suspended')
-$$;
-
-CREATE OR REPLACE FUNCTION app_tenants_with_queued_report_runs() RETURNS SETOF uuid
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
-    SELECT r.tenant_id FROM report_runs r JOIN tenants t ON t.id = r.tenant_id
-     WHERE r.status = 'queued' AND t.status IN ('active', 'suspended')
-       AND NOT EXISTS (SELECT 1 FROM report_runs x WHERE x.tenant_id = r.tenant_id AND x.status = 'running')
-     GROUP BY r.tenant_id
-     ORDER BY min(r.created_at), r.tenant_id
-$$;
-
-CREATE OR REPLACE FUNCTION app_tenants_with_stale_report_runs(p_cutoff timestamptz) RETURNS SETOF uuid
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
-    SELECT DISTINCT r.tenant_id FROM report_runs r JOIN tenants t ON t.id = r.tenant_id
-     WHERE r.status = 'running' AND t.status IN ('active', 'suspended')
-       AND coalesce(r.heartbeat_at, r.started_at) < p_cutoff
-$$;
 
 -- The nightly expiry of report files (ADR-038 decision 7) used to walk the active tenants only, so the files of a suspended
 -- business, or of one whose subscription has ended, were never deleted. Now it walks the tenants that have a file due,

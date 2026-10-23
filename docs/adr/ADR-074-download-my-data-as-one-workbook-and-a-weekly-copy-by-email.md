@@ -76,14 +76,17 @@ never change data, never show one business another's rows, and never hold a larg
    against the runner's 10 for any other report. Turning the switch off stops the next week, and a week already queued whose
    email is not yet written ends as skipped (`switched_off`) and sends nothing; turning it on mid-week sends that week's.
 7. **Read only, and served to a business whose subscription has ended.** Making the workbook writes only the run's own rows and
-   file. A suspended tenant answers 423 to every write except two reads that are a `POST`: asking for the workbook and the signed
-   address of a file; the runner's three definer functions (V49) now include suspended tenants. The nightly expiry of report
+   file. "Ended" means only a business that ended by its Owner's cancellation, the predicate of ADR-073 and V90
+   (`subscriptions.status = 'cancelled'` with `ended_on`): it answers 423 to every write except the exports, among them two
+   reads that are a `POST`: asking for the workbook and the signed address of a file. A business the operator suspended is not
+   ended, whatever cancellation it has scheduled: it gets neither, and the runner's three definer functions (V49, as V90 left
+   them) take none of its runs. The nightly expiry of report
    files no longer walks the active tenants only: `app_tenants_with_expired_report_files` lists every tenant with a file past
    its 30 days, whatever its status, so a suspended or ended business's workbook is deleted on time like any other. An ended business keeps
    "Download my data" and also keeps the weekly email, with the same attachment rules (decision 6) and the same sign-in link
    (decision 9), for 90 days after the end, then it stops: a business that is leaving gets its copies while it decides, and
-   the Owner of one that left long ago is not emailed its data for ever. The end is the last move of the subscription into
-   suspended or cancelled in the operator's audit (`app_data_export_weekly_tenants`). The switch is a write, so while the
+   the Owner of one that left long ago is not emailed its data for ever. The end is `subscriptions.ended_on`
+   (`app_data_export_weekly_tenants`); a business the operator suspended gets no weekly email. The switch is a write, so while the
    business is ended its Owner cannot turn the weekly email off (423 like any other write); the 90 days are the bound.
 8. **The card.** Business set-up shows "Download my data" to holders of the permission: when the business's data was last
    exported (by anyone) and last emailed, the caller's newest full workbook (preparing, ready to save until its expiry, or why it
@@ -110,8 +113,8 @@ for as long as it takes, up to 30 minutes, which holds back vacuum for that time
 ceiling once a large business is measured.
 
 **Tests:** `DataExportIT` (the shop and lender sheets and columns, business time and whole shillings, formula injection, one
-business never sees another's rows or file, the permission, a suspended business still downloads and changes nothing, an ended
-business's file is deleted after its 30 days, the weekly
+business never sees another's rows or file, the permission, an ended business still downloads and changes nothing, a business
+the operator suspended neither downloads nor gets the weekly email, an ended business's file is deleted after its 30 days, the weekly
 job queues once and emails once and stops when switched off, a week queued before the switch went off is skipped, the emailed copy leaves out the personal columns that the full
 copy keeps, a week with no Owner is skipped once), `RetailDataExportPlanIT` (the Restocks branch of 4,000 lines is read through
 the movements index by the line's purchase, not by a scan per line) and `DataExportSheetsTest`

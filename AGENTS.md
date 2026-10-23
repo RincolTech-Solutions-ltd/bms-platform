@@ -340,11 +340,11 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   equals the insights endpoints for the same filter and caller. `ReportMemoryIT` runs both reports as PDF and Excel on the 224 MB
   heap. The Reports screen offers the PDF first. Visual check: `make document-samples` and `docs/ui/report-samples/`.
 - **Built (Download my data, issue #334 step 1, ADR-074, FR-RPT-09 to FR-RPT-11):** migration `V91` (`data_export_settings`,
-  `data_export_weekly`, the permission `core.data_export.run` for `tenant_admin`, and the runner's definer functions over suspended
-  tenants too). The report `core.data_export` (`ReportDefinition.everyBusiness`: offered whatever `reports_enabled` says) writes
+  `data_export_weekly`, the permission `core.data_export.run` for `tenant_admin`, and `app_data_export_weekly_tenants`; the runner's definer functions stay as V90
+  left them, so a business the operator suspended gets no run). The report `core.data_export` (`ReportDefinition.everyBusiness`: offered whatever `reports_enabled` says) writes
   the Branches sheet and each vertical's `DataExportSection` (`RetailDataExport`, `LendingDataExport`), a sheet per table split by
   year past `bms.data-export.split-rows`, through the existing streaming writer (not POI SXSSF, ADR-038 decision 6). Routes
-  `/api/v1/data-export` (card, `/runs`, `/settings`); a suspended tenant may still ask and fetch the file. The job
+  `/api/v1/data-export` (card, `/runs`, `/settings`); a business ended by its Owner's cancellation (ADR-073) may still ask and fetch the file, one the operator suspended may not. The job
   `core.reporting.data-export-weekly` queues the Owner's copy once a week, without the personal-data columns (they are only in
   the copy downloaded after sign-in), and emails it through the outbox (attached up to
   `bms.data-export.attach-max-bytes`, else a link) via the `EmailAttachments` port of `core.notifications`; the integration tests

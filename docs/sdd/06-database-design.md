@@ -875,9 +875,9 @@ the pack. Three read-only `SECURITY DEFINER` functions let the runner see across
 beat) is older than the cutoff. The migration sets `lock_timeout` to five seconds before it takes its brief locks on `tenants` and
 `documents`.
 
-Migration V91 (issue #334, ADR-074) replaces the three definer functions so that they also count and name suspended tenants:
-a business whose subscription has ended still gets the workbook it asks for. Signatures, owners and grants are unchanged. It
-adds `app_tenants_with_expired_report_files(now)`, the tenants with a ready run whose file is past its expiry and not yet
+Migration V91 (issue #334, ADR-074) leaves the three definer functions as V90 made them: active tenants and those ended by
+the Owner's cancellation (`subscriptions.status = 'cancelled'` with `ended_on`), so an ended business still gets the workbook it
+asks for and a business the operator suspended gets no run. It adds `app_tenants_with_expired_report_files(now)`, the tenants with a ready run whose file is past its expiry and not yet
 deleted, whatever the tenant's status: the nightly expiry walks it, so a suspended or ended business's files go on time too.
 
 ### `data_export_settings` (RLS)
@@ -899,7 +899,8 @@ queues one workbook and one email however often it runs. Checks: every week but 
 `preparing` or `queued` week has no `finished_at`. Partial index on those open weeks. The definer function
 `app_data_export_weekly_email_status(week_id)` returns the outbox status of the week's own email for the bound tenant, so the
 week becomes `emailed` only when it was sent; `app_data_export_weekly_tenants(now)` lists the businesses the weekly job visits:
-the active ones and those whose subscription ended less than 90 days ago (ADR-074 decision 7). `bms_app` holds SELECT and INSERT, and UPDATE of
+the active ones and those ended by the Owner's cancellation less than 90 days ago by `ended_on`, never one the operator
+suspended (ADR-074 decision 7). `bms_app` holds SELECT and INSERT, and UPDATE of
 `status`, `attached`, `reason` and `finished_at` only.
 
 ### `payment_methods` (RLS)

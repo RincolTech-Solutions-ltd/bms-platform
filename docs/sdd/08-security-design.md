@@ -436,8 +436,9 @@ Notes:
   ADR-062), asks for "Download my data", the whole business as one workbook across every branch, and sees the weekly email switch;
   only the Owner (`users.is_owner`) turns it on or off (audited, `core.data_export.settings_changed`; anyone else 403
   `owner_only`). It is offered whatever `reports_enabled` says; the file
-  is fetched by the person it was made for while they hold the permission, every refusal 404. A suspended tenant (FR-TEN-06)
-  may still ask for it and fetch the signed address of a file, the two reads that are a `POST`; every other write stays 423.
+  is fetched by the person it was made for while they hold the permission, every refusal 404. A business ended by its Owner's
+  cancellation (ADR-073) may still ask for it and fetch the signed address of a file, the two reads that are a `POST`; every other
+  write stays 423. A business the operator suspended (FR-TEN-06) is refused both, 423 `tenant_suspended`.
   The weekly copy emailed to the Owner leaves out the columns of personal data (members' phones, ID numbers, dates of birth
   and villages, the arrears phone, customers' and suppliers' contacts); they are only in the full workbook downloaded after
   sign-in (ADR-074 decision 6).

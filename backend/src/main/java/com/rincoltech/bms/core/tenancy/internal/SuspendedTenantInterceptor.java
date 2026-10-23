@@ -11,13 +11,13 @@ import org.springframework.web.servlet.HandlerInterceptor;
 /**
  * A suspended tenant is read only (FR-TEN-06): every state-changing request returns 423
  * {@code tenant_suspended}, except staff sign-in, MFA, refresh and sign-out, so staff can still
- * sign in to read and export, and the two reads that are a POST: asking for the business's own
- * workbook and the signed address of a file (issue #334, ADR-074). Member portal sign-in is refused
- * like any write.
+ * sign in to read. Member portal sign-in is refused like any write, and so is every export that is
+ * a POST: a business the operator suspended takes nothing away (ADR-073, ADR-074).
  *
  * <p>A business whose Owner cancelled and whose end date has passed is read only the same way, with 423
- * {@code subscription_ended} (ADR-073): besides the sign-in routes and those two reads, the exports that are a POST
- * (the audit CSV and a report run) still work, so the business can take its data away.
+ * {@code subscription_ended} (ADR-073): besides the sign-in routes, the exports that are a POST (the audit CSV,
+ * a report run, the business's own workbook and the signed address of a file, issue #334) still work, so the
+ * business can take its data away.
  */
 class SuspendedTenantInterceptor implements HandlerInterceptor {
 
@@ -28,15 +28,14 @@ class SuspendedTenantInterceptor implements HandlerInterceptor {
         Object status = request.getAttribute(TenantResolutionFilter.STATUS_ATTRIBUTE);
         if (!"suspended".equals(status) && !"ended".equals(status)
                 || SAFE_METHODS.contains(request.getMethod())
-                || staffSessionPath(request.getRequestURI())
-                || exportPath(request.getRequestURI())) {
+                || staffSessionPath(request.getRequestURI())) {
             return true;
         }
         if ("ended".equals(status)) {
             // When member portal sign-in (FR-IAM-09) is built, its routes must be let through here, for an ended
             // business
             // only (ADR-073 decision 5): its members still sign in to read. A suspension by the operator refuses them.
-            if (endedExportPath(request.getRequestURI())) {
+            if (endedExportPath(request.getRequestURI()) || exportPath(request.getRequestURI())) {
                 return true;
             }
             throw new ApiException(

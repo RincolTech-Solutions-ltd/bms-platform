@@ -23,7 +23,8 @@ import org.springframework.web.bind.annotation.RestController;
  * {@code /api/v1/data-export} (chapter 7 section 7.11.8, issue #334 step 1, ADR-074): "Download my data" in Business set-up.
  * The workbook is a report run of {@code core.data_export}; its file is fetched with
  * {@code POST /documents/{document_id}/download-url} like any report file. Asking for one is allowed while the business is
- * read only (a suspended tenant, FR-TEN-06): it changes none of the business's data. Nothing is cached.
+ * read only because its Owner's cancellation took effect (ADR-073): it changes none of the business's data. A business the
+ * operator suspended is refused (FR-TEN-06). Nothing is cached.
  */
 @RestController
 @RequestMapping(path = "/api/v1/data-export", produces = MediaType.APPLICATION_JSON_VALUE)
