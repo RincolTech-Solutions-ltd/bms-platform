@@ -4,14 +4,17 @@
 
 Accepted (approved by the dev lead on 22 Oct 2026; issue #345, FR-RET-68; migration `V87`). Builds on ADR-020 (the retail
 vertical), ADR-033 (pack sizes, the `units` capability) and ADR-009 (the PWA). Numbered ADR-070 because ADR-067 (offline sales) and ADR-068 (shop
-logos) are taken and pending ADR-069 is claimed by an open pull request; renumbered at merge if needed.
+logos) are taken and pending ADR-069 is claimed by an open pull request; renumbered at merge if needed. Amended on 23 Oct 2026 by
+the owner's decision D7 (decision 11): a scanner is read only through a dedicated Scan box; this replaces the screen-wide
+keyboard-wedge reading first written in decision 5.
 
 ## Context
 
 The owner wants the product to sell to supermarkets, hardware shops and every other kind of shop, and supermarket style selling
 means scanning: a product's barcode is read at the till and the item lands on the sale. Until now products had no barcode field and
 `docs/specs/retail-mvp-scope.md` listed barcode scanning as out of scope. The team's DSN code base already prints Code 128 labels and
-reads scans from USB "keyboard wedge" scanners typing into a focused field; it has no camera decoding. Shops differ: some have a USB
+reads scans from USB "keyboard wedge" scanners typing into a focused field, which is also how this design reads them (decision
+11); it has no camera decoding. Shops differ: some have a USB
 or Bluetooth scanner at the till, many have only phones.
 
 ## Decision
@@ -36,10 +39,9 @@ or Bluetooth scanner at the till, many have only phones.
    is offline. Until then the offline lookup uses only the products this screen has already read and cached (the item search, the
    lines on the form); an item the screen has not read is "could not be looked up" offline. It covers the whole catalogue only once
    the offline catalogue cache of issue #463 carries `barcodes`.
-5. **Three ways in, one path out, on four forms.** The sale, the restock, the move stock and the stock count forms have a scan bar:
-   (a) a keyboard-wedge scanner anywhere on the screen, told apart from a person by its speed (keys within 35 ms, at least four,
-   closed by Enter); in a text field the burst is taken back out, so a scan with the cursor in a quantity box never changes it;
-   (b) a code typed in the scan box and Enter; (c) the phone camera behind a Scan button. A found item is added at 1, or its line in
+5. **Three ways in, one path out, on four forms.** The sale, the restock, the move stock and the stock count forms have a Scan box
+   (decision 11): (a) a USB or Bluetooth scanner that types the code into the box and presses Enter; (b) a code typed there by hand
+   and Enter; (c) the phone camera behind the camera button beside the box. A found item is added at 1, or its line in
    that unit gains one (a counted pack adds its factor). An unknown code says so in plain words; an administrator
    (`retail.catalogue.manage`) gets "Add this barcode to a product" on the spot, which assigns it and adds the item. A beep and a short
    vibration confirm a scan where the device allows.
@@ -63,11 +65,25 @@ or Bluetooth scanner at the till, many have only phones.
    (`4.00638E+12`), is refused in the import and on the item form with "the spreadsheet may have dropped a leading zero or turned
    the code into a number", unless the row's `barcode format` (or the request's `format`) is `code128`: no EAN or UPC has those
    lengths, and a spreadsheet drops the leading zero of a UPC-A or an EAN-13 and writes long numbers that way.
+11. **Scans go to a dedicated Scan box (owner decision D7, 23 Oct 2026).** A hardware scanner is read only through the labelled
+   Scan box on each of the four forms, as Square and Loyverse do. The box takes the cursor when the form opens on a device with a
+   mouse or trackpad (a till or a laptop; not on a phone, where it would open the keyboard), clears after each scan and keeps the
+   cursor for the next one; on the stock count the line counted is marked. Its Enter looks the code up and never submits the form.
+   Nothing listens to keys anywhere else on the screen: a quantity, price or count field is never read for a scan and never changed
+   by one, and Enter there submits the form as usual. The first design read a scanner anywhere on the screen by its speed (keys
+   within 35 ms, a per-device Scanner speed up to 80 ms, a stalled scan joined back by its check digit, the keys taken back out of
+   the field they landed in). Every review round found another case where it failed: a person typing a number fast with key
+   rollovers was taken for a scan, a scanner that stalled part way left part of the code in a quantity or submitted the sale, and
+   the slower settings that slow Bluetooth scanners needed came closer to a person's typing. Speed cannot tell a scanner from a
+   person for certain, and a wrong guess changes money or stock. A dedicated box needs no guess: what lands in it is a code, at any
+   speed, and what lands anywhere else is typing. The cost is one habit, keeping the cursor in the Scan box, which the box helps
+   by taking the cursor back after each scan; a scan with the cursor in another field types into that field, and the person sees it.
 
 ## Consequences
 
 **Better:** a shop with a cheap USB scanner sells at supermarket speed with no setup; a shop with only phones scans with the camera;
-an item with no manufacturer code gets a label; codes are checked, so a misread digit is caught at entry.
+an item with no manufacturer code gets a label; codes are checked, so a misread digit is caught at entry; a person's typing in a
+quantity, price or count is never taken for a scan, and a scanner of any speed works in the Scan box with no setting.
 
 **Worse:** one more table and one more lazy dependency (Quagga2, about 45 kB gzipped, loaded only on Scan). Quagga2 reads stills,
 so the iPhone camera is slower than the native detector. Quagga2's Node-only optional dependencies (`sharp`, and `ndarray-pixels`
@@ -76,6 +92,7 @@ with its own `sharp`, native libvips binaries) add about 72 MB to `node_modules`
 them. They are not removed: npm `overrides` cannot drop a dependency, a `file:` stub in `overrides` makes npm 10's `npm ci` refuse
 the lockfile, and `--omit=optional` would also drop the native binaries Rollup and esbuild need to build. A code holding `% ; ? # / \` cannot be stored.
 
-**Watch for:** a scanner configured to send Tab instead of Enter (the scan box and the wedge both need Enter); scanners that type
-faster than the browser fires key events still fit the 35 ms window; a slow Bluetooth scanner needs the device's Scanner speed in Notifications and app raised (up to 80 ms, kept in this browser only), and on the sale screen the cursor waits in the scan box (on a device with a mouse or trackpad, unless turned off there) so a scan too slow to be told from typing still lands in the box and its Enter never submits the sale; label printers with other
+**Watch for:** a scanner configured to send Tab instead of Enter (the Scan box needs Enter); a scan made with the cursor in
+another field types the code into that field, as any typing would (the box takes the cursor back after each scan, and on a till it
+has it when the form opens); label printers with other
 sheet sizes (the CSS sheet is A4, 3 by 8); the V87 number, taken in the agreed merge order after V85 (#465) and V86 (#463), renumbered at merge if that order changes.

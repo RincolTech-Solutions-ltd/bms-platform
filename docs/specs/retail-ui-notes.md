@@ -1306,26 +1306,18 @@ Tests: `outbox.test.ts`, `sync-engine.test.ts`, `catalogue.test.ts`, `offline-sa
 
 ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability switch.
 
-- **Scan bar** (`scan.tsx`, data-tour `scan-bar`) under the item search of the sale, restock, goods received without an order (purchasing), move stock and stock count forms:
-  "Scan or type a barcode, then press Enter", and a **Scan** button (data-tour `scan-camera`) shown only where the browser can open a
-  camera (`navigator.mediaDevices.getUserMedia`). A USB or Bluetooth scanner works anywhere on the screen: a burst of keys within
-  35 ms of each other (this device's **Scanner speed** in Notifications and app, up to 80 ms for a slow Bluetooth scanner, kept in
-  this browser), at least four, closed by Enter (`createWedge` in `barcode-state.ts`); with the cursor in a text field the field gets
-  back the value and selection it had before the burst, taken when the burst's first key starts a new run (so a scan right after
-  typing a quantity keeps the quantity typed). Each key carries the field as it was before it, and the field is put back to
-  how it was before the code's first key. A run is the keys since the field was last quiet for 500 ms (counted from the last
-  key), Enter or a Tab. Enter at scanner speed takes a code when the keys from some key on are at least four and steady: at
-  most one gap in four is longer than the gap (the scanner pausing part way, even late in a long Code 128), the rest come
-  within it. The code starts at two keys within the gap, or at a single key before a stall when that key and the rest make an
-  EAN-13, EAN-8 or UPC-A with a right check digit, or one of the system's own label codes (`IN` and eight digits), so an
-  EAN-13 starting with 0 that stalls after its 0 is still one code and a single key typed just before a scan stays in the
-  field. A person's keys are not steady, even with key rollovers (1000 typed at 70 to 120 ms a key with one rollover, 1256
-  with two rollovers around a pause, or 12, Tab, 50): they keep what was typed and their Enter reaches the form. When no
-  code can be taken (a short Code 128 that stalls, a stall after the first key of another Code 128), nothing in the field is
-  touched and the Enter reaches the form (a known limit). On the sale screen the cursor waits in the scan box (on a device with a
-  mouse or trackpad; "Keep the cursor in the scan box on the sale screen" in Notifications and app turns it off), so a scan too slow
-  to be told from typing still lands there and its Enter never submits the sale. While a dialog is open over the form (a sheet, the help, a tour step, the menu drawer) the wedge takes no keys, so a scan cannot add a line behind it. A found item is added at 1 or its line gains one, in the pack the barcode is on (the sale and the restock,
-  with pack sizes on); on the stock count it adds one to the count, or the pack factor, and clears the search so the counted line shows; an item not on the branch's count sheet is refused with "<item> is not on the count sheet of this branch." "Added <item>." is read out politely, with a
+- **Scan box** (`scan.tsx`, data-tour `scan-bar`) under the item search of the sale, restock, goods received without an order (purchasing), move stock and stock count forms
+  (ADR-070 decision 11, owner decision D7): a box labelled **Scan here** ("Scan or type a barcode, then Enter"; "A barcode scanner
+  types into this box. You can also type the barcode and press Enter.") and, beside it, a camera icon button **Scan with the
+  camera** (data-tour `scan-camera`) shown only where the browser can open a camera (`navigator.mediaDevices.getUserMedia`). A USB
+  or Bluetooth scanner types the code into the box and presses Enter, at any speed; a code typed by hand and Enter works the same.
+  Enter in the box looks the code up and never submits the form. On the sale, restock, move stock and stock count forms the box
+  takes the cursor when the form opens on a device with a mouse or trackpad (not on a phone, where it would open the keyboard);
+  after each scan the box is empty and keeps the cursor for the next one (after the camera too, on such a device). Nothing reads keys
+  anywhere else: with the cursor in a quantity, price or count field, whatever is typed stays in that field and Enter submits the
+  form as usual (a scan made there types the code into the field, as any typing would). There is no scanner setting in
+  Notifications and app. A found item is added at 1 or its line gains one, in the pack the barcode is on (the sale and the restock,
+  with pack sizes on); on the stock count it adds one to the count, or the pack factor, and clears the search so the counted line shows, marked with an outline and scrolled into view; an item not on the branch's count sheet is refused with "<item> is not on the count sheet of this branch." "Added <item>." is read out politely, with a
   short beep and buzz where the device allows. On the restock the quantity goes to the branch chosen at the top; with none chosen a scan says "Choose the branch at the top of the page first".
 - **Unknown code:** "No item has the barcode <code>." An administrator gets **Add this barcode to a product**: the item search
   opens, Choose puts the barcode on that item and adds it to the form. For a code that looks like spreadsheet damage (all digits of
@@ -1348,5 +1340,7 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
 - **Import:** the item file takes `barcode`, `pack barcode` and `barcode format` columns (several codes separated by spaces or `|`).
   A code a spreadsheet may have damaged (all digits of 6, 7, 9, 10, 11 or 14, or `4.00638E+12`) is an error row unless the
   row's `barcode format` is `code128`; on the item form the same code offers "This code is exactly as printed (Code 128)".
-- Tours: `retail-sales` version 14 adds the Scan step; `page-labels` version 1.
-- Tests: `barcode-state.test.ts`, `scan.dom.test.tsx`, `camera-scan.test.ts`; backend `BarcodesTest`, `RetailBarcodesIT`.
+- Tours: a **Scan here** step on the Scan box in `retail-sales` (version 15, from version 14's Scan step), `page-sale` (version 3),
+  `page-restock` (version 2), `page-transfer` (version 2) and `page-stocktake` (version 2); `page-labels` version 1.
+- Tests: `barcode-state.test.ts`, `scan.dom.test.tsx` (the Scan box; 1256 typed fast into a quantity, price or count field stays
+  there, submits normally and is never looked up), `camera-scan.test.ts`; backend `BarcodesTest`, `RetailBarcodesIT`.

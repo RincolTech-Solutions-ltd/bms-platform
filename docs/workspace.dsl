@@ -247,7 +247,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
         bms.api.reporting -> bms.api.audit "Audits every run, cancel, failure and expiry with the report key and parameters, never rows"
         bms.api.reporting -> bms.api.operations "Replays a repeated Idempotency-Key"
 
-        bms.web -> bms.api.retailCatalogue "Manages categories, units and products; edits prices; asks for similar names before saving an item and adds a repeated name anyway as an administrator; makes items with sizes and colours and reads an item's stock over its variants; looks up a scanned barcode (keyboard-wedge scanner, typed code or the phone camera with BarcodeDetector or the lazy Quagga2 fallback), edits an item's barcodes and makes label codes"
+        bms.web -> bms.api.retailCatalogue "Manages categories, units and products; edits prices; asks for similar names before saving an item and adds a repeated name anyway as an administrator; makes items with sizes and colours and reads an item's stock over its variants; looks up a scanned barcode (a scanner or a typed code in the Scan box, or the phone camera with BarcodeDetector or the lazy Quagga2 fallback), edits an item's barcodes and makes label codes"
         bms.api.retailCatalogue -> bms.api.audit "Writes audit rows"
         bms.api.retailCatalogue -> bms.api.documents "Stores item photos as checked, re-encoded uploads and reads them back for the PWA (ADR-053)"
         bms.api.retailCatalogue -> bms.api.tenancy "Reads the tenant currency and the units capability; takes the next label code number from the tenant sequences"
