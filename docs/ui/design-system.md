@@ -200,7 +200,9 @@ query, so the number is the token.
   motorbike), Banked `banking` (a bank building), Savings `savings` (a safe), Expenses `expenses` (a wallet), Advances
   `advances`, Stock `stock`, Restock `restock`, Count `stocktake` and Usage `usage`, SMS `phone`, Receive payments
   `receivePayments` (an arrow coming in to a coin), Users `user`, Notifications `bell`, Feedback `chat`, Business set-up
-  `settings`; the headings Shop `shop` and Lending `lending`.
+  `settings`; the headings Shop `shop` and Lending `lending`. Stock moves (`transfers`) is redrawn as a list with arrows,
+  so it no longer looks like a plain list. The member portal cards (`member/features.ts`): Balances `coins`, Loan schedule
+  `calendar`, Payments `phone`.
 - **Where it applies:** the staff area and the operator portal. The member area has no area list and keeps its layout.
 
 ## Light and dark theme (#429, #452)
@@ -305,8 +307,10 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
 - `npm test` runs the busy guard (`src/app/ui/busy-guard.test.ts`, #456: every mutation a press sends, including
   `useMutation<T>(`, destructured ones and local hooks that return one, hands its pending flag to `busy`, and no plain
   button is disabled by a pending state; fixture tests prove it fails both wrong shapes) and `BusyButton.dom.test.tsx`.
-- `npm test` runs `src/areas/staff/menu-icons.test.tsx` (#483): two items of the staff side menu, the retail tiles, the catalogue
-  tiles or the operator portal that draw the same picture fail it, compared by the drawing itself.
+- `npm test` runs `src/areas/staff/menu-icons.test.tsx` (#483): two items of the staff side menu (its full list asserted), the
+  retail tiles, the catalogue tiles, the operator portal or the member portal cards that draw the same picture fail it,
+  compared by the drawing itself. `home-cards.dom.test.tsx` checks each Home card draws its side menu heading's icon, and
+  `setup.dom.test.tsx` that the rendered Business set-up page draws no picture twice.
 - `npm test` runs the token contrast test and the design guard (`src/app/ui/design-guard.test.ts`: no
   `<style>` element, no inline HTML, and no hex colour in a component or a design layer stylesheet, and no palette token that would not follow the theme);
   `src/app/theme-mode.dom.test.tsx` covers the three choices, persistence, following the system, the pre-paint script and the

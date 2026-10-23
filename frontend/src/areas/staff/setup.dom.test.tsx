@@ -69,11 +69,11 @@ afterEach(() => {
   Object.defineProperty(navigator, 'userAgent', { value: REAL_AGENT, configurable: true });
 });
 
-function show({ card = false, modules }: { card?: boolean; modules?: string[] } = {}) {
+function show({ card = false, modules, permissions = ['core.settings.manage'] }: { card?: boolean; modules?: string[]; permissions?: string[] } = {}) {
   const me = mockMe('owner');
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <StaffContext.Provider value={{ me: { ...me, permissions: ['core.settings.manage'], modules: modules ?? me.modules }, branch: null, chooseBranch: () => {} }}>
+      <StaffContext.Provider value={{ me: { ...me, permissions, modules: modules ?? me.modules }, branch: null, chooseBranch: () => {} }}>
         {card && <NewLogoCard />}
         <Setup />
       </StaffContext.Provider>
@@ -195,5 +195,21 @@ describe('the set-up hints and module wording', () => {
     expect(reportsWording([])).toBe('and others');
     expect(hasRetail(undefined)).toBe(true);
     expect(hasRetail(['lending'])).toBe(false);
+  });
+});
+
+// Issue #483: no two items of the set-up menu draw the same picture. The page draws none today; any it gains must differ.
+describe('the set-up menu icons', () => {
+  it('draws no picture twice', async () => {
+    settings.setup_dismissed = false;
+    try {
+      show({ modules: ['lending', 'retail'], permissions: ['core.settings.manage', 'core.branches.read', 'core.users.read', 'core.referrals.read'] });
+      await screen.findByRole('link', { name: 'Referrals' });
+      await screen.findByRole('heading', { name: 'Checklist' });
+      const drawings = [...document.querySelectorAll('main svg')].map((svg) => svg.outerHTML);
+      expect(drawings.filter((svg, i) => drawings.indexOf(svg) !== i)).toEqual([]);
+    } finally {
+      settings.setup_dismissed = true;
+    }
   });
 });
