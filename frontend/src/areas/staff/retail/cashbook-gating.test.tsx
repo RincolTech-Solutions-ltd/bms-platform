@@ -61,7 +61,7 @@ describe('cash book routes and tiles', () => {
 
 describe('toast', () => {
   it('is a polite status message that goes away by itself', () => {
-    const out = html(<Toast message="Savings recorded." />);
+    const out = html(<Toast message="Savings recorded." tone="success" />);
     expect(out).toContain('role="status"');
     expect(out).toContain('class="toast toast-success"');
     expect(out).toContain('Savings recorded.');

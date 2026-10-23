@@ -130,6 +130,10 @@ describe('adding an item', () => {
     const badge = document.querySelector('.count-badge');
     await addItem('Test Bulb 9W');
     expect(vibrate).toHaveBeenCalledTimes(2);
+    // The refusal is an info toast, never the green check of an add (#508, docs/ui-rules.md rule 16).
+    const toast = document.querySelector('.toast');
+    expect(toast?.className).toBe('toast toast-info');
+    expect(toast?.textContent).toBe('Test Bulb 9W is already on the sale. Change its quantity below.');
     expect(document.querySelectorAll('.line-card')).toHaveLength(2);
     expect(document.querySelector('.count-badge')).toBe(badge);
     fireEvent.click(screen.getByRole('button', { name: 'Remove Test Bulb 9W' }));

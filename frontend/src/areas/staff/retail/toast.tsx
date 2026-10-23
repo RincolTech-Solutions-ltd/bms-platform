@@ -3,7 +3,9 @@ import { icons } from '../../../components/icons';
 
 // A toast (the .toast class of app/ui/feedback.css, docs/ui-rules.md rule 15): a dark neutral pill at the bottom with a leading
 // icon for its kind, raised on top of the on-screen success message and gone after four seconds. A screen calls `useToast()`,
-// renders `toast` once and calls `show(message)` when a write succeeds, or `show(message, 'error')` when it fails.
+// renders `toast` once and calls `show(message, 'success')` when a write succeeds, `show(message, 'error')` when it fails and
+// `show(message, 'info')` for anything else (a refusal, or a change that waits for approval). The tone has no default, so a
+// refusal can never draw the green check by omission (#508, docs/ui-rules.md rule 16).
 
 export const TOAST_MS = 4000;
 
@@ -15,7 +17,7 @@ const TONE_ICON = { success: icons.check, error: icons.error, info: icons.info }
  * The toast itself. It is announced politely (an error assertively) unless `silent`, for a screen whose on-screen message
  * already says the same to assistive technology.
  */
-export function Toast({ message, tone = 'success', silent = false }: { message: string; tone?: ToastTone; silent?: boolean }) {
+export function Toast({ message, tone, silent = false }: { message: string; tone: ToastTone; silent?: boolean }) {
   const announce = silent ? { 'aria-hidden': true } : tone === 'error' ? { role: 'alert' } : { role: 'status', 'aria-live': 'polite' as const };
   return (
     <p {...announce} className={`toast toast-${tone}`}>
@@ -25,7 +27,7 @@ export function Toast({ message, tone = 'success', silent = false }: { message: 
   );
 }
 
-export function useToast(ms: number = TOAST_MS, silent = false): { show: (message: string, tone?: ToastTone) => void; toast: ReactNode } {
+export function useToast(ms: number = TOAST_MS, silent = false): { show: (message: string, tone: ToastTone) => void; toast: ReactNode } {
   const [shown, setShown] = useState<{ message: string; tone: ToastTone } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clear = () => {
@@ -34,7 +36,7 @@ export function useToast(ms: number = TOAST_MS, silent = false): { show: (messag
   };
   useEffect(() => clear, []);
   const show = useCallback(
-    (message: string, tone: ToastTone = 'success') => {
+    (message: string, tone: ToastTone) => {
       clear();
       setShown({ message, tone });
       timer.current = setTimeout(() => setShown(null), ms);

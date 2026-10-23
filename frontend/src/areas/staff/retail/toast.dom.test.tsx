@@ -12,7 +12,7 @@ afterEach(() => {
 
 describe('Toast', () => {
   it('leads with the check icon and is a polite status for a success', () => {
-    render(<Toast message="Sale recorded." />);
+    render(<Toast message="Sale recorded." tone="success" />);
     const toast = screen.getByRole('status');
     expect(toast.className).toBe('toast toast-success');
     expect(toast.firstElementChild?.className).toBe('toast-icon');
@@ -24,7 +24,7 @@ describe('Toast', () => {
     render(<Toast message="Could not save." tone="error" />);
     expect(screen.getByRole('alert').className).toBe('toast toast-error');
     cleanup();
-    const { container } = render(<Toast message="Saved." silent />);
+    const { container } = render(<Toast message="Saved." tone="success" silent />);
     expect(container.querySelector('.toast')?.getAttribute('aria-hidden')).toBe('true');
     expect(screen.queryByRole('status')).toBeNull();
   });
@@ -39,5 +39,14 @@ describe('Toast', () => {
     expect(TOAST_MS).toBe(4000);
     act(() => vi.advanceTimersByTime(TOAST_MS));
     expect(result.current.toast).toBeNull();
+  });
+
+  it('has no default tone, so a refusal can never draw the success check by omission', () => {
+    const { result } = renderHook(() => useToast());
+    // @ts-expect-error the tone is required
+    act(() => result.current.show('Already on the sale.'));
+    act(() => result.current.show('Already on the sale.', 'info'));
+    const { container } = render(<>{result.current.toast}</>);
+    expect(container.querySelector('.toast')?.className).toBe('toast toast-info');
   });
 });

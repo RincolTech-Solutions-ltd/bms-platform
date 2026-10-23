@@ -271,7 +271,7 @@ function StylePage() {
           <button onClick={() => dialog.current?.showModal()}>Open a dialog</button>
           <button onClick={() => sheet.current?.showModal()}>Open a sheet</button>
         </div>
-        {toast && <Toast message={toast} />}
+        {toast && <Toast message={toast} tone="success" />}
         <dialog ref={dialog} aria-labelledby="style-dialog-title">
           <h2 id="style-dialog-title">A dialog</h2>
           <p>Centred, with a backdrop. It rises in over 200 ms.</p>

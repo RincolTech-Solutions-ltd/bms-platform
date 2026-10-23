@@ -324,17 +324,17 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
   const add = (p: Product) => {
     const now = lines.current;
     if (now.some((l) => l.product.id === p.id) && !(unitsOn && activePacks(p).length > 0)) {
-      show(`${p.description} is already on the sale. Change its quantity below.`);
+      show(`${p.description} is already on the sale. Change its quantity below.`, 'info');
       return;
     }
     const next = [...now, newLine(p)];
     lines.current = next;
     setDraft((d) => ({ ...d, lines: next }));
     mark(next.length - 1, true);
-    show(`Added ${p.description}`);
+    show(`Added ${p.description}`, 'success');
   };
   // A scan (issue #345) adds the item at 1, or one more to its line in the pack the barcode is on; a pack it cannot
-  // use is refused, never sold as one piece.
+  // use is refused, never sold as one piece: ScanBar shows the refusal as a warning and no toast is raised.
   const scanAdd = (p: Product, unitId?: string) => {
     const unit = unitsOn && activePacks(p).some((k) => k.unit_id === unitId) ? unitId : undefined;
     if (unitId && !unit) return PACK_UNUSABLE;
@@ -344,7 +344,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
     lines.current = next;
     setDraft((d) => ({ ...d, lines: next }));
     if (index >= 0) mark(index, created);
-    show(created ? `Added ${p.description}` : `One more ${p.description}`);
+    show(created ? `Added ${p.description}` : `One more ${p.description}`, 'success');
   };
 
   const total = draftTotal(shown.lines);

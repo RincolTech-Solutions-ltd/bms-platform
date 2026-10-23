@@ -44,6 +44,8 @@ check. The fuller design system is `docs/ui/design-system.md`.
 14. A page load shows a skeleton, and nothing at all for under 1 second.
 15. Toasts are dark and neutral, at the bottom, with an icon, for about 4 seconds, with at most one action. An error is never
     a blocking dialog.
+    Every toast names its tone: the check of `success` only where a write succeeded, `info` for a refusal (an item already on
+    the sale) or a change that waits for approval, `error` for a failure. `show()` has no default tone.
 16. Status colours are only for real status.
 
 ## Words

@@ -43,7 +43,8 @@ export function Success({ children }: { children: ReactNode }) {
 /**
  * A short toast above the bottom bar (`.toast`), gone after four seconds. It repeats the on-screen
  * success message and is hidden from assistive technology, which already has that message (#146).
- * Render `toast` anywhere in the screen and call `show` when a save succeeds.
+ * Render `toast` anywhere in the screen and call `show(text, 'success')` when a save succeeds, or `'info'` when it only waits
+ * for an approval.
  */
 export function useToast() {
   return useToastOf(TOAST_MS, true);
