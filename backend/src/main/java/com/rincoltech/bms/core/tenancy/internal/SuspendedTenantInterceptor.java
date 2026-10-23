@@ -1,9 +1,13 @@
 package com.rincoltech.bms.core.tenancy.internal;
 
+import com.rincoltech.bms.core.tenancy.EndedTenantDownloads;
 import com.rincoltech.bms.kernel.ApiException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.util.List;
 import java.util.Set;
+import java.util.UUID;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -16,12 +20,19 @@ import org.springframework.web.servlet.HandlerInterceptor;
  *
  * <p>A business whose Owner cancelled and whose end date has passed is read only the same way, with 423
  * {@code subscription_ended} (ADR-073): besides the sign-in routes, the exports that are a POST (the audit CSV,
- * a report run, the business's own workbook and the signed address of a file, issue #334) still work, so the
- * business can take its data away.
+ * a report run, and the business's own workbook of issue #334) still work, so the business can take its data away.
+ * The signed address of a file is let through only for the file of a data export run, as {@link EndedTenantDownloads}
+ * decides; member ID images, loan papers and every other file stay refused (ADR-074).
  */
 class SuspendedTenantInterceptor implements HandlerInterceptor {
 
     private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS");
+
+    private final List<EndedTenantDownloads> downloads;
+
+    SuspendedTenantInterceptor(List<EndedTenantDownloads> downloads) {
+        this.downloads = List.copyOf(downloads);
+    }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
@@ -35,7 +46,9 @@ class SuspendedTenantInterceptor implements HandlerInterceptor {
             // When member portal sign-in (FR-IAM-09) is built, its routes must be let through here, for an ended
             // business
             // only (ADR-073 decision 5): its members still sign in to read. A suspension by the operator refuses them.
-            if (endedExportPath(request.getRequestURI()) || exportPath(request.getRequestURI())) {
+            if (exportPath(request.getRequestURI())
+                    || dataExportPath(request.getRequestURI())
+                    || dataExportFile(request.getRequestURI())) {
                 return true;
             }
             throw new ApiException(
@@ -53,16 +66,30 @@ class SuspendedTenantInterceptor implements HandlerInterceptor {
                 "This tenant is suspended and read only. Contact the platform operator.");
     }
 
-    /** Asking for the data export and fetching a file change none of the business's data (ADR-074). */
     static boolean exportPath(String path) {
-        return path.equals("/api/v1/data-export/runs")
-                || DOWNLOAD_URL.matcher(path).matches();
+        return path.equals("/api/v1/audit-events/export") || path.equals("/api/v1/report-runs");
     }
 
-    private static final Pattern DOWNLOAD_URL = Pattern.compile("^/api/v1/documents/[0-9a-fA-F-]{36}/download-url$");
+    /** Asking for the data export changes none of the business's data (ADR-074). */
+    static boolean dataExportPath(String path) {
+        return path.equals("/api/v1/data-export/runs");
+    }
 
-    static boolean endedExportPath(String path) {
-        return path.equals("/api/v1/audit-events/export") || path.equals("/api/v1/report-runs");
+    private static final Pattern DOWNLOAD_URL = Pattern.compile("^/api/v1/documents/([0-9a-fA-F-]{36})/download-url$");
+
+    /** The signed address of a data export file, and of no other document. */
+    boolean dataExportFile(String path) {
+        Matcher m = DOWNLOAD_URL.matcher(path);
+        if (!m.matches()) {
+            return false;
+        }
+        UUID documentId;
+        try {
+            documentId = UUID.fromString(m.group(1));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        return downloads.stream().anyMatch(d -> d.isDataExportFile(documentId));
     }
 
     static boolean staffSessionPath(String path) {

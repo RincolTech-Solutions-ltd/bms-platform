@@ -1,5 +1,6 @@
 package com.rincoltech.bms.core.tenancy.internal;
 
+import com.rincoltech.bms.core.tenancy.EndedTenantDownloads;
 import com.rincoltech.bms.core.tenancy.ModuleManifest;
 import com.rincoltech.bms.core.tenancy.TenantModules;
 import java.util.List;
@@ -46,14 +47,15 @@ class TenancyConfiguration {
     }
 
     @Bean
-    WebMvcConfigurer moduleGate(List<ModuleManifest> manifests, TenantModules tenantModules) {
+    WebMvcConfigurer moduleGate(
+            List<ModuleManifest> manifests, TenantModules tenantModules, List<EndedTenantDownloads> endedDownloads) {
         return new WebMvcConfigurer() {
             @Override
             public void addInterceptors(InterceptorRegistry registry) {
                 registry.addInterceptor(new ModuleGateInterceptor(manifests, tenantModules))
                         .addPathPatterns("/api/v1/**")
                         .order(Ordered.HIGHEST_PRECEDENCE);
-                registry.addInterceptor(new SuspendedTenantInterceptor())
+                registry.addInterceptor(new SuspendedTenantInterceptor(endedDownloads))
                         .addPathPatterns("/api/v1/**")
                         .order(Ordered.HIGHEST_PRECEDENCE + 1);
             }

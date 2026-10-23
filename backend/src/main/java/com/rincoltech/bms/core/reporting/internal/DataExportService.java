@@ -5,6 +5,7 @@ import com.rincoltech.bms.core.operations.Idempotency;
 import com.rincoltech.bms.core.reporting.ReportDefinition;
 import com.rincoltech.bms.core.reporting.internal.RunService.Requested;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
+import com.rincoltech.bms.core.tenancy.EndedTenantDownloads;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
@@ -25,7 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
  * fetched like any report file, through {@code POST /documents/{id}/download-url}, by the person it was made for.
  */
 @Service
-class DataExportService {
+class DataExportService implements EndedTenantDownloads {
 
     static final String AUDIT_SETTINGS = "core.data_export.settings_changed";
 
@@ -136,6 +137,16 @@ class DataExportService {
                 .query(Boolean.class)
                 .optional()
                 .orElse(true);
+    }
+
+    /** Only this file, and no other document, is let through for a business whose subscription ended (ADR-074). */
+    @Override
+    @Transactional(readOnly = true)
+    public boolean isDataExportFile(UUID documentId) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM report_runs WHERE document_id = ? AND report_key = ?)")
+                .params(documentId, DataExportReport.KEY)
+                .query(Boolean.class)
+                .single();
     }
 
     private boolean isOwner(UUID userId) {

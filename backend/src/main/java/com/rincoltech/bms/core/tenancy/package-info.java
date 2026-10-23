@@ -12,6 +12,7 @@
  * {@link com.rincoltech.bms.core.tenancy.BranchDeactivationGuard},
  * {@link com.rincoltech.bms.core.tenancy.BranchProvisioning},
  * {@link com.rincoltech.bms.core.tenancy.ModuleManifest},
+ * {@link com.rincoltech.bms.core.tenancy.EndedTenantDownloads},
  * {@link com.rincoltech.bms.core.tenancy.ModuleSettingsGroup} and
  * {@link com.rincoltech.bms.core.tenancy.ModuleSettings} (a vertical's settings group, stored as
  * opaque jsonb and validated by the vertical, ADR-033).
