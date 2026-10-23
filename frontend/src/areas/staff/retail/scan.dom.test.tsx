@@ -243,6 +243,76 @@ describe('FR-RET-68 scanning on the stock count', () => {
   });
 });
 
+describe('FR-RET-68 typing in a quantity, price or count field is never a scan', () => {
+  /** The sale's first quantity and price, after one scan made the line. */
+  async function saleFields(): Promise<[HTMLInputElement, HTMLInputElement]> {
+    await retail.addBarcode(LAMP, { code: EAN });
+    screenOf(<SaleForm branchId={BRANCH} />);
+    scan(EAN);
+    await waitFor(() => expect(qtyOf(0)).toBe('1'));
+    return [document.getElementById('qty-0') as HTMLInputElement, document.getElementById('price-0') as HTMLInputElement];
+  }
+
+  /** The first count box of the count sheet. */
+  async function countField(): Promise<HTMLInputElement> {
+    screenOf(<StocktakePage />);
+    await waitFor(() => expect(document.querySelector('.rt-card input[id^="count-"]')).not.toBeNull());
+    return document.querySelector('.rt-card input[id^="count-"]') as HTMLInputElement;
+  }
+
+  /** 1256 at scanner speed with two key rollovers (the keys a wedge guess once took for a scan), then Enter. */
+  function fast1256(field: HTMLInputElement): Event {
+    field.focus();
+    field.select();
+    let at = (clock += 10000);
+    press('1', at);
+    press('2', (at += 8));
+    press('5', (at += 8));
+    press('6', (at += 8));
+    return press('Enter', (clock = at + 8));
+  }
+
+  const FIELDS = {
+    'the sale quantity': async () => (await saleFields())[0],
+    'the sale price': async () => (await saleFields())[1],
+    'a stock count box': countField,
+  } as const;
+
+  it.each(Object.keys(FIELDS) as (keyof typeof FIELDS)[])('keeps 1256 typed fast into %s with Enter, and looks nothing up', async (where) => {
+    const field = await FIELDS[where]();
+    const lookUp = vi.spyOn(retail, 'findByBarcode');
+    const seen = vi.fn();
+    (field.form ?? field.parentElement)?.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Enter') seen();
+    });
+    expect(fast1256(field).defaultPrevented).toBe(false);
+    expect(field.value).toBe('1256');
+    expect(seen).toHaveBeenCalledTimes(1);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(lookUp).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('scan-unknown')).toBeNull();
+  });
+
+  it('submits the sale normally with the 1256 typed into the quantity when Enter is pressed there', async () => {
+    // The branch holds enough lamps for 1256 to be a sale the form sends, not one it stops for stock.
+    const real = retail.findByBarcode;
+    const lookUp = vi.spyOn(retail, 'findByBarcode').mockImplementationOnce(async (code, branchId) => {
+      const match = await real(code, branchId);
+      return match && { ...match, product: { ...match.product, qty: '5000' } };
+    });
+    const [qty] = await saleFields();
+    lookUp.mockClear();
+    const createSale = vi.spyOn(retail, 'createSale');
+    const enter = fast1256(qty);
+    // A browser submits a form on Enter in its field unless the key was stopped; jsdom does not, so the test does it.
+    expect(enter.defaultPrevented).toBe(false);
+    qty.form?.requestSubmit();
+    await waitFor(() => expect(createSale).toHaveBeenCalledTimes(1));
+    expect(createSale.mock.calls[0]?.[0].lines?.[0]).toMatchObject({ product_id: LAMP, qty: '1256.000' });
+    expect(lookUp).not.toHaveBeenCalled();
+  });
+});
+
 describe('FR-RET-68 scanning on the restock form', () => {
   it('asks for a branch first when none is chosen at the top, and adds the item there once one is', async () => {
     await retail.addBarcode(LAMP, { code: EAN });
