@@ -1,6 +1,8 @@
 package com.rincoltech.bms.retail.reports.internal;
 
 import java.sql.Date;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -56,7 +58,8 @@ class CreditRepository {
             Integer oldestDays,
             int buyers,
             Long creditLimitMinor,
-            Integer termsDays) {}
+            Integer termsDays,
+            LocalDate oldestDue) {}
 
     record OverdueRow(
             UUID saleId,
@@ -96,16 +99,25 @@ class CreditRepository {
                 rs.getLong("over90"));
     }
 
-    /** Everything owed in scope as one row, and how many buyers owe it. */
+    /** Everything owed in scope as one row, how many buyers owe it, and the earliest due date of a sale still owing. */
     BuyerRow totals(List<UUID> branchIds, LocalDate today) {
         if (branchIds != null && branchIds.isEmpty()) {
-            return new BuyerRow(null, null, 0, new Buckets(0, 0, 0, 0, 0, 0), null, 0, null, null);
+            return new BuyerRow(null, null, 0, new Buckets(0, 0, 0, 0, 0, 0), null, 0, null, null, null);
         }
-        return jdbc.sql("SELECT " + BUCKETS + ", count(*) AS sales, count(DISTINCT " + key() + ") AS buyers"
+        return jdbc.sql("SELECT " + BUCKETS + ", count(*) AS sales, count(DISTINCT " + key() + ") AS buyers,"
+                        + " min(s.due_date) AS oldest_due"
                         + " FROM retail_sales s" + OPEN + branch(branchIds))
                 .params(params(branchIds, today))
                 .query((rs, n) -> new BuyerRow(
-                        null, null, rs.getInt("sales"), buckets(rs), null, rs.getInt("buyers"), null, null))
+                        null,
+                        null,
+                        rs.getInt("sales"),
+                        buckets(rs),
+                        null,
+                        rs.getInt("buyers"),
+                        null,
+                        null,
+                        rs.getObject("oldest_due", LocalDate.class)))
                 .single();
     }
 
@@ -136,20 +148,21 @@ class CreditRepository {
                         (Integer) rs.getObject("oldest"),
                         0,
                         rs.getObject("credit_limit", Long.class),
-                        rs.getObject("terms_days", Integer.class)))
+                        rs.getObject("terms_days", Integer.class),
+                        null))
                 .list();
     }
 
     /** What the credit buyers with a record owe, as one row (the total row of the customer ageing). */
     BuyerRow customerTotals(List<UUID> branchIds, LocalDate today) {
         if (branchIds != null && branchIds.isEmpty()) {
-            return new BuyerRow(null, null, 0, new Buckets(0, 0, 0, 0, 0, 0), null, 0, null, null);
+            return new BuyerRow(null, null, 0, new Buckets(0, 0, 0, 0, 0, 0), null, 0, null, null, null);
         }
         return jdbc.sql("SELECT " + BUCKETS + ", count(*) AS sales, count(DISTINCT s.customer_id) AS buyers"
                         + " FROM retail_sales s" + OPEN + " AND s.customer_id IS NOT NULL" + branch(branchIds))
                 .params(params(branchIds, today))
                 .query((rs, n) -> new BuyerRow(
-                        null, null, rs.getInt("sales"), buckets(rs), null, rs.getInt("buyers"), null, null))
+                        null, null, rs.getInt("sales"), buckets(rs), null, rs.getInt("buyers"), null, null, null))
                 .single();
     }
 
@@ -175,7 +188,8 @@ class CreditRepository {
                         (Integer) rs.getObject("oldest"),
                         0,
                         rs.getObject("credit_limit", Long.class),
-                        rs.getObject("terms_days", Integer.class)))
+                        rs.getObject("terms_days", Integer.class),
+                        null))
                 .list();
     }
 
@@ -216,6 +230,15 @@ class CreditRepository {
      * cancel is left out.
      */
     List<Payment> payments(List<UUID> branchIds, LocalDate from, LocalDate to) {
+        return payments(branchIds, from, to, null);
+    }
+
+    /**
+     * As above, reading only the payments entered from {@code enteredFrom} on, through the index on the moment of entry
+     * (V64): no payment is dated after the day it was entered, so the start of {@code from} in the tenant's zone leaves the
+     * answer unchanged and spares a scan of every payment for a short window (the Home summary, issue #485).
+     */
+    List<Payment> payments(List<UUID> branchIds, LocalDate from, LocalDate to, Instant enteredFrom) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
         }
@@ -225,6 +248,11 @@ class CreditRepository {
         if (branchIds != null) {
             params.put("branchIds", branchIds);
         }
+        String entered = "";
+        if (enteredFrom != null) {
+            params.put("enteredFrom", Timestamp.from(enteredFrom));
+            entered = " AND p.created_at >= :enteredFrom";
+        }
         String receivedIn = branchIds == null ? "" : " AND coalesce(ap.branch_id, s.branch_id) IN (:branchIds)";
         String reversedIn = branchIds == null ? "" : " AND ap.branch_id IN (:branchIds)";
         return jdbc.sql("SELECT m.d AS paid_on, m.method, sum(m.n) AS payments, sum(m.amt) AS amount FROM ("
@@ -232,7 +260,7 @@ class CreditRepository {
                         + " FROM retail_sale_payments p JOIN retail_sales s ON s.tenant_id = p.tenant_id AND s.id = p.sale_id"
                         + " LEFT JOIN retail_account_payment_allocations al ON al.tenant_id = p.tenant_id AND al.sale_payment_id = p.id"
                         + " LEFT JOIN retail_account_payments ap ON ap.tenant_id = al.tenant_id AND ap.id = al.receipt_id"
-                        + " WHERE p.paid_on BETWEEN :from AND :to AND s.status = 'completed'" + receivedIn
+                        + " WHERE p.paid_on BETWEEN :from AND :to AND s.status = 'completed'" + entered + receivedIn
                         + " UNION ALL"
                         + " SELECT ap.reversed_on, p.method, -1, -p.amount_minor"
                         + " FROM retail_account_payments ap"

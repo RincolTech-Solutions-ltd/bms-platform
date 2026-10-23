@@ -25,7 +25,9 @@ class DashboardRepository {
         this.jdbc = jdbc;
     }
 
-    record DaySales(UUID branchId, LocalDate day, boolean credit, long sales, long cost, long saleCount) {}
+    /** {@code method} is the sale's way of paying (cash, mobile_money, bank or credit); {@code credit} says it is credit. */
+    record DaySales(
+            UUID branchId, LocalDate day, String method, boolean credit, long sales, long cost, long saleCount) {}
 
     record Position(UUID branchId, long atPrice, long atCost, int out, int low) {}
 
@@ -50,7 +52,7 @@ class DashboardRepository {
             params.put("branchIds", branchIds);
             branch = " AND s.branch_id IN (:branchIds)";
         }
-        return jdbc.sql("SELECT s.branch_id, s.sale_date AS day, (s.payment_method = 'credit') AS credit,"
+        return jdbc.sql("SELECT s.branch_id, s.sale_date AS day, s.payment_method AS method,"
                         + " sum(l.line_total_minor) AS sales, sum(l.line_cost_minor) AS cost,"
                         + " count(DISTINCT s.id) AS sale_count"
                         + "  FROM " + SalesAnalysisRepository.NET_LINES
@@ -59,12 +61,13 @@ class DashboardRepository {
                                 ? ""
                                 : " AND (s.payment_method <> 'credit' OR s.historical OR NOT "
                                         + periods.sql("s.origin_date", "s.origin_created_at", params, "crpD") + ")")
-                        + " GROUP BY s.branch_id, s.sale_date, (s.payment_method = 'credit')")
+                        + " GROUP BY s.branch_id, s.sale_date, s.payment_method")
                 .params(params)
                 .query((rs, n) -> new DaySales(
                         rs.getObject("branch_id", UUID.class),
                         rs.getDate("day").toLocalDate(),
-                        rs.getBoolean("credit"),
+                        rs.getString("method"),
+                        "credit".equals(rs.getString("method")),
                         rs.getLong("sales"),
                         rs.getLong("cost"),
                         rs.getLong("sale_count")))
