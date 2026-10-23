@@ -45,7 +45,11 @@ import tools.jackson.databind.JsonNode;
  */
 @Import(MovableClockConfig.class)
 @ResourceLock(MovableClockConfig.LOCK)
+@ResourceLock(BillingAutomationIT.SETTINGS_LOCK)
 class BillingAutomationIT extends IntegrationTest {
+
+    /** Held by every suite that changes or depends on the one platform_billing_settings row. */
+    static final String SETTINGS_LOCK = "platform-billing-settings";
 
     /** 09:00 on 1 Nov 2026 in Kampala (UTC+3). */
     static final Instant NOV_1_MORNING = Instant.parse("2026-11-01T06:00:00Z");
@@ -462,6 +466,10 @@ class BillingAutomationIT extends IntegrationTest {
                 .update();
         String staffToken = token(inGrace);
         signInOperator();
+        Map<String, Object> before = TestDatabase.owner()
+                .sql("SELECT grace_days, how_to_pay FROM platform_billing_settings WHERE id = 1")
+                .query()
+                .singleRow();
         try {
             assertThat(saveGrace(7).getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(listed())
@@ -519,7 +527,19 @@ class BillingAutomationIT extends IntegrationTest {
                     .as("not for a business's staff")
                     .isEqualTo(HttpStatus.UNAUTHORIZED);
         } finally {
-            saveGrace(7);
+            Object howToPay = before.get("how_to_pay");
+            ResponseEntity<JsonNode> restored = platform.call(
+                    HttpMethod.PUT,
+                    "/api/v1/platform/billing/settings",
+                    Map.of(
+                            "grace_days",
+                            before.get("grace_days"),
+                            "how_to_pay",
+                            howToPay == null ? "" : howToPay,
+                            "reason",
+                            "Test: restore"),
+                    operator.accessToken());
+            assertThat(restored.getStatusCode()).as("%s", restored.getBody()).isEqualTo(HttpStatus.OK);
         }
     }
 
