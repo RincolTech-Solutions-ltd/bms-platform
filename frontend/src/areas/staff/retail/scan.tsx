@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { retail, type Product } from '../../../api/retail';
 import { useOffline } from '../../../offline/offline-context';
+import { icons } from '../../../components/icons';
 import { useStaff } from '../context';
 import { WEDGE_GAP_CHOICES, WEDGE_GAP_MS, createWedge, findByBarcodeIn, saleScanFocus, saveSaleScanFocus, saveWedgeGap, spreadsheetDamaged, wedgeGap } from './barcode-state';
 import { holds } from './permissions';
@@ -128,11 +129,11 @@ const UNSTORABLE = /[%;?#/\\]/;
 type Outcome = { kind: 'added'; name: string } | { kind: 'refused'; message: string } | { kind: 'unknown'; code: string } | { kind: 'failed'; error: unknown } | null;
 
 /**
- * The scan box and the camera button over a form's lines. `onFound` gets the item, with its balance at `branchId` when
+ * The Scan box and the camera button over a form's lines. `onFound` gets the item, with its balance at `branchId` when
  * given, and the pack the barcode is on (absent for the item's own unit); it returns a message instead when the form
  * cannot take the scan (a pack it cannot use, an item not on the sheet), shown in place of Added.
  */
-export function ScanBar({ id, branchId, onFound, keepFocus = false }: { id: string; branchId?: string; onFound: (product: Product, unitId?: string) => string | void; keepFocus?: boolean }) {
+export function ScanBar({ id, branchId, onFound, autoFocus = false }: { id: string; branchId?: string; onFound: (product: Product, unitId?: string) => string | void; autoFocus?: boolean }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const offline = useOffline();
@@ -145,17 +146,17 @@ export function ScanBar({ id, branchId, onFound, keepFocus = false }: { id: stri
   // As on the item form: a code that looks spreadsheet-damaged (a GTIN-14, a UPC-E) is added only as printed (Code 128).
   const [asPrinted, setAsPrinted] = useState(false);
   const canAssign = holds(me, 'retail.catalogue.manage');
-  // With keepFocus (the sale screen, unless this device turned it off) the cursor waits in the scan box, so a scanner too
-  // slow to be told from typing still lands there and its Enter looks the code up instead of submitting the sale. Only
-  // where there is a mouse or trackpad: on a phone it would open the keyboard on every visit.
+  // A scanner types into the Scan box only (ADR-070, D7). With autoFocus the cursor starts there, so the first scan lands
+  // in it, but only where there is a mouse or trackpad (a till or a laptop): on a phone it would open the keyboard.
   const box = useRef<HTMLInputElement>(null);
-  const holdFocus = keepFocus && saleScanFocus() && finePointer();
+  const holdFocus = autoFocus && saleScanFocus() && finePointer();
   useEffect(() => {
     if (holdFocus) box.current?.focus();
   }, [holdFocus]);
+  // After a scan the box keeps the cursor for the next one, unless the person has since moved it to another field.
   const refocus = () => {
     const at = document.activeElement;
-    if (holdFocus && (at === null || at === document.body)) box.current?.focus();
+    if (at === box.current || ((at === null || at === document.body) && (holdFocus || finePointer()))) box.current?.focus();
   };
 
   const found = (product: Product, unitId?: string) => {
@@ -223,18 +224,24 @@ export function ScanBar({ id, branchId, onFound, keepFocus = false }: { id: stri
 
   return (
     <div className="scan-bar" data-tour="scan-bar">
-      <label htmlFor={id}>Scan or type a barcode, then press Enter</label>
+      <label htmlFor={id}>Scan here</label>
       <div className="rt-row">
         <input
           id={id}
           ref={box}
           data-scan-box=""
           autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
           enterKeyHint="search"
+          placeholder="Scan or type a barcode, then Enter"
+          aria-describedby={`${id}-hint`}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key !== 'Enter') return;
+            // Enter here looks the code up; it never submits the form around the box.
             e.preventDefault();
             const code = text;
             setText('');
@@ -242,11 +249,12 @@ export function ScanBar({ id, branchId, onFound, keepFocus = false }: { id: stri
           }}
         />
         {cameraSupported() && (
-          <button type="button" onClick={() => setCamera(true)} data-tour="scan-camera">
-            Scan
+          <button type="button" className="scan-camera" aria-label="Scan with the camera" title="Scan with the camera" onClick={() => setCamera(true)} data-tour="scan-camera">
+            {icons.scan}
           </button>
         )}
       </div>
+      <p id={`${id}-hint`} className="hint">A barcode scanner types into this box. You can also type the barcode and press Enter.</p>
       {!cameraSupported() && insecureAddress() && <p className="hint">The camera works only on the secure (https) address.</p>}
       <p aria-live="polite" className="hint">
         {busy ? 'Looking up' : outcome?.kind === 'added' ? `Added ${outcome.name}.` : ''}

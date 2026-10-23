@@ -348,7 +348,7 @@ describe('FR-RET-68 scanning on the sale form', () => {
   it('takes a code typed in the scan box when Enter is pressed', async () => {
     await retail.addBarcode(LAMP, { code: 'TEST-LAMP' });
     screenOf(<SaleForm branchId={BRANCH} />);
-    const box = screen.getByLabelText('Scan or type a barcode, then press Enter');
+    const box = screen.getByLabelText('Scan here');
     fireEvent.change(box, { target: { value: 'TEST-LAMP' } });
     fireEvent.keyDown(box, { key: 'Enter' });
     await waitFor(() => expect(qtyOf(0)).toBe('1'));
@@ -426,7 +426,7 @@ describe('FR-RET-68 scanning on the sale form', () => {
     try {
       screenOf(<SaleForm branchId={BRANCH} />);
       expect(screen.getByText('The camera works only on the secure (https) address.')).toBeTruthy();
-      expect(screen.queryByRole('button', { name: 'Scan' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Scan with the camera' })).toBeNull();
     } finally {
       Reflect.deleteProperty(window, 'isSecureContext');
     }
@@ -435,11 +435,11 @@ describe('FR-RET-68 scanning on the sale form', () => {
   it('hides the camera Scan button where the browser cannot open a camera, and shows it where it can', () => {
     Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
     const first = screenOf(<SaleForm branchId={BRANCH} />);
-    expect(screen.queryByRole('button', { name: 'Scan' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Scan with the camera' })).toBeNull();
     first.unmount();
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: vi.fn() } });
     screenOf(<SaleForm branchId={BRANCH} />);
-    expect(screen.getByRole('button', { name: 'Scan' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Scan with the camera' })).toBeTruthy();
     expect(screen.queryByText('The camera works only on the secure (https) address.')).toBeNull();
     Reflect.deleteProperty(window, 'isSecureContext');
   });
@@ -692,7 +692,7 @@ describe('FR-RET-68 a pack barcode the restock and goods received cannot use', (
     await retail.addBarcode(LAMP, { code: 'TEST-LAMP-BOX', unit_id: ROLL });
     await retail.addBarcode(LAMP, { code: EAN });
     screenOf(<ReceiveBlindPage />, 'admin', BRANCH, ['purchasing']);
-    await screen.findByLabelText('Scan or type a barcode, then press Enter');
+    await screen.findByLabelText('Scan here');
     (document.activeElement as HTMLElement | null)?.blur();
     wedge('TEST-LAMP-BOX');
     await waitFor(() => expect(screen.getByTestId('scan-refused').textContent).toContain('pack size'));

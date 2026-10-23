@@ -110,7 +110,7 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
       <div data-tour="transfer-search">
       <ProductPicker id="transfer-search" branchId={fromBranchId} onAdd={add} />
       </div>
-      <ScanBar id="transfer-scan" branchId={fromBranchId} onFound={scanAdd} />
+      <ScanBar id="transfer-scan" branchId={fromBranchId} onFound={scanAdd} autoFocus />
 
       <h2 data-tour="transfer-items">Items to move</h2>
       {draft.lines.length === 0 && <p>No items yet. Search above and tap Add.</p>}

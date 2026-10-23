@@ -80,6 +80,8 @@ function CountSheet({ branchId }: { branchId: string }) {
   const search = useLiveSearch();
   const [counts, setCounts] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState<Stocktake | null>(null);
+  // The line the last scan counted, marked so the counter sees which one went up; the cursor stays in the Scan box.
+  const [scanned, setScanned] = useState<string | null>(null);
   const stock = useQuery({ queryKey: ['retail', 'stock', branchId, '', false], queryFn: () => countableStock(branchId) });
 
   // A scan (issue #345) counts one more of the item, or a whole pack when the barcode is on a pack. The search is cleared
@@ -92,6 +94,7 @@ function CountSheet({ branchId }: { branchId: string }) {
     if (unitId && !pack) return PACK_UNUSABLE;
     search.clear();
     setCounts((c) => ({ ...c, [id]: plusOne(c[id], pack ? (parseQty(pack.factor ?? '') ?? 1000) : 1000) }));
+    setScanned(id);
     return undefined;
   };
   const entered = Object.entries(counts).filter(([, v]) => v.trim() !== '');
@@ -126,14 +129,15 @@ function CountSheet({ branchId }: { branchId: string }) {
       <div data-tour="count-search">
         <SearchBox id="count-search" label="Search by name, code or category" search={search} fetching={false} count={stock.data ? rows.length : undefined} />
       </div>
-      <ScanBar id="count-scan" branchId={branchId} onFound={scanAdd} />
+      <ScanBar id="count-scan" branchId={branchId} onFound={scanAdd} autoFocus />
       {stock.isPending && <SkeletonList label="Loading stock" />}
       <Problem error={stock.error} />
       {stock.data && rows.length === 0 && search.term && <NoResults term={search.term} onClear={search.clear} noun="items" />}
       {rows.map((r) => {
         const id = r.product_id ?? '';
         return (
-          <div key={id} className="rt-card">
+          <div key={id} className={id === scanned ? 'rt-card scan-hit' : 'rt-card'} data-testid={id === scanned ? 'scan-hit' : undefined}
+            ref={id === scanned ? (el) => el?.scrollIntoView?.({ block: 'nearest' }) : undefined}>
             <label htmlFor={`count-${id}`}>{r.description} ({r.unit})</label>
             <CategoryLabel category={r.category} />
             <input id={`count-${id}`} inputMode="decimal" value={counts[id] ?? ''} placeholder="Counted"
