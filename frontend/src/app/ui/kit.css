@@ -1,0 +1,59 @@
+/*
+ * The component kit (#520, docs/ui-rules.md): the shared controls every screen moves onto in phase 3, one section each. Each
+ * reads the tokens of ../theme.css only, keeps to the two radii (--radius, --radius-lg) and the two shadows (--shadow-sm,
+ * --shadow-lg), gives every target 48px (--tap), and moves only by transform and opacity on the one ease-out curve. The
+ * components are in this folder (Segmented.tsx and the rest) and are shown together on /staff/kit.
+ */
+
+/* Segmented: one neutral tray, the chosen option raised on the surface. No brand fill, so it never competes with the one
+   primary action of the screen. On a phone the tray takes the full width and the options share it. */
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  max-width: 100%;
+  padding: var(--space-1);
+  margin: 0 var(--space-3) var(--space-4) 0;
+  border-radius: var(--radius);
+  background: var(--color-neutral-tint);
+}
+
+.segmented > button {
+  flex: 1 1 auto;
+  min-height: var(--tap);
+  padding: 8px 16px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-weight: var(--weight-semibold);
+  box-shadow: none;
+}
+
+.segmented > button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--color-text);
+}
+
+.segmented > button[aria-pressed='true'],
+.segmented > button[aria-pressed='true']:hover {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-sm);
+}
+
+@media (max-width: 719px) {
+  .segmented {
+    display: flex;
+    margin-right: 0;
+  }
+}
+
+/* The kit page (/staff/kit): one example under another, each under its heading. */
+.kit-example {
+  margin-bottom: var(--space-6);
+}
+
+.kit-example > h2 {
+  margin-bottom: var(--space-1);
+}
