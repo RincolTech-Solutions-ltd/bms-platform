@@ -50,7 +50,12 @@
 }
 
 /* Stepper: minus and plus as 48px squares either side of the number, which is centred and tabular so it does not jitter as
-   it changes. */
+   it changes. In a row of fields (the Sale screen's .rt-row) it keeps its own width and the next field wraps under it when the
+   two do not fit, so on a 360px phone the price never covers the plus. */
+.stepper-field {
+  flex: 0 0 auto;
+}
+
 .stepper {
   display: inline-grid;
   grid-template-columns: var(--tap) minmax(4.5rem, 7rem) var(--tap);
@@ -69,9 +74,15 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Field: the label above, the control 6px under it, then one line of hint or error. */
+/* Field: the label above, the control 6px under it, then one line of hint or error (.field-hint and .field-error in
+   forms.css). "(needed)" after the label is muted. */
 .field {
   margin-bottom: var(--space-4);
+}
+
+.field-needed {
+  color: var(--color-text-muted);
+  font-weight: var(--weight-regular);
 }
 
 .field > input,
@@ -380,7 +391,8 @@ button.list-row:focus-visible {
   color: var(--color-text-muted);
 }
 
-/* Skeleton: rows in the shape of a list that breathe by opacity; under reduced motion they hold still. */
+/* Skeleton: rows in the shape of a list that breathe by opacity. Under reduced motion base.css ends every animation after
+   one 1ms run, so they hold still, and so do the sheet, the ring and the check. */
 .skeleton-row {
   display: grid;
   gap: var(--space-2);
@@ -424,12 +436,12 @@ button.list-row:focus-visible {
   text-align: center;
 }
 
-.success-screen > h1 {
+.success-title {
   margin: var(--space-2) 0 0;
   font-size: var(--text-xl);
 }
 
-.success-screen > h1:focus {
+.success-title:focus {
   outline: none;
 }
 

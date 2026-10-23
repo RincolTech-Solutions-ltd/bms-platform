@@ -3,8 +3,9 @@ import { createPortal } from 'react-dom';
 import { icons } from '../../components/icons';
 
 // The one sheet (#520): pickers and confirmations open in it. On a phone (under 720px) it rises from the bottom edge and a
-// swipe down on its top closes it; on a wider screen it is a centred dialog. Either way it is modal: the page behind is inert,
-// focus starts inside and Tab stays inside, Escape, the close button and a tap on the dimmed page close it, and focus goes back
+// swipe down on its top (by touch or pen, never a mouse) closes it; on a wider screen it is a centred dialog. Either way it is
+// modal: aria-modal, the dimmed layer takes every tap on the page behind, the page does not scroll, focus starts inside and Tab
+// stays inside, Escape, the close button and a tap on the dimmed page close it, and focus goes back
 // to what opened it. The screen owns `open` and closes it in `onClose`. Drawn in a portal so no parent's overflow clips it. The
 // look is .sheet-layer in src/app/ui/kit.css.
 
@@ -30,9 +31,7 @@ export function Sheet({ open, onClose, title, children, actions }: {
   useEffect(() => {
     if (!open) return;
     const opener = document.activeElement as HTMLElement | null;
-    // Everything else on the page goes inert, so neither a pointer nor a screen reader reaches it.
-    const others = [...document.body.children].filter((el) => el !== layer.current && !el.hasAttribute('inert'));
-    others.forEach((el) => el.setAttribute('inert', ''));
+    // The page behind is not made inert: a toast's live region lives there and must still be heard.
     const overflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     // The first control of the content, then of the actions; the sheet itself when there is none.
@@ -40,7 +39,6 @@ export function Sheet({ open, onClose, title, children, actions }: {
     const first = parts.map((part) => part.querySelector<HTMLElement>(FOCUSABLE)).find(Boolean);
     (first ?? panel.current)?.focus();
     return () => {
-      others.forEach((el) => el.removeAttribute('inert'));
       document.body.style.overflow = overflow;
       opener?.focus?.();
     };
@@ -69,7 +67,7 @@ export function Sheet({ open, onClose, title, children, actions }: {
   };
 
   const grab = (e: PointerEvent<HTMLElement>) => {
-    if ((e.target as HTMLElement).closest('button')) return;
+    if (e.pointerType === 'mouse' || (e.target as HTMLElement).closest('button')) return;
     drag.current = { from: e.clientY, by: 0 };
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };

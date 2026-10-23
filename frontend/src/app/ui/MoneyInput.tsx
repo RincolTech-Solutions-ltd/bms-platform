@@ -4,7 +4,8 @@ import { Field } from './Field';
 
 // The one amount field (#520, docs/ui-rules.md rules 8 and 11): Uganda shillings in whole numbers, the numeric keypad on a
 // phone, and the thousands separators drawn as the person types (12,500), in tabular figures with UGX before it. It hands the
-// screen the amount in minor units (UGX has none smaller, so shillings), or null while it is empty. The separators come from
+// screen the amount in minor units (UGX has none smaller, so shillings), or null while it is empty. A pasted "12,500.00" keeps
+// what is before the point, so it is 12,500 and never 1,250,000. The separators come from
 // formatMinor, the one money formatter. Built on Field, so the label, hint and error-on-leave work the same. The look is
 // .money-input in src/app/ui/kit.css.
 
@@ -16,13 +17,14 @@ export function grouped(digits: string): string {
   return digits === '' ? '' : formatMinor(Number(digits), 'UGX').replace(/^UGX /, '');
 }
 
-export function MoneyInput({ label, valueMinor, onChange, hint, error, showError, id, tour }: {
+export function MoneyInput({ label, valueMinor, onChange, hint, error, showError, required, id, tour }: {
   label: string;
   valueMinor: number | null;
   onChange: (minor: number | null) => void;
   hint?: ReactNode;
   error?: string | null;
   showError?: boolean;
+  required?: boolean;
   id?: string;
   tour?: string;
 }) {
@@ -32,10 +34,12 @@ export function MoneyInput({ label, valueMinor, onChange, hint, error, showError
 
   const change = (e: ChangeEvent<HTMLInputElement>) => {
     const input = e.target;
-    const caret = input.selectionStart ?? input.value.length;
+    // Shillings have no cents: whatever follows a point is dropped, not run into the whole number.
+    const whole = input.value.split('.')[0] ?? '';
+    const caret = Math.min(input.selectionStart ?? input.value.length, whole.length);
+    const digits = whole.replace(/\D/g, '').replace(/^0+(?=\d)/, '').slice(0, MAX_DIGITS);
     // Where the caret was among the digits, so it stays after the same digit once the separators move.
-    const digitsBefore = input.value.slice(0, caret).replace(/\D/g, '').replace(/^0+(?=\d)/, '').length;
-    const digits = input.value.replace(/\D/g, '').replace(/^0+(?=\d)/, '').slice(0, MAX_DIGITS);
+    const digitsBefore = Math.min(digits.length, whole.slice(0, caret).replace(/\D/g, '').replace(/^0+(?=\d)/, '').length);
     const next = grouped(digits);
     setText(next);
     onChange(digits === '' ? null : Number(digits));
@@ -49,7 +53,13 @@ export function MoneyInput({ label, valueMinor, onChange, hint, error, showError
 
   return (
     <Field
-      label={label}
+      label={
+        <>
+          {label}
+          <span className="visually-hidden"> in UGX</span>
+        </>
+      }
+      required={required}
       hint={hint}
       error={error}
       showError={showError}

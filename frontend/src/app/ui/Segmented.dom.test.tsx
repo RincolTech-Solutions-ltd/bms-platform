@@ -43,6 +43,15 @@ describe('Segmented', () => {
     expect(screen.getAllByRole('button').every((b) => b.getAttribute('aria-pressed') === 'false')).toBe(true);
   });
 
+  it('is one Tab stop: the chosen option, or the first while none is', () => {
+    render(<Example clearable />);
+    expect(screen.getAllByRole('button').map((b) => b.getAttribute('tabindex'))).toEqual(['0', '-1', '-1']);
+    fireEvent.click(screen.getByRole('button', { name: 'Low stock' }));
+    expect(screen.getAllByRole('button').map((b) => b.getAttribute('tabindex'))).toEqual(['-1', '-1', '0']);
+    fireEvent.click(screen.getByRole('button', { name: 'Low stock' }));
+    expect(screen.getAllByRole('button').map((b) => b.getAttribute('tabindex'))).toEqual(['0', '-1', '-1']);
+  });
+
   it('moves focus with the arrow keys and wraps at the ends', () => {
     render(<Example />);
     const [all, out, low] = screen.getAllByRole('button') as HTMLButtonElement[];

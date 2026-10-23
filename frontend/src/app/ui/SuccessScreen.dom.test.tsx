@@ -28,11 +28,24 @@ describe('SuccessScreen', () => {
         actions={[{ label: 'New sale', onClick: again }, { label: 'View receipt', to: '/staff/retail/sales' }]}
       />,
     );
-    const heading = screen.getByRole('heading', { name: 'Sale recorded' });
+    const heading = screen.getByRole('heading', { name: 'Sale recorded', level: 1 });
     expect(document.activeElement).toBe(heading);
     expect(screen.getByRole('region', { name: 'Sale recorded' }).className).toBe('success-screen');
     expect(screen.getByText('UGX 12,500').className).toBe('success-amount');
     expect(document.querySelector('.success-mark')?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('takes its own id and an h2 under a page heading, so two can sit on one page', () => {
+    show(
+      <>
+        <SuccessScreen title="First" level={2} focus={false} actions={[{ label: 'One', onClick: () => undefined }]} />
+        <SuccessScreen title="Second" level={2} focus={false} actions={[{ label: 'Two', onClick: () => undefined }]} />
+      </>,
+    );
+    expect(screen.getByRole('region', { name: 'First' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Second' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Second', level: 2 })).toBeTruthy();
+    expect(document.activeElement).toBe(document.body);
   });
 
   it('lists the next steps as plain buttons in order, only the first primary', () => {

@@ -16,7 +16,7 @@ function Paid({ start = null }: { start?: number | null }) {
   return <MoneyInput label="Amount paid" valueMinor={paid} onChange={setPaid} error={paid === null ? 'Type the amount paid.' : null} />;
 }
 
-const input = () => screen.getByLabelText('Amount paid') as HTMLInputElement;
+const input = () => screen.getByLabelText('Amount paid in UGX') as HTMLInputElement;
 
 describe('MoneyInput', () => {
   it('opens the numeric keypad and shows UGX beside the figures', () => {
@@ -36,11 +36,21 @@ describe('MoneyInput', () => {
     expect(last).toBe(12500);
   });
 
-  it('drops anything but digits, decimals included, and leading zeros', () => {
+  it('drops anything but digits and leading zeros, and never runs cents into the shillings', () => {
     render(<Paid />);
-    fireEvent.change(input(), { target: { value: '00a5.50' } });
-    expect(input().value).toBe('550');
-    expect(last).toBe(550);
+    fireEvent.change(input(), { target: { value: '00a55' } });
+    expect(input().value).toBe('55');
+    fireEvent.change(input(), { target: { value: '12,500.00' } });
+    expect(input().value).toBe('12,500');
+    expect(last).toBe(12500);
+    fireEvent.change(input(), { target: { value: 'UGX 3.5' } });
+    expect(last).toBe(3);
+  });
+
+  it('names the currency to a screen reader', () => {
+    render(<Paid />);
+    expect(input().id).toBeTruthy();
+    expect(screen.getByText('in UGX', { exact: false }).className).toBe('visually-hidden');
   });
 
   it('hands back null when emptied, and shows the error once the field is left', () => {

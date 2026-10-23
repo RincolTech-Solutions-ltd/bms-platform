@@ -31,11 +31,23 @@ describe('Stepper', () => {
     render(<Example start="2" max={3} />);
     fireEvent.click(screen.getByRole('button', { name: 'One more Sugar' }));
     expect(field().value).toBe('3');
-    expect((screen.getByRole('button', { name: 'One more Sugar' }) as HTMLButtonElement).disabled).toBe(true);
+    const more = screen.getByRole('button', { name: 'One more Sugar' });
+    expect(more.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(more);
+    expect(field().value).toBe('3');
     fireEvent.click(screen.getByRole('button', { name: 'One less Sugar' }));
     fireEvent.click(screen.getByRole('button', { name: 'One less Sugar' }));
     expect(field().value).toBe('1');
-    expect((screen.getByRole('button', { name: 'One less Sugar' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'One less Sugar' }).getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('keeps focus on a button that reaches the end, since it is never disabled', () => {
+    render(<Example start="2" />);
+    const less = screen.getByRole('button', { name: 'One less Sugar' }) as HTMLButtonElement;
+    less.focus();
+    fireEvent.click(less);
+    expect(less.disabled).toBe(false);
+    expect(document.activeElement).toBe(less);
   });
 
   it('still takes a typed value, and steps from it', () => {
@@ -46,17 +58,16 @@ describe('Stepper', () => {
     expect(field().value).toBe('13.5');
   });
 
-  it('answers the arrow keys, Home and End in the field', () => {
+  it('answers the arrow keys in the field, and leaves Home and End to move the caret', () => {
     render(<Example start="4" max={9} />);
     fireEvent.keyDown(field(), { key: 'ArrowUp' });
     expect(field().value).toBe('5');
     fireEvent.keyDown(field(), { key: 'ArrowDown' });
     fireEvent.keyDown(field(), { key: 'ArrowDown' });
     expect(field().value).toBe('3');
-    fireEvent.keyDown(field(), { key: 'End' });
-    expect(field().value).toBe('9');
     fireEvent.keyDown(field(), { key: 'Home' });
-    expect(field().value).toBe('1');
+    fireEvent.keyDown(field(), { key: 'End' });
+    expect(field().value).toBe('3');
   });
 
   it('steps without drift, counts an empty or unreadable value as min, and keeps within the bounds', () => {

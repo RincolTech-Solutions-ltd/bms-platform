@@ -31,7 +31,7 @@ describe('the component kit page', () => {
     expect(sections).toEqual(expect.arrayContaining(['Segmented', 'Stepper', 'Field', 'MoneyInput', 'ListRow and Card', 'Sheet', 'EmptyState', 'Skeleton', 'SuccessScreen']));
     expect(screen.getByRole('group', { name: 'Show' })).toBeTruthy();
     expect(screen.getByLabelText('Quantity (piece)')).toBeTruthy();
-    expect(screen.getByLabelText('Amount paid').getAttribute('inputmode')).toBe('numeric');
+    expect(screen.getByLabelText('Amount paid in UGX').getAttribute('inputmode')).toBe('numeric');
     expect(screen.getByText('UGX 57,500')).toBeTruthy();
   });
 

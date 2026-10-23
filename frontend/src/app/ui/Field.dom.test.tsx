@@ -46,11 +46,20 @@ describe('Field', () => {
     expect(screen.getByText(/Type the 10 digits/).className).toBe('field-error');
   });
 
+  it('says (needed) after the label of a required field and marks it aria-required, without the browser bubble', () => {
+    render(<Field label="Buyer's name" required value="" onChange={() => undefined} />);
+    const input = screen.getByLabelText(/Buyer's name/) as HTMLInputElement;
+    expect(input.closest('.field')?.querySelector('label')?.textContent).toBe("Buyer's name (needed)");
+    expect(input.getAttribute('aria-required')).toBe('true');
+    expect(input.required).toBe(false);
+  });
+
   it('wires another control through control', () => {
     render(
       <Field
         label="Branch"
         hint="Where the stock is."
+        required
         control={(props) => (
           <select {...props}>
             <option>Main shop</option>
@@ -58,8 +67,9 @@ describe('Field', () => {
         )}
       />,
     );
-    const select = screen.getByLabelText('Branch');
+    const select = screen.getByLabelText(/^Branch/);
     expect(select.tagName).toBe('SELECT');
+    expect(select.getAttribute('aria-required')).toBe('true');
     expect(document.getElementById(select.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Where the stock is.');
   });
 });

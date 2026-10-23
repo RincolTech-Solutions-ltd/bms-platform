@@ -191,7 +191,7 @@ describe('design guard, the rules the kit holds every screen to', () => {
 
   // Rule 11: a choice of 2 to 5 options is the one Segmented control, not a row of separate pressed buttons.
   it.each(components.map((f) => relative(SRC, f)))('%s draws no row of pressed buttons in place of Segmented', (file) => {
-    expect(code(file), file).not.toMatch(/className="cluster filters"/);
+    expect(code(file), file).not.toMatch(/className=\{?["'`][^"'`]*(?<![\w-])filters(?![\w-])/);
   });
 
   const kit = code('app/ui/kit.css');
@@ -220,6 +220,13 @@ describe('design guard, the rules the kit holds every screen to', () => {
       expect(rule(selector), selector).toMatch(/font-variant-numeric: tabular-nums/);
     }
     expect(rule('.success-amount')).toMatch(/font-size: var\(--text-display\)/);
+  });
+
+  // Rule 13: under reduced motion every animation, the kit's included, runs once for 1ms and stops.
+  it('stops every animation under reduced motion', () => {
+    const reduce = code('app/ui/base.css').match(/prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+    expect(reduce).toMatch(/animation-duration: 1ms !important/);
+    expect(reduce).toMatch(/animation-iteration-count: 1 !important/);
   });
 
   // Rule 13: the kit moves on the motion tokens, and only the success check takes longer, 400 ms, as issue #520 asks.

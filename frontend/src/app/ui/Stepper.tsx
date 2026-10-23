@@ -3,9 +3,9 @@ import { icons } from '../../components/icons';
 
 // The quantity control (#520, docs/ui-rules.md rule 11): minus and plus around a number field, each a 48px button, so a
 // quantity is changed by a tap and still typed when it is large. The value stays the text the person typed (a screen may allow
-// 1.5 kg); minus and plus move it by `step` and keep it within `min` and `max`. In the field the arrow keys do the same, and
-// Home and End go to the ends when there are ends. The field keeps its own id and label, so a screen's tests and tours still
-// find it. The look is .stepper in src/app/ui/kit.css.
+// 1.5 kg); minus and plus move it by `step` and keep it within `min` and `max`. In the field ArrowUp and ArrowDown do the same;
+// Home and End still move the caret. At an end the button is aria-disabled, not disabled, so it keeps focus. The field keeps its
+// own id and label, so a screen's tests and tours still find it. The look is .stepper in src/app/ui/kit.css.
 
 /** The value moved by `delta`, kept within the bounds; an empty or unreadable value counts as `min`. */
 export function stepped(value: string, delta: number, min: number, max?: number): string {
@@ -16,7 +16,7 @@ export function stepped(value: string, delta: number, min: number, max?: number)
   return String(Math.min(max ?? Infinity, Math.max(min, next)));
 }
 
-export function Stepper({ id, label, value, onChange, min = 0, max, step = 1, name, inputMode = 'numeric', invalid = false, tour }: {
+export function Stepper({ id, label, value, onChange, min = 0, max, step = 1, name, inputMode = 'numeric', invalid = false, describedBy, tour }: {
   id: string;
   label: string;
   value: string;
@@ -29,6 +29,8 @@ export function Stepper({ id, label, value, onChange, min = 0, max, step = 1, na
   /** `decimal` where a part is allowed (1.5 kg). */
   inputMode?: 'numeric' | 'decimal';
   invalid?: boolean;
+  /** The id of the hint or error under the field. */
+  describedBy?: string;
   tour?: string;
 }) {
   const now = Number(value);
@@ -36,14 +38,12 @@ export function Stepper({ id, label, value, onChange, min = 0, max, step = 1, na
   const atMin = known && now <= min;
   const atMax = known && max !== undefined && now >= max;
   const keys = (e: KeyboardEvent<HTMLInputElement>) => {
-    const moves: Record<string, () => string | null> = {
+    const moves: Record<string, () => string> = {
       ArrowUp: () => stepped(value, step, min, max),
       ArrowDown: () => stepped(value, -step, min, max),
-      Home: () => String(min),
-      End: () => (max === undefined ? null : String(max)),
     };
     const next = moves[e.key]?.();
-    if (next == null) return;
+    if (next === undefined) return;
     e.preventDefault();
     onChange(next);
   };
@@ -52,7 +52,7 @@ export function Stepper({ id, label, value, onChange, min = 0, max, step = 1, na
     <div className="stepper-field" data-tour={tour}>
       <label htmlFor={id}>{label}</label>
       <div className="stepper">
-        <button type="button" aria-label={`One less${suffix}`} aria-controls={id} disabled={atMin} onClick={() => onChange(stepped(value, -step, min, max))}>
+        <button type="button" aria-label={`One less${suffix}`} aria-controls={id} aria-disabled={atMin} onClick={() => atMin || onChange(stepped(value, -step, min, max))}>
           {icons.minus}
         </button>
         <input
@@ -61,10 +61,11 @@ export function Stepper({ id, label, value, onChange, min = 0, max, step = 1, na
           autoComplete="off"
           value={value}
           aria-invalid={invalid}
+          aria-describedby={describedBy}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={keys}
         />
-        <button type="button" aria-label={`One more${suffix}`} aria-controls={id} disabled={atMax} onClick={() => onChange(stepped(value, step, min, max))}>
+        <button type="button" aria-label={`One more${suffix}`} aria-controls={id} aria-disabled={atMax} onClick={() => atMax || onChange(stepped(value, step, min, max))}>
           {icons.plus}
         </button>
       </div>

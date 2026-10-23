@@ -50,11 +50,12 @@ function openIt() {
 const dialog = () => screen.queryByRole('dialog', { name: 'How did the buyer pay?' });
 
 describe('Sheet', () => {
-  it('opens as a named modal dialog with focus on its first control and the page behind inert', () => {
+  it('opens as a named modal dialog with focus on its first control, the page still and not inert', () => {
     openIt();
     expect(dialog()?.getAttribute('aria-modal')).toBe('true');
     expect(document.activeElement?.textContent).toBe('Mobile money');
-    expect(document.querySelector('main')?.closest('[inert]')).toBeTruthy();
+    // Not inert: a toast's live region on the page must still be heard while the sheet is open.
+    expect(document.querySelector('[inert]')).toBeNull();
     expect(document.body.style.overflow).toBe('hidden');
   });
 
@@ -74,7 +75,6 @@ describe('Sheet', () => {
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expect(dialog()).toBeNull();
     expect(document.activeElement).toBe(opener);
-    expect(document.querySelector('[inert]')).toBeNull();
     expect(document.body.style.overflow).toBe('');
   });
 
@@ -90,16 +90,25 @@ describe('Sheet', () => {
   it('closes on a swipe down its top, and springs back from a short one', () => {
     openIt();
     const head = document.querySelector('.sheet-head')!;
-    fireEvent.pointerDown(head, { clientY: 100, pointerId: 1 });
+    fireEvent.pointerDown(head, { clientY: 100, pointerId: 1, pointerType: 'touch' });
     fireEvent.pointerMove(head, { clientY: 140, pointerId: 1 });
     expect((dialog() as HTMLElement).style.transform).toBe('translateY(40px)');
     fireEvent.pointerUp(head, { clientY: 140, pointerId: 1 });
     expect((dialog() as HTMLElement).style.transform).toBe('');
     expect(dialog()).toBeTruthy();
-    fireEvent.pointerDown(head, { clientY: 100, pointerId: 1 });
+    fireEvent.pointerDown(head, { clientY: 100, pointerId: 1, pointerType: 'touch' });
     fireEvent.pointerMove(head, { clientY: 260, pointerId: 1 });
     fireEvent.pointerUp(head, { clientY: 260, pointerId: 1 });
     expect(dialog()).toBeNull();
+  });
+
+  it('never closes on a mouse drag, which may be selecting the title', () => {
+    openIt();
+    const head = document.querySelector('.sheet-head')!;
+    fireEvent.pointerDown(head, { clientY: 100, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerMove(head, { clientY: 300, pointerId: 1 });
+    fireEvent.pointerUp(head, { clientY: 300, pointerId: 1 });
+    expect(dialog()).toBeTruthy();
   });
 
   it('draws nothing while closed', () => {
