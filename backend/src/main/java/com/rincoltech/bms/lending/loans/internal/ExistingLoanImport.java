@@ -213,6 +213,12 @@ class ExistingLoanImport {
                 }
             }
         }
+        Map<Integer, List<String>> warnings = new HashMap<>();
+        for (Pending p : loans.values()) {
+            if (p.checked != null && !byLine.containsKey(p.line)) {
+                warnings.put(p.line, service.warnings(p.checked));
+            }
+        }
         int errors = (int) byLine.values().stream()
                 .filter(r -> r.outcome().equals("error"))
                 .count();
@@ -229,15 +235,12 @@ class ExistingLoanImport {
                 added++;
             }
             String outcome = dryRun || errors > 0 ? "ready" : "added";
-            byLine.put(
-                    p.line,
-                    new ImportRow(
-                            p.line,
-                            p.ref,
-                            outcome,
-                            p.repayments.size() + " repayment(s); "
-                                    + p.checked.plan().position().daysPastDue() + " day(s) past due",
-                            loanId));
+            // The likely-duplicate warning of the form (ADR-071 decision 10), read before this loan is saved.
+            StringBuilder message = new StringBuilder(p.repayments.size() + " repayment(s); "
+                    + p.checked.plan().position().daysPastDue() + " day(s) past due");
+            warnings.getOrDefault(p.line, List.of())
+                    .forEach(w -> message.append(". ").append(w));
+            byLine.put(p.line, new ImportRow(p.line, p.ref, outcome, message.toString(), loanId));
             for (int[] r : p.repaymentLines) {
                 byLine.put(r[0], new ImportRow(r[0], p.ref, outcome, null, null));
             }

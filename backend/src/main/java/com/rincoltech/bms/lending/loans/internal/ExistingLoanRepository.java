@@ -167,17 +167,21 @@ class ExistingLoanRepository {
 
     /**
      * The number of a live loan (not cancelled or rejected) of the member for this principal given out on this date, other
-     * than {@code except}: likely the same loan entered twice when no register number tells them apart.
+     * than {@code except}: likely the same loan entered twice unless both carry register numbers and they differ. A
+     * register number on one side only tells nothing: the same paper loan may have come in once by the form without
+     * one and again by the import with one.
      */
-    Optional<String> sameLoan(UUID memberId, long principalMinor, LocalDate date, UUID except) {
+    Optional<String> sameLoan(UUID memberId, long principalMinor, LocalDate date, String registerRef, UUID except) {
         return jdbc.sql("""
                         SELECT loan_no FROM lending_loans
                          WHERE member_id = ? AND coalesce(approved_principal_minor, requested_principal_minor) = ?
                            AND coalesce(disbursed_on, proposed_disbursement_date) = ? AND id <> ?
                            AND status NOT IN ('cancelled', 'rejected')
+                           AND (CAST(? AS text) IS NULL OR register_ref IS NULL
+                                OR lower(register_ref) = lower(CAST(? AS text)))
                          ORDER BY created_at LIMIT 1
                         """)
-                .params(memberId, principalMinor, date, except)
+                .params(memberId, principalMinor, date, except, registerRef, registerRef)
                 .query(String.class)
                 .optional();
     }

@@ -646,8 +646,8 @@ class ExistingLoansIT extends LoanFixtures {
     }
 
     /**
-     * The same member, amount and date with no register number to tell them apart: the check and the waiting loan carry a
-     * warning; it stops nothing. A register number on the second removes it.
+     * The same member, amount and date with no register numbers to tell them apart: the check and the waiting loan carry a
+     * warning; it stops nothing. A register number on the second alone keeps it; different numbers on both remove it.
      */
     @Test
     void frExl02_aLikelyDuplicateIsFlaggedButNotRefused() {
@@ -674,7 +674,52 @@ class ExistingLoansIT extends LoanFixtures {
                 .as("the checker sees it too")
                 .hasSize(1);
         body.put("register_ref", "REG-DUP-2");
-        assertThat(check(body).getBody().get("warnings")).isEmpty();
+        assertThat(check(body).getBody().get("warnings"))
+                .as("a number on one side only tells nothing")
+                .hasSize(1);
+
+        String other = borrower(27);
+        Map<String, Object> numbered = request(other, product, 700_000, today.minusDays(30), List.of());
+        numbered.put("register_ref", "REG-DUP-3");
+        recorded(numbered);
+        numbered.put("register_ref", "REG-DUP-4");
+        assertThat(check(numbered).getBody().get("warnings"))
+                .as("both numbered and different")
+                .isEmpty();
+    }
+
+    /**
+     * A loan recorded by the form with no register number and approved, then the same loan in an import with
+     * {@code REG-7}: the number is not taken, so the import does not skip it, but its row and the checker's view warn.
+     */
+    @Test
+    void frExl06_anImportedLoanAlreadyEnteredByTheFormIsWarned() {
+        String product = product("EXL13", Map.of());
+        String member = borrower(28);
+        assertThat(setGoLive(today.minusDays(10)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        LocalDate disbursed = today.minusDays(40);
+        JsonNode a = recorded(request(member, product, 600_000, disbursed, List.of()));
+        approve(a);
+        assertThat(loan(a.get("loan_id").asString()).get("status").asString()).isEqualTo("active");
+
+        String csv = "kind,ref,member_no,product_code,principal,disbursement_date,term,agreed_total,purpose,"
+                + "repayment_date,amount,method,note\n"
+                + "loan,REG-7," + memberNo(member) + ",EXL13,600000," + disbursed + ",,,,,,,\n";
+        JsonNode checked = importCsv(csv, true).getBody();
+        assertThat(checked.get("rows").get(0).get("outcome").asString()).isEqualTo("ready");
+        assertThat(checked.get("rows").get(0).get("message").asString())
+                .contains(a.get("loan_no").asString())
+                .contains("entered twice");
+        JsonNode committed = importCsv(csv, false).getBody();
+        assertThat(committed.get("added").asInt()).as("%s", committed).isEqualTo(1);
+        assertThat(committed.get("rows").get(0).get("message").asString())
+                .contains(a.get("loan_no").asString());
+        String imported = committed.get("rows").get(0).get("loan_id").asString();
+        JsonNode seen = send(HttpMethod.GET, EXISTING + "/" + imported, as(manager, managerPerms, "*", null), null)
+                .getBody();
+        assertThat(seen.get("warnings")).as("the checker sees it").hasSize(1);
+        assertThat(seen.get("warnings").get(0).asString())
+                .contains(a.get("loan_no").asString());
     }
 
     /**

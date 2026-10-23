@@ -794,12 +794,15 @@ class ExistingLoanService {
                 warnings(d.member().id(), d.principalMinor(), d.disbursementDate(), d.registerRef(), loanId));
     }
 
+    /** The warnings of a checked loan not yet saved, for a row of the import. */
+    List<String> warnings(Checked c) {
+        Draft d = c.draft();
+        return warnings(d.member().id(), d.principalMinor(), d.disbursementDate(), d.registerRef(), null);
+    }
+
     /** What the maker and the checker should look at; nothing here stops the loan. */
     private List<String> warnings(UUID memberId, long principal, LocalDate date, String registerRef, UUID self) {
-        if (registerRef != null) {
-            return List.of();
-        }
-        return repo.sameLoan(memberId, principal, date, self == null ? new UUID(0, 0) : self)
+        return repo.sameLoan(memberId, principal, date, registerRef, self == null ? new UUID(0, 0) : self)
                 .map(no -> List.of("Loan " + no + " of this member for the same amount and date is already in the app."
                         + " Check it is not the same loan entered twice."))
                 .orElse(List.of());

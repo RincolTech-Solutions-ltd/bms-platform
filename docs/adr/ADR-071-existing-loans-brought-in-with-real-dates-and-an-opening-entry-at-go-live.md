@@ -99,9 +99,10 @@ fit every lending business, not one register.
 10. **No arrears SMS in the first seven days.** The nightly run queues no arrears notice for a brought-in loan until
     seven days after its bring-in date (due reminders still go): a borrower long behind on paper hears first from the
     business, not from an automatic text the night the loan is approved, and a register mistake can still be put right
-    (decision 9). The approvals inbox says so beside a `loan_bring_in` request. The check and the waiting loan also warn,
-    without refusing, when a loan of the same member for the same principal and date is already in the app and no
-    register number tells them apart.
+    (decision 9). The approvals inbox says so beside a `loan_bring_in` request. The check, the waiting loan and each row
+    of the import also warn, without refusing, when a loan of the same member for the same principal and date is
+    already in the app, unless both loans carry register numbers and they differ: a number on one side only tells
+    nothing, since the same paper loan may come in once by the form without one and again by the import with one.
 
 ### How an accountant reconciles it
 
