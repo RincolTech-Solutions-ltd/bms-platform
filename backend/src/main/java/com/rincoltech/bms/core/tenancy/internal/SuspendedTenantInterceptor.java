@@ -14,6 +14,10 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * sign in to read and export, and the two reads that are a POST: asking for the business's own
  * workbook and the signed address of a file (issue #334, ADR-074). Member portal sign-in is refused
  * like any write.
+ *
+ * <p>A business whose Owner cancelled and whose end date has passed is read only the same way, with 423
+ * {@code subscription_ended} (ADR-073): besides the sign-in routes and those two reads, the exports that are a POST
+ * (the audit CSV and a report run) still work, so the business can take its data away.
  */
 class SuspendedTenantInterceptor implements HandlerInterceptor {
 
@@ -21,11 +25,27 @@ class SuspendedTenantInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        if (!"suspended".equals(request.getAttribute(TenantResolutionFilter.STATUS_ATTRIBUTE))
+        Object status = request.getAttribute(TenantResolutionFilter.STATUS_ATTRIBUTE);
+        if (!"suspended".equals(status) && !"ended".equals(status)
                 || SAFE_METHODS.contains(request.getMethod())
                 || staffSessionPath(request.getRequestURI())
                 || exportPath(request.getRequestURI())) {
             return true;
+        }
+        if ("ended".equals(status)) {
+            // When member portal sign-in (FR-IAM-09) is built, its routes must be let through here, for an ended
+            // business
+            // only (ADR-073 decision 5): its members still sign in to read. A suspension by the operator refuses them.
+            if (endedExportPath(request.getRequestURI())) {
+                return true;
+            }
+            throw new ApiException(
+                    HttpStatus.LOCKED,
+                    "subscription_ended",
+                    "Subscription ended",
+                    "The subscription of this business has ended, so it is read only: you can sign in, look at"
+                            + " everything and download your data, but not add or change anything. Contact the platform"
+                            + " operator to start it again.");
         }
         throw new ApiException(
                 HttpStatus.LOCKED,
@@ -41,6 +61,10 @@ class SuspendedTenantInterceptor implements HandlerInterceptor {
     }
 
     private static final Pattern DOWNLOAD_URL = Pattern.compile("^/api/v1/documents/[0-9a-fA-F-]{36}/download-url$");
+
+    static boolean endedExportPath(String path) {
+        return path.equals("/api/v1/audit-events/export") || path.equals("/api/v1/report-runs");
+    }
 
     static boolean staffSessionPath(String path) {
         return path.startsWith("/api/v1/auth/staff/")

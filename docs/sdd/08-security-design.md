@@ -290,6 +290,7 @@ platform API and holds no tenant permissions.
 | `lending.loans.appraise` | Y | Y | Y | | | | | | | | | |
 | `lending.loans.approve` | Y | Y | | | | | | | | | | |
 | `lending.loans.cancel` | Y | Y | Y | | | | | | | | | |
+| `lending.loans.bring_in` | Y | Y | | | | | | | | | | |
 | `lending.disbursements.request` | Y | Y | | Y | | | | | | | | |
 | `lending.disbursements.authorise` | Y | Y | | | Y | | | | | | | |
 | `lending.repayments.create` | Y | Y | | Y | | | | | | | | |
@@ -381,6 +382,18 @@ The staff member and collateral screens (issue #280) offer an action only when t
 
 Notes:
 
+- Existing loans (issue #466, ADR-071, migration `V89`): `lending.loans.bring_in` records a loan from a paper register with
+  its real disbursement date and past repayments, by the form or the CSV import, checks one without saving (`dry_run`),
+  withdraws one still waiting and asks for its approval again. Administrators and branch managers hold it, in the
+  member's branch. The checker of `loan_bring_in` holds `lending.disbursements.authorise`, as for a disbursement, and is
+  never the maker (the approval CHECK, and the loan's own approver CHECK of V8, since the maker is stored as the
+  submitter). The existing loans are read with `lending.loans.read`. The go-live date that bounds them is set by the
+  Owner of the business alone (`PATCH /settings`, 403 `owner_only` for another administrator; ADR-062) or by the
+  platform operator with a reason (`platform.tenants.manage`), both audited. The date can only move earlier, otherwise
+  operator only: once a date is stored the Owner's later date is refused (422 `go_live_locked`), and only the operator
+  moves it later (`PUT /platform/tenants/{tenant_id}/go-live`), since a later date reopens the window for bringing loans in. An approved bring-in is reversed only
+  through `loan_bring_in_reversal`, with the same maker and checker permissions, never decided by its maker, and only
+  while the loan has no transaction in the app and no penalty charge (ADR-071 decision 9).
 - A loan officer running `lending.reports.collections` sees only loans where they are
   the responsible officer; branch managers and above see their branch scope.
 - Insights (#153, ADR-030): `lending.insights.read` opens the page in the user's branch scope.
@@ -694,6 +707,13 @@ read need `platform.tenants.read` and a status change or a linked issue `platfor
 `DocumentAccess` lets only its sender and an operator read it (a refusal is a 404). The operator reads across businesses only through
 the definer functions of `V80`, which refuse a tenant-bound transaction.
 
+The Owner's own plan (issue #472, ADR-073) adds no permission, so the matrix is unchanged: the Plan and modules card (`GET /plan`)
+needs `core.settings.manage`, so administrators see it, and asking for a module, stopping one, cancelling and undoing need it too and
+are then refused to anyone but the Owner (403 `owner_only`, ADR-062); stopping and cancelling also ask for the owner step-up. The end
+date (`GET /plan/status`) is open to every signed-in member of staff. The operator's lists need `platform.tenants.read`, an approval or
+a decline `platform.tenants.manage` (an approval also the operator's own authenticator code), on the platform host only. After a
+cancellation's end date the business is read only with `subscription_ended`, as a suspended one is with `tenant_suspended`.
+
 ### 8.3.3 Enforcement
 
 - Every route declares exactly one permission (`@RequiresPermission`), or is explicitly marked
@@ -732,6 +752,8 @@ CHECK constraint as well as the service.
 | Action type | Maker permission | Checker permission | Threshold applies |
 |---|---|---|---|
 | `loan_disbursement` | `lending.disbursements.request` | `lending.disbursements.authorise` | Yes |
+| `loan_bring_in` | `lending.loans.bring_in` | `lending.disbursements.authorise` | No (always checked) |
+| `loan_bring_in_reversal` | `lending.loans.bring_in` | `lending.disbursements.authorise` | No (always checked) |
 | `repayment_reversal` | `lending.repayments.reverse_request` | `lending.repayments.reverse_approve` | No (always checked) |
 | `charge_waiver` | `lending.charges.waive_request` | `lending.charges.waive_approve` | Yes |
 | `loan_write_off` | `lending.loans.write_off_request` | `lending.loans.write_off_approve` | No |

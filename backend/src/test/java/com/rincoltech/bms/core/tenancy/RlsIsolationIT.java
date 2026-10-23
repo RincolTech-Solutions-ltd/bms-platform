@@ -732,6 +732,12 @@ class RlsIsolationIT {
                                                           business_date)
                         VALUES (?, ?, ?, ?, 'loan.overdue_1', DATE '2026-02-17')
                         """).params(UUID.randomUUID(), t.tenantId(), loan, item).update();
+        // A repayment brought in from a paper register (ADR-071, #466).
+        owner.sql("""
+                        INSERT INTO lending_brought_in_repayments (id, tenant_id, loan_id, line_no, value_date,
+                                                                   amount_minor, payment_method_key, note)
+                        VALUES (?, ?, ?, 1, DATE '2026-02-10', 5000, 'cash', 'Test receipt 01')
+                        """).params(UUID.randomUUID(), t.tenantId(), loan).update();
         owner.sql("""
                         INSERT INTO lending_arrears_runs (tenant_id, business_date, started_at, lease_until, finished_at)
                         VALUES (?, DATE '2026-02-17', now(), now(), now())
@@ -1006,6 +1012,15 @@ class RlsIsolationIT {
         owner.sql("""
                         INSERT INTO feedback_items (id, tenant_id, sender_user_id, kind, message, app_version)
                         VALUES (?, ?, ?, 'idea', 'Test feedback message', 'test (abc123)')
+                        """).params(UUID.randomUUID(), t.tenantId(), user).update();
+        // The Owner's own plan (migration V90, #472): a module asked for and a cancellation scheduled.
+        owner.sql("""
+                        INSERT INTO subscription_module_requests (id, tenant_id, module_key, requested_by)
+                        VALUES (?, ?, 'retail', ?)
+                        """).params(UUID.randomUUID(), t.tenantId(), user).update();
+        owner.sql("""
+                        INSERT INTO subscription_scheduled_changes (id, tenant_id, kind, effective_on, requested_by)
+                        VALUES (?, ?, 'cancel', DATE '2026-12-01', ?)
                         """).params(UUID.randomUUID(), t.tenantId(), user).update();
         // A barcode on a product (migration V87, #345).
         owner.sql("""

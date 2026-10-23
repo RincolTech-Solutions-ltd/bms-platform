@@ -8,6 +8,7 @@ import { BusyButton } from '../../app/ui/BusyButton';
 import { DataExportCard } from './data-export';
 import { NewIconNote, rememberIconVersion } from '../../install/NewIcon';
 import { useStaff } from './context';
+import { PlanCard } from './plan';
 
 // Business set-up (FR-TEN-08): name, logo, theme colour and receipt footer, with a checklist a new
 // tenant admin lands on until it is dismissed. The logo is checked and re-encoded by the API; the
@@ -194,6 +195,22 @@ export function Setup() {
     });
   }
 
+  // ADR-071: the day the app became the register; only the Owner moves it (the server answers owner_only for anyone else).
+  function setGoLive(date: string) {
+    void run(async () => {
+      const { error } = await api.PATCH('/api/v1/settings', {
+        params: { header: { 'If-Match': `"${current.version}"` } },
+        body: { go_live_date: date },
+      });
+      if (error) {
+        const problem = problemOf(error);
+        throw new Error(problem.errors?.[0]?.message ?? problem.detail ?? 'Could not save the go-live date.');
+      }
+      await refresh();
+      return `The go-live date is ${date}. Existing loans given out before it can be brought in.`;
+    });
+  }
+
   function dismiss() {
     void run(async () => {
       const { error } = await api.PATCH('/api/v1/settings', {
@@ -334,6 +351,21 @@ export function Setup() {
         </fieldset>
 
         {permissions.includes('core.data_export.run') && <DataExportCard modules={me.modules} zone={me.tenant_timezone} />}
+
+        {permissions.includes('core.settings.manage') && <PlanCard mfaEnabled={me.mfa_enabled === true} />}
+
+        {(me.modules ?? ['lending']).includes('lending') && (
+          <fieldset>
+            <legend>Go-live date</legend>
+            <label htmlFor="go-live-date">The day the app became your register (only the Owner of the business changes it)</label>
+            <input id="go-live-date" type="date" disabled={busy} defaultValue={current.go_live_date ?? ''}
+              onBlur={(e) => { if (e.target.value && e.target.value !== current.go_live_date) setGoLive(e.target.value); }} />
+            <p className="hint">
+              Loans given out before this day can be brought in from your paper register with their real dates. Until it is set, the day an
+              administrator first signed in counts.
+            </p>
+          </fieldset>
+        )}
 
         {permissions.includes('core.branches.read') && (
           <fieldset>

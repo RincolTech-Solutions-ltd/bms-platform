@@ -64,6 +64,9 @@ class EmailLayoutTest {
         p.put("owner_name", "Test Owner 01");
         p.put("as_of", "19 Oct 2026");
         p.put("expires_on", "18 Nov 2026");
+        // The Owner's own plan (issue #472): the module asked for and the decision, with the operator's reason.
+        p.put("module", "Shop");
+        p.put("decision", "declined. The platform operator wrote: Test reason <i>typed</i> & sent.");
         return p;
     }
 
@@ -513,6 +516,11 @@ class EmailLayoutTest {
             @Override
             public <T> T callForTenant(UUID tenantId, java.util.function.Supplier<T> work) {
                 return work.get();
+            }
+
+            @Override
+            public <T> T callForTenantTakingPayments(UUID tenantId, java.util.function.Supplier<T> work) {
+                throw new UnsupportedOperationException();
             }
         };
         SmtpEmailChannel channel = new SmtpEmailChannel(
