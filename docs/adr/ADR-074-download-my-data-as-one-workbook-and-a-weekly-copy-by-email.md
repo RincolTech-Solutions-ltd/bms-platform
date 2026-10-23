@@ -4,9 +4,9 @@
 
 Accepted (issue #334, step 1; 22 Oct 2026). Builds on ADR-003 (row-level security), ADR-038 (the report runs: queued, one
 read-only snapshot, a disk spool, files kept 30 days, the streaming workbook writer), ADR-024 (the platform outbox), ADR-054
-(branded HTML emails) and ADR-062 (the Owner of a business). Migration `V94`, an ordered claim (AGENTS.md): `V80` to
-`V84` are merged, and `V85` and `V86` (payments), `V87` (offline), `V88` (shop logos), `V89` (referrals), `V90` (barcodes), `V91`
-(existing loans) and `V93` (the self-serve plan) are claimed before it. Flyway runs with `outOfOrder` off, so it merges after
+(branded HTML emails) and ADR-062 (the Owner of a business). Migration `V91`, an ordered claim (AGENTS.md): `V80` to
+`V87` are merged (`V85` shop logos, `V86` offline sales, `V87` barcodes), `V88` (referrals), `V89` (existing loans) and `V90`
+(the self-serve plan) are claimed before it and `V92` (billing) after it. Flyway runs with `outOfOrder` off, so it merges after
 those claims, or is renumbered to the next free number if it must merge sooner. Step 2 of the issue, a copy kept in the Owner's Google Drive, is a later decision and is not built.
 
 ## Context

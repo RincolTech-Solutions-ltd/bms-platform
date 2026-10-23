@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.kernel.BusinessClock;
+import com.rincoltech.bms.testsupport.ImageFixtures;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -1594,6 +1595,52 @@ class LoanServicingIT extends LoanFixtures {
                         .query(Long.class)
                         .single())
                 .isEqualTo(2);
+    }
+
+    /** Issue #461, ADR-068: a loan document carries the logo of the loan's branch (Letterheads.forBranch), else the business's. */
+    @Test
+    void aLoanDocumentCarriesItsBranchsOwnLogo() throws Exception {
+        String loan = approved(exampleB("LOGO1"), 1_200_000, 3, 91);
+        disburse(loan, today);
+        java.awt.Color business = new java.awt.Color(20, 40, 200);
+        java.awt.Color shop = new java.awt.Color(200, 30, 30);
+        logo("/api/v1/settings/logo", business);
+        assertThat(ImageFixtures.near(scheduleLogo(loan), business)).isTrue();
+
+        logo("/api/v1/branches/" + t.headOffice() + "/logo", shop);
+        assertThat(ImageFixtures.near(scheduleLogo(loan), shop)).isTrue();
+    }
+
+    void logo(String path, java.awt.Color colour) {
+        org.springframework.util.MultiValueMap<String, Object> form =
+                new org.springframework.util.LinkedMultiValueMap<>();
+        form.add("file", new org.springframework.core.io.ByteArrayResource(ImageFixtures.png(256, 256, colour)) {
+            @Override
+            public String getFilename() {
+                return "logo.png";
+            }
+        });
+        HttpHeaders h = as(admin, adminPerms, "*", null);
+        h.setContentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA);
+        assertThat(http.exchange(
+                                path,
+                                HttpMethod.PUT,
+                                new org.springframework.http.HttpEntity<>(form, h),
+                                JsonNode.class)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+    }
+
+    java.awt.Color scheduleLogo(String loan) throws Exception {
+        ResponseEntity<byte[]> schedule = http.exchange(
+                LOANS + "/" + loan + "/documents/schedule",
+                HttpMethod.POST,
+                new org.springframework.http.HttpEntity<>(as(cashier, cashierPerms, "*", null)),
+                byte[].class);
+        assertThat(schedule.getStatusCode()).isEqualTo(HttpStatus.OK);
+        List<java.awt.Color> images = ImageFixtures.pdfImageCentres(schedule.getBody());
+        assertThat(images).hasSize(1);
+        return images.get(0);
     }
 
     /** FR-DOC-01: the schedule and the statement are rendered as at today, never stored. */
@@ -3741,5 +3788,96 @@ class LoanServicingIT extends LoanFixtures {
         assertThat(lending("/collections/promises").get("items"))
                 .singleElement()
                 .satisfies(p -> assertThat(p.get("action_id").asString()).isEqualTo(later));
+    }
+
+    // ---- Home's Lending card (issue #471) ---------------------------------------------------
+
+    /** What the schedule still owes on items due today (when) or before today, the way the summary adds it up. */
+    long owed(String loan, boolean dueToday) {
+        long sum = 0;
+        for (JsonNode item : get(loan, "/schedule").get("items")) {
+            LocalDate due = LocalDate.parse(item.get("due_date").asString());
+            if (dueToday ? due.equals(today) : due.isBefore(today)) {
+                sum += item.get("outstanding_minor").asLong();
+            }
+        }
+        return sum;
+    }
+
+    /**
+     * Issue #471, ADR-072: the summary counts active loans with an instalment left unpaid today and before today, with what is
+     * still owed on them, read live from the schedule; a repayment lowers it, another branch's scope sees nothing, and a user
+     * without lending.loans.read is refused.
+     */
+    @Test
+    void issue471_theHomeSummaryCountsLoansDueTodayAndInArrears() {
+        String product = exampleB("HOME");
+        String due = approved(product, 1_200_000, 3, 81);
+        disburse(due, today.minusMonths(1));
+        String late = approved(product, 1_200_000, 3, 82);
+        disburse(late, today.minusMonths(2).minusDays(5));
+        approved(product, 1_200_000, 3, 83);
+
+        JsonNode s = asOfficer(HttpMethod.GET, LOANS + "/summary", null, null).getBody();
+        assertThat(s.get("date").asString()).isEqualTo(today.toString());
+        assertThat(s.get("currency").asString())
+                .isEqualTo(get(due, "/schedule").get("currency").asString());
+        long dueToday = owed(due, true) + owed(late, true);
+        long arrears = owed(due, false) + owed(late, false);
+        assertThat(arrears).as("the late loan's first two instalments are past").isPositive();
+        assertThat(s.get("due_today_minor").asLong()).isEqualTo(dueToday);
+        assertThat(s.get("in_arrears_minor").asLong()).isEqualTo(arrears);
+        assertThat(s.get("in_arrears_count").asInt()).isEqualTo(owed(due, false) > 0 ? 2 : 1);
+        assertThat(s.get("due_today_count").asInt())
+                .isEqualTo((owed(due, true) > 0 ? 1 : 0) + (owed(late, true) > 0 ? 1 : 0));
+
+        repaid(late, 100_000, today);
+        JsonNode after =
+                asOfficer(HttpMethod.GET, LOANS + "/summary", null, null).getBody();
+        assertThat(after.get("in_arrears_minor").asLong()).isEqualTo(arrears - 100_000);
+
+        JsonNode elsewhere = send(
+                        HttpMethod.GET,
+                        LOANS + "/summary",
+                        as(officer, officerPerms, UUID.randomUUID().toString(), null),
+                        null)
+                .getBody();
+        assertThat(elsewhere.get("in_arrears_count").asInt()).isZero();
+        assertThat(elsewhere.get("in_arrears_minor").asLong()).isZero();
+        assertThat(elsewhere.get("due_today_count").asInt()).isZero();
+
+        assertThat(send(HttpMethod.GET, LOANS + "/summary", as(officer, "core.approvals.read", "*", null), null)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    /**
+     * Issue #471 and ADR-064: a loan officer's Lending card counts only their own portfolio, like the collections lists;
+     * the branch manager, who holds lending.collections.all_officers, counts the branch.
+     */
+    @Test
+    void issue471_aLoanOfficersHomeSummaryCountsOnlyTheirOwnLoans() {
+        String product = exampleB("HOMEOWN");
+        String mine = approved(product, 1_200_000, 3, 77);
+        disburse(mine, today.minusMonths(2).minusDays(5));
+        String theirs = approved(product, 1_200_000, 3, 76);
+        disburse(theirs, today.minusMonths(2).minusDays(5));
+        UUID other = staffUser("loan_officer", t.headOffice());
+        assertThat(send(
+                                HttpMethod.PUT,
+                                LOANS + "/" + theirs + "/officer",
+                                as(manager, managerPerms, "*", null),
+                                Map.of("officer_user_id", other.toString(), "reason", "Test portfolio split"))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        JsonNode own = asOfficer(HttpMethod.GET, LOANS + "/summary", null, null).getBody();
+        assertThat(own.get("in_arrears_count").asInt()).isEqualTo(1);
+        assertThat(own.get("in_arrears_minor").asLong()).isEqualTo(owed(mine, false));
+
+        JsonNode branch = send(HttpMethod.GET, LOANS + "/summary", as(manager, managerPerms, "*", null), null)
+                .getBody();
+        assertThat(branch.get("in_arrears_count").asInt()).isEqualTo(2);
+        assertThat(branch.get("in_arrears_minor").asLong()).isEqualTo(owed(mine, false) + owed(theirs, false));
     }
 }

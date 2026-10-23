@@ -40,9 +40,9 @@ class MigrationOrderIT {
      * Merge order matters because {@code outOfOrder} is off: V41 (the retail price lists, #247, merged)
      * came before V42 (the loan pledge guard, #176, merged), then V43 (payment methods, #160, merged),
      * then V44 (the retail customer accounts, #196), then V45 (customer returns, #201, merged). Nothing here enforces the order, merge order does.
-     * Today V80 to V84 are merged; a number above them is allowed only as an ordered claim (AGENTS.md): V85 and V86
-     * (payments), V87 (offline), V88 (shop logos), V89 (referrals), V90 (barcodes), V91 (existing loans), V93 (the
-     * self-serve plan), then V94 (download my data, #334), each merged in its turn or renumbered at merge.
+     * Today V80 to V87 are merged; a number above them is allowed only as an ordered claim (AGENTS.md): V88 (referrals),
+     * V89 (existing loans), V90 (the self-serve plan), V91 (download my data, #334), then V92 (billing), each merged in
+     * its turn or renumbered at merge.
      */
     static final List<String> MERGED = List.of(
             "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "20", "21", "22", "23", "26",
@@ -52,7 +52,13 @@ class MigrationOrderIT {
      * Columns a later migration adds to a table these cases watch, left out of the "keeps its shape" comparisons: each case
      * answers for its own migration. V70 (customer orders, #385) adds retail_sale_lines.price_overridden_by.
      */
-    static final String LATER_COLUMNS = " AND column_name <> 'price_overridden_by'";
+    static final String LATER_COLUMNS = " AND column_name <> 'price_overridden_by'"
+            // V86 (offline sales, #458) adds four columns to retail_sales, which are not the earlier migrations' to
+            // answer
+            // for; named with their table, so a column of that name elsewhere (stock movements' occurred_at) still
+            // counts.
+            + " AND NOT (table_name = 'retail_sales'"
+            + " AND column_name IN ('client_sale_id', 'occurred_at', 'recorded_offline', 'request_hash'))";
 
     /** Every migration file on the classpath in numeric order: a new migration only adds its file. */
     static final List<String> VERSIONS = discoveredVersions();
@@ -1478,14 +1484,14 @@ class MigrationOrderIT {
                 .as("the existing tables keep their shape")
                 .isEqualTo(before);
         // V48 adds no permission; V55 (the AI assistant, #226) adds the two advisor ones, V57 (#233) the payment
-        // account one, V83 (collections, #266) the two collection list ones and V94 (download my data, #334, an ordered
-        // claim after V93) its own, which are not V48's to answer for.
+        // account one, V83 (collections, #266) the two collection list ones, V86 (offline sales, #458)
+        // retail.offline.resolve and V91 (download my data, #334) its own, which are not V48's to answer for.
         assertThat(owner.sql(
                                 "SELECT count(*) FROM permissions WHERE key NOT IN ('lending.advisor.use', 'lending.advisor.configure',"
                                         + " 'core.payment_account.manage', 'retail.controls.read', 'retail.credit.write_off',"
                                         + " 'retail.order.manage', 'retail.sale.all_sellers', 'retail.till.close',"
-                                        + " 'lending.members.contact', 'lending.collections.all_officers',"
-                                        + " 'core.data_export.run')")
+                                        + " 'retail.offline.resolve', 'lending.members.contact',"
+                                        + " 'lending.collections.all_officers', 'core.data_export.run')")
                         .query(Long.class)
                         .single())
                 .as("no permission is added")

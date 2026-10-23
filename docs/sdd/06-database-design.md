@@ -483,6 +483,9 @@ issue #329),
 `sells_goods boolean NOT NULL DEFAULT true` (false: a Store, a branch that holds stock but does not sell; retail refuses a sale, a payment taken and a
 refund paid there with `branch_does_not_sell`), `CHECK (sells_goods OR stocks_goods)` named `branches_store_stocks` (a Store must keep goods; migration
 V65, issue #366, ADR-048).
+`logo_document_id uuid` (the shop's own logo, null for none: the business logo shows; a `core.tenant` document of the tenant with the
+branch id on its row, foreign key `branches_logo_fk` on `(tenant_id, logo_document_id)` to `documents (tenant_id, id)`; migration V85,
+issue #461, ADR-068, FR-BR-09).
 `UNIQUE (tenant_id, code)`; partial unique index
 `ON branches (tenant_id) WHERE is_head_office` (exactly one head office). FR-BR-01.
 
@@ -764,21 +767,21 @@ the pack. Three read-only `SECURITY DEFINER` functions let the runner see across
 beat) is older than the cutoff. The migration sets `lock_timeout` to five seconds before it takes its brief locks on `tenants` and
 `documents`.
 
-Migration V94 (issue #334, ADR-074) replaces the three definer functions so that they also count and name suspended tenants:
+Migration V91 (issue #334, ADR-074) replaces the three definer functions so that they also count and name suspended tenants:
 a business whose subscription has ended still gets the workbook it asks for. Signatures, owners and grants are unchanged. It
 adds `app_tenants_with_expired_report_files(now)`, the tenants with a ready run whose file is past its expiry and not yet
 deleted, whatever the tenant's status: the nightly expiry walks it, so a suspended or ended business's files go on time too.
 
 ### `data_export_settings` (RLS)
 
-Built (issue #334 step 1, migration V94; ADR-074). (std, no `version`) `weekly_email boolean NOT NULL DEFAULT true` (the Owner is
+Built (issue #334 step 1, migration V91; ADR-074). (std, no `version`) `weekly_email boolean NOT NULL DEFAULT true` (the Owner is
 emailed the workbook every week), `updated_by uuid NOT NULL` (composite foreign key to `users`). Unique `(tenant_id)`: one row
 per business, written on the first change; no row means on. `bms_app` holds SELECT, INSERT and UPDATE; every change is audited
 (`core.data_export.settings_changed`, before and after).
 
 ### `data_export_weekly` (RLS)
 
-Built (issue #334 step 1, migration V94; ADR-074). (std, no `version`) `week_of date NOT NULL` (the Monday that starts the week,
+Built (issue #334 step 1, migration V91; ADR-074). (std, no `version`) `week_of date NOT NULL` (the Monday that starts the week,
 checked), `run_id uuid` (the week's `core.data_export` run, composite foreign key to `report_runs`), `recipient_user_id uuid` (the
 Owner it was made for, composite foreign key to `users`), `status text NOT NULL` [`preparing` (the run is being made),
 `queued` (the email is in the outbox), `emailed` (the outbox recorded it sent), `skipped`, `failed`],
@@ -1972,6 +1975,28 @@ Credit buyers: `name varchar(200)`, `contact varchar(100)` kept as entered, `cre
 | `status` | text | `completed` or `voided`; `voided_at`, `voided_by`, `void_reason` |
 | `sale_entry_id`, `cost_entry_id` | uuid | The two journal entries |
 | `historical` | boolean | Imported history posts no journal (FR-RET-12) |
+| `client_sale_id` | uuid | ADR-067, V86: the id the device made for the sale; unique per tenant (`retail_sales_client_sale_id`, partial on not null), so a send after the key expired is the same sale |
+| `occurred_at` | timestamptz | ADR-067: when the sale happened on the device, as recorded (a clock more than five minutes ahead is recorded as the server's now) |
+| `recorded_offline` | boolean | ADR-067: the sale was taken with no network; needs `client_sale_id` and `occurred_at` (CHECK) |
+| `request_hash` | char(64) | ADR-067: the SHA-256 of a canonical text of the sale (branch, payment method, `customer_id`, and per line item, pack, quantity and price; never `occurred_at`, `recorded_offline` or `prices_as_of`), only with a `client_sale_id` (CHECK); a send under the same client sale id with another request is 422 `client_sale_conflict`. The four columns never change (trigger `retail_sales_offline_guard`) |
+
+Built: retail sales offline (issue #458, ADR-067, migration `V86`). Besides the four columns
+above, two tables, each with forced row-level security, composite foreign keys on the tenant and no delete grant.
+`retail_sale_clashes` holds what changed while an offline sale was away: `sale_id`, `branch_id`, `line_no` and `product_id`
+(null together for `clock_ahead` and `clock_behind`), `kind` (`stock_short`, `item_inactive`, `pack_inactive`, `price_changed`, `price_typed`, `below_cost`, `clock_ahead`, `clock_behind`),
+`words` (the plain sentence, never a cost), and `resolved_at`, `resolved_by`, `resolution_note` (at least five characters),
+set together once (the application role may update only those three; a guard trigger refuses a second resolve); indexes by
+sale and on the open ones by branch. `retail_offline_failures` is a sale the server refused, reported by the device of the
+person who made it: `client_sale_id` (unique per tenant), `branch_id`, `made_by`, `occurred_at`, `payment_method`,
+`total_minor`, `request` (the sale request as the device holds it, jsonb), `code`, `message`, `status` (`open`, `retry`,
+`discarded`, `recorded`; a guard trigger allows open to retry, discarded or recorded, and retry to open, discarded or
+recorded, and nothing from the last two), `decided_by`, `decided_at`, `discard_reason` (exactly when discarded) and `sale_id`
+(exactly when recorded). A sale recorded with a client sale id closes its open or retry report in the same transaction. `retail_offline_waiting` is a sale another person left queued on a phone, in short (`client_sale_id`
+unique per tenant, `branch_id`, `made_by`, `occurred_at`, `total_minor`, `reported_by`, `reported_at`), upserted by a signed-in
+phone and deleted when the sale is recorded or its refusal reported; nothing is posted from it. The
+permission `retail.offline.resolve` is seeded for `tenant_admin` and `retail_supervisor`. `ADD COLUMN` with a constant
+default takes an access exclusive lock on `retail_sales` to the commit (no rewrite); the unique index is partial and empty;
+`lock_timeout` is five seconds.
 
 The sales summary (issue #328, `GET /retail/sales/summary`) reads this table only, with no migration: one grouped query per
 level (`date_trunc` of `sale_date` to year, month or day, counts and sums by status and payment method, and the sale's
@@ -2120,6 +2145,8 @@ migration yet: everything else below, except the two-step transfer (issue #193, 
 `retail_transfer_lines`, below).
 
 Built: units of measure (issue #194, migration V39). `retail_product_units` (`id`, `tenant_id`, `product_id`, `unit_id`, `factor numeric(14,3) >= 1`, `active`, `version`, audit columns; composite foreign keys to `retail_products` and `retail_units`; unique `(tenant_id, product_id, unit_id)`; forced RLS; the application role may SELECT, INSERT and UPDATE, never DELETE). The pack's unit differing from the product's base unit, and a base unit that cannot change while an active pack exists, are rules of the catalogue service because they span two tables. Four nullable columns on `retail_sale_lines` (`sale_unit_id`, `sale_qty`, `sale_unit_price_minor`, `unit_factor`) and four on `retail_purchase_lines` (`unit_id`, `unit_qty_total`, `unit_cost_minor`, `unit_factor`) record what was entered; all four of a group are null (entered in the base unit, every row that existed before) or all four are set (check `retail_sale_lines_unit_chk`, `retail_purchase_lines_unit_chk`; foreign keys to `retail_units`), each added `NOT VALID` and validated in the same migration (Flyway runs the file in one transaction, so the lock is held through the validation scan; the new columns are null on every existing row, so validation cannot fail), and also tie `qty` to `sale_qty x unit_factor` and `qty_total` to `unit_qty_total x unit_factor`. `qty`, `unit_price_minor`, `cost_minor` and `qty_total` keep their meaning (base units, per base unit), so every report is unchanged; `line_total_minor` is `sale_qty x sale_unit_price_minor` rounded half up once, and on a purchase line the amount paid or owed as entered. The chart gains account 5120 `purchase_rounding` (section 6.11.1), added to existing retail tenants by the migration. The covering index of V26 is untouched.
+
+Built: barcodes on products (issue #345, ADR-070, migration V87, FR-RET-68). `retail_product_barcodes` (`id`, `tenant_id`, `created_at`, `created_by`, `product_id`, the nullable `unit_id` of one of the product's pack sizes (composite foreign key to `retail_product_units (tenant_id, product_id, unit_id)`; null is the product's own unit), `code` (1 to 48 printable ASCII characters, no space, slash or backslash, not only dots), `format` (`ean13`, `ean8`, `upca`, `code128`, with a check that the digit count fits the format), `generated` (a Code 128 code the system made for labels, `IN` and eight digits from `tenant_sequences` key `retail_barcode`), and the generated column `lookup_key` (a code stored as `upca` gets a leading 0, so a UPC-A and the EAN-13 a scanner reports for it are one key; twelve digits stored as `code128` keep their own key); unique `(tenant_id, lookup_key)`, index `(tenant_id, product_id)`; forced RLS; the application role may SELECT, INSERT and DELETE, never UPDATE. Check digits are checked by the catalogue service. Unique among active items: a code held by a switched-off item is deleted (audited `retail.barcode.released`) when an active item takes it.
 
 Built: price lists (issue #195, migration V41). `retail_price_lists` (`id`, `tenant_id`, `name` unique ignoring case, `currency`, `strict`, `active`, `version`, audit columns; forced RLS; SELECT, INSERT and UPDATE for the application role). `retail_price_list_items` (`price_list_id`, `product_id`, `unit_id` (the product's base unit or one of its packs), `min_qty numeric(14,3) >= 0` (0 is from any quantity), `price_minor` (0 to 10^13, per `unit_id`), `valid_from`, `valid_to` (the last day, null is open ended, never before `valid_from`); composite foreign keys; a unique index on the open ended row of `(tenant_id, price_list_id, product_id, unit_id, min_qty)`; a lookup index `(tenant_id, price_list_id, product_id, valid_from DESC)`). It is append-only apart from `valid_to`: the application role holds SELECT, INSERT and UPDATE of `valid_to` only, a guard trigger (`retail_price_list_items_guard_update`) lets that one column change from null to a date once, and `reject_mutation` refuses every delete. Two items for the same list, product, unit and break may not overlap in time; the unique index covers the open ended row and `retail.catalogue` checks closed ranges under a `FOR UPDATE` lock on the list row, so concurrent edits of one list serialise (an exclusion constraint would need the `btree_gist` extension). `retail_customer_groups` (`name` unique ignoring case, `price_list_id` nullable, `active`, `version`). `retail_customers` gains nullable `customer_group_id` and `price_list_id`, `retail_sales` a nullable `price_list_id`, and `retail_sale_lines` the nullable `price_source` (`retail`, `list`, `override`), `price_list_id`, `price_break_min_qty`, `resolved_unit_price_minor` (what the system resolved per sale unit, before any override) and `price_override_reason`, all null or one of three shapes enforced by `retail_sale_lines_price_chk`. The foreign keys and the check are added `NOT VALID` and validated in the same migration. `ADD COLUMN` and `ADD CONSTRAINT ... CHECK` take an access exclusive lock and a foreign key takes share row exclusive; Flyway runs the file in one transaction, so every lock is held to the commit and sales, sale history and the daily profit report on `retail_sale_lines`, `retail_sales` and `retail_customers` wait for the migration (brief at the size of a small or medium business; a very large tenant would validate in a later migration). The validation scan is kept because it is one pass over rows whose new columns are all null, it blocks nothing the `ADD COLUMN` lock did not already block, and a constraint left `NOT VALID` stays unvalidated. Three permissions are seeded (chapter 8). No tenant is switched on: the `price_lists` capability is off until an administrator turns it on, and while it is off the sale ignores every list and writes null in every new column.
 
