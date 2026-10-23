@@ -306,6 +306,60 @@
   margin-top: var(--space-4);
 }
 
+/* The sale's total as the hero of the screen (#508, docs/ui-rules.md rule 8): the word small, the amount at the display size. */
+.rt-total-hero {
+  flex-wrap: wrap;
+}
+
+.rt-total-hero > span:first-child {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-muted);
+}
+
+.rt-total-amount {
+  font-size: var(--text-display);
+  font-weight: var(--weight-display);
+  line-height: var(--leading-tight);
+}
+
+/*
+ * The sale's one primary action (#508, docs/ui-rules.md rule 6): the button carries the live total. On a phone the bar sticks full
+ * width to the bottom of the screen, edge to edge over the page gutter, and the toast rises above it; from 720px it sits in the form.
+ */
+.sale-bar .sale-bar-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 56px;
+}
+
+.sale-bar-amount {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+}
+
+@media (max-width: 719px) {
+  .sale-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: var(--z-nav);
+    margin: var(--space-3) calc(-1 * var(--space-4)) 0;
+    padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom));
+    background: var(--color-surface);
+    border-top: 1px solid var(--color-border);
+  }
+
+  .sale-bar .rt-primary {
+    margin-top: 0;
+  }
+
+  :root:has(.sale-bar) {
+    --bottom-bar: 80px;
+  }
+}
+
 /*
  * Item lists grouped by category (retail/category-groups.tsx): the switch and Expand all / Collapse all
  * above the list, then one section per category whose header is a full-width button with the name on

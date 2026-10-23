@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { SEARCH_DELAY_MS, createDebouncer } from '../../../app/ui/useLiveSearch';
 import { RetailError, retail, type Product, type ResolvedLine, type Sale, type SalePayment, type SaleRequest } from '../../../api/retail';
@@ -98,6 +98,18 @@ export function Receipt({ sale, onNew, received }: { sale: Sale; onNew?: () => v
         </button>
       )}
     </section>
+  );
+}
+
+/**
+ * The sale's one primary action (#508, docs/ui-rules.md rule 6): on a phone a bar stuck full width to the bottom of the screen,
+ * its button carrying the live total, so the amount and Record sale are always in reach; from 720px it sits under the total.
+ */
+export function SaleBar({ children }: { children: ReactNode }) {
+  return (
+    <div className="sale-bar" data-testid="sale-bar">
+      {children}
+    </div>
   );
 }
 
@@ -462,8 +474,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
 
       </fieldset>
 
-      <p className="rt-total" aria-live="polite">
-        Total {money(total)}
+      <p className="rt-total rt-total-hero" aria-live="polite">
+        <span>Total</span> <span className="rt-total-amount">{money(total)}</span>
       </p>
       <ChangePanel method={draft.method} total={total} text={received} onText={setReceived} />
       {problem && draft.lines.length > 0 && <Note>{problem}</Note>}
@@ -503,9 +515,16 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
         </div>
       )}
       {keep.error && <p role="alert" className="alert alert-danger">This phone could not keep the sale: {keep.error.message}</p>}
-      <BusyButton type="submit" className="rt-primary" busy={save.isPending || keep.isPending} disabled={problem !== null && !locked} data-tour="sale-save">
-        {offlineMode && mayKeepOnPhone(draft.sent) ? 'Save on this phone' : lost ? 'Try again' : 'Save sale'}
-      </BusyButton>
+      <SaleBar>
+        <BusyButton type="submit" className="rt-primary sale-bar-action" busy={save.isPending || keep.isPending} disabled={problem !== null && !locked} data-tour="sale-save">
+          {offlineMode && mayKeepOnPhone(draft.sent) ? 'Save on this phone' : lost ? 'Try again' : (
+            <>
+              <span>Record sale</span>
+              {total > 0 && <> <span className="sale-bar-amount">{money(total)}</span></>}
+            </>
+          )}
+        </BusyButton>
+      </SaleBar>
       {draft.lines.length > 0 && !save.isPending && !confirmClear && (
         <button type="button" onClick={() => (draft.sent ? setConfirmClear(true) : clear())}>
           Clear this sale
