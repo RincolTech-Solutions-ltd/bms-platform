@@ -117,6 +117,19 @@ class RetailDashboardIT extends IntegrationTest {
         assertThat(b2.get("stock_at_price_minor").asLong()).isEqualTo(13_500);
     }
 
+    /** Two ways of paying that are not credit, at one branch on one day, both count in the cash (non-credit) figure. */
+    @Test
+    void twoNonCreditMethodsOnOneBranchAndDayBothCountAsPaid() {
+        d.sell(t.headOffice(), "mobile_money", d.p2, "1", 0);
+        d.sell(t.headOffice(), "bank", d.p2, "1", 0);
+        JsonNode today = dashboard(ADMIN).get("today");
+        assertThat(today.get("sales_minor").asLong()).isEqualTo(4_200);
+        assertThat(today.get("cash_minor").asLong()).isEqualTo(2_700);
+        assertThat(today.get("credit_minor").asLong()).isEqualTo(1_500);
+        JsonNode headOffice = shop(dashboard(ADMIN), t.headOffice());
+        assertThat(headOffice.get("today_sales_minor").asLong()).isEqualTo(2_700);
+    }
+
     @Test
     void theLowStockThresholdIsTheOneOfTheStockLists() {
         JsonNode stockList =
