@@ -491,6 +491,36 @@ class SelfServePlanIT extends IntegrationTest {
                 .isEqualTo(2);
     }
 
+    /**
+     * In a free month an ask for a module the plan includes (switched on at once) and a stop applied at once, sent together,
+     * are made one after the other under the subscription's lock: whichever goes first, the modules on are exactly what the
+     * two answers say, so neither switch overwrites the other.
+     */
+    @Test
+    void anAskSwitchedOnAtOnceAndAStopAppliedAtOnceNeverUndoEachOther() throws Exception {
+        for (int i = 0; i < 3; i++) {
+            Business b = business(bothPlan, false, null);
+            List<ResponseEntity<JsonNode>> both = atOnce(
+                    () -> b.api()
+                            .post(
+                                    "/api/v1/plan/module-requests",
+                                    Map.of("module", "retail"),
+                                    b.ownerSession().accessToken()),
+                    () -> withPassword(b.api(), "/api/v1/plan/modules/lending/stop", b.ownerSession()));
+            ResponseEntity<JsonNode> asked = both.get(0);
+            ResponseEntity<JsonNode> stopped = both.get(1);
+            assertThat(asked.getStatusCode()).as("%s", asked.getBody()).isEqualTo(HttpStatus.CREATED);
+            assertThat(asked.getBody().get("status").asString()).isEqualTo("approved");
+            if (stopped.getStatusCode() == HttpStatus.CREATED) {
+                assertThat(stopped.getBody().get("status").asString()).isEqualTo("applied");
+                assertThat(modules(b.t().tenantId())).containsExactly("retail");
+            } else {
+                assertRefused(stopped, HttpStatus.UNPROCESSABLE_CONTENT, "last_module");
+                assertThat(modules(b.t().tenantId())).containsExactly("lending", "retail");
+            }
+        }
+    }
+
     @SafeVarargs
     static List<ResponseEntity<JsonNode>> atOnce(Callable<ResponseEntity<JsonNode>>... calls) throws Exception {
         ExecutorService pool = Executors.newFixedThreadPool(calls.length);

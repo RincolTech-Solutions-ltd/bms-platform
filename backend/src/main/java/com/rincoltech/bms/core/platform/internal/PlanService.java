@@ -149,6 +149,10 @@ class PlanService {
         requireKnown(module);
         UUID actor = requireOwner();
         return transactions.execute(status -> {
+            // The module list is read under the subscription's lock, so a stop applied at once, the job or the
+            // operator's
+            // decision cannot switch the modules in between and have one write undo the other.
+            lockSubscription(tenant.profile().id());
             Sub sub = subscription();
             if (sub.modules().contains(module)) {
                 throw ApiException.rule("module_already_on", "The business already uses " + label(module) + ".");
@@ -289,10 +293,7 @@ class PlanService {
         return transactions.execute(status -> {
             // Under the subscription's row lock the checks are made again, so two stops or two cancellations sent at
             // once cannot both pass: the second waits, then sees the first.
-            jdbc.sql("SELECT app_lock_subscription(?)")
-                    .param(tenant.profile().id())
-                    .query(String.class)
-                    .optional();
+            lockSubscription(tenant.profile().id());
             Sub sub = subscription();
             if ("cancel".equals(kind)) {
                 checkCancel();
@@ -357,6 +358,7 @@ class PlanService {
     /** As {@link #applyDue()}, as of a given business date, in the caller's transaction or its own. */
     int applyDue(LocalDate today) {
         return transactions.execute(status -> {
+            lockSubscription(tenant.profile().id());
             List<UUID> due = jdbc.sql("""
                             SELECT id FROM subscription_scheduled_changes
                              WHERE status = 'scheduled' AND effective_on <= ?
@@ -439,6 +441,7 @@ class PlanService {
         return TenantContext.callAs(
                 tenantId,
                 () -> transactions.execute(status -> {
+                    lockSubscription(tenantId);
                     ModuleRequestResponse request = jdbc.sql(REQUEST_SELECT + " WHERE r.id = ? FOR UPDATE OF r")
                             .param(requestId)
                             .query(PlanService::request)
@@ -476,6 +479,18 @@ class PlanService {
                     tellOwner(requestId, request.moduleKey(), approve, reason.trim());
                     return request(requestId);
                 }));
+    }
+
+    /**
+     * Takes the subscription's row lock for the rest of the transaction: every change of the modules or the subscription
+     * (the Owner's ask, stop and cancel, the job, the operator's decision) reads the modules after it, so none overwrites
+     * another made at the same time.
+     */
+    private void lockSubscription(UUID tenantId) {
+        jdbc.sql("SELECT app_lock_subscription(?)")
+                .param(tenantId)
+                .query(String.class)
+                .optional();
     }
 
     private void decide(UUID id, String status, boolean automatic, UUID operator, String planAfter, String reason) {

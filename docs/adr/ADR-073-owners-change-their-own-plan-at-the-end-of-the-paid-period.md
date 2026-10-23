@@ -48,7 +48,10 @@ month does. It is generic for every business and the Owner's alone: administrato
    in a transaction bound to that business, applies every scheduled row whose day has come in the business's own time zone:
    a stop through `platform_set_tenant_modules`, a cancellation through `platform_end_subscription`. The row is locked and
    moved to `applied` in the same transaction as the change, so a second run, an overlapping run or a retry changes nothing.
-   One business's failure is logged and does not stop the others. It is switched off by
+   One business's failure is logged and does not stop the others. The job, the Owner's ask, stop and cancel and the operator's
+   decision on a request each take the subscription's row lock (`app_lock_subscription`) first and read the modules after it,
+   because switching the modules replaces the whole set: two changes at once are made one after the other and neither
+   overwrites the other. It is switched off by
    `bms.platform.plan-changes-job-enabled=false`, which the integration tests set; they call the same work themselves.
 5. **After the end date the business is read only, and its data is kept.** A cancellation applied sets the subscription to
    `cancelled` with `subscriptions.ended_on` and the tenant to `suspended`, so every scheduled job already skips it and nothing
