@@ -19,7 +19,11 @@ import org.springframework.http.HttpStatus;
  */
 class SmsSettingsServiceRaceTest {
 
-    /** Which read of the losing request the winner's switch-on commits just before. */
+    /**
+     * Which read of the losing request the winner's switch-on commits just before. {@code BEFORE_THE_GROUP_READ} is the
+     * regression check for #487 (422 before the fix). {@code BEFORE_THE_VERSION_READ} passed before the fix too; it
+     * pins the other side of the new order, so a change that reads the version first again fails one of the two.
+     */
     enum CommitLands {
         BEFORE_THE_GROUP_READ,
         BEFORE_THE_VERSION_READ
