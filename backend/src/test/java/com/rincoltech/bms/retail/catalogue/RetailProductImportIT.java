@@ -167,10 +167,12 @@ class RetailProductImportIT extends IntegrationTest {
         // #494: the import help names the columns buying price and selling price, in that order.
         String csv = "code,description,category,unit,buying price,selling price\nIMP-9,Test lamp,Bulbs,pc,700,1000\n";
         assertThat(run(csv, false, ADMINISTRATOR).getStatusCode()).isEqualTo(HttpStatus.OK);
-        JsonNode item = api.get("/products?query=IMP-9", ADMIN).getBody().get("items").get(0);
+        JsonNode item =
+                api.get("/products?query=IMP-9", ADMIN).getBody().get("items").get(0);
         assertThat(item.get("cost_minor").asLong()).isEqualTo(700);
         assertThat(item.get("sell_minor").asLong()).isEqualTo(1000);
-        ResponseEntity<JsonNode> missing = run("code,description,category,unit\nIMP-8,Test,Bulbs,pc\n", true, ADMINISTRATOR);
+        ResponseEntity<JsonNode> missing =
+                run("code,description,category,unit\nIMP-8,Test,Bulbs,pc\n", true, ADMINISTRATOR);
         assertThat(missing.getBody().toString()).contains("needs a column called selling price");
     }
 
