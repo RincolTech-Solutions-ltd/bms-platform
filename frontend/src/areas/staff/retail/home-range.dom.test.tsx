@@ -35,7 +35,7 @@ vi.mock('../../../api/retail', async (original) => {
   };
 });
 
-const { RetailDashboard } = await import('./dashboard');
+const { DashboardView, RetailDashboard } = await import('./dashboard');
 const { OwnSales } = await import('./own-sales');
 
 afterEach(() => {
@@ -168,5 +168,23 @@ describe("a seller's own range", () => {
     fireEvent.click(screen.getByRole('button', { name: 'All' }));
     await waitFor(() => expect(salesSummary).toHaveBeenCalledWith(expect.objectContaining({ level: 'year', from: undefined })));
     expect(readRange(me.user_id ?? '')).toEqual({ period: 'all' });
+  });
+
+  it('leaves the stock cell of a shop that has held nothing blank, not 0 or undefined (issue #490)', async () => {
+    const data: Dashboard = {
+      ...body('7d'),
+      stock: { value_at_price_minor: 0, out_of_stock: 1, low_stock: 3, low_stock_threshold: '5.000' },
+      shops: [
+        { branch_id: 'hq', range_sales_minor: 6600, out_of_stock: 1, low_stock: 3 },
+        { branch_id: 'two', range_sales_minor: 0 },
+      ],
+    };
+    show(<DashboardView data={data} nameOf={(id) => (id === 'hq' ? 'Head office' : 'Branch two')} />, mockMe('admin'));
+    await screen.findByText('Out / low now');
+    const cells = (name: string) => Array.from(screen.getByText(name).closest('tr')?.querySelectorAll('td') ?? []);
+    expect(cells('Head office').at(-1)?.textContent).toBe('1 / 3');
+    const two = cells('Branch two').at(-1)?.textContent;
+    expect(two).toBe('');
+    expect(cells('Branch two').map((c) => c.textContent).join(' ')).not.toMatch(/undefined|0 \/ 0/);
   });
 });
