@@ -58,7 +58,7 @@ or Bluetooth scanner at the till, many have only phones.
    business's sequence (`tenant_sequences`, key `retail_barcode`) for each item that has no made code; an item keeps the one it has.
    It was a Code 128 code `IN` plus eight digits; since decision 12 it is an EAN-13 from `210`.
    The Barcode labels page prints an A4 sheet of 3 by 8 labels of 70 by 37 mm with the name, the price and the barcode, drawn in the
-   browser as SVG (Code 128 set B) and printed with the browser's print dialog at zero margin (the page states the stock, and a 4 mm safe margin inside each label is an option for a printer that cannot print to the edge); no PDF is stored.
+   browser as SVG (a made EAN-13 in the GS1 layout since decision 12, an `IN` code of before in Code 128 set B) and printed with the browser's print dialog at zero margin (the page states the stock, and a 4 mm safe margin inside each label is an option for a printer that cannot print to the edge); no PDF is stored.
 8. **Who may do what.** Reading and scanning need `retail.stock.read` (every seller, storekeeper and administrator holds it). Adding,
    removing and making barcodes, and the labels page, need `retail.catalogue.manage` (administrators). No new permission.
 9. **The import file** takes the optional columns `barcode` (synonyms `barcodes`, `ean`, `upc`) and `pack barcode`, several codes in a
@@ -86,7 +86,10 @@ or Bluetooth scanner at the till, many have only phones.
    made code is `21` (GS1 sets 20 to 29 aside for numbers used only inside one business and never gives them to a brand, so a made
    code can never be a real product's GTIN), then `0`, then nine digits from the same sequence key `retail_barcode` (no new key; the
    numbers simply go on from the last `IN` code), then the GS1 check digit: `2100000000425` for number 42. The `0` keeps the codes
-   of `21` followed by 1 to 9 free for a later kind of shop code, such as a weighed item whose price is in the code. Nine digits
+   of `21` followed by 1 to 9 free for a later kind of shop code, such as a weighed item whose price is in the code. The issue's
+   `21` plus nine digits plus a check digit is twelve digits, one short of an EAN-13; the `0` is that digit (pending the owner's
+   confirmation). The spec `docs/specs/units-packs-and-costing.md` (pull request #513, not yet merged) says only `21`; when it lands,
+   its section 7 takes this layout: made codes `210`, weighed items and any other kind from `211` to `219`, never `210`. Nine digits
    hold 999,999,999 codes per business; the generator refuses past that rather than wrap. Two runs never draw one number: the
    sequence row stays locked until the run's transaction ends, and every item of a run is locked, in a fixed order, before the
    sequence is touched, so two runs over overlapping lists queue rather than deadlock. A number whose code another item already

@@ -345,7 +345,8 @@ class RetailBarcodesIT extends IntegrationTest {
                 api.post("/products/barcodes/generate", Map.of("product_ids", List.of(item)), ADMIN);
         assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.OK);
         String code = made.getBody().get("items").get(0).get("code").asString();
-        assertThat(code).matches("210\\d{10}").isNotIn(first, second);
+        // tenant_sequences.next_value is the number the next call hands out, so the run lands exactly past the two.
+        assertThat(code).isEqualTo(ean(next + 2));
         assertThat(lookup(code).getBody().get("product").get("id").asString()).isEqualTo(item.toString());
         assertThat(lookup(first).getBody().get("product").get("id").asString()).isEqualTo(typed.toString());
     }

@@ -1,7 +1,9 @@
 package com.rincoltech.bms.retail.catalogue.internal;
 
+import com.rincoltech.bms.kernel.ApiException;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.http.HttpStatus;
 
 /**
  * The barcode formats a product accepts (ADR-070, issue #345; FR-RET-68): EAN-13, EAN-8 and UPC-A, whose last digit is
@@ -184,7 +186,11 @@ final class Barcodes {
     /** The shop's own EAN-13 for number {@code n} of the business's sequence: 210, nine digits, the GS1 check digit. */
     static String generated(long n) {
         if (n < 1 || n > SHOP_EAN_MAX) {
-            throw new IllegalStateException("The business has used every shop barcode number");
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "barcode_numbers_used_up",
+                    "No barcode numbers left",
+                    "This business has used every shop barcode number. Add the item's own barcode instead.");
         }
         String body = SHOP_EAN_PREFIX + String.format("%09d", n);
         return body + checkDigit(body);

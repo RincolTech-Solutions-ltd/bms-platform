@@ -16,4 +16,20 @@ ALTER TABLE retail_product_barcodes
     ADD CONSTRAINT retail_product_barcodes_generated_chk
         CHECK (NOT generated OR format = 'code128' OR (format = 'ean13' AND code ~ '^2[0-9]{12}$')) NOT VALID;
 ALTER TABLE retail_product_barcodes VALIDATE CONSTRAINT retail_product_barcodes_generated_chk;
-ALTER TABLE retail_product_barcodes DROP CONSTRAINT retail_product_barcodes_check1;
+-- V87's check was unnamed, so it is found by what it says rather than by the name PostgreSQL gave it,
+-- and the migration stops if it is not there exactly once.
+DO $$
+DECLARE
+    old_check text;
+BEGIN
+    SELECT string_agg(conname, ',') INTO STRICT old_check
+      FROM pg_constraint
+     WHERE conrelid = 'retail_product_barcodes'::regclass
+       AND contype = 'c'
+       AND pg_get_constraintdef(oid) = 'CHECK (((NOT generated) OR (format = ''code128''::text)))';
+    IF old_check IS NULL OR old_check LIKE '%,%' THEN
+        RAISE EXCEPTION 'V93: expected one V87 check on generated, found %', coalesce(old_check, 'none');
+    END IF;
+    EXECUTE format('ALTER TABLE retail_product_barcodes DROP CONSTRAINT %I', old_check);
+END
+$$;

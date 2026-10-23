@@ -188,10 +188,9 @@ class BarcodeService {
                 continue;
             }
             // The sequence row is locked until this transaction ends, so two runs never draw one number. A person may
-            // have
-            // typed a code of the same shape by hand (a scale's label, say), or typed it a moment ago in another
-            // session;
-            // the sequence then moves past it and the next number is tried. A brand's GTIN never starts with 2.
+            // have typed a code of the same shape by hand (a scale's label, say), or typed it a moment ago in another
+            // session; the sequence then moves past it and the next number is tried. A brand's GTIN never starts
+            // with 2.
             UUID id = UUID.randomUUID();
             String code;
             do {

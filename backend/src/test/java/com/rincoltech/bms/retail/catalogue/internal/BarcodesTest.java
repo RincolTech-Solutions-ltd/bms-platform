@@ -3,6 +3,7 @@ package com.rincoltech.bms.retail.catalogue.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.rincoltech.bms.kernel.ApiException;
 import org.junit.jupiter.api.Test;
 
 /** The barcode formats of ADR-070 (FR-RET-68): shapes, check digits and the lookup key. Fabricated codes only. */
@@ -111,8 +112,8 @@ class BarcodesTest {
 
     @Test
     void issue524TheNineDigitsNeverOverflowIntoAnotherCode() {
-        assertThatThrownBy(() -> Barcodes.generated(1_000_000_000L)).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> Barcodes.generated(0)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> Barcodes.generated(1_000_000_000L)).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> Barcodes.generated(0)).isInstanceOf(ApiException.class);
     }
 
     @Test
