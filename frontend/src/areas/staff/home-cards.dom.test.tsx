@@ -408,6 +408,17 @@ describe('the shop summary cards (issue #485)', () => {
     expect(card('Credit owed')).toBeNull();
   });
 
+  it('does not say nothing was taken when money came in and went out again', async () => {
+    calls.home.mockResolvedValue({
+      ...HOME,
+      takings: { total_minor: 0, methods: [{ method: 'cash', amount_minor: 0, sales_minor: 500, payments_minor: 0, fees_minor: 0, out_minor: 500 }, { method: 'mobile_money', amount_minor: 0, sales_minor: 0, payments_minor: 0, fees_minor: 0, out_minor: 0 }] },
+    });
+    show(both);
+    const takings = await screen.findByRole('article', { name: 'Takings today' });
+    expect(await within(takings).findByText('Cash')).toBeTruthy();
+    expect(within(takings).queryByText('No money taken yet today.')).toBeNull();
+  });
+
   it('says so in each card when the summary cannot be loaded', async () => {
     calls.home.mockRejectedValue(new Error('down'));
     show(both);

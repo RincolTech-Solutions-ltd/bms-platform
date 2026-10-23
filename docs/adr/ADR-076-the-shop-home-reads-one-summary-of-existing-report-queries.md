@@ -41,7 +41,8 @@ rules than the cards need.
    `takings` also needs what the cash summary needs: `retail.cashbook.read` in every branch it covers and `retail.till.close`
    (ADR-055, the cash book is the till's). The takings are the cash summary's figures (refunds and reversed payments on account
    included), so `retail.sale.all_sellers` alone, which a Supervisor holds, must not show what the cash summary hides; the other
-   money parts stay on `retail.sale.all_sellers`, as on the dashboard.
+   money parts stay on `retail.sale.all_sellers`, as on the dashboard. The cash book's other figures (savings, banking, expenses,
+   withdrawals, advances, the expected cash) are not on Home.
 4. **Takings are read the way the cash book reads a day, for every way of paying.** The cash book (`JdbcCashSales`) is what the
    cash summary shows, and the card links there, so the two must agree: in, the sales paid at the sale dated today (cancelled later
    or not), the payments on credit sales dated today at the branch that took them, and the delivery fees taken at the door today or
