@@ -326,14 +326,19 @@ class RetailParityIT extends IntegrationTest {
 
     // ---- D. Low stock and out of stock ------------------------------------------------------
 
-    /** Head office holds 10 cable and 4 bulb (setUp), plus 6 high, 5 five, 0 zero and minus 1 owed. */
+    /**
+     * Head office holds 10 cable and 4 bulb (setUp), plus 6 high, 5 five, 0 zero (stocked and counted down to zero, so held
+     * there: an item a branch never carried is neither out nor low, issue #490) and minus 1 owed.
+     */
     void stockLevels() {
         UUID high = api.product("PAR-HIGH", 100, 150);
         UUID five = api.product("PAR-FIVE", 100, 150);
-        api.product("PAR-ZERO", 100, 150);
+        UUID zero = api.product("PAR-ZERO", 100, 150);
         UUID owed = api.product("PAR-OWED", 100, 150);
         api.stockUp(t.headOffice(), high, "6");
         api.stockUp(t.headOffice(), five, "5");
+        api.stockUp(t.headOffice(), zero, "2");
+        api.stockUp(t.headOffice(), zero, "0");
         api.importedBalance(t.headOffice(), owed, "-1");
     }
 

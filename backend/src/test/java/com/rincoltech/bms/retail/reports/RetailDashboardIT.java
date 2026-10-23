@@ -25,10 +25,10 @@ import tools.jackson.databind.JsonNode;
  * cash (1,500, cost 1,000). Today: 3,600, of which cash 2,100 and credit 1,500; profit 1,200. Yesterday 3,000;
  * ten days ago 900. Stock: head office 17 ANA-1, 15 ANA-2, 4 ANA-3 and 5 ANA-5 (cost 100, price 150): 33,550
  * at price, 22,100 at cost; branch two 9 ANA-1 and 0 ANA-4: 13,500 and 9,000. The counts follow the stock list
- * rule: an active item with no balance row counts as zero, low includes out of stock, and All branches judges each
- * item on its summed balance. Head office: ANA-4 out (never stocked there), ANA-3 and ANA-5 low, so 1 out and 3 low;
- * branch two: only ANA-1 in stock, so 4 out and 4 low; all branches: ANA-4 totals 0, ANA-3 4 and ANA-5 5, so 1 out
- * and 3 low.
+ * rule: an item counts only at a branch that has held it (issue #490), low includes out of stock, and All branches judges
+ * out on each item's summed balance and low at any branch. Head office: ANA-4 never stocked there so not counted, ANA-3
+ * and ANA-5 low, so 0 out and 2 low; branch two: ANA-4 stocked and counted down to 0, ANA-2 and ANA-3 never carried, so 1
+ * out and 1 low; all branches: ANA-4 totals 0, ANA-3 4 and ANA-5 5, so 1 out and 3 low.
  */
 class RetailDashboardIT extends IntegrationTest {
 
@@ -108,12 +108,12 @@ class RetailDashboardIT extends IntegrationTest {
         assertThat(hq.get("today_gross_profit_minor").asLong()).isEqualTo(700);
         assertThat(hq.get("stock_at_price_minor").asLong()).isEqualTo(33_550);
         assertThat(hq.get("stock_at_cost_minor").asLong()).isEqualTo(22_100);
-        assertThat(hq.get("out_of_stock").asInt()).isEqualTo(1);
-        assertThat(hq.get("low_stock").asInt()).isEqualTo(3);
+        assertThat(hq.get("out_of_stock").asInt()).isZero();
+        assertThat(hq.get("low_stock").asInt()).isEqualTo(2);
         JsonNode b2 = shop(r, t.secondBranch());
         assertThat(b2.get("today_sales_minor").asLong()).isEqualTo(1_500);
-        assertThat(b2.get("out_of_stock").asInt()).isEqualTo(4);
-        assertThat(b2.get("low_stock").asInt()).isEqualTo(4);
+        assertThat(b2.get("out_of_stock").asInt()).isEqualTo(1);
+        assertThat(b2.get("low_stock").asInt()).isEqualTo(1);
         assertThat(b2.get("stock_at_price_minor").asLong()).isEqualTo(13_500);
     }
 
@@ -189,8 +189,8 @@ class RetailDashboardIT extends IntegrationTest {
         assertThat(body.get("stock").get("value_at_price_minor").asLong()).isEqualTo(13_500);
         Map<String, Integer> counts = new HashMap<>();
         counts.put("out", body.get("stock").get("out_of_stock").asInt());
-        assertThat(counts.get("out")).isEqualTo(4);
-        assertThat(body.get("stock").get("low_stock").asInt()).isEqualTo(4);
+        assertThat(counts.get("out")).isEqualTo(1);
+        assertThat(body.get("stock").get("low_stock").asInt()).isEqualTo(1);
     }
 
     @Test

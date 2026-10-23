@@ -56,7 +56,9 @@ final class StockApi {
             UUID branchId,
             List<StockRow> items,
 
-            @Schema(description = "A quantity at or below this is low stock (FR-RET-03); the same for every branch")
+            @Schema(
+                    description =
+                            "A quantity at or below this is low stock (FR-RET-03) for an item with no minimum set; the same for every branch")
             String lowStockThreshold,
 
             String nextCursor) {}
@@ -108,7 +110,9 @@ final class StockApi {
             List<StockBranch> branches,
             List<AllBranchesRow> items,
 
-            @Schema(description = "A total at or below this is low stock; the same for every branch")
+            @Schema(
+                    description =
+                            "A balance at or below this is low stock for an item with no minimum set; the same for every branch")
             String lowStockThreshold,
 
             @Schema(

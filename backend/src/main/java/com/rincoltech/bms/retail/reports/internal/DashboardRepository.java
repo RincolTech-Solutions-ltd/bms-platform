@@ -1,6 +1,7 @@
 package com.rincoltech.bms.retail.reports.internal;
 
 import com.rincoltech.bms.retail.stock.CreditPeriods;
+import com.rincoltech.bms.retail.stock.LowStockRule;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.time.LocalDate;
@@ -92,9 +93,10 @@ class DashboardRepository {
     }
 
     /**
-     * Stock value above zero per branch (active items) and, per branch, the items out of stock or low by
-     * the stock list's rule: every active item judged on its balance in that branch (an inactive item, issue
-     * #342, is left out like the list leaves it out), an item with no balance row counting as zero.
+     * Stock value above zero per branch (active items) and, per branch, the items out of stock or low by the stock list's rule
+     * (issue #490, {@link LowStockRule}): an active item counts only at a branch that has held it, low at or below the branch's
+     * minimum, else {@code lowThreshold} (an inactive item, issue #342, is left out like the list leaves it out). A branch that
+     * has held no item has no row, so it shows no stock line.
      */
     List<Position> positions(List<UUID> branchIds, BigDecimal lowThreshold) {
         if (branchIds != null && branchIds.isEmpty()) {
@@ -107,19 +109,25 @@ class DashboardRepository {
             params.put("branchIds", branchIds);
             branch = " AND br.id IN (:branchIds)";
         }
-        return jdbc.sql("SELECT br.id AS branch_id,"
-                        + " coalesce(sum(round(b.qty * p.sell_minor)) FILTER (WHERE b.qty > 0 AND p.active), 0) AS at_price,"
-                        + " coalesce(sum(round(b.qty * p.cost_minor)) FILTER (WHERE b.qty > 0 AND p.active), 0) AS at_cost,"
-                        + " count(*) FILTER (WHERE coalesce(b.qty, 0) <= 0) AS out_of_stock,"
-                        + " count(*) FILTER (WHERE coalesce(b.qty, 0) <= :low) AS low_stock"
-                        + "  FROM branches br"
-                        + "  CROSS JOIN retail_products p"
-                        + "  LEFT JOIN retail_stock_balances b ON b.tenant_id = p.tenant_id AND b.product_id = p.id"
-                        + "   AND b.branch_id = br.id"
-                        + " WHERE p.active"
-                        + "   AND (br.status = 'active' OR EXISTS (SELECT 1 FROM retail_stock_balances h"
-                        + "        WHERE h.tenant_id = br.tenant_id AND h.branch_id = br.id AND h.qty <> 0))" + branch
-                        + " GROUP BY br.id")
+        return jdbc.sql("SELECT x.branch_id,"
+                        + " coalesce(sum(round(x.qty * x.sell_minor)) FILTER (WHERE x.qty > 0), 0) AS at_price,"
+                        + " coalesce(sum(round(x.qty * x.cost_minor)) FILTER (WHERE x.qty > 0), 0) AS at_cost,"
+                        + " count(*) FILTER (WHERE x.held AND x.qty <= 0) AS out_of_stock,"
+                        + " count(*) FILTER (WHERE x.held AND x.qty <= x.level) AS low_stock"
+                        + "  FROM (SELECT br.id AS branch_id, p.sell_minor, p.cost_minor, coalesce(b.qty, 0) AS qty,"
+                        + "               " + LowStockRule.heldSql("p.id", "br.id") + " AS held,"
+                        + "               " + LowStockRule.levelSql("p.id", "br.id", ":low") + " AS level"
+                        + "          FROM branches br"
+                        + "          CROSS JOIN retail_products p"
+                        + "          LEFT JOIN retail_stock_balances b ON b.tenant_id = p.tenant_id AND b.product_id = p.id"
+                        + "           AND b.branch_id = br.id"
+                        + "         WHERE p.active"
+                        + "           AND (br.status = 'active' OR EXISTS (SELECT 1 FROM retail_stock_balances h"
+                        + "                WHERE h.tenant_id = br.tenant_id AND h.branch_id = br.id AND h.qty <> 0))"
+                        + branch
+                        + "       ) x"
+                        + " GROUP BY x.branch_id"
+                        + " HAVING bool_or(x.held)")
                 .params(params)
                 .query((rs, n) -> new Position(
                         rs.getObject("branch_id", UUID.class),
@@ -131,9 +139,9 @@ class DashboardRepository {
     }
 
     /**
-     * Items out of stock and low over the given branches (all of them when null), as the stock list
-     * judges All branches: one balance per item, summed over the branches, an item with no row counting
-     * as zero. Returns {out, low}; low includes out.
+     * Items out of stock and low over the given branches (all of them when null), as the stock list judges them (issue #490,
+     * {@link LowStockRule}): one branch on its own balance and level, several on the balance summed over them, an item counted
+     * only when one of them has held it. Returns {out, low}; low includes out.
      */
     int[] counts(List<UUID> branchIds, BigDecimal lowThreshold) {
         if (branchIds != null && branchIds.isEmpty()) {
@@ -142,12 +150,25 @@ class DashboardRepository {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("low", lowThreshold);
         String branch = "";
-        if (branchIds != null) {
-            params.put("branchIds", branchIds);
-            branch = " AND b.branch_id IN (:branchIds)";
+        String out;
+        String low;
+        if (branchIds != null && branchIds.size() == 1) {
+            params.put("onlyBranch", branchIds.getFirst());
+            branch = " AND b.branch_id = :onlyBranch";
+            out = LowStockRule.atBranchSql(false, "t.id", ":onlyBranch", "t.total", ":low");
+            low = LowStockRule.atBranchSql(true, "t.id", ":onlyBranch", "t.total", ":low");
+        } else {
+            String scope = "true";
+            if (branchIds != null) {
+                params.put("branchIds", branchIds);
+                branch = " AND b.branch_id IN (:branchIds)";
+                scope = "lb.id IN (:branchIds)";
+            }
+            out = LowStockRule.overBranchesSql(false, "t.id", scope, "t.total", ":low");
+            low = LowStockRule.overBranchesSql(true, "t.id", scope, "t.total", ":low");
         }
-        return jdbc.sql("SELECT count(*) FILTER (WHERE total <= 0) AS out_of_stock,"
-                        + " count(*) FILTER (WHERE total <= :low) AS low_stock"
+        return jdbc.sql("SELECT count(*) FILTER (WHERE " + out + ") AS out_of_stock,"
+                        + " count(*) FILTER (WHERE " + low + ") AS low_stock"
                         + "  FROM (SELECT p.id, coalesce(sum(b.qty), 0) AS total"
                         + "          FROM retail_products p"
                         + "          LEFT JOIN retail_stock_balances b ON b.tenant_id = p.tenant_id AND b.product_id = p.id"

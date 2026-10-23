@@ -71,12 +71,14 @@ final class DashboardApi {
 
             @Schema(
                     description =
-                            "Active items whose balance is zero or less, as the stock list judges it: a branch alone, or the sum over the branches reported")
+                            "Active items whose balance is zero or less, as the stock list judges it: a branch alone, or the sum over the branches reported;"
+                                    + " only items one of them has held (a balance row or a movement, issue #490)")
             int outOfStock,
 
             @Schema(
                     description =
-                            "Active items at or below low_stock_threshold (ADR-029), out of stock ones included, as the stock list's low tab counts them")
+                            "Active items at or below their minimum at a branch, else low_stock_threshold (ADR-029), at a branch that has held them"
+                                    + " (issue #490), out of stock ones included, as the stock list's low tab counts them")
             int lowStock,
 
             String lowStockThreshold) {}

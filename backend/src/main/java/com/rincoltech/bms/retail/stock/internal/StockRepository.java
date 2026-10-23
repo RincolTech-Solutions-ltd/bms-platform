@@ -1,6 +1,7 @@
 package com.rincoltech.bms.retail.stock.internal;
 
 import com.rincoltech.bms.kernel.Search;
+import com.rincoltech.bms.retail.stock.LowStockRule;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.internal.StockApi.Correction;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementCorrection;
@@ -49,7 +50,7 @@ class StockRepository {
             UUID categoryId,
             boolean negativeOnly,
             boolean includeInactive,
-            Long atMostMilli,
+            String level,
             int afterRank,
             String afterCode,
             UUID afterId,
@@ -79,9 +80,11 @@ class StockRepository {
         if (negativeOnly) {
             sql.append(" AND coalesce(b.qty, 0) < 0");
         }
-        if (atMostMilli != null) {
-            sql.append(" AND coalesce(b.qty, 0) <= :atMost");
-            params.put("atMost", java.math.BigDecimal.valueOf(atMostMilli, 3));
+        if (level != null) {
+            sql.append(" AND ")
+                    .append(LowStockRule.atBranchSql(
+                            level.equals(StockService.LEVEL_LOW), "p.id", ":branch", "coalesce(b.qty, 0)", ":low"));
+            params.put("low", StockService.lowStock());
         }
         String statement;
         if (match == null) {
@@ -150,7 +153,7 @@ class StockRepository {
             boolean negativeOnly,
             boolean includeInactive,
             boolean keepHeldInactive,
-            Long atMostMilli,
+            String level,
             int afterRank,
             String afterCode,
             UUID afterId,
@@ -184,9 +187,19 @@ class StockRepository {
         if (negativeOnly) {
             sql.append(" AND coalesce(t.negs, 0) > 0");
         }
-        if (atMostMilli != null) {
-            sql.append(" AND coalesce(t.total, 0) <= :atMost");
-            params.put("atMost", java.math.BigDecimal.valueOf(atMostMilli, 3));
+        if (level != null) {
+            // One branch is judged as its own list judges it; several on their summed balance (issue #490).
+            boolean low = level.equals(StockService.LEVEL_LOW);
+            if (branchIds.size() == 1) {
+                sql.append(" AND ")
+                        .append(LowStockRule.atBranchSql(low, "p.id", ":onlyBranch", "coalesce(t.total, 0)", ":low"));
+                params.put("onlyBranch", branchIds.getFirst());
+            } else {
+                sql.append(" AND ")
+                        .append(LowStockRule.overBranchesSql(
+                                low, "p.id", "lb.id IN (:branchIds)", "coalesce(t.total, 0)", ":low"));
+            }
+            params.put("low", StockService.lowStock());
         }
         String statement;
         if (match == null) {

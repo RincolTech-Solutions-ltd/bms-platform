@@ -87,6 +87,52 @@ public final class LowStockRule {
         return Optional.empty();
     }
 
+    /*
+     * The counts of Home and the dashboard and the Out and Low filters of the stock lists (issue #490) judge an item only where
+     * it has been held: a balance row or a movement at the branch. A catalogue item a branch never carried is neither out nor
+     * low there. At one branch, low is at or below the branch's level: its own minimum, else the item's minimum for every
+     * branch, else the fixed threshold the caller binds. Over several branches together, as All branches lists them, the
+     * balances are summed and low is at or below the item's minimum for every branch, else the threshold, for an item one of
+     * them has held. The SQL below is that one rule, shared so the figures and the filters agree.
+     */
+
+    /** SQL: true when the branch has held the item, a balance row or a movement there. */
+    public static String heldSql(String product, String branch) {
+        return "(EXISTS (SELECT 1 FROM retail_stock_balances held_b WHERE held_b.product_id = " + product
+                + " AND held_b.branch_id = " + branch + ")"
+                + " OR EXISTS (SELECT 1 FROM retail_stock_movements held_m WHERE held_m.product_id = " + product
+                + " AND held_m.branch_id = " + branch + "))";
+    }
+
+    /** SQL: true when a branch of {@code scope} (a condition on the branch {@code lb}) has held the item. */
+    public static String heldInSql(String product, String scope) {
+        return "EXISTS (SELECT 1 FROM branches lb WHERE " + scope + " AND " + heldSql(product, "lb.id") + ")";
+    }
+
+    /** SQL: the item's minimum for every branch, else {@code threshold}. */
+    public static String itemLevelSql(String product, String threshold) {
+        return "coalesce((SELECT min_a.min_qty FROM retail_stock_minimums min_a WHERE min_a.product_id = " + product
+                + " AND min_a.branch_id IS NULL), " + threshold + ")";
+    }
+
+    /** SQL: the level at or below which the item is low at the branch: its own minimum, else {@link #itemLevelSql}. */
+    public static String levelSql(String product, String branch, String threshold) {
+        return "coalesce((SELECT min_b.min_qty FROM retail_stock_minimums min_b WHERE min_b.product_id = " + product
+                + " AND min_b.branch_id = " + branch + "), " + itemLevelSql(product, threshold) + ")";
+    }
+
+    /** SQL: true when the item is out ({@code low} false) or low at the branch, {@code qty} being its balance there. */
+    public static String atBranchSql(boolean low, String product, String branch, String qty, String threshold) {
+        return "(" + qty + " <= " + (low ? levelSql(product, branch, threshold) : "0") + " AND "
+                + heldSql(product, branch) + ")";
+    }
+
+    /** SQL: true when the item is out or low over the branches of {@code scope} together, {@code total} their summed balance. */
+    public static String overBranchesSql(boolean low, String product, String scope, String total, String threshold) {
+        return "(" + total + " <= " + (low ? itemLevelSql(product, threshold) : "0") + " AND "
+                + heldInSql(product, scope) + ")";
+    }
+
     /** A quantity without trailing zeros: 10, 2.5. */
     public static String plain(BigDecimal qty) {
         return qty.stripTrailingZeros().toPlainString();

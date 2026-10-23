@@ -43,7 +43,8 @@ final class HomeApi {
 
             @Schema(
                     description =
-                            "Present only with retail.stock.read: active items at or below the dashboard's low stock threshold")
+                            "Present only with retail.stock.read: active items low as the dashboard counts them, at or below their minimum or else"
+                                    + " the low stock threshold, at a branch that has held them (issue #490)")
             Integer lowStock,
 
             @Schema(
