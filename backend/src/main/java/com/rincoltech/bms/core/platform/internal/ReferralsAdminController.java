@@ -159,8 +159,8 @@ class ReferralsAdminController {
 
             @Schema(
                     description =
-                            "True to pay a line although the referrer business is suspended or cancelled now; without"
-                                    + " it that is 409 referrer_inactive")
+                            "True to pay a line although the referrer business is inactive now (suspended, cancelled,"
+                                    + " past_due or trial_lapsed); without it that is 409 referrer_inactive")
             Boolean confirmReferrerInactive) {}
 
     @GetMapping("/referrals")

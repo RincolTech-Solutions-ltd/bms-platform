@@ -1699,6 +1699,72 @@ class ReferralsIT extends IntegrationTest {
                 .isEqualTo(y.slug());
     }
 
+    /**
+     * Every state in which the referrer is not in use and paying counts as inactive: a suspended business, a suspended,
+     * cancelled or past due subscription, and a free month that ended unpaid (review of #467). Each flags the line and
+     * refuses an unconfirmed paid mark; an unexpired free month and a pilot stay active.
+     */
+    @Test
+    void everyStateOfAReferrerThatIsNotPayingIsInactive() {
+        Business referrer = business("ref-states");
+        Business x = business("ref-states-x");
+        setReferrer(x.id(), code(referrer.id()), "Test: referred by the shop");
+        UUID rx = currentReferral(x.id());
+        rule("/api/v1/platform/referrals/" + rx + "/rule", percent(1000, null), "Test: ten percent, no end");
+        pay(x.id(), 10000, 1);
+        String line = detail(rx).get("lines").get(0).get("id").asString();
+        Map<String, Object> paid = new LinkedHashMap<>();
+        paid.put("paid_on", LocalDate.now(KAMPALA).toString());
+        paid.put("method", "cash");
+        paid.put("reason", "Test: handed over");
+        LocalDate today = LocalDate.now(KAMPALA);
+
+        Map<String, String> states = new LinkedHashMap<>();
+        states.put("UPDATE tenants SET status = 'suspended' WHERE id = ?", "suspended");
+        states.put("UPDATE subscriptions SET status = 'suspended' WHERE tenant_id = ?", "suspended");
+        states.put("UPDATE subscriptions SET status = 'cancelled' WHERE tenant_id = ?", "cancelled");
+        states.put("UPDATE subscriptions SET status = 'past_due' WHERE tenant_id = ?", "past_due");
+        states.put(
+                "UPDATE subscriptions SET status = 'trial', is_pilot = false, trial_ends_on = DATE '"
+                        + today.minusDays(2) + "' WHERE tenant_id = ?",
+                "trial_lapsed");
+        states.put(
+                "UPDATE subscriptions SET status = 'trial', is_pilot = false, trial_ends_on = DATE '" + today
+                        + "' WHERE tenant_id = ?",
+                "active");
+        states.put(
+                "UPDATE subscriptions SET status = 'trial', is_pilot = true, trial_ends_on = NULL WHERE tenant_id = ?",
+                "active");
+        states.forEach((change, expected) -> {
+            TestDatabase.owner().sql(change).param(referrer.id()).update();
+            JsonNode l = detail(rx).get("lines").get(0);
+            assertThat(l.get("referrer_status").asString()).as(change).isEqualTo(expected);
+            assertThat(l.get("referrer_inactive").asBoolean()).as(change).isEqualTo(!expected.equals("active"));
+            if (!expected.equals("active")) {
+                ResponseEntity<JsonNode> refused = platform.post(
+                        "/api/v1/platform/referrals/commissions/" + line + "/paid", paid, operator.accessToken());
+                assertThat(refused.getStatusCode()).as(change).isEqualTo(HttpStatus.CONFLICT);
+                assertThat(refused.getBody().get("code").asString()).isEqualTo("referrer_inactive");
+            }
+            TestDatabase.owner()
+                    .sql("UPDATE tenants SET status = 'active' WHERE id = ?")
+                    .param(referrer.id())
+                    .update();
+            TestDatabase.owner()
+                    .sql("UPDATE subscriptions SET status = 'active', is_pilot = false WHERE tenant_id = ?")
+                    .param(referrer.id())
+                    .update();
+        });
+        assertThat(detail(rx).get("lines").get(0).get("referrer_inactive").asBoolean())
+                .isFalse();
+        assertThat(platform.post(
+                                "/api/v1/platform/referrals/commissions/" + line + "/paid",
+                                paid,
+                                operator.accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+    }
+
     static void subscription(UUID tenantId, String status) {
         TestDatabase.owner()
                 .sql("UPDATE subscriptions SET status = ? WHERE tenant_id = ?")

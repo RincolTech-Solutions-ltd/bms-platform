@@ -6633,7 +6633,7 @@
             "type" : "string"
           },
           "referrer_status" : {
-            "description" : "The referrer business now: active, suspended or cancelled",
+            "description" : "The referrer business now: active, suspended, cancelled, past_due or trial_lapsed",
             "type" : "string"
           },
           "referrer_tenant_id" : {
@@ -7043,7 +7043,7 @@
             "type" : "string"
           },
           "inactive_when_worked_out" : {
-            "description" : "The referrer business was suspended or cancelled when the line was worked out",
+            "description" : "The referrer business was not active when the line was worked out",
             "type" : "boolean"
           },
           "kind" : {
@@ -7082,11 +7082,11 @@
             "type" : "string"
           },
           "referrer_inactive" : {
-            "description" : "The referrer business is suspended or cancelled now: marking the line paid needs confirm_referrer_inactive",
+            "description" : "The referrer business is not active now: marking the line paid needs confirm_referrer_inactive",
             "type" : "boolean"
           },
           "referrer_status" : {
-            "description" : "The referrer business now: active, suspended or cancelled",
+            "description" : "The referrer business now: active, suspended, cancelled, past_due or trial_lapsed",
             "type" : "string"
           },
           "reversed_by_line_id" : {
@@ -7161,7 +7161,7 @@
         "description" : "The commission was paid outside the app; this records it",
         "properties" : {
           "confirm_referrer_inactive" : {
-            "description" : "True to pay a line although the referrer business is suspended or cancelled now; without it that is 409 referrer_inactive",
+            "description" : "True to pay a line although the referrer business is inactive now (suspended, cancelled, past_due or trial_lapsed); without it that is 409 referrer_inactive",
             "type" : "boolean"
           },
           "method" : {

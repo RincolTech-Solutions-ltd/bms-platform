@@ -313,7 +313,7 @@ CREATE TABLE referral_commission_lines (
     currency                    char(3)      NOT NULL REFERENCES currencies (code),
     months_counted              integer      CHECK (months_counted >= 0),
     rule_snapshot               jsonb,
-    -- The referrer business was suspended or cancelled when the line was worked out: the operator decides before paying.
+    -- The referrer business was inactive (bms_referrer_status) when the line was worked out: the operator decides before paying.
     referrer_inactive           boolean      NOT NULL DEFAULT false,
     note                        varchar(500),
     paid_on                     date,
@@ -422,16 +422,20 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $$
 $$;
 REVOKE ALL ON FUNCTION bms_referral_status(timestamptz, uuid) FROM PUBLIC;
 
--- The referrer business as it is now (ADR-069 decision 12): suspended (the business, or its latest subscription), cancelled
--- (its latest subscription), or active. Worked out at every read, so a line earned while the referrer was active is flagged as
--- soon as the referrer stops.
+-- The referrer business as it is now (ADR-069 decision 12): active only while it is in use and paying or in its free month.
+-- Anything else is inactive: suspended (the business, or its latest subscription), cancelled (its latest subscription),
+-- past_due (its paid period is over) or trial_lapsed (its free month ended with no payment, today in the business's own time
+-- zone; a pilot has no end). tenants.status has no other value and subscriptions no other terminal one. Worked out at every
+-- read, so a line earned while the referrer was active is flagged as soon as the referrer stops.
 CREATE FUNCTION bms_referrer_status(p_referrer uuid) RETURNS text
 LANGUAGE sql STABLE SET search_path = public, pg_temp AS $$
-    SELECT CASE WHEN t.status = 'suspended' THEN 'suspended'
-                WHEN s.status IN ('suspended', 'cancelled') THEN s.status
+    SELECT CASE WHEN t.status <> 'active' THEN 'suspended'
+                WHEN s.status IN ('suspended', 'cancelled', 'past_due') THEN s.status
+                WHEN s.status = 'trial' AND NOT s.is_pilot
+                     AND s.trial_ends_on < (now() AT TIME ZONE t.timezone)::date THEN 'trial_lapsed'
                 ELSE 'active' END
       FROM tenants t
-      LEFT JOIN LATERAL (SELECT x.status FROM subscriptions x WHERE x.tenant_id = t.id
+      LEFT JOIN LATERAL (SELECT x.status, x.is_pilot, x.trial_ends_on FROM subscriptions x WHERE x.tenant_id = t.id
                           ORDER BY x.created_at DESC LIMIT 1) s ON true
      WHERE t.id = p_referrer
 $$;
@@ -713,7 +717,7 @@ $$;
 --    referral_payment_outcomes). Recording a payment locks the business's subscription first (V75), so two payments recorded
 --    at once are counted one after the other and never both as the first; it then shares the lock on the business's tenant
 --    row that a change of referrer takes, so a payment recorded during a change sees the referral the change left current. Amounts are whole minor units, rounded half up. A line
---    worked out while the referrer business is suspended or cancelled keeps referrer_inactive; the reads and marking paid look
+--    worked out while the referrer business is inactive (suspended, cancelled, past due or a lapsed trial) keeps referrer_inactive; the reads and marking paid look
 --    at the referrer's status now (bms_referrer_status). Outcomes: added,
 --    no_referral, no_rule, not_first_payment, months_used, currency_differs, cap_reached, zero.
 -- ---------------------------------------------------------------------------------------------
@@ -915,8 +919,8 @@ $$;
 
 -- Marks one line paid (the app records it; the money moves outside it). Returns 'not_found', 'already_paid', 'reversed' (an
 -- unpaid line that was reversed is never paid, ADR-069 decision 11), 'reversal_of_unpaid' (the reversal of a line that was
--- never paid is never paid either), 'referrer_inactive' (the referrer is suspended or
--- cancelled now and p_confirm_inactive is false, decision 12), or the referral id as text.
+-- never paid is never paid either), 'referrer_inactive' (the referrer is inactive now, bms_referrer_status,
+-- and p_confirm_inactive is false, decision 12), or the referral id as text.
 CREATE FUNCTION platform_referral_mark_paid(
     p_line_id uuid, p_paid_on date, p_method text, p_reference text, p_note text, p_confirm_inactive boolean,
     p_platform_user_id uuid, p_now timestamptz)

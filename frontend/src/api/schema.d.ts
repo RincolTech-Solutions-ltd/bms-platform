@@ -9764,7 +9764,7 @@ export interface components {
             referred_tenant_id?: string;
             referrer_name?: string;
             referrer_slug?: string;
-            /** @description The referrer business now: active, suspended or cancelled */
+            /** @description The referrer business now: active, suspended, cancelled, past_due or trial_lapsed */
             referrer_status?: string;
             /** Format: uuid */
             referrer_tenant_id?: string;
@@ -9940,7 +9940,7 @@ export interface components {
             currency?: string;
             /** Format: uuid */
             id?: string;
-            /** @description The referrer business was suspended or cancelled when the line was worked out */
+            /** @description The referrer business was not active when the line was worked out */
             inactive_when_worked_out?: boolean;
             /** @description payment (worked out from a rule), manual (typed) or reversal */
             kind?: string;
@@ -9957,9 +9957,9 @@ export interface components {
             paid_reference?: string;
             /** Format: uuid */
             payment_id?: string;
-            /** @description The referrer business is suspended or cancelled now: marking the line paid needs confirm_referrer_inactive */
+            /** @description The referrer business is not active now: marking the line paid needs confirm_referrer_inactive */
             referrer_inactive?: boolean;
-            /** @description The referrer business now: active, suspended or cancelled */
+            /** @description The referrer business now: active, suspended, cancelled, past_due or trial_lapsed */
             referrer_status?: string;
             /** Format: uuid */
             reversed_by_line_id?: string;
@@ -10006,7 +10006,7 @@ export interface components {
         };
         /** @description The commission was paid outside the app; this records it */
         ReferralLinePaidRequest: {
-            /** @description True to pay a line although the referrer business is suspended or cancelled now; without it that is 409 referrer_inactive */
+            /** @description True to pay a line although the referrer business is inactive now (suspended, cancelled, past_due or trial_lapsed); without it that is 409 referrer_inactive */
             confirm_referrer_inactive?: boolean;
             method: string;
             note?: string;

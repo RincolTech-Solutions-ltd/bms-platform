@@ -597,9 +597,9 @@ class ReferralService implements Referrals {
             throw new ApiException(
                     HttpStatus.CONFLICT,
                     "referrer_inactive",
-                    "Referrer suspended or cancelled",
-                    "The business that earned this line is suspended or cancelled now. Confirm that it is still to be"
-                            + " paid, or leave it unpaid.");
+                    "Referrer inactive",
+                    "The business that earned this line is suspended, cancelled, past due or out of its free month now."
+                            + " Confirm that it is still to be paid, or leave it unpaid.");
         }
         UUID referralId = UUID.fromString(result);
         ReferralDetail detail = detail(referralId);
