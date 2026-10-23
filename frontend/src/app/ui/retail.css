@@ -367,7 +367,8 @@
 }
 
 /* An item going on the sale (#508): a new line slides up 8px and fades in, and the count beside Items pops on every add or
-   top-up, without overshoot. Both are keyed by the add in sale.tsx, so nothing moves on a removal or a refused duplicate. */
+   top-up, without overshoot. Both are keyed by the add in sale.tsx, so nothing moves on a removal or a refused duplicate. The
+   pop is its own class, set only after an add, so a badge that mounts with lines restored from a saved draft stays still. */
 .line-new {
   animation: rt-line-in var(--motion) var(--ease-out);
 }
@@ -376,6 +377,9 @@
   margin-left: var(--space-1);
   vertical-align: middle;
   font-variant-numeric: tabular-nums;
+}
+
+.count-pop {
   animation: rt-count-pop var(--motion) var(--ease-out);
 }
 

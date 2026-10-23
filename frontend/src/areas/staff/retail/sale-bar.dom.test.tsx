@@ -15,10 +15,11 @@ vi.setConfig({ testTimeout: 20000 });
 
 const bulb: Product = { id: 'p1', code: 'P003', description: 'Test Bulb 9W', unit: 'piece', sell_minor: 6000, active: true, qty: '12.000' };
 const lamp: Product = { id: 'p2', code: 'P004', description: 'Test Lamp 15W', unit: 'piece', sell_minor: 39000, active: true, qty: '8.000' };
+const cable: Product = { id: 'p3', code: 'P005', description: 'Test Cable 2m', unit: 'piece', sell_minor: 2500, active: true, qty: '30.000' };
 
 vi.mock('../../../api/retail', async (original) => ({
   ...(await original<typeof import('../../../api/retail')>()),
-  retail: { listProducts: () => Promise.resolve([bulb, lamp]), listCustomers: () => Promise.resolve([]), createSale: vi.fn() },
+  retail: { listProducts: () => Promise.resolve([bulb, lamp, cable]), listCustomers: () => Promise.resolve([]), createSale: vi.fn() },
 }));
 
 const { RecordSale } = await import('./sale');
@@ -107,6 +108,7 @@ describe('adding an item', () => {
     expect(document.querySelector('.count-badge')).toBeNull();
     await addItem('Test Bulb 9W');
     expect(vibrate).toHaveBeenCalledWith(10);
+    expect(document.querySelector('.count-badge')?.classList.contains('count-pop')).toBe(true);
     expect(document.querySelectorAll('.line-card')).toHaveLength(1);
     expect(document.querySelectorAll('.line-new')).toHaveLength(1);
     const first = document.querySelector('.count-badge');
@@ -133,6 +135,22 @@ describe('adding an item', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove Test Bulb 9W' }));
     expect(document.querySelector('.count-badge')?.textContent).toBe('1 on the sale');
     expect(document.querySelector('.count-badge')).toBe(badge);
+    expect(document.querySelectorAll('.line-new')).toHaveLength(0);
+  });
+
+  it('does not pop the count when a saved draft is restored with its lines', async () => {
+    open();
+    await addItem('Test Bulb 9W');
+    await addItem('Test Lamp 15W');
+    await addItem('Test Cable 2m');
+    expect(document.querySelector('.count-badge')?.textContent).toBe('3 on the sale');
+    // The cashier reloads or comes back to Record a sale: the draft kept on the phone comes back with no add.
+    cleanup();
+    open();
+    expect((await screen.findByRole('heading', { name: /^Items/ })).textContent).toBe('Items 3 on the sale');
+    expect(document.querySelectorAll('.line-card')).toHaveLength(3);
+    expect(document.querySelector('.count-badge')).not.toBeNull();
+    expect(document.querySelector('.count-pop')).toBeNull();
     expect(document.querySelectorAll('.line-new')).toHaveLength(0);
   });
 
@@ -169,5 +187,8 @@ describe('the sale screen stylesheet', () => {
       expect([...frames.matchAll(/([a-z-]+):/g)].map((m) => m[1]).every((p) => p === 'opacity' || p === 'transform')).toBe(true);
     }
     expect(retail).toMatch(/\.line-new \{\s*animation: rt-line-in var\(--motion\) var\(--ease-out\);/);
+    // The pop is its own class, never on the badge itself, so a badge that mounts without an add stays still.
+    expect(retail).toMatch(/\.count-pop \{\s*animation: rt-count-pop var\(--motion\) var\(--ease-out\);/);
+    expect(retail.match(/\.count-badge \{[^}]*\}/)?.[0]).not.toMatch(/animation/);
   });
 });

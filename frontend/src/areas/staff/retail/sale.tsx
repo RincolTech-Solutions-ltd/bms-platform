@@ -414,7 +414,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
       <h2>
         Items{' '}
         {shown.lines.length > 0 && (
-          <span key={pops} className="badge count-badge">
+          <span key={pops} className={pops > 0 ? 'badge count-badge count-pop' : 'badge count-badge'}>
             {shown.lines.length}
             <span className="visually-hidden"> on the sale</span>
           </span>
