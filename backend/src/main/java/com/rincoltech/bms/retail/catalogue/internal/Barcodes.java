@@ -26,7 +26,7 @@ final class Barcodes {
                     + " format to code128 if it really is this.";
 
     private static final java.util.regex.Pattern SCIENTIFIC =
-            java.util.regex.Pattern.compile("[+-]?\\d+(?:[.,]\\d+)?[eE][+-]?\\d+");
+            java.util.regex.Pattern.compile("[+-]?\\d+[.,]\\d+[eE][+-]?\\d+");
 
     /** The signs a code may not hold, since the lookup carries it in the path. */
     static final String NOT_IN_PATH = "%;?#/\\";

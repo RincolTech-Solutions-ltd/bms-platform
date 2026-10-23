@@ -1000,7 +1000,7 @@ FR-RET-63 is the low-stock level of an item (ADR-057, issue #412, migration `V76
 FR-RET-64 is the slow movers section of Stock health (issue #414); reports only, no migration and no permission added.
 FR-RET-65 is the range of the Retail home (ADR-060, issue #428); reports only, no migration and no permission added.
 FR-RET-66 is sharing a sale's receipt from the seller's own phone (ADR-061, issue #439); one read route, no migration and no permission added.
-FR-RET-68 is barcodes on products, scanning on the sale, restock, move stock and stock count forms, and printed labels (ADR-070, issue #345); migration `V87`, no permission added (FR-RET-67 is claimed by the open offline sales pull request).
+FR-RET-68 is barcodes on products, scanning on the sale, restock, move stock and stock count forms, and printed labels (ADR-070, issue #345); migration `V87`, no permission added (FR-RET-67 is the offline sales of issue #458).
 
 FR-RET-44 to FR-RET-46 are the corrections of entry mistakes inside the app (ADR-044, issues #351 and #352): one name per item, void a restock, correct a quantity. They add no permission.
 

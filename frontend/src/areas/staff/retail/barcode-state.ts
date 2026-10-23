@@ -25,7 +25,7 @@ export const SPREADSHEET_DAMAGE = 'This does not look like a barcode: the spread
 
 /** All digits of a length no barcode format has (6, 7, 9, 10, 11 or 14), or a number in scientific notation (4.00638E+12). */
 export function spreadsheetDamaged(code: string): boolean {
-  return /^[+-]?\d+(?:[.,]\d+)?[eE][+-]?\d+$/.test(code) || (/^\d+$/.test(code) && [6, 7, 9, 10, 11, 14].includes(code.length));
+  return /^[+-]?\d+[.,]\d+[eE][+-]?\d+$/.test(code) || (/^\d+$/.test(code) && [6, 7, 9, 10, 11, 14].includes(code.length));
 }
 
 export function inferredFormat(code: string): BarcodeFormat {
