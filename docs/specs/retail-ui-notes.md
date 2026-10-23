@@ -1364,7 +1364,8 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
   sold nothing. Only with All branches chosen, for a session that sees every seller's sales in more than one branch; the server
   leaves the lines out over fewer than two shops. Link: Open the shop dashboard.
 - **Who sees what.** The four cards and Sales today are money: they need `retail.sale.all_sellers` in the branches covered
-  (ADR-055); a seller sees no money card, and now sees Low on stock (with `retail.stock.read`) and the open orders (with
+  (ADR-055); Takings today needs besides what the cash summary needs (`retail.cashbook.read` there and `retail.till.close`), so a
+  Supervisor without the till sees no Takings card; a seller sees no money card, and now sees Low on stock (with `retail.stock.read`) and the open orders (with
   `retail.order.manage`) on the Shop card. A session with the orders permission and no sales read still reads the orders board.
 - **States.** "Loading" while the read is on its way, "Could not load" in each card when it fails, the other cards unchanged. A
   part the server leaves out (no money permission over the branches covered, a branch outside the session's scope) takes its card

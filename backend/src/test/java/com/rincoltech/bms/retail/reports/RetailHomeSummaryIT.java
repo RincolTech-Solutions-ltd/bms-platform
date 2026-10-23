@@ -34,8 +34,11 @@ import tools.jackson.databind.JsonNode;
  */
 class RetailHomeSummaryIT extends IntegrationTest {
 
-    static final String ORDERS = ADMIN + ",retail.order.manage";
     static final String CASHBOOK = "retail.cashbook.read,retail.till.close";
+    /** The admin column with the cash book read, which the takings need as the cash summary does. */
+    static final String TILL = ADMIN + ",retail.cashbook.read";
+
+    static final String ORDERS = TILL + ",retail.order.manage";
 
     @Autowired
     TestRestTemplate http;
@@ -110,7 +113,7 @@ class RetailHomeSummaryIT extends IntegrationTest {
     }
 
     long cash(String query, String branches) {
-        return method(home(query, ADMIN, branches).get("takings"), "cash")
+        return method(home(query, TILL, branches).get("takings"), "cash")
                 .get("amount_minor")
                 .asLong();
     }
@@ -184,7 +187,7 @@ class RetailHomeSummaryIT extends IntegrationTest {
     @Test
     void theSalesTodayAreTheDashboardsFigure() {
         JsonNode dashboard = api.get("/reports/dashboard?period=today", ADMIN).getBody();
-        JsonNode r = home("", ADMIN, "*");
+        JsonNode r = home("", TILL, "*");
         assertThat(r.get("sales_today").get("sales_minor").asLong())
                 .isEqualTo(dashboard.get("today").get("sales_minor").asLong());
         assertThat(r.get("low_stock").asInt())
@@ -193,7 +196,7 @@ class RetailHomeSummaryIT extends IntegrationTest {
 
     @Test
     void creditOwedIsTheCreditControlTotalWithTheBuyersAndTheOldestDueDate() {
-        JsonNode owed = home("", ADMIN, "*").get("credit_owed");
+        JsonNode owed = home("", TILL, "*").get("credit_owed");
         assertThat(owed.get("owed_minor").asLong()).isEqualTo(2_700);
         assertThat(owed.get("customers").asInt()).isEqualTo(2);
         assertThat(owed.get("sales").asInt()).isEqualTo(3);
@@ -208,7 +211,7 @@ class RetailHomeSummaryIT extends IntegrationTest {
 
     @Test
     void topFiveItemsTodayAndThisWeek() {
-        JsonNode top = home("", ADMIN, "*").get("top_items");
+        JsonNode top = home("", TILL, "*").get("top_items");
         JsonNode today = top.get("today");
         assertThat(today).hasSize(2);
         assertThat(today.get(0).get("code").asString()).isEqualTo("ANA-1");
@@ -230,7 +233,7 @@ class RetailHomeSummaryIT extends IntegrationTest {
 
     @Test
     void oneLinePerBranchMostSalesFirst() {
-        JsonNode lines = home("", ADMIN, "*").get("branches");
+        JsonNode lines = home("", TILL, "*").get("branches");
         assertThat(lines).hasSize(2);
         assertThat(lines.get(0).get("branch_id").asString())
                 .isEqualTo(t.headOffice().toString());
@@ -317,6 +320,26 @@ class RetailHomeSummaryIT extends IntegrationTest {
     }
 
     @Test
+    void theTakingsNeedTheCashSummarysPermissionsToo() {
+        // Everybody's money without the cash book: the sales and the rest, but not the takings.
+        JsonNode noBook = home("", ADMIN, "*");
+        assertThat(noBook.get("sales_today").get("sales_minor").asLong()).isEqualTo(3_600);
+        assertThat(noBook.has("credit_owed")).isTrue();
+        assertThat(noBook.has("takings")).isFalse();
+        // The cash book read without the till is refused the cash summary, so it gets no takings either.
+        String noTill = TILL.replace(",retail.till.close", "");
+        assertThat(api.get("/reports/cash/daily", noTill).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(home("", noTill, "*").has("takings")).isFalse();
+        // The cash book read at head office only covers head office, not both shops.
+        Map<String, String> scopes = Map.of("X-Dev-Scopes", "retail.cashbook.read=" + t.headOffice());
+        ResponseEntity<JsonNode> one = api.call(HttpMethod.GET, "/reports/home", null, TILL, "*", scopes);
+        assertThat(one.getBody().has("takings")).isFalse();
+        ResponseEntity<JsonNode> hq =
+                api.call(HttpMethod.GET, "/reports/home?branch_id=" + t.headOffice(), null, TILL, "*", scopes);
+        assertThat(hq.getBody().get("takings").get("total_minor").asLong()).isEqualTo(900);
+    }
+
+    @Test
     void theRouteNeedsTheSalesRead() {
         ResponseEntity<JsonNode> denied = api.get("/reports/home", "retail.stock.read,retail.order.manage");
         assertThat(denied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
@@ -376,15 +399,15 @@ class RetailHomeSummaryIT extends IntegrationTest {
     void aRefundTodayOfYesterdaysCashSaleComesOffTodaysCash() {
         giveBack(d.sell(t.headOffice(), "cash", d.p2, "1", 1), "cash");
 
-        JsonNode cash = method(home("", ADMIN, "*").get("takings"), "cash");
+        JsonNode cash = method(home("", TILL, "*").get("takings"), "cash");
         assertThat(cash.get("out_minor").asLong()).isEqualTo(1_500 + 300);
         assertThat(cash.get("amount_minor").asLong()).isEqualTo(1_700 - 300);
         // Yesterday's sale is not today's money, and the head office till paid the refund.
         assertThat(cash.get("sales_minor").asLong()).isEqualTo(3_000);
         assertThat(cash("?branch_id=" + t.secondBranch(), "*")).isEqualTo(1_500);
-        assertCashIsTheCashSummarys(home("", ADMIN, "*").get("takings"));
+        assertCashIsTheCashSummarys(home("", TILL, "*").get("takings"));
         // Sales today still agree with the dashboard, which takes the goods back on the day of the return.
-        assertThat(home("", ADMIN, "*").get("sales_today").get("sales_minor").asLong())
+        assertThat(home("", TILL, "*").get("sales_today").get("sales_minor").asLong())
                 .isEqualTo(api.get("/reports/dashboard?period=today", ADMIN)
                         .getBody()
                         .get("today")
@@ -395,7 +418,7 @@ class RetailHomeSummaryIT extends IntegrationTest {
     @Test
     void aRefundTodayOfYesterdaysMobileMoneySaleComesOffTodaysMobileMoneyNotCash() {
         giveBack(d.sell(t.headOffice(), "mobile_money", d.p2, "1", 1), "mobile_money");
-        JsonNode takings = home("", ADMIN, "*").get("takings");
+        JsonNode takings = home("", TILL, "*").get("takings");
         JsonNode mobile = method(takings, "mobile_money");
         assertThat(mobile.get("out_minor").asLong()).isEqualTo(300);
         assertThat(mobile.get("amount_minor").asLong()).isEqualTo(600 - 300);
@@ -407,7 +430,7 @@ class RetailHomeSummaryIT extends IntegrationTest {
     @Test
     void aReturnOnACreditSaleTakenOffTheBuyersBalanceIsNoMoney() {
         giveBack(d.sell(t.headOffice(), "credit", d.p2, "1", 1), "account");
-        JsonNode takings = home("", ADMIN, "*").get("takings");
+        JsonNode takings = home("", TILL, "*").get("takings");
         // Nothing left the till: no line for the account, and the money taken today is what it was.
         assertThat(takings.get("total_minor").asLong()).isEqualTo(2_400);
         for (JsonNode m : takings.get("methods")) {
@@ -469,7 +492,7 @@ class RetailHomeSummaryIT extends IntegrationTest {
                 UUID.randomUUID().toString());
         assertThat(reversed.getStatusCode()).as("%s", reversed.getBody()).isEqualTo(HttpStatus.OK);
 
-        JsonNode takings = home("", ADMIN, "*").get("takings");
+        JsonNode takings = home("", TILL, "*").get("takings");
         JsonNode cash = method(takings, "cash");
         assertThat(cash.get("payments_minor").asLong()).isEqualTo(200);
         assertThat(cash.get("out_minor").asLong()).isEqualTo(1_500 + 1_000);
@@ -490,11 +513,11 @@ class RetailHomeSummaryIT extends IntegrationTest {
         assertThat(done.getStatusCode().is2xxSuccessful())
                 .as("%s", done.getBody())
                 .isTrue();
-        JsonNode cash = method(home("", ADMIN, "*").get("takings"), "cash");
+        JsonNode cash = method(home("", TILL, "*").get("takings"), "cash");
         assertThat(cash.get("sales_minor").asLong()).isEqualTo(3_000 + 700);
         assertThat(cash.get("fees_minor").asLong()).isEqualTo(500);
         assertThat(cash.get("amount_minor").asLong()).isEqualTo(1_700 + 700 + 500);
-        assertCashIsTheCashSummarys(home("", ADMIN, "*").get("takings"));
+        assertCashIsTheCashSummarys(home("", TILL, "*").get("takings"));
     }
 
     @Test
@@ -506,7 +529,7 @@ class RetailHomeSummaryIT extends IntegrationTest {
         // Entered at half past eleven last night, dated yesterday: yesterday's money.
         UUID late = pay(sale, 50, "cash");
         entered(late, today().minusDays(1), today().minusDays(1) + " 23:30:00");
-        JsonNode cash = method(home("", ADMIN, "*").get("takings"), "cash");
+        JsonNode cash = method(home("", TILL, "*").get("takings"), "cash");
         assertThat(cash.get("payments_minor").asLong()).isEqualTo(200 + 40);
 
         // The payment route refuses a payment dated after the day it is entered; the summary does not rely on it and
@@ -533,7 +556,7 @@ class RetailHomeSummaryIT extends IntegrationTest {
         int mondayAgo = (int) ChronoUnit.DAYS.between(monday, today());
         d.sell(t.headOffice(), "cash", d.p3, "1", sunday);
         d.sell(t.headOffice(), "cash", d.p3, "1", mondayAgo);
-        JsonNode week = home("", ADMIN, "*").get("top_items").get("week");
+        JsonNode week = home("", TILL, "*").get("top_items").get("week");
         JsonNode ana3 = null;
         for (JsonNode i : week) {
             if (i.get("code").asString().equals("ANA-3")) {
@@ -556,7 +579,7 @@ class RetailHomeSummaryIT extends IntegrationTest {
                         + " VALUES (?, ?, 'ST3', 'Test Store Three', false)")
                 .params(UUID.randomUUID(), t.tenantId())
                 .update();
-        JsonNode lines = home("", ADMIN, "*").get("branches");
+        JsonNode lines = home("", TILL, "*").get("branches");
         assertThat(lines).hasSize(2);
         assertThat(lines.get(1).get("branch_id").asString())
                 .isEqualTo(t.secondBranch().toString());
@@ -572,7 +595,7 @@ class RetailHomeSummaryIT extends IntegrationTest {
         assertThat(otherApi.sell(other.headOffice(), "mobile_money", item, "1").getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
 
-        JsonNode mine = home("", ADMIN, "*");
+        JsonNode mine = home("", TILL, "*");
         assertThat(mine.get("sales_today").get("sales_minor").asLong()).isEqualTo(3_600);
         assertThat(method(mine.get("takings"), "mobile_money")
                         .get("amount_minor")

@@ -59,7 +59,8 @@ final class HomeApi {
             description = "Money taken today by way of paying, read the way the cash book reads a day for every way:"
                     + " sales paid at the sale dated today, payments on credit sales dated today and delivery fees taken"
                     + " today, less sales cancelled today, payments on account reversed today and money refunded today on"
-                    + " goods taken back")
+                    + " goods taken back. Besides retail.sale.all_sellers it needs, as the cash summary, retail.cashbook.read"
+                    + " in every branch it covers and retail.till.close (ADR-076)")
     record Takings(long totalMinor, List<Method> methods) {}
 
     @Schema(name = "RetailHomeTakingsMethod")

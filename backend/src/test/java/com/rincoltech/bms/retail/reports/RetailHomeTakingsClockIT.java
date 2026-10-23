@@ -90,7 +90,7 @@ class RetailHomeTakingsClockIT extends IntegrationTest {
     }
 
     JsonNode home() {
-        ResponseEntity<JsonNode> r = api.get("/reports/home", ADMIN);
+        ResponseEntity<JsonNode> r = api.get("/reports/home", RetailHomeSummaryIT.TILL);
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
         return r.getBody();
     }

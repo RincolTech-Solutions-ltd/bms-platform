@@ -38,6 +38,10 @@ rules than the cards need.
    summary covers two or more shops, so a session with one branch, or with one branch chosen in the header, gets no line per shop.
    A branch asked for outside the caller's scope of a part leaves that part out instead of answering zeros, and the PWA takes a
    card away when its part is absent, so no card says "nothing" about a shop the caller cannot see.
+   `takings` also needs what the cash summary needs: `retail.cashbook.read` in every branch it covers and `retail.till.close`
+   (ADR-055, the cash book is the till's). The takings are the cash summary's figures (refunds and reversed payments on account
+   included), so `retail.sale.all_sellers` alone, which a Supervisor holds, must not show what the cash summary hides; the other
+   money parts stay on `retail.sale.all_sellers`, as on the dashboard.
 4. **Takings are read the way the cash book reads a day, for every way of paying.** The cash book (`JdbcCashSales`) is what the
    cash summary shows, and the card links there, so the two must agree: in, the sales paid at the sale dated today (cancelled later
    or not), the payments on credit sales dated today at the branch that took them, and the delivery fees taken at the door today or

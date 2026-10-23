@@ -40,6 +40,8 @@ import org.springframework.transaction.annotation.Transactional;
 class HomeService {
 
     static final String ORDER_MANAGE = "retail.order.manage";
+    static final String CASHBOOK_READ = "retail.cashbook.read";
+    static final String TILL_CLOSE = "retail.till.close";
     static final int TOP = 5;
 
     private final DashboardRepository dashboard;
@@ -91,7 +93,10 @@ class HomeService {
                 count += d.saleCount();
             }
             sales = new Sales(total, count);
-            takings = takings(repo.takings(filter, today, zone));
+            // The takings are the cash summary's figures, so they need its permissions too (ADR-076 decision 3).
+            if (principal.hasPermission(TILL_CLOSE) && cashbookCovers(principal, filter)) {
+                takings = takings(repo.takings(filter, today, zone));
+            }
             BuyerRow b = credit.totals(filter, today);
             owed = new CreditOwed(b.buckets().owed(), b.buyers(), b.sales(), b.oldestDue());
             top = new TopItems(items(filter, today, today), items(filter, weekFrom, today));
@@ -110,6 +115,16 @@ class HomeService {
         }
         return new Summary(
                 today, tenant.profile().currency(), weekFrom, sales, takings, owed, top, lines, lowStock, openOrders);
+    }
+
+    /** True when the caller reads the cash book in every branch of the filter (every branch when null). */
+    private static boolean cashbookCovers(Principal principal, List<UUID> filter) {
+        return filter == null
+                ? principal
+                        .scopeOf(CASHBOOK_READ)
+                        .map(Principal.BranchScope::all)
+                        .orElse(false)
+                : filter.stream().allMatch(b -> principal.may(CASHBOOK_READ, b));
     }
 
     /** Cash and mobile money always, then any other way that took or gave back money today, in, less out. */
