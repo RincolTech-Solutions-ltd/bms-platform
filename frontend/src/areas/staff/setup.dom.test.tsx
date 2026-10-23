@@ -163,10 +163,14 @@ describe('the go-live date', () => {
 // Issue #514: an item of the checklist is Done when its value is saved, the business name given at onboarding included.
 // JUSTIFICATION-A3: a new block of tests for the fix, no new mechanism.
 describe('the set-up checklist', () => {
+  // Each test starts from the same settings: the whole object is restored, so no logo or colour leaks into the next test.
+  let saved: Record<string, unknown> = {};
+  beforeEach(() => {
+    saved = { ...settings };
+  });
   afterEach(() => {
-    settings.setup_dismissed = true;
-    settings.display_name_set = true;
-    delete settings.receipt_footer;
+    for (const k of Object.keys(settings)) delete settings[k];
+    Object.assign(settings, saved);
   });
 
   function status(label: string): string | undefined {
