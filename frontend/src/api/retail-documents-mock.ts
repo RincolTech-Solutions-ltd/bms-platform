@@ -27,7 +27,7 @@ export type DocumentsMock = Pick<
   RetailApi,
   | 'listSaleDocuments' | 'issueSaleDocument' | 'issueTransferDocument' | 'listDocuments' | 'renderDocument' | 'documentUrl' | 'documentSeries'
   | 'setDocumentPrefix' | 'renderCreditNote' | 'listQuotations' | 'getQuotation' | 'createQuotation' | 'cancelQuotation' | 'convertQuotation' | 'customerStatementPdf'
-  | 'saleReceiptPdf' | 'saleReceipt'
+  | 'saleReceiptPdf' | 'saleReceipt' | 'saleReceiptPrinted'
 >;
 
 const DEFAULT_PREFIX: Record<DocumentType, string> = { quotation: 'QT', invoice: 'INV', delivery_note: 'DN' };
@@ -254,6 +254,15 @@ export function createDocumentsMock(env: DocumentsEnv): DocumentsMock {
           payment_method: sale.payment_method, currency: sale.currency ?? 'UGX', total_minor: sale.total_minor ?? 0, paid_minor: sale.paid_minor ?? 0,
           balance_minor: sale.balance_minor ?? 0, returned_minor: 0, net_minor: sale.total_minor ?? 0, credit_notes: [], sale_version: sale.version ?? 1,
         };
+      }),
+
+    // The printed receipt for the screen (issue #500): the mock lays out none, so the screen offers the PDF.
+    saleReceiptPrinted: (saleId) =>
+      env.run(() => {
+        const sale = env.sales().find((x) => x.id === saleId);
+        if (!sale) return env.refuse(404, 'not_found', 'Not found.');
+        if (sale.status !== 'completed') return env.refuse(422, 'sale_voided', 'A cancelled sale has no receipt to share.');
+        return { sale_id: sale.id, sale_version: sale.version ?? 1 };
       }),
 
     // The receipt to share (issue #439): not gated by the documents capability, never stored.

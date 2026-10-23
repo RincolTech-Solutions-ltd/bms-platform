@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
-import { retail, type Sale, type SaleReceipt } from '../../../api/retail';
+import { retail, type ReceiptPreview, type Sale } from '../../../api/retail';
 import { useStaff } from '../context';
 import { ALL_SELLERS, holdsAt } from './permissions';
 import { normalisePhone, receiptCaption, shownPhone, whatsAppLink } from './receipt-share-state';
@@ -19,6 +19,8 @@ export const SHARE_AGAIN = 'The receipt is ready. Tap Share receipt again to sen
 export const SHARE_REFUSED = 'Your phone would not open its share options, so the receipt PDF was downloaded. Send it from your downloads.';
 export const WHATSAPP_HINT = 'WhatsApp opens with the receipt details. To send the PDF itself, use Share receipt and pick WhatsApp.';
 export const WHATSAPP_FAILED = 'WhatsApp could not be opened with these details. Check the number and try again.';
+
+export const NOT_DRAWN = 'The receipt could not be shown on the screen. Download the PDF to see it.';
 
 const CUSTOMER_MANAGE = 'retail.customer.manage';
 
@@ -52,12 +54,13 @@ export async function shareOrDownload(file: File, title: string, text: string): 
   return 'downloaded';
 }
 
-/** The receipt as the PDF prints it, in its order, from the facts the server read off the PDF's own model (issue #500). */
-function ReceiptPaper({ printed: p }: { printed: NonNullable<SaleReceipt['printed']> }) {
+/** The receipt as the PDF prints it, in its order, from what the server read off the PDF's own model (issue #500). */
+function ReceiptPaper({ printed: p }: { printed: NonNullable<ReceiptPreview['printed']> }) {
+  const [logo, setLogo] = useState(true);
   return (
     <article className="receipt-paper" aria-label={`${p.title} ${p.number}`}>
       <header className="receipt-head">
-        {p.logo && <img className="receipt-logo" src={p.logo} alt="" />}
+        {p.logo_url && logo && <img className="receipt-logo" src={p.logo_url} alt="" onError={() => setLogo(false)} />}
         <div>
           <p className="receipt-business">{p.business_name}</p>
           {p.branch_name && <p className="muted">{p.branch_name}</p>}
@@ -80,10 +83,11 @@ function ReceiptPaper({ printed: p }: { printed: NonNullable<SaleReceipt['printe
         <dt>Payment</dt><dd>{p.payment}</dd>
         {p.due_date && <><dt>Due date</dt><dd>{p.due_date}</dd></>}
         {p.price_list && <><dt>Price list</dt><dd>{p.price_list}</dd></>}
+        {p.quotation && <><dt>Quotation</dt><dd>{p.quotation}</dd></>}
       </dl>
       <ol className="receipt-lines" aria-label="Items">
-        {(p.lines ?? []).map((l) => (
-          <li key={l.no}>
+        {(p.lines ?? []).map((l, i) => (
+          <li key={i}>
             <span className="receipt-item">
               {l.description}
               <span className="muted"> {l.code}{l.price_list ? `, ${l.price_list}` : ''}</span>
@@ -100,17 +104,21 @@ function ReceiptPaper({ printed: p }: { printed: NonNullable<SaleReceipt['printe
         <span className="num">{p.total}</span>
       </p>
       <p className="receipt-words">{p.total_words}</p>
-      <div className="receipt-box">
-        <p>{p.status}</p>
-        {p.due && <p className="muted">{p.due}</p>}
-      </div>
+      {p.status && (
+        <div className="receipt-box">
+          <p>{p.status}</p>
+          {p.due && <p className="muted">{p.due}</p>}
+        </div>
+      )}
       {p.net && (
         <div className="receipt-box">
-          {(p.returns ?? []).map((r) => <p key={r}>{r}</p>)}
+          {(p.returns ?? []).map((r, i) => <p key={i}>{r}</p>)}
           <p>Net after returns ({p.currency}): <span className="num">{p.net}</span></p>
         </div>
       )}
+      {p.notes && <p className="muted">{p.notes}</p>}
       <p>Issued by {p.issued_by}<br /><span className="muted">{p.issued_on}</span></p>
+      <p>Received by {p.buyer_name}</p>
       {p.footer && <p className="receipt-footer">{p.footer}</p>}
     </article>
   );
@@ -145,6 +153,13 @@ export function ShareReceipt({ sale, madeHere = false }: { sale: Sale; madeHere?
   // cannot be trusted to show a PDF inline. Open for the state of the sale it was opened at only, so a payment closes it.
   const [shownFor, setShownFor] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  // The printed receipt is its own request, made only once View receipt is tapped, so the facts above stay a cheap read.
+  const printed = useQuery({
+    queryKey: ['retail', 'sale-receipt-printed', key],
+    queryFn: () => retail.saleReceiptPrinted(sale.id ?? ''),
+    enabled: allowed && shownFor === key,
+    retry: false,
+  });
   // The PDF once fetched, for this state of the sale only: a second tap shares it at once, inside the tap, which a phone that
   // let the first tap's wait run out needs. `refused` counts the phone's refusals of the share sheet for this file. `pending`
   // is the fetch under way, which Share and Download the PDF both wait on rather than fetching it twice.
@@ -165,7 +180,7 @@ export function ShareReceipt({ sale, madeHere = false }: { sale: Sale; madeHere?
     f?.customer_id !== undefined && f.customer_version !== undefined && !f.customer_has_contact && holdsAt(me, CUSTOMER_MANAGE, sale.branch_id) && (typed ?? '').trim() !== '';
   const title = `Receipt ${f?.receipt_no ?? sale.sale_no ?? ''}`.trim();
 
-  const shown = shownFor === key && f?.printed !== undefined;
+  const shown = shownFor === key;
   const previewId = `receipt-preview-${sale.id}`;
 
   /** The receipt PDF for this state of the sale, fetched once and kept for Share and Download the PDF. */
@@ -252,21 +267,19 @@ export function ShareReceipt({ sale, madeHere = false }: { sale: Sale; madeHere?
       {f && (
         <>
           <p className="cluster">
-            {f.printed && (
-              <button type="button" className="btn" aria-expanded={shown} aria-controls={previewId} onClick={() => setShownFor(shown ? null : key)}>
-                View receipt
-              </button>
-            )}
+            <button type="button" className="btn" aria-expanded={shown} aria-controls={previewId} onClick={() => setShownFor(shown ? null : key)}>
+              View receipt
+            </button>
             <BusyButton type="button" className="rt-primary" busy={busy} onClick={() => void share()}>Share receipt</BusyButton>
           </p>
           <div id={previewId} className="receipt-preview" hidden={!shown}>
-            {shown && f.printed && (
-              <>
-                <ReceiptPaper printed={f.printed} />
-                <BusyButton type="button" className="receipt-download" busy={downloading} onClick={() => void downloadPdf()}>
-                  Download the PDF
-                </BusyButton>
-              </>
+            {shown && printed.isPending && <p className="loading">Loading</p>}
+            {shown && printed.data?.printed && <ReceiptPaper printed={printed.data.printed} />}
+            {shown && (printed.isError || (printed.data && !printed.data.printed)) && <p className="alert alert-info">{NOT_DRAWN}</p>}
+            {shown && !printed.isPending && (
+              <BusyButton type="button" className="receipt-download" busy={downloading} onClick={() => void downloadPdf()}>
+                Download the PDF
+              </BusyButton>
             )}
           </div>
           {note && <p role="status" className="alert alert-info">{note}</p>}
