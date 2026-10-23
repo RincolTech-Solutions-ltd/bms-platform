@@ -2,8 +2,8 @@ import type { Product } from '../../../api/retail';
 import { parseCount, qtyString, showQty } from './maths';
 
 // Barcodes (ADR-070, issue #345; FR-RET-68): the formats an item accepts, the same rules as the server's
-// Barcodes.java so the item form can say what is wrong before saving, how a keyboard-wedge scanner is told
-// apart from a person typing, and the Code 128 bars a printed label draws.
+// Barcodes.java so the item form can say what is wrong before saving, how a scan lands on a form's lines, and
+// the Code 128 bars a printed label draws.
 
 export type BarcodeFormat = 'ean13' | 'ean8' | 'upca' | 'code128';
 
@@ -69,124 +69,7 @@ export function scanKeys(code: string): string[] {
   return /^\d{12}$/.test(c) ? [`0${c}`, c] : [c];
 }
 
-// ---- Keyboard-wedge scanners ------------------------------------------------------------------------
-
-/**
- * A USB or Bluetooth scanner types the code far faster than a person and ends with Enter. Keys closer together than
- * this are a scanner; a person rarely types two keys within 35 ms, a scanner sends one every 5 to 20. A slow Bluetooth
- * scanner may need more, so each device may raise it up to WEDGE_GAP_MAX_MS in Notifications and app.
- */
-export const WEDGE_GAP_MS = 35;
-export const WEDGE_GAP_MAX_MS = 80;
-export const WEDGE_GAP_CHOICES = [35, 50, 65, 80] as const;
-const WEDGE_GAP_KEY = 'bms.scanner.gap-ms';
-const SCAN_FOCUS_KEY = 'bms.scanner.sale-focus';
-
-/** This device's scanner gap: the saved one between 35 and 80 ms, else 35. Storage can be blocked; then the default. */
-export function wedgeGap(): number {
-  try {
-    const n = Number(window.localStorage.getItem(WEDGE_GAP_KEY));
-    return Number.isInteger(n) && n >= WEDGE_GAP_MS && n <= WEDGE_GAP_MAX_MS ? n : WEDGE_GAP_MS;
-  } catch {
-    return WEDGE_GAP_MS;
-  }
-}
-
-export function saveWedgeGap(ms: number): void {
-  try {
-    if (ms === WEDGE_GAP_MS) window.localStorage.removeItem(WEDGE_GAP_KEY);
-    else window.localStorage.setItem(WEDGE_GAP_KEY, String(Math.min(Math.max(Math.round(ms), WEDGE_GAP_MS), WEDGE_GAP_MAX_MS)));
-  } catch {
-    // Blocked storage keeps the default.
-  }
-}
-
-/** Whether the sale screen keeps the cursor in its scan box (on unless this device turned it off). */
-export function saleScanFocus(): boolean {
-  try {
-    return window.localStorage.getItem(SCAN_FOCUS_KEY) !== 'off';
-  } catch {
-    return true;
-  }
-}
-
-export function saveSaleScanFocus(on: boolean): void {
-  try {
-    if (on) window.localStorage.removeItem(SCAN_FOCUS_KEY);
-    else window.localStorage.setItem(SCAN_FOCUS_KEY, 'off');
-  } catch {
-    // Blocked storage keeps the default.
-  }
-}
-/** The shortest code a wedge burst is taken for (shorter bursts are a fast typist's double key). */
-export const WEDGE_MIN = 4;
-
-/**
- * How long a field must go without a key before the next key starts something new. A scanner can stall for longer
- * than the gap in the middle of a code; until the field has been this quiet, the keys belong to the same burst.
- */
-export const WEDGE_IDLE_MS = 500;
-
-/** The Code 128 code the system makes for an item's labels: IN and eight digits (Barcodes.GENERATED_PREFIX on the server). */
-const LABEL_CODE = /^IN\d{8}$/;
-
-/**
- * A code whose shape proves it whole: an EAN-13, EAN-8 or UPC-A whose check digit comes out right, or one of the
- * system's own label codes. A key a scanner left on its own before a stall is joined back only when it makes one.
- */
-function checked(code: string): boolean {
-  if (LABEL_CODE.test(code)) return true;
-  const c = checkBarcode(code);
-  return c.ok && c.format !== 'code128';
-}
-
-/** How many keys a run keeps: more than the longest code (48), so a person typing a long note never grows it. */
-const WEDGE_KEEP = 64;
-
-/**
- * Collects the keys of one scanner burst: `key` with a printable character, its time and a mark (the field as it was
- * before that key), `enter` at the end, `end` on a Tab. A run is the keys since the field was last idle for
- * WEDGE_IDLE_MS (counted from the last key), Enter, or a Tab. Enter gives a code when it follows the last key at
- * scanner speed and the keys from some key on are at least WEDGE_MIN and steady: at most one gap in four is longer
- * than the gap (a scanner pausing part way), the rest come within it. A person's keys are not steady, even with key
- * rollovers around a pause (1, 2 at +20 ms, 5 at +100 ms, 6 at +20 ms). The code starts at its first two keys within
- * the gap, or at a single key before a stall when that key and the rest make an EAN-13, EAN-8 or UPC-A with a right
- * check digit, or one of the system's IN label codes (a person who types one key just before a scan keeps it). Of the
- * steady codes, the first with a right check digit or the IN shape wins, else the longest. With no code, Enter is left
- * to the form and nothing in the field is touched. `mark` is the mark of the code's first key, to put the field back.
- */
-export function createWedge<T = undefined>(gap = WEDGE_GAP_MS, min = WEDGE_MIN) {
-  let keys: { ch: string; at: number; mark: T | undefined }[] = [];
-  return {
-    key(ch: string, at: number, mark?: T) {
-      const last = keys[keys.length - 1];
-      if (last && at - last.at >= WEDGE_IDLE_MS) keys = [];
-      keys.push({ ch, at, mark });
-      if (keys.length > WEDGE_KEEP) keys.shift();
-    },
-    enter(at: number): { code: string | null; mark: T | undefined } {
-      const run = keys;
-      keys = [];
-      const last = run[run.length - 1];
-      if (!last || at - last.at > gap * 3) return { code: null, mark: undefined };
-      const slow = run.map((k, i) => i > 0 && k.at - (run[i - 1]?.at ?? k.at) > gap);
-      let steady: number | null = null;
-      for (let s = 0; run.length - s >= min; s++) {
-        const stalls = slow.slice(s + 1).filter(Boolean).length;
-        if (stalls * 4 > run.length - 1 - s) continue;
-        const code = run.slice(s).map((k) => k.ch).join('');
-        if (checked(code)) return { code, mark: run[s]?.mark };
-        if (!slow[s + 1] && steady === null) steady = s;
-      }
-      if (steady === null) return { code: null, mark: undefined };
-      return { code: run.slice(steady).map((k) => k.ch).join(''), mark: run[steady]?.mark };
-    },
-    /** Ends the run (a Tab, a dialog): the next key starts a new one. */
-    end() {
-      keys = [];
-    },
-  };
-}
+// ---- Scans on a form --------------------------------------------------------------------------------
 
 /**
  * One more of a quantity typed on a form ("2" is "3", "1.5" is "2.5"), or `stepMilli` thousandths more (a counted

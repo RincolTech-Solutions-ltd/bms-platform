@@ -4,14 +4,15 @@ import { retail, type Product } from '../../../api/retail';
 import { useOffline } from '../../../offline/offline-context';
 import { icons } from '../../../components/icons';
 import { useStaff } from '../context';
-import { WEDGE_GAP_CHOICES, WEDGE_GAP_MS, createWedge, findByBarcodeIn, saleScanFocus, saveSaleScanFocus, saveWedgeGap, spreadsheetDamaged, wedgeGap } from './barcode-state';
+import { findByBarcodeIn, spreadsheetDamaged } from './barcode-state';
 import { holds } from './permissions';
 import { Problem, ProductPicker } from './ui';
 
 // Scanning on the sale, restock, move stock and stock count forms (ADR-070, issue #345; FR-RET-68). Three ways in,
-// one path out: a USB or Bluetooth scanner that types the code and presses Enter (anywhere on the screen, or in the
-// scan box), a code typed in the scan box, or the phone camera. Each looks the code up and hands the form the item
-// and the pack the barcode is on; the form adds a line of one or adds one to the line it has.
+// one path out: a USB or Bluetooth scanner that types the code into the Scan box and presses Enter, a code typed there
+// by hand, or the phone camera. Each looks the code up and hands the form the item and the pack the barcode is on; the
+// form adds a line of one or adds one to the line it has. A scanner is read only through the Scan box (D7): keys typed
+// into a quantity, price or count field are never watched, so they are never taken for a scan.
 
 const CameraScanner = lazy(() => import('./camera-scan'));
 
@@ -52,77 +53,6 @@ function feedback(ok: boolean) {
   }
 }
 
-/** True while focus is in a field a person types into, where a key belongs to that field unless it is a scanner burst. */
-function editable(target: EventTarget | null): target is HTMLInputElement | HTMLTextAreaElement {
-  return target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && !['checkbox', 'radio', 'button', 'submit'].includes(target.type));
-}
-
-/** A modal is open over the form (a sheet, the help, a tour step, a drawer): keys there are not a scan for the form. */
-function dialogOpen(): boolean {
-  return document.querySelector('dialog[open], [role="dialog"][aria-modal="true"], [role="alertdialog"]') !== null;
-}
-
-/** Puts a value into a React controlled input as if typed, so its onChange runs. */
-function setFieldValue(field: HTMLInputElement | HTMLTextAreaElement, value: string) {
-  const proto = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-  Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(field, value);
-  field.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
-/** A text field as it was before a burst's first key: its value and selection, put back when the burst is a scan. */
-type FieldSnapshot = { field: HTMLInputElement | HTMLTextAreaElement; value: string; start: number | null; end: number | null };
-
-function restore(snap: FieldSnapshot) {
-  if (snap.field.value !== snap.value) setFieldValue(snap.field, snap.value);
-  try {
-    if (snap.start !== null && snap.end !== null) snap.field.setSelectionRange(snap.start, snap.end);
-  } catch {
-    // A field type without a selection (number, email) keeps just its value.
-  }
-}
-
-/**
- * A keyboard-wedge scanner anywhere on the screen: a burst of keys faster than a person types, closed by Enter. In a
- * text field the value and selection from before the burst's first key are put back, so a scan with the cursor in a
- * quantity box never changes the quantity, wherever the cursor was, whatever was selected and whatever its onChange did.
- */
-export function useWedgeScan(onScan: (code: string) => void, enabled = true) {
-  const handler = useRef(onScan);
-  handler.current = onScan;
-  useEffect(() => {
-    if (!enabled) return undefined;
-    const wedge = createWedge<FieldSnapshot>(wedgeGap());
-    const down = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      // A modal over the form, or a Tab (a person moving to the next field): the keys after it are a new run.
-      if (dialogOpen() || e.key === 'Tab') {
-        wedge.end();
-        return;
-      }
-      if (e.key === 'Enter') {
-        const { code, mark } = wedge.enter(e.timeStamp || performance.now());
-        // Not a scan: the field keeps what was typed and the Enter reaches the form.
-        if (code === null) return;
-        // The scan box handles its own Enter.
-        if (e.target instanceof HTMLElement && e.target.dataset.scanBox !== undefined) return;
-        // A scan, even one that stalled part way: the field gets back what it had before the code's first key and the
-        // Enter never reaches the form.
-        e.preventDefault();
-        e.stopPropagation();
-        if (mark && mark.field === e.target) restore(mark);
-        handler.current(code);
-      } else if (e.key.length === 1) {
-        const t = e.target;
-        // Each key carries the field as it was before it, so the field is put back to how it was before the code's first
-        // key, whichever key that turns out to be (a scan right after typing keeps what was typed).
-        wedge.key(e.key, e.timeStamp || performance.now(), editable(t) ? { field: t, value: t.value, start: t.selectionStart, end: t.selectionEnd } : undefined);
-      }
-    };
-    document.addEventListener('keydown', down, true);
-    return () => document.removeEventListener('keydown', down, true);
-  }, [enabled]);
-}
-
 /** The signs checkBarcode refuses in a stored code, which also cannot travel in the lookup's path. */
 const UNSTORABLE = /[%;?#/\\]/;
 
@@ -149,7 +79,7 @@ export function ScanBar({ id, branchId, onFound, autoFocus = false }: { id: stri
   // A scanner types into the Scan box only (ADR-070, D7). With autoFocus the cursor starts there, so the first scan lands
   // in it, but only where there is a mouse or trackpad (a till or a laptop): on a phone it would open the keyboard.
   const box = useRef<HTMLInputElement>(null);
-  const holdFocus = autoFocus && saleScanFocus() && finePointer();
+  const holdFocus = autoFocus && finePointer();
   useEffect(() => {
     if (holdFocus) box.current?.focus();
   }, [holdFocus]);
@@ -206,8 +136,6 @@ export function ScanBar({ id, branchId, onFound, autoFocus = false }: { id: stri
       refocus();
     }
   };
-
-  useWedgeScan((code) => void lookUp(code), !camera);
 
   const assign = async (product: Product) => {
     if (outcome?.kind !== 'unknown') return;
@@ -293,34 +221,6 @@ export function ScanBar({ id, branchId, onFound, autoFocus = false }: { id: stri
           />
         </Suspense>
       )}
-    </div>
-  );
-}
-
-/** The scanner settings of this device, in Notifications and app: how slow a scanner may type, and the sale's scan box. */
-export function ScannerSettings() {
-  const [gap, setGap] = useState(wedgeGap);
-  const [focus, setFocus] = useState(saleScanFocus);
-  return (
-    <div className="stack">
-      <p className="hint">
-        A scanner types the code very fast and presses Enter. If scans from a slow Bluetooth scanner end up as typing, choose a
-        slower speed here. This is kept on this device only.
-      </p>
-      <p className="hint">
-        A slower speed is closer to fast typing: a number typed very quickly and then Enter (for example 1000 on a count)
-        may then be taken for a scan, so keep Usual unless scans fail.
-      </p>
-      <label htmlFor="scanner-gap">Scanner speed</label>
-      <select id="scanner-gap" value={gap} onChange={(e) => { const ms = Number(e.target.value); saveWedgeGap(ms); setGap(ms); }}>
-        {WEDGE_GAP_CHOICES.map((ms) => (
-          <option key={ms} value={ms}>{ms === WEDGE_GAP_MS ? `Usual (up to ${ms} ms between keys)` : `Slower (up to ${ms} ms between keys)`}</option>
-        ))}
-      </select>
-      <label>
-        <input type="checkbox" style={{ width: 'auto', minHeight: 24, marginRight: 8 }} checked={focus} onChange={(e) => { saveSaleScanFocus(e.target.checked); setFocus(e.target.checked); }} />
-        Keep the cursor in the scan box on the sale screen, so a scan never presses Enter on the sale
-      </label>
     </div>
   );
 }

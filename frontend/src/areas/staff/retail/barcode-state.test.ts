@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Product } from '../../../api/retail';
-import { CODE128, barcodeKey, checkBarcode, code128Values, code128Widths, createWedge, findByBarcodeIn, plusOne, scanInto } from './barcode-state';
+import { CODE128, barcodeKey, checkBarcode, code128Values, code128Widths, findByBarcodeIn, plusOne, scanInto } from './barcode-state';
 
-// Barcodes (ADR-070, issue #345; FR-RET-68): the same format rules as the server, the scanner burst, the line a scan
+// Barcodes (ADR-070, issue #345; FR-RET-68): the same format rules as the server, the line a scan
 // adds or bumps, and the Code 128 bars of a label. Fabricated codes and items.
 
 describe('FR-RET-68 barcode formats', () => {
@@ -39,45 +39,6 @@ describe('FR-RET-68 barcode formats', () => {
     expect(barcodeKey('036000291452', 'upca')).toBe(barcodeKey('0036000291452', 'ean13'));
     expect(barcodeKey('036000291452', 'code128')).toBe('036000291452');
     expect(barcodeKey('TEST-1', 'code128')).toBe('TEST-1');
-  });
-});
-
-describe('a keyboard-wedge scanner', () => {
-  it('is a fast burst closed by Enter', () => {
-    const wedge = createWedge();
-    [...'4006381333931'].forEach((ch, i) => wedge.key(ch, 1000 + i * 8));
-    expect(wedge.enter(1000 + 13 * 8).code).toBe('4006381333931');
-  });
-
-  it('is not a person typing, nor a burst too short to be a code', () => {
-    const wedge = createWedge();
-    [...'1234'].forEach((ch, i) => wedge.key(ch, 1000 + i * 150));
-    expect(wedge.enter(1700).code).toBeNull();
-    [...'12'].forEach((ch, i) => wedge.key(ch, 2000 + i * 5));
-    expect(wedge.enter(2010).code).toBeNull();
-  });
-});
-
-describe('a keyboard-wedge scanner that stalls', () => {
-  it('joins an EAN-13 starting with 0 that stalls after its first key, though the rest is a UPC-A', () => {
-    const wedge = createWedge<number>();
-    [...'0036000291452'].forEach((ch, i) => wedge.key(ch, 1000 + i * 8 + (i > 0 ? 120 : 0), i));
-    expect(wedge.enter(1000 + 13 * 8 + 120)).toEqual({ code: '0036000291452', mark: 0 });
-  });
-
-  it('counts the idle time from the last key, so a long Code 128 that stalls late is still one code', () => {
-    const wedge = createWedge<number>();
-    let at = 1000;
-    [...'TEST-LAMP-123456789'].forEach((ch, i) => wedge.key(ch, (at += i === 17 ? 120 : 30), i));
-    expect(wedge.enter(at + 30)).toEqual({ code: 'TEST-LAMP-123456789', mark: 0 });
-  });
-
-  it('is not a person with two key rollovers around a pause, at either gap', () => {
-    for (const gap of [35, 80]) {
-      const wedge = createWedge(gap);
-      [1000, 1020, 1120, 1140].forEach((at, i) => wedge.key('1256'[i] ?? '', at));
-      expect(wedge.enter(1145).code).toBeNull();
-    }
   });
 });
 
