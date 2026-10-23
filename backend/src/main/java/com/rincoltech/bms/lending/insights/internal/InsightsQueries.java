@@ -602,13 +602,13 @@ class InsightsQueries {
                 + memberFilter(s, "m", p);
         String submitted = "SELECT l.submitted_by, 'submitted' FROM lending_loans l"
                 + " WHERE l.submitted_by IS NOT NULL AND l.submitted_at >= :fromTs AND l.submitted_at < :toTs"
-                + s.loanFilter("l", p);
+                + " AND l.go_live_on IS NULL" + s.loanFilter("l", p);
         String appraisals = "SELECT a.appraised_by, 'appraisals' FROM lending_loan_appraisals a"
                 + " JOIN lending_loans l ON l.id = a.loan_id"
                 + " WHERE a.created_at >= :fromTs AND a.created_at < :toTs" + s.loanFilter("l", p);
         String money = "SELECT t.recorded_by, t.txn_type FROM lending_loan_transactions t"
                 + " JOIN lending_loans l ON l.id = t.loan_id"
-                + " WHERE t.recorded_by IS NOT NULL AND t.txn_type IN ('disbursement', 'repayment')"
+                + " WHERE t.recorded_by IS NOT NULL AND t.txn_type IN ('disbursement', 'repayment') AND NOT t.is_historic"
                 + " AND t.value_date BETWEEN :from AND :to" + s.loanFilter("l", p);
         String sql = "SELECT w.user_id, u.full_name,"
                 + " count(*) FILTER (WHERE w.kind = 'members') AS members,"

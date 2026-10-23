@@ -45,7 +45,9 @@ fit every lending business, not one register.
    allocation rows; the API marks them `historic` and the loan screen labels them as from the paper register. Insights
    leave a brought-in loan out of the application funnel and the median time to decision, since it was never decided
    as an application in the app. A reversed bring-in (decision 9) is no disbursement in insights and no earlier loan for
-   the repeat-borrower count, so a register mistake recorded again counts its principal once. The loan becomes `active`, or `closed` on its last repayment's date when the register shows it repaid
+   the repeat-borrower count, so a register mistake recorded again counts its principal once. Staff activity credits no
+   one with the register's work: a brought-in loan is no submitted application and a historic row no disbursement or
+   repayment of the person who keyed it in. The loan becomes `active`, or `closed` on its last repayment's date when the register shows it repaid
    in full. A historic repayment cannot be reversed (422 `historic_not_reversible`): it moved no cash in the books, so a
    mistake in it is corrected by withdrawing or recording the loan again before approval.
 4. **One opening entry at go-live.** For the principal still owed, one journal entry dated at the business's go-live

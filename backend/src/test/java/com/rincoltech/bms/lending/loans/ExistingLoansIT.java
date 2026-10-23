@@ -884,6 +884,49 @@ class ExistingLoansIT extends LoanFixtures {
         assertThat(code(refused)).isEqualTo("bring_in_has_activity");
     }
 
+    /**
+     * Staff activity credits no one with the register's past work: the person who keys in a bring-in submitted no
+     * application and gave out or received no money in the app, while a repayment they take in the app counts.
+     */
+    @Test
+    void frExl08_staffActivityGivesTheMakerNoCreditForTheRegistersPastWork() {
+        String product = product("EXL14", Map.of());
+        assertThat(setGoLive(today.minusDays(10)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        LocalDate disbursed = today.minusMonths(2);
+        JsonNode recorded = recorded(request(
+                borrower(19),
+                product,
+                900_000,
+                disbursed,
+                List.of(repayment(disbursed.plusMonths(1), 300_000, "cash", "Test receipt 41"))));
+        approve(recorded);
+        HttpHeaders h = as(admin, adminPerms, "*", null);
+        h.add("Idempotency-Key", "test-" + UUID.randomUUID());
+        ResponseEntity<JsonNode> paid = send(
+                HttpMethod.POST,
+                LOANS + "/" + recorded.get("loan_id").asString() + "/repayments",
+                h,
+                Map.of("amount_minor", 50_000, "value_date", today.toString(), "payment_method_key", "cash"));
+        assertThat(paid.getStatusCode()).as("%s", paid.getBody()).isEqualTo(HttpStatus.CREATED);
+
+        JsonNode members = send(
+                        HttpMethod.GET,
+                        "/api/v1/lending/insights/members?from=" + disbursed + "&to=" + today + "&product_id="
+                                + product,
+                        as(admin, adminPerms, "*", null),
+                        null)
+                .getBody();
+        List<String> work = new ArrayList<>();
+        members.get("staff").forEach(x -> {
+            if (x.get("user_id").asString().equals(admin.toString())) {
+                work.add("submitted=" + x.get("applications_submitted").asLong()
+                        + " disbursements=" + x.get("disbursements").asLong()
+                        + " repayments=" + x.get("repayments_recorded").asLong());
+            }
+        });
+        assertThat(work).containsExactly("submitted=0 disbursements=0 repayments=1");
+    }
+
     // ---- The go-live guard (FR-EXL-03) ----------------------------------------------------
 
     /**
