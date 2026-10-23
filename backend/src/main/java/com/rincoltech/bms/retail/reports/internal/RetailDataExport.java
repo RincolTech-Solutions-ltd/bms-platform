@@ -425,7 +425,8 @@ class RetailDataExport implements DataExportSection {
                                   FROM retail_stock_movements m
                                   JOIN branches b ON b.tenant_id = m.tenant_id AND b.id = m.branch_id
                                  WHERE m.tenant_id = l.tenant_id AND m.source_type = 'retail.purchase'
-                                   AND m.kind = 'purchase' AND m.source_line_id = l.id
+                                   AND m.source_id = l.purchase_id AND m.kind = 'purchase'
+                                   AND m.source_line_id = l.id
                                  GROUP BY b.name, b.code) x) AS branch,
                        sup.name AS supplier, pu.payment_method, l.line_no, p.code,
                        p.description, coalesce(l.unit_qty_total, l.qty_total) AS qty,
