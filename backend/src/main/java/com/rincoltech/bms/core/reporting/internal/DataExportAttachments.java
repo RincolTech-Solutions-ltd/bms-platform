@@ -71,9 +71,17 @@ class DataExportAttachments implements EmailAttachments {
             if (run.isEmpty()) {
                 return Optional.empty();
             }
-            return documents
-                    .readReportObject(run.get().documentId(), maxBytes)
-                    .map(bytes -> new Attachment("business-data-" + run.get().asOf() + ".xlsx", XLSX, bytes));
+            try {
+                return documents
+                        .readReportObject(run.get().documentId(), maxBytes)
+                        .map(bytes ->
+                                new Attachment("business-data-" + run.get().asOf() + ".xlsx", XLSX, bytes));
+            } catch (IllegalArgumentException e) {
+                // Larger than the limit now (it was lowered after the week was queued): empty, so the sender fails the
+                // row
+                // cleanly with attachment_unavailable instead of retrying it.
+                return Optional.<Attachment>empty();
+            }
         });
     }
 }

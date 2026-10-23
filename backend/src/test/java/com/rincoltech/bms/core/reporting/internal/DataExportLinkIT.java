@@ -18,7 +18,7 @@ import org.springframework.test.context.TestPropertySource;
  * The weekly copy that is too large to attach (ADR-074 decisions 6 and 9), with the attachment limit set to one byte: the
  * email carries no file and no link that works without signing in, only the business's own Business set-up, where the
  * signed-in Owner makes the full copy. And the documents module never hands the sender a report object larger than it asked
- * for. Every name is fabricated.
+ * for: the attachment source then answers empty, so the email fails cleanly. Every name is fabricated.
  */
 @Import(TestReports.class)
 @TestPropertySource(
@@ -38,6 +38,9 @@ class DataExportLinkIT extends ReportsItSupport {
 
     @Autowired
     Documents documents;
+
+    @Autowired
+    DataExportAttachments attachments;
 
     @Test
     void aWorkbookOverTheAttachmentLimitIsEmailedAsTheSignInLinkToBusinessSetUpWithNoFile() throws Exception {
@@ -77,6 +80,15 @@ class DataExportLinkIT extends ReportsItSupport {
         assertThatThrownBy(() -> tenantJobs.callAs(t.tenantId(), () -> documents.readReportObject(documentId, 10)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("larger");
+        // The email's attachment source, whose limit (one byte here) was lowered after the week was queued, answers
+        // empty,
+        // so the sender ends the row as attachment_unavailable rather than throwing on every attempt.
+        String runId = TestDatabase.owner()
+                .sql("SELECT id::text FROM report_runs WHERE document_id = ?")
+                .param(documentId)
+                .query(String.class)
+                .single();
+        assertThat(attachments.read(t.tenantId(), runId)).isEmpty();
         // Within the limit it is the stored workbook.
         assertThat(tenantJobs.callAs(t.tenantId(), () -> documents.readReportObject(documentId, 50_000_000L)))
                 .hasValueSatisfying(bytes -> assertThat(bytes).startsWith((byte) 'P', (byte) 'K'));
