@@ -66,7 +66,6 @@ class SettingsService implements TenantSettings, ModuleSettings, GoLiveDate {
     private final BusinessClock clock;
     private final PolicyChangeGuard guard;
     private final ApplicationEventPublisher events;
-    private final List<GoLiveDate.Dependent> goLiveDependents;
 
     SettingsService(
             JdbcClient jdbc,
@@ -78,10 +77,8 @@ class SettingsService implements TenantSettings, ModuleSettings, GoLiveDate {
             TenantModules modules,
             BusinessClock clock,
             @Lazy PolicyChangeGuard guard,
-            ApplicationEventPublisher events,
-            @Lazy List<GoLiveDate.Dependent> goLiveDependents) {
+            ApplicationEventPublisher events) {
         this.events = events;
-        this.goLiveDependents = goLiveDependents;
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.tenant = tenant;
@@ -119,7 +116,7 @@ class SettingsService implements TenantSettings, ModuleSettings, GoLiveDate {
         }
         validate(request);
         if (request.goLiveDate() != null) {
-            requireEarlierOnceInUse(stored, request.goLiveDate());
+            requireEarlier(stored, request.goLiveDate());
         }
         Map<String, Object> changes = plan(stored, request);
         boolean relaxes = relaxes(stored.values(), changes);
@@ -426,19 +423,16 @@ class SettingsService implements TenantSettings, ModuleSettings, GoLiveDate {
     }
 
     /**
-     * ADR-071: once the business has lending in the app's books (a journal entry of its own or an approved bring-in), a
-     * later go-live date would let loans disbursed after go-live come in as if from paper, so the Owner moves it only
-     * earlier. The operator moves it later, with a reason ({@link #setByOperator}).
+     * ADR-071: a later go-live date would let loans disbursed after go-live come in as if from paper, so once a date is
+     * stored the Owner moves it only earlier. The operator moves it later, with a reason ({@link #setByOperator}).
      */
-    private void requireEarlierOnceInUse(Stored stored, LocalDate date) {
+    private void requireEarlier(Stored stored, LocalDate date) {
         Object was = stored.values().get("go_live_date");
-        if (was != null
-                && date.isAfter(LocalDate.parse((String) was))
-                && goLiveDependents.stream().anyMatch(GoLiveDate.Dependent::dependsOnGoLive)) {
+        if (was != null && date.isAfter(LocalDate.parse((String) was))) {
             throw ApiException.rule(
                     "go_live_locked",
-                    "The business already has lending in the app's books, so the go-live date (" + was + ") only moves"
-                            + " earlier. Ask the platform operator to move it later, with a reason.");
+                    "The go-live date (" + was + ") only moves earlier. Ask the platform operator to move it later,"
+                            + " with a reason.");
         }
     }
 

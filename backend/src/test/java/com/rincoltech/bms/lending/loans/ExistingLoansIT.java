@@ -1029,23 +1029,22 @@ class ExistingLoansIT extends LoanFixtures {
     }
 
     /**
-     * Once the business has lending in the app's books (here an approved bring-in), the Owner moves the go-live date only
-     * earlier: a later date would let a loan disbursed after go-live come in as if from paper. The platform operator
-     * moves it later, with a reason, audited. Before that the Owner moves it either way.
+     * The go-live date only moves earlier (the owner's agreed rule): once a date is stored, the Owner's later date is
+     * refused, whether or not lending is in the books yet, since a later date would let a loan disbursed after go-live
+     * come in as if from paper. The platform operator moves it later, with a reason, audited.
      */
     @Test
-    void frExl03_onceLendingIsInTheBooksTheOwnerMovesTheGoLiveDateOnlyEarlier() {
-        String product = product("EXL8", Map.of());
-        String member = borrower(12);
-        assertThat(setGoLive(today.minusDays(10)).getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(setGoLive(today.minusDays(8)).getStatusCode())
-                .as("nothing in the books yet")
+    void frExl03_onceStoredTheOwnerMovesTheGoLiveDateOnlyEarlier() {
+        assertThat(setGoLive(today.minusDays(10)).getStatusCode())
+                .as("the first date")
                 .isEqualTo(HttpStatus.OK);
-        approve(recorded(request(member, product, 900_000, today.minusDays(40), List.of())));
-
-        ResponseEntity<JsonNode> later = setGoLive(today.minusDays(3));
+        ResponseEntity<JsonNode> later = setGoLive(today.minusDays(8));
         assertThat(later.getStatusCode()).as("%s", later.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(code(later)).isEqualTo("go_live_locked");
+        assertThat(code(later)).as("nothing in the books yet, still refused").isEqualTo("go_live_locked");
+        approve(recorded(request(borrower(12), product("EXL8", Map.of()), 900_000, today.minusDays(40), List.of())));
+        ResponseEntity<JsonNode> laterStill = setGoLive(today.minusDays(3));
+        assertThat(laterStill.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(laterStill)).isEqualTo("go_live_locked");
         assertThat(setGoLive(today.minusDays(20)).getStatusCode())
                 .as("earlier is allowed")
                 .isEqualTo(HttpStatus.OK);

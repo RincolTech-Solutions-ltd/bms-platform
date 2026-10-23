@@ -386,7 +386,9 @@ Notes:
   never the maker (the approval CHECK, and the loan's own approver CHECK of V8, since the maker is stored as the
   submitter). The existing loans are read with `lending.loans.read`. The go-live date that bounds them is set by the
   Owner of the business alone (`PATCH /settings`, 403 `owner_only` for another administrator; ADR-062) or by the
-  platform operator with a reason (`platform.tenants.manage`), both audited. An approved bring-in is reversed only
+  platform operator with a reason (`platform.tenants.manage`), both audited. The date can only move earlier, otherwise
+  operator only: once a date is stored the Owner's later date is refused (422 `go_live_locked`), and only the operator
+  moves it later (`PUT /platform/tenants/{tenant_id}/go-live`), since a later date reopens the window for bringing loans in. An approved bring-in is reversed only
   through `loan_bring_in_reversal`, with the same maker and checker permissions, never decided by its maker, and only
   while the loan has no transaction in the app and no penalty charge (ADR-071 decision 9).
 - A loan officer running `lending.reports.collections` sees only loans where they are
