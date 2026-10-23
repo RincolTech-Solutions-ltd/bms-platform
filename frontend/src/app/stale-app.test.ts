@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { isStaleAppError, reloadOnce } from './stale-app';
+import { describe, expect, it, vi } from 'vitest';
+import { isStaleAppError, loadFreshApp, reloadOnce } from './stale-app';
 
 // #491: a phone still on the app from before a deploy tapped a Home card and got the raw
 // "Importing a module script failed." The app now loads itself again, once a minute at most,
@@ -46,5 +46,30 @@ describe('stale app after a deploy', () => {
     expect(reloadOnce(1_000, blocked, reload)).toBe(false);
     expect(reloadOnce(1_000, forgetful, reload)).toBe(false);
     expect(reloads).toBe(0);
+  });
+});
+
+describe('loading the fresh app', () => {
+  it('removes the old offline copy and its saved files, then reloads', async () => {
+    const unregister = vi.fn(async () => true);
+    const update = vi.fn(async () => undefined);
+    const del = vi.fn(async () => true);
+    vi.stubGlobal('navigator', { serviceWorker: { getRegistrations: async () => [{ update, unregister }] } });
+    vi.stubGlobal('caches', { keys: async () => ['workbox-precache-v2'], delete: del });
+    const reload = vi.fn();
+    await loadFreshApp(reload);
+    expect(update).toHaveBeenCalled();
+    expect(unregister).toHaveBeenCalled();
+    expect(del).toHaveBeenCalledWith('workbox-precache-v2');
+    expect(reload).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('still reloads when the browser refuses', async () => {
+    vi.stubGlobal('navigator', { serviceWorker: { getRegistrations: async () => { throw new Error('denied'); } } });
+    const reload = vi.fn();
+    await loadFreshApp(reload);
+    expect(reload).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
   });
 });

@@ -42,8 +42,32 @@ export function claimReload(now = Date.now(), storage: Storage | null = sessionS
   }
 }
 
+
+/**
+ * Loads the newest app, also when the phone's offline copy (the service worker) still holds the old one: it asks the
+ * worker for an update, then removes the old worker and its saved files so the reload fetches the app fresh (Hillary,
+ * 24 Oct 2026: refreshing kept showing "A new version of the app is ready"). The worker registers itself again on load.
+ */
+export async function loadFreshApp(reload: () => void = () => location.reload()): Promise<void> {
+  try {
+    const sw = typeof navigator !== 'undefined' ? navigator.serviceWorker : undefined;
+    if (sw) {
+      const regs = await sw.getRegistrations();
+      await Promise.all(regs.map((r) => r.update().catch(() => undefined)));
+      await Promise.all(regs.map((r) => r.unregister().catch(() => false)));
+    }
+    if (typeof caches !== 'undefined') {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch {
+    // A browser that refuses any of this still gets the plain reload.
+  }
+  reload();
+}
+
 /** Reloads the page when a reload can be claimed; true when it reloads. */
-export function reloadOnce(now = Date.now(), storage: Storage | null = sessionStore(), reload = () => location.reload()): boolean {
+export function reloadOnce(now = Date.now(), storage: Storage | null = sessionStore(), reload = () => void loadFreshApp()): boolean {
   if (!claimReload(now, storage)) return false;
   reload();
   return true;
@@ -55,14 +79,14 @@ export function RouteError({ error }: ErrorComponentProps) {
   // The decision is made once, at the first render; the reload itself runs after rendering.
   const [reloading] = useState(() => stale && claimReload());
   useEffect(() => {
-    if (reloading) location.reload();
+    if (reloading) void loadFreshApp();
     else if (!stale) console.error('Screen error', error);
   }, [reloading, stale, error]);
   if (reloading) return <p role="status">Getting the new version of the app…</p>;
   return (
     <div role="alert" className={stale ? 'alert alert-info' : 'alert alert-danger'}>
       <p>{stale ? 'A new version of the app is ready.' : 'This screen could not open.'}</p>
-      <button type="button" className="btn btn-primary" onClick={() => location.reload()}>
+      <button type="button" className="btn btn-primary" onClick={() => void loadFreshApp()}>
         Load the page again
       </button>
     </div>
