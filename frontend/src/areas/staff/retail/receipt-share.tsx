@@ -85,20 +85,29 @@ function ReceiptPaper({ printed: p }: { printed: NonNullable<ReceiptPreview['pri
         {p.price_list && <><dt>Price list</dt><dd>{p.price_list}</dd></>}
         {p.quotation && <><dt>Quotation</dt><dd>{p.quotation}</dd></>}
       </dl>
-      <ol className="receipt-lines" aria-label="Items">
-        {(p.lines ?? []).map((l, i) => (
-          <li key={i}>
-            <span className="receipt-item">
-              {l.description}
-              <span className="muted"> {l.code}{l.price_list ? `, ${l.price_list}` : ''}</span>
-            </span>
-            <span className="num">{l.amount}</span>
-            <span className="muted receipt-qty">
-              {l.quantity}{l.pack ? ` (${l.pack})` : ''} x <span className="num">{l.unit_price}</span>
-            </span>
-          </li>
-        ))}
-      </ol>
+      {/* The PDF's items table, column for column, with the server's own strings: nothing is joined or worded here. */}
+      <table className="receipt-lines" aria-label="Items">
+        <thead>
+          <tr>
+            <th scope="col">No</th>
+            <th scope="col">Item</th>
+            <th scope="col" className="num">Quantity</th>
+            <th scope="col" className="num">Unit price ({p.currency})</th>
+            <th scope="col" className="num">Amount ({p.currency})</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(p.lines ?? []).map((l, i) => (
+            <tr key={i}>
+              <td>{l.no}</td>
+              <td>{l.description}<br /><span className="muted">{l.detail}</span></td>
+              <td className="num">{l.quantity}{l.pack && <><br /><span className="muted">{l.pack}</span></>}</td>
+              <td className="num">{l.unit_price}</td>
+              <td className="num">{l.amount}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
       <p className="receipt-total">
         <span>Total ({p.currency})</span>
         <span className="num">{p.total}</span>
@@ -118,7 +127,7 @@ function ReceiptPaper({ printed: p }: { printed: NonNullable<ReceiptPreview['pri
       )}
       {p.notes && <p className="muted">{p.notes}</p>}
       <p>Issued by {p.issued_by}<br /><span className="muted">{p.issued_on}</span></p>
-      <p>Received by {p.buyer_name}</p>
+      {p.received && <p>{p.received}</p>}
       {p.footer && <p className="receipt-footer">{p.footer}</p>}
     </article>
   );

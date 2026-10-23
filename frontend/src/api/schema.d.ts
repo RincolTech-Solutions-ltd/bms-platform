@@ -15331,6 +15331,8 @@ export interface components {
             payment?: string;
             price_list?: string;
             quotation?: string;
+            /** @description The received signature line as printed, such as Received by Test Buyer */
+            received?: string;
             /** @description One line for each credit note, oldest first */
             returns?: string[];
             sale_date?: string;
@@ -15345,6 +15347,8 @@ export interface components {
             amount?: string;
             code?: string;
             description?: string;
+            /** @description The line under the description as printed: the code, and the price list after a bar */
+            detail?: string;
             /** Format: int32 */
             no?: number;
             /** @description A pack in base units, such as = 60 piece */

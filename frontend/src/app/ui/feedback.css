@@ -262,7 +262,7 @@
 
 .receipt-paper p,
 .receipt-paper dl,
-.receipt-paper ol {
+.receipt-paper table {
   margin: 0;
 }
 
@@ -320,21 +320,39 @@
 }
 
 .receipt-lines {
-  list-style: none;
-  padding: 0;
-  display: grid;
+  width: 100%;
+  border-collapse: collapse;
 }
 
-.receipt-lines li {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0 var(--space-2);
-  padding-block: var(--space-2);
+.receipt-lines th {
+  color: var(--color-text-muted);
+  font-weight: var(--weight-regular);
+  font-size: var(--text-xs);
+  text-align: start;
+  vertical-align: bottom;
+  padding: 0 var(--space-1) var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.receipt-lines td {
+  vertical-align: top;
+  padding: var(--space-2) var(--space-1);
   border-bottom: 1px dashed var(--color-border);
 }
 
-.receipt-qty {
-  grid-column: 1 / -1;
+.receipt-lines th:first-child,
+.receipt-lines td:first-child {
+  padding-inline-start: 0;
+}
+
+.receipt-lines th:last-child,
+.receipt-lines td:last-child {
+  padding-inline-end: 0;
+}
+
+/* A column head may wrap, so the item column keeps its room on a phone; the figures under it never do. */
+.receipt-lines th.num {
+  white-space: normal;
 }
 
 .receipt-total {

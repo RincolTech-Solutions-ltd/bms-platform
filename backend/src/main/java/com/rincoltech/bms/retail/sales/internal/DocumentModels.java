@@ -78,6 +78,7 @@ class DocumentModels {
         return m;
     }
 
+    @SuppressWarnings("unchecked")
     private void invoice(DocumentSnapshot s, Map<String, Object> m) {
         DocumentSnapshot.SaleRef sale = s.sale();
         Map<String, Object> ref = new LinkedHashMap<>();
@@ -110,6 +111,9 @@ class DocumentModels {
             totals.put("due", null);
         }
         m.put("totals", totals);
+        // The received line as invoice.html prints it, which the receipt on the screen reads too (issue #500).
+        ((Map<String, Object>) m.get("signs"))
+                .put("received", "Received by " + ((Map<String, Object>) m.get("buyer")).get("name"));
     }
 
     // JUSTIFICATION-A3: the receipt to share (issue #439) is the invoice model with the sale's own balance and returns.
@@ -199,6 +203,7 @@ class DocumentModels {
                     l.get("no") instanceof Number n ? n.intValue() : lines.size() + 1,
                     text(l.get("code")),
                     text(l.get("description")),
+                    text(l.get("detail")),
                     text(l.get("quantity")),
                     blank(l.get("pack")),
                     blank(l.get("priceList")),
@@ -236,6 +241,7 @@ class DocumentModels {
                 blank(m.get("notes")),
                 text(signs.get("issuedBy")),
                 text(signs.get("issuedOn")),
+                blank(signs.get("received")),
                 blank(lh.get("footer")));
     }
 
@@ -321,6 +327,7 @@ class DocumentModels {
             m.put("unitPrice", l.unitPriceMinor() == null ? "" : money(l.unitPriceMinor(), s.currency()));
             m.put("total", money(l.totalMinor(), s.currency()));
             m.put("priceList", l.priceList());
+            m.put("detail", detail(l.code(), l.priceList()));
             out.add(m);
         }
         return out;
@@ -464,6 +471,12 @@ class DocumentModels {
     static String quantity(String qty, String unit) {
         String q = plain(qty);
         return unit == null || unit.isBlank() ? q : q + " " + unit;
+    }
+
+    /** The muted line under a line's description on an invoice: the code, and the price list when it has one. */
+    static String detail(String code, String priceList) {
+        String c = code == null ? "" : code;
+        return priceList == null ? c : c + "  |  " + priceList;
     }
 
     /** A pale tint of the brand colour for alternate table rows: 88% white over it. */

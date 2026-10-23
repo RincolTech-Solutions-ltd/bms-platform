@@ -16425,6 +16425,10 @@
           "quotation" : {
             "type" : "string"
           },
+          "received" : {
+            "description" : "The received signature line as printed, such as Received by Test Buyer",
+            "type" : "string"
+          },
           "returns" : {
             "description" : "One line for each credit note, oldest first",
             "items" : {
@@ -16463,6 +16467,10 @@
             "type" : "string"
           },
           "description" : {
+            "type" : "string"
+          },
+          "detail" : {
+            "description" : "The line under the description as printed: the code, and the price list after a bar",
             "type" : "string"
           },
           "no" : {

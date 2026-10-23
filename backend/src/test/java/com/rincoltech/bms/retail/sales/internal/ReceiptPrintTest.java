@@ -59,6 +59,12 @@ class ReceiptPrintTest {
     }
 
     @Test
+    void theLineUnderTheDescriptionIsTheCodeAndThePriceList() {
+        assertThat(DocumentModels.detail("TST-01", null)).isEqualTo("TST-01");
+        assertThat(DocumentModels.detail("TST-01", "Wholesale")).isEqualTo("TST-01  |  Wholesale");
+    }
+
+    @Test
     void aQuantityWithoutAUnitHasNoTrailingSpace() {
         assertThat(DocumentModels.quantity("5.000", null)).isEqualTo("5");
         assertThat(DocumentModels.quantity("2.500", "carton")).isEqualTo("2.5 carton");

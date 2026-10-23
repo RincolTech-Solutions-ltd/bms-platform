@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReceiptPreview, Sale, SaleReceipt } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
@@ -51,9 +51,11 @@ const preview: ReceiptPreview = {
     title: 'RECEIPT', number: 'RS00000007', date: '22 Oct 2026', logo_url: '/api/v1/branding/logo?v=test-1', business_name: 'Test Trading Ltd',
     branch_name: 'Test Branch', branch_location: 'Plot 1 Test Road', buyer_name: 'Test Buyer 01', buyer_contact: '0700 000 031',
     sale_no: 'RS00000007', sale_date: '22 Oct 2026', payment: 'Cash', currency: 'UGX',
-    lines: [{ no: 1, code: 'TST-01', description: 'Test Soap 500g', quantity: '5 piece', unit_price: '5,000', amount: '25,000' }],
+    lines: [
+      { no: 1, code: 'TST-01', description: 'Test Soap 500g', detail: 'TST-01  |  Wholesale', quantity: '5 carton', pack: '= 60 piece', price_list: 'Wholesale', unit_price: '5,000', amount: '25,000' },
+    ],
     total: '25,000', total_words: 'Twenty five thousand Uganda shillings only', status: 'Paid in full by Cash.', returns: [],
-    issued_by: 'Test Seller 01', issued_on: '22 Oct 2026', footer: 'Thank you for shopping with us',
+    issued_by: 'Test Seller 01', issued_on: '22 Oct 2026', received: 'Received by Test Buyer 01', footer: 'Thank you for shopping with us',
   },
 };
 
@@ -126,8 +128,10 @@ describe('Share receipt', () => {
     expect(region?.hidden).toBe(false);
     expect(paper.querySelector('img')?.getAttribute('src')).toBe('/api/v1/branding/logo?v=test-1');
     expect(paper.textContent).toContain('Plot 1 Test Road');
-    expect(paper.textContent).toContain('Test Soap 500g');
-    expect(paper.textContent).toContain('5 piece');
+    // The lines are the PDF's items table, cell for cell, with the server's strings.
+    const items = within(paper).getByRole('table', { name: 'Items' });
+    expect(within(items).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['No', 'Item', 'Quantity', 'Unit price (UGX)', 'Amount (UGX)']);
+    expect(within(items).getAllByRole('cell').map((c) => c.textContent)).toEqual(['1', 'Test Soap 500gTST-01  |  Wholesale', '5 carton= 60 piece', '5,000', '25,000']);
     expect(paper.textContent).toContain('Total (UGX)25,000');
     expect(paper.textContent).toContain('Paid in full by Cash.');
     expect(paper.textContent).toContain('Received by Test Buyer 01');

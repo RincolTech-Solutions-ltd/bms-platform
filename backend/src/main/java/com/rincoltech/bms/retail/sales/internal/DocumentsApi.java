@@ -368,6 +368,10 @@ final class DocumentsApi {
             String issuedBy,
             String issuedOn,
 
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(description = "The received signature line as printed, such as Received by Test Buyer")
+            String received,
+
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = "The receipt footer")
             String footer) {}
 
@@ -376,6 +380,9 @@ final class DocumentsApi {
             int no,
             String code,
             String description,
+
+            @Schema(description = "The line under the description as printed: the code, and the price list after a bar")
+            String detail,
 
             @Schema(description = "The quantity and unit as sold, such as 5 carton, or 5 alone without a unit")
             String quantity,

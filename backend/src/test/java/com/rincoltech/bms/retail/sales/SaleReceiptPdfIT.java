@@ -156,17 +156,21 @@ class SaleReceiptPdfIT extends IntegrationTest {
         if (p.has("quotation")) {
             shown.add("Quotation " + p.get("quotation").asString());
         }
+        // Each line as one row in the PDF's order: number, description, the code and price list line, quantity, pack,
+        // unit price and amount, so the screen's line layout is the PDF's.
         for (JsonNode l : p.get("lines")) {
-            shown.add(l.get("description").asString());
-            shown.add(l.get("code").asString());
-            shown.add(l.get("quantity").asString());
-            if (l.has("pack")) {
-                shown.add(l.get("pack").asString());
-            }
-            if (l.has("price_list")) {
-                shown.add(l.get("price_list").asString());
-            }
-            shown.add(l.get("unit_price").asString() + " " + l.get("amount").asString());
+            shown.add(l.get("no").asInt() + " " + l.get("description").asString() + " "
+                    + l.get("detail").asString()
+                    + " " + l.get("quantity").asString()
+                    + (l.has("pack") ? " " + l.get("pack").asString() : "")
+                    + " " + l.get("unit_price").asString() + " "
+                    + l.get("amount").asString());
+            assertThat(l.get("detail").asString())
+                    .isEqualTo(
+                            l.has("price_list")
+                                    ? l.get("code").asString() + "  |  "
+                                            + l.get("price_list").asString()
+                                    : l.get("code").asString());
         }
         shown.add("Total (" + cur + ") " + p.get("total").asString());
         for (JsonNode r : p.get("returns")) {
@@ -176,6 +180,10 @@ class SaleReceiptPdfIT extends IntegrationTest {
             shown.add("Net after returns (" + cur + "): " + p.get("net").asString());
         }
         shown.add("Issued by " + p.get("issued_by").asString());
+        // The received line is read from the model the template prints, never written by the screen.
+        assertThat(p.get("received").asString())
+                .isEqualTo("Received by " + p.get("buyer_name").asString());
+        shown.add(p.get("received").asString());
         for (String s : shown) {
             assertThat(text).as("the PDF prints %s", s).contains(s.replaceAll("\\s+", " "));
         }
