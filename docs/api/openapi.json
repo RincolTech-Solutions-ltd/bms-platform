@@ -12325,7 +12325,7 @@
         }
       },
       "RetailHomeTakings" : {
-        "description" : "Money taken today: sales paid at the sale dated today (net of goods taken back today) and payments on credit sales dated today, less payments on account reversed today, by way of paying",
+        "description" : "Money taken today by way of paying, counted as the cash summary counts cash: sales paid at the sale dated today, payments on credit sales paid on today, delivery fees paid today and returns voided today, less sales voided today, payments on account reversed today and money refunded today on returns of any day's sales. For cash, takings_minor and voids_minor are the cash summary's Cash takings and Cash sales voided or refunded for today",
         "properties" : {
           "methods" : {
             "items" : {
@@ -12342,21 +12342,22 @@
       "RetailHomeTakingsMethod" : {
         "properties" : {
           "amount_minor" : {
+            "description" : "takings_minor less voids_minor; below zero when more went back than came in",
             "format" : "int64",
             "type" : "integer"
           },
           "method" : {
-            "description" : "cash and mobile_money always, then any other way that took money today (bank)",
+            "description" : "cash and mobile_money always, then any other way that took or paid back money today (bank)",
             "enum" : [ "cash", "mobile_money", "bank" ],
             "type" : "string"
           },
-          "payments_minor" : {
-            "description" : "Of amount_minor, the payments on credit sales",
+          "takings_minor" : {
+            "description" : "Money in today: sales paid at the sale, payments on credit sales, delivery fees, returns voided",
             "format" : "int64",
             "type" : "integer"
           },
-          "sales_minor" : {
-            "description" : "Of amount_minor, the sales paid at the sale",
+          "voids_minor" : {
+            "description" : "Money out today: sales voided, payments on account reversed, refunds on returns",
             "format" : "int64",
             "type" : "integer"
           }

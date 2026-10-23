@@ -1350,7 +1350,7 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
 
 - **Where.** The staff Home (`/staff`), after the Shop card and before the Lending card. Every shop figure on Home, the Shop card's
   included, comes from one read, `GET /retail/reports/home`, under the branch chosen in the header (All branches sends none).
-- **Takings today.** A line each for Cash and Mobile money, then Bank or any other way only when it took money today, and the Total.
+- **Takings today.** A line each for Cash and Mobile money, then Bank or any other way only when it took or paid back money today, and the Total. Each line is what came in less what went back out today (voids and refunds), so Cash matches the cash summary for today; a line can be below zero on a day of more refunds than sales.
   Sales paid at the sale today and payments on credit sales dated today, as the cash summary and credit control count them. Nothing
   taken: "No money taken yet today." Link: Open the cash summary (for whoever may close the till), otherwise See all sales.
 - **Credit owed.** What customers owe, with "3 customers" as a hint, and Oldest due with the earliest due date of a sale still owing

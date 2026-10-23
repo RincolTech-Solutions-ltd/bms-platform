@@ -57,24 +57,31 @@ final class HomeApi {
     @Schema(
             name = "RetailHomeTakings",
             description =
-                    "Money taken today: sales paid at the sale dated today (net of goods taken back today) and payments on"
-                            + " credit sales dated today, less payments on account reversed today, by way of paying")
+                    "Money taken today by way of paying, counted as the cash summary counts cash: sales paid at the sale"
+                            + " dated today, payments on credit sales paid on today, delivery fees paid today and returns voided"
+                            + " today, less sales voided today, payments on account reversed today and money refunded today on"
+                            + " returns of any day's sales. For cash, takings_minor and voids_minor are the cash summary's Cash"
+                            + " takings and Cash sales voided or refunded for today")
     record Takings(long totalMinor, List<Method> methods) {}
 
     @Schema(name = "RetailHomeTakingsMethod")
     record Method(
             @Schema(
-                    description = "cash and mobile_money always, then any other way that took money today (bank)",
+                    description =
+                            "cash and mobile_money always, then any other way that took or paid back money today (bank)",
                     allowableValues = {"cash", "mobile_money", "bank"})
             String method,
 
+            @Schema(description = "takings_minor less voids_minor; below zero when more went back than came in")
             long amountMinor,
 
-            @Schema(description = "Of amount_minor, the sales paid at the sale")
-            long salesMinor,
+            @Schema(
+                    description =
+                            "Money in today: sales paid at the sale, payments on credit sales, delivery fees, returns voided")
+            long takingsMinor,
 
-            @Schema(description = "Of amount_minor, the payments on credit sales")
-            long paymentsMinor) {}
+            @Schema(description = "Money out today: sales voided, payments on account reversed, refunds on returns")
+            long voidsMinor) {}
 
     @Schema(name = "RetailHomeCreditOwed", description = "What buyers owe on credit sales, as Credit control counts it")
     @JsonInclude(JsonInclude.Include.NON_NULL)

@@ -95,9 +95,9 @@ const HOME = {
   takings: {
     total_minor: 98_000,
     methods: [
-      { method: 'cash', amount_minor: 60_000, sales_minor: 50_000, payments_minor: 10_000 },
-      { method: 'mobile_money', amount_minor: 35_000, sales_minor: 35_000, payments_minor: 0 },
-      { method: 'bank', amount_minor: 3_000, sales_minor: 0, payments_minor: 3_000 },
+      { method: 'cash', amount_minor: 60_000, takings_minor: 62_000, voids_minor: 2_000 },
+      { method: 'mobile_money', amount_minor: 35_000, takings_minor: 35_000, voids_minor: 0 },
+      { method: 'bank', amount_minor: 3_000, takings_minor: 3_000, voids_minor: 0 },
     ],
   },
   credit_owed: { owed_minor: 450_000, customers: 3, sales: 5, oldest_due_date: '2026-10-02' },
@@ -377,7 +377,7 @@ describe('the shop summary cards (issue #485)', () => {
     calls.home.mockResolvedValue({
       ...HOME,
       sales_today: { sales_minor: 0, sale_count: 0 },
-      takings: { total_minor: 0, methods: [{ method: 'cash', amount_minor: 0, sales_minor: 0, payments_minor: 0 }, { method: 'mobile_money', amount_minor: 0, sales_minor: 0, payments_minor: 0 }] },
+      takings: { total_minor: 0, methods: [{ method: 'cash', amount_minor: 0, takings_minor: 0, voids_minor: 0 }, { method: 'mobile_money', amount_minor: 0, takings_minor: 0, voids_minor: 0 }] },
       credit_owed: { owed_minor: 0, customers: 0, sales: 0 },
       top_items: { today: [], week: [] },
     });

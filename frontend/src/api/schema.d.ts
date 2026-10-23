@@ -13101,30 +13101,33 @@ export interface components {
              */
             week_from?: string;
         };
-        /** @description Money taken today: sales paid at the sale dated today (net of goods taken back today) and payments on credit sales dated today, less payments on account reversed today, by way of paying */
+        /** @description Money taken today by way of paying, counted as the cash summary counts cash: sales paid at the sale dated today, payments on credit sales paid on today, delivery fees paid today and returns voided today, less sales voided today, payments on account reversed today and money refunded today on returns of any day's sales. For cash, takings_minor and voids_minor are the cash summary's Cash takings and Cash sales voided or refunded for today */
         RetailHomeTakings: {
             methods?: components["schemas"]["RetailHomeTakingsMethod"][];
             /** Format: int64 */
             total_minor?: number;
         };
         RetailHomeTakingsMethod: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description takings_minor less voids_minor; below zero when more went back than came in
+             */
             amount_minor?: number;
             /**
-             * @description cash and mobile_money always, then any other way that took money today (bank)
+             * @description cash and mobile_money always, then any other way that took or paid back money today (bank)
              * @enum {string}
              */
             method?: "cash" | "mobile_money" | "bank";
             /**
              * Format: int64
-             * @description Of amount_minor, the payments on credit sales
+             * @description Money in today: sales paid at the sale, payments on credit sales, delivery fees, returns voided
              */
-            payments_minor?: number;
+            takings_minor?: number;
             /**
              * Format: int64
-             * @description Of amount_minor, the sales paid at the sale
+             * @description Money out today: sales voided, payments on account reversed, refunds on returns
              */
-            sales_minor?: number;
+            voids_minor?: number;
         };
         RetailHomeTopItem: {
             code?: string;

@@ -5,7 +5,6 @@ import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.retail.reports.internal.CreditRepository.BuyerRow;
-import com.rincoltech.bms.retail.reports.internal.CreditRepository.Payment;
 import com.rincoltech.bms.retail.reports.internal.DashboardRepository.DaySales;
 import com.rincoltech.bms.retail.reports.internal.HomeApi.BranchLine;
 import com.rincoltech.bms.retail.reports.internal.HomeApi.CreditOwed;
@@ -16,6 +15,7 @@ import com.rincoltech.bms.retail.reports.internal.HomeApi.Summary;
 import com.rincoltech.bms.retail.reports.internal.HomeApi.Takings;
 import com.rincoltech.bms.retail.reports.internal.HomeApi.TopItems;
 import com.rincoltech.bms.retail.reports.internal.HomeRepository.Shop;
+import com.rincoltech.bms.retail.reports.internal.HomeRepository.Taken;
 import com.rincoltech.bms.retail.reports.internal.SalesAnalysisRepository.Dimension;
 import com.rincoltech.bms.retail.reports.internal.SalesAnalysisRepository.Order;
 import com.rincoltech.bms.retail.stock.Quantities;
@@ -90,10 +90,7 @@ class HomeService {
                 count += d.saleCount();
             }
             sales = new Sales(total, count);
-            takings = takings(
-                    rows,
-                    credit.payments(
-                            filter, today, today, today.atStartOfDay(zone).toInstant()));
+            takings = takings(repo.takings(filter, today, zone));
             BuyerRow b = credit.totals(filter, today);
             owed = new CreditOwed(b.buckets().owed(), b.buyers(), b.sales(), b.oldestDue());
             top = new TopItems(items(filter, today, today), items(filter, weekFrom, today));
@@ -113,24 +110,22 @@ class HomeService {
                 today, tenant.profile().currency(), weekFrom, sales, takings, owed, top, lines, lowStock, openOrders);
     }
 
-    /** Cash and mobile money always, then any other way that took money; sales paid at the sale and payments on credit sales. */
-    private static Takings takings(List<DaySales> rows, List<Payment> payments) {
+    /** Cash and mobile money always, then any other way that took or paid back money; each is what came in less what went out. */
+    private static Takings takings(List<Taken> taken) {
         Map<String, long[]> byMethod = new LinkedHashMap<>();
         byMethod.put("cash", new long[2]);
         byMethod.put("mobile_money", new long[2]);
-        for (DaySales d : rows) {
-            if (!d.credit()) {
-                byMethod.computeIfAbsent(d.method(), k -> new long[2])[0] += d.sales();
-            }
-        }
-        for (Payment p : payments) {
-            byMethod.computeIfAbsent(p.method(), k -> new long[2])[1] += p.amount();
+        for (Taken t :
+                taken.stream().sorted(Comparator.comparing(Taken::method)).toList()) {
+            long[] f = byMethod.computeIfAbsent(t.method(), k -> new long[2]);
+            f[0] = Math.addExact(f[0], t.takings());
+            f[1] = Math.addExact(f[1], t.voids());
         }
         List<Method> methods = new ArrayList<>();
         long total = 0;
         for (Map.Entry<String, long[]> e : byMethod.entrySet()) {
             long[] f = e.getValue();
-            long amount = Math.addExact(f[0], f[1]);
+            long amount = Math.subtractExact(f[0], f[1]);
             boolean always = e.getKey().equals("cash") || e.getKey().equals("mobile_money");
             if (always || f[0] != 0 || f[1] != 0) {
                 methods.add(new Method(e.getKey(), amount, f[0], f[1]));

@@ -27,13 +27,15 @@ import tools.jackson.databind.JsonNode;
  * ten days ago 3 ANA-2 on credit there, 900, due in 20 days; today a voided cash sale there and 1 ANA-1 cash at branch two,
  * 1,500) plus: five days ago 2 ANA-2 on credit at head office (600, due in 25 days), paid today 200 in cash and 100 by bank;
  * today 2 ANA-2 by mobile money at head office (600) and 1 ANA-1 on credit there to a second buyer (1,500, due in 3 days); and
- * one open customer order at head office. Today: sales 3,600 in 3 sales; takings cash 1,700 (1,500 sold, 200 paid on credit),
- * mobile money 600, bank 100, 2,400 in all; owed 900 + 300 + 1,500 = 2,700 by 2 buyers on 3 sales, the oldest due in 3 days;
+ * one open customer order at head office. Today: sales 3,600 in 3 sales; takings cash 1,700 (3,200 in: the voided sale, the
+ * sale at branch two and 200 paid on credit; 1,500 out: the void), mobile money 600, bank 100, 2,400 in all; owed 900 + 300 + 1,500 = 2,700 by 2 buyers on 3 sales, the oldest due in 3 days;
  * head office 2,100 in 2 sales, branch two 1,500 in 1.
  */
 class RetailHomeSummaryIT extends IntegrationTest {
 
     static final String ORDERS = ADMIN + ",retail.order.manage";
+    static final String CASHBOOK = "retail.cashbook.read,retail.till.close";
+    static final String RETURNER = ADMIN + ",retail.sale.return";
 
     @Autowired
     TestRestTemplate http;
@@ -122,11 +124,108 @@ class RetailHomeSummaryIT extends IntegrationTest {
         assertThat(takings.get("methods").get(1).get("method").asString()).isEqualTo("mobile_money");
         JsonNode cash = method(takings, "cash");
         assertThat(cash.get("amount_minor").asLong()).isEqualTo(1_700);
-        assertThat(cash.get("sales_minor").asLong()).isEqualTo(1_500);
-        assertThat(cash.get("payments_minor").asLong()).isEqualTo(200);
+        assertThat(cash.get("takings_minor").asLong()).isEqualTo(3_200);
+        assertThat(cash.get("voids_minor").asLong()).isEqualTo(1_500);
         assertThat(method(takings, "mobile_money").get("amount_minor").asLong()).isEqualTo(600);
         assertThat(method(takings, "bank").get("amount_minor").asLong()).isEqualTo(100);
-        assertThat(method(takings, "bank").get("payments_minor").asLong()).isEqualTo(100);
+        assertThat(method(takings, "bank").get("takings_minor").asLong()).isEqualTo(100);
+        assertCashIsTheCashSummarys(takings);
+    }
+
+    /** The cash on the card is today's Cash takings and Cash sales voided or refunded of the cash summary, every shop added up. */
+    void assertCashIsTheCashSummarys(JsonNode takings) {
+        ResponseEntity<JsonNode> daily = api.get("/reports/cash/daily?from=" + today() + "&to=" + today(), CASHBOOK);
+        assertThat(daily.getStatusCode()).as("%s", daily.getBody()).isEqualTo(HttpStatus.OK);
+        long in = 0;
+        long out = 0;
+        for (JsonNode day : daily.getBody().get("items")) {
+            if (day.get("business_date").asString().equals(today().toString())) {
+                in += day.get("cash_takings_minor").asLong();
+                out += day.get("cash_sale_voids_minor").asLong();
+            }
+        }
+        JsonNode cash = method(takings, "cash");
+        assertThat(cash.get("takings_minor").asLong()).isEqualTo(in);
+        assertThat(cash.get("voids_minor").asLong()).isEqualTo(out);
+        assertThat(cash.get("amount_minor").asLong()).isEqualTo(in - out);
+    }
+
+    void capability(String key) {
+        String etag = api.get("/settings/capabilities", "core.settings.manage")
+                .getHeaders()
+                .getETag();
+        ResponseEntity<JsonNode> r = api.call(
+                HttpMethod.PUT,
+                "/settings/capabilities",
+                Map.of(key, true),
+                "core.settings.manage",
+                "*",
+                etag == null ? Map.of() : Map.of("If-Match", etag));
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+    }
+
+    void giveBack(UUID sale, String method) {
+        JsonNode line = api.get("/sales/" + sale, ADMIN).getBody().get("lines").get(0);
+        Map<String, Object> back = new LinkedHashMap<>();
+        back.put("sale_line_id", line.get("id").asString());
+        back.put("qty", "1");
+        back.put("reason", "defective");
+        back.put("disposition", "restock");
+        ResponseEntity<JsonNode> r = api.postKeyed(
+                "/sales/" + sale + "/returns",
+                Map.of("lines", List.of(back), "refund_method", method),
+                RETURNER,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    /** Goods of yesterday's sales given back today: the money refunded leaves today's takings of its own way of paying. */
+    @Test
+    void aRefundTodayOfYesterdaysSaleLowersTodaysTakingsByItsMethod() {
+        capability("returns");
+        giveBack(d.sell(t.headOffice(), "cash", d.p1, "1", 1), "cash");
+        giveBack(d.sell(t.headOffice(), "mobile_money", d.p2, "1", 1), "mobile_money");
+
+        JsonNode takings = home("", ADMIN, "*").get("takings");
+        JsonNode cash = method(takings, "cash");
+        assertThat(cash.get("amount_minor").asLong()).isEqualTo(200);
+        assertThat(cash.get("voids_minor").asLong()).isEqualTo(3_000);
+        assertThat(method(takings, "mobile_money").get("amount_minor").asLong()).isEqualTo(300);
+        assertThat(takings.get("total_minor").asLong()).isEqualTo(600);
+        assertCashIsTheCashSummarys(takings);
+    }
+
+    /** A delivery fee paid in cash at the door comes into today's cash with the order's sale, as in the cash summary. */
+    @Test
+    void aDeliveryFeePaidTodayCountsInTodaysTakings() {
+        Map<String, Object> order = new LinkedHashMap<>();
+        order.put("branch_id", t.headOffice());
+        order.put("source", "whatsapp");
+        order.put("customer_name", "Test Customer 02");
+        order.put("customer_phone", "+256700000012");
+        order.put("delivery_place", "Test Place, Plot 2");
+        order.put("delivery_date", today().toString());
+        order.put("delivery_fee_minor", 2_000);
+        order.put("lines", List.of(Map.of("product_id", d.p3, "qty", "1")));
+        ResponseEntity<JsonNode> placed =
+                api.postKeyed("/orders", order, ORDERS, "*", UUID.randomUUID().toString());
+        assertThat(placed.getStatusCode()).as("%s", placed.getBody()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> delivered = api.postKeyed(
+                "/orders/" + RetailTestSupport.id(placed) + "/deliver",
+                Map.of("payment_method", "cash"),
+                ORDERS,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(delivered.getStatusCode().is2xxSuccessful())
+                .as("%s", delivered.getBody())
+                .isTrue();
+
+        JsonNode takings = home("", ADMIN, "*").get("takings");
+        // 1,700 before, the order's 700 of ANA-3 sold for cash and its 2,000 fee.
+        assertThat(method(takings, "cash").get("amount_minor").asLong()).isEqualTo(4_400);
+        assertThat(takings.get("total_minor").asLong()).isEqualTo(5_100);
+        assertCashIsTheCashSummarys(takings);
     }
 
     @Test
