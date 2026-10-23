@@ -63,10 +63,10 @@ function screenOf(node: ReactElement) {
 
 describe('an item with sizes and colours', () => {
   it('asks the buying price before the selling price (#494)', async () => {
-    const { container } = screenOf(<NewFamilyPage />);
-    await waitFor(() => expect(screen.getByLabelText(/^Selling price/)).toBeTruthy());
-    const text = container.textContent ?? '';
-    if (text.includes('Buying price')) expect(text.indexOf('Buying price')).toBeLessThan(text.indexOf('Selling price'));
+    screenOf(<NewFamilyPage />);
+    const selling = await screen.findByLabelText(/^Selling price/);
+    const buying = screen.getByLabelText(/^Buying price/);
+    expect(buying.compareDocumentPosition(selling) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('lists every combination with its code and sends the list the owner checked', async () => {

@@ -262,7 +262,7 @@ describe('importing items from a file', () => {
     expect(html).toContain('What would happen');
     expect(html).toContain('<strong>1</strong> to add');
     expect(html).toContain('An item with this code exists already.');
-    expect(html).toContain('The sell price must be a whole number');
+    expect(html).toContain('The selling price must be a whole number');
     expect((await api.listCatalogue({ query: 'IMP-1' })).items).toHaveLength(0);
   });
 

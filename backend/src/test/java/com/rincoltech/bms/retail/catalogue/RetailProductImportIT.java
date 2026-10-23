@@ -174,6 +174,11 @@ class RetailProductImportIT extends IntegrationTest {
         ResponseEntity<JsonNode> missing =
                 run("code,description,category,unit\nIMP-8,Test,Bulbs,pc\n", true, ADMINISTRATOR);
         assertThat(missing.getBody().toString()).contains("needs a column called selling price");
+        ResponseEntity<JsonNode> bad = run(
+                "code,description,category,unit,buying price,selling price\nIMP-7,Test lamp two,Bulbs,pc,900,800\n",
+                true,
+                ADMINISTRATOR);
+        assertThat(bad.getBody().toString()).contains("The selling price must be above the buying price.");
     }
 
     @Test
