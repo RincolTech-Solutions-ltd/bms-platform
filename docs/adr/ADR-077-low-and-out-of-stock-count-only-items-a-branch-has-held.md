@@ -47,5 +47,8 @@ counts use "at or below", as the threshold always did.
 
 **Watch for:** the held test reads `retail_stock_balances` and `retail_stock_movements` per item and branch through their
 `(tenant_id, branch_id, product_id ...)` indexes; with a catalogue of thousands of items and many branches the dashboard's per-shop
-count is items times branches probes. Bench queries k15 (positions), k18 (the counts) and c10 (the Low tab) measure it; if it grows,
-a held flag kept on the balance row is the fix and needs a migration.
+count is items times branches probes. Bench queries k15 (positions), k18 (the counts) and c10 (the Low tab) measure it. At 25
+times the data (3000 items, 4 branches, 1.6 million movements, about 10000 minimums added to the seed) every probe is an index
+scan with `tenant_id` in its condition; medians were k15 162 ms, k18 190 ms and c10 17 ms. The positions query keeps its inner
+select behind `OFFSET 0`: flattened, the held and minimum probes ran once per aggregate and JIT optimisation took it to 1.4 s.
+If it grows, a held flag kept on the balance row is the fix and needs a migration.

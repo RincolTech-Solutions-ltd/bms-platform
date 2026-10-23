@@ -127,7 +127,9 @@ class DashboardRepository {
                         + "           AND (br.status = 'active' OR EXISTS (SELECT 1 FROM retail_stock_balances h"
                         + "                WHERE h.tenant_id = br.tenant_id AND h.branch_id = br.id AND h.qty <> 0))"
                         + branch
-                        + "       ) x"
+                        // OFFSET 0 keeps x a subquery, so held and level are probed once a row, not once an aggregate
+                        // (and JIT skips optimising: 160 ms, not 1.4 s, on the 25x bench, ADR-077).
+                        + "         OFFSET 0) x"
                         + " GROUP BY x.branch_id")
                 .params(params)
                 .query((rs, n) -> new Position(

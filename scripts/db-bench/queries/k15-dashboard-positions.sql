@@ -1,7 +1,7 @@
 -- DashboardRepository.positions: stock value and out of stock or low counts per branch (issue #149), every active item judged
 -- only at a branch that has held it, low at or below the branch's minimum, else the item's, else 5 (issue #490, ADR-077).
 -- Branches times active items; the held and minimum probes seek (tenant_id, branch_id, product_id) on the balances, the
--- movements and the minimums.
+-- movements and the minimums. OFFSET 0 keeps x a subquery so each probe runs once per row.
 -- tenant: tenant
 SELECT x.branch_id,
        coalesce(sum(round(x.qty * x.sell_minor)) FILTER (WHERE x.qty > 0), 0) AS at_price,
@@ -22,5 +22,6 @@ SELECT x.branch_id,
           LEFT JOIN retail_stock_balances b ON b.tenant_id = p.tenant_id AND b.product_id = p.id AND b.branch_id = br.id
          WHERE p.active AND p.tenant_id = br.tenant_id
            AND (br.status = 'active' OR EXISTS (SELECT 1 FROM retail_stock_balances h
-                WHERE h.tenant_id = br.tenant_id AND h.branch_id = br.id AND h.qty <> 0))) x
+                WHERE h.tenant_id = br.tenant_id AND h.branch_id = br.id AND h.qty <> 0))
+         OFFSET 0) x
  GROUP BY x.branch_id
