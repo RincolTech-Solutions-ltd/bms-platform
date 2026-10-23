@@ -62,7 +62,8 @@ class StockRepository {
                   FROM retail_products p
                   JOIN retail_units u ON u.id = p.unit_id
                   JOIN retail_categories c ON c.id = p.category_id
-                  LEFT JOIN retail_stock_balances b ON b.product_id = p.id AND b.branch_id = :branch
+                  LEFT JOIN retail_stock_balances b ON b.tenant_id = p.tenant_id AND b.product_id = p.id
+                       AND b.branch_id = :branch
                  WHERE (p.active OR :includeInactive)
                 """);
         Map<String, Object> params = new LinkedHashMap<>();

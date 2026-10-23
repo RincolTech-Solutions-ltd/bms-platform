@@ -4,7 +4,7 @@
 SELECT p.id, p.code, p.description, u.name AS unit, p.sell_minor, p.cost_minor, coalesce(b.qty, 0) AS qty
   FROM retail_products p
   JOIN retail_units u ON u.id = p.unit_id
-  LEFT JOIN retail_stock_balances b ON b.product_id = p.id AND b.branch_id = :'branch'
+  LEFT JOIN retail_stock_balances b ON b.tenant_id = p.tenant_id AND b.product_id = p.id AND b.branch_id = :'branch'
  WHERE p.active
    AND (coalesce(b.qty, 0) <= coalesce((SELECT min_b.min_qty FROM retail_stock_minimums min_b WHERE min_b.tenant_id = p.tenant_id
              AND min_b.product_id = p.id AND min_b.branch_id = :'branch'),
