@@ -149,8 +149,6 @@
   animation: rt-toast-in var(--motion) var(--ease-out);
 }
 
-
-
 @keyframes rt-toast-in {
   from {
     opacity: 0;
@@ -160,13 +158,6 @@
     opacity: 1;
     transform: translate(-50%, 0);
   }
-}
-
-/* The toast is light in the dark theme, so its edge uses the full status colour. */
-:root[data-theme='dark'] .toast-success {
-}
-
-:root[data-theme='dark'] .toast-danger {
 }
 
 /* The refresh button in the header (#430): icon only on a phone, the words and the last-loaded time from 720px up. */

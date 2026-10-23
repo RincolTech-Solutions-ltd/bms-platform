@@ -129,9 +129,6 @@
   box-shadow: var(--shadow-sm);
 }
 
-.iv-card-hero {
-}
-
 .iv-card-label {
   display: flex;
   align-items: center;
