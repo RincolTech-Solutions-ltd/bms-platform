@@ -1241,8 +1241,8 @@ facts (`GET /retail/sales/{sale_id}/receipt`) and shows the server's refusal in 
 whose goods were all taken back. The facts and the PDF are fetched again when the sale's version, paid amount or balance
 changes, so after a payment on the same screen the next share sends the new receipt.
 
-- **View receipt** (issue #500) shows the receipt on the screen as the PDF prints it, in the PDF's order: the logo (the shop's,
-  else the business's, by its cacheable URL), the business, branch and address, the number and date, the title, Bill to, the
+- **View receipt** (issue #500) shows the receipt on the screen as the PDF prints it, in the PDF's order: the logo (the one the PDF
+  prints: the shop's when its stored file can be read, else the business's, by its public cacheable URL), the business, branch and address, the number and date, the title, Bill to, the
   sale, payment, due date and price list, each line with its quantity, pack, unit price and amount, the total in figures and
   words, the payment status with what was paid and the balance, the credit notes and the net after returns, the notes, Issued
   by, Received by and the receipt footer. It is fetched only when the button is tapped, from

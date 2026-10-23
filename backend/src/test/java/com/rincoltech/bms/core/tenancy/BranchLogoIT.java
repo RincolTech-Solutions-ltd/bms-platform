@@ -401,8 +401,9 @@ class BranchLogoIT extends IntegrationTest {
         UUID atHeadOffice = RetailTestSupport.id(admin.sell(t.headOffice(), "cash", product, "1"));
         UUID atShop = RetailTestSupport.id(admin.sell(t.secondBranch(), "cash", product, "1"));
 
-        // No logo anywhere: the receipt has none.
+        // No logo anywhere: the receipt has none, and neither has the receipt on the screen.
         assertThat(images(receipt(admin, atShop))).isEmpty();
+        assertThat(printed(admin, atShop).has("logo_url")).isFalse();
 
         businessLogo(BUSINESS);
         assertThat(upload(t.secondBranch(), ImageFixtures.png(256, 256, SHOP)).getStatusCode())
@@ -428,12 +429,14 @@ class BranchLogoIT extends IntegrationTest {
         assertThat(near(after.get(0), BUSINESS)).isTrue();
     }
 
-    static String printedLogo(RetailTestSupport who, UUID sale) {
+    static JsonNode printed(RetailTestSupport who, UUID sale) {
         return who.get("/sales/" + sale + "/receipt/printed", RetailTestSupport.ADMIN)
                 .getBody()
-                .get("printed")
-                .get("logo_url")
-                .asString();
+                .get("printed");
+    }
+
+    static String printedLogo(RetailTestSupport who, UUID sale) {
+        return printed(who, sale).get("logo_url").asString();
     }
 
     @Test
@@ -454,6 +457,10 @@ class BranchLogoIT extends IntegrationTest {
         List<Color> receipt = images(receipt(admin, atShop));
         assertThat(receipt).hasSize(1);
         assertThat(near(receipt.get(0), BUSINESS)).isTrue();
+
+        // The receipt on the screen follows the PDF: the business logo, never the shop's missing one (issue #500).
+        String printed = printedLogo(admin, atShop);
+        assertThat(printed).startsWith("/api/v1/branding/logo?v=");
     }
 
     @Autowired

@@ -15,7 +15,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -119,11 +118,6 @@ class DocumentModels {
         return letterheads.current().displayName();
     }
 
-    /** The servable path of the business logo, versioned, when one is set (issue #500): the receipt preview's fallback. */
-    Optional<String> businessLogoPath() {
-        return letterheads.logoPath();
-    }
-
     /**
      * The model of the receipt a seller shares (issue #439, ADR-061): the invoice of the snapshot, titled RECEIPT, signed by
      * the seller who made the sale, with the money the buyer actually paid ({@code paidMinor}: a return taken off the balance
@@ -186,9 +180,10 @@ class DocumentModels {
     /**
      * What the receipt PDF prints, read from its model (issue #500): the screen's preview shows the same values, every one
      * the invoice template and its letterhead print. Read defensively, as the template does: a missing map or value is
-     * blank, never an error. The logo is given by its URL ({@code logoUrl}), which the browser caches, not its bytes.
+     * blank, never an error. The logo is given by the URL of the very logo the PDF prints ({@code lh.logoUrl}: the shop's
+     * own when its file can be read, else the business logo, else none), which the browser caches, not its bytes.
      */
-    DocumentsApi.ReceiptPrint printed(Map<String, Object> m, String logoUrl) {
+    DocumentsApi.ReceiptPrint printed(Map<String, Object> m) {
         Map<String, Object> lh = map(m.get("lh"));
         Map<String, Object> branch = map(m.get("branch"));
         Map<String, Object> doc = map(m.get("doc"));
@@ -218,7 +213,7 @@ class DocumentModels {
                 text(doc.get("title")),
                 text(doc.get("number")),
                 text(doc.get("date")),
-                logoUrl,
+                blank(lh.get("logoUrl")),
                 text(lh.get("name")),
                 blank(branch.get("name")),
                 blank(branch.get("location")),
@@ -432,6 +427,7 @@ class DocumentModels {
                         .map(l -> "data:" + l.contentType() + ";base64,"
                                 + Base64.getEncoder().encodeToString(l.bytes()))
                         .orElse(null));
+        letterhead.put("logoUrl", lh.logo().map(Letterheads.Logo::path).orElse(null));
         Map<String, Object> place = new LinkedHashMap<>();
         place.put("name", branch.name());
         place.put("location", branch.location());

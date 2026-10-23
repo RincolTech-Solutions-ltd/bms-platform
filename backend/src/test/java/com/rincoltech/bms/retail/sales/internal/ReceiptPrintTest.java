@@ -17,7 +17,7 @@ class ReceiptPrintTest {
 
     @Test
     void anEmptyModelPrintsBlankAndThrowsNothing() {
-        DocumentsApi.ReceiptPrint p = models.printed(Map.of(), null);
+        DocumentsApi.ReceiptPrint p = models.printed(Map.of());
         assertThat(p.title()).isEmpty();
         assertThat(p.lines()).isEmpty();
         assertThat(p.returns()).isEmpty();
@@ -38,7 +38,7 @@ class ReceiptPrintTest {
         m.put("branch", null);
         m.put("lines", List.of(line, "not a line"));
         m.put("returns", Map.of("lines", "not a list", "net", "5,000"));
-        DocumentsApi.ReceiptPrint p = models.printed(m, "/api/v1/branding/logo?v=1");
+        DocumentsApi.ReceiptPrint p = models.printed(m);
         assertThat(p.lines()).hasSize(2);
         assertThat(p.lines().get(0).no()).isEqualTo(3);
         assertThat(p.lines().get(0).quantity()).isEqualTo("5");
@@ -47,7 +47,15 @@ class ReceiptPrintTest {
         assertThat(p.returns()).isEmpty();
         assertThat(p.net()).isEqualTo("5,000");
         assertThat(p.businessName()).isEmpty();
-        assertThat(p.logoUrl()).isEqualTo("/api/v1/branding/logo?v=1");
+        assertThat(p.logoUrl()).isNull();
+    }
+
+    @Test
+    void theLogoIsTheOneTheLetterheadOfTheModelPrints() {
+        Map<String, Object> lh = new LinkedHashMap<>();
+        lh.put("logo", "data:image/png;base64,AAAA");
+        lh.put("logoUrl", "/api/v1/branding/logo?v=1");
+        assertThat(models.printed(Map.of("lh", lh)).logoUrl()).isEqualTo("/api/v1/branding/logo?v=1");
     }
 
     @Test

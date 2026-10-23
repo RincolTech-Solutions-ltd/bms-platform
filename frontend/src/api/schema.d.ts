@@ -15322,7 +15322,7 @@ export interface components {
             issued_by?: string;
             issued_on?: string;
             lines?: components["schemas"]["RetailReceiptPrintLine"][];
-            /** @description The same-origin URL of the shop's logo, else the business logo, versioned so the browser caches it */
+            /** @description The same-origin URL of the logo the receipt PDF prints: the shop's own when its stored file can be read, else the business logo; absent when the PDF prints none. Versioned so the browser caches it, and public, so an image tag loads it */
             logo_url?: string;
             /** @description The net after returns */
             net?: string;

@@ -5,7 +5,6 @@ import com.rincoltech.bms.core.documents.Documents;
 import com.rincoltech.bms.core.documents.Documents.GeneratedObject;
 import com.rincoltech.bms.core.operations.Idempotency;
 import com.rincoltech.bms.core.operations.Idempotency.Outcome;
-import com.rincoltech.bms.core.tenancy.Branches;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
@@ -95,7 +94,6 @@ class DocumentsService {
     private final Idempotency idempotency;
     private final RetailBranchContext branches;
     private final CurrentTenant tenant;
-    private final Branches tenancy;
     private final BusinessClock clock;
     private final AuditLog audit;
     private final JdbcClient jdbc;
@@ -115,7 +113,6 @@ class DocumentsService {
             Idempotency idempotency,
             RetailBranchContext branches,
             CurrentTenant tenant,
-            Branches tenancy,
             BusinessClock clock,
             AuditLog audit,
             JdbcClient jdbc,
@@ -132,7 +129,6 @@ class DocumentsService {
         this.idempotency = idempotency;
         this.branches = branches;
         this.tenant = tenant;
-        this.tenancy = tenancy;
         this.clock = clock;
         this.audit = audit;
         this.jdbc = jdbc;
@@ -794,22 +790,12 @@ class DocumentsService {
             Sale sale = r.sale();
             DocumentsApi.ReceiptPrint printed = null;
             try {
-                printed = models.printed(receiptModel(r), logoUrl(sale.branchId()));
+                printed = models.printed(receiptModel(r));
             } catch (RuntimeException e) {
                 log.warn("The receipt of sale {} could not be laid out for the screen", sale.id(), e);
             }
             return new DocumentsApi.ReceiptPreview(sale.id(), sale.version(), printed);
         });
-    }
-
-    /** The logo the receipt PDF prints, by its cacheable URL: the shop's own, else the business logo (ADR-068). */
-    private String logoUrl(UUID branchId) {
-        return tenancy.all().stream()
-                .filter(b -> b.id().equals(branchId) && b.logoUrl() != null)
-                .map(Branches.Branch::logoUrl)
-                .findFirst()
-                .or(models::businessLogoPath)
-                .orElse(null);
     }
 
     /** The model of the receipt PDF, which the screen's preview reads too (issue #500). */
