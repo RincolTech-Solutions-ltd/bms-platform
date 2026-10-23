@@ -10,6 +10,13 @@ import java.util.UUID;
 public interface Documents {
 
     /**
+     * Request attribute the tenancy module sets on a download address asked for by a business whose subscription ended
+     * (ADR-073): the documents module then signs only what a {@link DocumentAccess} lets an ended business take away
+     * (ADR-074 decision 7) and answers 423 {@code subscription_ended} for every other document.
+     */
+    String ENDED_BUSINESS_ATTRIBUTE = "bms.documents.ended_business";
+
+    /**
      * Checks, stores and records an uploaded file in the caller's transaction (FR-DOC-02, chapter 8
      * section 8.8): JPEG, PNG or PDF by content, at most 5 MB, images re-encoded to drop metadata.
      * The caller has already checked its own permission on the subject.

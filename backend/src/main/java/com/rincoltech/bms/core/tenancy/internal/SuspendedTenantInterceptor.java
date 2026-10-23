@@ -1,5 +1,6 @@
 package com.rincoltech.bms.core.tenancy.internal;
 
+import com.rincoltech.bms.core.documents.Documents;
 import com.rincoltech.bms.kernel.ApiException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -16,8 +17,9 @@ import org.springframework.web.servlet.HandlerInterceptor;
  *
  * <p>A business whose Owner cancelled and whose end date has passed is read only the same way, with 423
  * {@code subscription_ended} (ADR-073): besides the sign-in routes, the exports that are a POST (the audit CSV,
- * a report run, the business's own workbook and the signed address of a file, issue #334) still work, so the
- * business can take its data away.
+ * a report run and the business's own workbook, issue #334) still work, so the business can take its data away. The
+ * signed address of a file is passed on marked as asked by an ended business, and the documents module decides: it
+ * signs only the data export's own files and answers 423 for every other document (ADR-074 decision 7).
  */
 class SuspendedTenantInterceptor implements HandlerInterceptor {
 
@@ -38,6 +40,10 @@ class SuspendedTenantInterceptor implements HandlerInterceptor {
             if (endedExportPath(request.getRequestURI()) || exportPath(request.getRequestURI())) {
                 return true;
             }
+            if (DOWNLOAD_URL.matcher(request.getRequestURI()).matches()) {
+                request.setAttribute(Documents.ENDED_BUSINESS_ATTRIBUTE, Boolean.TRUE);
+                return true;
+            }
             throw new ApiException(
                     HttpStatus.LOCKED,
                     "subscription_ended",
@@ -54,13 +60,11 @@ class SuspendedTenantInterceptor implements HandlerInterceptor {
     }
 
     /**
-     * Asking for the data export and the signed address of a file change none of the business's data (ADR-074 decision 7).
-     * The address may be of any document the caller may read, not only a report file: an ended business still reads
-     * everything, and each document's own access rule still decides who fetches it.
+     * Asking for the data export changes none of the business's data (ADR-074 decision 7). The signed address of its file
+     * is not here: the documents module decides which documents an ended business may sign.
      */
     static boolean exportPath(String path) {
-        return path.equals("/api/v1/data-export/runs")
-                || DOWNLOAD_URL.matcher(path).matches();
+        return path.equals("/api/v1/data-export/runs");
     }
 
     private static final Pattern DOWNLOAD_URL = Pattern.compile("^/api/v1/documents/[0-9a-fA-F-]{36}/download-url$");

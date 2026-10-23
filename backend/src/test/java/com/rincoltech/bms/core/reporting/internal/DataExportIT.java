@@ -465,7 +465,15 @@ class DataExportIT extends LendingBookSupport {
                 Instant.parse("2026-10-08T08:00:00Z"));
         ended(s.t(), 0);
         UUID user = s.api().userId();
-        XlsxReader x = workbook(s.t(), user, export(s.t(), user));
+        JsonNode run = export(s.t(), user);
+        ResponseEntity<JsonNode> link = call(
+                HttpMethod.POST,
+                "/api/v1/documents/" + run.get("document_id").asString() + "/download-url",
+                s.t(),
+                user,
+                PERM);
+        assertThat(link.getStatusCode().value()).as("%s", link.getBody()).isEqualTo(200);
+        XlsxReader x = workbook(s.t(), user, run);
         assertThat(x.sheet("Sales").text("C2")).isEqualTo("S-0001");
         // Every other write stays refused while the business is read only, the weekly switch among them.
         ResponseEntity<JsonNode> settings = weeklyEmail(s.t(), user, false);
@@ -475,6 +483,58 @@ class DataExportIT extends LendingBookSupport {
                         .getStatusCode()
                         .value())
                 .isEqualTo(423);
+    }
+
+    /** ADR-074 decision 7: an ended business takes away its data export, not the files behind it (a member's ID scan). */
+    @Test
+    void anEndedBusinessCannotSignTheAddressOfAKycUpload() throws Exception {
+        Book book = goldenBook();
+        UUID kyc = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql("""
+                        WITH m AS (SELECT id, branch_id FROM lending_members WHERE tenant_id = ? ORDER BY id LIMIT 1),
+                        d AS (
+                            INSERT INTO documents (id, tenant_id, branch_id, doc_type, subject_type, subject_id, object_key,
+                                                   content_type, size_bytes, sha256)
+                            SELECT ?, ?, m.branch_id, 'upload', 'lending.member', m.id, ?, 'image/png', 4, repeat('0', 64)
+                              FROM m RETURNING subject_id)
+                        INSERT INTO lending_member_documents (id, tenant_id, member_id, doc_kind, document_id, uploaded_by)
+                        SELECT ?, ?, d.subject_id, 'id_front', ?, ? FROM d
+                        """)
+                .params(
+                        book.t().tenantId(),
+                        kyc,
+                        book.t().tenantId(),
+                        "tenants/" + book.t().tenantId() + "/upload/x/" + kyc + ".png",
+                        UUID.randomUUID(),
+                        book.t().tenantId(),
+                        kyc,
+                        UUID.randomUUID())
+                .update();
+        UUID user = UUID.randomUUID();
+        String perms = PERM + ",lending.members.read,lending.members.verify_kyc";
+        String path = "/api/v1/documents/" + kyc + "/download-url";
+        assertThat(call(HttpMethod.POST, path, book.t(), user, perms)
+                        .getStatusCode()
+                        .value())
+                .as("while the business is active the administrator may sign it")
+                .isEqualTo(200);
+        JsonNode run = export(book.t(), user);
+
+        ended(book.t(), 0);
+        ResponseEntity<JsonNode> refused = call(HttpMethod.POST, path, book.t(), user, perms);
+        assertThat(refused.getStatusCode().value()).as("%s", refused.getBody()).isEqualTo(423);
+        assertThat(refused.getBody().get("code").asString()).isEqualTo("subscription_ended");
+        assertThat(refused.getBody().has("url")).isFalse();
+        ResponseEntity<JsonNode> export = call(
+                HttpMethod.POST,
+                "/api/v1/documents/" + run.get("document_id").asString() + "/download-url",
+                book.t(),
+                user,
+                perms);
+        assertThat(export.getStatusCode().value())
+                .as("the data export's own file still is")
+                .isEqualTo(200);
     }
 
     @Test

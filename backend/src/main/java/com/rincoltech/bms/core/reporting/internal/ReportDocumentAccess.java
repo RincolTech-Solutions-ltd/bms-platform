@@ -51,6 +51,14 @@ class ReportDocumentAccess implements DocumentAccess {
         return true;
     }
 
+    /** Only the files of the business's data export (ADR-074 decision 7), never another report's. */
+    @Override
+    public boolean downloadableWhenEnded(UUID subjectId, UUID documentId) {
+        return store.find(subjectId)
+                .filter(run -> DataExportReport.KEY.equals(run.reportKey()))
+                .isPresent();
+    }
+
     @Override
     public boolean canRead(Principal principal, UUID subjectId) {
         Run run = store.find(subjectId).orElse(null);

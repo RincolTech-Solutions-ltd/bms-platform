@@ -534,9 +534,26 @@ class DocumentService implements Documents {
         return readable(documentId);
     }
 
-    /** FR-DOC-03: 5 minutes, after the permission check; every issue is audited. */
+    /**
+     * FR-DOC-03: 5 minutes, after the permission check; every issue is audited. For a business whose subscription ended
+     * ({@code ended}, ADR-073) only the documents its {@link DocumentAccess} lets it take away are signed (ADR-074
+     * decision 7); any other answers 423 {@code subscription_ended} before the permission check.
+     */
     @Transactional
-    DownloadUrl downloadUrl(UUID documentId) {
+    DownloadUrl downloadUrl(UUID documentId, boolean ended) {
+        if (ended) {
+            StoredDocument found = find(documentId).orElseThrow(ApiException::notFound);
+            if (access.stream()
+                    .filter(a -> a.subjectType().equals(found.subjectType()))
+                    .noneMatch(a -> a.downloadableWhenEnded(found.subjectId(), found.id()))) {
+                throw new ApiException(
+                        HttpStatus.LOCKED,
+                        "subscription_ended",
+                        "Subscription ended",
+                        "The subscription of this business has ended: you can still download your data export, but"
+                                + " not other files. Contact the platform operator to start it again.");
+            }
+        }
         StoredDocument d = readable(documentId);
         String key = jdbc.sql("SELECT object_key FROM documents WHERE id = ?")
                 .param(documentId)
