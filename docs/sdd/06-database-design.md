@@ -651,9 +651,11 @@ cancellation per business; a partial index on `effective_on` serves the job. Gra
 the scheduled rows across businesses through `platform_scheduled_changes()`; the job lists the businesses with one due through
 `platform_tenants_with_due_changes(through)`. `subscriptions.ended_on date` (V90) is the day an Owner's cancellation took effect;
 `platform_end_subscription(tenant_id, on)` (bound to that tenant only) sets it with the status `cancelled` and the tenant
-`suspended`; `platform_set_subscription_status` clears it when the subscription leaves `cancelled`; `app_resolve_tenant_status`
-answers `ended` for such a business, and for one whose scheduled cancellation's day has come in its own time zone before the job
-applied it, so its writes are refused with `subscription_ended` from that day. V90 also replaces V49's report runner lists
+`suspended`, but changes nothing and returns null for a business the operator suspended or cancelled (the suspension is kept and
+the cancellation stays scheduled until a resume; the job's list counts a due cancellation only for an active business);
+`platform_set_subscription_status` clears it when the subscription leaves `cancelled`; `app_resolve_tenant_status`
+answers `ended` for such a business, and for an active one whose scheduled cancellation's day has come in its own time zone
+before the job applied it, so its writes are refused with `subscription_ended` from that day. V90 also replaces V49's report runner lists
 (`app_count_running_report_runs`, `app_tenants_with_queued_report_runs`, `app_tenants_with_stale_report_runs`) so they take an
 ended business as well as an active one: its report runs still finish and a dead run is still failed. And it adds
 `app_tenant_takes_payments(tenant)` (active, or suspended with the subscription `cancelled` and `ended_on` set), which

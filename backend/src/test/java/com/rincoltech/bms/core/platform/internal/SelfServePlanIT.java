@@ -879,6 +879,107 @@ class SelfServePlanIT extends IntegrationTest {
         assertThat(lendingJobTenants()).contains(tenantId);
     }
 
+    /**
+     * The Owner cancels for the day after the paid period (say 1 December), the operator suspends the business before it
+     * (say 20 November, for fraud or non-payment), and on the day the business stays suspended: the resolver does not answer
+     * {@code ended}, the job leaves the cancellation scheduled, payments do not post, report runs are not picked up and
+     * exports stay refused. Once the operator resumes, the cancellation applies at the job's next run.
+     */
+    @Test
+    void anOperatorSuspensionIsNeverTurnedIntoAnEndByTheOwnersCancellation() {
+        LocalDate paidUntil = today.plusDays(5);
+        Business b = business(bothPlan, true, paidUntil);
+        UUID tenantId = b.t().tenantId();
+        String admin = b.adminSession().accessToken();
+        ResponseEntity<JsonNode> cancelled = withPassword(b.api(), "/api/v1/plan/cancel", b.ownerSession());
+        assertThat(cancelled.getStatusCode()).as("%s", cancelled.getBody()).isEqualTo(HttpStatus.CREATED);
+        String changeId = cancelled.getBody().get("id").asString();
+
+        Operator op = operator();
+        String base = "/api/v1/platform/tenants/" + tenantId;
+        ResponseEntity<JsonNode> suspended = op.api()
+                .post(
+                        base + "/suspend",
+                        Map.of("reason", "Test: suspected fraud"),
+                        op.session().accessToken());
+        assertThat(suspended.getStatusCode()).as("%s", suspended.getBody()).isEqualTo(HttpStatus.OK);
+
+        // The cancellation's day comes: moved to today, so the resolver (which reads the real date) sees it due too.
+        JdbcCall.run(
+                "UPDATE subscription_scheduled_changes SET effective_on = ? WHERE id = ?",
+                today,
+                UUID.fromString(changeId));
+        UUID run = UUID.randomUUID();
+        JdbcCall.run("""
+                INSERT INTO report_runs (id, tenant_id, report_key, params, params_hash, scope, format, status,
+                                         requested_by, as_of, row_cap, size_cap_bytes)
+                VALUES (?, ?, 'lending.par', '{}', repeat('a', 64), '{}', 'json', 'queued', ?, ?, 1000, 1000000)
+                """, run, tenantId, b.owner(), today);
+        try {
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT count(*) FROM platform_tenants_with_due_changes(?) WHERE tenant_id = ?")
+                            .params(today.plusDays(1), tenantId)
+                            .query(Long.class)
+                            .single())
+                    .isZero();
+            assertThat(applyDue(tenantId, today)).isZero();
+
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT status FROM subscription_scheduled_changes WHERE id = ?")
+                            .param(UUID.fromString(changeId))
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("scheduled");
+            assertThat(TestDatabase.owner()
+                            .sql(
+                                    "SELECT status || '/' || coalesce(ended_on::text, '-') FROM subscriptions WHERE tenant_id = ?")
+                            .param(tenantId)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("suspended/-");
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT status FROM app_resolve_tenant_status(?)")
+                            .param(b.t().slug())
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("suspended");
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT app_tenant_takes_payments(?)")
+                            .param(tenantId)
+                            .query(Boolean.class)
+                            .single())
+                    .isFalse();
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT app_tenants_with_queued_report_runs()")
+                            .query(UUID.class)
+                            .list())
+                    .doesNotContain(tenantId);
+            ResponseEntity<String> export = b.api().postForText("/api/v1/audit-events/export", Map.of(), admin);
+            assertThat(export.getStatusCode()).as("%s", export.getBody()).isEqualTo(HttpStatus.LOCKED);
+            assertThat(export.getBody()).contains("\"tenant_suspended\"");
+            assertRefused(
+                    b.api().post("/api/v1/branches", Map.of("code", "BR6", "name", "Test Branch Six"), admin),
+                    HttpStatus.LOCKED,
+                    "tenant_suspended");
+        } finally {
+            JdbcCall.run("UPDATE report_runs SET status = 'cancelled', finished_at = now() WHERE id = ?", run);
+        }
+
+        ResponseEntity<JsonNode> resumed = op.api()
+                .post(
+                        base + "/resume",
+                        Map.of("reason", "Test: cleared"),
+                        op.session().accessToken());
+        assertThat(resumed.getStatusCode()).as("%s", resumed.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(applyDue(tenantId, today)).isEqualTo(1);
+        assertThat(b.api()
+                        .get("/api/v1/plan", b.ownerSession().accessToken())
+                        .getBody()
+                        .get("ended_on")
+                        .asString())
+                .isEqualTo(today.toString());
+    }
+
     /** The businesses the nightly lending job (arrears and penalties) runs for. */
     static List<UUID> lendingJobTenants() {
         return TestDatabase.owner()

@@ -126,7 +126,9 @@ $$;
 
 -- The Owner's cancellation taking effect (the nightly job, or at once when nothing is paid ahead). Runs in a transaction
 -- bound to that tenant only. Cancelled with ended_on, the tenant read only; suspended_from keeps what a resume brings back.
--- A business that already ended changes nothing. Returns the previous status.
+-- A business that already ended changes nothing. A business the operator suspended or cancelled (or a tenant not active)
+-- keeps that suspension: nothing is changed and null is returned, so the scheduled cancellation stays scheduled and takes
+-- effect only once the operator resumes the business. Otherwise returns the previous status.
 CREATE FUNCTION platform_end_subscription(p_tenant_id uuid, p_on date)
 RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
@@ -144,6 +146,10 @@ BEGIN
     END IF;
     IF v_sub.status = 'cancelled' AND v_sub.ended_on IS NOT NULL THEN
         RETURN v_sub.status;
+    END IF;
+    IF v_sub.status IN ('suspended', 'cancelled')
+       OR NOT EXISTS (SELECT 1 FROM tenants t WHERE t.id = p_tenant_id AND t.status = 'active') THEN
+        RETURN NULL;
     END IF;
     UPDATE subscriptions s
        SET status = 'cancelled', ended_on = p_on, next_status_change_on = NULL,
@@ -177,12 +183,13 @@ $$;
 
 -- V2's resolver: a business whose Owner's cancellation took effect answers 'ended' instead of 'suspended', so the read
 -- only refusal names the end of the subscription rather than a suspension by the operator. A scheduled cancellation whose
--- day has come in the business's own time zone answers 'ended' too, so read only never waits for the quarter-hour job.
+-- day has come in the business's own time zone answers 'ended' too, so read only never waits for the quarter-hour job;
+-- only while the business is active, so a suspension by the operator is never turned into an end (it stays 'suspended').
 CREATE OR REPLACE FUNCTION app_resolve_tenant_status(p_slug text) RETURNS TABLE (id uuid, status text)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
     SELECT t.id,
            CASE WHEN t.status = 'suspended' AND s.status = 'cancelled' AND s.ended_on IS NOT NULL THEN 'ended'
-                WHEN EXISTS (SELECT 1 FROM subscription_scheduled_changes c
+                WHEN t.status = 'active' AND EXISTS (SELECT 1 FROM subscription_scheduled_changes c
                               WHERE c.tenant_id = t.id AND c.kind = 'cancel' AND c.status = 'scheduled'
                                 AND c.effective_on <= (now() AT TIME ZONE t.timezone)::date) THEN 'ended'
                 ELSE t.status END
@@ -309,7 +316,8 @@ END
 $$;
 
 -- The nightly job's list: every business with a scheduled change on or before p_through (the latest business date
--- anywhere), with its time zone; the job compares each change with that business's own date.
+-- anywhere), with its time zone; the job compares each change with that business's own date. A due cancellation counts
+-- only for an active business: one the operator suspended keeps it scheduled until a resume, without a retry each tick.
 CREATE FUNCTION platform_tenants_with_due_changes(p_through date) RETURNS TABLE (tenant_id uuid, timezone text)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 BEGIN
@@ -321,7 +329,8 @@ BEGIN
       FROM tenants t
      WHERE t.status IN ('active', 'suspended')
        AND EXISTS (SELECT 1 FROM subscription_scheduled_changes c
-                    WHERE c.tenant_id = t.id AND c.status = 'scheduled' AND c.effective_on <= p_through)
+                    WHERE c.tenant_id = t.id AND c.status = 'scheduled' AND c.effective_on <= p_through
+                      AND (c.kind = 'stop_module' OR t.status = 'active'))
      ORDER BY t.id;
 END
 $$;

@@ -62,6 +62,13 @@ month does. It is generic for every business and the Owner's alone: administrato
    midnight and the job's next run (up to a quarter hour) the resolver already answers `ended` while `tenants.status` is still
    `active`, so a background job may still run for the business in that window; that is harmless, since the nightly jobs run
    later in the night.
+   A suspension by the operator always wins over the Owner's cancellation. The resolver answers `ended` for a scheduled
+   cancellation whose day has come only while the tenant is `active`; `platform_end_subscription` changes nothing and returns
+   null for a business the operator suspended or cancelled (or a tenant not active), so the job leaves the cancellation
+   `scheduled`; and the job's list counts a due cancellation only for an active business, so it is not retried each tick.
+   An end would make payments post, report runs resume and exports open again for a business the operator stopped (for
+   fraud or non-payment, say). When the operator resumes the business, the cancellation, whose day has passed, applies at
+   the job's next run.
 5. **After the end date the business is read only, and its data is kept.** A cancellation applied sets the subscription to
    `cancelled` with `subscriptions.ended_on` and the tenant to `suspended`, so every scheduled job already skips it and nothing
    further is billed (no billing is automatic in this release; the operator records payments by hand, ADR-056). The tenant

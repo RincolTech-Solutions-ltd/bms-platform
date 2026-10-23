@@ -415,7 +415,14 @@ class PlanService {
             String before = jdbc.sql("SELECT platform_end_subscription(?, ?)")
                     .params(tenantId, change.effectiveOn())
                     .query(String.class)
-                    .single();
+                    .optional()
+                    .orElse(null);
+            if (before == null) {
+                // Suspended or cancelled by the operator: the suspension is kept (an end would let payments, report
+                // runs and exports through again) and the cancellation stays scheduled until the operator resumes.
+                log.info("the cancellation of tenant {} waits: the operator suspended the business", tenantId);
+                return false;
+            }
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("before", before);
             data.put("after", "cancelled");
