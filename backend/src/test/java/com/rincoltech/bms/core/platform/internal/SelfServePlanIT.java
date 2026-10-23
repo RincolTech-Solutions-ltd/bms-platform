@@ -1171,4 +1171,248 @@ class SelfServePlanIT extends IntegrationTest {
                         .isNull())
                 .isFalse();
     }
+
+    // ---- independent test review of #474: adversarial cases ----------------------------------------
+    // JUSTIFICATION-A3: whole new test methods appended to the suite whose fixtures they reuse; no production code.
+
+    /**
+     * After the end, writes in areas the other tests do not list are refused too: a stock count and its commit, a loan
+     * application, a branch rename, close and logo removal, a stock transfer, a payment request, a cashier's sale, and the
+     * Owner's own plan writes. The branch is unchanged.
+     */
+    @Test
+    void afterTheEndWritesInAreasNotListedElsewhereAreRefused() {
+        LocalDate paidUntil = today.plusDays(5);
+        Business b = business(bothPlan, true, paidUntil);
+        UUID tenantId = b.t().tenantId();
+        assertThat(withPassword(b.api(), "/api/v1/plan/cancel", b.ownerSession())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        assertThat(applyDue(tenantId, paidUntil.plusDays(1))).isEqualTo(1);
+
+        String admin = b.adminSession().accessToken();
+        String owner = b.ownerSession().accessToken();
+        String branch = "/api/v1/branches/" + b.t().headOffice();
+        String branchName = b.api().get(branch, admin).getBody().get("name").asString();
+        List<ResponseEntity<JsonNode>> writes = List.of(
+                b.api().post("/api/v1/retail/stocktakes", Map.of("branch_id", b.t().headOffice()), admin),
+                b.api().post("/api/v1/retail/stocktakes/" + UUID.randomUUID() + "/commit", Map.of(), admin),
+                b.api().post("/api/v1/lending/loans", Map.of(), admin),
+                b.api().call(HttpMethod.PATCH, branch, Map.of("name", "Test Renamed Branch"), admin),
+                b.api().post(branch + "/close", Map.of(), admin),
+                b.api().call(HttpMethod.DELETE, branch + "/logo", null, admin),
+                b.api().post("/api/v1/retail/transfers", Map.of(), admin),
+                b.api().post("/api/v1/payments/intents", Map.of(), admin),
+                b.api()
+                        .post(
+                                "/api/v1/retail/sales",
+                                Map.of(),
+                                b.cashierSession().accessToken()),
+                b.api()
+                        .post(
+                                "/api/v1/plan/module-requests",
+                                Map.of("module", "retail", "password", Api.PASSWORD),
+                                owner),
+                withPassword(b.api(), "/api/v1/plan/modules/retail/stop", b.ownerSession()),
+                withPassword(b.api(), "/api/v1/plan/cancel", b.ownerSession()));
+        for (ResponseEntity<JsonNode> write : writes) {
+            assertRefused(write, HttpStatus.LOCKED, "subscription_ended");
+        }
+        assertThat(b.api().get(branch, admin).getBody().get("name").asString()).isEqualTo(branchName);
+        assertThat(scheduled(tenantId)).isZero();
+    }
+
+    /**
+     * The operator suspends after the Owner cancelled, and the cancellation's day comes: through HTTP the business reads as
+     * suspended, not ended (no end date on the banner, writes and exports refused with {@code tenant_suspended}, the Owner's
+     * undo refused the same way), and however often the job runs nothing is applied.
+     */
+    @Test
+    void aSuspensionFollowedByTheCancellationDayStaysSuspendedThroughHttp() {
+        LocalDate paidUntil = today.plusDays(5);
+        Business b = business(bothPlan, true, paidUntil);
+        UUID tenantId = b.t().tenantId();
+        ResponseEntity<JsonNode> cancelled = withPassword(b.api(), "/api/v1/plan/cancel", b.ownerSession());
+        assertThat(cancelled.getStatusCode()).as("%s", cancelled.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID changeId = UUID.fromString(cancelled.getBody().get("id").asString());
+        Operator op = operator();
+        assertThat(op.api()
+                        .post(
+                                "/api/v1/platform/tenants/" + tenantId + "/suspend",
+                                Map.of("reason", "Test: unpaid invoice"),
+                                op.session().accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        JdbcCall.run("UPDATE subscription_scheduled_changes SET effective_on = ? WHERE id = ?", today, changeId);
+
+        for (int run = 0; run < 3; run++) {
+            assertThat(applyDue(tenantId, today.plusDays(run))).isZero();
+        }
+        String admin = b.adminSession().accessToken();
+        JsonNode status = b.api()
+                .get("/api/v1/plan/status", b.cashierSession().accessToken())
+                .getBody();
+        assertThat(status.get("ended_on").isNull()).as("%s", status).isTrue();
+        assertRefused(
+                b.api().post("/api/v1/branches", Map.of("code", "BR7", "name", "Test Branch Seven"), admin),
+                HttpStatus.LOCKED,
+                "tenant_suspended");
+        assertRefused(
+                b.api()
+                        .post(
+                                "/api/v1/plan/changes/" + changeId + "/undo",
+                                null,
+                                b.ownerSession().accessToken()),
+                HttpStatus.LOCKED,
+                "tenant_suspended");
+        assertThat(b.api()
+                        .postForText("/api/v1/audit-events/export", Map.of(), admin)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.LOCKED);
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT status || '/' || coalesce(ended_on::text, '-') FROM subscriptions WHERE tenant_id = ?")
+                        .param(tenantId)
+                        .query(String.class)
+                        .single())
+                .isEqualTo("suspended/-");
+        assertThat(platformAudits("platform.tenant.subscription_ended", tenantId))
+                .isZero();
+    }
+
+    /**
+     * A business already ended by its Owner that the operator then suspends (fraud found later) is the operator's
+     * suspension from then on: the resolver answers suspended, payments no longer post, writes and exports are refused
+     * with {@code tenant_suspended}.
+     */
+    @Test
+    void anEndedBusinessTheOperatorThenSuspendsNoLongerTakesPayments() {
+        LocalDate paidUntil = today.plusDays(5);
+        Business b = business(bothPlan, true, paidUntil);
+        UUID tenantId = b.t().tenantId();
+        assertThat(withPassword(b.api(), "/api/v1/plan/cancel", b.ownerSession())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        assertThat(applyDue(tenantId, paidUntil.plusDays(1))).isEqualTo(1);
+        assertThat(takesPayments(tenantId)).isTrue();
+
+        Operator op = operator();
+        ResponseEntity<JsonNode> suspended = op.api()
+                .post(
+                        "/api/v1/platform/tenants/" + tenantId + "/suspend",
+                        Map.of("reason", "Test: fraud found after the end"),
+                        op.session().accessToken());
+        assertThat(suspended.getStatusCode()).as("%s", suspended.getBody()).isEqualTo(HttpStatus.OK);
+
+        assertThat(takesPayments(tenantId)).isFalse();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT status FROM app_resolve_tenant_status(?)")
+                        .param(b.t().slug())
+                        .query(String.class)
+                        .single())
+                .isEqualTo("suspended");
+        String admin = b.adminSession().accessToken();
+        assertRefused(
+                b.api().post("/api/v1/branches", Map.of("code", "BR8", "name", "Test Branch Eight"), admin),
+                HttpStatus.LOCKED,
+                "tenant_suspended");
+        assertThat(b.api()
+                        .postForText("/api/v1/audit-events/export", Map.of(), admin)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.LOCKED);
+    }
+
+    static boolean takesPayments(UUID tenantId) {
+        return TestDatabase.owner()
+                .sql("SELECT app_tenant_takes_payments(?)")
+                .param(tenantId)
+                .query(Boolean.class)
+                .single();
+    }
+
+    /**
+     * Stop and cancel without the Owner's step-up are refused ({@code totp_required} with two-step sign-in on, and
+     * {@code password_required} for a stop without it); an administrator with a valid code, a cashier, an Owner who was
+     * replaced and a business with no Owner are refused, undo included; nothing is scheduled by any of them.
+     */
+    @Test
+    void stopAndCancelWithoutTheStepUpOrByANonOwnerAreRefused() {
+        Business plain = business(bothPlan, true, today.plusDays(10));
+        assertRefused(
+                plain.api()
+                        .post(
+                                "/api/v1/plan/modules/retail/stop",
+                                Map.of(),
+                                plain.ownerSession().accessToken()),
+                HttpStatus.UNPROCESSABLE_CONTENT,
+                "password_required");
+
+        Business b = business(bothPlan, true, today.plusDays(10), true);
+        Session owner = b.ownerSession();
+        Session admin = b.adminSession();
+        assertRefused(
+                b.api().post("/api/v1/plan/modules/retail/stop", Map.of(), owner.accessToken()),
+                HttpStatus.UNPROCESSABLE_CONTENT,
+                "totp_required");
+        assertRefused(
+                b.api().post("/api/v1/plan/cancel", Map.of(), owner.accessToken()),
+                HttpStatus.UNPROCESSABLE_CONTENT,
+                "totp_required");
+
+        Api.allowTotpReuse(admin.userId());
+        Map<String, Object> adminCode = Map.of("totp_code", Api.totp(admin.totpSecret(), Instant.now()));
+        assertRefused(
+                b.api().post("/api/v1/plan/modules/retail/stop", adminCode, admin.accessToken()),
+                HttpStatus.FORBIDDEN,
+                "owner_only");
+        assertRefused(
+                b.api().post("/api/v1/plan/cancel", adminCode, admin.accessToken()),
+                HttpStatus.FORBIDDEN,
+                "owner_only");
+        assertRefused(
+                withPassword(b.api(), "/api/v1/plan/modules/retail/stop", b.cashierSession()),
+                HttpStatus.FORBIDDEN,
+                "permission_denied");
+        assertThat(scheduled(b.t().tenantId())).isZero();
+
+        Api.allowTotpReuse(b.owner());
+        ResponseEntity<JsonNode> cancelled = b.api()
+                .post(
+                        "/api/v1/plan/cancel",
+                        Map.of("totp_code", Api.totp(owner.totpSecret(), Instant.now())),
+                        owner.accessToken());
+        assertThat(cancelled.getStatusCode()).as("%s", cancelled.getBody()).isEqualTo(HttpStatus.CREATED);
+        String undo = "/api/v1/plan/changes/" + cancelled.getBody().get("id").asString() + "/undo";
+        assertRefused(b.api().post(undo, null, admin.accessToken()), HttpStatus.FORBIDDEN, "owner_only");
+        assertRefused(
+                b.api().post(undo, null, b.cashierSession().accessToken()), HttpStatus.FORBIDDEN, "permission_denied");
+
+        // The Owner role moves to the other administrator: the old Owner's session may no longer undo or stop.
+        JdbcCall.run("UPDATE users SET is_owner = false WHERE id = ?", b.owner());
+        JdbcCall.run("UPDATE users SET is_owner = true WHERE id = ?", admin.userId());
+        assertRefused(b.api().post(undo, null, owner.accessToken()), HttpStatus.FORBIDDEN, "owner_only");
+        Api.allowTotpReuse(b.owner());
+        assertRefused(
+                b.api()
+                        .post(
+                                "/api/v1/plan/modules/retail/stop",
+                                Map.of("totp_code", Api.totp(owner.totpSecret(), Instant.now())),
+                                owner.accessToken()),
+                HttpStatus.FORBIDDEN,
+                "owner_only");
+
+        // No Owner at all: nobody changes the plan.
+        JdbcCall.run("UPDATE users SET is_owner = false WHERE id = ?", admin.userId());
+        assertRefused(b.api().post(undo, null, admin.accessToken()), HttpStatus.FORBIDDEN, "owner_only");
+        assertThat(scheduled(b.t().tenantId())).isEqualTo(1);
+        assertThat(modules(b.t().tenantId())).containsExactly("lending", "retail");
+    }
+
+    static long scheduled(UUID tenantId) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM subscription_scheduled_changes WHERE tenant_id = ? AND status = 'scheduled'")
+                .param(tenantId)
+                .query(Long.class)
+                .single();
+    }
 }
