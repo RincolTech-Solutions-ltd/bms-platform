@@ -597,7 +597,7 @@ body.side-menu-open {
 
 @media (prefers-reduced-motion: no-preference) {
   .sync-dot-syncing {
-    animation: rt-sync-pulse 1.2s ease-in-out infinite;
+    animation: rt-sync-pulse 1.2s var(--ease-out) infinite;
   }
 }
 

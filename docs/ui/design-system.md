@@ -65,7 +65,7 @@ The platform host and a tenant without a colour show the Rincol blue.
 - Elevation has three steps: flat (`.card-muted`), resting (`.card`), raised (`.card-raised`, the one card a
   page leads with, such as the landing hero and the sign-in card).
 - Motion (#106, #508, `docs/ui-rules.md`): `--motion-fast` 120ms (hover, press), `--motion` 200ms (dialogs, toasts), `--motion-slow`
-  250ms (a card or state rising in), all on `--ease-out`, `cubic-bezier(0.2, 0, 0, 1)`; never ease-in, never a bounce, never `transition: all` (the design guard checks).
+  250ms (a card or state rising in), all on `--ease-out`, `cubic-bezier(0.2, 0, 0, 1)`; never ease-in or ease-in-out, never a bounce, never `transition: all`, and only `transform` and `opacity` move, bar the guard's named colour fades (the design guard checks).
   Under `prefers-reduced-motion` the motion tokens are 0ms, `--press-scale` is 1, and every animation
   and transition runs once in 1ms (`base.css`), so a spinner stands still.
 

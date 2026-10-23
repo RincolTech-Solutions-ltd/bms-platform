@@ -35,9 +35,11 @@ check. The fuller design system is `docs/ui/design-system.md`.
 ## Motion
 
 13. Motion lasts 100 to 250ms and eases out with `cubic-bezier(0.2, 0, 0, 1)`. Only `transform` and `opacity` animate.
-    `prefers-reduced-motion` is respected. No bounce. The design guard fails a stylesheet whose `transition` or `@keyframes`
-    names a layout property (`top`, `left`, `right`, `bottom`, `width`, `height`, `margin`, `padding`), so the tour spotlight
-    glides by `transform` and the side menu folds without animating its width.
+    `prefers-reduced-motion` is respected. No bounce. The design guard scans every stylesheet under `frontend/src` and fails a
+    `transition` or `@keyframes` that animates anything but `transform` and `opacity`, a transition that names no property
+    (so animates all), and `ease-in` or `ease-in-out`. Its short exception list names each colour or background fade with
+    its reason: a button's fill and edge, a field's and a link card's edge, and the skeleton shimmer. So the tour spotlight
+    glides by `transform`, the side menu folds without animating its width, and shadows and focus rings change at once.
 
 ## Feedback
 
