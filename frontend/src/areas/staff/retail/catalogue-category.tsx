@@ -115,7 +115,7 @@ export function CategoryPage({ categoryId }: { categoryId: string }) {
         // The anchors of the page tour are drawn before the category arrives, so they are there when the tour starts.
         <>
           {message && <Success>{message}</Success>}
-          <h2>{category?.name ?? 'Category'} {category?.active === false && <span className="badge badge-warning">Switched off</span>}</h2>
+          {category?.active === false && <p><span className="badge badge-warning">Switched off</span></p>}
           <p className="hint" data-tour="category-codes">{category ? codeLine(category) : 'Loading'}</p>
           {canManage && (
             <p className="cluster">
