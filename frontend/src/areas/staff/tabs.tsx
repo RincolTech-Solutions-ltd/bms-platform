@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useRouterState } from '@tanstack/react-router';
-import { type ReactNode, type Ref, useEffect, useRef, useState } from 'react';
+import { type ReactNode, type Ref, useEffect, useMemo, useRef, useState } from 'react';
 import type { Me } from '../../api/client';
 import { icons } from '../../components/icons';
 import { useIsPhone } from '../../components/side-menu';
@@ -143,7 +143,7 @@ export function TabBar({ me, away = false, barRef }: { me: Me; away?: boolean; b
   const low = useLowStock(me);
   const tabs = staffTabs(me, { sells });
   const current = currentTab(tabs, pathname);
-  const underMore = staffAreas(me, { sells }).flatMap((l) => (l.tour ? [l.tour] : []));
+  const underMore = useMemo(() => staffAreas(me, { sells }).flatMap((l) => (l.tour ? [l.tour] : [])), [me, sells]);
   return (
     <nav ref={barRef} className="tab-bar" aria-label="Main" data-tour="tab-bar" data-tour-also="retail-nav" hidden={away}>
       <ul>
