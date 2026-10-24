@@ -261,6 +261,7 @@ class RetailCashbookSavingsIT extends IntegrationTest {
     @Test
     void aSavingsCreateWaitsForAnExpenseInFlightOnTheSameDayAndThenSeesIt() throws Exception {
         UUID[] item = cb.categoryWithItem("Premises", "Rent", false);
+        UUID recorder = seededUser(item);
         JsonNode s = suggestion(ALL);
         java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newSingleThreadExecutor();
         try (java.sql.Connection c = TestDatabase.ownerDataSource().getConnection()) {
@@ -288,7 +289,7 @@ class RetailCashbookSavingsIT extends IntegrationTest {
                 st.setDate(4, java.sql.Date.valueOf(day));
                 st.setObject(5, item[0]);
                 st.setObject(6, item[1]);
-                st.setObject(7, UUID.randomUUID());
+                st.setObject(7, recorder);
                 st.executeUpdate();
             }
             java.util.concurrent.Future<ResponseEntity<JsonNode>> save =
@@ -310,11 +311,22 @@ class RetailCashbookSavingsIT extends IntegrationTest {
         }
     }
 
+    /** A real recorder: the one the API stamped on an expense on another day, so the raw insert stays valid. */
+    UUID seededUser(UUID[] item) {
+        UUID id = RetailTestSupport.id(cb.expense(hq, item[0], item[1], 100, daysAgo(6)));
+        return TestDatabase.owner()
+                .sql("SELECT recorded_by FROM retail_expenses WHERE id = ?")
+                .param(id)
+                .query(UUID.class)
+                .single();
+    }
+
     /**
-     * The same race through the API, looped: a savings save of the whole available amount and an expense of 1,000 for the
-     * same branch and day sent at once. The lock orders them, and both take their clock reading ({@code occurred_at}) after
-     * it, so the later row is the one that waited. Savings never exceed the profit less the expenses that committed before
-     * them; an expense that came after is a later change (ADR-080 decision 3).
+     * The same race through the API, looped: a savings save of the whole available amount and an expense of 1 for the same
+     * branch and day sent at once. An expense of 1 leaves the suggestion (and so the token) as it was, so a save that comes
+     * second meets the cap (422), not the token (409). The lock orders them, and both take their clock reading
+     * ({@code occurred_at}) after it, so the later row is the one that waited. Savings never exceed the profit less the
+     * expenses that committed before them; an expense that came after is a later change (ADR-080 decision 3).
      */
     @Test
     void racingASavingsSaveAgainstAnExpenseNeverSavesAboveWhatTheDayHadAtCommit() throws Exception {
@@ -331,14 +343,19 @@ class RetailCashbookSavingsIT extends IntegrationTest {
                 });
                 var spend = pool.submit(() -> {
                     go.await();
-                    return cb.expense(hq, rent[0], rent[1], 1_000, day);
+                    return cb.expense(hq, rent[0], rent[1], 1, day);
                 });
                 go.countDown();
                 ResponseEntity<JsonNode> saved = save.get(60, java.util.concurrent.TimeUnit.SECONDS);
                 ResponseEntity<JsonNode> spent = spend.get(60, java.util.concurrent.TimeUnit.SECONDS);
                 assertThat(spent.getStatusCode()).isEqualTo(HttpStatus.CREATED);
                 assertThat(saved.getStatusCode())
-                        .isIn(HttpStatus.CREATED, HttpStatus.CONFLICT, HttpStatus.UNPROCESSABLE_CONTENT);
+                        .as("round %d", round)
+                        .isIn(HttpStatus.CREATED, HttpStatus.UNPROCESSABLE_CONTENT);
+                if (saved.getStatusCode() == HttpStatus.UNPROCESSABLE_CONTENT) {
+                    assertThat(saved.getBody().get("code").asString()).isEqualTo("savings_above_available");
+                    assertThat(saved.getBody().get("available_minor").asLong()).isEqualTo(available - 1);
+                }
                 if (saved.getStatusCode() == HttpStatus.CREATED) {
                     UUID id = RetailTestSupport.id(saved);
                     long before = TestDatabase.owner()
@@ -346,7 +363,7 @@ class RetailCashbookSavingsIT extends IntegrationTest {
                                     SELECT coalesce(sum(e.amount_minor), 0) FROM retail_expenses e, retail_daily_savings v
                                      WHERE v.id = ? AND e.tenant_id = v.tenant_id AND e.branch_id = v.branch_id
                                        AND e.business_date = v.business_date AND e.voided_at IS NULL
-                                       AND e.occurred_at < v.occurred_at
+                                       AND e.occurred_at <= v.occurred_at
                                     """)
                             .param(id)
                             .query(Long.class)

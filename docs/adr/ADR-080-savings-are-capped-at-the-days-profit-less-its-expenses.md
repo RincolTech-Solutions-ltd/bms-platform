@@ -4,7 +4,7 @@
 
 Proposed (issue #538, 24 Oct 2026). Amends ADR-022 decision 11 (the suggestion is now worked out from the day's available amount,
 not from its profit alone) and adds a cap it did not have; ADR-022 decisions 12 and 13 (the audit flags and the profit gate) are
-unchanged. Migration `V95`. Renumbered at merge if needed (pending ADR-079 is claimed by the open pull request #529).
+unchanged. Migration `V95`. Renumbered at merge if needed (ADR-079, average cost, is merged).
 
 ## Context
 
@@ -44,13 +44,17 @@ they are left for the business owner to decide one by one.
    **A later change does not undo savings:** an expense entered afterwards (or back-dated to that day), a sale voided
    afterwards or a cost correction can leave a saved amount above the day's new available amount, and the record stays. The
    Savings screen then says so for that day: "Saved UGX X; profit less expenses is now UGX Y" when X is above Y, from the
-   suggestion's `existing_amount_minor*`. To correct it the owner voids the savings record and saves again.
+   suggestion's `existing_amount_minor*`. To correct it the owner voids the savings record and saves again. The import of a
+   past cash book (historical expenses) takes no lock and is such a later change; expenses are never edited, only voided.
+   The lock relies on READ COMMITTED, the database default the services keep: each statement after it reads what committed
+   before it.
 4. **The screen** shows the three figures (profit, expenses, available) to a caller with `retail.profit.read`, from the new
    suggestion fields `day_expenses_minor*` and `available_minor*` (absent without it, as `daily_profit_minor` is).
 5. **The overwrite reason is optional.** The form offers "Add a reason (optional)", which opens a short pick list (Paying a debt,
    Buying stock, Owner took money, Slow day, Other, with a few words under Other). The server keeps a reason when one is given and
-   drops a blank one. `V95` replaces `retail_daily_savings_check1` with `retail_daily_savings_overwrite_reason_chk`: a reason, when
-   present, is not blank. The overwrite still needs `retail.savings.overwrite`, and the audit row still records that the amount was
+   drops a blank one. `V95` replaces `retail_daily_savings_check1` with `retail_daily_savings_overwrite_reason_chk`: on an
+   overwritten record a reason, when present, is not blank. Like the check it replaces it says nothing about records that are
+   not overwritten, so it is strictly weaker and cannot fail on existing rows. The overwrite still needs `retail.savings.overwrite`, and the audit row still records that the amount was
    overwritten.
 6. **Other typed reasons stay as they are.** Only the savings reason becomes optional. Every other screen that forces a typed
    reason (voids, reversals and write-offs, stock corrections and usage, price changes, transfers, quotation and order cancels,

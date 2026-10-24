@@ -100,11 +100,15 @@ describe('a new record shown at once', () => {
     const otherShop = ['retail', 'savings', ['another-branch'], '2026-10-01', '2026-10-31'];
     const lastMonth = ['retail', 'savings', [branch], '2026-09-01', '2026-09-30'];
     const report = ['retail', 'savings', 'report'];
+    const reportRows = ['retail', 'savings', 'report', '2026-10-01', '2026-10-31'];
+    const short = ['retail', 'savings', [branch]];
     client.setQueryData(mine, []);
     client.setQueryData(all, [{ id: 'old' }]);
     client.setQueryData(otherShop, []);
     client.setQueryData(lastMonth, []);
     client.setQueryData(report, { items: [] });
+    client.setQueryData(reportRows, []);
+    client.setQueryData(short, []);
     showInRecords(client, saved);
     showInRecords(client, saved);
     expect(client.getQueryData(mine)).toEqual([saved]);
@@ -112,6 +116,8 @@ describe('a new record shown at once', () => {
     expect(client.getQueryData(otherShop)).toEqual([]);
     expect(client.getQueryData(lastMonth)).toEqual([]);
     expect(client.getQueryData(report)).toEqual({ items: [] });
+    expect(client.getQueryData(reportRows)).toEqual([]);
+    expect(client.getQueryData(short)).toEqual([]);
   });
 });
 

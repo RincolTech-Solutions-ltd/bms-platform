@@ -32,9 +32,12 @@ const EMPTY = { amount: '', reason: '', other: '' };
 export function showInRecords(client: QueryClient, saved: Savings) {
   const day = saved.business_date ?? '';
   const holds = (key: readonly unknown[]): boolean => {
+    if (key.length !== 5) return false;
     const [, , scope, from, to] = key;
-    const inScope = !Array.isArray(scope) || scope.length === 0 || scope.includes(saved.branch_id);
-    return inScope && (typeof from !== 'string' || from === '' || day >= from) && (typeof to !== 'string' || to === '' || day <= to);
+    if (scope !== undefined && !Array.isArray(scope)) return false;
+    if (typeof from !== 'string' || typeof to !== 'string') return false;
+    const inScope = scope === undefined || scope.length === 0 || scope.includes(saved.branch_id);
+    return inScope && day >= from && day <= to;
   };
   for (const [key, rows] of client.getQueriesData<unknown>({ queryKey: ['retail', 'savings'] })) {
     if (!Array.isArray(rows) || !holds(key) || rows.some((r: Savings) => r.id === saved.id)) continue;
@@ -47,7 +50,8 @@ export function SavingsForm({ branchId, onSaved }: { branchId: string; onSaved?:
   const { me } = useStaff();
   const canOverwrite = holds(me, SAVINGS_OVERWRITE);
   const { key, draft, setDraft, finish, discard } = usePersistedDraft<SavingsDraft>(`savings:${me.user_id ?? ''}:${branchId}`, { date: businessToday(), ...EMPTY });
-  const [touched, setTouched] = useState(false);
+  // A draft restored with an amount shows its problem at once; a fresh form waits for blur (rule 10).
+  const [touched, setTouched] = useState(() => draft.amount.trim() !== '');
   const [reasonOpen, setReasonOpen] = useState(false);
   const suggestionKey = ['retail', 'savings-suggestion', branchId, draft.date];
   const suggestion = useQuery({ queryKey: suggestionKey, queryFn: () => retail.savingsSuggestion({ branchId, date: draft.date }) });

@@ -172,7 +172,15 @@ class RetailCashbookGuardsIT {
         asApp(c -> exec(c, """
                         INSERT INTO retail_daily_savings (id, tenant_id, branch_id, business_date, amount_minor, currency,
                                                           suggested_minor, overwritten, occurred_at, recorded_by)
-                        VALUES (?, ?, ?, CURRENT_DATE - 10, 300, 'UGX', 500, true, now(), ?)
+                        VALUES (?, ?, ?, CURRENT_DATE - 31, 300, 'UGX', 500, true, now(), ?)
+                        """, UUID.randomUUID(), t.tenantId(), t.headOffice(), user));
+        // As under V34, a record that is not overwritten may carry any reason, blank included: V95 only relaxes, so an
+        // imported or historical row like this one could never make the migration fail.
+        asApp(c -> exec(c, """
+                        INSERT INTO retail_daily_savings (id, tenant_id, branch_id, business_date, amount_minor, currency,
+                                                          suggested_minor, overwritten, overwrite_reason, occurred_at,
+                                                          recorded_by)
+                        VALUES (?, ?, ?, CURRENT_DATE - 32, 500, 'UGX', 500, false, '', now(), ?)
                         """, UUID.randomUUID(), t.tenantId(), t.headOffice(), user));
         assertThatThrownBy(() -> asApp(c -> exec(c, """
                         INSERT INTO retail_daily_savings (id, tenant_id, branch_id, business_date, amount_minor, currency,
