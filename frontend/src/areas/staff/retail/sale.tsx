@@ -3,6 +3,7 @@ import { createLazyRoute } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { SEARCH_DELAY_MS, createDebouncer } from '../../../app/ui/useLiveSearch';
+import { Stepper } from '../../../app/ui/Stepper';
 import { RetailError, retail, type Product, type ResolvedLine, type Sale, type SalePayment, type SaleRequest } from '../../../api/retail';
 import { mayKeepOnPhone, offlineProblem, offlineSale } from '../../../offline/catalogue';
 import { useOffline, useOnline } from '../../../offline/offline-context';
@@ -23,7 +24,7 @@ import type { BranchRole } from '../../../api/retail';
 import { BRANCH_ROLES, CREDIT_OVERRIDE, CUSTOMER_ACCOUNTS, PRICELIST_MANAGE, PRICELIST_USE, PRICE_LISTS, PRICE_OVERRIDE, UNITS, branchesWhere, capabilityOn, holds, holdsAt, needsOf, sellingBranches } from './permissions';
 import { exceededBy, isLimitRefusal, limitWords, termsWords } from './account-state';
 import { SaleDocuments } from './documents-ui';
-import { ShareReceipt } from './receipt-share';
+import { ShareReceipt, useShareReady } from './receipt-share';
 import { ChangePanel, ReceiptChange } from './sale-change';
 import { receivedFor, receivedProblem } from './sale-change-state';
 import { ScanBar } from './scan';
@@ -52,7 +53,7 @@ function useSettled<T>(value: T): T {
   return settled;
 }
 
-export function Receipt({ sale, onNew, received }: { sale: Sale; onNew?: () => void; /** Cash the customer gave, for the change line; display only. */ received?: number }) {
+export function Receipt({ sale, received }: { sale: Sale; /** Cash the customer gave, for the change line; display only. */ received?: number }) {
   const canProfit = useProfitAccess();
   return (
     <section aria-label="Sale receipt">
@@ -93,11 +94,6 @@ export function Receipt({ sale, onNew, received }: { sale: Sale; onNew?: () => v
         </p>
       )}
       {canProfit && sale.profit_minor !== undefined && <p>Profit on this sale: {money(sale.profit_minor)}</p>}
-      {onNew && (
-        <button type="button" className="rt-primary" onClick={onNew}>
-          New sale
-        </button>
-      )}
     </section>
   );
 }
@@ -188,10 +184,7 @@ export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, fresh,
         </div>
       )}
       <div className="rt-row">
-        <div>
-          <label htmlFor={`qty-${i}`}>Quantity ({pack?.unit ?? line.product.unit})</label>
-          <input id={`qty-${i}`} inputMode="decimal" value={line.qty} onChange={(e) => onQty(e.target.value)} aria-invalid={f === null || hint !== null} />
-        </div>
+        <Stepper id={`qty-${i}`} label={`Quantity (${pack?.unit ?? line.product.unit})`} name={line.product.description} value={line.qty} onChange={onQty} min={1} inputMode="decimal" invalid={f === null || hint !== null} />
         <div>
           <label htmlFor={`price-${i}`}>{pack ? `Price per ${pack.unit}` : 'Unit price'}</label>
           <input id={`price-${i}`} inputMode="numeric" value={line.price} onChange={(e) => onPrice(e.target.value)} aria-invalid={f === null} readOnly={price ? !price.canOverride : offlinePrice ? !offlinePrice.canType : false} />
@@ -420,7 +413,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
           </span>
         )}
       </h2>
-      {draft.lines.length === 0 && <EmptyState art="noSales" title="No items yet.">Search above and tap Add.</EmptyState>}
+      {draft.lines.length === 0 && <EmptyState art="noSales" title="No items yet.">Type an item above and tap it in the list, or scan it.</EmptyState>}
       {pricesOn && resolution.data?.price_list && !checking && (
         <p className="hint" data-tour="sale-price-list" data-testid="price-list-in-force">
           Priced from the list {resolution.data.price_list}{resolution.data.origin === 'customer_group' ? ' (the customer group)' : resolution.data.origin === 'customer' ? ' (the customer)' : ''}.
@@ -648,6 +641,15 @@ export function StoreBranch({ branchName, roles }: { branchName: string; roles?:
   );
 }
 
+/** New sale under the receipt actions: a secondary button once Share receipt is drawn, the main action until then (issue #534). */
+function NewSale({ sale, onNew }: { sale: Sale; onNew: () => void }) {
+  return (
+    <button type="button" className={useShareReady(sale, true) ? 'btn rt-next' : 'rt-primary'} onClick={onNew}>
+      New sale
+    </button>
+  );
+}
+
 export function RecordSale() {
   const { me } = useStaff();
   const roles = useBranchRoles(me);
@@ -675,8 +677,11 @@ export function RecordSale() {
         <ProvisionalReceipt item={queued} onNew={() => { setQueued(null); setRound((n) => n + 1); }} />
       ) : sale ? (
         <>
-          <Receipt sale={sale} received={received} onNew={() => { setSale(null); setReceived(undefined); setRound((n) => n + 1); }} />
+          {/* Share receipt is the main action here (issue #534): New sale comes right after the receipt actions, and is the
+              main action until Share receipt is drawn, or when this sale offers no receipt to share. */}
+          <Receipt sale={sale} received={received} />
           <ShareReceipt sale={sale} madeHere />
+          <NewSale sale={sale} onNew={() => { setSale(null); setReceived(undefined); setRound((n) => n + 1); }} />
           {sale.id && <SaleDocuments saleId={sale.id} status={sale.status} branchId={sale.branch_id} />}
         </>
       ) : (
