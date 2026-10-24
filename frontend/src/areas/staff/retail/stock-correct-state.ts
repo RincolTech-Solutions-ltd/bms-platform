@@ -1,5 +1,6 @@
 import type { StockMovement } from '../../../api/retail';
 import { milliOf, parseCount, qtyString, showQty } from './maths';
+import { WORDS } from '../../../app/glossary';
 
 // Correcting the quantity of an item on the stock list (issue #351, ADR-044). The server decides; these helpers only prepare the
 // request and put the answers in plain words.
@@ -41,7 +42,7 @@ export function correctionRequest(branchId: string, productId: string, typed: st
 }
 
 const KIND: Record<string, string> = {
-  purchase: 'Restock',
+  purchase: WORDS.buyStock,
   sale: 'Sale',
   usage: 'Used',
   damage: 'Damaged',
@@ -56,8 +57,8 @@ const KIND: Record<string, string> = {
 /** What a line of the stock history is, in words: a correction and a voided restock say so, a stock-take is a count. */
 export function movementTitle(m: StockMovement): string {
   if (m.correction || m.source_type === 'retail.stock_correction') return 'Quantity corrected';
-  if (m.source_type === 'retail.purchase_void') return 'Restock voided';
-  if (m.source_type === 'retail.stocktake') return 'Stock-take';
+  if (m.source_type === 'retail.purchase_void') return 'Purchase voided';
+  if (m.source_type === 'retail.stocktake') return 'Stock count';
   if (m.kind === 'adjustment') return 'Adjustment';
   return KIND[m.kind ?? ''] ?? (m.kind ?? '');
 }

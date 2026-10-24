@@ -55,7 +55,7 @@ function QuantityForm({ row, branchId, onDone }: { row: StockRow; branchId: stri
     onSuccess: (done) => {
       discard();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
-      onDone(`${row.description} is now ${showQty(done.new_qty ?? '0')} ${row.unit ?? ''} (it was ${showQty(done.old_qty ?? '0')}). The correction is in its history. It does not count as shrinkage.`);
+      onDone(`${row.description} is now ${showQty(done.new_qty ?? '0')} ${row.unit ?? ''} (it was ${showQty(done.old_qty ?? '0')}). The correction is in its history. It does not count as lost or damaged stock.`);
     },
     onError: (error) => {
       // The shelf moved while the form was open: read the list again, and type against the new quantity with a new key.
@@ -88,8 +88,8 @@ function QuantityForm({ row, branchId, onDone }: { row: StockRow; branchId: stri
       <label htmlFor="correct-note">A note (if you like)</label>
       <input id="correct-note" value={draft.note} maxLength={280} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} autoComplete="off" />
       <p className="hint">
-        The old figure stays in the history, with who changed it, when and why. A correction is not counted as shrinkage or usage.
-        If the money was entered wrongly too, use Past restocks instead.
+        The old figure stays in the history, with who changed it, when and why. A correction is not counted as lost or damaged stock, or as usage.
+        If the money was entered wrongly too, use Past purchases instead.
       </p>
       <Problem error={send.error} />
       <BusyButton type="submit" className="rt-primary" busy={send.isPending} disabled={!ready}>Save the right quantity</BusyButton>
@@ -208,13 +208,13 @@ export function CorrectItem({ row, branchId, onClose }: { row: StockRow; branchI
       {choice === 'other' && (
         <div className="stack" data-testid="correct-other">
           <p>
-            <strong>A restock was entered in the wrong pack unit, or at the wrong price:</strong> open <Link to="/staff/retail/restocks">Past restocks</Link>, choose Correct this restock, and enter it again.
+            <strong>A purchase was entered in the wrong pack unit, or at the wrong price:</strong> open <Link to="/staff/retail/restocks">Past purchases</Link>, choose Correct this purchase, and enter it again.
           </p>
           <p>
             <strong>The name or the price of the item itself is wrong:</strong> change it in <Link to="/staff/retail/catalogue/products">Items</Link>.
           </p>
           <p>
-            <strong>The item is kept in the wrong unit:</strong> a unit is never converted once the item has stock, because 10 rolls would become 10 metres. Add a new item with the right unit, correct this one to none here, and restock the new one.
+            <strong>The item is kept in the wrong unit:</strong> a unit is never converted once the item has stock, because 10 rolls would become 10 metres. Add a new item with the right unit, correct this one to none here, and buy stock of the new one.
           </p>
           <p>
             <strong>The shelf holds a different number than the list:</strong> choose The quantity is wrong above, or count it in <Link to="/staff/retail/stocktake">Stock-take</Link>.
