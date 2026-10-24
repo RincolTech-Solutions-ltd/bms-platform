@@ -188,7 +188,7 @@ function CustodyChange({ id, version, custody, onDone }: { id: string; version: 
   }
   return (
     <form onSubmit={(e) => void submit(e)} noValidate aria-label="Record a change" className="mf">
-      <FieldsNeededNote />
+      {(type === 'received_into_custody' || type === 'moved' || type === 'note') && <FieldsNeededNote />}
       <Group title="Record a change">
         <SelectField name="event_type" label="What happened" form={form} value={type} onChange={(v) => setType(v as EventType)} options={options.map((o) => ({ value: o, label: EVENT_WORDS[o] }))} />
         {(type === 'received_into_custody' || type === 'moved') && <TextField name="location" label="Where it is kept now" form={form} required value={location} onChange={setLocation} maxLength={200} />}
