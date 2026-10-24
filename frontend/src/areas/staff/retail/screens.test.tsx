@@ -54,12 +54,14 @@ describe('sale screen', () => {
   const client = new QueryClient();
   client.setQueryData(['retail', 'products', branch, ''], products);
 
-  it('lists items with the branch balance and a negative flag, labelled inputs', () => {
+  // The items show only while something is typed (issue #534); ItemCombobox.dom.test.tsx and item-picker.dom.test.tsx draws the matches.
+  it('shows a labelled item search with no list of items until something is typed', () => {
     const html = page('sales', <SaleForm branchId={branch} />, client);
-    expect(html).toContain('LED bulb 9W screw');
-    expect(html).toContain('in stock here');
-    expect(html).toContain('(negative)');
+    expect(html).not.toContain('LED bulb 9W screw');
+    expect(html).not.toContain('in stock here');
+    expect(html).not.toContain('Group by category');
     expect(html).toContain('for="sale-search"');
+    expect(html).toMatch(/id="sale-search"[^>]*role="combobox"[^>]*aria-expanded="false"/);
     expect(html).toContain('<span>Total</span> <span class="rt-total-amount">UGX 0</span>');
     expect(html).not.toMatch(/cost|profit/i);
   });
@@ -96,8 +98,9 @@ describe('stock screen', () => {
 
   it('says Price and puts Cost before it (issue #330), and says only Price without the permission', () => {
     const admin = renderToString(<StockTable rows={rows} showCost />);
-    expect(admin.indexOf('>Cost<')).toBeGreaterThan(-1);
-    expect(admin.indexOf('>Cost<')).toBeLessThan(admin.indexOf('>Price<'));
+    // ADR-079: the cost of stock is the shop's average buying price.
+    expect(admin.indexOf('>Average cost<')).toBeGreaterThan(-1);
+    expect(admin.indexOf('>Average cost<')).toBeLessThan(admin.indexOf('>Price<'));
     expect(admin.indexOf('UGX 3,500')).toBeLessThan(admin.indexOf('UGX 6,000'));
     expect(admin).not.toContain('Selling price');
     const sales = renderToString(<StockTable rows={rows} showCost={false} />);
@@ -108,8 +111,8 @@ describe('stock screen', () => {
   it('shows cost then price on the all-branches table and the phone cards', () => {
     const data = { branches: [{ id: 'b1', code: 'BR1', name: 'Test Branch A' }], items: [{ product_id: 'p1', description: 'Test Item 01', unit: 'piece', total_qty: '3.000', sell_minor: 6000, cost_minor: 3500, balances: [{ branch_id: 'b1', qty: '3.000' }] }] } as AllBranchesStock;
     const table = renderToString(<AllBranchesTable data={data} showCost />);
-    expect(table.indexOf('>Cost<')).toBeLessThan(table.indexOf('>Price<'));
-    expect(renderToString(<AllBranchesList data={data} showCost />)).toContain('Cost UGX 3,500, price UGX 6,000 each');
+    expect(table.indexOf('>Average cost<')).toBeLessThan(table.indexOf('>Price<'));
+    expect(renderToString(<AllBranchesList data={data} showCost />)).toContain('Average cost UGX 3,500, price UGX 6,000 each');
     expect(renderToString(<AllBranchesList data={data} showCost={false} />)).toContain('Price UGX 6,000 each');
   });
 
@@ -136,25 +139,25 @@ describe('low stock and out of stock tabs', () => {
     const html = renderToString(<StockLevelFilter level="low" onChange={() => undefined} />);
     expect(html).toContain('>All items<');
     expect(html).toContain('>Out of stock<');
-    expect(html).toContain('aria-pressed="true">Low stock<');
-    expect(html).toContain('aria-pressed="false">Out of stock<');
+    expect(html).toMatch(/aria-checked="true"[^>]*>Low stock</);
+    expect(html).toMatch(/aria-checked="false"[^>]*>Out of stock</);
     expect(html).toContain('at or below their minimum, or 5 or fewer without one, including those out of stock');
   });
 
   it('the Stock page starts on all items', () => {
     const client = new QueryClient();
     const html = page('sales', <StockPage />, client);
-    expect(html).toContain('aria-pressed="true">All items<');
+    expect(html).toMatch(/aria-checked="true"[^>]*>All items</);
     expect(html).not.toContain('including those that are out of stock');
   });
 });
 
 describe('category in the pickers', () => {
-  it('shows the category as a small grey label in the sale picker and the usage picker', () => {
+  it('lists no items in the sale picker and the usage picker before a search, even with the whole catalogue loaded', () => {
     const client = new QueryClient();
     client.setQueryData(['retail', 'products', branch, ''], products.map((p) => ({ ...p, category: 'Lighting' })));
-    expect(page('sales', <SaleForm branchId={branch} />, client)).toContain('<span class="hint">Lighting</span>');
-    expect(page('sales', <UsageForm branchId={branch} />, client)).toContain('<span class="hint">Lighting</span>');
+    expect(page('sales', <SaleForm branchId={branch} />, client)).not.toContain('Lighting');
+    expect(page('sales', <UsageForm branchId={branch} />, client)).not.toContain('Lighting');
   });
 });
 
@@ -305,7 +308,7 @@ describe('stock moves', () => {
     expect(html).toContain('for="transfer-to"');
     expect(html).toContain('Test Branch B');
     expect(html).not.toContain('>BR1 Test Branch A</option>');
-    expect(html).toContain('in stock here');
+    expect(html).not.toContain('in stock here');
     expect(html).toContain('for="transfer-search"');
     expect(html).not.toMatch(/each,/);
   });
@@ -403,7 +406,7 @@ describe('walk-through fixes (#112)', () => {
     expect(admin).toContain('Restock saved (RP00000042)');
     expect(admin).toContain('From Test Supplier 01, bought on 2026-10-06: 2 items');
     expect(admin).toContain('LED bulb 9W screw: sell price changed from UGX 1,200 to UGX 1,400.');
-    expect(admin).toContain('LED bulb 9W screw: cost changed from UGX 800 to UGX 850.');
+    expect(admin).toContain('LED bulb 9W screw: last paid changed from UGX 800 to UGX 850.');
     expect(admin).not.toContain('LED bulb 15W screw:');
     expect(page('sales', <RestockSaved purchase={purchase} context={context} />)).not.toContain('cost changed');
   });
