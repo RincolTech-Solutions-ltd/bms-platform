@@ -20,7 +20,7 @@ import { PACK_UNUSABLE } from './barcode-state';
 import { pickItem } from '../../../test-utils/item-picker';
 
 /** The count sheet before anything is found or scanned (issue #534). */
-const EMPTY_COUNT = 'No items yet. Find an item above, or scan it.';
+const EMPTY_COUNT = 'No items yet. Find an item above, scan it, or count it in the list below.';
 /** The picker of the barcode assign panel has its own label, so it is told apart from the sale's (review of #535). */
 const ASSIGN = 'Find the item this barcode belongs to';
 
@@ -229,7 +229,6 @@ describe('FR-RET-68 scanning on the stock count', () => {
     screenOf(<StocktakePage />);
     const search = await screen.findByRole('combobox', { name: 'Find an item by name, code or category' });
     await screen.findByText(EMPTY_COUNT);
-    expect(document.getElementById(`count-${LAMP}`)).toBeNull();
     fireEvent.change(search, { target: { value: 'solar' } });
     scan(EAN);
     await waitFor(() => expect(document.querySelector('.scan-bar')?.textContent).toContain('Added'));
@@ -256,7 +255,7 @@ describe('FR-RET-68 scanning on the stock count', () => {
     await screen.findByText(EMPTY_COUNT);
     scan('TEST-LAMP-BOX');
     await waitFor(() => expect(screen.getByTestId('scan-refused').textContent).toContain('pack size'));
-    expect(document.getElementById(`count-${LAMP}`)).toBeNull();
+    expect((document.getElementById(`count-${LAMP}`) as HTMLInputElement).value).toBe('');
   });
 });
 

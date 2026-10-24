@@ -853,7 +853,7 @@ export const cataloguePage: Tour = {
 export const stocktakePage: Tour = {
   id: 'page-stocktake',
   // Version 2 adds the Scan here step (issue #345, ADR-070).
-  // Version 3 words the Count step for the sheet that is searched, not shown whole (issue #534).
+  // Version 3 words the Count step for the search on top and the list Not counted yet below it (issue #534).
   version: 3,
   title: 'This page: stock-take',
   audience: (me) => STOCKTAKE.every((p) => held(me, p)),
@@ -864,7 +864,7 @@ export const stocktakePage: Tour = {
       id: 'count',
       target: 'count-search',
       title: 'Count each item',
-      body: 'Type part of the name, code or category, and tap the item in the list under the box. It goes on the count: type how many you counted. Leave an item blank to skip it.',
+      body: 'Find an item by typing part of its name, or work down the list Not counted yet. Type how many you counted, or tap 0 for an item that is gone.',
     },
     {
       id: 'scan',

@@ -86,7 +86,11 @@ function CountSheet({ branchId }: { branchId: string }) {
   // The items on the count, in the order they were picked or scanned (issue #534): the sheet is searched, not shown whole.
   const [listed, setListed] = useState<string[]>([]);
   const list = (id: string) => setListed((l) => (l.includes(id) ? l : [...l, id]));
-  const [showRest, setShowRest] = useState(false);
+  // The lines whose count is entered, in the order they were done; and the question asked before a count with lines left.
+  const [done, setDone] = useState<string[]>([]);
+  const [confirming, setConfirming] = useState(false);
+  /** A line leaves Not counted yet once its count is in, and goes back if the count is emptied. */
+  const settle = (id: string) => setDone((d) => ((counts[id] ?? '').trim() === '' ? d.filter((x) => x !== id) : d.includes(id) ? d : [...d, id]));
   const stock = useQuery({ queryKey: ['retail', 'stock', branchId, '', false], queryFn: () => countableStock(branchId) });
 
   // A scan (issue #345) counts one more of the item, or a whole pack when the barcode is on a pack, and puts it on the count.
@@ -99,7 +103,7 @@ function CountSheet({ branchId }: { branchId: string }) {
     if (unitId && !pack) return PACK_UNUSABLE;
     search.clear();
     setCounts((c) => ({ ...c, [id]: plusOne(c[id], pack ? (parseQty(pack.factor ?? '') ?? 1000) : 1000) }));
-    list(id);
+    setDone((d) => (d.includes(id) ? d : [...d, id]));
     setScanned(id);
     return undefined;
   };
@@ -123,7 +127,7 @@ function CountSheet({ branchId }: { branchId: string }) {
         <StocktakeReview stocktake={draft} onCommit={() => commit.mutate()} busy={commit.isPending} />
         <Problem error={commit.error} />
         {draft.status === 'draft' && <button type="button" onClick={() => setDraft(null)}>Back to the count</button>}
-        {draft.status === 'committed' && <button type="button" onClick={() => { setDraft(null); setCounts({}); setListed([]); setShowRest(false); }}>Start another count</button>}
+        {draft.status === 'committed' && <button type="button" onClick={() => { setDraft(null); setCounts({}); setListed([]); setDone([]); setConfirming(false); }}>Start another count</button>}
       </>
     );
   }
@@ -131,29 +135,44 @@ function CountSheet({ branchId }: { branchId: string }) {
   const found = search.term === '' || !stock.data ? undefined : stock.data.filter((r) => matchesSearch(`${r.description ?? ''} ${r.code ?? ''} ${r.category ?? ''}`, search.term));
   const byId = new Map((stock.data ?? []).map((r) => [r.product_id ?? '', r]));
   const rows = listed.flatMap((id) => byId.get(id) ?? []);
-  // The rest of the sheet, on request, for a full count that walks the shelf list and types 0 for what is gone (review of #535).
-  const rest = (stock.data ?? []).filter((r) => !listed.includes(r.product_id ?? ''));
-  // Hiding the rest keeps every line that has a count in sight: a count is never sent from a line the counter cannot see.
-  const hideRest = () => {
-    setListed((l) => [...l, ...rest.map((r) => r.product_id ?? '').filter((id) => (counts[id] ?? '').trim() !== '')]);
-    setShowRest(false);
+  // Owner decision on #535: the whole sheet stays below the search, as "Not counted yet", so a full count walks the shelf list.
+  // A line leaves it once its count is entered (on leaving the box, on Enter, or on 0), and "Counted items" holds the done
+  // ones. An item found or scanned and not yet counted heads the list, marked, for its count.
+  const isCounted = (id: string) => (counts[id] ?? '').trim() !== '';
+  const notCounted = [...rows.filter((r) => !done.includes(r.product_id ?? '')), ...(stock.data ?? []).filter((r) => !done.includes(r.product_id ?? '') && !listed.includes(r.product_id ?? ''))];
+  const counted = done.flatMap((id) => byId.get(id) ?? []);
+  const uncounted = (stock.data ?? []).filter((r) => !isCounted(r.product_id ?? '')).length;
+  const finish = () => {
+    setDone((d) => [...d, ...Object.keys(counts).filter((id) => isCounted(id) && !d.includes(id))]);
+    if (uncounted > 0 && !confirming) return setConfirming(true);
+    setConfirming(false);
+    review.mutate();
   };
-  const line = (r: StockRow) => {
+  const line = (r: StockRow, waiting: boolean) => {
     const id = r.product_id ?? '';
     return (
       <div key={id} className={id === scanned ? 'rt-card scan-hit' : 'rt-card'} data-testid={id === scanned ? 'scan-hit' : undefined}
         ref={id === scanned ? (el) => el?.scrollIntoView?.({ block: 'nearest' }) : undefined}>
         <label htmlFor={`count-${id}`}>{r.description} ({r.unit})</label>
         <CategoryLabel category={r.category} />
-        <input id={`count-${id}`} inputMode="decimal" value={counts[id] ?? ''} placeholder="Counted"
-          aria-invalid={(counts[id] ?? '').trim() !== '' && parseCount(counts[id] ?? '') === null}
-          onChange={(e) => setCounts({ ...counts, [id]: e.target.value })} />
+        <div className="count-entry">
+          <input id={`count-${id}`} inputMode="decimal" value={counts[id] ?? ''} placeholder="Counted"
+            aria-invalid={(counts[id] ?? '').trim() !== '' && parseCount(counts[id] ?? '') === null}
+            onChange={(e) => setCounts({ ...counts, [id]: e.target.value })}
+            onBlur={() => settle(id)}
+            onKeyDown={(e) => { if (e.key === 'Enter') settle(id); }} />
+          {waiting && (
+            <button type="button" className="btn-sm" aria-label={`Count 0 of ${r.description ?? ''}`} onClick={() => { setCounts((c) => ({ ...c, [id]: '0' })); setDone((d) => (d.includes(id) ? d : [...d, id])); }}>
+              0
+            </button>
+          )}
+        </div>
       </div>
     );
   };
   return (
     <>
-      <Note>Find each item you counted and type how many you counted. Leave an item blank to skip it.</Note>
+      <Note>Find or scan each item you count, or work down the list Not counted yet. Type how many you counted, or 0 for an item that is gone.</Note>
       <div data-tour="count-search">
         <ItemCombobox
           id="count-search"
@@ -176,26 +195,28 @@ function CountSheet({ branchId }: { branchId: string }) {
       <ScanBar id="count-scan" branchId={branchId} onFound={scanAdd} autoFocus />
       {stock.isPending && <SkeletonList label="Loading stock" />}
       <Problem error={stock.error} />
-      <h2>Counted items</h2>
-      {stock.data && rows.length === 0 && <p className="empty-state">No items yet. Find an item above, or scan it.</p>}
-      {rows.map(line)}
-      {stock.data && rest.length > 0 && (
-        <button type="button" className="btn rt-next" aria-expanded={showRest} aria-controls="count-rest" onClick={() => (showRest ? hideRest() : setShowRest(true))}>
-          {showRest ? 'Hide the rest of the sheet' : `Show the rest of the sheet (${rest.length} ${rest.length === 1 ? 'item' : 'items'})`}
-        </button>
+      {stock.data && (
+        <>
+          <h2>Counted items ({counted.length})</h2>
+          {counted.length === 0 && <p className="empty-state">No items yet. Find an item above, scan it, or count it in the list below.</p>}
+          {counted.map((r) => line(r, false))}
+          <h2>Not counted yet ({notCounted.length})</h2>
+          {notCounted.length === 0 ? <p className="empty-state">Every item on the sheet is counted.</p> : <p className="hint">Type how many are on the shelf, or tap 0 for an item that is gone. Leave an item blank to skip it.</p>}
+          {notCounted.map((r) => line(r, true))}
+        </>
       )}
-      <div id="count-rest" hidden={!showRest}>
-        {showRest && (
-          <>
-            <h2>The rest of the sheet</h2>
-            <p className="hint">For a full count: type how many are on the shelf, 0 for an item that is gone. Leave an item blank to skip it.</p>
-            {rest.map(line)}
-          </>
-        )}
-      </div>
       {bad && <p role="alert" className="rt-flag">Some counts are not valid quantities.</p>}
       <Problem error={review.error} />
-      <BusyButton type="button" className="rt-primary" busy={review.isPending} disabled={entered.length === 0 || bad} onClick={() => review.mutate()} data-tour="count-review">
+      {confirming && uncounted > 0 && (
+        <div role="alert" className="alert alert-warning" data-testid="count-not-done">
+          <p>{`${uncounted} ${uncounted === 1 ? 'item' : 'items'} not counted. Finish anyway?`}</p>
+          <p className="cluster">
+            <button type="button" className="btn-sm" onClick={() => setConfirming(false)}>Keep counting</button>
+            <button type="button" className="btn-sm" onClick={finish}>Finish anyway</button>
+          </p>
+        </div>
+      )}
+      <BusyButton type="button" className="rt-primary" busy={review.isPending} disabled={entered.length === 0 || bad} onClick={finish} data-tour="count-review">
         {`Review variance (${entered.length} counted)`}
       </BusyButton>
 

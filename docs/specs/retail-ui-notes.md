@@ -1262,13 +1262,15 @@ the items show only while you search, and go away once one is picked. Every item
   list is a `listbox` named "Matching items" and its rows `option`s, the highlighted one `aria-selected` and named on the
   input by `aria-activedescendant`; the status line under the box is a polite live region. A second picker on a screen has its
   own label: the barcode assign panel's is "Find the item this barcode belongs to".
-- **Count stock.** A found or scanned item goes on the list "Counted items" with its count box, in the order found, and the
-  last one is marked. Before any, the screen says "No items yet. Find an item above, or scan it." For a full count, **Show the
-  rest of the sheet (N items)** lists every other item of the sheet with its count box, so the counter can walk the shelf list
-  and type 0 for an item that is gone (review of #535); hiding it again moves every line with a count into Counted items, so a
-  count is never sent from a line out of sight. Only counted lines are sent, as before.
+- **Count stock (owner decision on #535).** The search and Scan boxes sit on top. Below them, **Counted items (N)** holds the
+  lines whose count is in, in the order done, and **Not counted yet (N)** holds every other item of the sheet (active items and
+  inactive ones that still hold stock) with its count box and a **0** button for an item that is gone. A line moves to Counted
+  items when its count is entered (on leaving the box, on Enter, or on 0) and back when the count is emptied. A found item that
+  is not counted yet heads Not counted yet, marked, with the cursor back in the search; a scan counts one more and moves the
+  line to Counted items. With lines left, Review variance first says "12 items not counted. Finish anyway?" with **Keep
+  counting** and **Finish anyway**, as an inline warning, not a dialog. Only counted lines are sent, as before.
 - **Scan box.** Unchanged (ADR-070 decision 11, owner decision D7): a scanner types only into the Scan box, which adds the item or one more.
-- **Tours.** `retail-sales` version 16, `page-stocktake` 3, `page-restock` 3, `page-usage` 2, `page-transfer` 3,
+- **Tours.** `retail-sales` version 16, `page-stocktake` 3 (the search on top and the list Not counted yet), `page-restock` 3, `page-usage` 2, `page-transfer` 3,
   `page-sizes-join` 2 and `page-labels` 2 word their search steps for the list that shows while you type.
 
 ## Share the receipt (issue #439, ADR-061, FR-RET-66)
