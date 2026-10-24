@@ -269,14 +269,15 @@ roll() {
 # release builds a new proxy image digest even when those are the same, and recreating it would stop all
 # traffic for a moment (ADR-082).
 switch_proxy() {
-    local id image ref same_config
+    local id image ref same_config running
     id="$("${COMPOSE[@]}" ps --quiet proxy 2>/dev/null | head -n 1 || true)"
     if [[ -n "$id" ]]; then
         image="$(docker inspect --format '{{.Image}}' "$id")"
         ref="$(docker inspect --format '{{.Config.Image}}' "$id")"
         same_config="$(PROXY_IMAGE="$ref" "${COMPOSE[@]}" config --hash proxy | awk '{ print $2 }')"
+        running="$(proxy_fingerprint "$image")"
         if [[ "$same_config" == "$(docker inspect --format '{{index .Config.Labels "com.docker.compose.config-hash"}}' "$id")" ]] \
-            && [[ "$(proxy_fingerprint "$image")" == "$(proxy_fingerprint "$PROXY_IMAGE")" ]]; then
+            && [[ -n "$running" && "$running" == "$(proxy_fingerprint "$PROXY_IMAGE")" ]]; then
             log "proxy unchanged; kept running"
             return 0
         fi
@@ -285,7 +286,7 @@ switch_proxy() {
 }
 
 # What the proxy runs, as one hash: its caddy binary and everything in /etc/caddy. Empty when the image cannot
-# be read, which never matches, so the proxy is then recreated as before.
+# be read; switch_proxy never counts an empty hash as a match, so the proxy is then recreated as before.
 proxy_fingerprint() {
     docker run --rm --network none --entrypoint sh "$1" -c 'cat /usr/bin/caddy /etc/caddy/* | sha256sum' 2>/dev/null || true
 }
