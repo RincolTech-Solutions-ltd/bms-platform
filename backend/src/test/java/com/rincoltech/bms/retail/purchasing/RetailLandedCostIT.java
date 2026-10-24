@@ -1198,4 +1198,55 @@ class RetailLandedCostIT extends LandedCostTestBase {
         assertThat(balance("inventory", br2)).isEqualTo(valuation(br2, product));
         assertBooksBalance();
     }
+
+    /**
+     * ADR-079: the void of a landed cost over two products racing a transfer of both between the branches that took its
+     * parts. Both take their balance locks in branch and product order, after any product locks, so neither deadlocks: both
+     * succeed, in either order, and each branch's inventory account still equals its stock at its own average.
+     */
+    @Test
+    void aTwoProductVoidRacingATransferOfBothNeitherDeadlocksNorDrifts() throws Exception {
+        List<UUID> prods = new ArrayList<>();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            for (int round = 0; round < 5; round++) {
+                UUID p1 = api.product("LC-R1-" + round, 100, 400);
+                UUID p2 = api.product("LC-R2-" + round, 150, 600);
+                prods.add(p1);
+                prods.add(p2);
+                receive(br2, p1, "10", 100);
+                receive(br2, p2, "10", 150);
+                JsonNode a = receive(hq, p1, "10", 100);
+                JsonNode b = receive(hq, p2, "10", 150);
+                JsonNode doc = landed(freight("FWD-RACE-" + round, 1_000, lineId(a), lineId(b)));
+                Map<String, Object> both = new LinkedHashMap<>();
+                both.put("from_branch_id", br2);
+                both.put("to_branch_id", hq);
+                both.put("lines", List.of(Map.of("product_id", p1, "qty", "2"), Map.of("product_id", p2, "qty", "2")));
+                CountDownLatch go = new CountDownLatch(1);
+                Future<ResponseEntity<JsonNode>> voided = pool.submit(() -> {
+                    go.await();
+                    return voidLanded(uuid(doc, "id"));
+                });
+                Future<ResponseEntity<JsonNode>> moved = pool.submit(() -> {
+                    go.await();
+                    return keyed("/transfers", both, ADMIN);
+                });
+                go.countDown();
+                ResponseEntity<JsonNode> v = voided.get(60, TimeUnit.SECONDS);
+                ResponseEntity<JsonNode> m = moved.get(60, TimeUnit.SECONDS);
+                assertThat(v.getStatusCode()).as("%s", v.getBody()).isEqualTo(HttpStatus.OK);
+                assertThat(m.getStatusCode()).as("%s", m.getBody()).isEqualTo(HttpStatus.CREATED);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        for (UUID branch : List.of(hq, br2)) {
+            assertThat(balance("inventory", branch))
+                    .isEqualTo(prods.stream()
+                            .mapToLong(prod -> valuation(branch, prod))
+                            .sum());
+        }
+        assertBooksBalance();
+    }
 }

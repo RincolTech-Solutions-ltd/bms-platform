@@ -282,13 +282,19 @@ class JdbcStockLedger implements StockLedger {
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public void revalue(
-            LocalDate businessDate, UUID branchId, UUID productId, long valueMinor, String sourceType, UUID sourceId) {
+            LocalDate businessDate,
+            UUID branchId,
+            UUID productId,
+            long valueMinor,
+            String sourceType,
+            UUID sourceId,
+            boolean reversal) {
         if (valueMinor == 0) {
             return;
         }
         Locked locked = lockRow(branchId, productId);
-        Quantities.Averaged a = averaged(
-                productId, sourceType.endsWith("_void") ? REVALUE_VOID : REVALUE, locked, BigDecimal.ZERO, valueMinor);
+        Quantities.Averaged a =
+                averaged(productId, reversal ? REVALUE_VOID : REVALUE, locked, BigDecimal.ZERO, valueMinor);
         jdbc.sql("""
                         UPDATE retail_stock_balances SET avg_cost_minor = ?, updated_at = now()
                          WHERE branch_id = ? AND product_id = ?

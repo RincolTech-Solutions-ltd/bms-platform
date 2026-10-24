@@ -97,10 +97,17 @@ public interface StockLedger {
      * ADR-079: a change of value with no quantity (a landed cost or a supplier price credit spread over the units a branch
      * holds) re-averages the branch's cost, under the balance row's lock, in the caller's transaction. The caller posts
      * {@code valueMinor} to inventory; what the new average does not carry is posted to purchase rounding. A change that would
-     * take the average below zero is refused with 422 {@code average_cost_negative}.
+     * take the average below zero is refused with 422 {@code average_cost_negative}, in words for the document or, with
+     * {@code reversal}, for its void.
      */
     void revalue(
-            LocalDate businessDate, UUID branchId, UUID productId, long valueMinor, String sourceType, UUID sourceId);
+            LocalDate businessDate,
+            UUID branchId,
+            UUID productId,
+            long valueMinor,
+            String sourceType,
+            UUID sourceId,
+            boolean reversal);
 
     /**
      * @param kind {@code opening}, {@code purchase}, {@code sale}, {@code usage}, {@code damage},

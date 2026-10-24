@@ -59,9 +59,26 @@ SET LOCAL row_security = on;
 
 ALTER TABLE retail_stock_balances VALIDATE CONSTRAINT retail_stock_balances_avg_cost_range;
 
--- Every row now has its average, and every writer names one (StockLedger starts a branch's first row at the product's last paid
--- cost). The default is dropped so a writer that forgot the column fails loudly instead of costing later sales at zero.
+-- Every row now has its average. The constant default is replaced by a trigger: a row inserted without an average (an
+-- application instance from before this migration still running during a deploy, or any other writer that leaves the column
+-- out) starts at the product's last paid cost, exactly as StockLedger starts one, and never at zero, which would cost later
+-- sales at nothing. A writer that names the average keeps it. Expand only: old instances keep working.
 ALTER TABLE retail_stock_balances ALTER COLUMN avg_cost_minor DROP DEFAULT;
+
+CREATE FUNCTION retail_stock_balances_avg_default() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.avg_cost_minor IS NULL THEN
+        SELECT p.cost_minor INTO NEW.avg_cost_minor
+          FROM retail_products p
+         WHERE p.tenant_id = NEW.tenant_id AND p.id = NEW.product_id;
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+CREATE TRIGGER retail_stock_balances_avg_default BEFORE INSERT ON retail_stock_balances
+    FOR EACH ROW EXECUTE FUNCTION retail_stock_balances_avg_default();
 
 -- ---------------------------------------------------------------------------------------------
 -- retail_cost_spreads: the part of a landed cost line or a supplier price credit line that went into each branch's inventory,

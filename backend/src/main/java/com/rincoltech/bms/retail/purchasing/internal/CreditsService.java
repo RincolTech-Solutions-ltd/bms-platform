@@ -202,7 +202,8 @@ class CreditsService {
             throw duplicate();
         }
         new TreeSet<>(ps.stream().map(p -> p.lot().productId()).toList()).forEach(catalogue::lock);
-        costing.lockStock(ps.stream().map(Planned::lot).toList());
+        Map<UUID, Set<UUID>> locked =
+                costing.lockStock(ps.stream().map(Planned::lot).toList());
         if (goods) {
             // Only units of the receipt that are still in its branch can go back: the stock may hold the product from a
             // later delivery at another cost, and units of this receipt that were sold are not there to return.
@@ -276,7 +277,7 @@ class CreditsService {
                 variance = p.ppvPart();
                 long share = p.amount() - p.ppvPart();
                 if (share > 0) {
-                    Effect e = costing.apply(p.lot(), share, false, id, no.no(), on, CREDIT);
+                    Effect e = costing.apply(p.lot(), share, false, id, no.no(), on, CREDIT, locked);
                     costing.recordSpread(lineId, p.lot(), e);
                     inventory = e.inventory();
                     inventoryByBranch = e.byBranch();
@@ -562,7 +563,7 @@ class CreditsService {
                 ls.stream().map(CreditsRepository.LineRow::receiptLineId).toList());
         Map<UUID, UUID> lineProducts = new LinkedHashMap<>();
         ls.forEach(l -> lineProducts.put(l.id(), l.productId()));
-        costing.lockStock(lots.values(), lineProducts);
+        Map<UUID, Set<UUID>> locked = costing.lockStock(lots.values(), lineProducts);
         boolean goods = c.kind().equals("goods");
         if (!goods) {
             for (CreditsRepository.LineRow l : ls) {
@@ -606,7 +607,14 @@ class CreditsService {
             }
             if (!goods) {
                 costing.revalueBack(
-                        l.id(), lots.get(l.receiptLineId()), l.toInventoryMinor(), false, id, today, CREDIT_VOID);
+                        l.id(),
+                        lots.get(l.receiptLineId()),
+                        l.toInventoryMinor(),
+                        false,
+                        id,
+                        today,
+                        CREDIT_VOID,
+                        locked);
             }
         }
         Instant now = clock.now();

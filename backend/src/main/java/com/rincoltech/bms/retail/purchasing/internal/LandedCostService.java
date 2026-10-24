@@ -159,7 +159,8 @@ class LandedCostService {
         // Lock the products and then the stock balances of every branch that holds them, in id order, before reading
         // what is on hand.
         new TreeSet<>(ps.stream().map(p -> p.lot().productId()).toList()).forEach(catalogue::lock);
-        costing.lockStock(ps.stream().map(Planned::lot).toList());
+        Map<UUID, Set<UUID>> locked =
+                costing.lockStock(ps.stream().map(Planned::lot).toList());
 
         Numbered no = lines.next("LC", "retail_landed_cost_no", home);
         Numbered billNo = lines.next("SB", "retail_supplier_bill_no", home);
@@ -169,7 +170,7 @@ class LandedCostService {
         Map<UUID, long[]> byBranch = new TreeMap<>();
         for (int i = 0; i < ps.size(); i++) {
             Planned p = ps.get(i);
-            Effect e = costing.apply(p.lot(), p.share(), true, id, no.no(), plan.costDate(), LANDED);
+            Effect e = costing.apply(p.lot(), p.share(), true, id, no.no(), plan.costDate(), LANDED, locked);
             UUID lineId = UUID.randomUUID();
             costing.recordSpread(lineId, p.lot(), e);
             newLines.add(new NewLine(
@@ -566,7 +567,7 @@ class LandedCostService {
                 lotRepo.lots(ls.stream().map(LineRow::receiptLineId).toList());
         Map<UUID, UUID> lineProducts = new LinkedHashMap<>();
         ls.forEach(l -> lineProducts.put(l.id(), l.productId()));
-        costing.lockStock(lots.values(), lineProducts);
+        Map<UUID, Set<UUID>> locked = costing.lockStock(lots.values(), lineProducts);
         for (LineRow l : ls) {
             if (l.toInventoryMinor() > 0
                     && costing.onHand(lots.get(l.receiptLineId())).compareTo(l.onHandQty()) < 0) {
@@ -586,7 +587,7 @@ class LandedCostService {
                 costing.restore(lots.get(l.receiptLineId()), l.costBeforeMinor(), l.costAfterMinor(), id, d.landedNo());
             }
             costing.revalueBack(
-                    l.id(), lots.get(l.receiptLineId()), l.toInventoryMinor(), true, id, today, LANDED_VOID);
+                    l.id(), lots.get(l.receiptLineId()), l.toInventoryMinor(), true, id, today, LANDED_VOID, locked);
         }
         Instant now = clock.now();
         if (billRepo.markVoided(d.billId(), principal.userId(), today, now, reason) == 0

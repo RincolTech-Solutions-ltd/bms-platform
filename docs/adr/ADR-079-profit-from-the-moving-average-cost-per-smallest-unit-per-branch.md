@@ -97,9 +97,12 @@ one figure for the business or one per branch, and what happens to remainders, v
    dashboard, the evaluation, a branch's holdings before it closes) multiplies a balance by its own branch's average.
 10. **Migration `V94`.** One column with a constant default and a range check (`NOT VALID`, validated after the backfill), and a
     backfill that sets every balance row's average to its product's cost: until now every unit was valued at that cost, so it is
-    today's average and nothing moves on the day of the deploy. The default is then dropped, so a writer that forgets the column
-    fails instead of costing later sales at zero. It adds the append-only `retail_cost_spreads` (decision 3) and follows V92's
-    handling of an owner without `BYPASSRLS`.
+    today's average and nothing moves on the day of the deploy. The constant default is then replaced by a trigger that starts
+    a row inserted without an average at the product's last paid cost (as `StockLedger` does), so an application instance from
+    before the migration keeps working during a deploy and no row ever starts at zero. It adds the append-only
+    `retail_cost_spreads` (decision 3) and follows V92's handling of an owner without `BYPASSRLS`. The backfill updates every
+    balance row in the transaction that took ACCESS EXCLUSIVE for the new column, so stock writers wait for it: well under a
+    second at staging's size; a business with millions of balance rows would want it batched in a migration of its own.
 
 ## Consequences
 

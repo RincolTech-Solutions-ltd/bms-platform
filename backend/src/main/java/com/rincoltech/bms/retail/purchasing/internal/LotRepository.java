@@ -207,8 +207,11 @@ class LotRepository {
      */
     void insertSpread(UUID lineId, UUID productId, Map<UUID, Long> byBranch) {
         // Only positive parts are recorded, as the column's check requires.
-        // spread() makes no other: a branch whose share rounds to nothing is left out.
+        // spread() makes no other part (ReceiptCostingTest), so a negative one is a bug, refused.
         byBranch.forEach((branch, part) -> {
+            if (part < 0) {
+                throw new IllegalStateException("a negative part of a cost spread: " + part);
+            }
             if (part > 0) {
                 jdbc.sql("""
                         INSERT INTO retail_cost_spreads (tenant_id, line_id, branch_id, product_id, inventory_minor)

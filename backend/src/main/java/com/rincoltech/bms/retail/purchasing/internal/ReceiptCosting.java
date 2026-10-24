@@ -9,9 +9,11 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -75,16 +77,19 @@ class ReceiptCosting {
      * Takes the stock balance rows of every branch that holds one of the lots' products, in branch and product order, so
      * what is on hand cannot change while a charge is worked out. Call it after the products are locked.
      */
-    void lockStock(Collection<Lot> forLots) {
-        lockStock(forLots, Map.of());
+    Map<UUID, Set<UUID>> lockStock(Collection<Lot> forLots) {
+        return lockStock(forLots, Map.of());
     }
 
     /**
      * As {@link #lockStock(Collection)}, for a void: also the balance rows of the branches the voided lines' recorded parts
      * went to ({@code lineProducts}: line id to product), which may hold none of the product now, all in one pass in branch and
      * product order, so the void takes every balance lock it will need before any revaluation (ADR-079).
+     *
+     * @return the rows locked, by branch: a charge is spread only over these (see {@link #apply}), so a branch whose first row
+     *     of the product a transfer made after this read is never revalued with a lock taken out of order
      */
-    void lockStock(Collection<Lot> forLots, Map<UUID, UUID> lineProducts) {
+    Map<UUID, Set<UUID>> lockStock(Collection<Lot> forLots, Map<UUID, UUID> lineProducts) {
         TreeMap<UUID, TreeSet<UUID>> byBranch = new TreeMap<>();
         for (Lot lot : forLots) {
             byBranch.computeIfAbsent(lot.branchId(), k -> new TreeSet<>()).add(lot.productId());
@@ -97,6 +102,7 @@ class ReceiptCosting {
                 .forEach(branch ->
                         byBranch.computeIfAbsent(branch, k -> new TreeSet<>()).add(product)));
         byBranch.forEach((branch, products) -> products.forEach(product -> stock.lock(branch, product)));
+        return Collections.unmodifiableMap(new TreeMap<UUID, Set<UUID>>(byBranch));
     }
 
     /** The units of the lot still on hand in every branch together, first in first out. */
@@ -124,8 +130,13 @@ class ReceiptCosting {
 
     /** The effect of a share on a lot, worked out without changing anything: for the preview ({@code documentId} may be null). */
     Effect estimate(Lot lot, long share, boolean raise, UUID documentId) {
+        return estimate(lot, share, raise, documentId, null);
+    }
+
+    /** As above, spread only over the balance rows in {@code locked} (null: every branch that holds the product). */
+    private Effect estimate(Lot lot, long share, boolean raise, UUID documentId, Map<UUID, Set<UUID>> locked) {
         BigDecimal onHand = onHand(lot);
-        Map<UUID, BigDecimal> balances = lots.balances(lot.productId());
+        Map<UUID, BigDecimal> balances = held(lot.productId(), locked);
         long cost = catalogue.find(lot.productId()).map(p -> p.costMinor()).orElse(0L);
         MovementKey key = lots.receiptMovement(lot.receiptLineId()).orElse(null);
         long perUnit = perUnit(share, lot.qty());
@@ -155,8 +166,20 @@ class ReceiptCosting {
                 null);
     }
 
-    /** The part by branch, in proportion to what each holds; all in the receiving branch when nothing is held. */
-    private static Map<UUID, Long> spread(Lot lot, long inventory, Map<UUID, BigDecimal> balances) {
+    /** What each branch holds of the product, limited to the rows in {@code locked} when it is not null. */
+    private Map<UUID, BigDecimal> held(UUID productId, Map<UUID, Set<UUID>> locked) {
+        Map<UUID, BigDecimal> balances = new TreeMap<>(lots.balances(productId));
+        if (locked != null) {
+            balances.keySet().removeIf(b -> !locked.getOrDefault(b, Set.of()).contains(productId));
+        }
+        return balances;
+    }
+
+    /**
+     * The part by branch, in proportion to what each holds; all in the receiving branch when nothing is held. Every part is
+     * above zero: a branch whose share rounds to nothing is left out, and only branches holding more than nothing count.
+     */
+    static Map<UUID, Long> spread(Lot lot, long inventory, Map<UUID, BigDecimal> balances) {
         Map<UUID, Long> out = new LinkedHashMap<>();
         if (inventory == 0) {
             return out;
@@ -185,8 +208,15 @@ class ReceiptCosting {
      * @param raise true for a landed cost (the cost goes up), false for a supplier price credit (it goes down)
      */
     Effect apply(
-            Lot lot, long share, boolean raise, UUID documentId, String documentNo, LocalDate on, String sourceType) {
-        Effect e = estimate(lot, share, raise, documentId);
+            Lot lot,
+            long share,
+            boolean raise,
+            UUID documentId,
+            String documentNo,
+            LocalDate on,
+            String sourceType,
+            Map<UUID, Set<UUID>> locked) {
+        Effect e = estimate(lot, share, raise, documentId, locked);
         if (e.applied()) {
             catalogue.applyCostChange(
                     lot.productId(),
@@ -202,11 +232,11 @@ class ReceiptCosting {
                             + ": cost not applied. " + e.note());
         }
         // ADR-079: the part each branch's inventory takes re-averages that branch's cost, whatever happened to the last
-        // paid cost above. The caller locked the product rows before the balances (the order a restock takes them) and
-        // lockStock took the balances in branch and product order, so this takes no lock out of that order.
+        // paid cost above. The caller locked the product rows, then lockStock the balances in branch and product order,
+        // and the spread names only rows it locked, so this takes no lock out of that order.
         e.byBranch()
-                .forEach((branch, part) ->
-                        stock.revalue(on, branch, lot.productId(), raise ? part : -part, sourceType, documentId));
+                .forEach((branch, part) -> stock.revalue(
+                        on, branch, lot.productId(), raise ? part : -part, sourceType, documentId, false));
         return e;
     }
 
@@ -249,13 +279,20 @@ class ReceiptCosting {
      * @param raise as for {@link #apply}: true for the void of a landed cost, whose part leaves the averages
      */
     void revalueBack(
-            UUID lineId, Lot lot, long inventory, boolean raise, UUID documentId, LocalDate on, String sourceType) {
+            UUID lineId,
+            Lot lot,
+            long inventory,
+            boolean raise,
+            UUID documentId,
+            LocalDate on,
+            String sourceType,
+            Map<UUID, Set<UUID>> locked) {
         Map<UUID, Long> parts = lots.spread(lineId);
         if (parts.isEmpty()) {
-            parts = spread(lot, inventory, lots.balances(lot.productId()));
+            parts = spread(lot, inventory, held(lot.productId(), locked));
         }
         parts.forEach((branch, part) ->
-                stock.revalue(on, branch, lot.productId(), raise ? -part : part, sourceType, documentId));
+                stock.revalue(on, branch, lot.productId(), raise ? -part : part, sourceType, documentId, true));
     }
 
     /** The charge per base unit, rounded down: no more is capitalised than was charged. */

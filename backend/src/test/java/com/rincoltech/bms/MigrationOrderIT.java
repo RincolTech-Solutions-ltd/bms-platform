@@ -2233,6 +2233,7 @@ class MigrationOrderIT {
             UUID branch = UUID.randomUUID();
             UUID cheap = UUID.randomUUID();
             UUID dear = UUID.randomUUID();
+            UUID later = UUID.randomUUID();
             owner.sql(
                             "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v94', 'Test Tenant V94', '00000000-0000-4000-8000-000000000001')")
                     .param(tenant)
@@ -2253,8 +2254,9 @@ class MigrationOrderIT {
                             INSERT INTO retail_products (id, tenant_id, code, description, category_id, unit_id, cost_minor,
                                                          sell_minor, currency)
                             SELECT x.id, ?, x.code, 'Test item ' || x.code, c.id, u.id, x.cost, x.cost * 2, 'UGX'
-                              FROM c, u, (VALUES (?::uuid, 'A1', 750), (?::uuid, 'A2', 4000)) AS x (id, code, cost)
-                            """).params(tenant, tenant, tenant, cheap, dear).update();
+                              FROM c, u, (VALUES (?::uuid, 'A1', 750), (?::uuid, 'A2', 4000), (?::uuid, 'A3', 500))
+                                   AS x (id, code, cost)
+                            """).params(tenant, tenant, tenant, cheap, dear, later).update();
             owner.sql("INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty) VALUES (?, ?, ?, 48)")
                     .params(tenant, branch, cheap)
                     .update();
@@ -2271,6 +2273,16 @@ class MigrationOrderIT {
                                      WHERE tenant_id = ? ORDER BY qty DESC
                                     """).param(tenant).query(String.class).list())
                     .containsExactly("48.000 750", "-2.000 4000");
+            // A writer from before V94 that leaves the average out (an old instance during a deploy) gets the product's
+            // last paid cost, never zero; one that names it keeps it.
+            owner.sql("INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty) VALUES (?, ?, ?, 3)")
+                    .params(tenant, branch, later)
+                    .update();
+            assertThat(owner.sql("SELECT avg_cost_minor FROM retail_stock_balances WHERE product_id = ?")
+                            .param(later)
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(500);
             assertThat(owner.sql("""
                                     SELECT convalidated FROM pg_constraint
                                      WHERE conname = 'retail_stock_balances_avg_cost_range'
