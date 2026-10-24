@@ -1,6 +1,6 @@
 # Units, packs, buying and selling in packs, and profit per piece
 
-Status: proposal for Hillary's decisions (23 Oct 2026). It follows the Modern Electronics set-up with George and Hatibu.
+Status: decided (Hillary, 23 and 24 Oct 2026: D16, D22 to D26 and D32 yes). Built so far: average cost (#529, ADR-079, V94) and shop EAN-13 barcodes (#528, V93). It follows the Modern Electronics set-up with George and Hatibu.
 Applies to every retail business: small shops, wholesalers and the ones in between.
 
 ## 1. The problem, in George's words
@@ -18,7 +18,7 @@ The `units` capability, switched off by default (ADR-033, V39), already gives:
 - one smallest unit per item. Stock is always counted in it.
 - packs on an item (carton = 12 pieces, dozen = 12). There is one fixed size per pack type, used when buying, selling and scanning.
 - a pack's selling price defaults to the piece price times the pack size. A different pack price needs a price list, and a walk-in sale does not use price lists.
-- the buying price per piece is the carton cost divided by the pieces. The last delivery overwrites the item's cost; there is no average yet (pending ADR-021).
+- the buying price per piece is the carton cost divided by the pieces. Until #529 the last delivery overwrote the item's cost; ADR-079 (V94) now keeps the moving average per branch.
 - barcodes per pack, so scanning a carton barcode sells a carton.
 
 The gaps:
@@ -62,7 +62,7 @@ The gaps:
 - The app never assumes one from the other, except to suggest a starting selling price.
 
 **Profit is per piece, using the average buying price.**
-- Each delivery updates the item's average cost per piece. The formula is (pieces already in stock × old average + pieces received × this delivery's cost per piece) ÷ the new number of pieces. This is the moving weighted average, the usual method for shops (the method pending ADR-021 was waiting for).
+- Each delivery updates the item's average cost per piece. The formula is (pieces already in stock × old average + pieces received × this delivery's cost per piece) ÷ the new number of pieces. This is the moving weighted average, the usual method for shops (ADR-079, built in #529).
 - Each sale line keeps a copy of the average cost per piece at the moment of sale. Profit on the line is its price minus the pieces sold times that cost.
 - Reports add up the lines, so the profit is right whether the goods were sold as cartons, dozens or pieces.
 - The last buying price is still shown ("last paid 750 a piece"), because owners use it to set prices.
@@ -102,7 +102,7 @@ The unit list is seeded with names Ugandans use: piece, kilo, litre, metre, pair
 | Suppliers | Suppliers (where you buy) | Keep, with the hint |
 | Variance | Difference | Plain |
 | Shrinkage | Lost or damaged stock | Plain |
-| Item code | Item code (D16) | Pending his answer |
+| Item code | Item code | D16: Hillary chose "Item code" |
 
 Rule: every label is a word a shop attendant in Kampala uses. There is a glossary file in the frontend, and a test fails when a banned word ("SKU", "variance", "shrinkage", "UOM") appears in UI copy.
 
@@ -126,7 +126,7 @@ Rule: every label is a word a shop attendant in Kampala uses. There is a glossar
 
 **Items with no barcode** (local goods, loose goods, unbranded accessories) get shop codes.
 - GS1 sets aside prefixes **20 to 29** of EAN-13 for "restricted circulation", meaning numbers used only inside one business.
-- Today the app prints its own Code 128 labels ("IN00000001"). Proposal: print EAN-13 codes in the 20 to 29 range instead. Every scanner and every till reads them, they look like normal product barcodes, and they never clash with a real brand's GTIN.
+- The app used to print its own Code 128 labels ("IN00000001"). It now prints EAN-13 codes (D25, #528): made codes are `210` + a 9-digit number + a check digit (D32), and `211` to `219` stay free for later, such as weighed items. Every scanner and till reads them, and they never clash with a real brand's GTIN. Old `IN` codes keep working.
 
 **When each piece is different** (TVs, phones), the barcode is the same and the **serial number** or IMEI tells the pieces apart. Warranty and theft checks need the serial. That is a later, optional "Serial numbers" capability: scan or type the serial at Buy stock and at Sale.
 
@@ -142,21 +142,22 @@ Rule: every label is a word a shop attendant in Kampala uses. There is a glossar
 
 ## 9. Build order (after Hillary's decisions)
 
-1. **Average cost per piece** (moving weighted average), with sale lines keeping their cost. This needs a migration and a decision record that settles pending ADR-021. Everything else depends on profit being right.
+1. **Average cost per piece** (moving weighted average), with sale lines keeping their cost. Built in #529 (ADR-079, V94). Everything else depends on profit being right.
 2. **Pack size per delivery on Buy stock.** The restock line keeps its own size. Includes "use this size from now on".
 3. **Selling packs with their own prices**, including half carton and dozen. Walk-in sales use them, the below-cost warning applies, and price lists still win.
 4. **Stock shown in packs and pieces** on Stock, Count stock and Move stock.
 5. **Starting templates** ("How do you buy and sell this?") and the Ugandan unit list.
 6. **Glossary and the banned-word test**, then the renames in section 5.
-7. **Shop barcodes as EAN-13 with prefixes 20 to 29** (new labels only; existing codes keep working), and a carton barcode filling the carton size on Buy stock.
+7. **Shop barcodes as EAN-13 with prefix 210** (built in #528; new labels only; existing codes keep working), and a carton barcode filling the carton size on Buy stock.
 8. **Later, optional capabilities:** serial numbers (TVs, phones) and batch with expiry.
 
 Each step is its own pull request with tests. Migrations take their numbers in merge order.
 
-## 10. Decisions for Hillary
+## 10. Decisions (answered)
 
-- **D22:** Use the moving average buying price per piece for profit (section 3)? Suggested: yes.
-- **D23:** Buying packs may change size per delivery, while selling packs have a fixed size and their own price (section 3)? Suggested: yes.
-- **D24:** Adopt the glossary in section 5, starting with Restock becoming Buy stock? Suggested: yes, and all screens use one glossary from now on.
-- **D25:** Print the shop's own barcodes as GS1 EAN-13 with prefixes 20 to 29 (section 7)? Suggested: yes, for new labels only.
-- **D26:** Serial numbers (TVs, phones) and batch with expiry come later, as optional capabilities (sections 7 and 8)? Suggested: yes, after steps 1 to 7.
+- **D22 yes:** profit uses the moving average buying price per piece (built, #529).
+- **D23 yes:** buying packs may change size per delivery; selling packs have a fixed size and their own price.
+- **D24 yes:** one glossary, starting with Restock becoming Buy stock.
+- **D25 yes:** shop barcodes as GS1 EAN-13 for new labels (built, #528); **D32 yes:** the layout is `210` + 9 digits + check.
+- **D26 yes:** serial numbers and batch with expiry come later, as optional capabilities.
+- **D16:** the field is called Item code.
