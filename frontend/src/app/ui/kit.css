@@ -42,6 +42,11 @@
   box-shadow: var(--shadow-sm);
 }
 
+/* In a row that already spaces its children (Correct an item puts Close beside it), the row's gap is the only space. */
+.cluster > .segmented {
+  margin: 0;
+}
+
 @media (max-width: 719px) {
   .segmented {
     display: flex;

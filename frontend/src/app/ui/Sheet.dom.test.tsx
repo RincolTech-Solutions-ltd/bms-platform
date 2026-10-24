@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Sheet } from './Sheet';
+import { Toast } from '../../areas/staff/retail/toast';
 
 // The one sheet (#520): modal, focus inside and trapped, Escape, the close button, the dimmed page and a swipe down close it.
 
@@ -61,6 +62,29 @@ describe('Sheet', () => {
     const opener = [...document.querySelectorAll('main button')].find((b) => b.textContent === 'Choose a payment')!;
     expect(opener.closest('[aria-hidden="true"]')).toBeTruthy();
     expect(screen.getByText('Added Sample soap').closest('[aria-hidden="true"]')).toBeNull();
+  });
+
+  it('says again, inside the sheet, a toast that appears after it opened under the hidden page', async () => {
+    function Paying() {
+      const [open, setOpen] = useState(true);
+      const [toast, setToast] = useState<string | null>(null);
+      return (
+        <>
+          <main>{toast && <Toast message={toast} tone="error" />}</main>
+          <Sheet open={open} onClose={() => setOpen(false)} title="How did the buyer pay?">
+            <button type="button" onClick={() => setToast('Mobile money is not set up for this shop.')}>
+              Mobile money
+            </button>
+          </Sheet>
+        </>
+      );
+    }
+    render(<Paying />);
+    fireEvent.click(screen.getByRole('button', { name: 'Mobile money' }));
+    const pill = document.querySelector('.toast')!;
+    expect(pill.closest('[aria-hidden="true"]')).toBeTruthy();
+    const relay = dialog()!.querySelector('[aria-live="polite"]')!;
+    await waitFor(() => expect(relay.textContent).toBe('Mobile money is not set up for this shop.'));
   });
 
   it('keeps Tab inside, both ways', () => {

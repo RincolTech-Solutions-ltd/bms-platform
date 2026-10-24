@@ -1,18 +1,27 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { useRef, type PointerEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { icons } from '../../components/icons';
 
 // The one sheet (#520): pickers and confirmations open in it. It is a Radix Dialog styled by our own tokens. On a phone (under
 // 720px) it rises from the bottom edge and a swipe down on its top, by touch only, closes it; on a wider
 // screen it is a centred dialog. Radix makes it modal: focus is trapped inside, Escape, a tap on the dimmed page and the close
 // button close it, the page does not scroll, and focus goes back to what opened it. The rest of the page is hidden from a screen
-// reader, but never a live region (aria-live), so a toast is still heard. Focus starts on the first control of the
+// reader, but never a live region (aria-live), so a toast already on the page is still heard; a toast that appears after the
+// sheet opened lands under that hiding, so the toast tells the sheet (announceToSheet) and the sheet says it again in a live
+// region of its own. Focus starts on the first control of the
 // content (not the close button). The screen owns `open` and closes it in `onClose`. The look is .sheet-layer in
 // src/app/ui/kit.css.
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 // How far down the top must be dragged, in px, to close the sheet rather than spring back.
 const SWIPE_CLOSE = 96;
+
+const listeners = new Set<(message: string, from: Element | null) => void>();
+
+/** Called by a toast as it appears: an open sheet repeats the message when the toast itself is hidden from a screen reader. */
+export function announceToSheet(message: string, from: Element | null): void {
+  listeners.forEach((listener) => listener(message, from));
+}
 
 export function Sheet({ open, onClose, title, children, actions }: {
   open: boolean;
@@ -29,6 +38,19 @@ export function Sheet({ open, onClose, title, children, actions }: {
   if (open && !wasOpen.current) opener.current = document.activeElement as HTMLElement | null;
   wasOpen.current = open;
   const drag = useRef<{ from: number; by: number } | null>(null);
+  const [heard, setHeard] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    const hear = (message: string, from: Element | null) => {
+      if (!from || from.closest('[aria-hidden="true"]')) setHeard(message);
+    };
+    listeners.add(hear);
+    return () => {
+      listeners.delete(hear);
+      setHeard('');
+    };
+  }, [open]);
 
   const grab = (e: PointerEvent<HTMLElement>) => {
     if (e.pointerType !== 'touch' || (e.target as HTMLElement).closest('button')) return;
@@ -76,6 +98,9 @@ export function Sheet({ open, onClose, title, children, actions }: {
                 {icons.close}
               </Dialog.Close>
             </header>
+            <p className="visually-hidden" role="status" aria-live="polite">
+              {heard}
+            </p>
             <div className="sheet-body">{children}</div>
             {actions && <div className="sheet-actions">{actions}</div>}
           </Dialog.Content>
