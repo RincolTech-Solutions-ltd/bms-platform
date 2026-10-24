@@ -80,10 +80,10 @@ Caddyfiles. Lines to know:
 - `<n> MB free, a second api needs <m> MB; restarting api in place (a short gap)`: the host, or
   `bms.slice` below its `MemoryHigh`, had less than the api's own memory limit plus 64 MB free, so
   the api restarted as before. Caddy holds requests for up to 30 seconds and the app says it is
-  updating. On the Pi this is expected often. To overlap there, measure a new api's start-up peak
-  once (`cat /sys/fs/cgroup/bms.slice/docker-<id>.scope/memory.peak` while a new container starts)
-  and set `BMS_ROLL_MIN_FREE_MB` in `.env` to that plus a margin; that, or raising the slice, is the
-  owner's call for the shared host.
+  updating. On the Pi this is expected on every deploy today (measured 24 Oct 2026: 70 MB free below `MemoryHigh`, api peak 380 MB; ADR-083). To overlap there the
+  slice must be raised (for example `MemoryHigh` 1.5 GB, `MemoryMax` 1.6 GB in
+  `deploy/systemd/bms.slice`), a host change for the owner to decide. `BMS_ROLL_MIN_FREE_MB` in `.env`
+  can replace the api's limit with a measured start-up peak plus a margin, where the slice has room.
 - During a switch `docker compose ps` shows two `api` (or `web`) containers, numbered on; that is
   expected. Two left after a deploy means it was interrupted: the next deploy removes the extra one.
 

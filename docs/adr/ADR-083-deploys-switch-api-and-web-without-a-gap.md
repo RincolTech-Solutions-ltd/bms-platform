@@ -61,12 +61,15 @@ NFR-AVL-03 allows 30 seconds of unavailability per deploy, written when deploys 
    PostgreSQL. No `oom_score_adj` is set: it is not needed under this bound, and the surviving container could not have it
    lowered again without privilege. When the memory is not there, `deploy.sh` logs both numbers and restarts the api in place
    as before; the 30-second retry in Caddy and the app's message and retry below cover that gap.
-   On the Pi this needs 512 MB below the 860 MB `MemoryHigh`, so with the steady stack (an API alone is about 235 MB after
-   start) it will often restart in place: the safe default trades the gap there for no risk to the live api. The deploy log
-   records the free memory on every switch. Once the new api's start-up peak (`memory.peak` of its container) has been measured
-   on the Pi, `BMS_ROLL_MIN_FREE_MB` in `.env` can replace the limit with that peak plus a margin, or the owner can raise the
-   slice; either is a decision for the host's shared budget, not made here. The production VM (4 GB, api limit 1536 MB, so
-   1600 MB needed) runs the same check.
+   **Measured state on the staging Pi (24 Oct 2026, 19:30 UTC):** `bms.slice` has `memory.high` 860 MB, `memory.max` 900 MB
+   and `memory.current` 790 MB, so about 70 MB is free below `MemoryHigh`; the api container uses 377 MB with a `memory.peak`
+   of 380 MB against its 448 MB limit; the host has 7.8 GB with about 6.3 GB available. The bound here is 512 MB (448 + 64),
+   so **staging always takes the in-place restart today**: safe for the live api, but the gap stays on staging, covered by
+   Caddy's 30-second retry and the app's message and keyed retry. Even the measured peak (380 MB) would not fit in 70 MB, so
+   `BMS_ROLL_MIN_FREE_MB` cannot help either. Closing the gap on staging needs a larger slice (for example `MemoryHigh` 1.5 GB,
+   `MemoryMax` 1.6 GB, which the host's available memory allows); that is a host change for the owner to decide and is not made
+   by this decision. The deploy log records the free and needed memory on every switch. The production VM (4 GB, api limit
+   1536 MB, so 1600 MB needed) runs the same check.
 5. **The app says it is updating, and never claims nothing was saved when it may have been.** The PWA's API client reads a 502,
    503 or 504 that is not the API's own `application/problem+json` (the proxy or Cloudflare answering: the connection to the
    API was refused, so nothing reached it) as "The app is updating. Nothing was saved yet. Try again in a minute.", a problem
@@ -97,8 +100,8 @@ NFR-AVL-03 allows 30 seconds of unavailability per deploy, written when deploys 
 **Worse:**
 
 - A switch takes longer: the new api's start plus one health interval, a graceful stop, and 3 seconds per service.
-- On the Pi the safe memory bound will often mean an in-place restart, the old gap, until the start-up peak is measured or the
-  slice is raised.
+- On the staging Pi, as measured, the safe memory bound always means an in-place restart, the old gap, until the owner raises
+  `bms.slice`.
 - During an overlap two JVMs share the Pi's `CPUQuota=250%`, which slows the old api and PostgreSQL for the new JVM's start;
   watch request times in a staging switch.
 - Between its port opening and its health check passing, a new api already takes a share of requests. If a release opens its port

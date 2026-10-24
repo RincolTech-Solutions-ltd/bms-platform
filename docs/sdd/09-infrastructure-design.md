@@ -461,7 +461,7 @@ Staging runs on an ARM64 host that already exists at a Rincol home site: a Raspb
   | `cloudflared` | 48 MB | |
   | `proxy`, `web` | 32 MB each | Caddy |
   | `migrate` | 160 MB | Only while a deploy runs, next to the old API |
-  | second `api`, `web` | 448 MB, 32 MB | Only during a switch, beside the old ones until they are healthy (ADR-083). The second api starts only while its own limit plus 64 MB (512 MB) is free below the slice's `MemoryHigh` and on the host, so its start-up peak can never reach the slice's reclaim or OOM killer; otherwise (often, with the steady stack) the api restarts in place, with the old gap. `BMS_ROLL_MIN_FREE_MB` can replace the limit with a measured start-up peak |
+  | second `api`, `web` | 448 MB, 32 MB | Only during a switch, beside the old ones until they are healthy (ADR-083). The second api starts only while its own limit plus 64 MB (512 MB) is free below the slice's `MemoryHigh` and on the host, so its start-up peak can never reach the slice's reclaim or OOM killer; otherwise the api restarts in place, with the old gap; as measured on 24 Oct 2026 (790 MB of the slice in use, 70 MB below `MemoryHigh`, api peak 380 MB) staging always restarts in place until the owner raises the slice (ADR-083). `BMS_ROLL_MIN_FREE_MB` can replace the limit with a measured start-up peak |
   | **Total** | 736 MB steady, 896 MB while migrations run, at most 860 MB in use (`MemoryHigh`) during an overlap, by the rule above | `bms.slice`: `MemoryMax=900M`, `MemoryHigh=860M`, no swap, `CPUQuota=250%` |
 
   Every container is started with `cgroup_parent: bms.slice`, so the slice is a hard cap for the
