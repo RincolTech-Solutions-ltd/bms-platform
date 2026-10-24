@@ -84,7 +84,16 @@ class OrdersRepository {
             BigDecimal receivedQty,
             long receivedMinor,
             BigDecimal billedQty,
-            long billedMinor) {}
+            long billedMinor,
+            BigDecimal receivedUnitQty) {}
+
+    /**
+     * D23, issue #554: what a receipt line received, counted in its order line's own unit ({@code rl} and {@code ol}). A
+     * line in the order's pack counts its packs, whatever each held this time (ten cartons of 30 receive ten cartons
+     * ordered at 24); a line in another unit counts its base units in packs of the size ordered.
+     */
+    static final String RECEIVED_IN_ORDER_UNIT =
+            "CASE WHEN ol.unit_id IS NULL THEN rl.qty WHEN rl.unit_id = ol.unit_id THEN rl.unit_qty ELSE round(rl.qty / ol.unit_factor, 3) END";
 
     record NewOrder(
             UUID id,
@@ -283,6 +292,10 @@ class OrdersRepository {
                                coalesce((SELECT sum(rl.qty) FROM retail_goods_receipt_lines rl
                                            JOIN retail_goods_receipts r ON r.tenant_id = rl.tenant_id AND r.id = rl.receipt_id
                                           WHERE rl.tenant_id = l.tenant_id AND rl.order_line_id = l.id AND r.status = 'posted'), 0) AS received_qty,
+                               coalesce((SELECT sum(%s) FROM retail_goods_receipt_lines rl
+                                           JOIN retail_goods_receipts r ON r.tenant_id = rl.tenant_id AND r.id = rl.receipt_id
+                                           JOIN retail_purchase_order_lines ol ON ol.tenant_id = rl.tenant_id AND ol.id = rl.order_line_id
+                                          WHERE rl.tenant_id = l.tenant_id AND rl.order_line_id = l.id AND r.status = 'posted'), 0) AS received_unit_qty,
                                coalesce((SELECT sum(rl.line_total_minor) FROM retail_goods_receipt_lines rl
                                            JOIN retail_goods_receipts r ON r.tenant_id = rl.tenant_id AND r.id = rl.receipt_id
                                           WHERE rl.tenant_id = l.tenant_id AND rl.order_line_id = l.id AND r.status = 'posted'), 0) AS received_minor,
@@ -298,7 +311,10 @@ class OrdersRepository {
                           JOIN retail_products p ON p.tenant_id = l.tenant_id AND p.id = l.product_id
                           LEFT JOIN retail_units u ON u.tenant_id = l.tenant_id AND u.id = l.unit_id
                          WHERE l.order_id = ? ORDER BY l.line_no
-                        """).param(orderId).query((rs, n) -> line(rs)).list();
+                        """.formatted(RECEIVED_IN_ORDER_UNIT))
+                .param(orderId)
+                .query((rs, n) -> line(rs))
+                .list();
     }
 
     /** The receipts of some orders, oldest first. */
@@ -370,7 +386,8 @@ class OrdersRepository {
                 rs.getBigDecimal("received_qty"),
                 rs.getLong("received_minor"),
                 rs.getBigDecimal("billed_qty"),
-                rs.getLong("billed_minor"));
+                rs.getLong("billed_minor"),
+                rs.getBigDecimal("received_unit_qty"));
     }
 
     static Instant instant(ResultSet rs, String column) throws SQLException {

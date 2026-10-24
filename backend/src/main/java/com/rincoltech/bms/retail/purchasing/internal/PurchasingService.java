@@ -237,6 +237,14 @@ class PurchasingService {
                 }
                 packs.put(i, pack);
             }
+            if (l.packSize() != null) {
+                // D23, issue #554: how many each pack held in this delivery, kept on the line only.
+                PackUnit sized = PurchaseLines.delivered(field, packs.get(i), l.packSize(), problems);
+                if (sized == null) {
+                    continue;
+                }
+                packs.put(i, sized);
+            }
             if (!p.currency().equals(currency)) {
                 problems.add(new FieldProblem(field + ".product_id", "currency_mismatch", "Priced in " + p.currency()));
             }
@@ -275,6 +283,7 @@ class PurchasingService {
                     "Permission denied",
                     "Setting the selling price needs the permission to change prices. Leave the selling price empty.");
         }
+        PurchaseLines.requireUseFromNowOn(r.lines().stream().anyMatch(PurchasingService::usesFromNowOn));
         for (PurchaseLineRequest l : r.lines()) {
             for (BranchQty b : l.qtyByBranch()) {
                 branches.resolveStocking(PERMISSION, b.branchId());
@@ -354,6 +363,10 @@ class PurchasingService {
             NewLine line = lines.get(i);
             repo.insertLine(id, line);
             catalogue.applyPurchasePrices(line.productId(), line.costMinor(), line.sellMinor(), id);
+            if (usesFromNowOn(r.lines().get(i))) {
+                // Under the product lock taken above and before any balance row (ADR-079 lock order).
+                catalogue.useBuyingSize(line.productId(), line.unitId(), line.unitFactor(), PURCHASE, id);
+            }
             List<BranchQty> entered = r.lines().get(i).qtyByBranch();
             for (int j = 0; j < entered.size(); j++) {
                 BranchQty b = entered.get(j);
@@ -402,6 +415,11 @@ class PurchasingService {
         after.put("lines", lines.size());
         audit.record(AuditLog.Entry.created("retail.purchase.created", PURCHASE, id, null, after));
         return repo.find(id).orElseThrow();
+    }
+
+    /** D23, issue #554: the line asks for its size to become the pack's usual size. */
+    private static boolean usesFromNowOn(PurchaseLineRequest l) {
+        return Boolean.TRUE.equals(l.useFromNowOn()) && l.packSize() != null;
     }
 
     @Transactional(readOnly = true)

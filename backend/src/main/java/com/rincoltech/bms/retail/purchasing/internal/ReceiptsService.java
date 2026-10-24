@@ -241,7 +241,7 @@ class ReceiptsService {
                     continue;
                 }
             }
-            Planned p = lines.plan(field, productId, unitId, l.qty(), cost, problems, ol != null);
+            Planned p = lines.plan(field, productId, unitId, l.qty(), cost, problems, ol != null, l.packSize());
             if (p != null) {
                 items.add(new Item(i, ol, l, p));
             }
@@ -253,6 +253,7 @@ class ReceiptsService {
             overReceipt(order, items, orderLines);
         }
         limitUnauthorised(order, items);
+        PurchaseLines.requireUseFromNowOn(items.stream().anyMatch(x -> usesFromNowOn(x.request())));
         new TreeSet<>(items.stream().map(x -> x.planned().product().id()).toList()).forEach(catalogue::lock);
 
         UUID id = UUID.randomUUID();
@@ -301,8 +302,13 @@ class ReceiptsService {
                     "Permission denied",
                     "Setting the selling price needs the permission to change prices. Leave the selling price empty.");
         }
-        for (NewLine l : newLines) {
+        for (int i = 0; i < newLines.size(); i++) {
+            NewLine l = newLines.get(i);
             catalogue.applyPurchasePrices(l.productId(), l.costMinor(), l.sellMinor(), id);
+            if (usesFromNowOn(items.get(i).request())) {
+                // D23, issue #554: under the product lock taken above, before any balance row (ADR-079 lock order).
+                catalogue.useBuyingSize(l.productId(), l.unitId(), l.unitFactor(), RECEIPT, id);
+            }
         }
         stock.record(on, movements);
         // Goods received not invoiced is owed as entered; inventory carries the movements' value; the difference, which
@@ -356,6 +362,11 @@ class ReceiptsService {
     }
 
     /** True when the unit being received is the unit the line was ordered in (naming the base unit is the base unit). */
+    /** D23, issue #554: the line asks for its size to become the pack's usual size. */
+    private static boolean usesFromNowOn(ReceiptLineRequest l) {
+        return Boolean.TRUE.equals(l.useFromNowOn()) && l.packSize() != null;
+    }
+
     private boolean sameUnit(OrdersRepository.LineRow ol, UUID unitId) {
         if (ol.unitId() != null) {
             return ol.unitId().equals(unitId);
@@ -412,23 +423,39 @@ class ReceiptsService {
         int bp = settings.current().overReceiptBp();
         Map<UUID, BigDecimal> already = repo.receivedByOrderLine(order.id());
         Map<UUID, BigDecimal> now = new HashMap<>();
-        items.forEach(x -> now.merge(x.orderLine().id(), x.planned().baseQty(), BigDecimal::add));
+        items.forEach(x -> now.merge(x.orderLine().id(), inOrderUnit(x), BigDecimal::add));
         for (Map.Entry<UUID, BigDecimal> e : now.entrySet()) {
             OrdersRepository.LineRow ol = orderLines.get(e.getKey());
             BigDecimal had = already.getOrDefault(e.getKey(), BigDecimal.ZERO);
-            BigDecimal limit =
-                    ol.qty().multiply(BigDecimal.valueOf(10000L + bp)).movePointLeft(4);
+            BigDecimal ordered = OrdersService.orderedInUnit(ol);
+            BigDecimal limit = ordered.multiply(BigDecimal.valueOf(10000L + bp)).movePointLeft(4);
             if (had.add(e.getValue()).compareTo(limit) > 0) {
                 BigDecimal room = limit.subtract(had).max(BigDecimal.ZERO);
                 throw ApiException.rule(
                         "receipt_exceeds_order",
-                        "Line " + ol.lineNo() + " of " + order.orderNo() + " ordered " + Quantities.format(ol.qty())
+                        "Line " + ol.lineNo() + " of " + order.orderNo() + " ordered " + Quantities.format(ordered)
                                 + " and " + Quantities.format(had) + " has been received, so at most "
                                 + room.setScale(Quantities.SCALE, java.math.RoundingMode.DOWN)
                                         .toPlainString()
                                 + " more can be received.");
             }
         }
+    }
+
+    /**
+     * D23, issue #554: what a line receives, in its order line's own unit, as {@code OrdersRepository.RECEIVED_IN_ORDER_UNIT}
+     * counts it: packs of the order's unit count as packs whatever each held this time.
+     */
+    private static BigDecimal inOrderUnit(Item x) {
+        OrdersRepository.LineRow ol = x.orderLine();
+        Planned p = x.planned();
+        if (ol.unitId() == null) {
+            return p.baseQty();
+        }
+        if (p.pack() != null && p.pack().unitId().equals(ol.unitId())) {
+            return p.unitQty();
+        }
+        return p.baseQty().divide(ol.unitFactor(), Quantities.SCALE, java.math.RoundingMode.HALF_UP);
     }
 
     // ---- Void ------------------------------------------------------------------------------
