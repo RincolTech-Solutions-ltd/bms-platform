@@ -1,4 +1,4 @@
-# How the proxy finds the api and web containers; imported by Caddyfile and Caddyfile.tunnel (ADR-082, issue #496).
+# How the proxy finds the api and web containers; imported by Caddyfile and Caddyfile.tunnel (ADR-083, issue #496).
 #
 # A deploy starts the new api (or web) container beside the running one and stops the old one only once the new one is
 # healthy, so for a while the service name resolves to two containers. `dynamic a` asks Docker's DNS for every

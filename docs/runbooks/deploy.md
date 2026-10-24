@@ -66,7 +66,7 @@ The volume holds copies only; deleting it (`docker volume rm bms_web_assets` whi
 loses nothing but those copies. The CI test `deploy/tests/keep-assets-test.sh` runs the same switch
 against both compose files with three small builds.
 
-## No gap during the switch (ADR-082)
+## No gap during the switch (ADR-083)
 
 `deploy.sh` starts the new `api` and `web` container beside the running one and stops the old one
 only once the new one is healthy, so the site keeps answering through a deploy and a rollback. The

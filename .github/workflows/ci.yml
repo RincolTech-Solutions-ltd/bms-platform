@@ -109,7 +109,7 @@ jobs:
   delivery:
     name: Workflows, scripts and compose files
     runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["self-hosted","jerome-laptop"]') }}
-    # The two deploy switch tests take about 2 and 4 minutes (ADR-078, ADR-082).
+    # The two deploy switch tests take about 2 and 4 minutes (ADR-078, ADR-083).
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -137,7 +137,7 @@ jobs:
         # ADR-078, issue #525: three small web builds through deploy.sh's switch and both compose files.
         run: bash deploy/tests/keep-assets-test.sh
       - name: Requests keep getting 200 while a deploy switches
-        # ADR-082, issue #496: deploy.sh's switch, rollback and a refused release under GET and POST traffic, both compose files.
+        # ADR-083, issue #496: deploy.sh's switch, rollback and a refused release under GET and POST traffic, both compose files.
         run: bash deploy/tests/no-gap-test.sh
       - name: Compose files parse
         env:

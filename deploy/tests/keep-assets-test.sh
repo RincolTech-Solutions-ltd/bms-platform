@@ -91,7 +91,7 @@ for file in compose.yml compose.pi-staging.yml; do
         || { echo "FAIL $file: keep-assets must have pull_policy: never"; exit 1; }
 done
 
-# The functions under test, exactly as deploy.sh defines them, with the gap-free switch they call (ADR-082).
+# The functions under test, exactly as deploy.sh defines them, with the gap-free switch they call (ADR-083).
 eval "$(sed -n '/^log() {/p; /^\(keep_outgoing_assets\|free_memory_mb\|roll_need_mb\|wait_healthy\|roll\|switch_proxy\|proxy_fingerprint\|switch_to\)() {/,/^}/p' "$REPO/deploy/deploy.sh")"
 for fn in log keep_outgoing_assets roll switch_to; do
     if ! declare -F "$fn" > /dev/null; then

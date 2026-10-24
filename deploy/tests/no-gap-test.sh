@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test for issue #496 (ADR-082): requests through the proxy keep getting 200 while deploy.sh switches api and web to a
+# Test for issue #496 (ADR-083): requests through the proxy keep getting 200 while deploy.sh switches api and web to a
 # new release, while it rolls back, and while a release whose api never starts is refused. Needs Docker and nothing else:
 # no registry, no cosign, no database. It builds small stand-ins: an api that, like the JVM, opens its port only a few
 # seconds after it starts and closes it at once on a graceful stop; web builds from frontend/Caddyfile; and proxy images
@@ -42,7 +42,7 @@ trap cleanup EXIT
 # still adapts (without its DNS-01 TLS block, whose Cloudflare module only the release image has).
 for file in Caddyfile Caddyfile.tunnel; do
     if grep -nE '^[^#]*reverse_proxy +(api|web):' "$REPO/deploy/caddy/$file"; then
-        echo "FAIL $file proxies to a fixed address instead of importing upstream (ADR-082)"
+        echo "FAIL $file proxies to a fixed address instead of importing upstream (ADR-083)"
         exit 1
     fi
 done

@@ -18,7 +18,7 @@
 #      application deploy, whatever else changed in the compose file or .env (ADR-018 finding M4).
 #      Just before each switch, the outgoing web build's hashed files are copied into the web_assets
 #      volume, which the new web container keeps serving, so a phone on the previous app copy still
-#      loads its screens (ADR-078). api and web switch without a gap (ADR-082): the new container
+#      loads its screens (ADR-078). api and web switch without a gap (ADR-083): the new container
 #      starts beside the old one, and the old one stops only once the new one is healthy; a new one
 #      that never gets healthy is removed and the old one keeps serving. The proxy is recreated only
 #      when what it runs changed (its binary, its Caddyfiles or its compose settings);
@@ -63,7 +63,7 @@ mkdir -p "$STATE_DIR"
 READY_TIMEOUT="${READY_TIMEOUT:-240}"
 # Seconds the keep-assets step may take before a switch (ADR-078); the rollback allows 20.
 KEEP_ASSETS_TIMEOUT="${BMS_KEEP_ASSETS_TIMEOUT:-60}"
-# ADR-082: a second API JVM runs beside the old one only while enough memory is free, both on the host
+# ADR-083: a second API JVM runs beside the old one only while enough memory is free, both on the host
 # and below bms.slice's MemoryHigh where that cgroup exists (the staging Pi); otherwise the api restarts
 # in place, with the short gap that Caddy's retries and the app's own retry cover. Enough is, by default,
 # the api container's own memory limit plus ROLL_MARGIN_MB: the new JVM can never use more than its limit
@@ -231,7 +231,7 @@ wait_healthy() {
     return 1
 }
 
-# ADR-082: switch one service without a gap. The new container starts beside the running one (Compose
+# ADR-083: switch one service without a gap. The new container starts beside the running one (Compose
 # names it with the next number), and the proxy finds both through Docker's DNS (deploy/caddy/upstreams.caddy).
 # Once the new one is healthy the old one gets its graceful stop and is removed. A new container that
 # never gets healthy is removed and the old one keeps serving, so the deploy fails with nothing changed.
@@ -292,7 +292,7 @@ roll() {
 
 # The proxy cannot run twice (it holds ports 80 and 443 on the production VM), so its image is replaced only
 # when what it runs changed: its caddy binary or its Caddyfiles. Every release builds a new proxy image digest
-# even when those are the same, and recreating it would stop all traffic for a moment (ADR-082). When they are
+# even when those are the same, and recreating it would stop all traffic for a moment (ADR-083). When they are
 # the same, Compose's own `up` runs with the running image's reference, so it still applies a change of the
 # proxy's settings in .env (recreating it, as before) and otherwise leaves it alone.
 switch_proxy() {

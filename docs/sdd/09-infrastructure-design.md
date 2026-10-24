@@ -130,7 +130,7 @@ only, stored in the production host's `.env` only. It cannot read or change anyt
 Policy of `default-src 'self'` with no inline scripts (chapter 8 section 8.8). Request bodies
 are capped at 6 MB (5 MB uploads plus framing). HTTP/3 is enabled on UDP 443.
 
-**Upstreams** (`deploy/caddy/upstreams.caddy`, imported by both Caddyfiles, ADR-082). Every route
+**Upstreams** (`deploy/caddy/upstreams.caddy`, imported by both Caddyfiles, ADR-083). Every route
 proxies to `dynamic a api 8080` or `dynamic a web 8080`, refreshed each second, so during a deploy
 both the old and the new container of a service take requests. A refused connection marks that
 address down for 2 seconds and the request goes to another; with none answering, Caddy tries again
@@ -193,7 +193,7 @@ a reload on an old copy, not data.
 
 During a deploy a new `api` or `web` container starts beside the old one and the old one stops
 only once the new one's health check passes (`/readyz` for the api, a `wget` of `/` every 5
-seconds for web), ADR-082. The proxy is recreated only when what it runs changed.
+seconds for web), ADR-083. The proxy is recreated only when what it runs changed.
 
 The API image carries two commands: the default starts the application; `migrate` applies the
 Flyway migrations as `bms_owner` and exits (ADR-006, ADR-010). The API image also carries the
@@ -461,7 +461,7 @@ Staging runs on an ARM64 host that already exists at a Rincol home site: a Raspb
   | `cloudflared` | 48 MB | |
   | `proxy`, `web` | 32 MB each | Caddy |
   | `migrate` | 160 MB | Only while a deploy runs, next to the old API |
-  | second `api`, `web` | 448 MB, 32 MB | Only during a switch, beside the old ones until they are healthy (ADR-082). The second api starts only while its own limit plus 64 MB (512 MB) is free below the slice's `MemoryHigh` and on the host, so its start-up peak can never reach the slice's reclaim or OOM killer; otherwise (often, with the steady stack) the api restarts in place, with the old gap. `BMS_ROLL_MIN_FREE_MB` can replace the limit with a measured start-up peak |
+  | second `api`, `web` | 448 MB, 32 MB | Only during a switch, beside the old ones until they are healthy (ADR-083). The second api starts only while its own limit plus 64 MB (512 MB) is free below the slice's `MemoryHigh` and on the host, so its start-up peak can never reach the slice's reclaim or OOM killer; otherwise (often, with the steady stack) the api restarts in place, with the old gap. `BMS_ROLL_MIN_FREE_MB` can replace the limit with a measured start-up peak |
   | **Total** | 736 MB steady, 896 MB while migrations run, at most 860 MB in use (`MemoryHigh`) during an overlap, by the rule above | `bms.slice`: `MemoryMax=900M`, `MemoryHigh=860M`, no swap, `CPUQuota=250%` |
 
   Every container is started with `cgroup_parent: bms.slice`, so the slice is a hard cap for the
