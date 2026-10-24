@@ -1,6 +1,6 @@
 import createClient, { type Middleware } from 'openapi-fetch';
 import { getAccessToken, refreshSession, tenantHeaders } from '../auth/session';
-import { APP_UPDATING, APP_UPDATING_MAYBE_SAVED } from './retail-errors';
+import { APP_UPDATING, APP_UPDATING_CHECK, APP_UPDATING_MAYBE_SAVED } from './retail-errors';
 import type { components, paths } from './schema';
 
 // The typed API client. `schema.d.ts` is generated from docs/api/openapi.json (the committed
@@ -44,19 +44,26 @@ const auth: Middleware = {
 /** How long a request with an Idempotency-Key waits before its one retry; tests shorten it. */
 export const updatingRetry = { delayMs: 4000 };
 
-// A 502, 503 or 504 that is not the API's own problem body is the proxy (Caddy or Cloudflare) answering while no
-// API is up: the connection to the API was refused, so nothing reached it, and the answer is plain words in a problem
-// body every screen already shows; the form keeps what was typed. A request with an Idempotency-Key is safe to send
-// again, so it is, once, after a few seconds: the server replays the first result if the first attempt did land.
+// While a deploy switches the server over, three things can come back instead of an answer, and they differ in what
+// they prove (ADR-083). Every one is plain words in a problem body every screen already shows, and the form keeps what
+// was typed.
 //
-// A dropped connection while the device says it is online is different: the request may have reached the API and been
-// saved before the answer was lost (a stop that ran out of grace, a lost reply). So only a read or a sign-in, which
-// save nothing, says "Nothing was saved yet". A write with a key is sent once more and, if that fails too, says it may
-// not have been saved and that trying again is safe. A write without a key keeps the TypeError, which the screens read
-// as an unknown outcome and check before another save. Offline, a dropped connection stays the TypeError the offline
-// paths expect.
-const isGap = (response: Response) =>
-  [502, 503, 504].includes(response.status) && !(response.headers.get('content-type') ?? '').includes('json');
+// 1. A 502, 503 or 504 with `Bms-Not-Delivered: 1`: Caddy could not connect to any api container for 30 seconds
+//    (deploy/caddy/upstreams.caddy), so nothing reached the API: "Nothing was saved yet".
+// 2. Any other 502, 503 or 504 that is not the API's own problem body: a container took the request and then reset or
+//    was stopped (Caddy says EOF), or Cloudflare timed out on the origin. The request may have been saved.
+// 3. A dropped connection while the device says it is online: the request may have been saved too.
+//
+// A request with an Idempotency-Key is safe to send again, so it is, once, after a few seconds: the server replays the
+// first result if the first attempt did land. Then only proof of 1 on every attempt says "Nothing was saved yet"; after
+// 2 or 3 a keyed write says it may have been saved and that trying again is safe, and a write without a key says it may
+// have been saved and to check first (a dropped one keeps the TypeError, which the screens read as an unknown outcome).
+// A read or a sign-in saves nothing, so it always says "Nothing was saved yet". Offline, a dropped connection stays the
+// TypeError the offline paths expect.
+const GAP_STATUSES = [502, 503, 504];
+const notDelivered = (response: Response) => GAP_STATUSES.includes(response.status) && response.headers.get('Bms-Not-Delivered') === '1';
+const unsure = (response: Response) =>
+  GAP_STATUSES.includes(response.status) && !notDelivered(response) && !(response.headers.get('content-type') ?? '').includes('json');
 const online = () => typeof navigator === 'undefined' || navigator.onLine !== false;
 const savesNothing = (request: Request) =>
   ['GET', 'HEAD'].includes(request.method) || ['/api/v1/auth/staff/login', '/api/v1/platform/auth/login'].includes(new URL(request.url).pathname);
@@ -67,8 +74,13 @@ const updating = (status: number, detail: string) =>
   });
 
 const replays = new WeakMap<Request, Request>();
-// Requests whose first attempt dropped, so whether it was saved is not known.
-const dropped = new WeakSet<Request>();
+// Requests one of whose attempts may have reached the API, so whether it was saved is not known.
+const maybeSaved = new WeakSet<Request>();
+/** The words for a request that ended without an answer, from what its attempts prove. */
+function wordsFor(request: Request): string {
+  if (!maybeSaved.has(request) || savesNothing(request)) return APP_UPDATING;
+  return request.headers.has('Idempotency-Key') ? APP_UPDATING_MAYBE_SAVED : APP_UPDATING_CHECK;
+}
 async function retryOnce(request: Request, send: typeof fetch): Promise<Response | undefined> {
   const replay = replays.get(request);
   replays.delete(request);
@@ -79,9 +91,17 @@ async function retryOnce(request: Request, send: typeof fetch): Promise<Response
     return await send(replay);
   } catch {
     // The retry itself may have landed.
-    dropped.add(request);
+    maybeSaved.add(request);
     return undefined;
   }
+}
+/** A retry's answer: 409 idempotency_in_progress proves the first attempt reached the API and is still running. */
+async function settle(retried: Response): Promise<Response> {
+  if (retried.status === 409) {
+    const code = await retried.clone().json().then((b: { code?: string }) => b.code, () => undefined);
+    if (code === 'idempotency_in_progress') return updating(409, APP_UPDATING_MAYBE_SAVED);
+  }
+  return retried;
 }
 
 const deployGap: Middleware = {
@@ -91,30 +111,34 @@ const deployGap: Middleware = {
     return request;
   },
   async onResponse({ request, response, options }) {
-    if (!isGap(response)) return response;
+    if (!notDelivered(response) && !unsure(response)) return response;
+    if (unsure(response)) maybeSaved.add(request);
     const retried = await retryOnce(request, options.fetch);
-    if (retried && !isGap(retried)) return retried;
-    return updating(response.status, dropped.has(request) ? APP_UPDATING_MAYBE_SAVED : APP_UPDATING);
+    if (retried) {
+      if (unsure(retried)) maybeSaved.add(request);
+      else if (!notDelivered(retried)) return settle(retried);
+    }
+    return updating(response.status, wordsFor(request));
   },
   async onError({ request, error, options }) {
     if (!online() || (error as { name?: string } | null)?.name === 'AbortError') return;
     if (savesNothing(request)) return new TypeError(APP_UPDATING);
     if (!replays.has(request)) return;
-    dropped.add(request);
+    maybeSaved.add(request);
     const retried = await retryOnce(request, options.fetch);
-    if (retried) return retried;
+    if (retried) return settle(retried);
     return new TypeError(APP_UPDATING_MAYBE_SAVED);
   },
 };
 
-export { APP_UPDATING, APP_UPDATING_MAYBE_SAVED };
+export { APP_UPDATING, APP_UPDATING_CHECK, APP_UPDATING_MAYBE_SAVED };
 export const api = createClient<paths>({ baseUrl: '/' });
 api.use(auth);
 api.use(deployGap);
 
 /** The problem body of a failed call, for showing its detail (chapter 7 section 7.7). */
 export function problemOf(error: unknown): Problem {
-  if (error instanceof Error && [APP_UPDATING, APP_UPDATING_MAYBE_SAVED].includes(error.message)) return { code: 'app_updating', detail: error.message };
+  if (error instanceof Error && [APP_UPDATING, APP_UPDATING_MAYBE_SAVED, APP_UPDATING_CHECK].includes(error.message)) return { code: 'app_updating', detail: error.message };
   return (error ?? {}) as Problem;
 }
 

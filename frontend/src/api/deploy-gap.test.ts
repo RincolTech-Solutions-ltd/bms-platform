@@ -23,15 +23,23 @@ const fetchImpl = vi.hoisted(() => {
   return state;
 });
 
-import { APP_UPDATING, APP_UPDATING_MAYBE_SAVED, api, problemOf, updatingRetry } from './client';
-import { asFormError, unknownOutcome } from './lending-forms';
+import { APP_UPDATING, APP_UPDATING_CHECK, APP_UPDATING_MAYBE_SAVED, api, problemOf, updatingRetry } from './client';
+import { FormError, asFormError, unknownOutcome } from './lending-forms';
+import { realMembers } from './members';
 import { retailMessage } from './retail-errors';
 
 updatingRetry.delayMs = 0;
 
 const json = (status: number, body: unknown, type = 'application/json') =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': type } });
-const gap = (status = 502) => async () => new Response(null, { status });
+// What Caddy answers when it could not connect to any container (deploy/caddy/upstreams.caddy, not_delivered).
+const gap = (status = 502) => async () =>
+  new Response('{"code":"app_updating","detail":"The app is updating. Nothing was saved yet. Try again in a minute."}', {
+    status,
+    headers: { 'content-type': 'application/problem+json', 'Bms-Not-Delivered': '1' },
+  });
+// What Caddy answers when a container took the request and then reset or was stopped (EOF): it may have been saved.
+const reset = (status = 502) => async () => new Response(null, { status });
 const dropped = async (): Promise<Response> => {
   throw new TypeError('Failed to fetch');
 };
@@ -47,7 +55,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('a 502, 503 or 504 from the proxy (#496)', () => {
+describe('a 502, 503 or 504 from the proxy that proves nothing reached the API (#496)', () => {
   it.each([502, 503, 504])('reads %i as the app updating, and a read without a key is not sent again', async (status) => {
     fetchImpl.answers = [gap(status)];
     const { error, response } = await api.GET('/api/v1/me');
@@ -56,10 +64,11 @@ describe('a 502, 503 or 504 from the proxy (#496)', () => {
     expect(fetchImpl.seen).toHaveLength(1);
   });
 
-  it('reads a Cloudflare error page the same way', async () => {
-    fetchImpl.answers = [async () => new Response('<html>Bad gateway</html>', { status: 502, headers: { 'content-type': 'text/html' } })];
-    const { error } = await api.GET('/api/v1/me');
-    expect(problemOf(error)).toEqual({ code: 'app_updating', detail: APP_UPDATING });
+  it('says nothing was saved for a write without a key, which is not sent again', async () => {
+    fetchImpl.answers = [gap(502)];
+    const { error } = await move();
+    expect(problemOf(error).detail).toBe(APP_UPDATING);
+    expect(fetchImpl.seen).toHaveLength(1);
   });
 
   it('sends a write with an Idempotency-Key once more, with the same key and body, and returns what that answers', async () => {
@@ -75,7 +84,7 @@ describe('a 502, 503 or 504 from the proxy (#496)', () => {
     expect(new URL(first.url).pathname).toBe(new URL(second.url).pathname);
   });
 
-  it('retries only once: a second gap reads as the app updating', async () => {
+  it('retries only once: a second proof that nothing arrived still says nothing was saved', async () => {
     fetchImpl.answers = [gap(503), gap(502)];
     const { error, response } = await move('test-key-496');
     expect(response.status).toBe(503);
@@ -102,12 +111,63 @@ describe('a 502, 503 or 504 from the proxy (#496)', () => {
     expect(fetchImpl.seen).toHaveLength(1);
   });
 
+  it('reads a 409 idempotency_in_progress on the retry as maybe saved: the first attempt did arrive', async () => {
+    fetchImpl.answers = [gap(502), async () => json(409, { code: 'idempotency_in_progress', detail: 'In progress.' }, 'application/problem+json')];
+    const { error, response } = await move('test-key-496');
+    expect(response.status).toBe(409);
+    expect(problemOf(error).detail).toBe(APP_UPDATING_MAYBE_SAVED);
+  });
+
   it('leaves other errors alone', async () => {
     fetchImpl.answers = [async () => new Response(null, { status: 500 })];
     const { error, response } = await move('test-key-496');
     expect(response.status).toBe(500);
     expect(problemOf(error).detail).toBeUndefined();
     expect(fetchImpl.seen).toHaveLength(1);
+  });
+});
+
+// Review of #556: Caddy gives the same bare 502 when a container took the request and then reset (or was stopped at the
+// end of its grace period), and Cloudflare's 504 is an origin timeout; the request may have been saved.
+describe('a bare 502, 503 or 504 that does not prove nothing arrived (#496)', () => {
+  it('says a write without a key may have been saved and to check first, and does not send it again', async () => {
+    fetchImpl.answers = [reset(502)];
+    const failure = await realMembers.update('m1', 1, { occupation: 'Test trade' }).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(FormError);
+    expect((failure as FormError).message).toBe(APP_UPDATING_CHECK);
+    expect(unknownOutcome(failure)).toBe(true);
+    expect(fetchImpl.seen).toHaveLength(1);
+  });
+
+  it('reads a Cloudflare 504 page the same way for a write', async () => {
+    fetchImpl.answers = [async () => new Response('<html>Gateway time-out</html>', { status: 504, headers: { 'content-type': 'text/html' } })];
+    const { error } = await move();
+    expect(problemOf(error).detail).toBe(APP_UPDATING_CHECK);
+  });
+
+  it('sends a write with a key once more; if that is refused, it may still have been saved by the first', async () => {
+    fetchImpl.answers = [reset(502), gap(502)];
+    const { error } = await move('test-key-496');
+    expect(problemOf(error).detail).toBe(APP_UPDATING_MAYBE_SAVED);
+    expect(fetchImpl.seen).toHaveLength(2);
+  });
+
+  it('a keyed write refused first and reset on the retry may have been saved by the retry', async () => {
+    fetchImpl.answers = [gap(502), reset(502)];
+    const { error } = await move('test-key-496');
+    expect(problemOf(error).detail).toBe(APP_UPDATING_MAYBE_SAVED);
+  });
+
+  it('a keyed write that resets and then succeeds returns the answer (the server replays it)', async () => {
+    fetchImpl.answers = [reset(502), async () => json(200, { id: 'tr1' })];
+    const { data } = await move('test-key-496');
+    expect(data).toMatchObject({ id: 'tr1' });
+  });
+
+  it('a read says nothing was saved, since it saves nothing', async () => {
+    fetchImpl.answers = [async () => new Response('<html>Bad gateway</html>', { status: 502, headers: { 'content-type': 'text/html' } })];
+    const { error } = await api.GET('/api/v1/me');
+    expect(problemOf(error)).toEqual({ code: 'app_updating', detail: APP_UPDATING });
   });
 });
 
@@ -185,8 +245,8 @@ describe('a dropped connection (#496)', () => {
 });
 
 describe('the words', () => {
-  it('are what the retail and lending screens show for a bare 502, 503 or 504', () => {
-    for (const status of [502, 503, 504]) expect(retailMessage(undefined, status)).toBe(APP_UPDATING);
+  it('are what the retail and lending screens show for a bare 502, 503 or 504 with no body: maybe saved, check first', () => {
+    for (const status of [502, 503, 504]) expect(retailMessage(undefined, status)).toBe(APP_UPDATING_CHECK);
     expect(retailMessage(undefined, 500)).toBe('The server had a problem. Try again in a moment.');
     expect(retailMessage({ code: 'app_updating', detail: APP_UPDATING }, 502)).toBe(APP_UPDATING);
   });

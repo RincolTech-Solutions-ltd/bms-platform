@@ -25,7 +25,12 @@ NFR-AVL-03 allows 30 seconds of unavailability per deploy, written when deploys 
    api, which needs the database and migrations at head; a `wget` of `/` for web, added to both compose files), up to
    `READY_TIMEOUT`. Then it gives the old container its graceful stop (`docker stop`, which honours `stop_grace_period`) and
    removes it, and waits 3 seconds before the next service, so an address Docker frees is not handed to a new container while the
-   proxy still lists it. A new container that reports unhealthy, stops, or is not healthy in time is removed, its last log lines
+   proxy still lists it. While the old and the new web container both take requests, a page from the new one may ask the old
+   one for the new build's hashed files, so before the new web starts, `keep_incoming_assets` runs the incoming web image
+   (verified and pulled by this deploy, `pull_policy: never`) once as `keep-assets`, copying its hashed files into
+   `web_assets`, which the old container also serves from `/srv/previous` (ADR-078). If that copy fails, web restarts in
+   place instead (a short gap) rather than overlap two builds that cannot serve each other's files. A new container that
+   reports unhealthy, stops, or is not healthy in time is removed, its last log lines
    are printed, and the old one keeps serving: the switch fails with the previous release still live, and the existing rollback
    runs, finding nothing to change. A service whose single running container already runs the image asked for is handed to
    Compose's own `up --no-deps`, which leaves it alone (so a re-run with the live tag recreates nothing) unless `.env` changed
@@ -57,8 +62,11 @@ NFR-AVL-03 allows 30 seconds of unavailability per deploy, written when deploys 
    (`MemAvailable`) and, where `bms.slice` exists, below its `MemoryHigh` (where throttling and reclaim begin; `MemoryMax` if
    none), counting the slice's inactive file cache as free. The new JVM can never use more than its own limit: its own cgroup
    stops it first, and an OOM kill there takes only the new container, which the deploy then removes. So whatever the JVM's
-   start-up peak, the overlap cannot push the slice into reclaim or make the slice's OOM killer choose the old api or
-   PostgreSQL. No `oom_score_adj` is set: it is not needed under this bound, and the surviving container could not have it
+   start-up peak, the overlap cannot make the slice's OOM killer choose the old api or PostgreSQL. It can still push the slice
+   past `MemoryHigh`, since the inactive file cache counted as free is dropped only by reclaim, which then slows the whole
+   slice for a moment; that is throttling, not a kill. The margin covers the second web and modest growth; the second
+   pool's 5 to 10 extra PostgreSQL backends (a few MB each) come out of PostgreSQL's own 176 MB limit on the Pi, and a larger
+   slice may want a larger `BMS_ROLL_MARGIN_MB`. No `oom_score_adj` is set: it is not needed under this bound, and the surviving container could not have it
    lowered again without privilege. When the memory is not there, `deploy.sh` logs both numbers and restarts the api in place
    as before; the 30-second retry in Caddy and the app's message and retry below cover that gap.
    **Measured state on the staging Pi (24 Oct 2026, 19:30 UTC):** `bms.slice` has `memory.high` 860 MB, `memory.max` 900 MB
@@ -70,20 +78,29 @@ NFR-AVL-03 allows 30 seconds of unavailability per deploy, written when deploys 
    `MemoryMax` 1.6 GB, which the host's available memory allows); that is a host change for the owner to decide and is not made
    by this decision. The deploy log records the free and needed memory on every switch. The production VM (4 GB, api limit
    1536 MB, so 1600 MB needed) runs the same check.
-5. **The app says it is updating, and never claims nothing was saved when it may have been.** The PWA's API client reads a 502,
-   503 or 504 that is not the API's own `application/problem+json` (the proxy or Cloudflare answering: the connection to the
-   API was refused, so nothing reached it) as "The app is updating. Nothing was saved yet. Try again in a minute.", a problem
-   with code `app_updating` that every screen already shows, sign-in included; forms keep what was typed. A request with an
-   `Idempotency-Key` is sent once more by itself after 4 seconds with the same key and body (the server replays the first
-   answer if the first attempt landed, chapter 7 section 7.8). A dropped connection while online is different, since the
-   request may have been saved before the answer was lost (a lost reply, or an old api whose `stop_grace_period` ran out): a
-   read or a sign-in, which save nothing, says the app is updating; a write with a key is sent once more and, if that drops or
-   meets a gap too, says "The app is updating, so this may not have been saved. Trying again in a minute is safe."; a write
-   without a key keeps its `TypeError`, which the screens read as an unknown outcome and check before another save. Offline, a
-   dropped connection stays the `TypeError` the offline paths expect.
+5. **The app says it is updating, and says "Nothing was saved yet" only when the proxy proves it.** Caddy answers the same bare
+   502 when it could not connect and when a container took the request and then reset or was stopped at the end of its
+   `stop_grace_period` (it reports EOF), and Cloudflare's 504 is an origin timeout. So the proxy marks the one case that proves
+   nothing arrived: `import not_delivered` in both Caddyfiles adds a `handle_errors 502 503 504` route that, only when the
+   error message starts with `dial tcp` (refused, timed out, no address) or is `no upstreams available`, answers with the
+   header `Bms-Not-Delivered: 1` and an `app_updating` problem. The PWA's API client then reads:
+   - a marked answer as "The app is updating. Nothing was saved yet. Try again in a minute.";
+   - any other 502, 503 or 504 that is not the API's own `application/problem+json`, and a dropped connection while online,
+     as possibly saved: a write with an `Idempotency-Key` is sent once more by itself after 4 seconds with the same key and
+     body (the server replays the first answer if it landed) and, unless every attempt was marked, then says "The app is
+     updating, so this may not have been saved. Trying again in a minute is safe."; a write without a key says "The app is
+     updating, so this may have been saved. Check before you try again." (a dropped one keeps its `TypeError`, the unknown
+     outcome the screens check before another save);
+   - a 409 `idempotency_in_progress` on the retry as possibly saved (it proves the first attempt arrived);
+   - a read or a sign-in, which saves nothing, as "Nothing was saved yet" in every case.
+   All are problems with code `app_updating` that every screen already shows, sign-in included; forms keep what was typed.
+   Offline, a dropped connection stays the `TypeError` the offline paths expect. The retry reuses the token it was sent with;
+   a 401 on it is shown as such (the session refresh retries reads only).
 6. **Proved in CI.** `deploy/tests/no-gap-test.sh` runs `deploy.sh`'s own switch against both compose files with stand-in images
    (an api that opens its port 8 seconds after start) while a client sends GETs and POSTs through the real tunnel Caddyfile every
-   50 ms. Every answer must be 200 within 3 seconds during a switch, during a refused release and during a rollback; an
+   50 ms, and fetches the hashed file each page names. Every answer must be 200 within 3 seconds during a switch, during a
+   refused release and during a rollback; a request the api took and dropped must answer a bare 502, and with no api up the
+   answer must carry `Bms-Not-Delivered`; an
    unchanged proxy must be kept, a changed one recreated, and with too little free memory below `MemoryHigh` the api must
    restart in place. The staging file runs under a pinned, checksummed Compose 2.26.1.
 
@@ -99,7 +116,10 @@ NFR-AVL-03 allows 30 seconds of unavailability per deploy, written when deploys 
 
 **Worse:**
 
-- A switch takes longer: the new api's start plus one health interval, a graceful stop, and 3 seconds per service.
+- A switch takes longer: the new api's start plus one health interval, a graceful stop, and 3 seconds per service, plus one
+  more `keep-assets` run (the incoming build's files) before web.
+- During the web overlap a browser may fetch `sw.js` from either build; the worker settles on the new one once the old
+  container stops, and either build's hashed files load from both containers meanwhile.
 - On the staging Pi, as measured, the safe memory bound always means an in-place restart, the old gap, until the owner raises
   `bms.slice`.
 - During an overlap two JVMs share the Pi's `CPUQuota=250%`, which slows the old api and PostgreSQL for the new JVM's start;

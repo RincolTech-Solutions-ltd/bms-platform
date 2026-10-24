@@ -21,3 +21,21 @@
 		keepalive off
 	}
 }
+
+# Marks the 502, 503 or 504 that proves the request never reached an api or web container: the dial failed (refused,
+# timed out, no address) or no container was up, for every try within lb_try_duration. Only then does the answer carry
+# the header Bms-Not-Delivered: 1 and the app_updating problem, which the PWA reads as "Nothing was saved yet". Any
+# other proxy error (a container that took the request and then reset or was killed at the end of its stop grace
+# period, which Caddy reports as EOF or a reset) keeps its bare status, which the PWA reads as "may have been saved".
+# Imported inside each site block of Caddyfile and Caddyfile.tunnel (ADR-083).
+(not_delivered) {
+	handle_errors 502 503 504 {
+		@not_delivered expression `{http.error.message}.matches("^(dial tcp|no upstreams available)")`
+		handle @not_delivered {
+			header Content-Type application/problem+json
+			header Cache-Control no-store
+			header Bms-Not-Delivered 1
+			respond `{"code":"app_updating","detail":"The app is updating. Nothing was saved yet. Try again in a minute."}` {err.status_code}
+		}
+	}
+}

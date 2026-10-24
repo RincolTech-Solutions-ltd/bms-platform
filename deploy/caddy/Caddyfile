@@ -50,6 +50,9 @@ import upstreams.caddy
 		max_size 6MB
 	}
 
+	# A proxy error that proves nothing reached a container says so (ADR-083).
+	import not_delivered
+
 	# The callback host carries provider callbacks only (chapter 7 section 7.2).
 	@callbackHost host {$BMS_CALLBACK_HOST}
 	handle @callbackHost {

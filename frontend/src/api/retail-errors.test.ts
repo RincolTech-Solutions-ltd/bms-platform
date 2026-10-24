@@ -93,7 +93,7 @@ describe('retail problem details in plain words', () => {
     expect(retailMessage(undefined, 401)).toMatch(/sign in/i);
     expect(retailMessage(undefined, 500)).toMatch(/server had a problem/i);
     // The proxy with no API behind it during a deploy (issue #496).
-    expect(retailMessage(undefined, 503)).toBe('The app is updating. Nothing was saved yet. Try again in a minute.');
+    expect(retailMessage(undefined, 503)).toBe('The app is updating, so this may have been saved. Check before you try again.');
     expect(retailMessage({}, 418)).toBe('The request failed.');
   });
 });

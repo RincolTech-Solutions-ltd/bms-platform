@@ -97,6 +97,9 @@ build_api() {
 }
 :8080 {
 	respond /readyz "ready" 200
+	# Takes the request, then closes the connection with no answer, as an api stopped mid-request does.
+	@abort path /api/abort
+	abort @abort
 	respond "api {$BUILD}" 200
 }
 EOF
@@ -114,7 +117,8 @@ build_web() {
     local v="$1" dir="$WORK/web$1"
     mkdir -p "$dir/dist/assets"
     cp "$REPO/frontend/Caddyfile" "$dir/Caddyfile"
-    printf '<!doctype html><title>web %s</title>\n' "$v" > "$dir/dist/index.html"
+    printf '<!doctype html><title>web %s</title><script type="module" src="/assets/index-%s.js"></script>\n' "$v" "$v" > "$dir/dist/index.html"
+    printf 'export const build = "%s"\n' "$v" > "$dir/dist/assets/index-$v.js"
     cat > "$dir/Dockerfile" <<'EOF'
 FROM caddy:2.11-alpine
 COPY --chmod=644 Caddyfile /etc/caddy/Caddyfile
@@ -163,7 +167,7 @@ EOF
 
 # The functions under test, exactly as deploy.sh defines them. The staging Pi runs Compose 2.26.1 (#533): everything
 # they call exists there (up --scale --no-recreate, ps --all), and the Pi's file below runs under that version.
-eval "$(sed -n '/^log() {/p; /^\(keep_outgoing_assets\|free_memory_mb\|roll_need_mb\|wait_healthy\|roll\|switch_proxy\|proxy_fingerprint\|switch_to\)() {/,/^}/p' "$REPO/deploy/deploy.sh")"
+eval "$(sed -n '/^log() {/p; /^\(keep_outgoing_assets\|keep_incoming_assets\|free_memory_mb\|roll_need_mb\|wait_healthy\|roll\|switch_proxy\|proxy_fingerprint\|switch_to\)() {/,/^}/p' "$REPO/deploy/deploy.sh")"
 for fn in log roll switch_proxy switch_to; do
     declare -F "$fn" > /dev/null || { echo "FAIL could not read $fn out of deploy/deploy.sh"; exit 1; }
 done
@@ -190,7 +194,14 @@ wait_answer() {
     return 1
 }
 
-# A client that sends a GET to the api, a GET to the PWA and a POST to the api every 50 ms and prints each status.
+# The status line and headers of one POST through the proxy from the client network (curl: busybox wget hides the
+# headers of an error answer).
+headers_of() {
+    docker run --rm --network "$NET" curlimages/curl:8.10.1 -s -o /dev/null -D - -X POST -d x "http://proxy:8080$1" 2>&1 || true
+}
+
+# A client that sends a GET to the api, a GET to the PWA, a GET of the hashed file that page names and a POST to the api
+# every 50 ms and prints each status.
 start_client() {
     docker rm --force "$ID-client" > /dev/null 2>&1 || true
     docker run -d --name "$ID-client" --network "$NET" caddy:2.11-alpine sh -c '
@@ -202,6 +213,9 @@ start_client() {
         while :; do
             echo "GET /api/v1/me $(status http://proxy:8080/api/v1/me)"
             echo "GET / $(status http://proxy:8080/)"
+            # The hashed file the page just served names, which during a web switch may come from the other container.
+            asset="$(wget -q -O - http://proxy:8080/ 2> /dev/null | grep -o "/assets/index-v[0-9]*\.js" | head -n 1)"
+            echo "GET the asset of the page $(status "http://proxy:8080${asset:-/assets/missing.js}")"
             echo "POST /api/v1/retail/transfers $(status --post-data=x http://proxy:8080/api/v1/retail/transfers)"
             sleep 0.05
         done' > /dev/null
@@ -261,6 +275,8 @@ $api_extra
       start_period: 30s
   web:
 $reset
+  keep-assets:
+$reset
   proxy:
 $reset
 $proxy_extra
@@ -275,6 +291,13 @@ EOF
     release v1 v1 p1
     switch_to 20 > "$WORK/switch.log" 2>&1 || { fail "$file: the first release did not start"; cat "$WORK/switch.log"; continue; }
     wait_answer /api/v1/me 'api v1' || { fail "$file: the first release does not answer"; continue; }
+    # A request the api took and then dropped may have been saved: a bare 502, never the not-delivered marker.
+    out="$(headers_of /api/abort)"
+    if grep -q ' 502' <<< "$out" && ! grep -qi 'Bms-Not-Delivered' <<< "$out"; then
+        ok "$file: a request the api took and dropped answers a bare 502"
+    else
+        fail "$file: a request the api took and dropped:"; printf '       %s\n' "$out"
+    fi
     proxy_id="$(ids proxy)"
 
     # A new release: api and web switch beside the old ones, the proxy (same content, new image ID) stays.
@@ -354,6 +377,15 @@ EOF
         ok "$file: below MemoryHigh less than the api's limit plus margin is free, so the api restarts in place"
     else
         fail "$file: the low-memory fallback did not run as expected:"; sed 's/^/       /' "$WORK/switch.log"
+    fi
+
+    # With no api up, after Caddy's 30 seconds of tries, the answer proves nothing reached it.
+    "${COMPOSE[@]}" stop api > /dev/null 2>&1
+    out="$(headers_of /api/v1/retail/transfers)"
+    if grep -qE ' 50[23]' <<< "$out" && grep -qi 'Bms-Not-Delivered: 1' <<< "$out"; then
+        ok "$file: with no api up the answer carries Bms-Not-Delivered"
+    else
+        fail "$file: with no api up:"; printf '       %s\n' "$out"
     fi
 done
 

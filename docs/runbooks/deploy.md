@@ -84,6 +84,10 @@ Caddyfiles. Lines to know:
   slice must be raised (for example `MemoryHigh` 1.5 GB, `MemoryMax` 1.6 GB in
   `deploy/systemd/bms.slice`), a host change for the owner to decide. `BMS_ROLL_MIN_FREE_MB` in `.env`
   can replace the api's limit with a measured start-up peak plus a margin, where the slice has room.
+- `warning: the incoming web files were not kept; restarting web in place (a short gap)`: the
+  new build's hashed files could not be copied into `bms_web_assets` before the switch, so web was
+  not overlapped (the old container could not have served them). Nothing else to do; check disk space
+  if it repeats.
 - During a switch `docker compose ps` shows two `api` (or `web`) containers, numbered on; that is
   expected. Two left after a deploy means it was interrupted: the next deploy removes the extra one.
 

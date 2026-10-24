@@ -136,7 +136,10 @@ both the old and the new container of a service take requests. A refused connect
 address down for 2 seconds and the request goes to another; with none answering, Caddy tries again
 every 250 ms for up to 30 seconds before a 502. Only a failed connection is retried, and keep-alive
 to the containers is off so that a POST is never written on a connection the old container is
-closing.
+closing. Every site also imports `not_delivered`: a 502, 503 or 504 whose error is a failed dial or
+`no upstreams available`, the only case that proves nothing reached a container, answers with the
+header `Bms-Not-Delivered: 1` and an `app_updating` problem; any other proxy error stays bare, and the
+PWA reads it as possibly saved (chapter 7 section 7.8).
 
 ## 9.6 Images and containers
 
@@ -193,7 +196,10 @@ a reload on an old copy, not data.
 
 During a deploy a new `api` or `web` container starts beside the old one and the old one stops
 only once the new one's health check passes (`/readyz` for the api, a `wget` of `/` every 5
-seconds for web), ADR-083. The proxy is recreated only when what it runs changed.
+seconds for web), ADR-083. Before the new web starts, its own hashed files are copied into
+`web_assets` (`keep-assets` run by the incoming image), so during the overlap the old container also
+serves them and a page from the new one loads whichever container answers; if that copy fails, web
+restarts in place instead. The proxy is recreated only when what it runs changed.
 
 The API image carries two commands: the default starts the application; `migrate` applies the
 Flyway migrations as `bms_owner` and exits (ADR-006, ADR-010). The API image also carries the
@@ -461,7 +467,7 @@ Staging runs on an ARM64 host that already exists at a Rincol home site: a Raspb
   | `cloudflared` | 48 MB | |
   | `proxy`, `web` | 32 MB each | Caddy |
   | `migrate` | 160 MB | Only while a deploy runs, next to the old API |
-  | second `api`, `web` | 448 MB, 32 MB | Only during a switch, beside the old ones until they are healthy (ADR-083). The second api starts only while its own limit plus 64 MB (512 MB) is free below the slice's `MemoryHigh` and on the host, so its start-up peak can never reach the slice's reclaim or OOM killer; otherwise the api restarts in place, with the old gap; as measured on 24 Oct 2026 (790 MB of the slice in use, 70 MB below `MemoryHigh`, api peak 380 MB) staging always restarts in place until the owner raises the slice (ADR-083). `BMS_ROLL_MIN_FREE_MB` can replace the limit with a measured start-up peak |
+  | second `api`, `web` | 448 MB, 32 MB | Only during a switch, beside the old ones until they are healthy (ADR-083). The second api starts only while its own limit plus 64 MB (512 MB) is free below the slice's `MemoryHigh` and on the host, so its start-up peak can never bring the slice's OOM killer onto the old api or PostgreSQL (reclaim, a slowdown, stays possible); otherwise the api restarts in place, with the old gap; as measured on 24 Oct 2026 (790 MB of the slice in use, 70 MB below `MemoryHigh`, api peak 380 MB) staging always restarts in place until the owner raises the slice (ADR-083). `BMS_ROLL_MIN_FREE_MB` can replace the limit with a measured start-up peak |
   | **Total** | 736 MB steady, 896 MB while migrations run, at most 860 MB in use (`MemoryHigh`) during an overlap, by the rule above | `bms.slice`: `MemoryMax=900M`, `MemoryHigh=860M`, no swap, `CPUQuota=250%` |
 
   Every container is started with `cgroup_parent: bms.slice`, so the slice is a hard cap for the

@@ -279,19 +279,20 @@ Server behaviour:
 The protocol is implemented once, `Idempotency` in `core.operations`, and every vertical's
 money-moving routes call it.
 
-Client behaviour during a deploy (issue #496, ADR-083): the PWA's API client
-(`frontend/src/api/client.ts`) reads a 502, 503 or 504 that is not the API's own
-`application/problem+json` body (the proxy or Cloudflare answering while no API is up, so nothing
-reached it) as the app updating. A request that carries an `Idempotency-Key` is sent once more by
-itself after 4 seconds with the same key and body, which is safe by the rules above; if that also
-fails, or the request has no key, the screen shows "The app is updating. Nothing was saved yet. Try
-again in a minute." as a problem with the code `app_updating`, and the form keeps what was typed. A
-dropped connection while online may have been saved, so only a read or a sign-in says that; a write
-with a key is retried once and then says "The app is updating, so this may not have been saved.
-Trying again in a minute is safe."; a write without a key keeps its `TypeError`, an unknown outcome
-the screen checks before another save. The retry can meet 409 `idempotency_in_progress` while the
-first attempt still runs; trying again later replays the first answer. Offline, a dropped
-connection stays the `TypeError` the offline paths expect.
+Client behaviour during a deploy (issue #496, ADR-083): the proxy marks the 502, 503 or 504 that proves
+nothing reached the API (Caddy could not connect to any container) with `Bms-Not-Delivered: 1`. The
+PWA's API client (`frontend/src/api/client.ts`) shows that as "The app is updating. Nothing was saved
+yet. Try again in a minute.", a problem with the code `app_updating`, and the form keeps what was
+typed. Any other 502, 503 or 504 that is not the API's own `application/problem+json` (a container
+that took the request and then reset or was stopped, a Cloudflare origin timeout), and a dropped
+connection while online, may have been saved: a request that carries an `Idempotency-Key` is sent
+once more by itself after 4 seconds with the same key and body, which is safe by the rules above, and
+then says "The app is updating, so this may not have been saved. Trying again in a minute is safe.";
+a write without a key says "The app is updating, so this may have been saved. Check before you try
+again." (a dropped one keeps its `TypeError`, an unknown outcome the screen checks before another
+save). A 409 `idempotency_in_progress` on the retry proves the first attempt arrived and reads the
+same as maybe saved. A read or a sign-in saves nothing and always says nothing was saved. Offline, a
+dropped connection stays the `TypeError` the offline paths expect.
 
 Gateway callbacks use the provider's transaction reference as the idempotency key
 (FR-PAY-03).

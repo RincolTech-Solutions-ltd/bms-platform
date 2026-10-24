@@ -67,8 +67,9 @@ KEEP_ASSETS_TIMEOUT="${BMS_KEEP_ASSETS_TIMEOUT:-60}"
 # and below bms.slice's MemoryHigh where that cgroup exists (the staging Pi); otherwise the api restarts
 # in place, with the short gap that Caddy's retries and the app's own retry cover. Enough is, by default,
 # the api container's own memory limit plus ROLL_MARGIN_MB: the new JVM can never use more than its limit
-# (its own cgroup stops it first, killing only the new container), so the overlap cannot push the slice
-# into reclaim or its OOM killer whatever the JVM's start-up peak. BMS_ROLL_MIN_FREE_MB replaces the limit
+# (its own cgroup stops it first, killing only the new container), so the overlap cannot bring the slice's
+# OOM killer onto the old api or postgres whatever the JVM's start-up peak (it can still cause reclaim, since
+# the inactive file cache counts as free). BMS_ROLL_MIN_FREE_MB replaces the limit
 # with a measured peak (memory.peak of a new api container), at the operator's risk.
 ROLL_MIN_FREE_MB="${BMS_ROLL_MIN_FREE_MB:-}"
 ROLL_MARGIN_MB="${BMS_ROLL_MARGIN_MB:-64}"
@@ -249,7 +250,7 @@ roll() {
         return 0
     fi
     if [[ "$service" == api ]]; then
-        free="$(free_memory_mb)" need="$(roll_need_mb "$old")"
+        free="$(free_memory_mb)" need="$(roll_need_mb "$(head -n 1 <<< "$old")")"
         if (( free < need )); then
             log "${free} MB free, a second api needs ${need} MB; restarting api in place (a short gap)"
             "${COMPOSE[@]}" up --detach --no-deps "$service" || return 1
@@ -258,6 +259,13 @@ roll() {
             return 0
         fi
         log "${free} MB free, a second api needs ${need} MB"
+    fi
+    if [[ "$service" == web ]] && ! keep_incoming_assets "${KEEP_LIMIT:-60}"; then
+        # Without them, a page from the new web could ask the old one for files it does not have.
+        log "warning: the incoming web files were not kept; restarting web in place (a short gap)"
+        "${COMPOSE[@]}" up --detach --no-deps "$service" || return 1
+        sleep 3
+        return 0
     fi
     # A stopped container of the service (left by an interrupted deploy) would be started again instead of
     # a new one, so it goes first.
@@ -317,9 +325,23 @@ proxy_fingerprint() {
     docker run --rm --network none --entrypoint sh "$1" -c 'cat /usr/bin/caddy /etc/caddy/* | sha256sum' 2>/dev/null || true
 }
 
-# The argument is keep_outgoing_assets' time limit: the rollback passes a shorter one.
+# ADR-083: while the old and the new web container both take requests, a page loaded from the new one may ask the old
+# one for the new build's hashed files. So, before the new container starts, the incoming image (WEB_IMAGE, verified
+# and pulled by this deploy; pull_policy: never) copies its own hashed files into web_assets, which the old container
+# also serves from /srv/previous. The same run as keep_outgoing_assets, by the incoming image instead of the outgoing.
+keep_incoming_assets() {
+    local limit="$1" name="bms-keep-incoming-$$"
+    if ! KEEP_ASSETS_IMAGE="$WEB_IMAGE" timeout --kill-after=5 "$limit" "${COMPOSE[@]}" --profile keep-assets \
+            run --rm -T --name "$name" keep-assets < /dev/null; then
+        docker rm --force "$name" > /dev/null 2>&1 || true
+        return 1
+    fi
+}
+
+# The argument is the keep-assets steps' time limit: the rollback passes a shorter one.
 switch_to() {
     local service
+    KEEP_LIMIT="$1"
     keep_outgoing_assets "$1"
     for service in "${APP_SERVICES[@]}"; do
         case "$service" in

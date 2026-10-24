@@ -21,7 +21,10 @@ const fetchImpl = vi.hoisted(() => {
     // A clone is a plain Request, not the subclass above, so the check is against the base class.
     const request = input instanceof Base ? input : new Request(new URL(String(input), 'http://localhost'), init);
     state.seen.push(request);
-    if (request.method === 'POST') return Promise.resolve(new Response(null, { status: 502 }));
+    // What Caddy answers when it could not connect to any api container (deploy/caddy/upstreams.caddy).
+    if (request.method === 'POST') {
+      return Promise.resolve(new Response('{"code":"app_updating"}', { status: 502, headers: { 'content-type': 'application/problem+json', 'Bms-Not-Delivered': '1' } }));
+    }
     return Promise.resolve(new Response('{"items":[]}', { status: 200, headers: { 'content-type': 'application/json' } }));
   }) as typeof fetch;
   return state;
