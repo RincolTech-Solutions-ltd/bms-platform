@@ -105,11 +105,16 @@ function CountSheet({ branchId }: { branchId: string }) {
   const stock = useQuery({ queryKey: ['retail', 'stock', branchId, '', false], queryFn: () => countableStock(branchId) });
   const profit = useProfitAccess();
   // Issue #505: a first count of an item not in the list. The new item joins the sheet once it is read again, with its count done.
+  // An item already counted (one chosen from the name warning) has the count added to it, as a scan adds; an item the sheet of
+  // this branch does not hold is refused, as a scan is, rather than counted out of sight.
   const addNew = async ({ product, qty }: AddedItem) => {
     const id = product.id ?? '';
-    await stock.refetch();
+    const sheet = await stock.refetch();
+    if (!(sheet.data ?? []).some((r) => r.product_id === id)) {
+      return `${product.description ?? 'The item'} is saved, but it is not on the count sheet of this branch${sheet.isError ? ', which could not be read again' : ''}. Find it in the search to count it, or count it at its own branch.`;
+    }
     list(id);
-    setCounts((c) => ({ ...c, [id]: qty }));
+    setCounts((c) => ({ ...c, [id]: plusOne(c[id], parseCount(qty) ?? 0) }));
     setDone((d) => (d.includes(id) ? d : [...d, id]));
     setScanned(id);
   };

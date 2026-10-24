@@ -51,21 +51,32 @@ export function NewItemHere({ id, qtyLabel, counting = false, askCost, onAdded }
   counting?: boolean;
   /** The buying price is asked for: always on Buy stock; on Count stock only for someone who may see it. */
   askCost: boolean;
-  onAdded: (added: AddedItem) => void | Promise<void>;
+  /** Puts the item on the screen's line; a returned text says why it could not, and shows under the button. */
+  onAdded: (added: AddedItem) => string | void | Promise<string | void>;
 }) {
   const { me } = useStaff();
   const [open, setOpen] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
   if (!(me.permissions ?? []).includes('retail.catalogue.manage')) {
     return <p className="hint" data-testid={`${id}-ask`}>Not in the list? {ASK_MANAGER}</p>;
   }
   if (!open) {
     return (
-      <button type="button" className="btn-ghost" aria-expanded={false} aria-controls={`${id}-form`} onClick={() => setOpen(true)}>
-        Not in the list? Add it here
-      </button>
+      <>
+        <button type="button" id={`${id}-open`} className="btn-ghost" aria-expanded={false} onClick={() => { setNote(null); setOpen(true); }}>
+          Not in the list? Add it here
+        </button>
+        {note && <p role="alert" className="alert alert-warning" data-testid={`${id}-note`}>{note}</p>}
+      </>
     );
   }
-  return <NewItemForm id={id} qtyLabel={qtyLabel} counting={counting} askCost={askCost} onAdded={onAdded} onClose={() => setOpen(false)} />;
+  // Focus goes back to the button that opened the form, so it never falls to the page.
+  const close = (refused?: string | void) => {
+    setNote(refused || null);
+    setOpen(false);
+    setTimeout(() => document.getElementById(`${id}-open`)?.focus());
+  };
+  return <NewItemForm id={id} qtyLabel={qtyLabel} counting={counting} askCost={askCost} onAdded={onAdded} onClose={close} />;
 }
 
 function NewItemForm({ id, qtyLabel, counting, askCost, onAdded, onClose }: {
@@ -73,8 +84,8 @@ function NewItemForm({ id, qtyLabel, counting, askCost, onAdded, onClose }: {
   qtyLabel?: string;
   counting: boolean;
   askCost: boolean;
-  onAdded: (added: AddedItem) => void | Promise<void>;
-  onClose: () => void;
+  onAdded: (added: AddedItem) => string | void | Promise<string | void>;
+  onClose: (refused?: string | void) => void;
 }) {
   const { me } = useStaff();
   const online = useOnline();
@@ -110,8 +121,7 @@ function NewItemForm({ id, qtyLabel, counting, askCost, onAdded, onClose }: {
   const canAddAnyway = (me.permissions ?? []).includes('core.settings.manage');
 
   const added = async (product: Product, own: boolean) => {
-    await onAdded({ product, qty: qtyLabel === undefined ? '' : qty.trim(), cost: askCost ? cost.trim() : '', ...(own ? { sell: sell.trim() } : {}) });
-    onClose();
+    onClose(await onAdded({ product, qty: qtyLabel === undefined ? '' : qty.trim(), cost: askCost ? cost.trim() : '', ...(own ? { sell: sell.trim() } : {}) }));
   };
   const save = useMutation({
     mutationFn: async (duplicateReason?: string) => {
@@ -154,7 +164,14 @@ function NewItemForm({ id, qtyLabel, counting, askCost, onAdded, onClose }: {
   // An item already in the list, chosen from the warning: it goes on the line instead, with the quantity typed.
   const pickExisting = useMutation({
     mutationFn: async (productId: string) => added(await retail.getProduct(productId), false),
+    onSettled: () => { sending.current = false; },
   });
+  // A second tap on Use before the first has answered would put the item on the line twice.
+  const chooseExisting = (productId: string) => {
+    if (sending.current) return;
+    sending.current = true;
+    pickExisting.mutate(productId);
+  };
   const busy = save.isPending || check.isPending || pickExisting.isPending;
 
   const submit = () => {
@@ -163,7 +180,8 @@ function NewItemForm({ id, qtyLabel, counting, askCost, onAdded, onClose }: {
       if (group.current) focusFirstMissing(group.current);
       return;
     }
-    if (busy || sending.current) return;
+    // While a name warning is open its own buttons decide; Enter in a field (or the reason box) does not check the name again.
+    if (busy || sending.current || exists !== null || similar !== null) return;
     // Nothing is kept for later: a new item is made on the server, so without the internet it is refused here, plainly.
     // Read at the press: the browser's flag does not render the form again when the connection drops.
     if (!online || (typeof navigator !== 'undefined' && navigator.onLine === false)) return setOffline(true);
@@ -278,7 +296,7 @@ function NewItemForm({ id, qtyLabel, counting, askCost, onAdded, onClose }: {
           canAddAnyway={exists.mayAddAnyway}
           busy={busy}
           openLabel="Use this item"
-          onOpen={(productId) => pickExisting.mutate(productId)}
+          onOpen={chooseExisting}
           onAddAnyway={(reason) => { if (sending.current) return; sending.current = true; save.mutate(reason); }}
           onChangeName={forget}
         />
@@ -288,7 +306,7 @@ function NewItemForm({ id, qtyLabel, counting, askCost, onAdded, onClose }: {
           items={similar}
           busy={busy}
           openLabel="Use"
-          onOpen={(productId) => pickExisting.mutate(productId)}
+          onOpen={chooseExisting}
           onSaveAnyway={() => { if (sending.current) return; sending.current = true; setAcceptedKey(nameKey); setSimilar(null); save.mutate(undefined); }}
           onChangeName={forget}
         />
@@ -300,7 +318,7 @@ function NewItemForm({ id, qtyLabel, counting, askCost, onAdded, onClose }: {
       )}
       <p className="cluster">
         <BusyButton busy={busy} type="button" disabled={exists !== null || similar !== null} onClick={submit}>Save the item</BusyButton>
-        <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn-ghost" onClick={() => onClose()}>Cancel</button>
       </p>
     </div>
   );

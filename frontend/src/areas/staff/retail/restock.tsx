@@ -151,29 +151,27 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
   });
 
   const unitsOn = capabilityOn(me, 'retail', UNITS);
-  const add = (p: Product) =>
-    setLines((ls) =>
-      ls.some((l) => l.product.id === p.id) && !(unitsOn && activePacks(p).length > 0)
-        ? ls
-        : [...ls, { product: p, cost: p.cost_minor !== undefined ? String(p.cost_minor) : '', sell: p.sell_minor !== undefined ? String(p.sell_minor) : '', qtyByBranch: { ...(branch && branches.some((b) => b.id === branch) ? { [branch]: '' } : {}) } }],
-    );
   // A scan (issue #345): the item at 1 for this branch, or one more on its line in the pack the barcode is on.
   const here = branch && branches.some((b) => b.id === branch) ? branch : undefined;
+  /** A new line of the item at its current prices, with the quantity at this branch. */
+  const lineOf = (p: Product, qty: string): RestockLine => ({ product: p, cost: p.cost_minor !== undefined ? String(p.cost_minor) : '', sell: p.sell_minor !== undefined ? String(p.sell_minor) : '', qtyByBranch: here ? { [here]: qty } : {} });
+  const add = (p: Product) =>
+    setLines((ls) => (ls.some((l) => l.product.id === p.id) && !(unitsOn && activePacks(p).length > 0) ? ls : [...ls, lineOf(p, '')]));
   const scanAdd = (p: Product, unitId?: string) => {
     const unit = unitsOn && activePacks(p).some((k) => k.unit_id === unitId) ? unitId : undefined;
     if (unitId && !unit) return PACK_UNUSABLE;
     // Without a stocking branch chosen at the top, the scanned quantity would go nowhere.
     if (!here) return 'Choose the branch at the top of the page first, so the scanned item is counted there.';
-    const fresh: RestockLine = { product: p, cost: p.cost_minor !== undefined ? String(p.cost_minor) : '', sell: p.sell_minor !== undefined ? String(p.sell_minor) : '', qtyByBranch: here ? { [here]: '1' } : {} };
+    const fresh = lineOf(p, '1');
     setLines((ls) => scanInto(ls, p, unit, (l) => ({ ...l, qtyByBranch: { ...l.qtyByBranch, [here]: plusOne(l.qtyByBranch[here]) } }), () => (unit ? withUnit(fresh, unit) : fresh)));
     return undefined;
   };
-  // Issue #505: an item added here goes on the purchase with what was typed for it, its quantity at this branch.
+  // Issue #505: an item added here goes on the purchase with what was typed for it and its quantity at this branch. An item already
+  // on the purchase (one chosen from the name warning) keeps its line and prices, and the quantity is added to it, as a scan adds.
   const addNew = ({ product, qty, cost, sell }: AddedItem) => {
-    const prices = { cost: cost || (product.cost_minor !== undefined ? String(product.cost_minor) : ''), sell: sell ?? (product.sell_minor !== undefined ? String(product.sell_minor) : '') };
-    setLines((ls) => ls.some((l) => l.product.id === product.id)
-      ? ls.map((l) => (l.product.id === product.id && here ? { ...l, qtyByBranch: { ...l.qtyByBranch, [here]: qty } } : l))
-      : [...ls, { product, ...prices, qtyByBranch: here ? { [here]: qty } : {} }]);
+    const milli = qty ? parseQty(qty) : null;
+    const fresh = { ...lineOf(product, qty), ...(cost ? { cost } : {}), ...(sell !== undefined ? { sell } : {}) };
+    setLines((ls) => scanInto(ls, product, undefined, (l) => (here && milli ? { ...l, qtyByBranch: { ...l.qtyByBranch, [here]: plusOne(l.qtyByBranch[here], milli) } } : l), () => fresh));
   };
   const hereBranch = branches.find((b) => b.id === here);
   const patch = (i: number, change: Partial<RestockLine>) => setLines((ls) => ls.map((l, n) => (n === i ? { ...l, ...change } : l)));
