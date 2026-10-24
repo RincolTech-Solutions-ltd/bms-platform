@@ -146,6 +146,8 @@ const BY_CODE: Record<string, string> = {
 
 /** What a person reads while a deploy switches the server over (issue #496). */
 export const APP_UPDATING = 'The app is updating. Nothing was saved yet. Try again in a minute.';
+/** The same, after a write with an Idempotency-Key lost its connection twice: it may have been saved, and the key makes a retry safe. */
+export const APP_UPDATING_MAYBE_SAVED = 'The app is updating, so this may not have been saved. Trying again in a minute is safe.';
 
 const BY_STATUS: Record<number, string> = {
   401: 'Your session has ended. Sign in again.',

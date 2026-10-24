@@ -957,9 +957,10 @@ Accepted (this list is the ADR index):
   (proposed, #493, owner decisions D14 and D16; FR-RET-70; migration `V96`, the next number after `V95`)
 - ADR-082 Deploys switch api and web without a gap: a new container starts beside the old one (`--scale 2 --no-recreate`) and the
   old one stops only once the new one is healthy, else the new one is removed; Caddy finds both through `dynamic a` upstreams with a
-  30 second retry of refused connections and no keep-alive; the proxy is recreated only when its binary, Caddyfiles or settings
-  changed; a second API JVM only while `BMS_ROLL_MIN_FREE_MB` is free, else the api restarts in place; the PWA says "The app is
-  updating" on a proxy 502, 503 or 504 and retries a keyed request once (proposed, #496, owner decision D36; no migration)
+  30 second retry of refused connections and no keep-alive; the proxy keeps its image unless its binary or Caddyfiles changed; a
+  second API JVM only while its own memory limit plus 64 MB is free below `MemoryHigh` (often not on the Pi, which then restarts in
+  place); tested under Compose 2.26.1; the PWA says "The app is updating" on a proxy 502, 503 or 504, never "Nothing was saved" after
+  a dropped write, and retries a keyed request once (proposed, #496, owner decision D36; no migration)
 - ADR-046 Two-step sign-in is optional by default (migration `V67`) and a tenant policy can require it for everyone or for chosen roles after a grace
   period; one deadline, enforced-now versus due-by, the forgotten-password rules unchanged (proposed, #348; FR-IAM-06, FR-IAM-16)
 - ADR-063 Production is created by Terraform on production day (`infra/production/`, a Hetzner root and an AWS root over shared

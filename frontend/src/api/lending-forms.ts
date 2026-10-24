@@ -1,4 +1,4 @@
-import { APP_UPDATING, problemOf } from './client';
+import { problemOf } from './client';
 import { LendingError, lendingMessage } from './lending';
 import type { RetailProblem } from './retail-errors';
 import { getAccessToken, refreshSession, tenantHeaders } from '../auth/session';
@@ -89,7 +89,7 @@ export function asFormError(e: unknown): FormError {
   const stopped = (e as { name?: string } | null)?.name === 'AbortError';
   return stopped
     ? new FormError('The request was stopped.', 0, 'aborted')
-    : new FormError(problemOf(e).detail === APP_UPDATING ? APP_UPDATING : 'The connection dropped before an answer came back. Check the connection.', 0, 'network');
+    : new FormError(problemOf(e).code === 'app_updating' ? (problemOf(e).detail as string) : 'The connection dropped before an answer came back. Check the connection.', 0, 'network');
 }
 
 /** The same client with every call's failures as FormError, so a screen sees a lost answer as one (status 0), never a raw TypeError. */

@@ -63,10 +63,15 @@ mkdir -p "$STATE_DIR"
 READY_TIMEOUT="${READY_TIMEOUT:-240}"
 # Seconds the keep-assets step may take before a switch (ADR-078); the rollback allows 20.
 KEEP_ASSETS_TIMEOUT="${BMS_KEEP_ASSETS_TIMEOUT:-60}"
-# ADR-082: a second API JVM runs beside the old one only while this much memory (MB) is free, both on
-# the host and in bms.slice where that cgroup exists (the staging Pi); otherwise the api restarts in
-# place, with the short gap that Caddy's retries and the app's own retry cover.
-ROLL_MIN_FREE_MB="${BMS_ROLL_MIN_FREE_MB:-320}"
+# ADR-082: a second API JVM runs beside the old one only while enough memory is free, both on the host
+# and below bms.slice's MemoryHigh where that cgroup exists (the staging Pi); otherwise the api restarts
+# in place, with the short gap that Caddy's retries and the app's own retry cover. Enough is, by default,
+# the api container's own memory limit plus ROLL_MARGIN_MB: the new JVM can never use more than its limit
+# (its own cgroup stops it first, killing only the new container), so the overlap cannot push the slice
+# into reclaim or its OOM killer whatever the JVM's start-up peak. BMS_ROLL_MIN_FREE_MB replaces the limit
+# with a measured peak (memory.peak of a new api container), at the operator's risk.
+ROLL_MIN_FREE_MB="${BMS_ROLL_MIN_FREE_MB:-}"
+ROLL_MARGIN_MB="${BMS_ROLL_MARGIN_MB:-64}"
 SLICE_DIR="${BMS_SLICE_DIR:-/sys/fs/cgroup/bms.slice}"
 COMPOSE=(docker compose --project-name bms --file compose.yml --env-file "$ENV_FILE")
 
@@ -179,22 +184,37 @@ keep_outgoing_assets() {
     fi
 }
 
-# Free memory in MB: the host's MemAvailable, or what bms.slice still allows when that is less. The slice's
+# Free memory in MB: the host's MemAvailable, or what bms.slice still allows below its MemoryHigh (where
+# throttling and reclaim begin; MemoryMax when no MemoryHigh is set) when that is less. The slice's
 # inactive file cache counts as free, since the kernel drops it before it would kill anything.
 free_memory_mb() {
-    local free max current cache
+    local free limit current cache
     free="$(awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo 2>/dev/null || true)"
     free="${free:-0}"
-    if [[ -r "$SLICE_DIR/memory.max" && -r "$SLICE_DIR/memory.current" ]]; then
-        max="$(cat "$SLICE_DIR/memory.max")"
+    if [[ -r "$SLICE_DIR/memory.current" ]]; then
+        limit="$(cat "$SLICE_DIR/memory.high" 2>/dev/null || true)"
+        [[ "$limit" =~ ^[0-9]+$ ]] || limit="$(cat "$SLICE_DIR/memory.max" 2>/dev/null || true)"
         current="$(cat "$SLICE_DIR/memory.current")"
         cache="$(awk '$1 == "inactive_file" { print $2 }' "$SLICE_DIR/memory.stat" 2>/dev/null || true)"
         current=$(( current - ${cache:-0} ))
-        if [[ "$max" =~ ^[0-9]+$ ]] && (( (max - current) / 1048576 < free )); then
-            free=$(( (max - current) / 1048576 ))
+        if [[ "$limit" =~ ^[0-9]+$ ]] && (( (limit - current) / 1048576 < free )); then
+            free=$(( (limit - current) / 1048576 ))
         fi
     fi
     echo "$free"
+}
+
+# MB a second api needs free: BMS_ROLL_MIN_FREE_MB when set, else the running api container's memory limit
+# (the new one gets the same) plus ROLL_MARGIN_MB, for the second web and the old containers' growth.
+roll_need_mb() {
+    local limit
+    if [[ -n "$ROLL_MIN_FREE_MB" ]]; then
+        echo "$ROLL_MIN_FREE_MB"
+        return
+    fi
+    limit="$(docker inspect --format '{{.HostConfig.Memory}}' "$1" 2>/dev/null || echo 0)"
+    (( limit > 0 )) || limit=$(( 2048 * 1048576 ))
+    echo $(( limit / 1048576 + ROLL_MARGIN_MB ))
 }
 
 # Waits until a container's health check passes; fails at once if it reports unhealthy or stops.
@@ -215,23 +235,29 @@ wait_healthy() {
 # names it with the next number), and the proxy finds both through Docker's DNS (deploy/caddy/upstreams.caddy).
 # Once the new one is healthy the old one gets its graceful stop and is removed. A new container that
 # never gets healthy is removed and the old one keeps serving, so the deploy fails with nothing changed.
-# A service whose running container already matches the compose file (an idempotent re-run) is left alone.
+# A service whose running container already runs the image asked for (an idempotent re-run) is handed to
+# Compose's own `up`, which leaves it alone unless .env changed its settings. Compose 2.26.1's `config --hash`
+# does not match the label its own `up` compares (found by deploy/tests/no-gap-test.sh), so it is not used.
 roll() {
-    local service="$1" old count want new id
+    local service="$1" old count new id free need image_var
     old="$("${COMPOSE[@]}" ps --quiet "$service" 2>/dev/null || true)"
     count="$(wc -w <<< "$old")"
-    if (( count == 0 )); then
-        "${COMPOSE[@]}" up --detach --no-deps "$service"
+    image_var="$(tr '[:lower:]' '[:upper:]' <<< "$service")_IMAGE"
+    if (( count == 0 )) || { (( count == 1 )) \
+            && [[ "$(docker inspect --format '{{.Config.Image}}' "$old")" == "${!image_var:-}" ]]; }; then
+        "${COMPOSE[@]}" up --detach --no-deps "$service" || return 1
         return 0
     fi
-    want="$("${COMPOSE[@]}" config --hash "$service" | awk '{ print $2 }')"
-    if (( count == 1 )) && [[ "$(docker inspect --format '{{index .Config.Labels "com.docker.compose.config-hash"}}' "$old")" == "$want" ]]; then
-        return 0
-    fi
-    if [[ "$service" == api ]] && (( $(free_memory_mb) < ROLL_MIN_FREE_MB )); then
-        log "less than ${ROLL_MIN_FREE_MB} MB free for a second api; restarting api in place (a short gap)"
-        "${COMPOSE[@]}" up --detach --no-deps "$service"
-        return 0
+    if [[ "$service" == api ]]; then
+        free="$(free_memory_mb)" need="$(roll_need_mb "$old")"
+        if (( free < need )); then
+            log "${free} MB free, a second api needs ${need} MB; restarting api in place (a short gap)"
+            "${COMPOSE[@]}" up --detach --no-deps "$service" || return 1
+            # As below: the freed address must not reach the next new container while the proxy still lists it.
+            sleep 3
+            return 0
+        fi
+        log "${free} MB free, a second api needs ${need} MB"
     fi
     # A stopped container of the service (left by an interrupted deploy) would be started again instead of
     # a new one, so it goes first.
@@ -264,22 +290,22 @@ roll() {
     log "${service} switched"
 }
 
-# The proxy cannot run twice (it holds ports 80 and 443 on the production VM), so it is recreated only when
-# what it runs changed: its compose settings other than the image, its caddy binary or its Caddyfiles. Every
-# release builds a new proxy image digest even when those are the same, and recreating it would stop all
-# traffic for a moment (ADR-082).
+# The proxy cannot run twice (it holds ports 80 and 443 on the production VM), so its image is replaced only
+# when what it runs changed: its caddy binary or its Caddyfiles. Every release builds a new proxy image digest
+# even when those are the same, and recreating it would stop all traffic for a moment (ADR-082). When they are
+# the same, Compose's own `up` runs with the running image's reference, so it still applies a change of the
+# proxy's settings in .env (recreating it, as before) and otherwise leaves it alone.
 switch_proxy() {
-    local id image ref same_config running
+    local id image ref running
     id="$("${COMPOSE[@]}" ps --quiet proxy 2>/dev/null | head -n 1 || true)"
     if [[ -n "$id" ]]; then
         image="$(docker inspect --format '{{.Image}}' "$id")"
         ref="$(docker inspect --format '{{.Config.Image}}' "$id")"
-        same_config="$(PROXY_IMAGE="$ref" "${COMPOSE[@]}" config --hash proxy | awk '{ print $2 }')"
         running="$(proxy_fingerprint "$image")"
-        if [[ "$same_config" == "$(docker inspect --format '{{index .Config.Labels "com.docker.compose.config-hash"}}' "$id")" ]] \
-            && [[ -n "$running" && "$running" == "$(proxy_fingerprint "$PROXY_IMAGE")" ]]; then
+        if [[ -n "$running" && "$running" == "$(proxy_fingerprint "$PROXY_IMAGE")" ]]; then
             log "proxy unchanged; kept running"
-            return 0
+            PROXY_IMAGE="$ref" "${COMPOSE[@]}" up --detach --no-deps proxy
+            return
         fi
     fi
     "${COMPOSE[@]}" up --detach --no-deps proxy
@@ -298,8 +324,8 @@ switch_to() {
     for service in "${APP_SERVICES[@]}"; do
         case "$service" in
             api | web) roll "$service" || return 1 ;;
-            proxy) switch_proxy ;;
-            *) "${COMPOSE[@]}" up --detach --no-deps "$service" ;;
+            proxy) switch_proxy || return 1 ;;
+            *) "${COMPOSE[@]}" up --detach --no-deps "$service" || return 1 ;;
         esac
     done
 }

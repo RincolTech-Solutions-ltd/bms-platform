@@ -17,7 +17,7 @@ const fetchImpl = vi.hoisted(() => {
   return state;
 });
 
-import { APP_UPDATING, updatingRetry } from './client';
+import { APP_UPDATING, APP_UPDATING_MAYBE_SAVED, updatingRetry } from './client';
 import { FormError, unknownOutcome } from './lending-forms';
 import { realCollateral } from './collateral';
 import { realMembers } from './members';
@@ -43,20 +43,23 @@ describe('a connection that drops', () => {
     fetchImpl.next = async () => {
       throw new TypeError('Failed to fetch');
     };
-    for (const call of [
-      () => realMembers.create(member, 'key-1'),
-      () => realMembers.update('m1', 1, { occupation: 'x' }),
-      () => realMembers.duplicateCheck({ phone: '+256700000001' }),
-      () => realMembers.addKin('m1', { full_name: 'Test Kin 01', phone: '0700000002', relationship: 'sibling' }),
-      () => realCollateral.create(item, 'key-2'),
-      () => realCollateral.list({ memberId: 'm1' }),
-      () => realCollateral.addValuation('c1', { valued_on: '2026-01-01', market_value_minor: 1000 }),
-    ]) {
+    // A write may have been saved before the answer was lost, so it never says nothing was saved (issue #496): one with a
+    // key is sent once more first and then says so, one without keeps the dropped-connection words. A read saves nothing.
+    const dropped = 'The connection dropped before an answer came back. Check the connection.';
+    const calls: [() => Promise<unknown>, string][] = [
+      [() => realMembers.create(member, 'key-1'), APP_UPDATING_MAYBE_SAVED],
+      [() => realMembers.update('m1', 1, { occupation: 'x' }), dropped],
+      [() => realMembers.duplicateCheck({ phone: '+256700000001' }), dropped],
+      [() => realMembers.addKin('m1', { full_name: 'Test Kin 01', phone: '0700000002', relationship: 'sibling' }), dropped],
+      [() => realCollateral.create(item, 'key-2'), APP_UPDATING_MAYBE_SAVED],
+      [() => realCollateral.list({ memberId: 'm1' }), APP_UPDATING],
+      [() => realCollateral.addValuation('c1', { valued_on: '2026-01-01', market_value_minor: 1000 }), dropped],
+    ];
+    for (const [call, words] of calls) {
       const error = await failure(call);
       expect(error.status).toBe(0);
       expect(error.code).toBe('network');
-      // Online, a dropped connection is most often a deploy switching the server over (issue #496).
-      expect(error.message).toBe(APP_UPDATING);
+      expect(error.message).toBe(words);
       expect(unknownOutcome(error)).toBe(true);
     }
   });

@@ -92,7 +92,7 @@ for file in compose.yml compose.pi-staging.yml; do
 done
 
 # The functions under test, exactly as deploy.sh defines them, with the gap-free switch they call (ADR-082).
-eval "$(sed -n '/^log() {/p; /^\(keep_outgoing_assets\|free_memory_mb\|wait_healthy\|roll\|switch_proxy\|proxy_fingerprint\|switch_to\)() {/,/^}/p' "$REPO/deploy/deploy.sh")"
+eval "$(sed -n '/^log() {/p; /^\(keep_outgoing_assets\|free_memory_mb\|roll_need_mb\|wait_healthy\|roll\|switch_proxy\|proxy_fingerprint\|switch_to\)() {/,/^}/p' "$REPO/deploy/deploy.sh")"
 for fn in log keep_outgoing_assets roll switch_to; do
     if ! declare -F "$fn" > /dev/null; then
         echo "FAIL could not read $fn out of deploy/deploy.sh"
@@ -100,7 +100,7 @@ for fn in log keep_outgoing_assets roll switch_to; do
     fi
 done
 # shellcheck disable=SC2034 # read by roll and wait_healthy, copied out of deploy.sh above
-READY_TIMEOUT=60 ROLL_MIN_FREE_MB=0 SLICE_DIR=/nonexistent
+READY_TIMEOUT=60 ROLL_MIN_FREE_MB=0 ROLL_MARGIN_MB=64 SLICE_DIR=/nonexistent
 
 # GET a path inside the web container; prints the status line and headers, then the body.
 fetch() {

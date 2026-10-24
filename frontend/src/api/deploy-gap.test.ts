@@ -23,8 +23,8 @@ const fetchImpl = vi.hoisted(() => {
   return state;
 });
 
-import { APP_UPDATING, api, problemOf, updatingRetry } from './client';
-import { asFormError } from './lending-forms';
+import { APP_UPDATING, APP_UPDATING_MAYBE_SAVED, api, problemOf, updatingRetry } from './client';
+import { asFormError, unknownOutcome } from './lending-forms';
 import { retailMessage } from './retail-errors';
 
 updatingRetry.delayMs = 0;
@@ -129,19 +129,48 @@ describe('a dropped connection (#496)', () => {
     expect(fetchImpl.seen).toHaveLength(1);
   });
 
-  it('while online, a write whose retry also drops throws the updating words', async () => {
+  // A dropped connection may have been saved (the answer was lost, or the old api's stop ran out of grace), so a write
+  // never says "Nothing was saved yet" after one (review of #556).
+  it('while online, a write with a key whose retry also drops says it may have been saved and a retry is safe', async () => {
     fetchImpl.answers = [dropped, dropped];
     const failure = await move('test-key-496').catch((e: unknown) => e);
     expect(failure).toBeInstanceOf(TypeError);
-    expect((failure as Error).message).toBe(APP_UPDATING);
+    expect((failure as Error).message).toBe(APP_UPDATING_MAYBE_SAVED);
+    expect(problemOf(failure)).toEqual({ code: 'app_updating', detail: APP_UPDATING_MAYBE_SAVED });
+    expect(asFormError(failure).message).toBe(APP_UPDATING_MAYBE_SAVED);
+    expect(unknownOutcome(asFormError(failure))).toBe(true);
     expect(fetchImpl.seen).toHaveLength(2);
   });
 
-  it('while online, a retry that meets a gap reads as the app updating', async () => {
+  it('while online, a dropped write whose retry meets a gap says it may have been saved', async () => {
     fetchImpl.answers = [dropped, gap(502)];
     const { error } = await move('test-key-496');
-    expect(problemOf(error).detail).toBe(APP_UPDATING);
+    expect(problemOf(error).detail).toBe(APP_UPDATING_MAYBE_SAVED);
     expect(fetchImpl.seen).toHaveLength(2);
+  });
+
+  it('a write refused by the proxy whose retry drops says it may have been saved', async () => {
+    fetchImpl.answers = [gap(502), dropped];
+    const { error } = await move('test-key-496');
+    expect(problemOf(error).detail).toBe(APP_UPDATING_MAYBE_SAVED);
+    expect(fetchImpl.seen).toHaveLength(2);
+  });
+
+  it('while online, a write without a key stays the TypeError the screens read as an unknown outcome, and is not sent again', async () => {
+    fetchImpl.answers = [dropped];
+    const failure = await move().catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(TypeError);
+    expect((failure as Error).message).toBe('Failed to fetch');
+    expect(asFormError(failure).message).toContain('The connection dropped');
+    expect(unknownOutcome(asFormError(failure))).toBe(true);
+    expect(fetchImpl.seen).toHaveLength(1);
+  });
+
+  it('while online, a sign-in, which saves nothing, says the app is updating', async () => {
+    fetchImpl.answers = [dropped];
+    const failure = await api.POST('/api/v1/auth/staff/login', { body: { login: 'staff01@example.test', password: 'test-password-01' } }).catch((e: unknown) => e);
+    expect(problemOf(failure).detail).toBe(APP_UPDATING);
+    expect(fetchImpl.seen).toHaveLength(1);
   });
 
   it('offline, stays the plain TypeError the offline paths expect, and is not sent again', async () => {

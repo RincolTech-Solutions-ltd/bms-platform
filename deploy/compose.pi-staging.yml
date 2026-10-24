@@ -24,9 +24,10 @@
 #   keep-assets 32 runs alone, before the switch, ADR-078)
 #
 # During a switch a second api and a second web run beside the old ones until the new ones are healthy
-# (ADR-082). Their limits would add 480 MB, more than the slice allows, but an API measures about 235 MB
-# after start, so deploy.sh starts the second api only when bms.slice and the host both have
-# BMS_ROLL_MIN_FREE_MB (default 320) free; otherwise it restarts the api in place, with the old short gap.
+# (ADR-082). deploy.sh starts the second api only while its own limit plus 64 MB (512 MB) is free below
+# the slice's MemoryHigh and on the host, so the new JVM's start-up peak can never reach the slice's
+# reclaim or OOM killer; otherwise it restarts the api in place, with the old short gap.
+# BMS_ROLL_MIN_FREE_MB in .env replaces the limit with a measured start-up peak (memory.peak).
 
 name: bms
 

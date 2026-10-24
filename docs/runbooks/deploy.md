@@ -77,11 +77,13 @@ Caddyfiles. Lines to know:
 - `the new api container is not healthy; removing it, the old one keeps serving`: the release did
   not start. Its last 40 log lines follow; the previous release is still live and the rollback
   finds nothing to change.
-- `less than 320 MB free for a second api; restarting api in place (a short gap)`: the host or
-  `bms.slice` was short of memory, so the api restarted as before. Caddy holds requests for up to
-  30 seconds and the app says it is updating. If it shows on every staging deploy, check
-  `cat /sys/fs/cgroup/bms.slice/memory.current` and what else runs in the slice before changing
-  `BMS_ROLL_MIN_FREE_MB` in `.env`.
+- `<n> MB free, a second api needs <m> MB; restarting api in place (a short gap)`: the host, or
+  `bms.slice` below its `MemoryHigh`, had less than the api's own memory limit plus 64 MB free, so
+  the api restarted as before. Caddy holds requests for up to 30 seconds and the app says it is
+  updating. On the Pi this is expected often. To overlap there, measure a new api's start-up peak
+  once (`cat /sys/fs/cgroup/bms.slice/docker-<id>.scope/memory.peak` while a new container starts)
+  and set `BMS_ROLL_MIN_FREE_MB` in `.env` to that plus a margin; that, or raising the slice, is the
+  owner's call for the shared host.
 - During a switch `docker compose ps` shows two `api` (or `web`) containers, numbered on; that is
   expected. Two left after a deploy means it was interrupted: the next deploy removes the extra one.
 

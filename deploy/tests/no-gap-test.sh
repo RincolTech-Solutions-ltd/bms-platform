@@ -6,7 +6,10 @@
 # that run the real deploy/caddy/Caddyfile.tunnel and upstreams.caddy. It then runs deploy.sh's own switch_to (copied out
 # of the script) against the real compose.yml and compose.pi-staging.yml while a client on the proxy's network sends GET
 # and POST requests every 50 ms and records every status. It also checks that an unchanged proxy is kept running, a
-# changed one is recreated, and that with too little free memory the api restarts in place instead.
+# changed one is recreated, and that with too little free memory the api restarts in place instead. The staging Pi's
+# file runs under Compose 2.26.1, the version on the Pi (#533), downloaded and checked against its published SHA-256;
+# the production file runs under the runner's own Compose. A static check first proves both databases accept two API
+# pools at once.
 # Run: bash deploy/tests/no-gap-test.sh
 set -uo pipefail
 
@@ -55,6 +58,31 @@ if docker run --rm -v "$WORK/caddy:/c:ro" -w /c -e BMS_DNS_ZONE=example.test -e 
 else
     fail "a Caddyfile does not adapt:"; sed 's/^/       /' "$WORK/adapt.log"
 fi
+
+# Two APIs run at once during a switch, each with its own pool (BMS_DB_POOL_SIZE): max_connections must hold both, plus
+# PostgreSQL's 3 reserved superuser connections and 5 for the backup, the monitor, a migrate and an operator's psql.
+for file in compose.yml compose.pi-staging.yml; do
+    pool="$(grep -oE 'BMS_DB_POOL_SIZE:-[0-9]+' "$REPO/deploy/$file" | head -n 1 | cut -d- -f2)"
+    max="$(grep -oE 'max_connections=[0-9]+' "$REPO/deploy/$file" | head -n 1 | cut -d= -f2)"
+    if [[ -n "$pool" && -n "$max" ]] && (( 2 * pool + 3 + 5 <= max )); then
+        ok "$file: max_connections $max holds two API pools of $pool"
+    else
+        fail "$file: max_connections ${max:-?} does not hold two API pools of ${pool:-?} plus 8"
+    fi
+done
+
+# Compose 2.26.1 for the staging file, as on the Pi.
+case "$(uname -m)" in
+    x86_64) arch=x86_64 sum=2f61856d1b8c9de29ffdaedaa1c6d0a5fc5c79da45068f1f4310feed8d3a3f61 ;;
+    aarch64 | arm64) arch=aarch64 sum=c86efb0d6347b72af6690f06fbd30ed17023fe67e23e28647cacb4b3f6bfb451 ;;
+    *) echo "FAIL no pinned Compose 2.26.1 for $(uname -m)"; exit 1 ;;
+esac
+curl -fsSL -o "$WORK/docker-compose-2.26.1" \
+    "https://github.com/docker/compose/releases/download/v2.26.1/docker-compose-linux-$arch" \
+    || { echo "FAIL could not download Compose 2.26.1"; exit 1; }
+echo "$sum  $WORK/docker-compose-2.26.1" | sha256sum --check --quiet || { echo "FAIL Compose 2.26.1 checksum"; exit 1; }
+chmod +x "$WORK/docker-compose-2.26.1"
+"$WORK/docker-compose-2.26.1" version | grep -q 'v2.26.1' || { echo "FAIL Compose 2.26.1 does not run"; exit 1; }
 
 # The api stand-in: the port opens START_DELAY (8) seconds after start, as the JVM's does, and /readyz answers 200 from
 # then on. CRASH=1 is a release that never starts. Caddy closes its port the moment a graceful stop begins, as
@@ -134,13 +162,13 @@ R2_DOCUMENTS_BUCKET=test-placeholder
 EOF
 
 # The functions under test, exactly as deploy.sh defines them. The staging Pi runs Compose 2.26.1 (#533): everything
-# they call exists there (config --hash, up --scale --no-recreate, ps --all).
-eval "$(sed -n '/^log() {/p; /^\(keep_outgoing_assets\|free_memory_mb\|wait_healthy\|roll\|switch_proxy\|proxy_fingerprint\|switch_to\)() {/,/^}/p' "$REPO/deploy/deploy.sh")"
+# they call exists there (up --scale --no-recreate, ps --all), and the Pi's file below runs under that version.
+eval "$(sed -n '/^log() {/p; /^\(keep_outgoing_assets\|free_memory_mb\|roll_need_mb\|wait_healthy\|roll\|switch_proxy\|proxy_fingerprint\|switch_to\)() {/,/^}/p' "$REPO/deploy/deploy.sh")"
 for fn in log roll switch_proxy switch_to; do
     declare -F "$fn" > /dev/null || { echo "FAIL could not read $fn out of deploy/deploy.sh"; exit 1; }
 done
 # shellcheck disable=SC2034 # read by the functions copied out of deploy.sh above
-READY_TIMEOUT=60 KEEP_ASSETS_TIMEOUT=20 ROLL_MIN_FREE_MB=0 SLICE_DIR=/nonexistent APP_SERVICES=(api web proxy)
+READY_TIMEOUT=60 KEEP_ASSETS_TIMEOUT=20 ROLL_MIN_FREE_MB=0 ROLL_MARGIN_MB=64 SLICE_DIR=/nonexistent APP_SERVICES=(api web proxy)
 
 log "building the stand-in images"
 { build_api v1 0 && build_api v2 0 && build_api v3 1 && build_web v1 && build_web v2 \
@@ -197,9 +225,14 @@ stop_client() {
 ids() { "${COMPOSE[@]}" ps --all --quiet "$1" | sort | tr '\n' ' '; }
 
 for file in compose.yml compose.pi-staging.yml; do
-    log "$file"
     project="$ID-$(project_of "$file")"
-    COMPOSE=(docker compose --project-name "$project" --file "$REPO/deploy/$file" --env-file "$WORK/env")
+    if [[ "$file" == compose.pi-staging.yml ]]; then
+        COMPOSE=("$WORK/docker-compose-2.26.1" --project-name "$project" --file "$REPO/deploy/$file" --env-file "$WORK/env")
+        log "$file under Compose $("$WORK/docker-compose-2.26.1" version --short)"
+    else
+        COMPOSE=(docker compose --project-name "$project" --file "$REPO/deploy/$file" --env-file "$WORK/env")
+        log "$file under Compose $(docker compose version --short)"
+    fi
     # The api stand-in has no bash for the real probe; the probe asks the same /readyz. The proxy runs the real tunnel
     # Caddyfile and upstreams.caddy, mounted beside the image's own /etc/caddy so the fingerprint still reads the image.
     if [[ "$file" == compose.pi-staging.yml ]]; then
@@ -301,20 +334,26 @@ EOF
         fail "$file: a changed proxy was not recreated"
     fi
 
-    # Too little free memory for a second api (a fake bms.slice with 10 MB left): the api restarts in place.
+    # Too little free memory for a second api: a fake bms.slice with 2 GB MemoryMax but 600 MB MemoryHigh, 100 MB in use,
+    # so 500 MB below MemoryHigh, less than the api's own limit plus the margin (448 + 64 on the Pi, 1536 + 64 on the VM).
+    # The default need comes from the running container's limit, and MemoryHigh, not MemoryMax, is the bound.
     mkdir -p "$WORK/slice"
-    echo 104857600 > "$WORK/slice/memory.max"
-    echo 94371840 > "$WORK/slice/memory.current"
-    printf 'anon 94371840\ninactive_file 0\n' > "$WORK/slice/memory.stat"
-    SLICE_DIR="$WORK/slice" ROLL_MIN_FREE_MB=320
+    echo 2147483648 > "$WORK/slice/memory.max"
+    echo 629145600 > "$WORK/slice/memory.high"
+    echo 104857600 > "$WORK/slice/memory.current"
+    printf 'anon 104857600\ninactive_file 0\n' > "$WORK/slice/memory.stat"
+    if [[ "$file" == compose.pi-staging.yml ]]; then need=512; else need=1600; fi
+    SLICE_DIR="$WORK/slice" ROLL_MIN_FREE_MB=""
     release v2 v1 p3
     switch_to 20 > "$WORK/switch.log" 2>&1 || fail "$file: the in-place switch failed"
     # shellcheck disable=SC2034 # read by roll, copied out of deploy.sh above
     SLICE_DIR=/nonexistent ROLL_MIN_FREE_MB=0
-    if grep -q 'restarting api in place' "$WORK/switch.log" && wait_answer /api/v1/me 'api v2'; then
-        ok "$file: with too little memory free the api restarts in place"
+    free="$(grep -oE '^\[deploy [^]]*\] [0-9]+ MB free' "$WORK/switch.log" | grep -oE '[0-9]+ MB free' | cut -d' ' -f1)"
+    if grep -q "a second api needs ${need} MB; restarting api in place" "$WORK/switch.log" && (( ${free:-9999} <= 500 )) \
+        && wait_answer /api/v1/me 'api v2'; then
+        ok "$file: below MemoryHigh less than the api's limit plus margin is free, so the api restarts in place"
     else
-        fail "$file: the low-memory fallback did not run:"; sed 's/^/       /' "$WORK/switch.log"
+        fail "$file: the low-memory fallback did not run as expected:"; sed 's/^/       /' "$WORK/switch.log"
     fi
 done
 

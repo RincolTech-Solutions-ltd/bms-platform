@@ -1,6 +1,6 @@
 import createClient, { type Middleware } from 'openapi-fetch';
 import { getAccessToken, refreshSession, tenantHeaders } from '../auth/session';
-import { APP_UPDATING } from './retail-errors';
+import { APP_UPDATING, APP_UPDATING_MAYBE_SAVED } from './retail-errors';
 import type { components, paths } from './schema';
 
 // The typed API client. `schema.d.ts` is generated from docs/api/openapi.json (the committed
@@ -45,20 +45,30 @@ const auth: Middleware = {
 export const updatingRetry = { delayMs: 4000 };
 
 // A 502, 503 or 504 that is not the API's own problem body is the proxy (Caddy or Cloudflare) answering while no
-// API is up, and so is a dropped connection while the device says it is online. Nothing reached the API, so the
-// answer is plain words in a problem body every screen already shows, and the form keeps what was typed. A request
-// with an Idempotency-Key is safe to send again, so it is, once, after a few seconds: the server replays the first
-// result if the first attempt did land. Offline, a dropped connection stays the TypeError the offline paths expect.
+// API is up: the connection to the API was refused, so nothing reached it, and the answer is plain words in a problem
+// body every screen already shows; the form keeps what was typed. A request with an Idempotency-Key is safe to send
+// again, so it is, once, after a few seconds: the server replays the first result if the first attempt did land.
+//
+// A dropped connection while the device says it is online is different: the request may have reached the API and been
+// saved before the answer was lost (a stop that ran out of grace, a lost reply). So only a read or a sign-in, which
+// save nothing, says "Nothing was saved yet". A write with a key is sent once more and, if that fails too, says it may
+// not have been saved and that trying again is safe. A write without a key keeps the TypeError, which the screens read
+// as an unknown outcome and check before another save. Offline, a dropped connection stays the TypeError the offline
+// paths expect.
 const isGap = (response: Response) =>
   [502, 503, 504].includes(response.status) && !(response.headers.get('content-type') ?? '').includes('json');
 const online = () => typeof navigator === 'undefined' || navigator.onLine !== false;
-const updating = (status: number) =>
-  new Response(JSON.stringify({ code: 'app_updating', detail: APP_UPDATING }), {
+const savesNothing = (request: Request) =>
+  ['GET', 'HEAD'].includes(request.method) || ['/api/v1/auth/staff/login', '/api/v1/platform/auth/login'].includes(new URL(request.url).pathname);
+const updating = (status: number, detail: string) =>
+  new Response(JSON.stringify({ code: 'app_updating', detail }), {
     status,
     headers: { 'content-type': 'application/problem+json' },
   });
 
 const replays = new WeakMap<Request, Request>();
+// Requests whose first attempt dropped, so whether it was saved is not known.
+const dropped = new WeakSet<Request>();
 async function retryOnce(request: Request, send: typeof fetch): Promise<Response | undefined> {
   const replay = replays.get(request);
   replays.delete(request);
@@ -68,6 +78,8 @@ async function retryOnce(request: Request, send: typeof fetch): Promise<Response
   try {
     return await send(replay);
   } catch {
+    // The retry itself may have landed.
+    dropped.add(request);
     return undefined;
   }
 }
@@ -81,24 +93,28 @@ const deployGap: Middleware = {
   async onResponse({ request, response, options }) {
     if (!isGap(response)) return response;
     const retried = await retryOnce(request, options.fetch);
-    return retried && !isGap(retried) ? retried : updating(response.status);
+    if (retried && !isGap(retried)) return retried;
+    return updating(response.status, dropped.has(request) ? APP_UPDATING_MAYBE_SAVED : APP_UPDATING);
   },
   async onError({ request, error, options }) {
     if (!online() || (error as { name?: string } | null)?.name === 'AbortError') return;
+    if (savesNothing(request)) return new TypeError(APP_UPDATING);
+    if (!replays.has(request)) return;
+    dropped.add(request);
     const retried = await retryOnce(request, options.fetch);
     if (retried) return retried;
-    return new TypeError(APP_UPDATING);
+    return new TypeError(APP_UPDATING_MAYBE_SAVED);
   },
 };
 
-export { APP_UPDATING };
+export { APP_UPDATING, APP_UPDATING_MAYBE_SAVED };
 export const api = createClient<paths>({ baseUrl: '/' });
 api.use(auth);
 api.use(deployGap);
 
 /** The problem body of a failed call, for showing its detail (chapter 7 section 7.7). */
 export function problemOf(error: unknown): Problem {
-  if (error instanceof Error && error.message === APP_UPDATING) return { code: 'app_updating', detail: APP_UPDATING };
+  if (error instanceof Error && [APP_UPDATING, APP_UPDATING_MAYBE_SAVED].includes(error.message)) return { code: 'app_updating', detail: error.message };
   return (error ?? {}) as Problem;
 }
 
