@@ -67,7 +67,8 @@ BEGIN
             result := result || pg_catalog.left(words[i], 1);
         END LOOP;
     END IF;
-    RETURN pg_catalog.rpad(result, 2, 'X');
+    -- rpad also cuts a longer text, so only a short one is padded.
+    RETURN CASE WHEN pg_catalog.length(result) < 2 THEN pg_catalog.rpad(result, 2, 'X') ELSE result END;
 END
 $$;
 
