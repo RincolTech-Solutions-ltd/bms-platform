@@ -14,6 +14,8 @@
 	}
 }
 
+import upstreams.caddy
+
 :8080 {
 	header {
 		Strict-Transport-Security "max-age=31536000"
@@ -35,13 +37,15 @@
 	# Overwrite it in both blocks so nothing downstream, the API included, ever sees a forged value.
 	@backend path /api/* /healthz /readyz /version
 	handle @backend {
-		reverse_proxy api:8080 {
+		reverse_proxy {
+			import upstream api
 			header_up X-Forwarded-Host {host}
 		}
 	}
 
 	handle {
-		reverse_proxy web:8080 {
+		reverse_proxy {
+			import upstream web
 			header_up X-Forwarded-Host {host}
 		}
 	}

@@ -22,6 +22,11 @@
 #
 #   postgres 176  api 448  web 32  proxy 32  cloudflared 48  (migrate 160, only during a deploy;
 #   keep-assets 32 runs alone, before the switch, ADR-078)
+#
+# During a switch a second api and a second web run beside the old ones until the new ones are healthy
+# (ADR-082). Their limits would add 480 MB, more than the slice allows, but an API measures about 235 MB
+# after start, so deploy.sh starts the second api only when bms.slice and the host both have
+# BMS_ROLL_MIN_FREE_MB (default 320) free; otherwise it restarts the api in place, with the old short gap.
 
 name: bms
 
@@ -247,6 +252,12 @@ services:
       BMS_PLATFORM_HOST: ${BMS_PLATFORM_HOST:?}
     mem_limit: 32m
     cpus: 0.5
+    # deploy.sh starts a new web container beside the old one and stops the old one once this passes (ADR-082).
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
     # Hashed files of earlier builds, read-only; the Caddyfile falls back to them (ADR-078).
     volumes:
       - type: volume
