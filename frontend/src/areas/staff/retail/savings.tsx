@@ -24,9 +24,22 @@ interface SavingsDraft { date: string; amount: string; reason: string; other: st
 
 const EMPTY = { amount: '', reason: '', other: '' };
 
-/** Put a new record at the top of every savings list already loaded, so it shows before the refetch lands. */
-function showInRecords(client: QueryClient, saved: Savings) {
-  client.setQueriesData<Savings[]>({ queryKey: ['retail', 'savings'] }, (rows) => (rows && !rows.some((r) => r.id === saved.id) ? [saved, ...rows] : rows));
+/**
+ * Put a new record at the top of the savings lists already loaded that would show it: their key is
+ * ['retail', 'savings', scope, from, to] (SavingsRecords), the scope lists branch ids or is empty for all, and the
+ * window holds the day. Anything else under the prefix is left alone; the refetch that follows settles every list.
+ */
+export function showInRecords(client: QueryClient, saved: Savings) {
+  const day = saved.business_date ?? '';
+  const holds = (key: readonly unknown[]): boolean => {
+    const [, , scope, from, to] = key;
+    const inScope = !Array.isArray(scope) || scope.length === 0 || scope.includes(saved.branch_id);
+    return inScope && (typeof from !== 'string' || from === '' || day >= from) && (typeof to !== 'string' || to === '' || day <= to);
+  };
+  for (const [key, rows] of client.getQueriesData<unknown>({ queryKey: ['retail', 'savings'] })) {
+    if (!Array.isArray(rows) || !holds(key) || rows.some((r: Savings) => r.id === saved.id)) continue;
+    client.setQueryData(key, [saved, ...(rows as Savings[])]);
+  }
 }
 
 export function SavingsForm({ branchId, onSaved }: { branchId: string; onSaved?: (saved: Savings) => void }) {

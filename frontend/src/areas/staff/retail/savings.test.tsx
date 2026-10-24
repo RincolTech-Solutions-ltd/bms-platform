@@ -6,7 +6,7 @@ import { ALL_BRANCHES } from '../../../auth/branch';
 import { branch, page, pageAs, sessionOf } from './cashbook-test-utils';
 import { changedSuggestion, planSavings, reasonText, savedWords } from './savings-state';
 import { showDate } from './maths';
-import { SavingsForm, SavingsRecords } from './savings';
+import { SavingsForm, SavingsRecords, showInRecords } from './savings';
 import { BranchRequired } from './ui';
 
 const today = businessToday();
@@ -46,8 +46,8 @@ describe('savings form', () => {
   });
 
   it('treats existing_id null (what the API sends when nothing is saved) as no savings yet', () => {
-    // The API writes every field (default-property-inclusion: always), so an empty day comes back
-    // as existing_id: null, not as a missing field (HATS Gayaza, 24 Oct 2026).
+    // The API now leaves existing_id out on an empty day (NON_NULL), but an older server wrote every field
+    // (default-property-inclusion: always) and sent existing_id: null, which the pilot tenant hit (#536).
     const out = page('admin', <SavingsForm branchId={branch} />, clientWith({ ...withAmounts, existing_id: null as unknown as undefined }));
     expect(out).not.toContain('already recorded');
     expect(out).toContain('Save savings');
@@ -88,6 +88,30 @@ describe('savings records', () => {
     expect(admin).toContain('Entered twice');
     const cashier = pageAs(sessionOf('cashier'), <SavingsRecords />, client, ALL_BRANCHES);
     expect(cashier).not.toContain('>Void<');
+  });
+});
+
+describe('a new record shown at once', () => {
+  it('goes only into the loaded lists whose branch and window hold it, and leaves anything else under the key alone', () => {
+    const client = new QueryClient();
+    const saved: Savings = { id: 'sv-9', branch_id: branch, business_date: '2026-10-24' };
+    const mine = ['retail', 'savings', [branch], '2026-10-01', '2026-10-31'];
+    const all = ['retail', 'savings', undefined, '2026-10-01', '2026-10-31'];
+    const otherShop = ['retail', 'savings', ['another-branch'], '2026-10-01', '2026-10-31'];
+    const lastMonth = ['retail', 'savings', [branch], '2026-09-01', '2026-09-30'];
+    const report = ['retail', 'savings', 'report'];
+    client.setQueryData(mine, []);
+    client.setQueryData(all, [{ id: 'old' }]);
+    client.setQueryData(otherShop, []);
+    client.setQueryData(lastMonth, []);
+    client.setQueryData(report, { items: [] });
+    showInRecords(client, saved);
+    showInRecords(client, saved);
+    expect(client.getQueryData(mine)).toEqual([saved]);
+    expect(client.getQueryData(all)).toEqual([saved, { id: 'old' }]);
+    expect(client.getQueryData(otherShop)).toEqual([]);
+    expect(client.getQueryData(lastMonth)).toEqual([]);
+    expect(client.getQueryData(report)).toEqual({ items: [] });
   });
 });
 

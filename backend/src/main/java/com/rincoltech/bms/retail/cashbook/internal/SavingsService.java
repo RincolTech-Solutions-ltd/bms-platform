@@ -151,6 +151,7 @@ class SavingsService {
                             "amount_requires_profit_access",
                             "Only the default can be recorded without profit access.")));
         }
+        repo.lockBranchDay(branch, date);
         Day d = day(branch, date);
         long suggested = d.suggested();
         if (!support.tokenMatches(branch, date, suggested, r.suggestionToken())) {

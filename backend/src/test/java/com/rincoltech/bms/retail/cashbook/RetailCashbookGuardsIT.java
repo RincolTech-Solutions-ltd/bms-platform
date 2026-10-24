@@ -179,7 +179,9 @@ class RetailCashbookGuardsIT {
                                                           suggested_minor, overwritten, occurred_at, recorded_by)
                         VALUES (?, ?, ?, CURRENT_DATE - 9, 300, 'UGX', 300, true, now(), ?)
                         """, id, t.tenantId(), t.headOffice(), user)))
-                .isInstanceOf(SQLException.class);
+                .isInstanceOf(SQLException.class)
+                // V95 dropped the reason check by its definition; this V34 consistency check must still be there.
+                .hasMessageContaining("retail_daily_savings_check");
     }
 
     @Test
