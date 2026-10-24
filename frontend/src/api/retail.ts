@@ -1105,7 +1105,7 @@ const realRetail: RetailApi = {
   },
 
   async cancelQuotation(id, reason) {
-    return unwrap(await api.POST('/api/v1/retail/quotations/{quotation_id}/cancel', { params: { path: { quotation_id: id } }, body: reason.trim() !== '' ? { reason: reason.trim() } : {} }));
+    return unwrap(await api.POST('/api/v1/retail/quotations/{quotation_id}/cancel', { params: { path: { quotation_id: id } }, body: { reason } }));
   },
 
   async convertQuotation(id, body, key) {

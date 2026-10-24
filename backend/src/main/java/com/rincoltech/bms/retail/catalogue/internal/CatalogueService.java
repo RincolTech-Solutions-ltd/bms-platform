@@ -777,10 +777,7 @@ class CatalogueService {
         if (costUnchanged && sell == before.sellMinor()) {
             throw ApiException.rule("price_unchanged", "The new prices equal the current ones.");
         }
-        // The reason is optional (#538): the history row keeps who changed the price and when either way.
-        String reason =
-                r.reason() == null || r.reason().isBlank() ? null : r.reason().trim();
-        changePrices(before, cost, sell, "manual", null, reason);
+        changePrices(before, cost, sell, "manual", null, r.reason().trim());
         return visible(repo.find(id).orElseThrow());
     }
 

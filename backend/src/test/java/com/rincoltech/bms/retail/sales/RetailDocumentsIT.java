@@ -688,20 +688,18 @@ class RetailDocumentsIT extends IntegrationTest {
                 .isEqualTo(1);
     }
 
-    /**
-     * A quotation is cancelled, not edited; it voids its document, and it cannot be converted after. The reason is
-     * optional (#538, ADR-080): a blank one is kept as none.
-     */
+    /** A quotation is cancelled, not edited; it voids its document, and it cannot be converted after. */
     @Test
     void aCancelledQuotationIsVoidAndCannotBeConverted() {
         JsonNode q = quote("2026-11-08", null, "quote-key-3").getBody();
         UUID id = UUID.fromString(q.get("id").asString());
-        ResponseEntity<JsonNode> cancelled = api.post("/quotations/" + id + "/cancel", Map.of("reason", " "), DOCS);
+        assertThat(api.post("/quotations/" + id + "/cancel", Map.of("reason", " "), DOCS)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        ResponseEntity<JsonNode> cancelled =
+                api.post("/quotations/" + id + "/cancel", Map.of("reason", "Customer went elsewhere"), DOCS);
         assertThat(cancelled.getStatusCode()).as("%s", cancelled.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(cancelled.getBody().get("status").asString()).isEqualTo("cancelled");
-        assertThat(cancelled.getBody().get("cancel_reason") == null
-                        || cancelled.getBody().get("cancel_reason").isNull())
-                .isTrue();
         assertThat(api.get("/documents/" + q.get("document_id").asString(), DOCS)
                         .getBody()
                         .get("status")

@@ -129,9 +129,9 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
       {panel === 'cancel' && (
         <fieldset>
           <legend>Cancel this quotation</legend>
-          <label htmlFor={`cancel-${q.id}`}>Why? (optional, it stays on record)</label>
+          <label htmlFor={`cancel-${q.id}`}>Why? (it stays on record)</label>
           <input id={`cancel-${q.id}`} value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} />
-          <BusyButton type="button" busy={cancel.isPending} onClick={() => cancel.mutate()}>
+          <BusyButton type="button" busy={cancel.isPending} disabled={reason.trim() === ''} onClick={() => cancel.mutate()}>
             Cancel the quotation
           </BusyButton>
         </fieldset>

@@ -147,8 +147,7 @@ final class CatalogueApi {
             @PositiveOrZero @Max(RetailCatalogue.MAX_AMOUNT_MINOR)
             Long sellMinor,
 
-            @Size(max = 300) @Schema(description = "Optional since #538; kept in the price history when given")
-            String reason) {}
+            @NotBlank @Size(max = 300) String reason) {}
 
     @Schema(name = "RetailProduct")
     record Product(

@@ -14514,8 +14514,7 @@ export interface components {
         RetailPriceEditRequest: {
             /** Format: int64 */
             cost_minor?: number;
-            /** @description Optional since #538; kept in the price history when given */
-            reason?: string;
+            reason: string;
             /** Format: int64 */
             sell_minor?: number;
         };
@@ -15209,8 +15208,7 @@ export interface components {
             version?: number;
         };
         RetailQuotationCancelRequest: {
-            /** @description Optional since #538; kept on the quotation when given */
-            reason?: string;
+            reason: string;
         };
         RetailQuotationConvertRequest: {
             credit_override_reason?: string;

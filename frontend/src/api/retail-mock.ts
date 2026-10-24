@@ -495,7 +495,7 @@ export function createMockRetail(): RetailApi {
         const nextSell = body.sell_minor ?? p.sellMinor;
         if (nextCost === p.costMinor && nextSell === p.sellMinor) refuse(422, 'price_unchanged', 'The new prices equal the current ones.');
         history.set(id, [...(history.get(id) ?? []), {
-          id: nextId('h'), at: new Date().toISOString(), source: 'manual', old_sell_minor: p.sellMinor, new_sell_minor: nextSell, currency: 'UGX', ...(body.reason ? { reason: body.reason } : {}),
+          id: nextId('h'), at: new Date().toISOString(), source: 'manual', old_sell_minor: p.sellMinor, new_sell_minor: nextSell, currency: 'UGX', reason: body.reason,
           ...(profitAccess ? { old_cost_minor: p.costMinor, new_cost_minor: nextCost } : {}),
         }]);
         Object.assign(p, { costMinor: nextCost, sellMinor: nextSell, version: (p.version ?? 1) + 1 });

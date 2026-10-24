@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -181,9 +182,7 @@ final class DocumentsApi {
     record QuotationPage(List<Quotation> items, String nextCursor) {}
 
     @Schema(name = "RetailQuotationCancelRequest")
-    record CancelRequest(
-            @Size(max = 300) @Schema(description = "Optional since #538; kept on the quotation when given")
-            String reason) {}
+    record CancelRequest(@NotBlank @Size(max = 300) String reason) {}
 
     @Schema(name = "RetailQuotationConvertRequest")
     record ConvertRequest(

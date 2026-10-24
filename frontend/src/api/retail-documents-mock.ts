@@ -202,8 +202,9 @@ export function createDocumentsMock(env: DocumentsEnv): DocumentsMock {
       gate(() => {
         const q = quotations.find((x) => x.id === id) ?? env.refuse(404, 'not_found', 'That could not be found.');
         if (q.status !== 'open') env.refuse(409, 'quotation_not_open', `This quotation is ${q.status} already.`);
+        if (reason.trim() === '') env.refuse(422, 'validation_failed', 'Give a reason.');
         q.status = 'cancelled';
-        if (reason.trim() !== '') q.cancel_reason = reason.trim();
+        q.cancel_reason = reason.trim();
         q.version = (q.version ?? 1) + 1;
         return quotationView(q);
       }),

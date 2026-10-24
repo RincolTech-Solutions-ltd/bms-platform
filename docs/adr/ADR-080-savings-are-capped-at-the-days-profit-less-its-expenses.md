@@ -1,4 +1,4 @@
-# ADR-080: Savings are capped at the day's profit less its expenses, and fewer reasons are typed
+# ADR-080: Savings are capped at the day's profit less its expenses, and the savings reason is optional
 
 ## Status
 
@@ -20,8 +20,8 @@ times the tenant rate, and let a holder of `retail.savings.overwrite` type any a
 day with large expenses the suggestion could exceed what was really left, and nothing at all stopped a typed amount above the
 profit.
 
-Many other screens also force a typed reason. Some of those reasons are the only record a reviewer has of why money or stock moved;
-others guard nothing.
+Many other screens also force a typed reason. For most of them the reason is the audit record of why money or stock moved, so
+they are left for the business owner to decide one by one.
 
 ## Decision
 
@@ -42,30 +42,20 @@ others guard nothing.
    drops a blank one. `V95` replaces `retail_daily_savings_check1` with `retail_daily_savings_overwrite_reason_chk`: a reason, when
    present, is not blank. The overwrite still needs `retail.savings.overwrite`, and the audit row still records that the amount was
    overwritten.
-6. **Other typed reasons.** A reason stays required where it is the record a checker or reviewer relies on for money or stock, or a
-   legal or consent record; it becomes optional where nothing depends on it:
-   - Optional now: the catalogue price change (the price history already keeps who and when; `retail_price_history.reason` was
-     always nullable) and cancelling a quotation (no money, no stock; `V95` replaces the `V46` check that tied the reason to the
-     cancel stamp with `retail_quotations_cancelled_chk` and `retail_quotations_cancel_reason_chk`).
-   - Kept required: voids, reversals and write-offs of money records (sales, credit notes, customer and supplier payments, supplier
-     bills and credits, landed costs, restocks, deliveries, the cash book's records, lending reversals, write-offs and early
-     withdrawals), because each reverses a journal or goes to a checker and the reason is the only explanation in the controls
-     report or the approval; a price changed at the till and a sale above the credit limit (the controls report's price overrides,
-     ADR-033); used or damaged stock, transfer cancels and take-backs and the costing hold release (stock leaves the books);
-     discarding an offline sale and resolving a clash (ADR-067); SMS opt-out lifts (consent, ADR-036); operator changes and owner
-     rescue (ADR-056, ADR-059, ADR-062); a checker's rejection note and an application note (the other person reads it); a customer
-     order cancel (the reason is the content of the cancelled orders report, ADR-052); adding a duplicate item name (the reason is
-     also the administrator's "add anyway" signal in the API, ADR-051; making it optional needs a separate flag and is left for a
-     later change).
+6. **Other typed reasons stay as they are.** Only the savings reason becomes optional. Every other screen that forces a typed
+   reason (voids, reversals and write-offs, stock corrections and usage, price changes, transfers, quotation and order cancels,
+   lending, SMS opt-outs, operator changes) keeps it, with its server rule and its database check, because those reasons are the
+   audit record a business relies on. Each is listed in the pull request of issue #538 (screen, endpoint, check) to be decided one
+   by one later; any change to one is its own decision.
 
 ## Consequences
 
 **Better:** The suggestion and the limit match what the day really left after its expenses, on the screen and on the server. A
-changed savings amount, a price change and a quotation cancel no longer stop the person to type.
+changed savings amount no longer stops the person to type.
 
 **Worse:** The suggestion endpoint reads the day's expenses as well as its profit. An expense entered or voided after the form was
 shown can change the suggestion and send the person back to look again. An overwrite without a reason tells a later reader less.
 
 **Watch for:** Expenses dated on another day than the money was spent move the cap with them; the cap reads `business_date`. A
 tenant rate above 10,000 basis points would suggest more than the day has; the suggestion is clamped to the available amount.
-If owners ask for the duplicate name reason to go too, add an explicit `add_anyway` flag first.
+The other forced reasons are decided one by one, each as its own change.
