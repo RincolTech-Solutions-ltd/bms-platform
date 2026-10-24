@@ -2,12 +2,10 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { type ReactNode, type Ref, useEffect, useRef, useState } from 'react';
 import type { Me } from '../../api/client';
-import { retailAnalytics } from '../../api/retail-analytics';
-import { ALL_BRANCHES } from '../../auth/branch';
 import { icons } from '../../components/icons';
 import { useIsPhone } from '../../components/side-menu';
 import { useOptionalStaff } from './context';
-import { homeParts, homeSummaryKey } from './home-cards';
+import { homeParts, homeSummaryQuery } from './home-cards';
 import { showSavings } from './lending/savings-permissions';
 import { staffAreas } from './menu';
 import { showReceivePayments } from './payments/state';
@@ -120,19 +118,15 @@ function useSoftKeyboard(): boolean {
 }
 
 /**
- * How many items are low on stock in the branch chosen: the Home summary's own read (homeSummaryKey), so the two share one request,
+ * How many items are low on stock in the branch chosen: the Home summary's own read (homeSummaryQuery: one key, gate and freshness), so the two share one request,
  * held fresh for a minute so moving between pages does not ask the heavy summary again.
  */
 function useLowStock(me: Me): number {
   const branch = useOptionalStaff()?.branch ?? null;
   const parts = homeParts(me, branch);
-  const branchId = branch && branch !== ALL_BRANCHES ? branch : undefined;
-  const home = useQuery({
-    queryKey: homeSummaryKey(branchId),
-    queryFn: ({ signal }) => retailAnalytics.home(branchId, signal),
-    enabled: parts.lowStock && branch !== null,
-    staleTime: 60_000,
-  });
+  // Home's own options, so the badge asks only when Home would, and only when it shows a count.
+  const options = homeSummaryQuery(parts, branch);
+  const home = useQuery({ ...options, enabled: options.enabled && parts.lowStock });
   return parts.lowStock ? (home.data?.low_stock ?? 0) : 0;
 }
 
