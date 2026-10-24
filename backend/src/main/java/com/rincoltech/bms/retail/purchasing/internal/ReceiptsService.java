@@ -42,9 +42,11 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -260,6 +262,8 @@ class ReceiptsService {
         UUID by = CurrentPrincipal.require().userId();
         Numbered no = lines.next("GR", "retail_goods_receipt_no", branch);
         List<NewLine> newLines = new ArrayList<>();
+        // D23, issue #554: the lines whose size becomes the pack's usual size, by the line's own id.
+        Set<UUID> fromNowOn = new HashSet<>();
         List<Movement> movements = new ArrayList<>();
         long total = 0;
         long stocked = 0;
@@ -285,6 +289,9 @@ class ReceiptsService {
                     p.stocked()));
             movements.add(new Movement(
                     branch, p.product().id(), "purchase", p.baseQty(), p.costBase(), RECEIPT, id, lineId, null, null));
+            if (usesFromNowOn(item.request())) {
+                fromNowOn.add(lineId);
+            }
         }
         // Lines are applied in request order, so when two lines name one product the later line's cost is the product's
         // cost afterwards (latest receipt wins, ADR-020 decision 5), each change with its own history row.
@@ -302,10 +309,9 @@ class ReceiptsService {
                     "Permission denied",
                     "Setting the selling price needs the permission to change prices. Leave the selling price empty.");
         }
-        for (int i = 0; i < newLines.size(); i++) {
-            NewLine l = newLines.get(i);
+        for (NewLine l : newLines) {
             catalogue.applyPurchasePrices(l.productId(), l.costMinor(), l.sellMinor(), id);
-            if (usesFromNowOn(items.get(i).request())) {
+            if (fromNowOn.contains(l.id())) {
                 // D23, issue #554: under the product lock taken above, before any balance row (ADR-079 lock order).
                 catalogue.useBuyingSize(l.productId(), l.unitId(), l.unitFactor(), RECEIPT, id);
             }
@@ -361,12 +367,12 @@ class ReceiptsService {
         return view(repo.find(id, false).orElseThrow(), true);
     }
 
-    /** True when the unit being received is the unit the line was ordered in (naming the base unit is the base unit). */
     /** D23, issue #554: the line asks for its size to become the pack's usual size. */
     private static boolean usesFromNowOn(ReceiptLineRequest l) {
         return Boolean.TRUE.equals(l.useFromNowOn()) && l.packSize() != null;
     }
 
+    /** True when the unit being received is the unit the line was ordered in (naming the base unit is the base unit). */
     private boolean sameUnit(OrdersRepository.LineRow ol, UUID unitId) {
         if (ol.unitId() != null) {
             return ol.unitId().equals(unitId);

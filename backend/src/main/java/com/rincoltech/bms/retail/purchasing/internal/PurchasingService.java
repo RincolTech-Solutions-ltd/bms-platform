@@ -301,6 +301,8 @@ class PurchasingService {
         Map<UUID, Long> stockByBranch = new TreeMap<>();
         // Per line, the quantity of each branch in base units (a base unit line: as entered).
         List<List<BigDecimal>> baseQtys = new ArrayList<>();
+        // D23, issue #554: the lines whose size becomes the pack's usual size, by the line's own id.
+        Set<UUID> fromNowOn = new HashSet<>();
         for (int i = 0; i < r.lines().size(); i++) {
             PurchaseLineRequest l = r.lines().get(i);
             PackUnit pack = packs.get(i);
@@ -317,10 +319,7 @@ class PurchasingService {
                 BigDecimal base = b.qty();
                 if (pack != null) {
                     base = Quantities.toBase(b.qty(), pack.factor())
-                            .orElseThrow(() -> ApiException.rule(
-                                    "quantity_not_representable",
-                                    b.qty() + " " + pack.unit() + " does not convert exactly to thousandths of the"
-                                            + " item's unit. Change the quantity."));
+                            .orElseThrow(() -> PurchaseLines.notInBase(b.qty(), pack));
                     unitQtyTotal = unitQtyTotal.add(b.qty());
                 }
                 long entered = Quantities.value(b.qty(), l.costMinor());
@@ -331,9 +330,19 @@ class PurchasingService {
                 valueByBranch.merge(b.branchId(), entered, Math::addExact);
                 stockByBranch.merge(b.branchId(), stocked, Math::addExact);
             }
+            if (qtyTotal.compareTo(Quantities.MAX_QTY) > 0) {
+                throw ApiException.rule(
+                        "quantity_out_of_range",
+                        "Line " + (i + 1) + " comes to more than can be recorded. Check the quantities"
+                                + (pack == null ? "." : " and how many are in each " + pack.unit() + "."));
+            }
             baseQtys.add(bases);
+            UUID lineId = UUID.randomUUID();
+            if (usesFromNowOn(l)) {
+                fromNowOn.add(lineId);
+            }
             lines.add(new NewLine(
-                    UUID.randomUUID(),
+                    lineId,
                     i + 1,
                     l.productId(),
                     costBase,
@@ -363,7 +372,7 @@ class PurchasingService {
             NewLine line = lines.get(i);
             repo.insertLine(id, line);
             catalogue.applyPurchasePrices(line.productId(), line.costMinor(), line.sellMinor(), id);
-            if (usesFromNowOn(r.lines().get(i))) {
+            if (fromNowOn.contains(line.id())) {
                 // Under the product lock taken above and before any balance row (ADR-079 lock order).
                 catalogue.useBuyingSize(line.productId(), line.unitId(), line.unitFactor(), PURCHASE, id);
             }

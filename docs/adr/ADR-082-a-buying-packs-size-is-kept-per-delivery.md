@@ -26,7 +26,9 @@ line's own `unit_factor`, never the item's current one.
    units each pack held in this delivery, at least 1 with at most three decimals (422 on the line's `pack_size` field otherwise, and
    on a line not in a pack). Absent means the pack's usual size, as before. It is stored in the line's existing `unit_factor`, so
    the line's base quantity is the packs times that size, the cost per base unit is the pack cost divided by it (rounded half up,
-   the remainder to purchase rounding as before), and the stock movement and the branch's average (ADR-079) use them. No column is
+   the remainder to purchase rounding as before), and the stock movement and the branch's average (ADR-079) use them. The packs
+   times the delivery's size must be exact in thousandths (422 `quantity_not_representable`) and fit the quantity columns, per
+   branch and for the line (422 `quantity_out_of_range`), judged with this size and never the usual one. No column is
    added: `unit_factor` already means "the factor in force when the line was made".
 2. **Use from now on.** `use_from_now_on: true` with a `pack_size` also makes that size the pack's usual size
    (`retail_product_units.factor`), in the same transaction, with a `retail.product_unit.updated` audit row naming the delivery

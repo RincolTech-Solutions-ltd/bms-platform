@@ -382,4 +382,142 @@ class RetailPackSizePerDeliveryIT extends LandedCostTestBase {
                         hq));
         assertBooksBalance();
     }
+
+    /**
+     * Review of #555: the exact conversion and the size of the columns are judged with the delivery's own size. A non-integer
+     * size with a quantity that converts exactly is taken; one that does not, or that comes to more than the columns hold, is
+     * a 422 in plain words and writes nothing, on Buy stock and on goods received.
+     */
+    @Test
+    void aDeliverysSizeIsCheckedForExactAndTooLargeQuantities() {
+        // 0.5 of a carton of 24.5 is 12.25 pieces: exact, taken.
+        JsonNode half = restocked("0.5", 12_250, "24.5", false);
+        assertThat(half.get("lines").get(0).get("qty_total").asString()).isEqualTo("12.250");
+        assertThat(stockAt(hq, bulb)).isEqualByComparingTo("12.25");
+
+        // 0.333 of a carton of 30.5 is 10.1565: not exact in thousandths.
+        ResponseEntity<JsonNode> inexact = restock(restockLine("0.333", 30_500, "30.5", false), ADMIN);
+        assertThat(inexact.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(inexact)).isEqualTo("quantity_not_representable");
+        Map<String, Object> blindInexact = receiptLine(null, "0.333", 30_500, "30.5");
+        Map<String, Object> b = new LinkedHashMap<>();
+        b.put("supplier_id", supplier);
+        b.put("branch_id", hq);
+        b.put("lines", List.of(blindInexact));
+        ResponseEntity<JsonNode> received = keyed("/goods-receipts", b, BUYER);
+        assertThat(received.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(received)).isEqualTo("quantity_not_representable");
+
+        // Two cartons of 99,999,999,999 is more than the quantity columns hold.
+        ResponseEntity<JsonNode> huge = restock(restockLine("2", 0, "99999999999", false), ADMIN);
+        assertThat(huge.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(huge)).isEqualTo("quantity_out_of_range");
+        assertThat(huge.getBody().get("detail").asString()).contains("more than can be recorded");
+        b.put("lines", List.of(receiptLine(null, "2", 0, "99999999999")));
+        ResponseEntity<JsonNode> hugeReceipt = keyed("/goods-receipts", b, BUYER);
+        assertThat(hugeReceipt.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(hugeReceipt)).isEqualTo("quantity_out_of_range");
+
+        // Each branch fits on its own, the line's total does not.
+        Map<String, Object> twoBranches = restockLine("1", 0, "60000000000", false);
+        twoBranches.put(
+                "qty_by_branch", List.of(Map.of("branch_id", hq, "qty", "1"), Map.of("branch_id", br2, "qty", "1")));
+        ResponseEntity<JsonNode> summed = restock(twoBranches, ADMIN);
+        assertThat(summed.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(summed)).isEqualTo("quantity_out_of_range");
+
+        assertThat(stockAt(hq, bulb)).isEqualByComparingTo("12.25");
+        assertThat(stockAt(br2, bulb)).isEqualByComparingTo("0");
+        assertThat(usual()).isEqualTo("24.000");
+        assertBooksBalance();
+    }
+
+    /** Review of #555: two items in one delivery, each with its own size and Use from now on, each changes its own pack. */
+    @Test
+    void twoItemsInOneDeliveryEachChangeTheirOwnUsualSize() {
+        UUID lamp = api.product("PS-LAMP", 900, 1_500);
+        ResponseEntity<JsonNode> pack =
+                api.post("/products/" + lamp + "/units", Map.of("unit_id", carton, "factor", "12"), ADMIN);
+        assertThat(pack.getStatusCode()).as("%s", pack.getBody()).isEqualTo(HttpStatus.CREATED);
+        Map<String, Object> lampLine = restockLine("1", 9_000, "10", true);
+        lampLine.put("product_id", lamp);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("purchased_on", TODAY);
+        body.put("payment_method", "cash");
+        // The bulb's line ticks nothing; the lamp's, second, ticks Use 10 from now on.
+        body.put("lines", List.of(restockLine("1", 24_000, "30", false), lampLine));
+        ResponseEntity<JsonNode> r = api.postKeyed("/purchases", body, ADMIN, "*", key());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(usual()).isEqualTo("24.000");
+        assertThat(api.get("/products/" + lamp + "/units", ADMIN)
+                        .getBody()
+                        .get("items")
+                        .get(0)
+                        .get("factor")
+                        .asString())
+                .isEqualTo("10.000");
+        assertThat(stockAt(hq, bulb)).isEqualByComparingTo("30");
+        assertThat(stockAt(hq, lamp)).isEqualByComparingTo("10");
+        assertThat(audits(r.getBody().get("id").asString())).isEqualTo(1);
+    }
+
+    /**
+     * ADR-082 decision 4: a delivery's Use from now on and a pack edit on the Items screen at once. Both take the product's row
+     * lock, so the delivery always lands, the edit lands or is told the pack changed (409), and the usual size is the one
+     * written last.
+     */
+    @Test
+    void useFromNowOnRacingAPackEditNeverLosesEither() throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            for (int round = 0; round < 5; round++) {
+                String etag = api.get("/products/" + bulb + "/units", ADMIN)
+                        .getBody()
+                        .get("items")
+                        .get(0)
+                        .get("version")
+                        .asString();
+                String usualBefore = usual();
+                CountDownLatch go = new CountDownLatch(1);
+                Future<ResponseEntity<JsonNode>> delivery = pool.submit(() -> {
+                    go.await();
+                    return restock(restockLine("1", 24_000, "30".equals(trim(usualBefore)) ? "20" : "30", true), ADMIN);
+                });
+                Future<ResponseEntity<JsonNode>> edit = pool.submit(() -> {
+                    go.await();
+                    return api.call(
+                            org.springframework.http.HttpMethod.PATCH,
+                            "/products/" + bulb + "/units/" + carton,
+                            Map.of("factor", "36"),
+                            ADMIN,
+                            "*",
+                            Map.of("If-Match", "\"" + etag + "\""));
+                });
+                go.countDown();
+                ResponseEntity<JsonNode> d = delivery.get(60, TimeUnit.SECONDS);
+                ResponseEntity<JsonNode> e = edit.get(60, TimeUnit.SECONDS);
+                assertThat(d.getStatusCode()).as("%s", d.getBody()).isEqualTo(HttpStatus.CREATED);
+                assertThat(e.getStatusCode()).as("%s", e.getBody()).isIn(HttpStatus.OK, HttpStatus.CONFLICT);
+                String delivered =
+                        d.getBody().get("lines").get(0).get("unit_factor").asString();
+                long version = scalar(
+                        "SELECT version FROM retail_product_units WHERE product_id = ? AND unit_id = ?", bulb, carton);
+                if (e.getStatusCode() == HttpStatus.OK) {
+                    // The edit read the old version, so it went first and the delivery's change came after it.
+                    assertThat(usual()).isEqualTo(delivered);
+                    assertThat(version).isEqualTo(Long.parseLong(etag) + 2);
+                } else {
+                    assertThat(usual()).isEqualTo(delivered);
+                    assertThat(version).isEqualTo(Long.parseLong(etag) + 1);
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertBooksBalance();
+    }
+
+    static String trim(String factor) {
+        return new java.math.BigDecimal(factor).stripTrailingZeros().toPlainString();
+    }
 }

@@ -61,7 +61,7 @@ function LineCard({ line, index, order, onChange, onRemove }: {
       {line.unitId && (
         <div data-testid={`receive-size-${index}`}>
           <Field id={`rc-size-${index}`} required inputMode="decimal" label={howManyInEach(line.baseUnit, line.unitLabel)}
-            hint={`Usually ${showQty(line.usualSize ?? '')}. Change it when this delivery's ${line.unitLabel} held a different number.`}
+            hint={`${line.orderLineId ? 'Ordered at' : 'Usually'} ${showQty(line.usualSize ?? '')}. Change it when this delivery's ${line.unitLabel} held a different number.`}
             error={factor === null ? 'Enter 1 or more, with at most three decimals.' : null}
             value={line.packSize ?? showQty(line.usualSize ?? '')} onChange={(e) => onChange({ ...line, packSize: e.target.value })} />
           {differs && canManageItems && (

@@ -181,6 +181,8 @@ describe('goods received in a pack', () => {
     expect(size.value).toBe('24');
     expect(size.getAttribute('aria-required')).toBe('true');
     expect(document.querySelector('label[for="rc-size-0"] .field-star')).toBeTruthy();
+    // On an order line the size it started at is the one ordered, and the hint says so.
+    expect(screen.getByText(/^Ordered at 24\./)).toBeTruthy();
     expect(screen.getByText(/are needed\./)).toBeTruthy();
     rerender(
       <QueryClientProvider client={new QueryClient()}>

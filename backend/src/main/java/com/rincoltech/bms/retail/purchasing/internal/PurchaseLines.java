@@ -146,11 +146,7 @@ class PurchaseLines {
         BigDecimal base = qty;
         if (pack != null) {
             PackUnit packed = pack;
-            base = Quantities.toBase(qty, pack.factor())
-                    .orElseThrow(() -> ApiException.rule(
-                            "quantity_not_representable",
-                            qty + " " + packed.unit() + " does not convert exactly to thousandths of the item's unit."
-                                    + " Change the quantity."));
+            base = Quantities.toBase(qty, pack.factor()).orElseThrow(() -> notInBase(qty, packed));
         }
         long total = value(qty, enteredCost);
         long stocked = pack == null ? total : value(base, costBase);
@@ -176,6 +172,25 @@ class PurchaseLines {
             return null;
         }
         return new PackUnit(pack.unitId(), pack.unit(), packSize, pack.active());
+    }
+
+    /**
+     * Why {@code qty} packs have no base quantity: more than the quantity columns hold (a size per delivery may be large,
+     * issue #554), or not exact in thousandths.
+     */
+    static ApiException notInBase(BigDecimal qty, PackUnit pack) {
+        if (qty.multiply(pack.factor()).compareTo(Quantities.MAX_QTY) > 0) {
+            return ApiException.rule(
+                    "quantity_out_of_range",
+                    qty.stripTrailingZeros().toPlainString() + " " + pack.unit() + " of "
+                            + pack.factor().stripTrailingZeros().toPlainString()
+                            + " each is more than can be recorded. Check the quantity and how many are in each "
+                            + pack.unit() + ".");
+        }
+        return ApiException.rule(
+                "quantity_not_representable",
+                qty + " " + pack.unit() + " does not convert exactly to thousandths of the item's unit."
+                        + " Change the quantity.");
     }
 
     /**
