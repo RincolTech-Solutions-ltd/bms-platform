@@ -100,6 +100,11 @@ describe('a new record shown at once', () => {
     const otherShop = ['retail', 'savings', ['another-branch'], '2026-10-01', '2026-10-31'];
     const lastMonth = ['retail', 'savings', [branch], '2026-09-01', '2026-09-30'];
     const report = ['retail', 'savings', 'report'];
+    // A list of rows under the same prefix that is not the records list (a report, an export) is left alone.
+    const rowsReport = ['retail', 'savings', 'report', '2026-10-01', '2026-10-31'];
+    const longer = ['retail', 'savings', [branch], '2026-10-01', '2026-10-31', 'by-day'];
+    client.setQueryData(rowsReport, [{ id: 'r1' }]);
+    client.setQueryData(longer, []);
     client.setQueryData(mine, []);
     client.setQueryData(all, [{ id: 'old' }]);
     client.setQueryData(otherShop, []);
@@ -112,6 +117,8 @@ describe('a new record shown at once', () => {
     expect(client.getQueryData(otherShop)).toEqual([]);
     expect(client.getQueryData(lastMonth)).toEqual([]);
     expect(client.getQueryData(report)).toEqual({ items: [] });
+    expect(client.getQueryData(rowsReport)).toEqual([{ id: 'r1' }]);
+    expect(client.getQueryData(longer)).toEqual([]);
   });
 });
 

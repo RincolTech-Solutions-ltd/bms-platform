@@ -31,4 +31,5 @@ END
 $$;
 ALTER TABLE retail_daily_savings
     ADD CONSTRAINT retail_daily_savings_overwrite_reason_chk
-        CHECK (overwrite_reason IS NULL OR btrim(overwrite_reason) <> '');
+        -- Only an overwritten record is held to it, as V34's check was, so no existing row can fail the new check.
+        CHECK (NOT overwritten OR overwrite_reason IS NULL OR btrim(overwrite_reason) <> '');
