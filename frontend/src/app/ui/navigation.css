@@ -679,11 +679,12 @@ body.side-menu-open {
  * The bottom tabs on a phone (issue #539, areas/staff/tabs.tsx): five daily jobs fixed to the bottom, each an icon above its label
  * on a target taller than 48px. The current tab is in the brand colour, its label semibold, and its icon sits on a tinted pill that
  * fades and widens in by opacity and transform: no stripe, no glow. The bar takes the iPhone's home indicator and side insets. While
- * it shows, the root has the class has-tab-bar and --tab-bar is its full height, so the page ends above it, a sticky action bar
+ * it shows, the root has the class has-tab-bar and --tab-bar is its full height, edge included, so the page ends above it, a sticky action bar
  * stops on top of it (retail.css, lending.css) and a toast rises above both (feedback.css).
  */
+/* The tabs' 64px and the hairline above them. */
 .has-tab-bar {
-  --tab-bar: calc(64px + env(safe-area-inset-bottom));
+  --tab-bar: calc(65px + env(safe-area-inset-bottom));
 }
 
 .has-tab-bar body {

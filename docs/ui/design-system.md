@@ -194,7 +194,7 @@ query, so the number is the token.
   glow, no shadow. Home and the pages only More lists have no current tab. My stock carries a badge with the count of items low
   on stock (the Home summary's own read, `['retail', 'home', branch]`, so the two share one request); the number is
   `aria-hidden` and the link says ", 3 items low on stock" after its label. No other tab has a badge. The bar pads itself with
-  `env(safe-area-inset-bottom)`, `-left` and `-right`; while it shows, the root has `has-tab-bar` and `--tab-bar` (64px plus the
+  `env(safe-area-inset-bottom)`, `-left` and `-right`; while it shows, the root has `has-tab-bar` and `--tab-bar` (64px and its hairline plus the
   bottom inset), the body ends that far up, the sale bar and the member form's save bar stick at `bottom: var(--tab-bar)` so they
   sit on top of the tabs and never under them, and a toast rises above both. While a text field has focus the bar steps aside
   (the keyboard is up) and the action bar sits on the keyboard. The staff bar has no menu button and no Sell button on a phone.

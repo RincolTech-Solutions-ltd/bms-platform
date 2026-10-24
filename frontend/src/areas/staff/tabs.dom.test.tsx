@@ -282,7 +282,7 @@ describe('the tab bar styles', () => {
     expect(rule('.tab-bar')).toMatch(/env\(safe-area-inset-left\)/);
     expect(rule('.tab')).toMatch(/min-height: 64px/);
     expect(rule('.tab')).toMatch(/min-width: var\(--tap\)/);
-    expect(rule('.has-tab-bar')).toMatch(/--tab-bar: calc\(64px \+ env\(safe-area-inset-bottom\)\)/);
+    expect(rule('.has-tab-bar')).toMatch(/--tab-bar: calc\(65px \+ env\(safe-area-inset-bottom\)\)/);
   });
 
   it('marks the current tab without a stripe: the colour, the weight and a pill behind the icon', () => {
