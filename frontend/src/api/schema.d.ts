@@ -14999,6 +14999,8 @@ export interface components {
             reason: string;
         };
         RetailPurchaseOrderLine: {
+            /** @description The unit the item is counted in (piece), whatever unit the line was ordered in */
+            base_unit?: string;
             /**
              * Format: int64
              * @description What the supplier billed for it; present with retail.payable.manage

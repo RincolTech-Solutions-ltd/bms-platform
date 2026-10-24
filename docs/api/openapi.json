@@ -15721,6 +15721,10 @@
       },
       "RetailPurchaseOrderLine" : {
         "properties" : {
+          "base_unit" : {
+            "description" : "The unit the item is counted in (piece), whatever unit the line was ordered in",
+            "type" : "string"
+          },
           "billed_minor" : {
             "description" : "What the supplier billed for it; present with retail.payable.manage",
             "format" : "int64",

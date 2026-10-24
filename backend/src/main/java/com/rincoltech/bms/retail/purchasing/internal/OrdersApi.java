@@ -113,7 +113,10 @@ final class OrdersApi {
                             "D23, issue #554: received so far in the line's own unit, for a line ordered in a pack:"
                                     + " packs received in it count whatever each held, other units count in packs of the size"
                                     + " ordered. The order is received in full when this reaches unit_qty")
-            String receivedUnitQty) {}
+            String receivedUnitQty,
+
+            @Schema(description = "The unit the item is counted in (piece), whatever unit the line was ordered in")
+            String baseUnit) {}
 
     @Schema(name = "RetailPurchaseOrderReceiptRef")
     record ReceiptRef(UUID id, String receiptNo, LocalDate receivedOn, String status, long totalMinor) {}

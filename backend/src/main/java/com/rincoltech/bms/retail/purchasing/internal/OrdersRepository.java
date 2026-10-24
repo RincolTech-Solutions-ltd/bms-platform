@@ -85,7 +85,8 @@ class OrdersRepository {
             long receivedMinor,
             BigDecimal billedQty,
             long billedMinor,
-            BigDecimal receivedUnitQty) {}
+            BigDecimal receivedUnitQty,
+            String baseUnit) {}
 
     /**
      * D23, issue #554: what a receipt line received, counted in its order line's own unit ({@code rl} and {@code ol}). A
@@ -288,7 +289,7 @@ class OrdersRepository {
     List<LineRow> lines(UUID orderId) {
         return jdbc.sql("""
                         SELECT l.id, l.line_no, l.product_id, p.code, p.description, l.qty, l.unit_id, u.name AS unit, l.unit_qty,
-                               l.unit_factor, l.unit_cost_minor, l.cost_minor, l.line_total_minor,
+                               l.unit_factor, l.unit_cost_minor, l.cost_minor, l.line_total_minor, bu.name AS base_unit,
                                coalesce((SELECT sum(rl.qty) FROM retail_goods_receipt_lines rl
                                            JOIN retail_goods_receipts r ON r.tenant_id = rl.tenant_id AND r.id = rl.receipt_id
                                           WHERE rl.tenant_id = l.tenant_id AND rl.order_line_id = l.id AND r.status = 'posted'), 0) AS received_qty,
@@ -310,6 +311,7 @@ class OrdersRepository {
                           FROM retail_purchase_order_lines l
                           JOIN retail_products p ON p.tenant_id = l.tenant_id AND p.id = l.product_id
                           LEFT JOIN retail_units u ON u.tenant_id = l.tenant_id AND u.id = l.unit_id
+                          LEFT JOIN retail_units bu ON bu.tenant_id = p.tenant_id AND bu.id = p.unit_id
                          WHERE l.order_id = ? ORDER BY l.line_no
                         """.formatted(RECEIVED_IN_ORDER_UNIT))
                 .param(orderId)
@@ -387,7 +389,8 @@ class OrdersRepository {
                 rs.getLong("received_minor"),
                 rs.getBigDecimal("billed_qty"),
                 rs.getLong("billed_minor"),
-                rs.getBigDecimal("received_unit_qty"));
+                rs.getBigDecimal("received_unit_qty"),
+                rs.getString("base_unit"));
     }
 
     static Instant instant(ResultSet rs, String column) throws SQLException {

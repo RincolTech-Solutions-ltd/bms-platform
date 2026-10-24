@@ -447,6 +447,7 @@ class OrdersService {
                 l.receivedMinor(),
                 billed ? Quantities.format(l.billedQty()) : null,
                 billed ? l.billedMinor() : null,
-                l.unitId() == null ? null : Quantities.format(l.receivedUnitQty()));
+                l.unitId() == null ? null : Quantities.format(l.receivedUnitQty()),
+                l.baseUnit());
     }
 }
