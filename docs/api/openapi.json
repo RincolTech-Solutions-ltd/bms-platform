@@ -14804,6 +14804,7 @@
             "type" : "integer"
           },
           "reason" : {
+            "description" : "Optional since #538; kept in the price history when given",
             "maxLength" : 300,
             "minLength" : 0,
             "type" : "string"
@@ -14814,8 +14815,7 @@
             "minimum" : 0,
             "type" : "integer"
           }
-        },
-        "required" : [ "reason" ]
+        }
       },
       "RetailPriceHistory" : {
         "properties" : {
@@ -16153,12 +16153,12 @@
       "RetailQuotationCancelRequest" : {
         "properties" : {
           "reason" : {
+            "description" : "Optional since #538; kept on the quotation when given",
             "maxLength" : 300,
             "minLength" : 0,
             "type" : "string"
           }
-        },
-        "required" : [ "reason" ]
+        }
       },
       "RetailQuotationConvertRequest" : {
         "properties" : {

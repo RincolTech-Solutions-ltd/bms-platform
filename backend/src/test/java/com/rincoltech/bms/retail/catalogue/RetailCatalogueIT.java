@@ -102,6 +102,26 @@ class RetailCatalogueIT extends IntegrationTest {
         assertThat(api.post("/products", body, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     }
 
+    /** #538, ADR-080: the reason for a price change is optional; the history row keeps who and when without it. */
+    @Test
+    void aPriceEditNeedsNoReason() {
+        UUID id = api.product("LMP-11W", 3_000, 4_000);
+        ResponseEntity<JsonNode> edited = api.editPrices(id, Map.of("sell_minor", 4_200), ADMIN);
+        assertThat(edited.getStatusCode()).as("%s", edited.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(api.editPrices(id, Map.of("sell_minor", 4_300, "reason", "  "), ADMIN)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        JsonNode history =
+                api.get("/products/" + id + "/price-history", ADMIN).getBody().get("items");
+        assertThat(history).hasSize(3);
+        for (int i = 1; i < 3; i++) {
+            JsonNode row = history.get(i);
+            assertThat(row.get("source").asString()).isEqualTo("manual");
+            assertThat(row.get("by").isNull()).isFalse();
+            assertThat(row.get("reason") == null || row.get("reason").isNull()).isTrue();
+        }
+    }
+
     /** FR-RET-02, ADR-020 decision 5: a manual edit changes the price and writes history together. */
     @Test
     void aManualPriceEditWritesAHistoryRow() {

@@ -296,13 +296,13 @@ export function PriceForm({ product, onSaved, onCancel }: { product: Product; on
   const history = useQuery({ queryKey: ['retail', 'price-history', product.id], queryFn: () => retail.priceHistory(product.id ?? '') });
   const sellChanged = sellMinor !== null && sellMinor !== product.sell_minor;
   const costChanged = profit && costMinor !== null && costMinor !== product.cost_minor;
-  const valid = sellMinor !== null && (!profit || costMinor !== null) && reason.trim() !== '' && (sellChanged || costChanged);
+  const valid = sellMinor !== null && (!profit || costMinor !== null) && (sellChanged || costChanged);
   const hint = belowCostHint(sellMinor, profit ? costMinor : null);
   const save = useMutation({
     mutationFn: () => retail.editPrices(product.id ?? '', product.version ?? 1, {
       ...(sellChanged ? { sell_minor: sellMinor ?? 0 } : {}),
       ...(costChanged ? { cost_minor: costMinor ?? 0 } : {}),
-      reason: reason.trim(),
+      ...(reason.trim() !== '' ? { reason: reason.trim() } : {}),
     }),
     onSuccess: (saved) => {
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
@@ -323,7 +323,7 @@ export function PriceForm({ product, onSaved, onCancel }: { product: Product; on
         <label htmlFor="price-sell">New selling price ({RETAIL_CURRENCY})</label>
         <input id="price-sell" inputMode="numeric" value={sell} onChange={(e) => setSell(e.target.value)} aria-invalid={sellMinor === null} autoComplete="off" />
         {hint && <p role="note" className="alert alert-warning">{hint}</p>}
-        <label htmlFor="price-reason">Why is the price changing?</label>
+        <label htmlFor="price-reason">Why is the price changing? (optional)</label>
         <input id="price-reason" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} autoComplete="off" />
         <Problem error={save.error} />
         <BusyButton busy={save.isPending} type="submit" className="rt-primary" disabled={!valid}>Save the new price</BusyButton>

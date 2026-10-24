@@ -324,7 +324,10 @@ class QuotationsService {
         writing.executeWithoutResult(status -> {
             Header h = visible(id, true);
             requireOpen(h);
-            String reason = r.reason().trim();
+            // The reason is optional (#538): a quotation moves no money and no stock.
+            String reason = r == null || r.reason() == null || r.reason().isBlank()
+                    ? null
+                    : r.reason().trim();
             if (repo.markCancelled(id, reason, CurrentPrincipal.require().userId()) == 0) {
                 throw notOpen(h);
             }
@@ -332,7 +335,9 @@ class QuotationsService {
             before.put("status", "open");
             Map<String, Object> after = new LinkedHashMap<>();
             after.put("status", "cancelled");
-            after.put("reason", reason);
+            if (reason != null) {
+                after.put("reason", reason);
+            }
             audit.record(new AuditLog.Entry(
                     "retail.quotation.cancelled", "retail.quotation", id, h.branchId(), before, after));
         });

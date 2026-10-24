@@ -103,6 +103,14 @@ describe('documents in the mock', () => {
     await expect(api.convertQuotation(q.id ?? '', { payment_method: 'cash' }, 'c1')).rejects.toMatchObject({ code: 'quotation_not_open' });
   });
 
+  it('cancels a quotation with no reason, since the reason is optional (#538)', async () => {
+    const { api, productId } = await on();
+    const q = await api.createQuotation({ branch_id: hq, buyer_name: 'Test Buyer 03', valid_until: daysBefore(today, -5), lines: [{ product_id: productId, qty: '1' }] }, 'q3');
+    const cancelled = await api.cancelQuotation(q.id ?? '', '  ');
+    expect(cancelled.status).toBe('cancelled');
+    expect(cancelled.cancel_reason).toBeUndefined();
+  });
+
   it('lays out a sample printed receipt for View receipt, so it can be seen offline (issue #500)', async () => {
     const api = createMockRetail();
     const [bulb] = await api.listProducts({ query: 'P003' });
