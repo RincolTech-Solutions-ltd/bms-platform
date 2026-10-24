@@ -275,11 +275,12 @@ export function ShareReceipt({ sale, madeHere = false }: { sale: Sale; madeHere?
       <Problem error={facts.error} />
       {f && (
         <>
+          {/* Share receipt first, the main action of the sale-complete screen (issue #534); New sale sits below these. */}
+          <BusyButton type="button" className="rt-primary" busy={busy} onClick={() => void share()}>Share receipt</BusyButton>
           <p className="cluster">
             <button type="button" className="btn" aria-expanded={shown} aria-controls={previewId} onClick={() => setShownFor(shown ? null : key)}>
               View receipt
             </button>
-            <BusyButton type="button" className="rt-primary" busy={busy} onClick={() => void share()}>Share receipt</BusyButton>
           </p>
           <div id={previewId} className="receipt-preview" hidden={!shown}>
             {shown && printed.isPending && <p className="loading">Loading</p>}

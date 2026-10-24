@@ -73,8 +73,8 @@ describe('Record a sale offline', () => {
     expect(screen.getByText(/Prices as of/)).toBeTruthy();
     expect((screen.getByLabelText('Credit (pay later)') as HTMLInputElement).disabled).toBe(true);
 
-    fireEvent.change(screen.getByLabelText('Find an item by name, code or category'), { target: { value: 'bulb' } });
-    fireEvent.click(await screen.findByRole('button', { name: 'Add Test Bulb 9W' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Find an item by name, code or category' }), { target: { value: 'bulb' } });
+    fireEvent.click(await screen.findByRole('option', { name: /^Test Bulb 9W/ }));
     // Two on a shelf the copy says holds one: the server flags it, the phone does not stop the sale.
     const qty = screen.getAllByRole('textbox').find((i) => (i as HTMLInputElement).value === '1') as HTMLInputElement;
     fireEvent.change(qty, { target: { value: '2' } });
@@ -123,8 +123,8 @@ describe('Record a sale offline', () => {
         </StaffContext.Provider>
       </QueryClientProvider>,
     );
-    fireEvent.change(await screen.findByLabelText('Find an item by name, code or category'), { target: { value: 'bulb' } });
-    fireEvent.click(await screen.findByRole('button', { name: 'Add Test Bulb 9W' }));
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Find an item by name, code or category' }), { target: { value: 'bulb' } });
+    fireEvent.click(await screen.findByRole('option', { name: /^Test Bulb 9W/ }));
     const price = screen.getByLabelText('Unit price') as HTMLInputElement;
     expect(price.readOnly).toBe(true);
     expect(screen.getByText('Offline, the price saved on this phone is used. You do not have permission to change it.')).toBeTruthy();
@@ -140,8 +140,8 @@ describe('Record a sale offline', () => {
     if (!offline) throw new Error('a seller sells offline');
     screenWith(offline);
 
-    fireEvent.change(screen.getByLabelText('Find an item by name, code or category'), { target: { value: 'bulb' } });
-    fireEvent.click(await screen.findByRole('button', { name: 'Add Test Bulb 9W' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Find an item by name, code or category' }), { target: { value: 'bulb' } });
+    fireEvent.click(await screen.findByRole('option', { name: /^Test Bulb 9W/ }));
     const save = screen.getByRole('button', { name: /^Record sale/ }) as HTMLButtonElement;
     await waitFor(() => expect(save.disabled).toBe(false));
     fireEvent.click(save);

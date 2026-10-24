@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
-import { NoResults, SearchBox } from '../../../app/ui/SearchBox';
+import { Highlight } from '../../../app/ui/SearchBox';
+import { ItemCombobox } from '../../../app/ui/ItemCombobox';
 import { matchesSearch, useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { retail, type Product, type Stocktake, type StocktakeLine } from '../../../api/retail';
 import { milliOf, parseCount, parseQty, showQty } from './maths';
@@ -82,10 +83,13 @@ function CountSheet({ branchId }: { branchId: string }) {
   const [draft, setDraft] = useState<Stocktake | null>(null);
   // The line the last scan counted, marked so the counter sees which one went up; the cursor stays in the Scan box.
   const [scanned, setScanned] = useState<string | null>(null);
+  // The items on the count, in the order they were picked or scanned (issue #534): the sheet is searched, not shown whole.
+  const [listed, setListed] = useState<string[]>([]);
+  const list = (id: string) => setListed((l) => (l.includes(id) ? l : [...l, id]));
   const stock = useQuery({ queryKey: ['retail', 'stock', branchId, '', false], queryFn: () => countableStock(branchId) });
 
-  // A scan (issue #345) counts one more of the item, or a whole pack when the barcode is on a pack. The search is cleared
-  // so the counted line shows; an item not on this branch's sheet is refused rather than counted out of sight.
+  // A scan (issue #345) counts one more of the item, or a whole pack when the barcode is on a pack, and puts it on the count.
+  // The search is cleared so the counted line shows; an item not on this branch's sheet is refused rather than counted out of sight.
   const scanAdd = (p: Product, unitId?: string) => {
     const id = p.id ?? '';
     if (!stock.data) return 'The count sheet is still loading. Scan again in a moment.';
@@ -94,6 +98,7 @@ function CountSheet({ branchId }: { branchId: string }) {
     if (unitId && !pack) return PACK_UNUSABLE;
     search.clear();
     setCounts((c) => ({ ...c, [id]: plusOne(c[id], pack ? (parseQty(pack.factor ?? '') ?? 1000) : 1000) }));
+    list(id);
     setScanned(id);
     return undefined;
   };
@@ -117,22 +122,41 @@ function CountSheet({ branchId }: { branchId: string }) {
         <StocktakeReview stocktake={draft} onCommit={() => commit.mutate()} busy={commit.isPending} />
         <Problem error={commit.error} />
         {draft.status === 'draft' && <button type="button" onClick={() => setDraft(null)}>Back to the count</button>}
-        {draft.status === 'committed' && <button type="button" onClick={() => { setDraft(null); setCounts({}); }}>Start another count</button>}
+        {draft.status === 'committed' && <button type="button" onClick={() => { setDraft(null); setCounts({}); setListed([]); }}>Start another count</button>}
       </>
     );
   }
-  // The whole sheet is loaded, so the list narrows as you type, on the text, ignoring case and accents.
-  const rows = (stock.data ?? []).filter((r) => matchesSearch(`${r.description ?? ''} ${r.code ?? ''} ${r.category ?? ''}`, search.text));
+  // The whole sheet is loaded, so the matches are found in the browser, on the settled term, ignoring case and accents.
+  const found = search.term === '' || !stock.data ? undefined : stock.data.filter((r) => matchesSearch(`${r.description ?? ''} ${r.code ?? ''} ${r.category ?? ''}`, search.term));
+  const byId = new Map((stock.data ?? []).map((r) => [r.product_id ?? '', r]));
+  const rows = listed.flatMap((id) => byId.get(id) ?? []);
   return (
     <>
-      <Note>Type the counted quantity for each item you counted. Leave an item blank to skip it.</Note>
+      <Note>Find each item you counted and type how many you counted. Leave an item blank to skip it.</Note>
       <div data-tour="count-search">
-        <SearchBox id="count-search" label="Search by name, code or category" search={search} fetching={false} count={stock.data ? rows.length : undefined} />
+        <ItemCombobox
+          id="count-search"
+          label="Find an item by name, code or category"
+          search={search}
+          results={found}
+          optionKey={(r) => r.product_id ?? ''}
+          onPick={(r) => { list(r.product_id ?? ''); setScanned(r.product_id ?? ''); }}
+          renderOption={(r) => (
+            <>
+              <span className="cb-text">
+                <strong><Highlight text={r.description ?? ''} term={search.term} /></strong> (<Highlight text={r.code ?? ''} term={search.term} />)
+                <span className="cb-meta">{[r.category, r.unit].filter(Boolean).join(', ')}</span>
+              </span>
+              <span className="cb-verb" aria-hidden="true">{listed.includes(r.product_id ?? '') ? 'On the count' : 'Count'}</span>
+            </>
+          )}
+        />
       </div>
       <ScanBar id="count-scan" branchId={branchId} onFound={scanAdd} autoFocus />
       {stock.isPending && <SkeletonList label="Loading stock" />}
       <Problem error={stock.error} />
-      {stock.data && rows.length === 0 && search.term && <NoResults term={search.term} onClear={search.clear} noun="items" />}
+      <h2>Counted items</h2>
+      {stock.data && rows.length === 0 && <p className="empty-state">No items yet. Find an item above, or scan it.</p>}
       {rows.map((r) => {
         const id = r.product_id ?? '';
         return (
