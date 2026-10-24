@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery, type QueryClient } from '@tanstack/react-query';
+import { useQuery, type QueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { TOAST_MS, useToast as useToastOf } from './toast';
 import { Highlight } from '../../../app/ui/SearchBox';
@@ -246,15 +246,15 @@ export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStoc
     queryKey: ['retail', 'products', branchId, search.term],
     queryFn: ({ signal }) => retail.listProducts({ query: search.term, branchId, signal }),
     enabled: search.term !== '',
-    placeholderData: keepPreviousData,
   });
   return (
     <ItemCombobox
       id={id}
       label="Find an item by name, code or category"
       search={search}
+      // Only the answer to the term in the box: an earlier term's matches are never shown, so never picked.
       results={search.term === '' ? undefined : products.data}
-      fetching={products.isPlaceholderData || products.isFetching}
+      fetching={products.isFetching}
       error={products.isError ? <Problem error={products.error} /> : undefined}
       optionKey={(p) => p.id ?? p.code ?? ''}
       onPick={onAdd}

@@ -66,7 +66,8 @@ export function ItemCombobox<T>({ id, label, search, results, fetching = false, 
       setActive((a) => (e.key === 'ArrowDown' ? Math.min(a + 1, shown.length - 1) : Math.max(a - 1, 0)));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const item = expanded && active >= 0 ? shown[active] : undefined;
+      // Enter picks only from a settled answer: with more typed and the search still on its way, it settles the search.
+      const item = expanded && active >= 0 && !search.pending && !fetching ? shown[active] : undefined;
       if (item !== undefined) pick(item);
       else search.flush();
     } else if (e.key === 'Escape') {

@@ -91,6 +91,21 @@ describe('the item picker on the retail screens', () => {
     expect(document.activeElement).toBe(box());
   });
 
+  it('never shows or picks the matches of the earlier search while the next one is on its way', async () => {
+    let answer: (rows: Product[]) => void = () => undefined;
+    listProducts.mockImplementation(({ query }: { query: string }) => (query === 'bulb' ? Promise.resolve([bulb]) : new Promise((r) => (answer = r))));
+    open();
+    await pickItem('Test Bulb 9W', { typed: 'bulb' });
+    fireEvent.change(box(), { target: { value: 'lamp' } });
+    await waitFor(() => expect(listProducts).toHaveBeenLastCalledWith(expect.objectContaining({ query: 'lamp' })));
+    expect(screen.queryAllByRole('option')).toHaveLength(0);
+    fireEvent.keyDown(box(), { key: 'ArrowDown' });
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(document.getElementById('qty-1')).toBeNull();
+    answer([lamp]);
+    expect(await screen.findByRole('option', { name: /^Test Lamp 15W/ })).toBeTruthy();
+  });
+
   it('says plainly when no item matches what was typed', async () => {
     listProducts.mockResolvedValue([]);
     open();
