@@ -101,7 +101,8 @@ function useSoftKeyboard(): boolean {
     // Read after the event, when the focus has moved and the viewport has its new size.
     const check = () => {
       window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => setUp(typingIn(document.activeElement) && window.innerHeight - view.height > KEYBOARD_PX));
+      // Height times scale: a pinch zoom shrinks the visual viewport in CSS pixels but not on the screen, and is no keyboard.
+      frame = window.requestAnimationFrame(() => setUp(typingIn(document.activeElement) && window.innerHeight - view.height * (view.scale ?? 1) > KEYBOARD_PX));
     };
     check();
     view.addEventListener('resize', check);

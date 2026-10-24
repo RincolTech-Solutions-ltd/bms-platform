@@ -246,6 +246,26 @@ describe('the bottom tabs on a phone (issue #539)', () => {
     expect(retailAnalytics.home).not.toHaveBeenCalled();
   });
 
+  it('never asks the Home summary for a session Home would not ask for: a storekeeper reads stock but not sales', async () => {
+    const storekeeper = { ...admin, permissions: ['retail.stock.read', 'retail.purchase.create', 'retail.stocktake.commit'] } as Me;
+    show(storekeeper, { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) });
+    expect(tabNames()).toContain('My stock');
+    await act(async () => undefined);
+    expect(retailAnalytics.home).not.toHaveBeenCalled();
+    expect(document.querySelector('.tab-badge')).toBeNull();
+  });
+
+  it('stays through a pinch zoom with a field focused, as the viewport shrinks by its scale and no keyboard is up', () => {
+    viewport(900);
+    show(admin, { children: <input aria-label="Item" /> });
+    act(() => screen.getByRole('textbox', { name: 'Item' }).focus());
+    act(() => {
+      Object.assign(window.visualViewport as object, { height: 692, scale: 1.3 });
+      window.visualViewport?.dispatchEvent(new Event('resize'));
+    });
+    expect(bar().hidden).toBe(false);
+  });
+
   it('sets --tab-bar to its measured height, so a bar grown by a large font still ends where the action bar begins', () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       return { height: this.classList.contains('tab-bar') ? 97.4 : 0 } as DOMRect;
