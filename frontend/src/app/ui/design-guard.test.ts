@@ -20,7 +20,28 @@ function files(dir: string, ext: RegExp): string[] {
 
 const components = files(SRC, /\.tsx$/);
 const stylesheets = files(join(SRC, 'app/ui'), /\.css$/);
+// Every stylesheet under src, for the motion rule: a stylesheet outside the design layer animates under the same rule.
+const allStylesheets = files(SRC, /\.css$/);
 const HEX = /#[0-9a-fA-F]{3,8}\b/;
+// What may move (rule 13): only transform and opacity, which the browser animates without laying out or repainting the page.
+const MOVES = new Set(['transform', 'opacity']);
+// The named exceptions, each a colour or background fade with its reason; anything else that animates fails the guard.
+const MOTION_EXCEPTIONS: Record<string, { property: string; why: string }[]> = {
+  'app/ui/buttons.css': [
+    { property: 'background', why: 'a button fades to its hover and pressed fill in --motion-fast rather than flashing' },
+    { property: 'border-color', why: 'the edge of a button fades with its fill' },
+  ],
+  'app/ui/forms.css': [{ property: 'border-color', why: 'a field edge fades to the hover and focus colour' }],
+  'app/ui/surfaces.css': [{ property: 'border-color', why: 'a link card edge fades to the accent on hover' }],
+  'app/ui/feedback.css': [{ property: 'background-position', why: 'the skeleton shimmer slides its gradient while a page loads' }],
+};
+// The words of a transition item that are not its property: durations, delays, curves and the motion tokens.
+const NOT_A_PROPERTY = /^(?:-?[\d.]+m?s|var\(--[\w-]+\)|linear|ease(?:-in|-out|-in-out)?|step-start|step-end|(?:steps|cubic-bezier|linear)\([^)]*\)|allow-discrete|normal)$/;
+
+/** The properties a `transition` or `transition-property` value animates; an item that names none animates `all`. */
+function transitioned(value: string): string[] {
+  return value.split(/,(?![^(]*\))/).map((item) => item.trim().split(/\s+(?![^(]*\))/).find((word) => !NOT_A_PROPERTY.test(word)) ?? 'all');
+}
 
 /** The source with its comments blanked: comments cite issues (#95) and name what was removed. */
 function code(file: string): string {
@@ -62,6 +83,57 @@ describe('design guard', () => {
     expect(css).not.toMatch(HEX);
   });
 
+  // Motion (#508, docs/ui-rules.md rule 13): everything eases out on the one curve. Ease-in and ease-in-out feel slow to answer,
+  // a curve whose y goes past 0..1 bounces, and only transform and opacity move, bar the named fades above.
+  // JUSTIFICATION-A3: two new guard rules asked for by #508; no existing test checks motion.
+  it.each(allStylesheets.map((f) => relative(SRC, f)))('%s eases out without bounce and animates only transform and opacity', (file) => {
+    const css = code(file);
+    const excepted = new Set((MOTION_EXCEPTIONS[file] ?? []).map((e) => e.property));
+    const allowed = (prop: string) => MOVES.has(prop) || excepted.has(prop);
+    expect(css, `${file} eases in or in and out`).not.toMatch(/\bease-in(?:-out)?\b/);
+    expect(css).not.toMatch(/\bbounce\b|\belastic\b/);
+    for (const [, value] of css.matchAll(/(?<![\w-])transition(?:-property)?\s*:\s*([^;}]+)/g)) {
+      if ((value as string).trim() === 'none') continue;
+      for (const prop of transitioned(value as string)) {
+        expect(allowed(prop) ? null : prop, `${file}: transition: ${value} animates ${prop}`).toBeNull();
+      }
+    }
+    for (const [, name, frames] of css.matchAll(/@keyframes\s+([\w-]+)\s*\{((?:[^{}]*\{[^{}]*\})*\s*)\}/g)) {
+      for (const [, prop] of (frames as string).matchAll(/([a-z-]+)\s*:/g)) {
+        expect(allowed(prop as string) ? null : prop, `${file}: @keyframes ${name} animates ${prop}`).toBeNull();
+      }
+    }
+    for (const [, curve] of css.matchAll(/cubic-bezier\(([^)]*)\)/g)) {
+      const [, y1, , y2] = (curve as string).split(',').map(Number);
+      expect([y1, y2].every((y) => (y as number) >= 0 && (y as number) <= 1), `${file}: cubic-bezier(${curve}) overshoots`).toBe(true);
+    }
+  });
+
+  it('reads the property out of each transition item, and an item without one as all', () => {
+    expect(transitioned('transform var(--motion) var(--ease-out)')).toEqual(['transform']);
+    expect(transitioned('background var(--transition), border-color 120ms cubic-bezier(0.2, 0, 0, 1)')).toEqual(['background', 'border-color']);
+    expect(transitioned('var(--transition)')).toEqual(['all']);
+    expect(transitioned('200ms ease-out 50ms box-shadow')).toEqual(['box-shadow']);
+  });
+
+  it('keeps every motion exception in use, so the list stays short', () => {
+    for (const [file, list] of Object.entries(MOTION_EXCEPTIONS)) {
+      const css = code(file);
+      const used = [...css.matchAll(/(?<![\w-])transition(?:-property)?\s*:\s*([^;}]+)/g)].flatMap(([, v]) => transitioned(v as string));
+      const framed = [...css.matchAll(/@keyframes\s+[\w-]+\s*\{((?:[^{}]*\{[^{}]*\})*\s*)\}/g)].flatMap(([, f]) => [...(f as string).matchAll(/([a-z-]+)\s*:/g)].map((m) => m[1]));
+      for (const { property } of list) expect([...used, ...framed], `${file}: ${property} is excepted but never animated`).toContain(property);
+    }
+  });
+
+  it('the motion tokens are 120 and 200 ms on the ease-out curve, with a display size for the key amount', () => {
+    const theme = code('app/theme.css');
+    expect(theme).toMatch(/--motion-fast:\s*120ms/);
+    expect(theme).toMatch(/--motion:\s*200ms/);
+    expect(theme).toMatch(/--ease-out:\s*cubic-bezier\(0\.2,\s*0,\s*0,\s*1\)/);
+    expect(theme).toMatch(/--text-display:/);
+    expect(code('app/ui/base.css')).toMatch(/prefers-reduced-motion: reduce\)\s*\{\s*:root\s*\{[^}]*--motion:\s*0ms/);
+  });
+
   // The palette tokens do not change with the theme (#429), so a stylesheet draws with the colour roles, which do. The only
   // palette colours left are white text on a strong fill, black for a darker mix, and the QR code's fixed pair.
   it.each(stylesheets.map((f) => relative(SRC, f)))('%s draws with theme roles, not palette tokens', (file) => {
@@ -79,5 +151,98 @@ describe('design guard', () => {
       expect(css, relative(SRC, file)).not.toMatch(/inset\s+([2-9]|\d{2,})px\s+0\s+0/);
       expect(css, relative(SRC, file)).not.toMatch(/inset\s+0\s+([2-9]|\d{2,})px\s+0\s+var\(--color-(accent|primary|danger|warning|success)/);
     }
+  });
+});
+
+// The component kit (#520): the rules of docs/ui-rules.md that a test can read off the source.
+describe('design guard, the rules the kit holds every screen to', () => {
+  const sources = files(SRC, /\.(tsx?|css)$/).map((f) => relative(SRC, f));
+
+  // Rule 3: an emoji draws differently on every phone and reads as generated. Icons come from components/icons.tsx.
+  it.each(sources)('%s draws no emoji', (file) => {
+    expect(code(file).match(/\p{Emoji_Presentation}|️/u)?.[0] ?? null, file).toBeNull();
+  });
+
+  // Rule 17 and CLAUDE.md: no em or en dash anywhere, in copy, comments or styles.
+  it.each(sources)('%s writes no dash', (file) => {
+    expect(readFileSync(join(SRC, file), 'utf8').match(/[\u2013\u2014]/)?.[0] ?? null, file).toBeNull();
+  });
+
+  // Rule 2: no gradient on text, buttons or backgrounds, no glow and no glass. The two gradients left are not paint: the table's
+  // scroll shadows (a hint that it scrolls) and the old skeleton shimmer, which phase 3 replaces with the kit's Skeleton.
+  const GRADIENTS = new Set(['app/ui/tables.css', 'app/ui/feedback.css']);
+  it.each(allStylesheets.map((f) => relative(SRC, f)))('%s paints no gradient, glow or glass', (file) => {
+    const css = code(file);
+    if (!GRADIENTS.has(file)) expect(css, file).not.toMatch(/gradient\(/);
+    expect(css, file).not.toMatch(/text-shadow|backdrop-filter|filter:\s*blur/);
+    // A glow is a blurred shadow in the brand or a status colour; a focus ring (no blur) and the neutral shadows are not.
+    for (const [, value] of css.matchAll(/box-shadow:\s*([^;]+);/g)) {
+      for (const layer of (value as string).split(/,(?![^(]*\))/)) {
+        const blur = Number(layer.trim().replace(/^inset\s+/, '').split(/\s+/)[2]?.replace('px', '') ?? 0);
+        const coloured = /var\(--color-(accent|primary|success|danger|warning|link|focus)/.test(layer);
+        expect(blur > 0 && coloured ? layer.trim() : null, `${file} glows`).toBeNull();
+      }
+    }
+  });
+
+  it('keeps the gradient list to files that still draw one', () => {
+    for (const file of GRADIENTS) expect(code(file), file).toMatch(/gradient\(/);
+  });
+
+  // Rule 11: a choice of 2 to 5 options is the one Segmented control, not a row of separate pressed buttons.
+  it.each(components.map((f) => relative(SRC, f)))('%s draws no row of pressed buttons in place of Segmented', (file) => {
+    expect(code(file), file).not.toMatch(/className=\{?["'`][^"'`]*(?<![\w-])filters(?![\w-])/);
+  });
+
+  const kit = code('app/ui/kit.css');
+  const rule = (selector: string) => kit.match(new RegExp(`\\n${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`))?.[1] ?? '';
+
+  // Rule 4: two radii and two shadows. The kit keeps to --radius and --radius-lg, --shadow-sm and --shadow-lg.
+  it('the kit uses the two radii and the two shadows only', () => {
+    const radii = [...kit.matchAll(/border-radius:\s*([^;]+);/g)].flatMap(([, v]) => (v as string).split(/\s+/));
+    expect(new Set(radii)).toEqual(new Set(['var(--radius)', 'var(--radius-lg)', '0']));
+    // The focus ring is not a depth: it is the keyboard ring, put back where a reset removed it.
+    const shadows = [...kit.matchAll(/box-shadow:\s*([^;]+);/g)].flatMap(([, v]) => (v as string).split(/,\s*/)).filter((v) => v !== 'var(--focus-ring)');
+    expect(new Set(shadows)).toEqual(new Set(['none', 'var(--shadow-sm)', 'var(--shadow-lg)']));
+  });
+
+  // Rule 12: every target of the kit is at least 48px. A bare button already has min-height: var(--tap) (buttons.css).
+  it('gives every kit target 48px', () => {
+    expect(rule('.segmented > button')).toMatch(/min-height: var\(--tap\)/);
+    expect(rule('.stepper > button')).toMatch(/width: var\(--tap\)/);
+    expect(rule('.stepper')).toMatch(/grid-template-columns: var\(--tap\) [^;]+ var\(--tap\)/);
+    expect(rule('.sheet-close')).toMatch(/width: var\(--tap\)/);
+    expect(rule('.list-row')).toMatch(/min-height: 64px/);
+  });
+
+  // Rule 8: every amount the kit draws is in tabular figures, and the success amount is the display size.
+  it('draws every kit amount in tabular figures', () => {
+    for (const selector of ['.stepper > input', '.money-input > input', '.list-row-amount', '.success-amount']) {
+      expect(rule(selector), selector).toMatch(/font-variant-numeric: tabular-nums/);
+    }
+    expect(rule('.success-amount')).toMatch(/font-size: var\(--text-display\)/);
+  });
+
+  // Rule 13: under reduced motion every animation stops: base.css ends them all, and kit.css names each of its own.
+  it('stops every animation under reduced motion', () => {
+    const reduce = code('app/ui/base.css').match(/prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+    expect(reduce).toMatch(/animation-duration: 1ms !important/);
+    expect(reduce).toMatch(/animation-iteration-count: 1 !important/);
+    const still = kit.match(/prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+    expect(still).toMatch(/animation: none/);
+    const animated = [...kit.matchAll(/\n([^\n{}]+)\{[^}]*animation(?:-name)?: (?!none)/g)].map(([, sel]) => (sel as string).trim());
+    expect(animated.length).toBeGreaterThanOrEqual(6);
+    for (const selector of animated) expect(still, `${selector} still moves under reduced motion`).toContain(selector);
+  });
+
+  // Rule 13 (owner rule, 24 Oct 2026): the kit moves on the motion tokens, 300ms at most, never in a loop; only the sale-complete
+  // check takes 400ms.
+  it('times every kit motion with the tokens, never loops, and only the check takes 400 ms', () => {
+    const times = [...kit.matchAll(/animation:\s*[\w-]+\s+([^\s;]+)/g)].map(([, t]) => t);
+    expect(new Set(times)).toEqual(new Set(['var(--motion)', '400ms']));
+    expect(kit).not.toMatch(/infinite/);
+    expect(rule('.success-tick')).toMatch(/400ms/);
+    expect(rule('.success-tick-inner')).toMatch(/400ms/);
+    expect([...kit.matchAll(/animation:\s*[\w-]+\s+400ms/g)]).toHaveLength(2);
   });
 });

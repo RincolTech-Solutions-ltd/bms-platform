@@ -1,6 +1,7 @@
 package com.rincoltech.bms.retail.stock.internal;
 
 import com.rincoltech.bms.kernel.Search;
+import com.rincoltech.bms.retail.stock.LowStockRule;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.internal.StockApi.Correction;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementCorrection;
@@ -49,7 +50,7 @@ class StockRepository {
             UUID categoryId,
             boolean negativeOnly,
             boolean includeInactive,
-            Long atMostMilli,
+            String level,
             int afterRank,
             String afterCode,
             UUID afterId,
@@ -57,11 +58,13 @@ class StockRepository {
         Search.Match match = query == null ? null : query.match(SEARCH);
         StringBuilder sql = new StringBuilder("""
                 SELECT p.id, p.code, p.description, p.category_id, c.name AS category, u.name AS unit, p.sell_minor,
-                       p.cost_minor, coalesce(b.qty, 0) AS qty, coalesce(b.reserved_qty, 0) AS reserved_qty
+                       coalesce(b.avg_cost_minor, p.cost_minor) AS cost_minor, coalesce(b.qty, 0) AS qty,
+                       coalesce(b.reserved_qty, 0) AS reserved_qty
                   FROM retail_products p
                   JOIN retail_units u ON u.id = p.unit_id
                   JOIN retail_categories c ON c.id = p.category_id
-                  LEFT JOIN retail_stock_balances b ON b.product_id = p.id AND b.branch_id = :branch
+                  LEFT JOIN retail_stock_balances b ON b.tenant_id = p.tenant_id AND b.product_id = p.id
+                       AND b.branch_id = :branch
                  WHERE (p.active OR :includeInactive)
                 """);
         Map<String, Object> params = new LinkedHashMap<>();
@@ -79,9 +82,16 @@ class StockRepository {
         if (negativeOnly) {
             sql.append(" AND coalesce(b.qty, 0) < 0");
         }
-        if (atMostMilli != null) {
-            sql.append(" AND coalesce(b.qty, 0) <= :atMost");
-            params.put("atMost", java.math.BigDecimal.valueOf(atMostMilli, 3));
+        if (level != null) {
+            sql.append(" AND ")
+                    .append(LowStockRule.atBranchSql(
+                            level.equals(StockService.LEVEL_LOW),
+                            "p.tenant_id",
+                            "p.id",
+                            ":branch",
+                            "coalesce(b.qty, 0)",
+                            ":low"));
+            params.put("low", StockService.lowStock());
         }
         String statement;
         if (match == null) {
@@ -150,7 +160,7 @@ class StockRepository {
             boolean negativeOnly,
             boolean includeInactive,
             boolean keepHeldInactive,
-            Long atMostMilli,
+            String level,
             int afterRank,
             String afterCode,
             UUID afterId,
@@ -158,12 +168,15 @@ class StockRepository {
         Search.Match match = query == null ? null : query.match(SEARCH);
         StringBuilder sql = new StringBuilder("""
                 SELECT p.id, p.code, p.description, p.category_id, c.name AS category, u.name AS unit, p.sell_minor,
-                       p.cost_minor, coalesce(t.total, 0) AS total, coalesce(t.negs, 0) > 0 AS negative
+                       coalesce(round(t.held_value / nullif(t.held_qty, 0)), p.cost_minor)::bigint AS cost_minor,
+                       coalesce(t.total, 0) AS total, coalesce(t.negs, 0) > 0 AS negative
                   FROM retail_products p
                   JOIN retail_units u ON u.id = p.unit_id
                   JOIN retail_categories c ON c.id = p.category_id
                   LEFT JOIN (SELECT product_id, sum(qty) AS total, count(*) FILTER (WHERE qty < 0) AS negs,
-                                    count(*) FILTER (WHERE qty <> 0) AS held
+                                    count(*) FILTER (WHERE qty <> 0) AS held,
+                                    sum(qty * avg_cost_minor) FILTER (WHERE qty > 0) AS held_value,
+                                    sum(qty) FILTER (WHERE qty > 0) AS held_qty
                                FROM retail_stock_balances WHERE branch_id IN (:branchIds)
                               GROUP BY product_id) t ON t.product_id = p.id
                  WHERE (p.active OR :includeInactive OR (:keepHeld AND coalesce(t.held, 0) > 0))
@@ -184,9 +197,17 @@ class StockRepository {
         if (negativeOnly) {
             sql.append(" AND coalesce(t.negs, 0) > 0");
         }
-        if (atMostMilli != null) {
-            sql.append(" AND coalesce(t.total, 0) <= :atMost");
-            params.put("atMost", java.math.BigDecimal.valueOf(atMostMilli, 3));
+        if (level != null) {
+            // Over the listed branches together: out on the summed balance, low at any one of them (issue #490).
+            sql.append(" AND ")
+                    .append(LowStockRule.overBranchesSql(
+                            level.equals(StockService.LEVEL_LOW),
+                            "p.tenant_id",
+                            "p.id",
+                            "lb.id IN (:branchIds)",
+                            "coalesce(t.total, 0)",
+                            ":low"));
+            params.put("low", StockService.lowStock());
         }
         String statement;
         if (match == null) {
@@ -252,6 +273,27 @@ class StockRepository {
                 .query((rs, n) -> {
                     out.computeIfAbsent(rs.getObject("product_id", UUID.class), k -> new LinkedHashMap<>())
                             .put(rs.getObject("branch_id", UUID.class), rs.getBigDecimal("qty"));
+                    return null;
+                })
+                .list();
+        return out;
+    }
+
+    /** ADR-079: each branch's average cost per base unit of the products, by product and branch. */
+    Map<UUID, Map<UUID, Long>> averages(List<UUID> productIds, List<UUID> branchIds) {
+        Map<UUID, Map<UUID, Long>> out = new LinkedHashMap<>();
+        if (productIds.isEmpty()) {
+            return out;
+        }
+        jdbc.sql("""
+                        SELECT product_id, branch_id, avg_cost_minor FROM retail_stock_balances
+                         WHERE product_id IN (:products) AND branch_id IN (:branchIds)
+                        """)
+                .param("products", productIds)
+                .param("branchIds", branchIds)
+                .query((rs, n) -> {
+                    out.computeIfAbsent(rs.getObject("product_id", UUID.class), k -> new LinkedHashMap<>())
+                            .put(rs.getObject("branch_id", UUID.class), rs.getLong("avg_cost_minor"));
                     return null;
                 })
                 .list();

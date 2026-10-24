@@ -51,7 +51,7 @@ const notifications: TourStep = {
   id: 'notifications',
   target: 'nav-notifications',
   title: 'Install the app and get notifications',
-  body: 'Tap Notifications to install BMS on your phone. There you can also turn on a notice for when something needs you, such as an approval.',
+  body: 'Tap Notifications to install BMS on your phone. On a phone it is under More. There you can also turn on a notice for when something needs you, such as an approval.',
 };
 
 // Feedback (issue #447): every member of staff can tell the BMS team an idea, a problem or a question.
@@ -59,7 +59,7 @@ const feedback: TourStep = {
   id: 'feedback',
   target: 'nav-feedback',
   title: 'Tell us what you think',
-  body: 'Tap Feedback to send the BMS team an idea, a problem or a question. Add a picture of the screen if it helps. You see our reply there too. On a phone it is also under Help.',
+  body: 'Tap Feedback to send the BMS team an idea, a problem or a question. Add a picture of the screen if it helps. You see our reply there too. On a phone it is under More, and under Help.',
 };
 
 // The theme button in the header (issues #429 and #452): Light, Dark or Same as my phone, kept on this device. Every area has it.
@@ -110,6 +110,15 @@ const loanApplications: TourStep = {
   body: 'Pick Submitted or Appraised to see applications waiting for a decision. Pick Approved to see loans ready to pay out.',
 };
 
+// The bottom tabs on a phone (issue #539): the daily jobs one tap away. On a laptop there is no bar and the step is skipped.
+const tabs: TourStep = {
+  id: 'tabs',
+  target: 'tab-bar',
+  optional: true,
+  title: 'Your daily jobs at the bottom',
+  body: 'On a phone, the bar at the bottom holds Sell, My stock, Buy and Money, the ones your role allows. More has everything else, and Sign out.',
+};
+
 const branch: TourStep = {
   id: 'branch',
   target: 'branch-picker',
@@ -136,7 +145,8 @@ export const adminWelcome: Tour = {
   // Version 17 adds the Refresh step (issue #430): the button at the top that gets the latest figures.
   // Version 18 adds the Feedback step (issue #447): send the BMS team an idea, a problem or a question.
   // Version 19 adds the Download my data step (issue #334): the whole business as one Excel workbook, and the weekly copy by email.
-  version: 19,
+  // Version 20 adds the bottom tabs step (issue #539) and words the phone steps for the tabs and More.
+  version: 20,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -209,11 +219,12 @@ export const adminWelcome: Tour = {
       title: 'Two-step sign-in',
       body: 'Ask your staff for a code from their phone as well as the password. It is optional until you choose who must use it.',
     },
+    tabs,
     {
       id: 'modules',
       target: 'nav-areas',
       title: 'Your modules',
-      body: 'Each part of the business you use has its own item in the menu, like Retail or Lending. On a phone, open the menu at the top left. To add or remove one, contact us.',
+      body: 'Each part of the business you use has its own item in the menu, like Retail or Lending. On a phone, tap More at the bottom. To add or remove one, contact us.',
     },
     {
       id: 'billing',
@@ -398,7 +409,9 @@ export const retailSales: Tour = {
   // Version 13 adds the Online or offline step (issue #458, ADR-067): the dot, and selling with no network.
   // Version 14 adds the Scan step (issue #345): a barcode scanner, a typed barcode or the phone camera adds the item.
   // Version 15 makes it the Scan here step (ADR-070 decision 11): a scanner types only into the Scan box.
-  version: 15,
+  // Version 16 words the Find the item step for the picker that lists items only while you type (issue #534).
+  // Version 17 adds the bottom tabs step (issue #539) and words the phone steps for the tabs and More.
+  version: 17,
   title: 'Selling tour',
   audience: isSeller,
   autoStart: true,
@@ -409,6 +422,7 @@ export const retailSales: Tour = {
       body: 'Here is how to sell, check stock and restock. It takes about a minute.',
     },
     { ...branch, optional: true, body: 'Sales and stock are counted per branch. Check that this shows the shop you are in.' },
+    tabs,
     {
       id: 'sale',
       route: '/staff/retail',
@@ -424,7 +438,7 @@ export const retailSales: Tour = {
       module: 'retail',
       optional: true,
       title: 'Find the item',
-      body: 'Type part of the name or code, then tap Add.',
+      body: 'Type part of the name, code or category. The matching items show under the box: tap one to add it. The list closes, ready for the next item.',
     },
     {
       id: 'sale-scan',
@@ -460,7 +474,7 @@ export const retailSales: Tour = {
       module: 'retail',
       optional: true,
       title: 'Save the sale',
-      body: 'Check the total, then tap Save sale. You get a receipt to show the customer. Tap Share receipt to send the PDF from your phone, on WhatsApp or any other app. WhatsApp customer sends the details to their number.',
+      body: 'Check the total, then tap Record sale. You get a receipt to show the customer. Tap Share receipt to send the PDF from your phone, on WhatsApp or any other app. WhatsApp customer sends the details to their number.',
     },
     {
       id: 'sync-status',
@@ -556,7 +570,7 @@ export const retailSales: Tour = {
       module: 'retail',
       optional: true,
       title: 'Shortcuts',
-      body: 'Your most used retail pages are listed under Retail in the menu. On a phone, open the menu at the top left first.',
+      body: 'Your most used retail pages are listed under Retail in the menu. On a phone they are the tabs at the bottom: Sell, My stock, Buy and Money.',
     },
     notifications,
     feedback,
@@ -572,7 +586,8 @@ export const staffWelcome: Tour = {
   // Version 4 adds the Light or dark step (issue #429): the theme selector at the top right.
   // Version 5 adds the Refresh step (issue #430): the button at the top that gets the latest figures.
   // Version 6 adds the Feedback step (issue #447): send the BMS team an idea, a problem or a question.
-  version: 6,
+  // Version 7 adds the bottom tabs step (issue #539) and words the phone steps for the tabs and More.
+  version: 7,
   title: 'Welcome tour',
   audience: (me) => !isTenantAdmin(me) && !isSeller(me),
   autoStart: true,
@@ -583,6 +598,7 @@ export const staffWelcome: Tour = {
       body: 'This short tour shows you the pages you can use. You can stop at any time.',
     },
     { ...branch, optional: true },
+    tabs,
     {
       id: 'members',
       route: '/staff',
@@ -852,7 +868,8 @@ export const cataloguePage: Tour = {
 export const stocktakePage: Tour = {
   id: 'page-stocktake',
   // Version 2 adds the Scan here step (issue #345, ADR-070).
-  version: 2,
+  // Version 3 words the Count step for the search on top and the list Not counted yet below it (issue #534).
+  version: 3,
   title: 'This page: stock-take',
   audience: (me) => STOCKTAKE.every((p) => held(me, p)),
   autoStart: false,
@@ -862,7 +879,7 @@ export const stocktakePage: Tour = {
       id: 'count',
       target: 'count-search',
       title: 'Count each item',
-      body: 'Find an item and type how many you counted. Leave an item blank to skip it.',
+      body: 'Find an item by typing part of its name, or work down the list Not counted yet. Type how many you counted, or tap 0 for an item that is gone.',
     },
     {
       id: 'scan',
@@ -1036,6 +1053,50 @@ export const notificationsPage: Tour = {
       id: 'turn-on-card',
       title: 'Asked once, with one tap',
       body: 'When you open the installed app, a card asks "Get told when something needs you?". Tap Turn on and your phone asks once. Not now asks again in a few days, at most three times.',
+    },
+  ],
+};
+
+// The Money and More pages of the phone's bottom tabs (issue #539). JUSTIFICATION-A3: one page tour per new screen, as ADR-049 asks.
+export const moneyPage: Tour = {
+  id: 'page-money',
+  version: 1,
+  title: 'This page: money',
+  audience: () => true,
+  autoStart: false,
+  page: '/staff/money',
+  steps: [
+    {
+      id: 'list',
+      target: 'money-list',
+      optional: true,
+      title: 'Your money pages',
+      body: 'Cash, banking, savings, expenses and who owes you, the ones your role allows. Tap one to open it.',
+    },
+    { ...tabs, id: 'tabs', body: 'Money is one of the tabs at the bottom. Tap Sell, My stock or Buy to get back to the daily jobs.' },
+  ],
+};
+
+export const morePage: Tour = {
+  id: 'page-more',
+  version: 1,
+  title: 'This page: more',
+  audience: () => true,
+  autoStart: false,
+  page: '/staff/more',
+  steps: [
+    {
+      id: 'list',
+      target: 'more-list',
+      title: 'Everything else',
+      body: 'Every area your role allows that is not a tab: Home, reports, settings, users, and Lending when the business has it.',
+    },
+    {
+      id: 'sign-out',
+      target: 'more-sign-out',
+      optional: true,
+      title: 'Sign out',
+      body: 'Sign out here when you are done on a shared phone. If sales are still waiting to send, you are asked first.',
     },
   ],
 };
@@ -1776,7 +1837,7 @@ export const CORE_TOURS: readonly Tour[] = [
   adminWelcome, retailSales, staffWelcome, salePage, stockPage, restocksPage, salesPage, creditSalesPage, setupPage, loansPage, loanPage, cataloguePage, stocktakePage,
   retailSettingsPage, branchRolesCapability, stockByLocationPage, inTransitPage, transferReceiptCapability, unitsCapability,
   priceListsCapability, priceListsPage, customerAccountsCapability, accountsPage, returnsCapability, returnsPage, documentsCapability, documentsPage, quotationsPage,
-  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, controlsPage, twoStepPage, businessNotificationsPage, billingPage, notificationsPage, feedbackPage, referralsPage, ...CUSTOMER_TOURS,
+  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, controlsPage, twoStepPage, businessNotificationsPage, billingPage, notificationsPage, feedbackPage, moneyPage, morePage, referralsPage, ...CUSTOMER_TOURS,
 ];
 
 const dynamicSegments = (tour: Tour) => (tour.page ?? '').split('/').filter((part) => part.startsWith('$')).length;

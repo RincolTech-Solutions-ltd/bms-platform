@@ -18,11 +18,11 @@ placeholder. Screens use class names from this catalogue and never write a raw c
 | `ui/forms.css` | Labels, inputs, selects, choice rows, fieldsets, `.form-stack`, `.form-actions`, `.field-hint`, `.field-error`, `.input-code`, `.secret-box`, `.codes-box` |
 | `ui/surfaces.css` | `.card`, `.card-muted`, `<dialog>` and `.sheet` |
 | `ui/tables.css` | Tables and `.table-wrap` |
-| `ui/feedback.css` | `.alert-*`, `.badge-*`, `.empty-state`, `.loading`, `.spinner`, `.skeleton`, `.toast`, `.toast-success`, `.toast-danger`, the header refresh button (`.refresh`, `.refresh-status` readable by assistive tech but off screen below 720px, `.refresh-problem` visible at every width) |
+| `ui/feedback.css` | `.alert-*`, `.badge-*`, `.empty-state`, `.loading`, `.spinner`, `.skeleton`, `.toast`, `.toast-success`, `.toast-error`, `.toast-info`, `.toast-icon`, the header refresh button (`.refresh`, `.refresh-status` readable by assistive tech but off screen below 720px, `.refresh-problem` visible at every width) |
 | `ui/illustrations.css` | The paint classes of the illustrations (`.ill-*`), the state components (`.empty-state-art`, `.status-panel`, `.brand-loader`, `.skeleton-list`) and the shared keyframes |
-| `ui/navigation.css` | The staff bar, the side menu: the sidebar from 720px (`.nav-layout`, `.side-nav`) and the phone drawer (`.menu-button`, `.side-menu`) |
+| `ui/navigation.css` | The staff bar, the side menu: the sidebar from 720px (`.nav-layout`, `.side-nav`) and the phone drawer of the operator portal (`.menu-button`, `.side-menu`); the staff area's bottom tabs on a phone (`.tab-bar`, `.tab`, `.has-tab-bar`, #539) |
 | `ui/pages.css` | The landing page (hero, trust line, module cards), `.auth-card` and `.auth-art`, the portal cards, the approvals decision cell, the style page |
-| `ui/retail.css` | The retail classes (`.rt`, `.rt-card`, `.rt-row`, `.rt-total`, `.rt-flag`, `.rt-primary`), `.tile-grid`, `.tile`, `.line-foot` |
+| `ui/retail.css` | The retail classes (`.rt`, `.rt-card`, `.rt-row`, `.rt-total`, `.rt-flag`, `.rt-primary`), `.line-foot` |
 | `ui/search.css` | The shared search box (#241): `.sb`, `.sb-field`, `.sb-clear`, `.sb-status`, `.sb-searching`, `.sb-results` (dimmed while `aria-busy`), `.sb-mark` |
 | `ui/onboarding.css` | The sign-up, applicant and operator portal additions (ADR-024): `.facts` (a definition list that stacks on a phone), `.filters` (the pressed status filter), `.pre-line`, `.wrap-anywhere`; those screens otherwise use `.auth-card`, `.form-stack`, `.alert`, `.table-wrap` and `.cluster` |
 | `frontend/src/components/icons.tsx` | Inline SVG line icons (decorative, `aria-hidden`), so no image is fetched |
@@ -64,19 +64,20 @@ The platform host and a tenant without a colour show the Rincol blue.
 - Shadows are soft: `--shadow-sm` on controls, `--shadow` on cards, `--shadow-lg` on hover and dialogs.
 - Elevation has three steps: flat (`.card-muted`), resting (`.card`), raised (`.card-raised`, the one card a
   page leads with, such as the landing hero and the sign-in card).
-- Motion (#106): `--motion-fast` 150ms (hover, press), `--motion` 200ms (dialogs, toasts), `--motion-slow`
-  250ms (a card or state rising in), all on `--ease-out`. Under `prefers-reduced-motion` every animation
+- Motion (#106, #508, `docs/ui-rules.md`): `--motion-fast` 120ms (hover, press), `--motion` 200ms (dialogs, toasts), `--motion-slow`
+  250ms (a card or state rising in), all on `--ease-out`, `cubic-bezier(0.2, 0, 0, 1)`; never ease-in or ease-in-out, never a bounce, never `transition: all`, and only `transform` and `opacity` move, bar the guard's named colour fades (the design guard checks).
+  Under `prefers-reduced-motion` the motion tokens are 0ms, `--press-scale` is 1, and every animation
   and transition runs once in 1ms (`base.css`), so a spinner stands still.
 
 ## Components
 
 | Component | Markup | Notes |
 |---|---|---|
-| Secondary button | `<button>` | The default; 44px tall. Pressed: it sinks to 98% and darkens. Disabled (`disabled` or `aria-disabled="true"`): flat grey with muted text |
+| Secondary button | `<button>` | The default; 48px tall (`--tap`). Pressed: it sinks to 98% and darkens. Disabled (`disabled` or `aria-disabled="true"`): flat grey with muted text |
 | Primary button | `.btn-primary` (retail: `.rt-primary`; #87: `.btn-brand`) | One per view, the main action, at the bottom of a form |
 | Danger, ghost | `.btn-danger`, `.btn-ghost` | Reject or destroy; quiet actions such as Remove and Sign out |
 | Busy button | `<BusyButton busy={save.isPending} className="btn-primary">Save</BusyButton>` (`app/ui/BusyButton.tsx`, `.busy-button`, `.busy-spinner`; #456) | Every button that writes (POST, PUT, PATCH, DELETE: a sale, a payment, an invitation, a setting, a sign-in, an approval). While busy it keeps its label (never swap it for Saving or Sending: the spinner shows the work), shows a small spinner placed absolutely in its end padding (the width does not jump; while busy the end padding is at least 1.1em, so the spinner never covers the label; `.btn-sm`, tighter than that, has the same 1.1em end padding when idle too, so it keeps its width as well), and is `aria-busy="true"` and `aria-disabled="true"` rather than `disabled`, so it keeps keyboard focus while its own press guard drops every press. It has no live region of its own: the one `BusyAnnouncer` the app shell mounts says Working once while any button is busy (twenty rows sharing one flag are announced once) and clears when the last is done. An `aria-modal` dialog hides the shell's announcer, so the phone menu drawer mounts its own `<BusyAnnouncer modal />` inside itself while the person has it open, and Sign out there is heard; while it is mounted the shell's announcer renders nothing, so there is only one Working live region at a time. A press holds it until busy shows, or until an `onClick` that awaits has settled (released in a `finally`, so a throw cannot stick it) and two tasks have passed, and for at most 10 seconds when busy never shows, so a double click sends once; a submit of its form that gets through (from code or another submit button) holds it the same way, so two submits in one task send once, and while busy its form drops an Enter re-submit. Under reduced motion the spinner is a pulsing dot. Takes every `<button>` prop |
-| Link as button | `<Link className="btn btn-primary">` | Sizes `.btn-lg`, `.btn-sm` (still 44px tall), `.btn-block` |
+| Link as button | `<Link className="btn btn-primary">` | Sizes `.btn-lg`, `.btn-sm` (still 48px tall), `.btn-block` |
 | Field | `<label>Text<input/></label>` or `<label htmlFor>` then the input | Label above, `.field-hint` and `.field-error` under it; `aria-invalid="true"` turns the edge red; a focused field shows the focus edge and halo however it got focus, and a wrapping label turns the link colour |
 | Choice row | `<label><input type="radio"/>Text</label>` | The whole row is the tap target; the chosen row is tinted |
 | Vertical form | `.form-stack` | Fields 16px apart, buttons full width |
@@ -85,18 +86,31 @@ The platform host and a tenant without a colour show the Rincol blue.
 | Card | `.card`, `.card-muted`, `.card-raised`, `.card-interactive` | White, 8px corners, soft shadow; `.card-interactive` (a card that is a link) lifts on hover and sinks on press |
 | Table | `<div className="table-wrap" tabIndex={0}><table>` | Scrolls inside its card on a phone with edge shadows; `.num` cells right-aligned in tabular figures; `tabIndex` lets a keyboard scroll it |
 | Table as cards | `.table-wrap.table-cards` and `data-label` on every `<td>` | Below 560px each row is a card of label and value pairs (no sideways scroll); `.cell-stack` puts controls under their label. Used by approvals and the member list |
-| Side menu | `SideNav` and `SideMenu` (`components/side-menu.tsx`), `.side-nav`, `.side-nav-folded`, `.menu-button`, `.side-menu`, `.side-menu-panel`, `.side-menu-group` | The one navigation of the staff area and the operator portal: a sidebar from 720px that folds to icons, a drawer of the same items below it (see Navigation) |
+| Side menu | `SideNav` and `SideMenu` (`components/side-menu.tsx`), `.side-nav`, `.side-nav-folded`, `.menu-button`, `.side-menu`, `.side-menu-panel`, `.side-menu-group` | The navigation of the staff area and the operator portal from 720px: a sidebar that folds to icons; below 720px the operator portal draws the same items in a drawer (see Navigation) |
+| Bottom tabs | `StaffTabBar` and `TabBar` (`areas/staff/tabs.tsx`), `MoneyPage` and `MorePage` (`areas/staff/tab-pages.tsx`), `.tab-bar`, `.tab`, `.tab-icon`, `.tab-badge` | The staff area's navigation below 720px (#539): Sell, My stock, Buy, Money and More (see Navigation) |
 | Breadcrumbs | `StaffBreadcrumbs` (`components/breadcrumbs.tsx`): `<nav aria-label="Breadcrumb">` with an `<ol>` | One trail under the staff bar from the routes' `crumb` labels (FR-UXN-01); the last item is `aria-current="page"`; below 720px only Back to the parent and the current page |
-| Category group | `GroupControls`, `GroupedBodies`, `GroupedCards` (`areas/staff/retail/category-groups.tsx`), `.cat-head` | A list in expandable category sections: a full-width header button (`aria-expanded`, `aria-controls`) with the count and subtotal, a Group by category switch, Expand all and Collapse all (FR-UXN-02) |
+| Category group | `GroupControls`, `GroupedBodies`, `GroupedCards` (`areas/staff/retail/category-groups.tsx`), `.cat-head` | A list in expandable category sections: a full-width header button (`aria-expanded`, `aria-controls`) with the count and subtotal, a Group by category switch, Expand all and Collapse all (FR-UXN-02). The Stock page and the catalogue items only; never an item picker |
+| Item picker | `ItemCombobox` (`app/ui/ItemCombobox.tsx`), `ProductPicker` (`areas/staff/retail/ui.tsx`), `.cb-pop`, `.cb-option`, `.cb-empty` in `ui/search.css`; `--z-dropdown` | The one way to find and add an item (#534, FR-UXN-07): a labelled search box whose matches open under it, over the page, only while something is typed, at most 10, each a 48px row; a pick adds the item, empties the box, closes the list and keeps the cursor in the box. Combobox pattern: `aria-expanded`, `aria-controls`, `aria-activedescendant`, Up, Down, Enter and Escape. The list fades and rises 4px over 150ms, off under reduced motion |
 | Home cards | `HomeCards` (`areas/staff/home-cards.tsx`), `.home-cards`, `.home-card`, `.home-figures` | Home's card per module the business uses (#471, FR-UXN-05, ADR-072): a `.card` headed with the module's menu icon and name, its figures as a `dl` (label muted, value large and semibold, a count as a hint), and a link to the module; a grid of columns at least 280px wide, so one column on a phone |
 | Shop summary cards | `TakingsCard`, `CreditCard`, `TopItemsCard`, `BranchesCard` (`areas/staff/home-cards.tsx`), `.home-summary`, `.home-summary-body`, `.home-list` | The shop's cards after the Shop card on Home (#485, FR-UXN-06, ADR-076): a `.card` headed by its name without an icon (the icons stay the modules'), figures as a `dl` or a `.home-list` (a name, then its figure at the end of the line, semibold), Today and This week as two `aria-pressed` buttons, a plain sentence when there is nothing to show, and a link to the full page |
 | Retail shortcuts | `RetailMenuGroup` (`areas/staff/retail/nav.tsx`) | Up to five retail shortcuts the user may use, as a group under Retail in the side menu on every size (#455, which removed the retail bottom bar) |
-| Tile | `.tile-grid` of `.tile` | Retail home: icon, label, hint; two per row on a phone |
+| Tile | `<TileGrid label><Tile to icon label hint /></TileGrid>` (`app/ui/Tile.tsx`, `.tile-grid`, `.tile`, `.tile-label`, `.tile-hint` in `ui/navigation.css`; #508) | Every hub page (Retail home, Catalogue, Business set-up): an icon above the label and a one-line hint under it, two per row on a phone. The link is named by its label and described by its hint. A press shrinks it to 98% over 120ms; hover changes the edge and background; focus adds a 3px ring; the shadow never grows |
+| Sale bar | `<SaleBar>` around the sale's submit button (`areas/staff/retail/sale.tsx`, `.sale-bar`, `.sale-bar-action`, `.sale-bar-amount`; #508) | The sale screen's one primary action, Record sale with the live total (Record sale UGX 45,000). Below 720px it sticks full width to the bottom of the screen over the page gutter, and `SaleBar` measures it with a `ResizeObserver` into `--bottom-bar` on the root (cleared on unmount), so the toast rises above it and `scroll-padding-bottom` with the form's bottom padding keep a focused field clear of it; from 720px it sits in the form. The total above it is `.rt-total-hero` with the amount in `.rt-total-amount` at `--text-display`. A new line on the sale slides (`.line-new`) up 8px and fades in over 200ms; the count beside Items (`.count-badge`) pops on every add or scan top-up, never on a removal; and a phone that can vibrates for 10ms. A duplicate add gives none of these |
+| Amounts | `.num`, `.rt-total`, `.rt-group-total`, `.rc-total`, `.line-foot`, `.sale-bar-amount`, `.an-stat-value`, `.iv-card-value`, `.iv-bars-value`, `.iv-value-btn`, `.home-figure dd` (`ui/base.css`) | Every amount in tabular figures, formatted only by `formatMinor` (`money()` on the retail screens); UGX has no decimals |
 | Stat tile | `.an-stats` of `.an-stat` (`.an-stat-label`, `.an-stat-value`, a `.hint`) | The retail dashboard: a figure with its label, two per row on a phone and four from 720px; `.an-placeholder` (dashed) marks a slot for a figure that does not exist yet and shows no number |
 | Bars | `Bars` (`areas/staff/retail/analytics-ui.tsx`): an `<ol class="bars">` of a name, a figure and an inline `<svg class="bar">` | A ranking drawn as bars scaled to the largest. The figure is text; the SVG is `aria-hidden` and is colour from `.bar-fill` and `.bar-track`, never an attribute |
 | Sparkline | `Sparkline` (same file): `<svg class="spark" role="img" aria-label>` with a `<polyline class="spark-line">` | A trend line from zero to the largest value, with the total in text beside it and the label saying what it shows |
 | Alert | `.alert` with `-danger`, `-warning`, `-success`, `-info` | Left rule and tint; the words carry the meaning |
 | Badge | `.badge` with `-success`, `-warning`, `-danger`, `-info` | |
+| Segmented (#520) | `<Segmented label options value onChange tour />`, `clearable` to let a second press clear it (`app/ui/Segmented.tsx`, `.segmented` in `ui/kit.css`) | The one "pick one" control, for 2 to 5 options: a Radix ToggleGroup of one choice styled by our tokens, so a named radio group that is one Tab stop with the arrow keys between options, drawn as one neutral tray with the chosen option raised, never a brand fill. It replaced every `.cluster.filters` row; the design guard fails a `filters` class |
+| Stepper (#520) | `<Stepper id label name value onChange min max step inputMode />` (`app/ui/Stepper.tsx`, `.stepper`) | A quantity: 48px minus and plus either side of a centred, tabular number field that still takes typing. Minus and plus stay within `min` and `max` and go grey at the ends; ArrowUp, ArrowDown, Home and End work in the field. The buttons are named "One less" and "One more" with what is counted. On the Sale screen's quantity |
+| Field (#520) | `<Field label hint error showError required optional {...inputProps} />` or `control={(props) => <select {...props} />}`, with `<FieldsNeededNote />` and `focusFirstMissing(form)` (`app/ui/Field.tsx`, `.field`) | The label above, a hint under it, and the error with its icon in place of the hint once the person leaves the field (or `showError` after a send), never while they type. Wires the id, `aria-describedby`, `aria-invalid` and `aria-required`. Owner rule for required fields: a red asterisk after the label (`aria-hidden`), the form starts with "Fields marked * are needed.", or on a form where most fields are needed the few others say "(optional)", never both on one form; the send button stays enabled and a press goes to the first missing field. The lending forms (`form-fields.tsx`) use the same asterisk and note |
+| MoneyInput (#520) | `<MoneyInput label valueMinor onChange hint error />` (`app/ui/MoneyInput.tsx`, `.money-input`) | UGX in whole shillings on the numeric keypad, UGX drawn inside the field, the commas drawn as the person types (through `formatMinor`), in tabular semibold figures. Hands back minor units or null. Built on Field |
+| ListRow and Card (#520) | `<Card title action><RowList label><ListRow title meta amount to onClick chevron /></RowList></Card>` (`app/ui/ListRow.tsx`, `.ui-card`, `.row-list`, `.list-row`) | One row style for items, sales and people: the title, one muted line, the amount on the right in tabular figures, a chevron when it opens something. The whole row (at least 64px) is the link or the button. The Card is the one surface: hairline edge, `--radius-lg`, `--shadow-sm` |
+| Sheet (#520) | `<Sheet open onClose title actions>content</Sheet>` (`app/ui/Sheet.tsx`, `.sheet-layer`, `.sheet-panel`) | Pickers and confirmations, a Radix Dialog styled by our tokens. Under 720px a bottom sheet with a grab bar that a swipe down closes, by touch only; wider, a centred dialog. Focus starts on the first control of the content and Tab stays inside, Escape, Close and a tap outside close it, the page behind is hidden from a screen reader (never a live region, so a toast is heard) and does not scroll, and focus returns to the opener. Arrives in 200ms by transform and opacity. Replaces `dialog.sheet` in phase 3 |
+| Empty state, kit (#520) | `<EmptyState text action={{ label, to }} />` (`app/ui/EmptyState.tsx`, `.empty-line`) | One muted line and at most one action, centred. Replaces the illustrated `EmptyState` of `components/states.tsx` in phase 3 |
+| Skeleton (#520) | `<Skeleton loading={query.isPending} of={key} rows>content</Skeleton>` (`app/ui/Skeleton.tsx`, `.skeleton-rows`) | Nothing for the first second, then still grey rows faded in once, never a loop. Once the content has been on the screen a reload never covers it; a new list (`of` changes) starts again |
+| Success screen (#520) | `<SuccessScreen title amount detail actions />` (`app/ui/SuccessScreen.tsx`, `.success-screen`) | After a sale or a payment: a check drawn in 400ms, the title (focused), the amount at the display size, then the next steps as plain buttons, the first primary. Centred |
 | Search box | `useLiveSearch` and `<SearchBox id label search fetching count more>` (`app/ui/`) with `<SearchResults fetching>`, `<NoResults term onClear noun>` and `<Highlight text term>` | Every search on every screen: the label, the input with a Clear button, and a polite status line ("Searching", "12 results", `No results for "x"`). The text is live, the term follows after 250 ms, Escape clears, the old list stays dimmed until the new answer arrives. Pass `placeholderData: keepPreviousData` and the query function's `signal`. Rules: `docs/specs/search.md` section 2 |
 | Form fields | `TextField`, `SelectField`, `Group`, `SaveBar`, `useFormErrors` (`areas/staff/lending/form-fields.tsx`; `.mf`, `.mf-field`, `.mf-group`, `.mf-savebar`) | A label above each input, hint and error tied with `aria-describedby`, `aria-invalid`, focus to the first refused input, groups as fieldset and legend, and a save bar stuck to the bottom of a phone with what blocks it in words |
 | Photo control | `PhotoQueueControl`, `usePhotoQueue` (`areas/staff/lending/photo-queue.tsx`, `image-prep.ts`; `.ph-*`) | Take a photo (camera) or Choose a file, checked and shrunk in the browser, progress, Send again that does not shrink twice |
@@ -104,7 +118,7 @@ The platform host and a tenant without a colour show the Rincol blue.
 | Success, error | `<StatusPanel tone="success" title="...">` | `role="status"` or `"alert"`; the title in the status colour |
 | Loading | `<BrandLoader />` for a page, `<SkeletonList />` for a list, `.loading` for a line of text, `.spinner`, `.skeleton` | Every loader names what loads in words; motion stops with `prefers-reduced-motion` |
 | Dialog | `<dialog>`, `<dialog className="sheet">`, `.dialog-actions` | Rises in over 200ms with a fading backdrop; a bottom sheet that slides up below 560px, actions full width |
-| Toast | `.toast`, `.toast-success`, `.toast-danger` with `role="status"` | At the bottom of the screen, centred on the content column beside the sidebar, rises in; no screen raises one yet |
+| Toast | `<Toast message tone />` and `useToast()` (`areas/staff/retail/toast.tsx`), `.toast`, `.toast-success`, `.toast-error`, `.toast-info` | A dark neutral pill (`--color-toast`, dark in both themes) with a leading check, error or info icon and no coloured edge; at the bottom of the screen, centred on the content column beside the sidebar and above the sticky sale bar, rises in, gone after 4 seconds. A status for success and info, an alert for an error, hidden where the screen already says the same |
 | Illustration | `illustrations.hero`, `.shopfront`, `.secure`, `.success`, `.error`, and the four empty ones | Decorative (`aria-hidden`), under 2 KB each, no colour attribute: `.ill-tint`, `.ill-tint-strong`, `.ill-accent`, `.ill-primary` follow the tenant colour; `.ill-surface`, `.ill-line` are neutral; `.ill-success-*`, `.ill-danger-*` stay status colours. `shopfront` is the sign-up hero for the onboarding pages of #97 to adopt |
 | iPhone install pictures | `IosSteps` in `frontend/src/install/InstallPrompt.tsx`, drawings in `src/install/ios-pictures.tsx` (#448) | One drawing of the part of Safari beside each of the four install steps (a normal tab, Share in the toolbar, Add to Home Screen and View More in the share sheet, Add at the top right): our own simple shapes, never screenshots or Apple artwork; unlike the decorative illustrations each is `role="img"` with a short `aria-label` that describes the drawing ("Picture: ..."), so a screen reader does not read the step twice; a 100 unit viewBox drawn at 104px with 11 unit labels, so they read at about 11px on a 360px phone; under 2 KB each; painted by the `.ill-*` classes plus `.ill-accent-ring` (what to tap), `.ill-thin` (the Share icon), `.ill-dashed` and `.ill-text*`; View More sits in a frame of its own under the Add to Home Screen row, since it is a second place to look, not a row seen beside it; step 2 says that on an iPad Share is at the top right; `.ios-step` keeps the words first and moves the picture under them on a narrow phone |
 | New logo on the home screen | `NewIconNote` and `NewLogoCard` in `frontend/src/install/NewIcon.tsx` (#453, ADR-066) | The note sits in the Logo fieldset of set-up after a logo or colour save while a logo is set: plain words with the home screen name, no `role="status"` (the save message already is one), and a Show me how on an iPhone button that reveals `IosSteps`. The card is a `.card` headed Your app has a new icon, in the staff area, only in the installed app on an iPhone or iPad, once per new icon version, with the business's address, `IosSteps` and a Done button; never on the first run, nor on the device that made the save. Neither names an iOS menu item: press and hold the icon, then remove it |
@@ -121,9 +135,9 @@ The platform host and a tenant without a colour show the Rincol blue.
 
 ## Navigation (#455)
 
-One navigation pattern on every screen size: the staff area and the operator portal list their areas in a side menu with an
-icon on each item, like the owner's other apps. There are no area tabs and no separate retail row. Only where the menu sits
-changes, at the design system's phone width, `(max-width: 719px)`, read in code by `useIsPhone` (`components/side-menu.tsx`;
+From 720px the staff area and the operator portal list their areas in a side menu with an icon on each item, like the owner's
+other apps. Below 720px the staff area has bottom tabs for the five daily jobs instead (#539, decisions D29 and D31), and the
+operator portal keeps the drawer. There is no separate retail row. Where the navigation sits changes at the design system's phone width, `(max-width: 719px)`, read in code by `useIsPhone` (`components/side-menu.tsx`;
 the retail screens re-export it) and in CSS by the `720px` media queries. CSS custom properties cannot be used in a media
 query, so the number is the token.
 
@@ -155,7 +169,7 @@ query, so the number is the token.
   step points at one of its links or its `tours` (`retail-nav` for Shop). The heading acts on what the person sees, as the
   sidebar button does: a press on a section held open folds it and wins until the page or the tour step changes. In the folded
   sidebar the heading is its icon, with the label as its accessible name and `title`. With one section, or none, the list stays
-  flat with no heading, as before. On a phone the one-tap Sell is there only while retail is on, and Sale stays in Shop too.
+  flat with no heading, as before. On a phone the same sections head the More page's cards (#539).
 - **Folding the sidebar:** a button at its top (the `menu` icon, the constant name `aria-label="Menu labels"`, `aria-expanded`
   true while the labels show, a `title` that says Show or Hide menu labels) folds it to 64px of icons and back. It starts
   folded between 720 and 1023px and unfolded from 1024px. A folded item keeps its label as its accessible name (a
@@ -166,14 +180,37 @@ query, so the number is the token.
   shows. The button acts on what the person sees and the press wins for the rest of that step: pressed during the step, the
   sidebar folds (or unfolds again on a second press) at once, with `aria-expanded`, the `side-nav-folded` class and the
   `title` following, and the choice is kept in `bms.sidebar`. A step that points somewhere else, or the tour ending, forgets the press: the next step that points into the sidebar, going back to the step, or the next run of the tour unfolds it again.
-- **Below 720px, the drawer** (`SideMenu`): a menu button (`.menu-button`, the `menu` icon, `aria-label="Menu"`) at the top
-  left of the staff bar opens the list in a side drawer from the left: 85% of the width, at most 320px, over a dimmed backdrop
+- **Below 720px, the staff area's bottom tabs (#539):** `StaffTabBar` draws a `nav` named Main fixed to the bottom of the
+  screen, one link per tab, in this order: **Sell** (the sale screen, for `useSells`), **My stock** (the stock list, for the
+  `stock` screen), **Buy** (restock, the D24 word for it, for the `restock` screen), **Money** (`/staff/money`, while
+  `moneyLinks` lists a page: the cash book pages, Customers who owe, Credit control, the customer accounts and ageing pages
+  while `customer_accounts` is on, What you owe suppliers, member Savings with lending and Receive payments) and **More**
+  (`/staff/more`, always). A tab whose module is off or whose page the session may not use is not drawn, so the bar holds one
+  to five tabs; a business with lending only has Money (when it has a money page) and More. More lists `staffAreas` as rows,
+  under the Shop and Lending headings for a business with both, the Retail row standing for every shop page, then the shop in
+  use (`CurrentShop`), the person's name and Sign out (the staff layout passes `signOut` and `signingOut` in `StaffContext`).
+  Each tab is an icon above its label on a target 64px tall and at least 48px wide; the current one (`aria-current="page"`, on
+  its page and the pages under it, such as Count under My stock) takes `--color-link`, a semibold label and a tinted pill
+  (`--color-accent-tint`) behind the icon that fades and widens in by opacity and transform over `--motion`: no stripe, no
+  glow, no shadow. Home and the pages only More lists have no current tab. My stock carries a badge with the count of items low
+  on stock (Home's own summary read, `homeSummaryQuery` in `home-cards.tsx`: one key, one gate and one minute of freshness for both, so they share one request and the badge never asks for a session Home would not ask for); the
+  number is `aria-hidden` and the link says ", 3 items low on stock" after its label. No other tab has a badge. The bar pads itself
+  with `env(safe-area-inset-bottom)`, `-left` and `-right`; while it shows, the root has `has-tab-bar` and `--tab-bar`, the bar's
+  measured height (a `ResizeObserver`, as the sale bar measures `--bottom-bar`, so a large font or text zoom is counted; the CSS
+  value, 64px and the hairline plus the bottom inset, is only the first paint's). The body ends that far up, the sale bar and the
+  member form's save bar stick at `bottom: var(--tab-bar)` so they sit on top of the tabs and never under them, and a toast rises
+  above both. The bar steps aside only while the soft keyboard is up: a text field has focus and `visualViewport` is more than
+  150px shorter than the window, its height multiplied by its scale so a pinch zoom is not a keyboard. Under `interactive-widget=resizes-content` (Android) the window shrinks with the viewport and the bar stays, which is accepted. A field that only has focus (a page that focuses its Scan box, a barcode scanner or a Bluetooth
+  keyboard) leaves it in place, and a browser without `visualViewport` never hides it. While aside it stays mounted with `hidden`,
+  so its read is not asked again. The staff bar has no menu button and no Sell button on a phone, except that Sign out stays in it
+  while two-step set-up blocks the page (`signOutInBar`), since the tabs and More are not drawn then.
+- **Below 720px in the operator portal, the drawer** (`SideMenu`): a menu button (`.menu-button`, the `menu` icon,
+  `aria-label="Menu"`) at the top left of the bar opens the list in a side drawer from the left: 85% of the width, at most 320px, over a dimmed backdrop
   (`--color-scrim`). The person's name and Sign out sit at the bottom (one `BusyButton` in `SideMenu`, with an `onSignOut` prop and a `busy`
   prop held true while signing out runs, like Sign out in the bar). It
   closes on the backdrop, Escape, a left swipe on the drawer (50px, more sideways than down), a chosen link, or any change of
   page (the back button, a tour, a redirect).
-- **One-tap Sell on a phone:** beside the menu button, a primary Sell button (`.staff-sell`, a link to the sale screen) for
-  anyone who can sell (`useSells`), so a sale is one tap as it was on the bottom bar. With branch roles on, it waits until the
+- **Sell on a phone:** the first bottom tab, for anyone who can sell (`useSells`). With branch roles on, it waits until the
   roles are read, so it never flashes up for a session whose every branch is a store. From 720px Sale is in the sidebar instead.
 - **Drawer accessibility:** the drawer is `role="dialog"` with the heading Menu, and `aria-modal="true"` only while the person
   opened it (a tour step that opens it leaves the page reachable); focus moves to its
@@ -186,11 +223,12 @@ query, so the number is the token.
   in over `--motion` (once in 1ms under reduced motion). The sidebar and the drawer draw only with theme roles, so both
   follow light and dark.
 - **Guided tours:** every `data-tour` anchor of a menu item (`nav-areas`, `nav-approvals`, `nav-retail`, `retail-nav` and the
-  rest) is in the page on every size: in the sidebar from 720px, and in the closed drawer (kept with `hidden`) on a phone.
-  When a step points at one, the tour host's current target (`useTour().target`) opens the drawer at once, without animation
-  and without taking focus from the tour card, or unfolds a folded sidebar; both return when the step moves on. A tour that
-  starts while the drawer is open closes it first. The tour copy says "the menu", and "on a phone, open the menu at the top
-  left".
+  rest) is in the sidebar from 720px, which a step that points at one unfolds while it shows. On a phone the More tab answers
+  for them: it carries `data-tour-also` with `nav-areas` and the `tour` id of every link More lists, the tab bar carries
+  `retail-nav`, and the tour host looks for `[data-tour-also~=id]` when no element has the id itself. The welcome tours have a
+  `tabs` step on `data-tour="tab-bar"`, skipped on a laptop, and the copy says "On a phone, tap More at the bottom". In the
+  operator portal a step on a drawer link opens the drawer at once, without animation and without taking focus from the tour
+  card.
 - **One icon per item (#483):** no two items of one menu draw the same picture, counting the Retail shortcuts and the section
   headings as items of the side menu, and each retail tile and catalogue tile as an item of its page. The same item keeps its
   icon wherever it shows: a retail shortcut and its tile both read `icons[screen]`, and the Shop heading and the Shop card on
@@ -284,7 +322,7 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
    colour outside `theme.css`; a new illustration uses the `.ill-*` classes. Add anything new to the
    style page.
 2. Phone first: one column at 360px, nothing scrolls sideways except inside a `.table-wrap`, every tap
-   target at least 44px, the main action last and full width.
+   target at least 48px (`--tap`), the main action last and full width.
 3. State in words as well as colour; errors in `role="alert"` with `.alert-danger`.
 4. Money through `formatMinor` (`src/components/money.ts`), in `.num` cells.
 5. A tenant colour is applied for you; never write a brand colour. Draw with the colour roles, never a palette token, so
@@ -315,9 +353,14 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
   `setup.dom.test.tsx` that the Business set-up page, with everything rendered beside it, draws no picture twice.
 - `npm test` runs the token contrast test and the design guard (`src/app/ui/design-guard.test.ts`: no
   `<style>` element, no inline HTML, and no hex colour in a component or a design layer stylesheet, and no palette token that would not follow the theme);
+  Since #520 it also fails an emoji or a dash in any source, a gradient, glow or glass outside the two named stylesheets, a
+  `.cluster.filters` row in place of Segmented, and, in `ui/kit.css`, a third radius or shadow, a target under 48px, an
+  amount without tabular figures, a motion off the tokens or in a loop (bar the 400ms check), and a kit animation that still
+  moves under reduced motion;
   `src/app/theme-mode.dom.test.tsx` covers the three choices, persistence, following the system, the pre-paint script and the
   theme colour.
 - `/style` in `npm run dev` shows every component at the width of the window.
+- `/staff/kit` (administrators only, not in the menu) shows every control of the component kit (#520) with made-up figures, for review on a phone.
 - The screenshot walk in `docs/ui/design-system/README.md` checks every screen route for sideways
   overflow at 360px and runs axe-core (WCAG 2.1 A and AA rules, colour contrast included).
 

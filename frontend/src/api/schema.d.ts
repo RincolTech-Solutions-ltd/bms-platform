@@ -5413,7 +5413,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Make a Code 128 label code for each item that has no made code yet; idempotent (#345) */
+        /** Make a shop EAN-13 label code (210, nine digits, check digit) for each item that has no made code yet; idempotent (#345, #524) */
         post: operations["generateRetailBarcodes"];
         delete?: never;
         options?: never;
@@ -6442,6 +6442,23 @@ export interface paths {
         };
         /** The receipt of a sale as a PDF to share from the seller's phone, rendered now and never stored; a seller who sees only their own figures gets their own sales only (issue #439) */
         get: operations["renderRetailSaleReceipt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/sales/{sale_id}/receipt/printed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What a sale's receipt PDF prints, laid out for the screen's preview and asked for only when View receipt is tapped; the same check as the PDF, and without printed when it cannot be laid out (issue #500) */
+        get: operations["getRetailSaleReceiptPrinted"];
         put?: never;
         post?: never;
         delete?: never;
@@ -11425,7 +11442,7 @@ export interface components {
              */
             closed_branches?: number;
             items?: components["schemas"]["RetailAllBranchesRow"][];
-            /** @description A total at or below this is low stock; the same for every branch */
+            /** @description A balance at or below this is low stock for an item with no minimum set; the same for every branch */
             low_stock_threshold?: string;
             next_cursor?: string;
         };
@@ -11591,7 +11608,7 @@ export interface components {
             code?: string;
             /** @description ean13, ean8, upca or code128 */
             format?: string;
-            /** @description True for a Code 128 code the system made for the product's labels */
+            /** @description True for a code the system made for the product's labels: a shop EAN-13 from 210 (#524), or a Code 128 IN code made before */
             generated?: boolean;
             /** Format: uuid */
             id?: string;
@@ -12770,13 +12787,13 @@ export interface components {
         RetailDashboardStock: {
             /**
              * Format: int32
-             * @description Active items at or below low_stock_threshold (ADR-029), out of stock ones included, as the stock list's low tab counts them
+             * @description Active items at or below their minimum at a branch, else low_stock_threshold (ADR-029), at a branch that has held them (issue #490), out of stock ones included, as the stock list's low tab counts them
              */
             low_stock?: number;
             low_stock_threshold?: string;
             /**
              * Format: int32
-             * @description Active items whose balance is zero or less, as the stock list judges it: a branch alone, or the sum over the branches reported
+             * @description Active items whose balance is zero or less, as the stock list judges it: a branch alone, or the sum over the branches reported; only items one of them has held (a balance row or a movement, issue #490)
              */
             out_of_stock?: number;
             /**
@@ -13378,7 +13395,7 @@ export interface components {
             date?: string;
             /**
              * Format: int32
-             * @description Present only with retail.stock.read: active items at or below the dashboard's low stock threshold
+             * @description Present only with retail.stock.read: active items low as the dashboard counts them, at or below their minimum or else the low stock threshold, at a branch that has held them (issue #490)
              */
             low_stock?: number;
             /**
@@ -15278,6 +15295,69 @@ export interface components {
              */
             valid_until: string;
         };
+        RetailReceiptPreview: {
+            printed?: components["schemas"]["RetailReceiptPrint"];
+            /** Format: uuid */
+            sale_id?: string;
+            /**
+             * Format: int32
+             * @description The sale's version the receipt was laid out at
+             */
+            sale_version?: number;
+        };
+        /** @description What the receipt PDF prints, in its order and already formatted; absent when it could not be laid out, and the screen then offers the PDF */
+        RetailReceiptPrint: {
+            branch_location?: string;
+            branch_name?: string;
+            business_name?: string;
+            buyer_contact?: string;
+            buyer_name?: string;
+            currency?: string;
+            /** @description The day the receipt was made, as printed */
+            date?: string;
+            due?: string;
+            due_date?: string;
+            /** @description The receipt footer */
+            footer?: string;
+            issued_by?: string;
+            issued_on?: string;
+            lines?: components["schemas"]["RetailReceiptPrintLine"][];
+            /** @description The same-origin URL of the logo the receipt PDF prints: the shop's own when its stored file can be read, else the business logo; absent when the PDF prints none. Versioned so the browser caches it, and public, so an image tag loads it */
+            logo_url?: string;
+            /** @description The net after returns */
+            net?: string;
+            notes?: string;
+            number?: string;
+            payment?: string;
+            price_list?: string;
+            quotation?: string;
+            /** @description The received signature line as printed, such as Received by Test Buyer */
+            received?: string;
+            /** @description One line for each credit note, oldest first */
+            returns?: string[];
+            sale_date?: string;
+            sale_no?: string;
+            status?: string;
+            /** @description RECEIPT, or RECEIPT AFTER RETURNS */
+            title?: string;
+            total?: string;
+            total_words?: string;
+        };
+        RetailReceiptPrintLine: {
+            amount?: string;
+            code?: string;
+            description?: string;
+            /** @description The line under the description as printed: the code, and the price list after a bar */
+            detail?: string;
+            /** Format: int32 */
+            no?: number;
+            /** @description A pack in base units, such as = 60 piece */
+            pack?: string;
+            price_list?: string;
+            /** @description The quantity and unit as sold, such as 5 carton, or 5 alone without a unit */
+            quantity?: string;
+            unit_price?: string;
+        };
         RetailRepayment: {
             /** Format: uuid */
             advance_id?: string;
@@ -16381,7 +16461,7 @@ export interface components {
             /** Format: uuid */
             branch_id?: string;
             items?: components["schemas"]["RetailStockRow"][];
-            /** @description A quantity at or below this is low stock (FR-RET-03); the same for every branch */
+            /** @description A quantity at or below this is low stock (FR-RET-03) for an item with no minimum set; the same for every branch */
             low_stock_threshold?: string;
             next_cursor?: string;
         };
@@ -18440,7 +18520,7 @@ export interface components {
             approval_validity_days?: number;
             disabled_collateral_types?: string[];
             display_name?: string;
-            /** @description True once the admin has saved a business name of their own */
+            /** @description True when the business has a name: the one given at onboarding or one the admin saved */
             display_name_set?: boolean;
             /**
              * Format: date
@@ -30049,6 +30129,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    getRetailSaleReceiptPrinted: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailReceiptPreview"];
                 };
             };
         };

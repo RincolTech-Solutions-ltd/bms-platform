@@ -9033,7 +9033,7 @@
             "type" : "array"
           },
           "low_stock_threshold" : {
-            "description" : "A total at or below this is low stock; the same for every branch",
+            "description" : "A balance at or below this is low stock for an item with no minimum set; the same for every branch",
             "type" : "string"
           },
           "next_cursor" : {
@@ -9339,7 +9339,7 @@
             "type" : "string"
           },
           "generated" : {
-            "description" : "True for a Code 128 code the system made for the product's labels",
+            "description" : "True for a code the system made for the product's labels: a shop EAN-13 from 210 (#524), or a Code 128 IN code made before",
             "type" : "boolean"
           },
           "id" : {
@@ -11423,7 +11423,7 @@
         "description" : "Present only with retail.stock.read",
         "properties" : {
           "low_stock" : {
-            "description" : "Active items at or below low_stock_threshold (ADR-029), out of stock ones included, as the stock list's low tab counts them",
+            "description" : "Active items at or below their minimum at a branch, else low_stock_threshold (ADR-029), at a branch that has held them (issue #490), out of stock ones included, as the stock list's low tab counts them",
             "format" : "int32",
             "type" : "integer"
           },
@@ -11431,7 +11431,7 @@
             "type" : "string"
           },
           "out_of_stock" : {
-            "description" : "Active items whose balance is zero or less, as the stock list judges it: a branch alone, or the sum over the branches reported",
+            "description" : "Active items whose balance is zero or less, as the stock list judges it: a branch alone, or the sum over the branches reported; only items one of them has held (a balance row or a movement, issue #490)",
             "format" : "int32",
             "type" : "integer"
           },
@@ -12572,7 +12572,7 @@
             "type" : "string"
           },
           "low_stock" : {
-            "description" : "Present only with retail.stock.read: active items at or below the dashboard's low stock threshold",
+            "description" : "Present only with retail.stock.read: active items low as the dashboard counts them, at or below their minimum or else the low stock threshold, at a branch that has held them (issue #490)",
             "format" : "int32",
             "type" : "integer"
           },
@@ -16339,6 +16339,160 @@
         },
         "required" : [ "lines", "valid_until" ]
       },
+      "RetailReceiptPreview" : {
+        "properties" : {
+          "printed" : {
+            "$ref" : "#/components/schemas/RetailReceiptPrint"
+          },
+          "sale_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "sale_version" : {
+            "description" : "The sale's version the receipt was laid out at",
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailReceiptPrint" : {
+        "description" : "What the receipt PDF prints, in its order and already formatted; absent when it could not be laid out, and the screen then offers the PDF",
+        "properties" : {
+          "branch_location" : {
+            "type" : "string"
+          },
+          "branch_name" : {
+            "type" : "string"
+          },
+          "business_name" : {
+            "type" : "string"
+          },
+          "buyer_contact" : {
+            "type" : "string"
+          },
+          "buyer_name" : {
+            "type" : "string"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "date" : {
+            "description" : "The day the receipt was made, as printed",
+            "type" : "string"
+          },
+          "due" : {
+            "type" : "string"
+          },
+          "due_date" : {
+            "type" : "string"
+          },
+          "footer" : {
+            "description" : "The receipt footer",
+            "type" : "string"
+          },
+          "issued_by" : {
+            "type" : "string"
+          },
+          "issued_on" : {
+            "type" : "string"
+          },
+          "lines" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailReceiptPrintLine"
+            },
+            "type" : "array"
+          },
+          "logo_url" : {
+            "description" : "The same-origin URL of the logo the receipt PDF prints: the shop's own when its stored file can be read, else the business logo; absent when the PDF prints none. Versioned so the browser caches it, and public, so an image tag loads it",
+            "type" : "string"
+          },
+          "net" : {
+            "description" : "The net after returns",
+            "type" : "string"
+          },
+          "notes" : {
+            "type" : "string"
+          },
+          "number" : {
+            "type" : "string"
+          },
+          "payment" : {
+            "type" : "string"
+          },
+          "price_list" : {
+            "type" : "string"
+          },
+          "quotation" : {
+            "type" : "string"
+          },
+          "received" : {
+            "description" : "The received signature line as printed, such as Received by Test Buyer",
+            "type" : "string"
+          },
+          "returns" : {
+            "description" : "One line for each credit note, oldest first",
+            "items" : {
+              "description" : "One line for each credit note, oldest first",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "sale_date" : {
+            "type" : "string"
+          },
+          "sale_no" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "title" : {
+            "description" : "RECEIPT, or RECEIPT AFTER RETURNS",
+            "type" : "string"
+          },
+          "total" : {
+            "type" : "string"
+          },
+          "total_words" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RetailReceiptPrintLine" : {
+        "properties" : {
+          "amount" : {
+            "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "detail" : {
+            "description" : "The line under the description as printed: the code, and the price list after a bar",
+            "type" : "string"
+          },
+          "no" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "pack" : {
+            "description" : "A pack in base units, such as = 60 piece",
+            "type" : "string"
+          },
+          "price_list" : {
+            "type" : "string"
+          },
+          "quantity" : {
+            "description" : "The quantity and unit as sold, such as 5 carton, or 5 alone without a unit",
+            "type" : "string"
+          },
+          "unit_price" : {
+            "type" : "string"
+          }
+        }
+      },
       "RetailRepayment" : {
         "properties" : {
           "advance_id" : {
@@ -18381,7 +18535,7 @@
             "type" : "array"
           },
           "low_stock_threshold" : {
-            "description" : "A quantity at or below this is low stock (FR-RET-03); the same for every branch",
+            "description" : "A quantity at or below this is low stock (FR-RET-03) for an item with no minimum set; the same for every branch",
             "type" : "string"
           },
           "next_cursor" : {
@@ -22671,7 +22825,7 @@
             "type" : "string"
           },
           "display_name_set" : {
-            "description" : "True once the admin has saved a business name of their own",
+            "description" : "True when the business has a name: the one given at onboarding or one the admin saved",
             "type" : "boolean"
           },
           "go_live_date" : {
@@ -37569,7 +37723,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Make a Code 128 label code for each item that has no made code yet; idempotent (#345)",
+        "summary" : "Make a shop EAN-13 label code (210, nine digits, check digit) for each item that has no made code yet; idempotent (#345, #524)",
         "tags" : [ "retail-catalogue" ]
       }
     },
@@ -40816,6 +40970,34 @@
           }
         },
         "summary" : "The receipt of a sale as a PDF to share from the seller's phone, rendered now and never stored; a seller who sees only their own figures gets their own sales only (issue #439)",
+        "tags" : [ "retail-documents" ]
+      }
+    },
+    "/api/v1/retail/sales/{sale_id}/receipt/printed" : {
+      "get" : {
+        "operationId" : "getRetailSaleReceiptPrinted",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sale_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailReceiptPreview"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "What a sale's receipt PDF prints, laid out for the screen's preview and asked for only when View receipt is tapped; the same check as the PDF, and without printed when it cannot be laid out (issue #500)",
         "tags" : [ "retail-documents" ]
       }
     },

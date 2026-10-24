@@ -112,7 +112,7 @@
   border-radius: var(--radius-sm);
   background: linear-gradient(90deg, var(--color-neutral-tint), var(--color-surface-muted), var(--color-neutral-tint));
   background-size: 200% 100%;
-  animation: rt-shimmer 1.2s ease-in-out infinite;
+  animation: rt-shimmer 1.2s var(--ease-out) infinite;
 }
 
 @keyframes rt-spin {
@@ -130,23 +130,50 @@
   }
 }
 
-/* A toast, bottom centre, rising in (#106); beside the sidebar it centres on the content column (#455). Give it role="status" (or
-   "alert" for a failure); -success and -danger add a coloured edge, the words carry the meaning. */
+/* A toast (#106, #508, docs/ui-rules.md rule 15): a dark neutral pill, bottom centre, rising in; beside the sidebar it centres on
+   the content column (#455), and above the sticky sale bar and the phone's bottom tabs (#539). Its kind is the leading icon and the words, never
+   a coloured edge. Render it with the Toast of areas/staff/retail/toast.tsx. */
 .toast {
   position: fixed;
   left: calc(50% + var(--side-nav-width, 0px) / 2);
-  bottom: calc(var(--space-5) + env(safe-area-inset-bottom));
+  bottom: calc(var(--space-5) + var(--bottom-bar, 0px) + max(var(--tab-bar, 0px), env(safe-area-inset-bottom)));
   transform: translateX(-50%);
   z-index: var(--z-toast);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: max-content;
   max-width: calc(100% - var(--side-nav-width, 0px) - 32px);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius);
-  background: var(--color-inverse);
-  color: var(--color-on-inverse);
+  margin: 0;
+  padding: var(--space-3) var(--space-5) var(--space-3) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-toast);
+  color: var(--color-on-toast);
   box-shadow: var(--shadow-lg);
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
+  line-height: 1.4;
   animation: rt-toast-in var(--motion) var(--ease-out);
+}
+
+.toast-icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.toast-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* The icon alone carries the kind, in a colour that reads on the dark pill. */
+.toast-success .toast-icon {
+  color: var(--color-toast-success);
+}
+
+.toast-error .toast-icon {
+  color: var(--color-toast-error);
 }
 
 @keyframes rt-toast-in {
@@ -232,5 +259,202 @@
   .refresh-more,
   .refresh-label {
     display: inline;
+  }
+}
+
+/* View receipt (Hillary, 23 Oct 2026; issue #500): the receipt as the PDF prints it, drawn like a printed slip. */
+.receipt-preview {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: center;
+}
+
+.receipt-preview[hidden] {
+  display: none;
+}
+
+.receipt-paper {
+  display: grid;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 380px;
+  padding: var(--space-4);
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+}
+
+.receipt-paper p,
+.receipt-paper dl,
+.receipt-paper table {
+  margin: 0;
+}
+
+.receipt-paper .num {
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  white-space: nowrap;
+}
+
+.receipt-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-2);
+  align-items: start;
+}
+
+.receipt-logo {
+  max-width: 72px;
+  max-height: 48px;
+  object-fit: contain;
+}
+
+.receipt-business,
+.receipt-strong,
+.receipt-no {
+  font-weight: var(--weight-bold);
+}
+
+.receipt-docline {
+  text-align: end;
+}
+
+.receipt-title {
+  margin: 0;
+  padding-block: var(--space-2);
+  border-block: 1px solid var(--color-border-strong);
+  text-align: center;
+  font-size: var(--text-base);
+  letter-spacing: 0.08em;
+}
+
+.receipt-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-3);
+}
+
+.receipt-facts dt {
+  color: var(--color-text-muted);
+}
+
+.receipt-facts dd {
+  margin: 0;
+  text-align: end;
+}
+
+.receipt-lines {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.receipt-lines th {
+  color: var(--color-text-muted);
+  font-weight: var(--weight-regular);
+  font-size: var(--text-xs);
+  text-align: start;
+  vertical-align: bottom;
+  padding: 0 var(--space-1) var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.receipt-lines td {
+  vertical-align: top;
+  padding: var(--space-2) var(--space-1);
+  border-bottom: 1px dashed var(--color-border);
+}
+
+.receipt-lines th:first-child,
+.receipt-lines td:first-child {
+  padding-inline-start: 0;
+}
+
+.receipt-lines th:last-child,
+.receipt-lines td:last-child {
+  padding-inline-end: 0;
+}
+
+/* A column head may wrap, so the item column keeps its room on a phone; the figures under it never do. */
+.receipt-lines th.num {
+  white-space: normal;
+}
+
+.receipt-total {
+  display: flex;
+  justify-content: space-between;
+  font-weight: var(--weight-bold);
+  font-size: var(--text-base);
+}
+
+.receipt-words {
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+.receipt-box {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.receipt-footer {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.receipt-download {
+  background: none;
+  border: 0;
+  padding: var(--space-2);
+  color: var(--color-link);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* A line just added to a sale flashes once, so the eye finds it (Hillary, 23 Oct 2026). The flash is its own element,
+   keyed by the add, so a repeat scan flashes again and the card never keeps a marker. */
+.line-card {
+  position: relative;
+}
+
+.line-added {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--color-success-tint);
+  pointer-events: none;
+  animation: rt-line-added 1.2s var(--ease-out) forwards;
+}
+
+@keyframes rt-line-added {
+  from {
+    opacity: 0.9;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .line-added {
+    animation: rt-line-added-still 1.2s steps(1, end) forwards;
+  }
+
+  @keyframes rt-line-added-still {
+    from {
+      opacity: 0.6;
+    }
+    to {
+      opacity: 0;
+    }
   }
 }

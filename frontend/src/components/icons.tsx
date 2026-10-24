@@ -552,6 +552,36 @@ export const icons = {
       <path d="M5 12.5l4.5 4.5L19 7.5" />
     </Svg>
   ),
+  // The component kit (#520): the Stepper's minus and plus, and the chevron at the end of a row that opens something.
+  minus: (
+    <Svg>
+      <path d="M5 12h14" />
+    </Svg>
+  ),
+  plus: (
+    <Svg>
+      <path d="M12 5v14M5 12h14" />
+    </Svg>
+  ),
+  chevron: (
+    <Svg>
+      <path d="M9 6l6 6-6 6" />
+    </Svg>
+  ),
+  // A circle with an exclamation mark: a toast that says something failed (#508).
+  error: (
+    <Svg>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7.5v5.5M12 16.5v.01" />
+    </Svg>
+  ),
+  // A circle with an i: a toast that only informs (#508).
+  info: (
+    <Svg>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5.5M12 7.5v.01" />
+    </Svg>
+  ),
   // A barcode inside a viewfinder: the camera button of the Scan box (issue #345).
   scan: (
     <Svg>

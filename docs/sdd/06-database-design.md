@@ -1967,7 +1967,7 @@ module on again adds nothing. `S` marks `is_system_controlled`.
 | `name_key` | text, generated stored | `bms_name_key(description)` (V63, issue #352): the description folded to lower case without accents (`bms_fold`, V40) with every run of spaces and punctuation collapsed to one space and the ends trimmed. Indexed on `(tenant_id, name_key)`; the application refuses a second product of the same unit with the same key (422 `duplicate_product_name`, ADR-044), it is not a unique index because an administrator may add one anyway |
 | `duplicate_reason` | varchar(300), null | Why an administrator added a product whose name another product of the same unit has (V63); null otherwise |
 | `category_id`, `unit_id` | uuid | Composite FKs to `retail_categories`, `retail_units` |
-| `cost_minor`, `sell_minor` | bigint >= 0 | The current prices. Changed only by the statement that also writes `retail_price_history` (ADR-020 decision 5) |
+| `cost_minor`, `sell_minor` | bigint >= 0 | The current prices; `cost_minor` is the last price paid per base unit (Last paid), used to set prices and as a branch's first average, never to value stock or cost a sale (ADR-079). Changed only by the statement that also writes `retail_price_history` (ADR-020 decision 5) |
 | `currency` | char(3) | The tenant currency at creation |
 | `active` | boolean | Inactive products stay in history and stock views |
 
@@ -2040,7 +2040,7 @@ Imported history (sales, purchases, adjustments, returns, usage, legacy balances
 | `branch_id`, `product_id` | uuid | Composite FKs |
 | `kind` | text | `opening`, `purchase`, `return`, `transfer_in` (positive); `sale`, `usage`, `damage`, `transfer_out` (negative); `adjustment`, `legacy_balance` (either sign). CHECK on the sign |
 | `qty` | numeric(14,3) | Signed, never zero |
-| `unit_cost_minor` | bigint | The product's cost at the time: the valuation snapshot |
+| `unit_cost_minor` | bigint | The cost per base unit the movement carries: the branch's average for stock leaving at the average, what it cost for stock coming in (ADR-079) |
 | `source_type`, `source_id`, `source_line_id` | | The document that wrote it: `retail.sale`, `retail.sale_void`, `retail.stocktake`, the R3 sources, `retail.transfer` and `retail.transfer_void` (source id the transfer, line id its line), `retail.purchase_void` (source id the restock voided, an `adjustment` per movement of the restock, V63, issue #351) and `retail.stock_correction` (source id the correction, one `adjustment`; the reports that count shrinkage read `retail.stocktake` only, ADR-044) |
 | `reverses_movement_id` | uuid | Set on a void's `return`, and on a transfer void's opposite movement; unique, so a movement is reversed at most once |
 | `transfer_id` | uuid | The transfer a `transfer_out` or `transfer_in` belongs to, and only on those kinds (CHECK `retail_stock_movements_transfer_link`, V22); composite FK to `retail_transfers`, checked at commit because the movements are written under their balance locks before the header |
@@ -2055,7 +2055,15 @@ instant range so this index applies (section 6.12); `(tenant_id, transfer_id)` p
 
 ### `retail_stock_balances` (RLS; `bms_app` SELECT, INSERT, UPDATE)
 
-Primary key `(tenant_id, branch_id, product_id)`, `qty numeric(14,3)`, `updated_at`. Written only by
+Primary key `(tenant_id, branch_id, product_id)`, `qty numeric(14,3)`, `updated_at`, and (V94, ADR-079, issue #523)
+`avg_cost_minor bigint` (0 to 10^13): the moving weighted average cost of one base unit at the branch. A new row starts at the
+product's `cost_minor`; a movement at another cost than the average re-averages it under the row's lock, a movement at the average
+leaves it, and the rounding remainder posts per branch to purchase rounding (source `retail.average_cost`). V94 set it to the
+product's cost on every row that existed; a row inserted without it starts at the product's `cost_minor` (trigger
+`retail_stock_balances_avg_default`, in place of a default). Every valuation reads a balance times its own row's
+average. The part of a landed cost or supplier price credit line that went into each branch's average is kept in
+`retail_cost_spreads` (`line_id`, `branch_id`, `product_id`, `inventory_minor > 0`; forced RLS, append-only, V94), so the void takes
+back exactly those parts. Written only by
 `StockLedger` in the transaction of each movement, under the row's lock (`SELECT ... FOR UPDATE`,
 taken in branch and product order). Product rows are locked only by restocks and price edits, with
 `FOR NO KEY UPDATE` (see purchases below). The nightly job `retail.stock-reconciliation` compares each row
@@ -2090,7 +2098,7 @@ every role (`reject_mutation`). V22 allowed the void only; V38 replaced the trig
 ### `retail_transfer_lines` (RLS; append-only except one column, `bms_app` SELECT, INSERT, UPDATE of `received_qty`)
 
 `transfer_id`, `line_no`, `product_id`, `qty numeric(14,3)` (positive), `unit_cost_minor` (the
-source's cost when moved, at most 10^13) and `line_cost_minor`. One line per product per transfer
+source branch's average cost when moved, ADR-079, at most 10^13) and `line_cost_minor`. One line per product per transfer
 (`UNIQUE (transfer_id, product_id)`). The quantities that moved are the movements themselves
 (`source_line_id` the line). `received_qty numeric(14,3)` (V38, null until a receipt, then at least
 zero and at most `qty`, CHECK `retail_transfer_lines_received_qty_chk`) is set once, by the receipt,
@@ -2176,7 +2184,8 @@ Indexes: `(tenant_id, branch_id, sale_date, created_at, id)` for a branch's list
 ### `retail_sale_lines` (RLS; append-only, `bms_app` SELECT, INSERT)
 
 `line_no`, `product_id`, `qty numeric(14,3) > 0`, and the snapshots `unit_price_minor` and
-`unit_cost_minor` with `line_total_minor` and `line_cost_minor` (each rounded half up once). Profit
+`unit_cost_minor` (the branch's average cost per base unit at the moment of sale, ADR-079) with `line_total_minor` and
+`line_cost_minor` (each rounded half up once). Profit
 is computed from these, never from the product's current prices (ADR-020 decision 5). Index
 `(tenant_id, sale_id) INCLUDE (line_total_minor, line_cost_minor)` (V26): a list page loads the lines
 of all its sales in one statement, and the daily profit sums them without reading the heap.
@@ -2206,8 +2215,8 @@ nothing was committed and the idempotency key rolled back, so the same request m
 ### `retail_usage_reports`, `retail_usage_lines` (RLS; append-only, `bms_app` SELECT, INSERT)
 
 A report: `branch_id`, `kind` (`used`, `damaged`), `reason`, `occurred_on`, `cost_total_minor`,
-`journal_entry_id`. A line: `product_id`, `qty > 0`, `unit_cost_minor` (the product's cost at the
-time) and `line_cost_minor`. Each line writes a `usage` or `damage` movement.
+`journal_entry_id`. A line: `product_id`, `qty > 0`, `unit_cost_minor` (the branch's average cost at the
+time, ADR-079) and `line_cost_minor`. Each line writes a `usage` or `damage` movement.
 
 ### `retail_sale_payments` (RLS; append-only, `bms_app` SELECT, INSERT)
 
@@ -2298,7 +2307,7 @@ migration yet: everything else below, except the two-step transfer (issue #193, 
 
 Built: units of measure (issue #194, migration V39). `retail_product_units` (`id`, `tenant_id`, `product_id`, `unit_id`, `factor numeric(14,3) >= 1`, `active`, `version`, audit columns; composite foreign keys to `retail_products` and `retail_units`; unique `(tenant_id, product_id, unit_id)`; forced RLS; the application role may SELECT, INSERT and UPDATE, never DELETE). The pack's unit differing from the product's base unit, and a base unit that cannot change while an active pack exists, are rules of the catalogue service because they span two tables. Four nullable columns on `retail_sale_lines` (`sale_unit_id`, `sale_qty`, `sale_unit_price_minor`, `unit_factor`) and four on `retail_purchase_lines` (`unit_id`, `unit_qty_total`, `unit_cost_minor`, `unit_factor`) record what was entered; all four of a group are null (entered in the base unit, every row that existed before) or all four are set (check `retail_sale_lines_unit_chk`, `retail_purchase_lines_unit_chk`; foreign keys to `retail_units`), each added `NOT VALID` and validated in the same migration (Flyway runs the file in one transaction, so the lock is held through the validation scan; the new columns are null on every existing row, so validation cannot fail), and also tie `qty` to `sale_qty x unit_factor` and `qty_total` to `unit_qty_total x unit_factor`. `qty`, `unit_price_minor`, `cost_minor` and `qty_total` keep their meaning (base units, per base unit), so every report is unchanged; `line_total_minor` is `sale_qty x sale_unit_price_minor` rounded half up once, and on a purchase line the amount paid or owed as entered. The chart gains account 5120 `purchase_rounding` (section 6.11.1), added to existing retail tenants by the migration. The covering index of V26 is untouched.
 
-Built: barcodes on products (issue #345, ADR-070, migration V87, FR-RET-68). `retail_product_barcodes` (`id`, `tenant_id`, `created_at`, `created_by`, `product_id`, the nullable `unit_id` of one of the product's pack sizes (composite foreign key to `retail_product_units (tenant_id, product_id, unit_id)`; null is the product's own unit), `code` (1 to 48 printable ASCII characters, no space, slash or backslash, not only dots), `format` (`ean13`, `ean8`, `upca`, `code128`, with a check that the digit count fits the format), `generated` (a Code 128 code the system made for labels, `IN` and eight digits from `tenant_sequences` key `retail_barcode`), and the generated column `lookup_key` (a code stored as `upca` gets a leading 0, so a UPC-A and the EAN-13 a scanner reports for it are one key; twelve digits stored as `code128` keep their own key); unique `(tenant_id, lookup_key)`, index `(tenant_id, product_id)`; forced RLS; the application role may SELECT, INSERT and DELETE, never UPDATE. Check digits are checked by the catalogue service. Unique among active items: a code held by a switched-off item is deleted (audited `retail.barcode.released`) when an active item takes it.
+Built: barcodes on products (issue #345, ADR-070, migration V87, FR-RET-68). `retail_product_barcodes` (`id`, `tenant_id`, `created_at`, `created_by`, `product_id`, the nullable `unit_id` of one of the product's pack sizes (composite foreign key to `retail_product_units (tenant_id, product_id, unit_id)`; null is the product's own unit), `code` (1 to 48 printable ASCII characters, no space, slash or backslash, not only dots), `format` (`ean13`, `ean8`, `upca`, `code128`, with a check that the digit count fits the format), `generated` (a code the system made for labels from `tenant_sequences` key `retail_barcode`: since V93, issue #524, an `ean13` of `210`, nine digits and the GS1 check digit; before it a `code128` of `IN` and eight digits, which stay; the check `retail_product_barcodes_generated_chk` allows a made code only as `code128` or as an `ean13` starting with 2), and the generated column `lookup_key` (a code stored as `upca` gets a leading 0, so a UPC-A and the EAN-13 a scanner reports for it are one key; twelve digits stored as `code128` keep their own key); unique `(tenant_id, lookup_key)`, index `(tenant_id, product_id)`; forced RLS; the application role may SELECT, INSERT and DELETE, never UPDATE. Check digits are checked by the catalogue service. Unique among active items: a code held by a switched-off item is deleted (audited `retail.barcode.released`) when an active item takes it.
 
 Built: price lists (issue #195, migration V41). `retail_price_lists` (`id`, `tenant_id`, `name` unique ignoring case, `currency`, `strict`, `active`, `version`, audit columns; forced RLS; SELECT, INSERT and UPDATE for the application role). `retail_price_list_items` (`price_list_id`, `product_id`, `unit_id` (the product's base unit or one of its packs), `min_qty numeric(14,3) >= 0` (0 is from any quantity), `price_minor` (0 to 10^13, per `unit_id`), `valid_from`, `valid_to` (the last day, null is open ended, never before `valid_from`); composite foreign keys; a unique index on the open ended row of `(tenant_id, price_list_id, product_id, unit_id, min_qty)`; a lookup index `(tenant_id, price_list_id, product_id, valid_from DESC)`). It is append-only apart from `valid_to`: the application role holds SELECT, INSERT and UPDATE of `valid_to` only, a guard trigger (`retail_price_list_items_guard_update`) lets that one column change from null to a date once, and `reject_mutation` refuses every delete. Two items for the same list, product, unit and break may not overlap in time; the unique index covers the open ended row and `retail.catalogue` checks closed ranges under a `FOR UPDATE` lock on the list row, so concurrent edits of one list serialise (an exclusion constraint would need the `btree_gist` extension). `retail_customer_groups` (`name` unique ignoring case, `price_list_id` nullable, `active`, `version`). `retail_customers` gains nullable `customer_group_id` and `price_list_id`, `retail_sales` a nullable `price_list_id`, and `retail_sale_lines` the nullable `price_source` (`retail`, `list`, `override`), `price_list_id`, `price_break_min_qty`, `resolved_unit_price_minor` (what the system resolved per sale unit, before any override) and `price_override_reason`, all null or one of three shapes enforced by `retail_sale_lines_price_chk`. The foreign keys and the check are added `NOT VALID` and validated in the same migration. `ADD COLUMN` and `ADD CONSTRAINT ... CHECK` take an access exclusive lock and a foreign key takes share row exclusive; Flyway runs the file in one transaction, so every lock is held to the commit and sales, sale history and the daily profit report on `retail_sale_lines`, `retail_sales` and `retail_customers` wait for the migration (brief at the size of a small or medium business; a very large tenant would validate in a later migration). The validation scan is kept because it is one pass over rows whose new columns are all null, it blocks nothing the `ADD COLUMN` lock did not already block, and a constraint left `NOT VALID` stays unvalidated. Three permissions are seeded (chapter 8). No tenant is switched on: the `price_lists` capability is off until an administrator turns it on, and while it is off the sale ignores every list and writes null in every new column.
 

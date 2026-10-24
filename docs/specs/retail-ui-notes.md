@@ -105,9 +105,10 @@ a no-op export.
 - The retail home shows one large tile per screen, with an icon, two per row on a phone. Each tile has its own icon
   (`icons[screen]`, issue #483), the same one its shortcut shows in the side menu; so do the catalogue tiles (`TILE_ICONS`).
 - The retail shortcuts (`retail/nav.tsx`, up to five the user may use) are a group under Retail in the
-  side menu, the sidebar from 720px and the drawer on a phone (issue #455 replaced the bottom bar). Retail stays
-  current on every retail page and is drawn as the section above a current shortcut. On a phone a primary Sell
-  button beside the menu button opens the sale screen in one tap for anyone who can sell.
+  sidebar from 720px (issue #455). Retail stays current on every retail page and is drawn as the section above a
+  current shortcut. On a phone the bottom tabs hold the daily jobs instead (issue #539): Sell, My stock (with the
+  count of items low on stock), Buy, Money and More, each shown only when the session may use it, and the sale's
+  sticky total sits on top of them.
 - Tables sit in a `.table-wrap` that scrolls sideways inside its card on a phone, with a shadow on the
   side that has more columns; quantities and money are right-aligned in tabular figures.
 - Forms end with the main action full width, and any secondary action ("Clear this sale") under it.
@@ -129,6 +130,12 @@ API stays the authority.
 `module_not_enabled`, `branch_required`, `sale_voided`, `stocktake_committed`, `transfer_voided`, `payment_exceeds_balance`, expired
 sessions, and the field messages of `validation_failed`. A code it does not know shows the server's own message,
 so a new refusal (for example a price floor code spelled differently) is never hidden.
+
+A sale line's quantity is the kit's Stepper (issue #520): minus and plus either side of the number, from 1 up, and the
+number can still be typed (1.5 for a part of a kilo). Minus and ArrowDown never go below 1, so on 1.5 kg minus gives 1, and
+below 1 (a typed 0.5 kg) minus is greyed out and ArrowDown does nothing: a part below 1 is typed, never stepped to. This is on
+purpose, not a fault. The Stock screen's All items, Out of stock and Low stock, and every other
+row of pick-one buttons in the retail screens, is the kit's Segmented control.
 
 The sale form also gives early hints that only save a round trip: a quantity above the branch balance, and a
 price not above cost when the cost is known (only with `retail.profit.read`; for anyone else only the server can
@@ -259,9 +266,14 @@ from Town to Second Shop. A Playwright script drove Chromium at 360px and 390px;
   names the branch on each item row; Daily profit adds a By branch table and sums the days across branches. The
   write screens (sale, usage, stock-take, Move stock; Restock already chose its branches per line) still need one
   branch, and now say "Choose a branch to continue:" with a button for each of the user's branches.
-- **Out of stock and Low stock.** Tabs on Stock (`stock_level=out|low`): out is zero or less, low is 5 or fewer
-  and so includes out of stock. The threshold is a constant in the API (`StockService.LOW_STOCK_MILLI`) because
-  the settings catalogue has no retail group (ADR-029); in All branches the level is judged on the total.
+- **Out of stock and Low stock.** Tabs on Stock (`stock_level=out|low`): out is zero or less, low is at or below
+  the item's minimum (the branch's own, else the one for every branch) or 5 or fewer without one, and so includes
+  out of stock. Both keep only items the branch has held (issue #490, ADR-077). The threshold is a constant in the
+  API (`StockService.LOW_STOCK_MILLI`, ADR-029); in All branches an item is low when it is low at any listed branch and out
+  when its total is zero or less. The hints say
+  "Items you have stocked with none left, or less than none." and "Items you have stocked that are at or below their
+  minimum, or 5 or fewer without one, including those out of stock."; the dashboard's Low stock figure says "at their
+  minimum, or 5 or fewer without one".
 - **Credit sales and All sales.** Two screens on the sales list API (new filters `payment_method`, `product_id`,
   `buyer`, `status`, `newest_first`), linked from the retail home. A card shows the buyer, date and amount; a
   credit sale adds the due date, what is still owed and a state badge (Paid, Part paid, Unpaid, Overdue; the
@@ -481,24 +493,22 @@ example Home / Retail / Catalogue / Items. A new route gets its place by declari
   link. Labels longer than 16rem are cut with an ellipsis (the full text is the title). Below 720px the trail
   collapses to "Back to <parent>" and the current page.
 
-**Category groups.** Stock per branch, stock across branches (table, and cards on a phone), the catalogue
-items and the shared product picker (the sale and Move stock screens) group by category
-(`retail/category-groups.tsx`). The low and out of stock lists are the same Stock screen with its level filter,
+**Category groups.** Stock per branch, stock across branches (table, and cards on a phone) and the catalogue
+items group by category (`retail/category-groups.tsx`). The item pickers no longer do: since issue #534 they
+list matches only while something is typed (see "Item pickers" below). The low and out of stock lists are the same Stock screen with its level filter,
 so they group too.
 
 - A header per category (a button with `aria-expanded` and `aria-controls`) shows the count and, on the stock
   lists, a subtotal: the quantity when every item of the group has the same unit, and what the group holds at
-  the selling price. The catalogue and the pickers show the count only. Expand all and Collapse all sit above
+  the selling price. The catalogue shows the count only. Expand all and Collapse all sit above
   the list.
 - Categories are A to Z; items without one are in "Uncategorised", last; items keep the order the server sent.
-- Sections start open for 30 items or fewer and closed above that. A search (the stock and items search boxes,
-  the picker's) opens them, so a match inside a closed section shows. The default is decided when results first
+- Sections start open for 30 items or fewer and closed above that. A search (the stock and items search boxes)
+  opens them, so a match inside a closed section shows. The default is decided when results first
   arrive for a search and filters and held while more load, so "Show more items" never opens or closes a section.
-- The "Group by category" switch is remembered per screen (`stock`, `items`, `picker`) in `localStorage`, inside
-  try and catch: with storage blocked it defaults to on and is forgotten at reload. The picker shows the switch
-  only when its matches span more than one category.
-- The restock and usage screens have pickers of their own and stay flat for now.
-- Grouping is within the items the screen holds. Stock and the pickers are not paged. The catalogue items list is
+- The "Group by category" switch is remembered per screen (`stock`, `items`) in `localStorage`, inside
+  try and catch: with storage blocked it defaults to on and is forgotten at reload.
+- Grouping is within the items the screen holds. Stock is not paged. The catalogue items list is
   (cursor paging): its hint says "Grouped within the items loaded so far. Show more items loads the rest."
 - Search and filters stay the screen's own (plain component state, sent to the server as before); the grouping
   takes the already filtered items. Grouped lists drop the Category column and the per-row category label,
@@ -1232,6 +1242,44 @@ own: the order is copied from the chat, so the form asks for the phone first and
 - Tours: `page-stock-health` v2 adds the Slow movers step (`health-slow`), `page-retail-settings` v4 the settings step
   (`retail-slow-movers`).
 
+## Item pickers (issue #534, FR-UXN-07)
+
+Hatibu (HATS Gayaza) found the always-open list of items under the search box confusing, and asked for the AppSheet dropdown:
+the items show only while you search, and go away once one is picked. Every item picker is now the one shared component
+`ItemCombobox` (`frontend/src/app/ui/ItemCombobox.tsx`); `ProductPicker` (`retail/ui.tsx`) wraps it with the catalogue search.
+
+- **Where.** Record a sale (and the offline picker, which searches the copy on the phone), restock, usage and damage, Move
+  stock, count stock, price lists, orders and their items, quotations, labels, purchase orders, goods received without an
+  order, joining sizes, and the item chosen for an unknown barcode. Correct stock opens from a line of the Stock page, which
+  keeps its full list with Group by category, Expand all and Collapse all. No picker has the grouped browse list any more.
+- **Empty box.** Only the label "Find an item by name, code or category" and the box: no list, and no request to the server.
+- **Typing.** The term follows 250 ms after the last key (`useLiveSearch`). The matches open under the box, over the page, in
+  a card with the larger shadow (no stripe), with a 150 ms fade and 4px rise that eases out and is off under reduced motion.
+  Each option is a row at least 48px tall: the photo, the name and code with the typed words marked, then the category, the
+  price where the screen shows one and the stock here (a negative balance flagged), and the verb of the screen (Add, Choose,
+  Join this item, Add as a size). At most 10 show; with more the status line says "First 10 items shown. Type more to narrow."
+  No match shows `No item matches "<text>".` in the list and the status line. The offline picker says `No item on this phone
+  matches "<text>".` instead, or that nothing is saved on the phone yet. While more is typed, or the answer is on its way, the
+  list says Searching and holds no option, so a quick tap or Enter can never pick a match of the earlier text; the status line
+  stays quiet until the answer, so a screen reader hears it once per pause.
+- **Picking.** A tap, or Up and Down then Enter, adds the item. The box empties, the list closes and the cursor stays in
+  the box for the next item. Enter with nothing highlighted only settles the search; it never picks. Escape closes the list,
+  and a second Escape empties the box; an Escape that closes the list or empties the box never reaches a panel around the picker, and one with nothing to close goes on to it. The list closes when the cursor leaves the picker and opens again on return.
+- **Accessibility.** The input is `role="combobox"` with `aria-expanded`, `aria-controls` and `aria-autocomplete="list"`; the
+  list is a `listbox` named by its box's label and its rows `option`s, the highlighted one `aria-selected` and named on the
+  input by `aria-activedescendant`; the status line under the box is a polite live region. A second picker on a screen has its
+  own label: the barcode assign panel's is "Find the item this barcode belongs to".
+- **Count stock (owner decision on #535).** The search and Scan boxes sit on top. Below them, **Counted items (N)** holds the
+  lines whose count is in, in the order done, and **Not counted yet (N)** holds every other item of the sheet (active items and
+  inactive ones that still hold stock) with its count box and a **0** button for an item that is gone. A line moves to Counted
+  items when its count is entered (on leaving the box, on Enter, or on 0) and back when the count is emptied. A found item that
+  is not counted yet heads Not counted yet, marked, with the cursor in its count box (the one picker where a pick does not leave it in the search, since the count is the next step); a scan counts one more and moves the
+  line to Counted items. With lines left, Review variance first says "12 items not counted. Finish anyway?" with **Keep
+  counting** and **Finish anyway**, as an inline warning, not a dialog. Only counted lines are sent, as before.
+- **Scan box.** Unchanged (ADR-070 decision 11, owner decision D7): a scanner types only into the Scan box, which adds the item or one more.
+- **Tours.** `retail-sales` version 16, `page-stocktake` 3 (the search on top and the list Not counted yet), `page-restock` 3, `page-usage` 2, `page-transfer` 3,
+  `page-sizes-join` 2 and `page-labels` 2 word their search steps for the list that shows while you type.
+
 ## Share the receipt (issue #439, ADR-061, FR-RET-66)
 
 A card **Send the receipt** under the receipt, right after a sale is saved (`sale.tsx`) and on an opened sale (`sales.tsx`, beside
@@ -1241,6 +1289,19 @@ facts (`GET /retail/sales/{sale_id}/receipt`) and shows the server's refusal in 
 whose goods were all taken back. The facts and the PDF are fetched again when the sale's version, paid amount or balance
 changes, so after a payment on the same screen the next share sends the new receipt.
 
+- **View receipt** (issue #500) shows the receipt on the screen as the PDF prints it, in the PDF's order: the logo (the one the PDF
+  prints: the shop's when its stored file can be read, else the business's, by its public cacheable URL), the business, branch and address, the number and date, the title, Bill to, the
+  sale, payment, due date and price list, the items as the PDF's table (No, Item with the code and price list line under it, Quantity with the pack under it, Unit
+  price and Amount), the total in figures and
+  words, the payment status with what was paid and the balance, the credit notes and the net after returns, the notes, Issued
+  by, the received line and the receipt footer. Every one of these strings, the received line and the code and price list line
+  included, is the server's own from the PDF's model; the screen joins and words none of them. It is fetched only when the button is tapped, from
+  `GET /retail/sales/{sale_id}/receipt/printed`, which the server reads off the PDF's own model, so the receipt facts stay a
+  cheap read for Share and WhatsApp and no PDF is fetched to show it: a phone's browser often cannot show a PDF inline (Android
+  Chrome shows a blank box, iOS Safari only the first page). When the receipt cannot be laid out the preview says so and offers
+  **Download the PDF**. The button keeps its label and says open or closed through `aria-expanded` and `aria-controls`; a
+  payment or a return on the same screen closes the preview. Under it, **Download the PDF** fetches the real PDF; it and Share
+  receipt share one fetch, so tapping both fetches the PDF once.
 - **Share receipt** fetches `GET /retail/sales/{sale_id}/receipt/pdf` (never stored, documents capability on or off) and hands the
   PDF to the phone's share sheet as `Receipt <sale no>.pdf` with the caption as its text. On an iPhone (Safari or the installed
   app) and on an Android phone (Chrome or the installed app) the share sheet lists WhatsApp, Gmail, Messages, Telegram and the rest.
@@ -1263,6 +1324,10 @@ changes, so after a payment on the same screen the next share sends the new rece
   `*`, `_`, `~` and the backtick are taken out of the names so they cannot break WhatsApp's bold, and half an emoji is dropped.
 - Nothing is written to the server except the optional number; the typed number is never logged. The tour `retail-sales` is
   version 10: its Save step names Share receipt and WhatsApp customer.
+- **On the sale-complete screen (issue #534)** Share receipt is the first of the receipt actions and the screen's one main
+  action, right under the receipt; View receipt, the WhatsApp number and WhatsApp customer follow, then **New sale** as a full
+  width secondary button 48px tall, and the sale's documents last, so the next sale needs no scroll past them. Until Share receipt is drawn (its facts loading or
+  failed to load), or when the sale has no receipt to share, New sale is the main action, so the screen always has one.
 
 ## Sell offline (issue #458, ADR-067, FR-RET-67)
 
@@ -1378,3 +1443,14 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
   customers; Oldest due 2 Oct 2026), Top items (Today pressed, Test Sugar 1kg 4 bag 24,000), Each shop today (Test Shop One
   100,000, 5 sales; Test Shop Two, No sales yet), each with its link underneath. On a wide screen they sit side by side in columns
   of at least 280px.
+
+## Last paid and the average buying price (issue #523, ADR-079, FR-RET-69)
+
+- The item's own buying price is the last one paid: the item card says "last paid UGX 750" and the Change price form calls the field
+  **Last paid**, with a hint that profit uses the average buying price of the stock in each shop, which restocks keep up to date. The
+  new item form still asks for the **Buying price**; it becomes the last paid price and the first average of a shop that has none.
+- The stock lists call their cost column **Average cost**: on one shop, that shop's average per smallest unit; on all shops, the
+  average of the shops that hold stock, weighted by what each holds. The phone cards say "Average cost UGX 769, price UGX 1,000 each".
+- A restock line that changes the item's buying price says "Last paid will change from UGX 750 to UGX 800", and the restock's summary
+  "last paid changed from UGX 750 to UGX 800". Nothing else on the screens changes: sale lines, profit and the reports show the cost
+  each sale line kept, which is now the shop's average at the moment of sale.

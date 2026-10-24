@@ -303,11 +303,6 @@
   margin-bottom: var(--space-3);
 }
 
-.mf-req {
-  font-weight: var(--weight-regular);
-  color: var(--color-text-muted);
-}
-
 .mf-group {
   margin: 0;
 }
@@ -320,6 +315,12 @@
   padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
   background: var(--color-surface);
   border-top: 1px solid var(--color-border);
+}
+
+/* Over the phone's bottom tabs (issue #539): the save bar stops on top of them, and they take the home indicator inset. */
+.has-tab-bar .mf-savebar {
+  bottom: var(--tab-bar);
+  padding-bottom: var(--space-3);
 }
 
 .mf-savebar-note {

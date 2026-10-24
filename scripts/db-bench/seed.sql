@@ -320,9 +320,10 @@ INSERT INTO retail_stock_movements (id, tenant_id, created_at, occurred_at, busi
                                     transfer_id)
 SELECT * FROM bmove ORDER BY created_at;
 
-INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty, updated_at)
-SELECT tenant_id, branch_id, product_id, sum(qty), max(created_at)
-  FROM bmove GROUP BY tenant_id, branch_id, product_id;
+INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty, updated_at, avg_cost_minor)
+SELECT m.tenant_id, m.branch_id, m.product_id, sum(m.qty), max(m.created_at), min(p.cost_minor)
+  FROM bmove m JOIN retail_products p ON p.tenant_id = m.tenant_id AND p.id = m.product_id
+ GROUP BY m.tenant_id, m.branch_id, m.product_id;
 
 -- Stock-takes: monthly per branch, 100 counted products each.
 INSERT INTO retail_stocktakes (id, tenant_id, created_at, branch_id, status, created_by, committed_by, committed_at)
@@ -525,6 +526,17 @@ SELECT s.tenant_id, bt.users[2], 'bench-' || s.id, 'POST', '/api/v1/retail/sales
        '{"id": "x"}', s.created_at, s.created_at + interval '7 days'
   FROM bsale s JOIN bt ON bt.id = s.tenant_id
  WHERE s.created_at > timestamptz '2026-09-23';
+
+-- Low-stock minimums (issue #412, measured for issue #490): an item level on one product in three and a branch level on one
+-- branch and product in eight, between 2 and 20, so the minimum probes of the low-stock rule find rows.
+INSERT INTO retail_stock_minimums (id, tenant_id, product_id, branch_id, min_qty)
+SELECT gen_random_uuid(), p.tenant_id, p.id, NULL, 2 + abs(hashtext(p.id::text)) % 19
+  FROM retail_products p
+ WHERE abs(hashtext(p.id::text)) % 3 = 0
+UNION ALL
+SELECT gen_random_uuid(), p.tenant_id, p.id, b.id, 2 + abs(hashtext(b.id::text || p.id::text)) % 19
+  FROM retail_products p JOIN branches b ON b.tenant_id = p.tenant_id
+ WHERE abs(hashtext(b.id::text || p.id::text)) % 8 = 0;
 
 INSERT INTO tenant_sequences (tenant_id, sequence_key, next_value)
 SELECT tenant_id, 'retail_sale_no', max(i) + 1 FROM bsale GROUP BY tenant_id

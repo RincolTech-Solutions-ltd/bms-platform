@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { SEARCH_DELAY_MS, createDebouncer } from '../../../app/ui/useLiveSearch';
+import { Stepper } from '../../../app/ui/Stepper';
 import { RetailError, retail, type Product, type ResolvedLine, type Sale, type SalePayment, type SaleRequest } from '../../../api/retail';
 import { mayKeepOnPhone, offlineProblem, offlineSale } from '../../../offline/catalogue';
 import { useOffline, useOnline } from '../../../offline/offline-context';
@@ -23,11 +24,12 @@ import type { BranchRole } from '../../../api/retail';
 import { BRANCH_ROLES, CREDIT_OVERRIDE, CUSTOMER_ACCOUNTS, PRICELIST_MANAGE, PRICELIST_USE, PRICE_LISTS, PRICE_OVERRIDE, UNITS, branchesWhere, capabilityOn, holds, holdsAt, needsOf, sellingBranches } from './permissions';
 import { exceededBy, isLimitRefusal, limitWords, termsWords } from './account-state';
 import { SaleDocuments } from './documents-ui';
-import { ShareReceipt } from './receipt-share';
+import { ShareReceipt, useShareReady } from './receipt-share';
 import { ChangePanel, ReceiptChange } from './sale-change';
 import { receivedFor, receivedProblem } from './sale-change-state';
 import { ScanBar } from './scan';
-import { PACK_UNUSABLE, plusOne, scanInto } from './barcode-state';
+import { PACK_UNUSABLE, plusOne, scanInto, touchedLine } from './barcode-state';
+import { useToast } from './toast';
 
 // Record a sale (FR-RET-04, FR-RET-05). One idempotency key per draft, kept with the draft in this
 // tab until the sale is saved or the draft is cleared: a double tap, a retry after a lost answer or a
@@ -51,7 +53,7 @@ function useSettled<T>(value: T): T {
   return settled;
 }
 
-export function Receipt({ sale, onNew, received }: { sale: Sale; onNew?: () => void; /** Cash the customer gave, for the change line; display only. */ received?: number }) {
+export function Receipt({ sale, received }: { sale: Sale; /** Cash the customer gave, for the change line; display only. */ received?: number }) {
   const canProfit = useProfitAccess();
   return (
     <section aria-label="Sale receipt">
@@ -92,12 +94,43 @@ export function Receipt({ sale, onNew, received }: { sale: Sale; onNew?: () => v
         </p>
       )}
       {canProfit && sale.profit_minor !== undefined && <p>Profit on this sale: {money(sale.profit_minor)}</p>}
-      {onNew && (
-        <button type="button" className="rt-primary" onClick={onNew}>
-          New sale
-        </button>
-      )}
     </section>
+  );
+}
+
+/** A short buzz on a phone that has one when an item goes on the sale (#508); nothing elsewhere. */
+export function tapFeedback() {
+  if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate(10);
+}
+
+/**
+ * The sale's one primary action (#508, docs/ui-rules.md rule 6): on a phone a bar stuck full width to the bottom of the screen,
+ * its button carrying the live total, so the amount and Record sale are always in reach; from 720px it sits under the total.
+ */
+export function SaleBar({ children }: { children: ReactNode }) {
+  // While the bar sticks (a phone), its measured height is --bottom-bar on the page, so the toast rises above it and a field
+  // scrolled into view stops above it, without :has() and at any font size; cleared when the bar goes.
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    const root = document.documentElement;
+    if (!el) return;
+    const measure = () => {
+      if (getComputedStyle(el).position === 'sticky') root.style.setProperty('--bottom-bar', `${Math.ceil(el.getBoundingClientRect().height)}px`);
+      else root.style.removeProperty('--bottom-bar');
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(el);
+    return () => {
+      observer?.disconnect();
+      root.style.removeProperty('--bottom-bar');
+    };
+  }, []);
+  return (
+    <div ref={ref} className="sale-bar" data-testid="sale-bar">
+      {children}
+    </div>
   );
 }
 
@@ -105,7 +138,13 @@ export function Receipt({ sale, onNew, received }: { sale: Sale; onNew?: () => v
  * One line of the sale being made. The unit choice is drawn only while the tenant has the units capability
  * (`unitsOn`) and the item has active pack sizes; otherwise the line is exactly what it was before packs.
  */
-export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, onQty, onPrice, onUnit, onReason, onReset, onRemove }: {
+export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, fresh, slide = false, onFlashed, onQty, onPrice, onUnit, onReason, onReset, onRemove }: {
+  /** Set on the line just added or topped up, a new number each time: it flashes once (Hillary, 23 Oct 2026). */
+  fresh?: number;
+  /** Set while the line just went on the sale as a new line: it slides in (#508). */
+  slide?: boolean;
+  /** Called when the flash has run, so it never stays on or moves to another line. */
+  onFlashed?: () => void;
   line: DraftLine;
   index: number;
   unitsOn: boolean;
@@ -132,7 +171,8 @@ export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, onQty,
   const noPrice = price ? hasNoPrice(price.resolved) : false;
   const changedOffline = offlinePrice !== undefined && f !== null && f.priceMinor !== defaultPrice(line.product, line.unitId);
   return (
-    <div className="rt-card">
+    <div className={`rt-card line-card${slide ? ' line-new' : ''}`}>
+      {fresh !== undefined && <span key={fresh} className="line-added" aria-hidden="true" onAnimationEnd={onFlashed} />}
       <strong>{line.product.description}</strong>
       {packs.length > 0 && (
         <div>
@@ -144,10 +184,7 @@ export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, onQty,
         </div>
       )}
       <div className="rt-row">
-        <div>
-          <label htmlFor={`qty-${i}`}>Quantity ({pack?.unit ?? line.product.unit})</label>
-          <input id={`qty-${i}`} inputMode="decimal" value={line.qty} onChange={(e) => onQty(e.target.value)} aria-invalid={f === null || hint !== null} />
-        </div>
+        <Stepper id={`qty-${i}`} label={`Quantity (${pack?.unit ?? line.product.unit})`} name={line.product.description} value={line.qty} onChange={onQty} min={1} inputMode="decimal" invalid={f === null || hint !== null} />
         <div>
           <label htmlFor={`price-${i}`}>{pack ? `Price per ${pack.unit}` : 'Unit price'}</label>
           <input id={`price-${i}`} inputMode="numeric" value={line.price} onChange={(e) => onPrice(e.target.value)} aria-invalid={f === null} readOnly={price ? !price.canOverride : offlinePrice ? !offlinePrice.canType : false} />
@@ -262,14 +299,45 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
     setDraft((d) => ({ ...d, lines: d.lines.map((l, n) => (n === i ? withUnit(l, unitId) : l)) }));
   const unitsOn = capabilityOn(me, 'retail', UNITS);
   // An item can be on the sale twice (cartons and loose pieces) only while it has pack sizes to choose from.
-  const add = (p: Product) =>
-    setDraft((d) => (d.lines.some((l) => l.product.id === p.id) && !(unitsOn && activePacks(p).length > 0) ? d : { ...d, lines: [...d.lines, newLine(p)] }));
+  // Every add says so on screen (Hillary, 23 Oct 2026): a short toast, and the new line flashes once.
+  const { show, toast } = useToast(2500);
+  // The line just added or topped up flashes once; `n` changes on every add so a repeat scan flashes again. A line just
+  // appended (`created`) also slides in (#508).
+  const [fresh, setFresh] = useState<{ index: number; n: number; created: boolean } | null>(null);
+  // Counts the adds and top-ups, so the count beside Items pops on each and never on a removal (#508).
+  const [pops, setPops] = useState(0);
+  // The lines as of the last add, so two taps or scans before React renders again see each other.
+  const lines = useRef(draft.lines);
+  lines.current = draft.lines;
+  const mark = (index: number, created: boolean) => {
+    tapFeedback();
+    setPops((n) => n + 1);
+    setFresh((f) => ({ index, n: (f?.n ?? 0) + 1, created }));
+  };
+  const add = (p: Product) => {
+    const now = lines.current;
+    if (now.some((l) => l.product.id === p.id) && !(unitsOn && activePacks(p).length > 0)) {
+      show(`${p.description} is already on the sale. Change its quantity below.`, 'info');
+      return;
+    }
+    const next = [...now, newLine(p)];
+    lines.current = next;
+    setDraft((d) => ({ ...d, lines: next }));
+    mark(next.length - 1, true);
+    show(`Added ${p.description}`, 'success');
+  };
   // A scan (issue #345) adds the item at 1, or one more to its line in the pack the barcode is on; a pack it cannot
-  // use is refused, never sold as one piece.
+  // use is refused, never sold as one piece: ScanBar shows the refusal as a warning and no toast is raised.
   const scanAdd = (p: Product, unitId?: string) => {
     const unit = unitsOn && activePacks(p).some((k) => k.unit_id === unitId) ? unitId : undefined;
     if (unitId && !unit) return PACK_UNUSABLE;
-    setDraft((d) => ({ ...d, lines: scanInto(d.lines, p, unit, (l) => ({ ...l, qty: plusOne(l.qty) }), () => (unit ? withUnit(newLine(p), unit) : newLine(p))) }));
+    const now = lines.current;
+    const next = scanInto(now, p, unit, (l) => ({ ...l, qty: plusOne(l.qty) }), () => (unit ? withUnit(newLine(p), unit) : newLine(p)));
+    const { index, created } = touchedLine(now, next);
+    lines.current = next;
+    setDraft((d) => ({ ...d, lines: next }));
+    if (index >= 0) mark(index, created);
+    show(created ? `Added ${p.description}` : `One more ${p.description}`, 'success');
   };
 
   const total = draftTotal(shown.lines);
@@ -315,6 +383,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
 
   return (
     <form
+      className="sale-form"
       onSubmit={(e) => {
         e.preventDefault();
         if (save.isPending || keep.isPending || (problem && !draft.sent)) return;
@@ -335,8 +404,16 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
       </div>
       <ScanBar id="sale-scan" branchId={branchId} onFound={scanAdd} autoFocus />
 
-      <h2>Items</h2>
-      {draft.lines.length === 0 && <EmptyState art="noSales" title="No items yet.">Search above and tap Add.</EmptyState>}
+      <h2>
+        Items{' '}
+        {shown.lines.length > 0 && (
+          <span key={pops} className={pops > 0 ? 'badge count-badge count-pop' : 'badge count-badge'}>
+            {shown.lines.length}
+            <span className="visually-hidden"> on the sale</span>
+          </span>
+        )}
+      </h2>
+      {draft.lines.length === 0 && <EmptyState art="noSales" title="No items yet.">Type an item above and tap it in the list, or scan it.</EmptyState>}
       {pricesOn && resolution.data?.price_list && !checking && (
         <p className="hint" data-tour="sale-price-list" data-testid="price-list-in-force">
           Priced from the list {resolution.data.price_list}{resolution.data.origin === 'customer_group' ? ' (the customer group)' : resolution.data.origin === 'customer' ? ' (the customer)' : ''}.
@@ -349,6 +426,9 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
           line={l}
           index={i}
           unitsOn={unitsOn}
+          fresh={fresh !== null && fresh.index === i ? fresh.n : undefined}
+          slide={fresh !== null && fresh.index === i && fresh.created}
+          onFlashed={() => setFresh(null)}
           price={pricesOn ? { resolved: resolved?.[i], listName: resolution.data?.price_list, canOverride: holdsAt(me, PRICE_OVERRIDE, branchId) } : undefined}
           offlinePrice={offlineMode ? { canType: holdsAt(me, PRICE_OVERRIDE, branchId) } : undefined}
           onQty={(v) => setLine(i, { qty: v })}
@@ -462,8 +542,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
 
       </fieldset>
 
-      <p className="rt-total" aria-live="polite">
-        Total {money(total)}
+      <p className="rt-total rt-total-hero" aria-live="polite">
+        <span>Total</span> <span className="rt-total-amount">{money(total)}</span>
       </p>
       <ChangePanel method={draft.method} total={total} text={received} onText={setReceived} />
       {problem && draft.lines.length > 0 && <Note>{problem}</Note>}
@@ -503,9 +583,16 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
         </div>
       )}
       {keep.error && <p role="alert" className="alert alert-danger">This phone could not keep the sale: {keep.error.message}</p>}
-      <BusyButton type="submit" className="rt-primary" busy={save.isPending || keep.isPending} disabled={problem !== null && !locked} data-tour="sale-save">
-        {offlineMode && mayKeepOnPhone(draft.sent) ? 'Save on this phone' : lost ? 'Try again' : 'Save sale'}
-      </BusyButton>
+      <SaleBar>
+        <BusyButton type="submit" className="rt-primary sale-bar-action" busy={save.isPending || keep.isPending} disabled={problem !== null && !locked} data-tour="sale-save">
+          {offlineMode && mayKeepOnPhone(draft.sent) ? 'Save on this phone' : lost ? 'Try again' : (
+            <>
+              <span>Record sale</span>
+              {total > 0 && <> <span className="sale-bar-amount">{money(total)}</span></>}
+            </>
+          )}
+        </BusyButton>
+      </SaleBar>
       {draft.lines.length > 0 && !save.isPending && !confirmClear && (
         <button type="button" onClick={() => (draft.sent ? setConfirmClear(true) : clear())}>
           Clear this sale
@@ -524,6 +611,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
           </div>
         </div>
       )}
+      {toast}
     </form>
   );
 }
@@ -550,6 +638,15 @@ export function StoreBranch({ branchName, roles }: { branchName: string; roles?:
           ))}
       </div>
     </div>
+  );
+}
+
+/** New sale under the receipt actions: a secondary button once Share receipt is drawn, the main action until then (issue #534). */
+function NewSale({ sale, onNew }: { sale: Sale; onNew: () => void }) {
+  return (
+    <button type="button" className={useShareReady(sale, true) ? 'btn rt-next' : 'rt-primary'} onClick={onNew}>
+      New sale
+    </button>
   );
 }
 
@@ -580,8 +677,11 @@ export function RecordSale() {
         <ProvisionalReceipt item={queued} onNew={() => { setQueued(null); setRound((n) => n + 1); }} />
       ) : sale ? (
         <>
-          <Receipt sale={sale} received={received} onNew={() => { setSale(null); setReceived(undefined); setRound((n) => n + 1); }} />
+          {/* Share receipt is the main action here (issue #534): New sale comes right after the receipt actions, and is the
+              main action until Share receipt is drawn, or when this sale offers no receipt to share. */}
+          <Receipt sale={sale} received={received} />
           <ShareReceipt sale={sale} madeHere />
+          <NewSale sale={sale} onNew={() => { setSale(null); setReceived(undefined); setRound((n) => n + 1); }} />
           {sale.id && <SaleDocuments saleId={sale.id} status={sale.status} branchId={sale.branch_id} />}
         </>
       ) : (

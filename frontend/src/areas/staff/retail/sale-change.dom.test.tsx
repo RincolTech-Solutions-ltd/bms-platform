@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Product, Sale } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
+import { pickItem } from '../../../test-utils/item-picker';
 
 // The amount received and the change to give on the sale form (issue #346), as a seller uses it: the field for cash only, a
 // short amount refused in plain words, the change shown, the receipt with received and change, the field gone for the next sale,
@@ -49,13 +50,14 @@ function open() {
 }
 
 async function addBoth() {
-  fireEvent.click(await screen.findByRole('button', { name: 'Add LED bulb 9W screw' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Add LED bulb 15W screw' }));
+  await pickItem('LED bulb 9W screw');
+  await pickItem('LED bulb 15W screw');
 }
 
 const field = () => screen.getByLabelText('Amount received (UGX)') as HTMLInputElement;
 const type = (v: string) => fireEvent.change(field(), { target: { value: v } });
-const saveButton = () => screen.getByRole('button', { name: 'Save sale' }) as HTMLButtonElement;
+const saveButton = () => screen.getByRole('button', { name: /^Record sale/ }) as HTMLButtonElement;
+const totalLine = () => document.querySelector('.rt-total-hero')?.textContent;
 const pay = (name: string) => fireEvent.click(screen.getByLabelText(name));
 
 afterEach(() => {
@@ -84,7 +86,7 @@ describe('amount received on the sale form', () => {
   it('refuses an amount below the total in plain words and shows the change once it covers the total', async () => {
     open();
     await addBoth();
-    expect(screen.getByText('Total UGX 15,500')).toBeTruthy();
+    expect(totalLine()).toBe('Total UGX 15,500');
     type('10000');
     expect(screen.getByRole('alert').textContent).toBe('Enter at least the total, UGX 15,500.');
     expect(saveButton().disabled).toBe(true);
@@ -181,7 +183,7 @@ describe('amount received on the sale form', () => {
   });
 
   // JUSTIFICATION-A3: the busy-button test case issue #456 asks for.
-  it('shows Save sale as busy while the sale is sent, and a double click records it once', async () => {
+  it('shows Record sale as busy while the sale is sent, and a double click records it once', async () => {
     let finish: (s: Sale) => void = () => undefined;
     createSale.mockReturnValue(new Promise<Sale>((resolve) => { finish = resolve; }));
     open();
