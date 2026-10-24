@@ -6,7 +6,7 @@ Proposed (owner decision D22 of 24 Oct 2026, issue #523; docs/specs/units-packs-
 accepted on merge. Settles the record ADR-020 decision 6 left open as pending ADR-021, which is never written: this record takes
 its place. Supersedes ADR-020 decision 6, amends ADR-020 decisions 5 and 8 and the ADR-020 transfer amendment ("at the source's
 current cost"), and amends the ADR-033 amendment for landed cost and supplier credits (#199) where it says the valuation is
-balance times the product's one cost. Migration `V93`; renumbered at merge if needed.
+balance times the product's one cost. Migration `V94`; renumbered at merge if needed.
 
 ## Context
 
@@ -84,7 +84,7 @@ one figure for the business or one per branch, and what happens to remainders, v
    still read the last paid cost; selling packs with their own prices is spec step 3.
 9. **Valuation reads the averages.** Every read of stock at cost (stock lists, stock by location, the valuation, stock health, the
    dashboard, the evaluation, a branch's holdings before it closes) multiplies a balance by its own branch's average.
-10. **Migration `V93`.** One column with a constant default and a range check (`NOT VALID`, validated after the backfill), and a
+10. **Migration `V94`.** One column with a constant default and a range check (`NOT VALID`, validated after the backfill), and a
     backfill that sets every balance row's average to its product's cost: until now every unit was valued at that cost, so it is
     today's average and nothing moves on the day of the deploy. It follows V92's handling of an owner without `BYPASSRLS`.
 

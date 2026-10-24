@@ -2217,7 +2217,7 @@ class MigrationOrderIT {
     }
 
     /**
-     * V93 (ADR-079, issue #523) on a database at the migration before it: every stock balance row of every business takes its
+     * V94 (ADR-079, issue #523) on a database at the migration before it: every stock balance row of every business takes its
      * product's cost as today's average, so the valuation does not move on the day of the deploy, and the quantity is kept.
      * JUSTIFICATION-A3: a new test case; no existing case migrates stock balances across the average cost migration.
      */
@@ -2225,7 +2225,7 @@ class MigrationOrderIT {
     void averageCostMigrationSetsTodaysAverageFromEachProductsCost() {
         try (PostgreSQLContainer postgres = database()) {
             postgres.start();
-            String before = VERSIONS.get(VERSIONS.indexOf("93") - 1);
+            String before = VERSIONS.get(VERSIONS.indexOf("94") - 1);
             assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
             JdbcClient owner = JdbcClient.create(
                     new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
@@ -2234,7 +2234,7 @@ class MigrationOrderIT {
             UUID cheap = UUID.randomUUID();
             UUID dear = UUID.randomUUID();
             owner.sql(
-                            "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v93', 'Test Tenant V93', '00000000-0000-4000-8000-000000000001')")
+                            "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v94', 'Test Tenant V94', '00000000-0000-4000-8000-000000000001')")
                     .param(tenant)
                     .update();
             owner.sql(

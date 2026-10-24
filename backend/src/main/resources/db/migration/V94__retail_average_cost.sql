@@ -1,4 +1,4 @@
--- V93: the moving weighted average buying price per smallest unit (issue #523, owner decision D22, ADR-079, which settles
+-- V94: the moving weighted average buying price per smallest unit (issue #523, owner decision D22, ADR-079, which settles
 -- pending ADR-021; docs/specs/units-packs-and-costing.md section 3).
 --
 -- One column on retail_stock_balances: avg_cost_minor, the average cost of one base unit of the product at the branch, in whole
