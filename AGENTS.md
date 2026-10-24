@@ -970,7 +970,7 @@ Accepted (this list is the ADR index):
   old one stops only once the new one is healthy, else the new one is removed; Caddy finds both through `dynamic a` upstreams with a
   30 second retry of refused connections and no keep-alive; the proxy keeps its image unless its binary or Caddyfiles changed; a
   second API JVM only while its own memory limit plus 64 MB is free below `MemoryHigh` (often not on the Pi, which then restarts in
-  place; measured on the Pi: always, until the owner raises `bms.slice`); the incoming web build's hashed files go into `web_assets`
+  place; the Pi's slice, 1500/1600 MB since D37, leaves room, so staging overlaps on every deploy); the incoming web build's hashed files go into `web_assets`
   before the web overlap; tested under Compose 2.26.1; Caddy marks only a failed dial with `Bms-Not-Delivered`, the only case the PWA
   calls "Nothing was saved yet", any other proxy error or dropped write reads as maybe saved, and a keyed request is retried once
   (proposed, #496, owner decision D36; no migration)

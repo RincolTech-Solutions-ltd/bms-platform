@@ -3,7 +3,7 @@
 ## Status
 
 Proposed (issue #496, owner decision D36, 24 Oct 2026). Builds on ADR-006 (build once, migrations before the swap, rollback on a
-failed health gate), ADR-018 (the staging Pi, its 900 MB `bms.slice`, signed digests, Compose 2.26.1 there, #533) and ADR-078
+failed health gate), ADR-018 (the staging Pi, its `bms.slice`, 1600 MB since the D37 amendment, signed digests, Compose 2.26.1 there, #533) and ADR-078
 (`keep-assets` before every switch). Changes no signing, verification, pointer or migration rule. Renumbered at merge if needed.
 
 ## Context
@@ -69,15 +69,16 @@ NFR-AVL-03 allows 30 seconds of unavailability per deploy, written when deploys 
    slice may want a larger `BMS_ROLL_MARGIN_MB`. No `oom_score_adj` is set: it is not needed under this bound, and the surviving container could not have it
    lowered again without privilege. When the memory is not there, `deploy.sh` logs both numbers and restarts the api in place
    as before; the 30-second retry in Caddy and the app's message and retry below cover that gap.
-   **Measured state on the staging Pi (24 Oct 2026, 19:30 UTC):** `bms.slice` has `memory.high` 860 MB, `memory.max` 900 MB
-   and `memory.current` 790 MB, so about 70 MB is free below `MemoryHigh`; the api container uses 377 MB with a `memory.peak`
-   of 380 MB against its 448 MB limit; the host has 7.8 GB with about 6.3 GB available. The bound here is 512 MB (448 + 64),
-   so **staging always takes the in-place restart today**: safe for the live api, but the gap stays on staging, covered by
-   Caddy's 30-second retry and the app's message and keyed retry. Even the measured peak (380 MB) would not fit in 70 MB, so
-   `BMS_ROLL_MIN_FREE_MB` cannot help either. Closing the gap on staging needs a larger slice (for example `MemoryHigh` 1.5 GB,
-   `MemoryMax` 1.6 GB, which the host's available memory allows); that is a host change for the owner to decide and is not made
-   by this decision. The deploy log records the free and needed memory on every switch. The production VM (4 GB, api limit
-   1536 MB, so 1600 MB needed) runs the same check.
+   **The staging Pi.** Measured on 24 Oct 2026, 19:30 UTC, with the slice then at 860/900 MB: 790 MB in use, so about 70 MB
+   free below `MemoryHigh`, and the api container at 377 MB with a `memory.peak` of 380 MB against its 448 MB limit; the host
+   had 7.8 GB with about 6.3 GB available. With that slice every staging deploy would have restarted in place, so the owner
+   raised it the same day (decision D37, ADR-018 amendment, #561): `MemoryHigh=1500M`, `MemoryMax=1600M`. With the same 790
+   MB in use that leaves about 710 MB below `MemoryHigh`, more than the 512 MB bound (448 + 64), so **staging now runs the
+   second api beside the old one on every deploy**: the log shows `starting a new api container beside the running one` and
+   two `api` containers for the length of the switch. The worst case by limits is 736 + 448 + 32 = 1216 MB, under 1500 MB.
+   If the slice ever has less than 512 MB free below `MemoryHigh` (more data, a bigger PostgreSQL), it falls back to the
+   in-place restart and says so. The deploy log records the free and needed memory on every switch. The production VM (4 GB,
+   api limit 1536 MB, so 1600 MB needed) runs the same check.
 5. **The app says it is updating, and says "Nothing was saved yet" only when the proxy proves it.** Caddy answers the same bare
    502 when it could not connect and when a container took the request and then reset or was stopped at the end of its
    `stop_grace_period` (it reports EOF), and Cloudflare's 504 is an origin timeout. So the proxy marks the one case that proves
@@ -120,10 +121,9 @@ NFR-AVL-03 allows 30 seconds of unavailability per deploy, written when deploys 
   more `keep-assets` run (the incoming build's files) before web.
 - During the web overlap a browser may fetch `sw.js` from either build; the worker settles on the new one once the old
   container stops, and either build's hashed files load from both containers meanwhile.
-- On the staging Pi, as measured, the safe memory bound always means an in-place restart, the old gap, until the owner raises
-  `bms.slice`.
-- During an overlap two JVMs share the Pi's `CPUQuota=250%`, which slows the old api and PostgreSQL for the new JVM's start;
-  watch request times in a staging switch.
+- On the staging Pi two JVMs now overlap on every deploy and share the slice's `CPUQuota=250%`, which slows the old api and
+  PostgreSQL while the new JVM starts. That path has been tested only with stand-in images in CI, not with the real JVM on the
+  Pi; watch request times and the deploy log in the first staging switches after merge.
 - Between its port opening and its health check passing, a new api already takes a share of requests. If a release opens its port
   but fails `/readyz`, some requests reach it until the check fails and it is removed.
 - A new TCP connection per proxied request.
@@ -134,5 +134,5 @@ NFR-AVL-03 allows 30 seconds of unavailability per deploy, written when deploys 
   are claimed with `FOR UPDATE SKIP LOCKED`, so each still runs once.
 - A request that is in the old api when its `stop_grace_period` (30 seconds) runs out is cut off, as before.
 - Each switch logs the free memory and what a second api needs; that is the data for setting `BMS_ROLL_MIN_FREE_MB`.
-- The keyed retry after 4 seconds can meet 409 `idempotency_in_progress` while the first attempt is still running; that is shown
-  as the server's refusal, and trying again later replays the first answer.
+- The keyed retry after 4 seconds can meet 409 `idempotency_in_progress` while the first attempt is still running; as decision
+  5 says, that proves the first attempt arrived and reads as maybe saved, and trying again later replays the first answer.

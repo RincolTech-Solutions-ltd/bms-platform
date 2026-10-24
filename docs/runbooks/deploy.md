@@ -80,10 +80,12 @@ Caddyfiles. Lines to know:
 - `<n> MB free, a second api needs <m> MB; restarting api in place (a short gap)`: the host, or
   `bms.slice` below its `MemoryHigh`, had less than the api's own memory limit plus 64 MB free, so
   the api restarted as before. Caddy holds requests for up to 30 seconds and the app says it is
-  updating. On the Pi this is expected on every deploy today (measured 24 Oct 2026: 70 MB free below `MemoryHigh`, api peak 380 MB; ADR-083). To overlap there the
-  slice must be raised (for example `MemoryHigh` 1.5 GB, `MemoryMax` 1.6 GB in
-  `deploy/systemd/bms.slice`), a host change for the owner to decide. `BMS_ROLL_MIN_FREE_MB` in `.env`
-  can replace the api's limit with a measured start-up peak plus a margin, where the slice has room.
+  updating. On the Pi this is not expected since the slice was raised to 1500/1600 MB (decision
+  D37): measured 24 Oct 2026 at about 790 MB in use, it has about 710 MB free below `MemoryHigh`,
+  and a normal deploy runs two `api` containers for the length of the switch. If this line appears,
+  check `cat /sys/fs/cgroup/bms.slice/memory.current` and what grew in the slice.
+  `BMS_ROLL_MIN_FREE_MB` in `.env` can replace the api's limit with a measured start-up peak plus a
+  margin.
 - `warning: the incoming web files were not kept; restarting web in place (a short gap)`: the
   new build's hashed files could not be copied into `bms_web_assets` before the switch, so web was
   not overlapped (the old container could not have served them). Nothing else to do; check disk space

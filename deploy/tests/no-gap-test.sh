@@ -357,6 +357,35 @@ EOF
         fail "$file: a changed proxy was not recreated"
     fi
 
+    # Enough memory, as the staging Pi has it since decision D37: a fake bms.slice with MemoryHigh 1500 MB, MemoryMax
+    # 1600 MB and about 830 MB in use, and the default need (the api's own limit plus the margin, 448 + 64 on the Pi). The
+    # memory check itself runs here (every other switch above sets ROLL_MIN_FREE_MB=0), and the api must overlap.
+    if [[ "$file" == compose.pi-staging.yml ]]; then
+        mkdir -p "$WORK/slice"
+        echo 1677721600 > "$WORK/slice/memory.max"
+        echo 1572864000 > "$WORK/slice/memory.high"
+        echo 870318080 > "$WORK/slice/memory.current"
+        printf 'anon 870318080\ninactive_file 0\n' > "$WORK/slice/memory.stat"
+        SLICE_DIR="$WORK/slice" ROLL_MIN_FREE_MB=""
+        start_client
+        sleep 2
+        release v2 v1 p3
+        switch_to 20 > "$WORK/switch.log" 2>&1 || fail "$file: the switch with the D37 slice failed"
+        sleep 3
+        # shellcheck disable=SC2034 # read by roll, copied out of deploy.sh above
+        SLICE_DIR=/nonexistent ROLL_MIN_FREE_MB=0
+        stop_client "$file: during a switch with the D37 slice"
+        if grep -qE '\] [0-9]+ MB free, a second api needs 512 MB$' "$WORK/switch.log" \
+            && grep -q 'starting a new api container beside the running one' "$WORK/switch.log" \
+            && ! grep -q 'restarting api in place' "$WORK/switch.log" && [[ "$(ask /api/v1/me)" == 'api v2' ]]; then
+            ok "$file: with the D37 slice (about 670 MB free below MemoryHigh) the api overlaps"
+        else
+            fail "$file: with the D37 slice the api did not overlap:"; sed 's/^/       /' "$WORK/switch.log"
+        fi
+        release v1 v1 p3
+        switch_to 20 > "$WORK/switch.log" 2>&1 || fail "$file: the switch back to release 1 failed"
+    fi
+
     # Too little free memory for a second api: a fake bms.slice with 2 GB MemoryMax but 600 MB MemoryHigh, 100 MB in use,
     # so 500 MB below MemoryHigh, less than the api's own limit plus the margin (448 + 64 on the Pi, 1536 + 64 on the VM).
     # The default need comes from the running container's limit, and MemoryHigh, not MemoryMax, is the bound.

@@ -319,10 +319,15 @@ switch_proxy() {
     "${COMPOSE[@]}" up --detach --no-deps proxy
 }
 
-# What the proxy runs, as one hash: its caddy binary and everything in /etc/caddy. Empty when the image cannot
-# be read; switch_proxy never counts an empty hash as a match, so the proxy is then recreated as before.
+# What the proxy runs, as one hash: its environment, command, entrypoint and user, its caddy binary and everything in
+# /etc/caddy. Empty when the image cannot be read; switch_proxy never counts an empty hash as a match, so the proxy is
+# then recreated as before.
 proxy_fingerprint() {
-    docker run --rm --network none --entrypoint sh "$1" -c 'cat /usr/bin/caddy /etc/caddy/* | sha256sum' 2>/dev/null || true
+    local config files
+    config="$(docker image inspect --format '{{json .Config.Env}}{{json .Config.Cmd}}{{json .Config.Entrypoint}}{{.Config.User}}' "$1" 2>/dev/null)" || return 0
+    files="$(docker run --rm --network none --entrypoint sh "$1" -c 'set -o pipefail; cat /usr/bin/caddy /etc/caddy/* | sha256sum' 2>/dev/null)" || return 0
+    [[ -n "$config" && -n "$files" ]] || return 0
+    printf '%s\n%s\n' "$config" "$files" | sha256sum | cut -d' ' -f1
 }
 
 # ADR-083: while the old and the new web container both take requests, a page loaded from the new one may ask the old
