@@ -483,7 +483,8 @@ class PaymentsRepository {
     /**
      * Every event of the supplier dated on or before {@code to}, in the order they happened: credit restocks (never
      * imported ones, which no payment can pay) and their voids, supplier invoices and credit notes and their voids, and
-     * payments and their reversals, each on its own day.
+     * payments and their reversals, each on its own day. Within a day they come in the order they were entered, and a void or
+     * reversal never before what it undoes (its time is the business clock's, the other's the database's).
      */
     List<Event> statementEvents(UUID supplierId, LocalDate to) {
         return jdbc.sql("""
@@ -495,7 +496,7 @@ class PaymentsRepository {
                              WHERE pu.supplier_id = :supplier AND pu.payment_method = 'credit' AND NOT pu.historical
                                AND pu.total_minor > 0
                             UNION ALL
-                            SELECT 'purchase_void', v.voided_on, v.created_at, pu.purchase_no, NULL, pu.id, NULL,
+                            SELECT 'purchase_void', v.voided_on, greatest(v.created_at, pu.created_at), pu.purchase_no, NULL, pu.id, NULL,
                                    -pu.total_minor, %1$s
                               FROM retail_purchase_voids v
                               JOIN retail_purchases pu ON pu.tenant_id = v.tenant_id AND pu.id = v.purchase_id
@@ -506,7 +507,7 @@ class PaymentsRepository {
                                    ARRAY[b.branch_id]
                               FROM retail_supplier_bills b WHERE b.supplier_id = :supplier
                             UNION ALL
-                            SELECT 'bill_void', b.voided_on, b.voided_at, b.bill_no, b.supplier_ref, b.id, NULL, -b.total_minor,
+                            SELECT 'bill_void', b.voided_on, greatest(b.voided_at, b.created_at), b.bill_no, b.supplier_ref, b.id, NULL, -b.total_minor,
                                    ARRAY[b.branch_id]
                               FROM retail_supplier_bills b WHERE b.supplier_id = :supplier AND b.status = 'voided'
                             UNION ALL
@@ -516,7 +517,7 @@ class PaymentsRepository {
                               JOIN retail_supplier_bills b ON b.tenant_id = c.tenant_id AND b.id = c.bill_id
                              WHERE c.supplier_id = :supplier
                             UNION ALL
-                            SELECT 'credit_note_void', c.voided_on, c.voided_at, c.credit_no, c.supplier_ref, c.id, NULL,
+                            SELECT 'credit_note_void', c.voided_on, greatest(c.voided_at, c.created_at), c.credit_no, c.supplier_ref, c.id, NULL,
                                    c.total_minor, ARRAY[b.branch_id]
                               FROM retail_supplier_credits c
                               JOIN retail_supplier_bills b ON b.tenant_id = c.tenant_id AND b.id = c.bill_id
@@ -526,7 +527,7 @@ class PaymentsRepository {
                                    -p.amount_minor, ARRAY[p.branch_id]
                               FROM retail_supplier_payments p WHERE p.supplier_id = :supplier
                             UNION ALL
-                            SELECT 'payment_reversed', p.reversed_on, p.reversed_at, p.payment_no, p.reference, p.id, p.method,
+                            SELECT 'payment_reversed', p.reversed_on, greatest(p.reversed_at, p.created_at), p.payment_no, p.reference, p.id, p.method,
                                    p.amount_minor, ARRAY[p.branch_id]
                               FROM retail_supplier_payments p WHERE p.supplier_id = :supplier AND p.status = 'reversed'
                         ) e
