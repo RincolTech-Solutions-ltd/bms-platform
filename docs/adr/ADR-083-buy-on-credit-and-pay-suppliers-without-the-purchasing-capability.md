@@ -38,10 +38,13 @@ split per branch, posting trade creditors against the method's account, with the
    day's till, which `CashPurchases` already reads by `paid_on`. It pays only what was owed on that day: the open items dated on or
    before it (a manual allocation to a later one is 422 `after_payment_date`; oldest first stops at what was owed then, 422
    `payment_exceeds_open`), so the statement's running balance never goes below nothing, and no payment is dated before the
-   oldest thing it pays. A cash payment dated before today is refused once that day's cash at the paying branch is banked by a
-   banking that stands (422 `cash_day_banked`): a banked day is not changed after the fact. Mobile money and bank never touch the
-   till. On the screen the date stays empty, meaning today, until the person picks one, so a form left open overnight pays the
-   day it is sent. A reversal stays dated the day it is made.
+   oldest thing it pays, as a customer payment is dated between its sale and today. A cash payment is refused once a banking that
+   stands at the paying branch is dated on that day or later (422 `cash_day_banked`): the cash book carries unbanked cash forward,
+   so such a banking already counted that day's cash, and a banked day is not changed after the fact (today too, once today is
+   banked). The check runs under the supplier row lock. The cash book has no other close of a day and expenses no back-date
+   window, so none is copied here; the ledger refuses a date in a closed period. Mobile money and bank never touch the till. On
+   the screen the date stays empty, meaning today, until the person picks one, so a form left open overnight pays the day it is
+   sent. A reversal stays dated the day it is made.
 4. **The supplier statement.** `GET /retail/suppliers/{id}/statement?from&to` (`retail.payable.manage`, the last 90 days by
    default, at most 731 days and 2,000 lines): the balance at the start of `from`, then each credit restock (never an imported one,
    which no payment can pay) and its void, each supplier invoice and credit note and their voids, and each payment and its reversal
@@ -64,6 +67,7 @@ purchasing on sees the same payments and adds invoices beside them.
 **Worse:** the payment and payables routes answer the same with the capability on or off, so "capability off equals today"
 (ADR-033) no longer holds for them; a cash payment dated on an earlier day that is not yet banked changes that day's cash book,
 as a back-dated expense does.
+How far back a payment may go, beyond the oldest purchase it pays and the last banking, is the owner's call if they want a window.
 
 **Watch for:** a ledger period closed by an accountant refuses a payment dated inside it (the ledger's own rule), which the screen
 shows as the server's message. Unapplied supplier credits and a cash refund from a supplier stay deferred (issue #199). A PDF of the

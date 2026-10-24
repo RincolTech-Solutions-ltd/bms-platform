@@ -26,7 +26,8 @@ vi.mock('../../../api/retail', async (original) => {
 });
 
 const { METHODS, RestockForm, buildPurchase, creditNeedsSupplier } = await import('./restock');
-const { OwedList } = await import('./supplier-payables');
+const { OwedList, PayablesReport } = await import('./supplier-payables');
+const { Money } = await import('./ui');
 const { moneyLinks } = await import('../tabs');
 const { PaymentFormView } = await import('./supplier-payment-new');
 const { SupplierStatementView } = await import('./supplier-statement');
@@ -155,6 +156,25 @@ describe('Pay a supplier', () => {
   });
 });
 
+describe('amounts on the screen', () => {
+  it('Money draws an amount in tabular figures', () => {
+    const { container } = render(<Money minor={1234500} />);
+    const el = container.querySelector('span');
+    expect(el?.className).toBe('num');
+    expect(el?.textContent).toBe('UGX 1,234,500');
+  });
+
+  it('every amount on What I owe suppliers and Pay a supplier goes through it', () => {
+    const report: SupplierPayables = { as_of: '2026-10-08', currency: 'UGX', totals: { owed_minor: 7000 }, suppliers: [{ supplier_id: 's2', supplier_name: 'Test Supplier 02', owed_minor: 7000, not_due_minor: 7000, unbilled_receipts_minor: 300 }] };
+    const owed = render(<OwedList report={report} />);
+    expect([...owed.container.querySelectorAll('.num')].map((n) => n.textContent)).toEqual(['UGX 7,000', 'UGX 7,000']);
+    owed.unmount();
+    const phone = render(<PayablesReport report={report} phone />);
+    // Owed in all, the five ages, received not invoiced; and the same for the totals card.
+    expect(phone.container.querySelectorAll('.num')).toHaveLength(14);
+  });
+});
+
 describe('under the Money tab', () => {
   it('lists What I owe suppliers for an owner without the purchasing capability, and not for a seller', () => {
     const links = moneyLinks(owner);
@@ -179,8 +199,9 @@ describe('the supplier statement', () => {
     expect(screen.getAllByTestId('statement-balance').map((b) => b.textContent)).toEqual(['UGX 15,000', 'UGX 9,000']);
     expect(screen.getAllByTestId('statement-line')[1]?.textContent).toContain('Paid by mobile money SP-HQ-000001 (MM-77)');
     expect(screen.getByTestId('statement-closing').textContent).toBe('UGX 9,000');
-    // Every amount in tabular figures.
-    for (const el of [screen.getByTestId('statement-opening'), ...screen.getAllByTestId('statement-balance'), screen.getByTestId('statement-closing')]) expect(el.className).toContain('num');
+    // Every amount is drawn by Money, so in tabular figures.
+    for (const el of [screen.getByTestId('statement-opening'), ...screen.getAllByTestId('statement-balance'), screen.getByTestId('statement-closing')]) expect(el.querySelector('.num')?.textContent).toBe(el.textContent);
+    expect(screen.getAllByTestId('statement-line')[0]?.querySelectorAll('.num')).toHaveLength(2);
   });
 
   it('is shared as plain text with the running balance', () => {

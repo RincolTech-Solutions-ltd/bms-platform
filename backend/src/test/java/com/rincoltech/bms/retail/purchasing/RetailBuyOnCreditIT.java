@@ -273,24 +273,36 @@ class RetailBuyOnCreditIT extends IntegrationTest {
         assertThat(cashOut(TODAY)).isZero();
     }
 
-    @Test
-    void aCashPaymentCannotBeDatedOnADayWhoseCashIsBanked() {
-        buy("credit", "5", "2026-10-05");
+    void bank(String day) {
         Map<String, Object> banking = new LinkedHashMap<>();
         banking.put("branch_id", hq);
-        banking.put("business_date", "2026-10-06");
+        banking.put("business_date", day);
         banking.put("amount_minor", 1_000);
         ResponseEntity<JsonNode> banked = api.postKeyed("/bankings", banking, OWNER, "*", key());
         assertThat(banked.getStatusCode()).as("%s", banked.getBody()).isEqualTo(HttpStatus.CREATED);
-        ResponseEntity<JsonNode> r = payRaw("cash", 100, "2026-10-06", OWNER);
-        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(code(r)).isEqualTo("cash_day_banked");
-        assertThat(cashOut("2026-10-06")).isZero();
-        // Mobile money and bank never touch the till, and an unbanked earlier day or today stays open to cash.
-        pay("mobile_money", 100, "2026-10-06");
-        pay("cash", 100, "2026-10-05");
-        pay("cash", 100, TODAY);
-        assertThat(owed()).isEqualTo(200);
+    }
+
+    @Test
+    void aCashPaymentCannotBeDatedOnOrBeforeADayWhoseCashIsBanked() {
+        buy("credit", "5", "2026-10-04");
+        // Before any banking, an earlier day is open to cash.
+        pay("cash", 100, "2026-10-04");
+        bank("2026-10-06");
+        // The banking day itself, and an earlier day it carried forward with no banking of its own.
+        for (String day : List.of("2026-10-06", "2026-10-05")) {
+            ResponseEntity<JsonNode> r = payRaw("cash", 100, day, OWNER);
+            assertThat(r.getStatusCode()).as(day).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+            assertThat(code(r)).as(day).isEqualTo("cash_day_banked");
+            assertThat(cashOut(day)).as(day).isZero();
+        }
+        // A day after the last banking is open; mobile money and bank never touch the till.
+        pay("cash", 100, "2026-10-07");
+        pay("mobile_money", 100, "2026-10-05");
+        // Today too, once today's cash is banked.
+        bank(TODAY);
+        assertThat(code(payRaw("cash", 100, TODAY, OWNER))).isEqualTo("cash_day_banked");
+        pay("bank", 100, TODAY);
+        assertThat(owed()).isEqualTo(100);
     }
 
     @Test

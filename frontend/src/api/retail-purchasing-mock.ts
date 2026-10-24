@@ -548,7 +548,7 @@ export function createPurchasingMock(env: PurchasingEnv): PurchasingMock {
       open(() =>
         env.once(`payment|${key}`, body, (): SupplierPayment => {
           const paidOn = body.paid_on ?? env.today();
-          if (paidOn > env.today()) env.refuse(422, 'validation_failed', 'A payment cannot be dated in the future.');
+          if (paidOn > env.today()) env.refuse(422, 'future_date', 'A payment cannot be dated in the future.');
           const items = openItems(body.supplier_id).filter((i) => (i.date ?? '') <= paidOn);
           const owed = items.reduce((sum, i) => sum + (i.open_minor ?? 0), 0);
           if (body.amount_minor <= 0 || body.amount_minor > 1_000_000_000_000) env.refuse(422, 'amount_out_of_range', 'That amount is out of range.');

@@ -583,13 +583,15 @@ class PaymentsRepository {
     }
 
     /**
-     * Whether cash of the branch's day has been banked by a banking that stands (issue #557): a cash payment dated that day
-     * would change a day whose expected amount was already banked.
+     * Whether a banking that stands at the branch is dated on or after {@code day} (issue #557). The cash book carries cash not yet
+     * banked forward, so a banking covers its own day and every earlier one: cash paid out on any of them would change what that
+     * banking was expected to hold.
      */
-    boolean cashBanked(UUID branchId, LocalDate day) {
+    boolean cashBankedFrom(UUID branchId, LocalDate day) {
         return jdbc.sql("""
                         SELECT EXISTS (SELECT 1 FROM retail_cash_bankings
-                                        WHERE branch_id = :branch AND business_date = :day AND voided_at IS NULL)
+                                        WHERE tenant_id = current_setting('app.tenant_id')::uuid AND branch_id = :branch
+                                          AND business_date >= :day AND voided_at IS NULL)
                         """)
                 .param("branch", branchId)
                 .param("day", Date.valueOf(day))

@@ -7,7 +7,7 @@ import { useStaff } from '../context';
 import { canUse, capabilityOn } from './permissions';
 import { AGEING_COLUMNS } from './payables-state';
 import { showDate } from './transfers';
-import { Gate, Problem, money, useIsPhone } from './ui';
+import { Gate, Problem, Money, useIsPhone } from './ui';
 
 // What I owe suppliers (ADR-033, issue #198; under the Money tab without any capability since issue #557, ADR-083): one balance per
 // supplier, from what was bought on credit in Buy stock (and, with the purchasing capability, supplier invoices) less what was
@@ -42,7 +42,7 @@ export function OwedList({ report }: { report: SupplierPayables }) {
   const suppliers = (report.suppliers ?? []).filter((r) => (r.owed_minor ?? 0) > 0);
   return (
     <section aria-label={WORDS.whatIOweSuppliers} data-testid="payables-report" data-tour="payables-report">
-      <p className="rt-total" data-testid="payables-total">You owe suppliers {money(report.totals?.owed_minor ?? 0)} in all.</p>
+      <p className="rt-total" data-testid="payables-total">You owe suppliers <Money minor={report.totals?.owed_minor ?? 0} /> in all.</p>
       <p className="hint">As of {showDate(report.as_of)}.</p>
       {suppliers.length === 0 ? (
         <p className="empty-state">You owe no supplier anything. Stock bought {WORDS.onCredit.toLowerCase()} in {WORDS.buyStock} shows here.</p>
@@ -51,7 +51,7 @@ export function OwedList({ report }: { report: SupplierPayables }) {
           {suppliers.map((row) => (
             <li key={row.supplier_id} className="rt-card" data-testid={`payable-${row.supplier_id}`}>
               <p><strong>{row.supplier_name}</strong></p>
-              <p>Owed <strong className="num">{money(row.owed_minor ?? 0)}</strong></p>
+              <p>Owed <strong><Money minor={row.owed_minor ?? 0} /></strong></p>
               <SupplierActions row={row} />
             </li>
           ))}
@@ -74,11 +74,11 @@ export function PayablesReport({ report, phone = false }: { report: SupplierPaya
           {[...suppliers, { ...totals, supplier_name: 'All suppliers' } as SupplierPayablesRow].map((row, i) => (
             <li key={row.supplier_id ?? `total-${i}`} className="rt-card" data-testid={row.supplier_id ? `payable-${row.supplier_id}` : 'payables-totals'}>
               <p><strong>{row.supplier_id ? <PayLink row={row} /> : row.supplier_name}</strong></p>
-              <p>Owed in all <strong>{money(row.owed_minor ?? 0)}</strong></p>
+              <p>Owed in all <strong><Money minor={row.owed_minor ?? 0} /></strong></p>
               <ul>
-                {AGEING_COLUMNS.map((c) => <li key={c.key}>{c.label}: {money(row[c.key] ?? 0)}</li>)}
+                {AGEING_COLUMNS.map((c) => <li key={c.key}>{c.label}: <Money minor={row[c.key] ?? 0} /></li>)}
               </ul>
-              <p>Received, not invoiced <strong>{money(row.unbilled_receipts_minor ?? 0)}</strong>{i === 0 && <NotInvoiced />}</p>
+              <p>Received, not invoiced <strong><Money minor={row.unbilled_receipts_minor ?? 0} /></strong>{i === 0 && <NotInvoiced />}</p>
               {row.supplier_id && <SupplierActions row={row} />}
             </li>
           ))}
@@ -99,18 +99,18 @@ export function PayablesReport({ report, phone = false }: { report: SupplierPaya
               {suppliers.map((row) => (
                 <tr key={row.supplier_id} data-testid={`payable-${row.supplier_id}`}>
                   <td><PayLink row={row} /> <Link to="/staff/retail/suppliers/$supplierId/statement" params={{ supplierId: row.supplier_id ?? '' }} aria-label={`Statement of ${row.supplier_name}`}>Statement</Link></td>
-                  {AGEING_COLUMNS.map((c) => <td key={c.key} className="num">{money(row[c.key] ?? 0)}</td>)}
-                  <td className="num"><strong>{money(row.owed_minor ?? 0)}</strong></td>
-                  <td className="num">{money(row.unbilled_receipts_minor ?? 0)}</td>
+                  {AGEING_COLUMNS.map((c) => <td key={c.key} className="num"><Money minor={row[c.key] ?? 0} /></td>)}
+                  <td className="num"><strong><Money minor={row.owed_minor ?? 0} /></strong></td>
+                  <td className="num"><Money minor={row.unbilled_receipts_minor ?? 0} /></td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr data-testid="payables-totals">
                 <td><strong>All suppliers</strong></td>
-                {AGEING_COLUMNS.map((c) => <td key={c.key} className="num"><strong>{money(totals[c.key] ?? 0)}</strong></td>)}
-                <td className="num"><strong>{money(totals.owed_minor ?? 0)}</strong></td>
-                <td className="num"><strong>{money(totals.unbilled_receipts_minor ?? 0)}</strong></td>
+                {AGEING_COLUMNS.map((c) => <td key={c.key} className="num"><strong><Money minor={totals[c.key] ?? 0} /></strong></td>)}
+                <td className="num"><strong><Money minor={totals.owed_minor ?? 0} /></strong></td>
+                <td className="num"><strong><Money minor={totals.unbilled_receipts_minor ?? 0} /></strong></td>
               </tr>
             </tfoot>
           </table>

@@ -11,7 +11,7 @@ import {
 } from './payables-state';
 import { BranchField, Star, SupplierField, useSuppliers, type SupplierOption } from './purchasing-ui';
 import { showDate } from './transfers';
-import { Gate, Problem, money } from './ui';
+import { Gate, Problem, Money, money } from './ui';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { FieldsNeededNote } from '../../../app/ui/Field';
 import { WORDS } from '../../../app/glossary';
@@ -29,7 +29,7 @@ function OwedList({ items }: { items: SupplierOpenItem[] }) {
         <li key={itemKey(i)} className="rt-card">
           <strong>{KIND_WORDS[i.kind ?? 'bill']} {i.number}</strong>{i.supplier_ref ? ` (invoice ${i.supplier_ref})` : ''}
           <br />
-          Due {showDate(i.due_date)}, {lateWords(i.days_past_due).toLowerCase()}. Owed <strong>{money(i.open_minor ?? 0)}</strong>
+          Due {showDate(i.due_date)}, {lateWords(i.days_past_due).toLowerCase()}. Owed <strong><Money minor={i.open_minor ?? 0} /></strong>
         </li>
       ))}
     </ul>
@@ -59,7 +59,7 @@ export function PaymentFormView({ form, suppliers, branches, items, owed, loadin
         {form.supplierId !== '' && loadingItems && <p className="loading">Loading</p>}
         {form.supplierId !== '' && items && (
           <section aria-label="What is owed">
-            {items.length === 0 ? <p className="empty-state">This supplier is owed nothing.</p> : <p data-testid="owed-total">This supplier is owed <strong>{money(owed ?? 0)}</strong>.</p>}
+            {items.length === 0 ? <p className="empty-state">This supplier is owed nothing.</p> : <p data-testid="owed-total">This supplier is owed <strong><Money minor={owed ?? 0} /></strong>.</p>}
             {form.allocation === 'oldest_first' && items.length > 0 && <OwedList items={items} />}
           </section>
         )}
@@ -100,7 +100,7 @@ export function PaymentFormView({ form, suppliers, branches, items, owed, loadin
             return (
               <div key={itemKey(i)} className="rt-card">
                 <label htmlFor={`amt-${itemKey(i)}`}>
-                  Pay on {KIND_WORDS[i.kind ?? 'bill']} {i.number}{i.supplier_ref ? ` (invoice ${i.supplier_ref})` : ''}, due {showDate(i.due_date)}, {lateWords(i.days_past_due).toLowerCase()}, owed {money(i.open_minor ?? 0)}
+                  Pay on {KIND_WORDS[i.kind ?? 'bill']} {i.number}{i.supplier_ref ? ` (invoice ${i.supplier_ref})` : ''}, due {showDate(i.due_date)}, {lateWords(i.days_past_due).toLowerCase()}, owed <Money minor={i.open_minor ?? 0} />
                 </label>
                 <input id={`amt-${itemKey(i)}`} inputMode="numeric" value={text} onChange={(e) => onChange({ ...form, amounts: { ...form.amounts, [itemKey(i)]: e.target.value } })} aria-invalid={bad !== null} />
                 {bad && <p role="alert" className="rt-flag">{bad}</p>}
@@ -108,7 +108,7 @@ export function PaymentFormView({ form, suppliers, branches, items, owed, loadin
             );
           })}
           <p data-testid="pay-remaining" aria-live="polite">
-            Given out {money(allocatedMinor(form.amounts))} of {money(paymentAmount(form) ?? 0)}. {left === 0 ? 'Nothing is left to give out.' : left > 0 ? `${money(left)} is left to give out.` : `${money(-left)} too much is given out.`}
+            Given out <Money minor={allocatedMinor(form.amounts)} /> of <Money minor={paymentAmount(form) ?? 0} />. {left === 0 ? 'Nothing is left to give out.' : left > 0 ? `${money(left)} is left to give out.` : `${money(-left)} too much is given out.`}
           </p>
         </section>
       )}

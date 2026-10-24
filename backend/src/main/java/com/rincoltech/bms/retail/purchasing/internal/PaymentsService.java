@@ -122,21 +122,21 @@ class PaymentsService {
                     List.of(new FieldProblem("paid_on", "future_date", "A payment cannot be dated in the future.")));
         }
         UUID branch = branches.resolve(PERMISSION, r.branchId());
-        // Issue #557: cash paid on an earlier day leaves that day's till, so a day whose cash is already banked is not
-        // changed
-        // after the fact. Mobile money and bank never touch the till. How far back is bounded by what is paid: a
-        // payment pays
-        // only what was owed on its day.
-        if (r.method().equals("cash") && paidOn.isBefore(today) && repo.cashBanked(branch, paidOn)) {
-            throw ApiException.rule(
-                    "cash_day_banked",
-                    "The cash of " + paidOn
-                            + " at this branch is already banked, so a cash payment cannot be dated that"
-                            + " day. Date it today, or choose mobile money or bank if it was paid that way.");
-        }
         if (!suppliers.lockSupplier(r.supplierId())) {
             throw ApiException.validation(
                     List.of(new FieldProblem("supplier_id", "unknown_supplier", "No such supplier.")));
+        }
+        // Issue #557: cash paid out leaves the till on the payment's day. The cash book carries unbanked cash forward,
+        // so a banking
+        // that stands on that day or any later one already counted that cash: such a day is not changed after the fact.
+        // Mobile
+        // money and bank never touch the till.
+        if (r.method().equals("cash") && repo.cashBankedFrom(branch, paidOn)) {
+            throw ApiException.rule(
+                    "cash_day_banked",
+                    "The cash of " + paidOn
+                            + " at this branch is already banked (by a banking on that day or later), so a"
+                            + " cash payment cannot be dated that day. Choose mobile money or bank if it was paid that way.");
         }
         // Issue #557: a payment pays only what was owed on its day, so the statement's running balance never goes below
         // nothing.

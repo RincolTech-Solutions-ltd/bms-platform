@@ -12,7 +12,7 @@ import { canUse } from './permissions';
 import { statementLineWords, statementText } from './payables-state';
 import { Star } from './purchasing-ui';
 import { showDate } from './transfers';
-import { Gate, Problem, money } from './ui';
+import { Gate, Problem, Money } from './ui';
 
 // A supplier's statement (issue #557, D15): what was owed at the start, each purchase on credit, invoice, payment, void and
 // reversal with the balance after it, and what is owed at the end. Like a customer statement it can be sent: Share uses the
@@ -23,7 +23,7 @@ export function SupplierStatementView({ statement }: { statement: SupplierStatem
   const lines = statement.lines ?? [];
   return (
     <section aria-label="The statement" data-testid="supplier-statement" data-tour="supplier-statement-lines">
-      <p>Owed at the start of {showDate(statement.from)}: <strong className="num" data-testid="statement-opening">{money(statement.opening_minor ?? 0)}</strong></p>
+      <p>Owed at the start of {showDate(statement.from)}: <strong data-testid="statement-opening"><Money minor={statement.opening_minor ?? 0} /></strong></p>
       {lines.length === 0 ? (
         <p className="empty-state">Nothing happened with this supplier between these dates.</p>
       ) : (
@@ -32,14 +32,14 @@ export function SupplierStatementView({ statement }: { statement: SupplierStatem
             <li key={`${l.source_id ?? ''}-${l.kind ?? ''}-${i}`} className="rt-card" data-testid="statement-line">
               <p>{showDate(l.date)}: {statementLineWords(l)}</p>
               <p>
-                {(l.increase_minor ?? 0) > 0 ? 'Adds ' : 'Takes off '}<span className="num">{money((l.increase_minor ?? 0) > 0 ? (l.increase_minor ?? 0) : (l.decrease_minor ?? 0))}</span>. Owed after it{' '}
-                <strong className="num" data-testid="statement-balance">{money(l.balance_minor ?? 0)}</strong>
+                {(l.increase_minor ?? 0) > 0 ? 'Adds ' : 'Takes off '}<Money minor={(l.increase_minor ?? 0) > 0 ? (l.increase_minor ?? 0) : (l.decrease_minor ?? 0)} />. Owed after it{' '}
+                <strong data-testid="statement-balance"><Money minor={l.balance_minor ?? 0} /></strong>
               </p>
             </li>
           ))}
         </ul>
       )}
-      <p className="rt-total">Owed at the end of {showDate(statement.to)}: <span className="num" data-testid="statement-closing">{money(statement.closing_minor ?? 0)}</span></p>
+      <p className="rt-total">Owed at the end of {showDate(statement.to)}: <span data-testid="statement-closing"><Money minor={statement.closing_minor ?? 0} /></span></p>
     </section>
   );
 }
