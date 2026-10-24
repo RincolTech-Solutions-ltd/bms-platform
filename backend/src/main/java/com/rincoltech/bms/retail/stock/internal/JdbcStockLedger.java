@@ -40,6 +40,9 @@ class JdbcStockLedger implements StockLedger {
     /** The source type of the entry that posts what an average does not carry (ADR-079). */
     static final String AVERAGE_COST = "retail.average_cost";
 
+    /** The kind {@link #averaged} is told for a change of value alone ({@link #revalue}). */
+    private static final String REVALUE = "revalue";
+
     private final JdbcClient jdbc;
     private final BusinessClock clock;
     private final LowStockAlerts lowStock;
@@ -135,8 +138,8 @@ class JdbcStockLedger implements StockLedger {
                     .update();
             long average = locked.average();
             if (m.unitCostMinor() != average) {
-                Quantities.Averaged a =
-                        averaged(m.productId(), locked, m.qty(), Quantities.value(m.qty(), m.unitCostMinor()));
+                Quantities.Averaged a = averaged(
+                        m.productId(), m.kind(), locked, m.qty(), Quantities.value(m.qty(), m.unitCostMinor()));
                 average = a.averageMinor();
                 remainders.add(m, id, a.remainderMinor());
             }
@@ -156,8 +159,25 @@ class JdbcStockLedger implements StockLedger {
     }
 
     /** The new average, refused when it would fall below zero or above what a cost may be. */
-    private Quantities.Averaged averaged(UUID productId, Locked locked, BigDecimal qty, long valueMinor) {
+    private Quantities.Averaged averaged(UUID productId, String kind, Locked locked, BigDecimal qty, long valueMinor) {
         Quantities.Averaged a = Quantities.average(locked.qty(), locked.average(), qty, valueMinor);
+        if (a.averageMinor() < 0 && REVALUE.equals(kind)) {
+            // The void of a landed cost or a price credit takes back the part this branch took, from what it holds now.
+            throw ApiException.rule(
+                    "average_cost_negative",
+                    itemName(productId) + ": taking this cost back out would leave the rest of the stock at this branch"
+                            + " at a cost below zero, because the goods it was added to have been sold there since. It"
+                            + " cannot be voided now.");
+        }
+        if (a.averageMinor() < 0 && "return_to_supplier".equals(kind)) {
+            // Goods sent back leave at what their receipt's units are carried at (#199), above what the rest is worth
+            // now.
+            throw ApiException.rule(
+                    "average_cost_negative",
+                    itemName(productId) + ": sending this many back at what they were bought for would leave the rest"
+                            + " of the stock at this branch at a cost below zero, because it was sold at a higher average"
+                            + " since. Send back fewer, or ask the supplier for a price credit instead.");
+        }
         if (a.averageMinor() < 0) {
             throw ApiException.rule(
                     "average_cost_negative",
@@ -258,7 +278,7 @@ class JdbcStockLedger implements StockLedger {
             return;
         }
         Locked locked = lockRow(branchId, productId);
-        Quantities.Averaged a = averaged(productId, locked, BigDecimal.ZERO, valueMinor);
+        Quantities.Averaged a = averaged(productId, REVALUE, locked, BigDecimal.ZERO, valueMinor);
         jdbc.sql("""
                         UPDATE retail_stock_balances SET avg_cost_minor = ?, updated_at = now()
                          WHERE branch_id = ? AND product_id = ?
@@ -303,7 +323,9 @@ class JdbcStockLedger implements StockLedger {
                 .params(branchId, productId)
                 .query((rs, n) -> new Locked(
                         rs.getBigDecimal("qty"), rs.getBigDecimal("reserved_qty"), rs.getLong("avg_cost_minor")))
-                .single();
+                .optional()
+                // No row was made: the product does not exist in this business (callers check it first).
+                .orElseThrow(() -> ApiException.rule("unknown_product", "No such product."));
     }
 
     @Override
@@ -448,7 +470,7 @@ class JdbcStockLedger implements StockLedger {
                         .thenComparing(i -> i));
         for (int i : order) {
             HistoricalMovement m = movements.get(i);
-            lockBalance(m.branchId(), m.productId());
+            Locked locked = lockRow(m.branchId(), m.productId());
             UUID id = UUID.randomUUID();
             jdbc.sql("""
                             INSERT INTO retail_stock_movements (id, tenant_id, occurred_at, business_date, branch_id, product_id, kind,
@@ -469,15 +491,11 @@ class JdbcStockLedger implements StockLedger {
                     .param("sourceLineId", m.sourceLineId())
                     .param("note", m.note())
                     .update();
-            // ADR-079: history posts nothing, so it does not re-average; the opening balance of an import is valued at
-            // the
-            // cost it carries, and that is the branch's average from then on.
             jdbc.sql("""
-                            UPDATE retail_stock_balances SET qty = qty + ?, updated_at = now(),
-                                   avg_cost_minor = CASE WHEN ? THEN ? ELSE avg_cost_minor END
+                            UPDATE retail_stock_balances SET qty = qty + ?, avg_cost_minor = ?, updated_at = now()
                              WHERE branch_id = ? AND product_id = ?
                             """)
-                    .params(m.qty(), "legacy_balance".equals(m.kind()), m.unitCostMinor(), m.branchId(), m.productId())
+                    .params(m.qty(), historicalAverage(locked, m), m.branchId(), m.productId())
                     .update();
             ids[i] = id;
         }
@@ -487,6 +505,28 @@ class JdbcStockLedger implements StockLedger {
                 .map(m -> new LowStockAlerts.Touched(m.branchId(), m.productId()))
                 .toList());
         return List.of(ids);
+    }
+
+    /**
+     * ADR-079: history posts nothing, so its movements leave the average alone, apart from the opening balance of an import
+     * ({@code legacy_balance}), which the opening journal values at the cost it carries: into a branch that holds nothing it is
+     * the average; added to stock already held it re-averages with it (never below zero); taking stock away leaves it.
+     */
+    private static long historicalAverage(Locked locked, HistoricalMovement m) {
+        if (!"legacy_balance".equals(m.kind())) {
+            return locked.average();
+        }
+        if (locked.qty().signum() <= 0) {
+            return m.unitCostMinor();
+        }
+        if (m.qty().signum() <= 0) {
+            return locked.average();
+        }
+        long value = Quantities.value(m.qty(), m.unitCostMinor());
+        return Math.max(
+                0,
+                Quantities.average(locked.qty(), locked.average(), m.qty(), value)
+                        .averageMinor());
     }
 
     @Override

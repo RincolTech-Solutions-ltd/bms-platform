@@ -158,14 +158,15 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   a bill. The Landed costs and Supplier credit notes pages, the hold on a receipt and the costing switch show while `module_capabilities` lists
   `purchasing`. Unapplied credits to spend later and a cash refund from a supplier are deferred.
 - **Built (profit from the average buying price per piece, issue #523, owner decision D22, ADR-079):** migration `V94`
-  (`retail_stock_balances.avg_cost_minor`, backfilled from each product's cost). `StockLedger` keeps each branch's moving weighted
+  (`retail_stock_balances.avg_cost_minor`, backfilled from each product's cost, no default after; `retail_cost_spreads`, the part of
+  a landed cost or price credit line each branch's average took, so its void takes back the same parts). `StockLedger` keeps each branch's moving weighted
   average per base unit under the balance row's lock: a movement at another cost than the average re-averages it (restock, goods
   received, transfer in at the source's average, customer return, sale void, the void of a restock or receipt taking its units out
   at their own cost), a movement at the average leaves it (sale, usage, damage, count, correction, transfer out), the remainder posts
   per branch to purchase rounding (source `retail.average_cost`), a void that would leave a negative average is refused (422
   `average_cost_negative`); `StockLedger.averageCost` and `revalue` (landed cost and supplier price credits). Sale lines snapshot
   the branch average; every valuation reads it; `retail_products.cost_minor` is the last price paid, shown as Last paid. No route,
-  permission or response field added. Tests: `RetailAverageCostIT`, `QuantitiesAverageTest`, `MigrationOrderIT`.
+  permission or response field added. Tests: `RetailAverageCostIT`, `RetailLandedCostIT`, `QuantitiesAverageTest`, `MigrationOrderIT`, `RlsIsolationIT`.
 - **Self-onboarding, build step 1 (issue #89, ADR-024):** migration `V23` with
   `onboarding_applications` and `notification_outbox`, reached only through definer functions;
   the public sign-up and applicant page; the operator portal on the platform host (operator

@@ -2059,7 +2059,10 @@ Primary key `(tenant_id, branch_id, product_id)`, `qty numeric(14,3)`, `updated_
 `avg_cost_minor bigint` (0 to 10^13): the moving weighted average cost of one base unit at the branch. A new row starts at the
 product's `cost_minor`; a movement at another cost than the average re-averages it under the row's lock, a movement at the average
 leaves it, and the rounding remainder posts per branch to purchase rounding (source `retail.average_cost`). V94 set it to the
-product's cost on every row that existed. Every valuation reads a balance times its own row's average. Written only by
+product's cost on every row that existed and then dropped the column's default. Every valuation reads a balance times its own row's
+average. The part of a landed cost or supplier price credit line that went into each branch's average is kept in
+`retail_cost_spreads` (`line_id`, `branch_id`, `product_id`, `inventory_minor > 0`; forced RLS, append-only, V94), so the void takes
+back exactly those parts. Written only by
 `StockLedger` in the transaction of each movement, under the row's lock (`SELECT ... FOR UPDATE`,
 taken in branch and product order). Product rows are locked only by restocks and price edits, with
 `FOR NO KEY UPDATE` (see purchases below). The nightly job `retail.stock-reconciliation` compares each row

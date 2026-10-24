@@ -1155,4 +1155,47 @@ class RetailLandedCostIT extends LandedCostTestBase {
                         t.tenantId()))
                 .isEqualTo(1);
     }
+
+    /**
+     * ADR-079: a landed cost spread over two branches is taken back on void from exactly the branches that took it, by the
+     * parts recorded when it was posted, so each branch's inventory account still equals its stock at its own average after
+     * the other branch sold some of the product in between.
+     */
+    @Test
+    void aVoidTakesTheLandedCostBackFromTheBranchesThatTookIt() {
+        receive(br2, product, "10", 100);
+        JsonNode lot = receive(hq, product, "10", 100);
+        // 1,000 for the 10 of the lot, spread over what each branch holds: 500 each, both averages 150.
+        JsonNode doc = landed(freight("FWD-SPREAD", 1_000, lineId(lot)));
+        assertThat(doc.get("lines").get(0).get("to_inventory_minor").asLong()).isEqualTo(1_000);
+        assertThat(valuation(hq, product)).isEqualTo(1_500);
+        assertThat(valuation(br2, product)).isEqualTo(1_500);
+        assertThat(api.sell(br2, "cash", product, "3").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        assertThat(voidLanded(uuid(doc, "id")).getStatusCode()).isEqualTo(HttpStatus.OK);
+        // Head office gives back its 500 (10 at 100 again); branch two its 500 from the 7 left (1,050 less 500, 79
+        // each).
+        assertThat(valuation(hq, product)).isEqualTo(1_000);
+        assertThat(balance("inventory", hq)).isEqualTo(valuation(hq, product));
+        assertThat(valuation(br2, product)).isEqualTo(7 * 79);
+        assertThat(balance("inventory", br2)).isEqualTo(valuation(br2, product));
+        assertBooksBalance();
+    }
+
+    /** ADR-079: when a branch has since sold most of what took the cost, taking its part back is refused in plain words. */
+    @Test
+    void aVoidThatWouldLeaveABranchBelowZeroIsRefused() {
+        receive(br2, product, "10", 100);
+        JsonNode lot = receive(hq, product, "10", 100);
+        JsonNode doc = landed(freight("FWD-SOLD", 1_000, lineId(lot)));
+        assertThat(api.sell(br2, "cash", product, "8").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        ResponseEntity<JsonNode> refused = voidLanded(uuid(doc, "id"));
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(refused)).isEqualTo("average_cost_negative");
+        assertThat(refused.getBody().get("detail").asString()).contains("cannot be voided");
+        assertThat(landedCost(uuid(doc, "id")).get("status").asString()).isEqualTo("posted");
+        assertThat(balance("inventory", br2)).isEqualTo(valuation(br2, product));
+        assertBooksBalance();
+    }
 }

@@ -174,11 +174,6 @@ class ReceiptCosting {
     Effect apply(
             Lot lot, long share, boolean raise, UUID documentId, String documentNo, LocalDate on, String sourceType) {
         Effect e = estimate(lot, share, raise, documentId);
-        // ADR-079: the part each branch's inventory takes re-averages that branch's cost, whatever happens to the last
-        // paid cost below.
-        e.byBranch()
-                .forEach((branch, part) ->
-                        stock.revalue(on, branch, lot.productId(), raise ? part : -part, sourceType, documentId));
         if (e.applied()) {
             catalogue.applyCostChange(
                     lot.productId(),
@@ -193,7 +188,20 @@ class ReceiptCosting {
                     (raise ? "Landed cost " : "Supplier credit ") + documentNo + " on " + lot.receiptNo()
                             + ": cost not applied. " + e.note());
         }
+        // ADR-079: the part each branch's inventory takes re-averages that branch's cost, whatever happened to the last
+        // paid
+        // cost above. The caller locked the product rows before the balances (the order a restock takes them) and
+        // lockStock
+        // took the balances in branch and product order, so this takes no lock out of that order.
+        e.byBranch()
+                .forEach((branch, part) ->
+                        stock.revalue(on, branch, lot.productId(), raise ? part : -part, sourceType, documentId));
         return e;
+    }
+
+    /** ADR-079: keeps the parts a line put into each branch's average, for its void (see {@link #revalueBack}). */
+    void recordSpread(UUID lineId, Lot lot, Effect e) {
+        lots.insertSpread(lineId, lot.productId(), e.byBranch());
     }
 
     /**
@@ -223,15 +231,20 @@ class ReceiptCosting {
     }
 
     /**
-     * ADR-079: the void of a landed cost or a price credit takes its inventory part back out of the branches' averages, spread
-     * as it was recorded, in proportion to what each branch holds now (the void is refused once the goods have moved on).
+     * ADR-079: the void of a landed cost or a price credit takes its inventory part back out of the averages of exactly the
+     * branches that took it, by the parts recorded when it was posted, as its reversed entries take it out of their inventory
+     * accounts. A line posted before V94 has no recorded parts; its part is spread over what each branch holds now.
      *
      * @param raise as for {@link #apply}: true for the void of a landed cost, whose part leaves the averages
      */
-    void revalueBack(Lot lot, long inventory, boolean raise, UUID documentId, LocalDate on, String sourceType) {
-        spread(lot, inventory, lots.balances(lot.productId()))
-                .forEach((branch, part) ->
-                        stock.revalue(on, branch, lot.productId(), raise ? -part : part, sourceType, documentId));
+    void revalueBack(
+            UUID lineId, Lot lot, long inventory, boolean raise, UUID documentId, LocalDate on, String sourceType) {
+        Map<UUID, Long> parts = lots.spread(lineId);
+        if (parts.isEmpty()) {
+            parts = spread(lot, inventory, lots.balances(lot.productId()));
+        }
+        parts.forEach((branch, part) ->
+                stock.revalue(on, branch, lot.productId(), raise ? -part : part, sourceType, documentId));
     }
 
     /** The charge per base unit, rounded down: no more is capitalised than was charged. */

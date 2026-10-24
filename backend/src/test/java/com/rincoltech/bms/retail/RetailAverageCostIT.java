@@ -343,4 +343,130 @@ class RetailAverageCostIT extends IntegrationTest {
         assertThat(account("inventory", hq)).isEqualTo(valuation(hq)).isEqualTo(5 * 11_000);
         assertThat(account("purchase_rounding", hq)).isZero();
     }
+
+    void capabilities(Map<String, Object> flags) {
+        String etag = api.get("/settings/capabilities", SETTINGS).getHeaders().getETag();
+        ResponseEntity<JsonNode> r = api.call(
+                HttpMethod.PUT,
+                "/settings/capabilities",
+                flags,
+                SETTINGS,
+                "*",
+                etag == null ? Map.of() : Map.of("If-Match", etag));
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+    }
+
+    UUID transfer(UUID from, UUID to, UUID product, String qty) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("from_branch_id", from);
+        body.put("to_branch_id", to);
+        body.put("lines", List.of(Map.of("product_id", product, "qty", qty)));
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/transfers", body, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return RetailTestSupport.id(r);
+    }
+
+    /**
+     * ADR-079 decision 1: a sale locks the balance row before it reads the average, so a delivery committing at the same
+     * moment leaves it costed at the average before the delivery or the one after, never a mix, and the books agree.
+     */
+    @Test
+    void aSaleRacingADeliveryIsCostedAtOneAverage() throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            for (int round = 0; round < 5; round++) {
+                UUID fuse = api.product("AVG-FUSE-" + round, 100, 1_000);
+                restocked(hq, fuse, null, "10", 100);
+                CountDownLatch go = new CountDownLatch(1);
+                Future<ResponseEntity<JsonNode>> delivery = pool.submit(() -> {
+                    go.await();
+                    return restock(hq, fuse, null, "10", 300);
+                });
+                Future<JsonNode> sale = pool.submit(() -> {
+                    go.await();
+                    return sell(hq, fuse, null, "4", 1_000);
+                });
+                go.countDown();
+                assertThat(delivery.get(60, TimeUnit.SECONDS).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+                // Sold first: 4 at 100. Delivered first: (1,000 + 3,000) / 20 = 200 a piece.
+                long cost = lineCost(sale.get(60, TimeUnit.SECONDS));
+                assertThat(cost).isIn(400L, 800L);
+                assertThat(average(hq, fuse)).isEqualTo(cost == 400 ? (600 + 3_000) / 16 : 200);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(account("inventory", hq)).isEqualTo(valuation(hq));
+    }
+
+    /**
+     * ADR-079 decision 4, two-step: goods on the road carry the source's average at dispatch, and the destination re-averages
+     * with that cost when they arrive, whatever the source paid for a later delivery meanwhile.
+     */
+    @Test
+    void aTwoStepTransferArrivesAtTheCostItLeftWith() {
+        capabilities(Map.of("transfer_receipt", true));
+        UUID lamp = api.product("AVG-LAMP", 100, 900);
+        restocked(hq, lamp, null, "10", 100);
+        restocked(br2, lamp, null, "5", 200);
+        UUID moved = transfer(hq, br2, lamp, "5");
+        // Head office buys dearer while the five are on the road: (500 + 3,000) / 15 = 233.
+        restocked(hq, lamp, null, "10", 300);
+        assertThat(average(hq, lamp)).isEqualTo(233);
+        ResponseEntity<JsonNode> received = api.postKeyed(
+                "/transfers/" + moved + "/receive",
+                Map.of(),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(received.getStatusCode()).as("%s", received.getBody()).isEqualTo(HttpStatus.OK);
+        // 5 at 200 and 5 at the 100 they left with: 150.
+        assertThat(average(br2, lamp)).isEqualTo(150);
+        assertThat(account("inventory", br2)).isEqualTo(valuation(br2)).isEqualTo(1_500);
+        assertThat(account("inventory", hq)).isEqualTo(valuation(hq));
+    }
+
+    /** ADR-079 decision 3: the void of a transfer takes each side back at the transfer's cost, which re-averages both. */
+    @Test
+    void aTransferVoidReaveragesBothBranches() {
+        UUID plug = api.product("AVG-PLUG", 100, 900);
+        restocked(hq, plug, null, "10", 100);
+        restocked(br2, plug, null, "10", 300);
+        UUID moved = transfer(hq, br2, plug, "5");
+        // (3,000 + 500) / 15 = 233.
+        assertThat(average(br2, plug)).isEqualTo(233);
+        ResponseEntity<JsonNode> voided =
+                api.post("/transfers/" + moved + "/void", Map.of("reason", "Test wrong branch"), ADMIN);
+        assertThat(voided.getStatusCode()).as("%s", voided.getBody()).isEqualTo(HttpStatus.OK);
+        // Branch two: (15 x 233 less 5 at 100) / 10 = 299.5, carried as 300; head office: 10 at 100 again.
+        assertThat(average(br2, plug)).isEqualTo(300);
+        assertThat(average(hq, plug)).isEqualTo(100);
+        assertThat(account("inventory", br2)).isEqualTo(valuation(br2)).isEqualTo(3_000);
+        assertThat(account("inventory", hq)).isEqualTo(valuation(hq)).isEqualTo(1_000);
+    }
+
+    /** ADR-079 decision 3: a correction and a count move stock at the branch's average, which they leave as it is. */
+    @Test
+    void aCorrectionAndACountMoveStockAtTheAverage() {
+        UUID wire = api.product("AVG-WIRE", 100, 900);
+        restocked(hq, wire, null, "10", 100);
+        restocked(hq, wire, null, "10", 200);
+        assertThat(average(hq, wire)).isEqualTo(150);
+        Map<String, Object> fix = new LinkedHashMap<>();
+        fix.put("branch_id", hq);
+        fix.put("product_id", wire);
+        fix.put("new_qty", "18");
+        fix.put("expected_qty", "20");
+        fix.put("reason_code", "miscount");
+        ResponseEntity<JsonNode> corrected = api.postKeyed(
+                "/stock/corrections", fix, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(corrected.getStatusCode()).as("%s", corrected.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(account("stock_shrinkage", hq)).isEqualTo(300);
+        api.stockUp(hq, wire, "21");
+        assertThat(average(hq, wire)).isEqualTo(150);
+        assertThat(account("stock_shrinkage", hq)).isEqualTo(300 - 450);
+        assertThat(account("inventory", hq)).isEqualTo(valuation(hq)).isEqualTo(21 * 150);
+        assertThat(account("purchase_rounding", hq)).isZero();
+    }
 }

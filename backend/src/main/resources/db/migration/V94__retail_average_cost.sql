@@ -7,7 +7,8 @@
 -- it; a movement out at the average leaves it as it is; a movement out at another cost (the void of a restock) re-averages what
 -- stays. retail_products.cost_minor is kept and now means the last price paid, shown as Last paid.
 --
--- Expand only, safe on a populated database. ADD COLUMN with a constant default is a catalogue change in PostgreSQL 16 (no table
+-- Expand only, safe on a populated database: one column on retail_stock_balances and one new table, retail_cost_spreads.
+-- ADD COLUMN with a constant default is a catalogue change in PostgreSQL 16 (no table
 -- rewrite), but it takes ACCESS EXCLUSIVE on retail_stock_balances for the moment it runs, which blocks sales, restocks and
 -- transfers until the commit. The check is added NOT VALID (no scan under that lock) and validated after the backfill. The
 -- backfill updates every balance row once (staging: a few thousand rows, well under a second); fillfactor 80 (V26) keeps the
@@ -31,7 +32,8 @@ COMMENT ON COLUMN retail_stock_balances.avg_cost_minor IS
 -- retail_stock_balances and retail_products have FORCE ROW LEVEL SECURITY and no app.tenant_id is bound here. bms_owner has
 -- BYPASSRLS (deploy/postgres/initdb/01-roles.sh), so it reads every business. row_security = off makes PostgreSQL raise instead
 -- of silently updating no rows should a policy still apply. When the migrating owner cannot bypass row security, the two tables
--- drop FORCE for this transaction only and get it back before the commit, as V92 does.
+-- drop FORCE for this transaction only and get it back before the commit, as V92 does; that ALTER takes ACCESS EXCLUSIVE on
+-- retail_products as well, which blocks reads of the catalogue until the commit. With BYPASSRLS, as deployed, nothing is altered.
 SET LOCAL row_security = off;
 DO $$
 BEGIN
@@ -56,3 +58,30 @@ $$;
 SET LOCAL row_security = on;
 
 ALTER TABLE retail_stock_balances VALIDATE CONSTRAINT retail_stock_balances_avg_cost_range;
+
+-- Every row now has its average, and every writer names one (StockLedger starts a branch's first row at the product's last paid
+-- cost). The default is dropped so a writer that forgot the column fails loudly instead of costing later sales at zero.
+ALTER TABLE retail_stock_balances ALTER COLUMN avg_cost_minor DROP DEFAULT;
+
+-- ---------------------------------------------------------------------------------------------
+-- retail_cost_spreads: the part of a landed cost line or a supplier price credit line that went into each branch's inventory,
+-- and so into that branch's average (ADR-079 decision 3). A void takes back exactly these parts, from the branches that took
+-- them, so each branch's inventory account and its valuation stay together whatever moved since. line_id is the
+-- retail_landed_cost_lines or retail_supplier_credit_lines row (no foreign key: it names one of two tables). Append-only; a line
+-- recorded before this migration has no rows, and its void spreads the part over what each branch holds then.
+-- ---------------------------------------------------------------------------------------------
+
+CREATE TABLE retail_cost_spreads (
+    tenant_id       uuid        NOT NULL REFERENCES tenants (id),
+    line_id         uuid        NOT NULL,
+    branch_id       uuid        NOT NULL,
+    product_id      uuid        NOT NULL,
+    inventory_minor bigint      NOT NULL CHECK (inventory_minor > 0 AND inventory_minor <= 10000000000000),
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, line_id, branch_id),
+    FOREIGN KEY (tenant_id, branch_id) REFERENCES branches (tenant_id, id),
+    FOREIGN KEY (tenant_id, product_id) REFERENCES retail_products (tenant_id, id)
+);
+SELECT bms_apply_tenant_rls('retail_cost_spreads');
+SELECT bms_grant_app('retail_cost_spreads', 'SELECT, INSERT');
+SELECT bms_make_append_only('retail_cost_spreads');

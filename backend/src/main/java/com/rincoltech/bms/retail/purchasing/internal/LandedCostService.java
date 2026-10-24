@@ -171,8 +171,10 @@ class LandedCostService {
         for (int i = 0; i < ps.size(); i++) {
             Planned p = ps.get(i);
             Effect e = costing.apply(p.lot(), p.share(), true, id, no.no(), plan.costDate(), LANDED);
+            UUID lineId = UUID.randomUUID();
+            costing.recordSpread(lineId, p.lot(), e);
             newLines.add(new NewLine(
-                    UUID.randomUUID(),
+                    lineId,
                     i + 1,
                     p.lot().receiptLineId(),
                     p.lot().branchId(),
@@ -579,10 +581,11 @@ class LandedCostService {
         }
         for (int i = ls.size() - 1; i >= 0; i--) {
             LineRow l = ls.get(i);
-            costing.revalueBack(lots.get(l.receiptLineId()), l.toInventoryMinor(), true, id, today, LANDED_VOID);
             if (l.costApplied()) {
                 costing.restore(lots.get(l.receiptLineId()), l.costBeforeMinor(), l.costAfterMinor(), id, d.landedNo());
             }
+            costing.revalueBack(
+                    l.id(), lots.get(l.receiptLineId()), l.toInventoryMinor(), true, id, today, LANDED_VOID);
         }
         Instant now = clock.now();
         if (billRepo.markVoided(d.billId(), principal.userId(), today, now, reason) == 0

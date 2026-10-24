@@ -53,12 +53,17 @@ one figure for the business or one per branch, and what happens to remainders, v
    - Out, at the branch's average: a sale, usage and damage, a stock correction and a count's difference (up or down: a count that
      finds more pieces adds them at the average), a transfer out.
    - Value only: a landed cost and a supplier price credit put their inventory part (ADR-033 #199, spread over the branches that hold
-     the goods in proportion to what each holds) into those branches' averages (`StockLedger.revalue`); their voids take it back out,
-     spread over what each branch holds then.
+     the goods in proportion to what each holds) into those branches' averages (`StockLedger.revalue`). The part each branch took
+     is recorded (`retail_cost_spreads`), and the void takes exactly those parts back from exactly those branches, as its reversed
+     entries take them out of their inventory accounts; when a branch has since sold so much of the product that its part would
+     leave the rest below zero, the void is refused (`average_cost_negative`, "It cannot be voided now"). A line posted before
+     `V94` has no recorded parts and its void spreads its part over what each branch holds then.
    - Undoing an earlier movement (the void of a restock, a goods receipt, a customer return or a transfer, goods sent back to a
      supplier) takes its units out at the cost they came in at, which re-averages what stays. Goods sent back to a supplier leave at
      what the receipt's units are carried at (#199), not at the average, so the supplier's credit, the price variance and the
-     inventory account stay as #199 built them; what stays is re-averaged.
+     inventory account stay as #199 built them; what stays is re-averaged. When sales at a higher average since would leave the
+     rest below zero the return is refused with its own words ("Send back fewer, or ask the supplier for a price credit
+     instead").
 4. **A transfer carries the cost.** A transfer out leaves the source at the source's average (the line's `unit_cost_minor`, as
    before but now the average and not the product's cost); the transfer in, at once or when a two-step dispatch is received, brings
    the units in at that cost and re-averages the destination. The clearing legs still net to zero, the business's valuation does not
@@ -75,7 +80,9 @@ one figure for the business or one per branch, and what happens to remainders, v
    first average, before it has held the product, is the last paid cost; a manual change of the last paid cost does not move an
    average.
 7. **Imports.** History posts nothing (ADR-020 decision 9), so historical movements do not re-average; the opening balance
-   (`legacy_balance`) of an import is valued, in the opening journal, at the cost it carries, and that becomes the branch's average.
+   (`legacy_balance`) of an import is valued, in the opening journal, at the cost it carries: into a branch that holds nothing it
+   becomes the branch's average, added to stock already held it re-averages with it, and a legacy balance that takes stock away
+   leaves the average alone.
 8. **Profit is the sale lines' snapshots; history never changes.** A sale line keeps the branch's average at the moment of sale in
    `unit_cost_minor`, and `line_cost_minor` is the base quantity times it, whether the line was sold in cartons, dozens or pieces.
    The daily profit, the margins, the sales analysis, the dashboard and the evaluation already add up `line_cost_minor` (and returns
@@ -86,7 +93,9 @@ one figure for the business or one per branch, and what happens to remainders, v
    dashboard, the evaluation, a branch's holdings before it closes) multiplies a balance by its own branch's average.
 10. **Migration `V94`.** One column with a constant default and a range check (`NOT VALID`, validated after the backfill), and a
     backfill that sets every balance row's average to its product's cost: until now every unit was valued at that cost, so it is
-    today's average and nothing moves on the day of the deploy. It follows V92's handling of an owner without `BYPASSRLS`.
+    today's average and nothing moves on the day of the deploy. The default is then dropped, so a writer that forgets the column
+    fails instead of costing later sales at zero. It adds the append-only `retail_cost_spreads` (decision 3) and follows V92's
+    handling of an owner without `BYPASSRLS`.
 
 ## Consequences
 
@@ -98,7 +107,8 @@ cost; profit history never changes.
 unit, so a remainder of up to half a minor unit per unit on hand goes to purchase rounding each time it is re-averaged; the
 business has no single average of an item (decision 1); goods sent back to a supplier leave at their receipt's carrying cost, not the
 average, so they move the average of what stays; a void that empties a branch after mixed deliveries and sales puts the cost error of
-those sales into purchase rounding on the void's day.
+those sales into purchase rounding on the void's day. The valuation as of an earlier date multiplies the quantity on that date by
+each branch's average today: the average's history is not kept, so a past valuation is today's costs applied to that day's stock.
 
 **Watch for:** a sale (after the buyer's lock, spec 5.2), a usage report and a transfer (both branches, in branch and product order)
 take the balance rows' locks before they read the average, so a delivery committing meanwhile cannot leave them costed at the

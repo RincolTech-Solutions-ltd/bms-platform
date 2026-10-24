@@ -133,6 +133,22 @@ class RetailReportsIT extends IntegrationTest {
         assertThat(difference)
                 .containsEntry(t.headOffice().toString(), 0L)
                 .containsEntry(t.secondBranch().toString(), 0L);
+        // A valuation that drifts from the ledger (as imported history can leave it) still shows as the difference: the
+        // stock carried at 1,100 against the inventory account's 1,000 a unit.
+        TestDatabase.owner()
+                .sql("UPDATE retail_stock_balances SET avg_cost_minor = 1100 WHERE tenant_id = ? AND product_id = ?")
+                .params(t.tenantId(), a)
+                .update();
+        Map<String, Long> drifted = new HashMap<>();
+        api.get("/reports/valuation", ADMIN)
+                .getBody()
+                .get("branches")
+                .forEach(br -> drifted.put(
+                        br.get("branch_id").asString(),
+                        br.get("revaluation_difference_minor").asLong()));
+        assertThat(drifted)
+                .containsEntry(t.headOffice().toString(), 700L)
+                .containsEntry(t.secondBranch().toString(), 500L);
 
         String yesterday =
                 LocalDate.now(ZoneId.of("Africa/Kampala")).minusDays(1).toString();
