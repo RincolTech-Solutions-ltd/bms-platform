@@ -156,7 +156,7 @@ describe('goods received in a pack', () => {
     // Six cartons of 30 came: 180 pieces, but four of the ten cartons are still to come.
     expect(stillToComeMilli(order.lines?.[0] ?? {})).toBe(96_000);
     const form = receiveFormFor(order, branch);
-    const l = form.lines[0];
+    const l = form.lines[0] ?? blindLineFor(bulb, true, 'unused');
     expect(l).toMatchObject({ unitId: CARTON, unitLabel: 'carton', baseUnit: 'piece', packSize: '24', usualSize: '24.000', qty: '4' });
     const thirty = { ...l, packSize: '30', fromNowOn: true };
     expect(receiveLineProblem(thirty)).toBeNull();
@@ -184,7 +184,7 @@ describe('goods received in a pack', () => {
     expect(screen.getByText(/are needed\./)).toBeTruthy();
     rerender(
       <QueryClientProvider client={new QueryClient()}>
-        <StaffContext.Provider value={{ me: admin, branch }}>{view({ ...form, lines: [{ ...form.lines[0], packSize: '30' }] })}</StaffContext.Provider>
+        <StaffContext.Provider value={{ me: admin, branch }}>{view({ ...form, lines: form.lines.map((l) => ({ ...l, packSize: '30' })) })}</StaffContext.Provider>
       </QueryClientProvider>,
     );
     expect(screen.getByLabelText('Use 30 from now on')).toBeTruthy();
