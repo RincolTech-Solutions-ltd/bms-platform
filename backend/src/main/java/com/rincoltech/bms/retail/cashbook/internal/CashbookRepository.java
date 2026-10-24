@@ -496,6 +496,17 @@ class CashbookRepository {
                 .optional();
     }
 
+    /** The branch's expenses dated that day that are not voided, for the savings cap (ADR-080). */
+    long activeExpensesMinor(UUID branch, LocalDate date) {
+        return jdbc.sql("""
+                        SELECT coalesce(sum(amount_minor), 0) FROM retail_expenses
+                         WHERE branch_id = ? AND business_date = ? AND voided_at IS NULL
+                        """)
+                .params(branch, Date.valueOf(date))
+                .query(Long.class)
+                .single();
+    }
+
     List<SavingsRow> savingsPage(
             List<UUID> branches,
             LocalDate from,

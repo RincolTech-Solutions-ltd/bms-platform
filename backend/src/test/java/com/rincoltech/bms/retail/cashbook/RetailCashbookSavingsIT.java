@@ -80,7 +80,7 @@ class RetailCashbookSavingsIT extends IntegrationTest {
         assertThat(s.get("suggested_minor").asLong()).isEqualTo(2_500);
         assertThat(s.get("daily_profit_minor").asLong()).isEqualTo(5_000);
         assertThat(s.get("total_sold_minor").asLong()).isEqualTo(15_000);
-        assertThat(s.get("existing_id").isNull()).isTrue();
+        assertThat(s.get("existing_id")).isNull();
 
         ResponseEntity<JsonNode> r = cb.post("/savings", body(s, null, null), PROFIT_RECORDER);
 
@@ -126,7 +126,7 @@ class RetailCashbookSavingsIT extends IntegrationTest {
     }
 
     @Test
-    void anOverwriteNeedsTheOverwritePermissionAndAReason() {
+    void anOverwriteNeedsTheOverwritePermissionButTheReasonIsOptional() {
         JsonNode s = suggestion(PROFIT_RECORDER);
 
         ResponseEntity<JsonNode> forbidden = cb.post("/savings", body(s, 4_000, "Owner asked"), PROFIT_RECORDER);
@@ -138,20 +138,160 @@ class RetailCashbookSavingsIT extends IntegrationTest {
         assertThat(equal.getBody().get("overwritten").asBoolean()).isFalse();
         cb.voidIt("/savings/" + RetailTestSupport.id(equal), "Redo", ALL);
 
+        // #538: no reason at all is accepted, and the row keeps none (V95 relaxed the check).
         ResponseEntity<JsonNode> noReason = cb.post("/savings", body(s, 4_000, null), ALL);
-        assertThat(noReason.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(noReason.getBody().get("code").asString()).isEqualTo("reason_required");
-        assertThat(cb.post("/savings", body(s, 4_000, "no"), ALL)
-                        .getBody()
-                        .get("code")
-                        .asString())
-                .isEqualTo("reason_required");
+        assertThat(noReason.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(noReason.getBody().get("overwritten").asBoolean()).isTrue();
+        assertThat(noReason.getBody().get("amount_minor").asLong()).isEqualTo(4_000);
+        assertThat(reasonOf(RetailTestSupport.id(noReason))).isNull();
+        cb.voidIt("/savings/" + RetailTestSupport.id(noReason), "Redo", ALL);
 
-        ResponseEntity<JsonNode> ok = cb.post("/savings", body(s, 4_000, "Owner asked for more"), ALL);
-        assertThat(ok.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(ok.getBody().get("overwritten").asBoolean()).isTrue();
-        assertThat(ok.getBody().get("amount_minor").asLong()).isEqualTo(4_000);
+        // A blank reason counts as none; a short pick such as "Debt" is kept as given.
+        ResponseEntity<JsonNode> blank = cb.post("/savings", body(s, 3_000, "   "), ALL);
+        assertThat(blank.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(reasonOf(RetailTestSupport.id(blank))).isNull();
+        cb.voidIt("/savings/" + RetailTestSupport.id(blank), "Redo", ALL);
+
+        ResponseEntity<JsonNode> picked = cb.post("/savings", body(s, 4_000, "Debt"), ALL);
+        assertThat(picked.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(reasonOf(RetailTestSupport.id(picked))).isEqualTo("Debt");
         assertThat(cb.accountMovement("savings_reserve", hq)).isEqualTo(4_000);
+    }
+
+    String reasonOf(UUID id) {
+        return TestDatabase.owner()
+                .sql("SELECT overwrite_reason FROM retail_daily_savings WHERE id = ?")
+                .param(id)
+                .query((rs, n) -> rs.getString(1))
+                .list()
+                .getFirst();
+    }
+
+    @Test
+    void theDatabaseStillRefusesABlankReason() {
+        UUID id = RetailTestSupport.id(cb.post("/savings", body(suggestion(ALL), 4_000, null), ALL));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> TestDatabase.owner()
+                        .sql("UPDATE retail_daily_savings SET overwrite_reason = '  ' WHERE id = ?")
+                        .param(id)
+                        .update())
+                .hasMessageContaining("retail_daily_savings");
+    }
+
+    // ------------------------------------------------------------ the cap: profit less expenses (ADR-080)
+
+    UUID[] rent;
+
+    UUID expense(long amount) {
+        if (rent == null) {
+            rent = cb.categoryWithItem("Premises", "Rent", false);
+        }
+        ResponseEntity<JsonNode> r = cb.expense(hq, rent[0], rent[1], amount, day);
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        return RetailTestSupport.id(r);
+    }
+
+    @Test
+    void theSuggestionShowsProfitExpensesAndAvailable() {
+        JsonNode s = suggestion(PROFIT_RECORDER);
+        assertThat(s.get("day_expenses_minor").asLong()).isZero();
+        assertThat(s.get("available_minor").asLong()).isEqualTo(5_000);
+
+        JsonNode hidden = suggestion(CASHIER);
+        assertThat(hidden.has("day_expenses_minor")).isFalse();
+        assertThat(hidden.has("available_minor")).isFalse();
+    }
+
+    @Test
+    void theServerRefusesAnAmountAboveTheAvailableInPlainWords() {
+        ResponseEntity<JsonNode> above = cb.post("/savings", body(suggestion(ALL), 5_001, "Owner asked"), ALL);
+
+        assertThat(above.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(above.getBody().get("code").asString()).isEqualTo("savings_above_available");
+        assertThat(above.getBody().get("detail").asString())
+                .isEqualTo("You can save at most UGX 5,000 for " + words(day)
+                        + " (profit UGX 5,000 minus expenses UGX 0).");
+        assertThat(above.getBody().get("errors").get(0).get("field").asString()).isEqualTo("amount_minor");
+        assertThat(above.getBody().get("available_minor").asLong()).isEqualTo(5_000);
+        assertThat(cb.accountMovement("savings_reserve", hq)).isZero();
+        assertThat(cb.get("/savings", ALL).getBody().get("items")).isEmpty();
+    }
+
+    @Test
+    void theServerAcceptsAnAmountEqualToTheAvailable() {
+        ResponseEntity<JsonNode> at = cb.post("/savings", body(suggestion(ALL), 5_000, null), ALL);
+        assertThat(at.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(at.getBody().get("amount_minor").asLong()).isEqualTo(5_000);
+        assertThat(cb.accountMovement("savings_reserve", hq)).isEqualTo(5_000);
+    }
+
+    @Test
+    void theDaysExpensesReduceTheAvailableAndTheSuggestion() {
+        expense(3_000);
+        // A voided expense no longer counts.
+        UUID voided = expense(500);
+        assertThat(cb.voidIt("/expenses/" + voided, "Typed twice", ALL).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        JsonNode s = suggestion(PROFIT_RECORDER);
+        assertThat(s.get("daily_profit_minor").asLong()).isEqualTo(5_000);
+        assertThat(s.get("day_expenses_minor").asLong()).isEqualTo(3_000);
+        assertThat(s.get("available_minor").asLong()).isEqualTo(2_000);
+        assertThat(s.get("suggested_minor").asLong()).isEqualTo(1_000);
+
+        ResponseEntity<JsonNode> above = cb.post("/savings", body(s, 2_001, null), ALL);
+        assertThat(above.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(above.getBody().get("detail").asString())
+                .isEqualTo("You can save at most UGX 2,000 for " + words(day)
+                        + " (profit UGX 5,000 minus expenses UGX 3,000).");
+
+        ResponseEntity<JsonNode> ok = cb.post("/savings", body(s, null, null), PROFIT_RECORDER);
+        assertThat(ok.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(ok.getBody().get("amount_minor").asLong()).isEqualTo(1_000);
+    }
+
+    @Test
+    void anExpenseAfterTheFormWasShownChangesTheTokenAndWritesNothing() {
+        JsonNode s = suggestion(PROFIT_RECORDER);
+        expense(3_000);
+        ResponseEntity<JsonNode> stale = cb.post("/savings", body(s, null, null), PROFIT_RECORDER);
+        assertThat(stale.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(stale.getBody().get("code").asString()).isEqualTo("suggestion_changed");
+        assertThat(stale.getBody().get("suggested_minor").asLong()).isEqualTo(1_000);
+    }
+
+    @Test
+    void expensesAboveTheProfitLeaveZeroAvailableNeverLess() {
+        expense(7_000);
+
+        JsonNode s = suggestion(PROFIT_RECORDER);
+        assertThat(s.get("available_minor").asLong()).isZero();
+        assertThat(s.get("suggested_minor").asLong()).isZero();
+
+        ResponseEntity<JsonNode> one = cb.post("/savings", body(s, 1, null), ALL);
+        assertThat(one.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(one.getBody().get("detail").asString())
+                .isEqualTo("You can save at most UGX 0 for " + words(day)
+                        + " (profit UGX 5,000 minus expenses UGX 7,000).");
+
+        ResponseEntity<JsonNode> zero = cb.post("/savings", body(s, null, null), PROFIT_RECORDER);
+        assertThat(zero.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(zero.getBody().get("amount_minor").asLong()).isZero();
+        assertThat(cb.accountMovement("savings_reserve", hq)).isZero();
+    }
+
+    @Test
+    void todayIsSaidAsToday() {
+        LocalDate today = LocalDate.now(BusinessClock.DEFAULT_ZONE);
+        JsonNode s = cb.get("/savings/suggestion?branch_id=" + hq + "&date=" + today, ALL)
+                .getBody();
+        Map<String, Object> b = body(s, 1, null);
+        b.put("business_date", today.toString());
+        ResponseEntity<JsonNode> r = cb.post("/savings", b, ALL);
+        assertThat(r.getBody().get("detail").asString()).startsWith("You can save at most UGX 0 today (profit");
+    }
+
+    static String words(LocalDate d) {
+        return d.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.ENGLISH));
     }
 
     @Test
