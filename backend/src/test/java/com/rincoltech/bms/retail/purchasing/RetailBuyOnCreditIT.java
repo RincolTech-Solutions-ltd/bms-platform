@@ -59,7 +59,7 @@ class RetailBuyOnCreditIT extends IntegrationTest {
     }
 
     /** The administrator column: buys, pays and reads the cash book. */
-    static final String OWNER = ADMIN + ",retail.payable.manage,retail.cashbook.read";
+    static final String OWNER = ADMIN + ",retail.payable.manage,retail.cashbook.read,retail.banking.record";
     /** The Purchasing role (ADR-055): may buy, on credit too, but not pay. */
     static final String BUYER = "retail.stock.read,retail.purchase.create";
 
@@ -271,6 +271,36 @@ class RetailBuyOnCreditIT extends IntegrationTest {
         assertThat(entryDate).isEqualTo("2026-10-06");
         assertThat(cashOut("2026-10-06")).isEqualTo(400);
         assertThat(cashOut(TODAY)).isZero();
+    }
+
+    @Test
+    void aCashPaymentCannotBeDatedOnADayWhoseCashIsBanked() {
+        buy("credit", "5", "2026-10-05");
+        Map<String, Object> banking = new LinkedHashMap<>();
+        banking.put("branch_id", hq);
+        banking.put("business_date", "2026-10-06");
+        banking.put("amount_minor", 1_000);
+        ResponseEntity<JsonNode> banked = api.postKeyed("/bankings", banking, OWNER, "*", key());
+        assertThat(banked.getStatusCode()).as("%s", banked.getBody()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> r = payRaw("cash", 100, "2026-10-06", OWNER);
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(r)).isEqualTo("cash_day_banked");
+        assertThat(cashOut("2026-10-06")).isZero();
+        // Mobile money and bank never touch the till, and an unbanked earlier day or today stays open to cash.
+        pay("mobile_money", 100, "2026-10-06");
+        pay("cash", 100, "2026-10-05");
+        pay("cash", 100, TODAY);
+        assertThat(owed()).isEqualTo(200);
+    }
+
+    @Test
+    void aVoidedMobileMoneyPurchaseNeverTouchesTheTill() {
+        UUID purchase = buy("mobile_money", "3", TODAY);
+        ResponseEntity<JsonNode> v =
+                api.postKeyed("/purchases/" + purchase + "/void", Map.of("reason", "Entered twice"), OWNER, "*", key());
+        assertThat(v.getStatusCode()).as("%s", v.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(cashOut(TODAY)).isZero();
+        assertThat(posted("retail.purchase", purchase)).containsEntry("mobile_money", "300/300");
     }
 
     @Test

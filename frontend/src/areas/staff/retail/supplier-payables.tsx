@@ -51,7 +51,7 @@ export function OwedList({ report }: { report: SupplierPayables }) {
           {suppliers.map((row) => (
             <li key={row.supplier_id} className="rt-card" data-testid={`payable-${row.supplier_id}`}>
               <p><strong>{row.supplier_name}</strong></p>
-              <p>Owed <strong>{money(row.owed_minor ?? 0)}</strong></p>
+              <p>Owed <strong className="num">{money(row.owed_minor ?? 0)}</strong></p>
               <SupplierActions row={row} />
             </li>
           ))}

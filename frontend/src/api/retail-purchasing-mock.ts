@@ -614,7 +614,8 @@ export function createPurchasingMock(env: PurchasingEnv): PurchasingMock {
     supplierStatement: (supplierId, { from, to }) =>
       open(() => {
         const end = to || env.today();
-        const start = from || end;
+        // As the server: the last 90 days by default.
+        const start = from || new Date(Date.parse(`${end}T00:00:00Z`) - 89 * 86_400_000).toISOString().slice(0, 10);
         type Event = { date: string; kind: string; number: string; reference?: string; source_id: string; method?: string; amount: number };
         const events: Event[] = [
           ...restocks.filter((r) => r.supplier_id === supplierId).map((r) => ({ date: r.date, kind: 'purchase', number: r.purchase_no, source_id: r.id, amount: r.total_minor })),

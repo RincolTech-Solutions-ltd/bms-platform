@@ -73,7 +73,7 @@ export function PaymentFormView({ form, suppliers, branches, items, owed, loadin
         <label htmlFor="pay-amount">Amount paid<Star /></label>
         <input id="pay-amount" inputMode="numeric" aria-required value={form.amount} onChange={(e) => onChange({ ...form, amount: e.target.value })} />
         <label htmlFor="pay-date">Date paid<Star /></label>
-        <input id="pay-date" type="date" aria-required max={businessToday()} value={paidOnOf(form)} onChange={(e) => onChange({ ...form, paidOn: e.target.value, amounts: {} })} />
+        <input id="pay-date" type="date" aria-required max={businessToday()} value={paidOnOf(form)} onChange={(e) => onChange({ ...form, paidOn: e.target.value === businessToday() ? '' : e.target.value, amounts: {} })} />
         <p className="hint">Today or an earlier day. It pays only what was owed on that day.</p>
       </div>
       <label htmlFor="pay-ref">Reference, such as a bank or mobile money number (optional)</label>

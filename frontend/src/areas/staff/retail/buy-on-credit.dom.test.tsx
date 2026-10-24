@@ -27,6 +27,7 @@ vi.mock('../../../api/retail', async (original) => {
 
 const { METHODS, RestockForm, buildPurchase, creditNeedsSupplier } = await import('./restock');
 const { OwedList } = await import('./supplier-payables');
+const { moneyLinks } = await import('../tabs');
 const { PaymentFormView } = await import('./supplier-payment-new');
 const { SupplierStatementView } = await import('./supplier-statement');
 const { blankPayment, buildPaymentRequest, owedOn, paymentProblem, statementLineWords, statementText } = await import('./payables-state');
@@ -143,11 +144,23 @@ describe('Pay a supplier', () => {
     const tomorrow = new Date(Date.parse(`${businessToday()}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
     const form = { ...blankPayment('s1', branch), amount: '100' };
     expect(paymentProblem({ ...form, paidOn: tomorrow }, items, 42000)).toBe('A payment cannot be dated in the future.');
-    expect(paymentProblem({ ...form, paidOn: '' }, items, 42000)).toBe('Enter the day it was paid.');
+    // No day picked means today, read when it is sent: a draft left open overnight pays the next day, never the day it was started.
+    expect(form.paidOn).toBe('');
+    expect(paymentProblem(form, items, 42000)).toBeNull();
+    expect(buildPaymentRequest(form, items).paid_on).toBe(businessToday());
     expect(owedOn(items, '2026-10-01').map((i) => i.number)).toEqual(['P-000001']);
     // A draft saved before the date existed pays today.
     const { paidOn: _old, ...older } = form;
     expect(buildPaymentRequest(older, items).paid_on).toBe(businessToday());
+  });
+});
+
+describe('under the Money tab', () => {
+  it('lists What I owe suppliers for an owner without the purchasing capability, and not for a seller', () => {
+    const links = moneyLinks(owner);
+    expect(links.map((l) => l.label)).toContain(WORDS.whatIOweSuppliers);
+    expect(links.find((l) => l.label === WORDS.whatIOweSuppliers)?.to).toBe('/staff/retail/supplier-payables');
+    expect(moneyLinks({ ...mockMe('sales'), module_capabilities: { retail: [] } }).map((l) => l.label)).not.toContain(WORDS.whatIOweSuppliers);
   });
 });
 
@@ -166,6 +179,8 @@ describe('the supplier statement', () => {
     expect(screen.getAllByTestId('statement-balance').map((b) => b.textContent)).toEqual(['UGX 15,000', 'UGX 9,000']);
     expect(screen.getAllByTestId('statement-line')[1]?.textContent).toContain('Paid by mobile money SP-HQ-000001 (MM-77)');
     expect(screen.getByTestId('statement-closing').textContent).toBe('UGX 9,000');
+    // Every amount in tabular figures.
+    for (const el of [screen.getByTestId('statement-opening'), ...screen.getAllByTestId('statement-balance'), screen.getByTestId('statement-closing')]) expect(el.className).toContain('num');
   });
 
   it('is shared as plain text with the running balance', () => {

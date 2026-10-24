@@ -3,12 +3,14 @@ import { Link, createLazyRoute, getRouteApi } from '@tanstack/react-router';
 import { useState } from 'react';
 import { retail, type SupplierStatement } from '../../../api/retail';
 import { WORDS } from '../../../app/glossary';
+import { FieldsNeededNote } from '../../../app/ui/Field';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { SkeletonList } from '../../../components/states';
 import { useStaff } from '../context';
 import { defaultStatementRange } from './account-state';
 import { canUse } from './permissions';
 import { statementLineWords, statementText } from './payables-state';
+import { Star } from './purchasing-ui';
 import { showDate } from './transfers';
 import { Gate, Problem, money } from './ui';
 
@@ -21,7 +23,7 @@ export function SupplierStatementView({ statement }: { statement: SupplierStatem
   const lines = statement.lines ?? [];
   return (
     <section aria-label="The statement" data-testid="supplier-statement" data-tour="supplier-statement-lines">
-      <p>Owed at the start of {showDate(statement.from)}: <strong data-testid="statement-opening">{money(statement.opening_minor ?? 0)}</strong></p>
+      <p>Owed at the start of {showDate(statement.from)}: <strong className="num" data-testid="statement-opening">{money(statement.opening_minor ?? 0)}</strong></p>
       {lines.length === 0 ? (
         <p className="empty-state">Nothing happened with this supplier between these dates.</p>
       ) : (
@@ -30,14 +32,14 @@ export function SupplierStatementView({ statement }: { statement: SupplierStatem
             <li key={`${l.source_id ?? ''}-${l.kind ?? ''}-${i}`} className="rt-card" data-testid="statement-line">
               <p>{showDate(l.date)}: {statementLineWords(l)}</p>
               <p>
-                {(l.increase_minor ?? 0) > 0 ? `Adds ${money(l.increase_minor ?? 0)}` : `Takes off ${money(l.decrease_minor ?? 0)}`}. Owed after it{' '}
-                <strong data-testid="statement-balance">{money(l.balance_minor ?? 0)}</strong>
+                {(l.increase_minor ?? 0) > 0 ? 'Adds ' : 'Takes off '}<span className="num">{money((l.increase_minor ?? 0) > 0 ? (l.increase_minor ?? 0) : (l.decrease_minor ?? 0))}</span>. Owed after it{' '}
+                <strong className="num" data-testid="statement-balance">{money(l.balance_minor ?? 0)}</strong>
               </p>
             </li>
           ))}
         </ul>
       )}
-      <p className="rt-total">Owed at the end of {showDate(statement.to)}: <span data-testid="statement-closing">{money(statement.closing_minor ?? 0)}</span></p>
+      <p className="rt-total">Owed at the end of {showDate(statement.to)}: <span className="num" data-testid="statement-closing">{money(statement.closing_minor ?? 0)}</span></p>
     </section>
   );
 }
@@ -79,9 +81,10 @@ export function SupplierStatementPage() {
         <Link className="btn btn-sm" to="/staff/retail/supplier-payments/new" search={{ supplier: supplierId } as never}>Pay this supplier</Link>
         <Link className="btn btn-sm" to="/staff/retail/supplier-payables">{WORDS.whatIOweSuppliers}</Link>
       </p>
+      <FieldsNeededNote />
       <div className="rt-row" data-tour="supplier-statement-dates">
-        <div><label htmlFor="sst-from">From</label><input id="sst-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
-        <div><label htmlFor="sst-to">To</label><input id="sst-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+        <div><label htmlFor="sst-from">From<Star /></label><input id="sst-from" type="date" aria-required value={from} onChange={(e) => setFrom(e.target.value)} /></div>
+        <div><label htmlFor="sst-to">To<Star /></label><input id="sst-to" type="date" aria-required value={to} onChange={(e) => setTo(e.target.value)} /></div>
       </div>
       {!ranged && <p role="alert" className="rt-flag">The start date must not be after the end date.</p>}
       {statement.isPending && ranged && <SkeletonList label="Loading the statement" />}

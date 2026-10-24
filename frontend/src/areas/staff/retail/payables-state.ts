@@ -168,14 +168,17 @@ export interface PaymentForm {
   allocation: Allocation;
   /** The amount typed against each open item for a manual allocation, by `itemKey`. */
   amounts: Record<string, string>;
-  /** The day it was paid, YYYY-MM-DD: today or before (issue #557). A draft saved before it existed has none, which means today. */
+  /**
+   * The day it was paid, YYYY-MM-DD, only once the person picked one (issue #557). Empty or absent means today, read when the form is
+   * shown and sent, never stored: a draft left open overnight still pays today, not the day it was started.
+   */
   paidOn?: string;
 }
 
-export const blankPayment = (supplierId = '', branchId = '', paidOn = businessToday()): PaymentForm => ({ supplierId, branchId, method: 'cash', amount: '', reference: '', note: '', allocation: 'oldest_first', amounts: {}, paidOn });
+export const blankPayment = (supplierId = '', branchId = ''): PaymentForm => ({ supplierId, branchId, method: 'cash', amount: '', reference: '', note: '', allocation: 'oldest_first', amounts: {}, paidOn: '' });
 
-/** The day of the payment: the one typed, or today for a draft from before the field. */
-export const paidOnOf = (form: PaymentForm): string => form.paidOn ?? businessToday();
+/** The day of the payment: the one picked, or today. */
+export const paidOnOf = (form: PaymentForm): string => form.paidOn || businessToday();
 
 /** What was owed on the day of the payment: a payment pays only what was bought on or before its day, as the server does. */
 export const owedOn = (items: SupplierOpenItem[], day: string): SupplierOpenItem[] => items.filter((i) => (i.date ?? '') <= day);
@@ -212,9 +215,7 @@ export function itemAmountProblem(item: SupplierOpenItem, text: string | undefin
 export function paymentProblem(form: PaymentForm, items: SupplierOpenItem[] | undefined, owed: number | undefined): string | null {
   if (form.supplierId === '') return 'Choose the supplier.';
   if (form.branchId === '') return 'Choose the branch that pays.';
-  const day = paidOnOf(form);
-  if (day === '') return 'Enter the day it was paid.';
-  if (day > businessToday()) return 'A payment cannot be dated in the future.';
+  if (paidOnOf(form) > businessToday()) return 'A payment cannot be dated in the future.';
   const amount = paymentAmount(form);
   if (amount === null) return 'Enter the amount paid, in whole shillings.';
   if (form.allocation === 'oldest_first') {

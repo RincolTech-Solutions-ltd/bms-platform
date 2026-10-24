@@ -122,6 +122,18 @@ class PaymentsService {
                     List.of(new FieldProblem("paid_on", "future_date", "A payment cannot be dated in the future.")));
         }
         UUID branch = branches.resolve(PERMISSION, r.branchId());
+        // Issue #557: cash paid on an earlier day leaves that day's till, so a day whose cash is already banked is not
+        // changed
+        // after the fact. Mobile money and bank never touch the till. How far back is bounded by what is paid: a
+        // payment pays
+        // only what was owed on its day.
+        if (r.method().equals("cash") && paidOn.isBefore(today) && repo.cashBanked(branch, paidOn)) {
+            throw ApiException.rule(
+                    "cash_day_banked",
+                    "The cash of " + paidOn
+                            + " at this branch is already banked, so a cash payment cannot be dated that"
+                            + " day. Date it today, or choose mobile money or bank if it was paid that way.");
+        }
         if (!suppliers.lockSupplier(r.supplierId())) {
             throw ApiException.validation(
                     List.of(new FieldProblem("supplier_id", "unknown_supplier", "No such supplier.")));
