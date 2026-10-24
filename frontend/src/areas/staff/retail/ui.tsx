@@ -256,7 +256,8 @@ export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStoc
       search={search}
       // Only the answer to the term in the box: an earlier term's matches are never shown, so never picked.
       results={search.term === '' ? undefined : products.data}
-      fetching={products.isFetching}
+      // Waiting only for a term with no answer yet: a background refresh of a cached answer keeps its options in view.
+      fetching={products.isPending}
       error={products.isError ? <Problem error={products.error} /> : undefined}
       optionKey={(p) => p.id ?? p.code ?? ''}
       onPick={onAdd}

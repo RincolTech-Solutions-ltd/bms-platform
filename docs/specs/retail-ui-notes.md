@@ -1257,16 +1257,16 @@ the items show only while you search, and go away once one is picked. Every item
   stays quiet until the answer, so a screen reader hears it once per pause.
 - **Picking.** A tap, or Up and Down then Enter, adds the item. The box empties, the list closes and the cursor stays in
   the box for the next item. Enter with nothing highlighted only settles the search; it never picks. Escape closes the list,
-  and a second Escape empties the box; Escape never reaches a panel around the picker. The list closes when the cursor leaves the picker and opens again on return.
+  and a second Escape empties the box; an Escape that closes the list or empties the box never reaches a panel around the picker, and one with nothing to close goes on to it. The list closes when the cursor leaves the picker and opens again on return.
 - **Accessibility.** The input is `role="combobox"` with `aria-expanded`, `aria-controls` and `aria-autocomplete="list"`; the
-  list is a `listbox` named "Matching items" and its rows `option`s, the highlighted one `aria-selected` and named on the
+  list is a `listbox` named by its box's label and its rows `option`s, the highlighted one `aria-selected` and named on the
   input by `aria-activedescendant`; the status line under the box is a polite live region. A second picker on a screen has its
   own label: the barcode assign panel's is "Find the item this barcode belongs to".
 - **Count stock (owner decision on #535).** The search and Scan boxes sit on top. Below them, **Counted items (N)** holds the
   lines whose count is in, in the order done, and **Not counted yet (N)** holds every other item of the sheet (active items and
   inactive ones that still hold stock) with its count box and a **0** button for an item that is gone. A line moves to Counted
   items when its count is entered (on leaving the box, on Enter, or on 0) and back when the count is emptied. A found item that
-  is not counted yet heads Not counted yet, marked, with the cursor back in the search; a scan counts one more and moves the
+  is not counted yet heads Not counted yet, marked, with the cursor in its count box (the one picker where a pick does not leave it in the search, since the count is the next step); a scan counts one more and moves the
   line to Counted items. With lines left, Review variance first says "12 items not counted. Finish anyway?" with **Keep
   counting** and **Finish anyway**, as an inline warning, not a dialog. Only counted lines are sent, as before.
 - **Scan box.** Unchanged (ADR-070 decision 11, owner decision D7): a scanner types only into the Scan box, which adds the item or one more.
@@ -1318,8 +1318,8 @@ changes, so after a payment on the same screen the next share sends the new rece
 - Nothing is written to the server except the optional number; the typed number is never logged. The tour `retail-sales` is
   version 10: its Save step names Share receipt and WhatsApp customer.
 - **On the sale-complete screen (issue #534)** Share receipt is the first of the receipt actions and the screen's one main
-  action, right under the receipt; View receipt, the WhatsApp number and WhatsApp customer follow, then the sale's documents,
-  and **New sale** comes last as a full width secondary button 48px tall. Until Share receipt is drawn (its facts loading or
+  action, right under the receipt; View receipt, the WhatsApp number and WhatsApp customer follow, then **New sale** as a full
+  width secondary button 48px tall, and the sale's documents last, so the next sale needs no scroll past them. Until Share receipt is drawn (its facts loading or
   failed to load), or when the sale has no receipt to share, New sale is the main action, so the screen always has one.
 
 ## Sell offline (issue #458, ADR-067, FR-RET-67)

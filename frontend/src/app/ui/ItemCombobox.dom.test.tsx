@@ -175,6 +175,16 @@ describe('the item picker', () => {
     fireEvent.keyDown(box(), { key: 'Escape' });
     fireEvent.keyDown(box(), { key: 'Escape' });
     expect(outer).not.toHaveBeenCalled();
+    // With the list closed and the box empty, Escape has nothing to do here and goes on to the panel.
+    fireEvent.keyDown(box(), { key: 'Escape' });
+    expect(outer).toHaveBeenCalledTimes(1);
+  });
+
+  it('names its list after its own box, so two pickers on a screen are told apart', () => {
+    vi.useFakeTimers();
+    render(<Picker onPick={() => undefined} />);
+    type('bulb');
+    expect(screen.getByRole('listbox', { name: 'Find an item' })).toBeTruthy();
   });
 
   it('says plainly when no item matches', () => {

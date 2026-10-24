@@ -679,12 +679,12 @@ export function RecordSale() {
         <ProvisionalReceipt item={queued} onNew={() => { setQueued(null); setRound((n) => n + 1); }} />
       ) : sale ? (
         <>
-          {/* Share receipt is the main action here (issue #534): New sale comes after the receipt actions, and is the
+          {/* Share receipt is the main action here (issue #534): New sale comes right after the receipt actions, and is the
               main action until Share receipt is drawn, or when this sale offers no receipt to share. */}
           <Receipt sale={sale} received={received} />
           <ShareReceipt sale={sale} madeHere />
-          {sale.id && <SaleDocuments saleId={sale.id} status={sale.status} branchId={sale.branch_id} />}
           <NewSale sale={sale} onNew={() => { setSale(null); setReceived(undefined); setRound((n) => n + 1); }} />
+          {sale.id && <SaleDocuments saleId={sale.id} status={sale.status} branchId={sale.branch_id} />}
         </>
       ) : (
         <>

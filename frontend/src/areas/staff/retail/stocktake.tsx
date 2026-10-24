@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Highlight } from '../../../app/ui/SearchBox';
 import { ItemCombobox } from '../../../app/ui/ItemCombobox';
 import { matchesSearch, useLiveSearch } from '../../../app/ui/useLiveSearch';
@@ -89,6 +89,14 @@ function CountSheet({ branchId }: { branchId: string }) {
   // The lines whose count is entered, in the order they were done; and the question asked before a count with lines left.
   const [done, setDone] = useState<string[]>([]);
   const [confirming, setConfirming] = useState(false);
+  // The question answers the counts it was asked about: any change to a count withdraws it, so Finish anyway never sends
+  // counts the counter has not seen it for (review of #535).
+  useEffect(() => setConfirming(false), [counts]);
+  // A picked item's count box takes the cursor, after the picker has put it back in the search (review of #535).
+  const [focusOn, setFocusOn] = useState<{ id: string; pick: number } | null>(null);
+  useEffect(() => {
+    if (focusOn) document.getElementById(`count-${focusOn.id}`)?.focus();
+  }, [focusOn]);
   /** A line leaves Not counted yet once its count is in, and goes back if the count is emptied. */
   const settle = (id: string) => setDone((d) => ((counts[id] ?? '').trim() === '' ? d.filter((x) => x !== id) : d.includes(id) ? d : [...d, id]));
   const stock = useQuery({ queryKey: ['retail', 'stock', branchId, '', false], queryFn: () => countableStock(branchId) });
@@ -139,7 +147,10 @@ function CountSheet({ branchId }: { branchId: string }) {
   // A line leaves it once its count is entered (on leaving the box, on Enter, or on 0), and "Counted items" holds the done
   // ones. An item found or scanned and not yet counted heads the list, marked, for its count.
   const isCounted = (id: string) => (counts[id] ?? '').trim() !== '';
-  const notCounted = [...rows.filter((r) => !done.includes(r.product_id ?? '')), ...(stock.data ?? []).filter((r) => !done.includes(r.product_id ?? '') && !listed.includes(r.product_id ?? ''))];
+  // Sets, so a sheet of thousands of lines is not walked line by line for every key in a count box.
+  const doneSet = new Set(done);
+  const listedSet = new Set(listed);
+  const notCounted = [...rows.filter((r) => !doneSet.has(r.product_id ?? '')), ...(stock.data ?? []).filter((r) => !doneSet.has(r.product_id ?? '') && !listedSet.has(r.product_id ?? ''))];
   const counted = done.flatMap((id) => byId.get(id) ?? []);
   const uncounted = (stock.data ?? []).filter((r) => !isCounted(r.product_id ?? '')).length;
   const finish = () => {
@@ -180,7 +191,7 @@ function CountSheet({ branchId }: { branchId: string }) {
           search={search}
           results={found}
           optionKey={(r) => r.product_id ?? ''}
-          onPick={(r) => { list(r.product_id ?? ''); setScanned(r.product_id ?? ''); }}
+          onPick={(r) => { list(r.product_id ?? ''); setScanned(r.product_id ?? ''); setFocusOn((f) => ({ id: r.product_id ?? '', pick: (f?.pick ?? 0) + 1 })); }}
           renderOption={(r) => (
             <>
               <span className="cb-text">
@@ -201,7 +212,7 @@ function CountSheet({ branchId }: { branchId: string }) {
           {counted.length === 0 && <p className="empty-state">No items yet. Find an item above, scan it, or count it in the list below.</p>}
           {counted.map((r) => line(r, false))}
           <h2>Not counted yet ({notCounted.length})</h2>
-          {notCounted.length === 0 ? <p className="empty-state">Every item on the sheet is counted.</p> : <p className="hint">Type how many are on the shelf, or tap 0 for an item that is gone. Leave an item blank to skip it.</p>}
+          {notCounted.length === 0 ? <p className="empty-state">Every item on the sheet is counted.</p> : <p className="hint">Type how many are on the shelf, or tap 0 for an item that is gone.</p>}
           {notCounted.map((r) => line(r, true))}
         </>
       )}
@@ -212,7 +223,7 @@ function CountSheet({ branchId }: { branchId: string }) {
           <p>{`${uncounted} ${uncounted === 1 ? 'item' : 'items'} not counted. Finish anyway?`}</p>
           <p className="cluster">
             <button type="button" className="btn-sm" onClick={() => setConfirming(false)}>Keep counting</button>
-            <button type="button" className="btn-sm" onClick={finish}>Finish anyway</button>
+            <BusyButton type="button" className="btn-sm" busy={review.isPending} disabled={entered.length === 0 || bad} onClick={finish}>Finish anyway</BusyButton>
           </p>
         </div>
       )}

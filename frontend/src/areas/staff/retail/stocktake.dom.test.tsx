@@ -91,7 +91,7 @@ describe('counting the sheet', () => {
     expect(box().getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('puts a picked item at the head of the list, marked, clears and closes the search and returns the cursor to it', async () => {
+  it('puts a picked item at the head of the list, marked, clears and closes the search and puts the cursor in its count box', async () => {
     listStock.mockResolvedValue([...active, inactiveHeld]);
     open();
     await screen.findByText(EMPTY);
@@ -99,7 +99,8 @@ describe('counting the sheet', () => {
     fireEvent.click(await screen.findByRole('option', { name: /^Test Lamp Inactive Held/ }));
     expect(box().value).toBe('');
     expect(screen.queryByRole('listbox')).toBeNull();
-    expect(document.activeElement).toBe(box());
+    // The point of the pick is its count (review of #535), so its box takes the cursor rather than the search.
+    expect(document.activeElement?.id).toBe('count-I-1');
     expect(screen.getByTestId('scan-hit').querySelector('input')?.id).toBe('count-I-1');
     const lines = [...document.querySelectorAll('.rt-card input[id^="count-"]')].map((i) => i.id);
     expect(lines).toEqual(['count-I-1', 'count-A-1']);
@@ -136,6 +137,36 @@ describe('counting the sheet', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Finish anyway' }));
     await waitFor(() => expect(createStocktake).toHaveBeenCalledTimes(1));
     expect(createStocktake.mock.calls[0]?.[0]).toEqual({ branch_id: expect.any(String), lines: [{ product_id: 'I-1', counted_qty: '0' }] });
+  });
+
+  // Review of #535: the question answers the counts it was asked about, and Finish anyway keeps the Review button's guards.
+  it('withdraws the question when a count changes, so Finish anyway never sends an invalid or empty count', async () => {
+    listStock.mockResolvedValue([...active, inactiveHeld]);
+    open();
+    await screen.findByText(EMPTY);
+    const held = document.getElementById('count-I-1') as HTMLInputElement;
+    fireEvent.change(held, { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Review variance (1 counted)' }));
+    expect(screen.getByTestId('count-not-done')).toBeTruthy();
+    fireEvent.change(document.getElementById('count-I-1') as HTMLInputElement, { target: { value: '4x' } });
+    expect(screen.queryByTestId('count-not-done')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Finish anyway' })).toBeNull();
+    expect(createStocktake).not.toHaveBeenCalled();
+  });
+
+  it('keeps Finish anyway to one request however often it is tapped', async () => {
+    listStock.mockResolvedValue([...active, inactiveHeld]);
+    createStocktake.mockImplementation(() => new Promise(() => {}));
+    open();
+    await screen.findByText(EMPTY);
+    fireEvent.click(screen.getByRole('button', { name: 'Count 0 of Test Lamp Inactive Held' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review variance (1 counted)' }));
+    const go = screen.getByRole('button', { name: 'Finish anyway' });
+    fireEvent.click(go);
+    fireEvent.click(go);
+    await waitFor(() => expect(createStocktake).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(createStocktake).toHaveBeenCalledTimes(1);
   });
 
   it('goes back to the count on Keep counting, and sends nothing', async () => {

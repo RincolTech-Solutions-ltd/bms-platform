@@ -108,6 +108,15 @@ describe('the item picker on the retail screens', () => {
     expect(await screen.findByRole('option', { name: /^Test Lamp 15W/ })).toBeTruthy();
   });
 
+  it('keeps a cached answer in view while it is refreshed in the background (review of #535)', async () => {
+    listProducts.mockResolvedValueOnce([bulb]).mockImplementation(() => new Promise(() => {}));
+    open();
+    await pickItem('Test Bulb 9W', { typed: 'bulb' });
+    fireEvent.change(box(), { target: { value: 'bulb' } });
+    expect(await screen.findByRole('option', { name: /^Test Bulb 9W/ })).toBeTruthy();
+    expect(listProducts).toHaveBeenCalledTimes(2);
+  });
+
   it('says plainly when no item matches what was typed', async () => {
     listProducts.mockResolvedValue([]);
     open();

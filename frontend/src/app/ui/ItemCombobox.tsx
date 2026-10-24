@@ -82,7 +82,9 @@ export function ItemCombobox<T>({ id, label, search, results, fetching = false, 
       if (item !== undefined) pick(item);
       else search.flush();
     } else if (e.key === 'Escape') {
-      // Escape belongs to the picker: a panel or dialog around it does not close on it as well.
+      // An Escape that closes the list or empties the box belongs to the picker, so a panel around it does not close as well;
+      // with the list closed and the box empty it goes on to the panel.
+      if (!expanded && search.text === '') return;
       e.preventDefault();
       e.stopPropagation();
       if (expanded) setOpen(false);
@@ -98,7 +100,7 @@ export function ItemCombobox<T>({ id, label, search, results, fetching = false, 
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false);
       }}
     >
-      <label htmlFor={id}>{label}</label>
+      <label id={`${id}-label`} htmlFor={id}>{label}</label>
       <div className="cb-anchor">
         <div className="sb-field">
           <input
@@ -126,7 +128,7 @@ export function ItemCombobox<T>({ id, label, search, results, fetching = false, 
         </div>
         {expanded && (
           <div className="cb-pop">
-            <ul id={listId} role="listbox" aria-label="Matching items" className="cb-list">
+            <ul id={listId} role="listbox" aria-labelledby={`${id}-label`} className="cb-list">
               {shown.map((item, i) => (
                 <li
                   key={optionKey(item)}
