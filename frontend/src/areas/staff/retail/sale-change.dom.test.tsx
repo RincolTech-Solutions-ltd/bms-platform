@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Product, Sale } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
-import { pickItem } from '../../../app/ui/item-combobox-kit';
+import { pickItem } from '../../../test-utils/item-picker';
 
 // The amount received and the change to give on the sale form (issue #346), as a seller uses it: the field for cash only, a
 // short amount refused in plain words, the change shown, the receipt with received and change, the field gone for the next sale,

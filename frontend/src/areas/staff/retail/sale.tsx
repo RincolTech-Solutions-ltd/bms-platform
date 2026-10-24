@@ -23,7 +23,7 @@ import type { BranchRole } from '../../../api/retail';
 import { BRANCH_ROLES, CREDIT_OVERRIDE, CUSTOMER_ACCOUNTS, PRICELIST_MANAGE, PRICELIST_USE, PRICE_LISTS, PRICE_OVERRIDE, UNITS, branchesWhere, capabilityOn, holds, holdsAt, needsOf, sellingBranches } from './permissions';
 import { exceededBy, isLimitRefusal, limitWords, termsWords } from './account-state';
 import { SaleDocuments } from './documents-ui';
-import { ShareReceipt, canShareReceipt } from './receipt-share';
+import { ShareReceipt, useShareReady } from './receipt-share';
 import { ChangePanel, ReceiptChange } from './sale-change';
 import { receivedFor, receivedProblem } from './sale-change-state';
 import { ScanBar } from './scan';
@@ -643,6 +643,15 @@ export function StoreBranch({ branchName, roles }: { branchName: string; roles?:
   );
 }
 
+/** New sale under the receipt actions: a secondary button once Share receipt is drawn, the main action until then (issue #534). */
+function NewSale({ sale, onNew }: { sale: Sale; onNew: () => void }) {
+  return (
+    <button type="button" className={useShareReady(sale, true) ? 'btn rt-next' : 'rt-primary'} onClick={onNew}>
+      New sale
+    </button>
+  );
+}
+
 export function RecordSale() {
   const { me } = useStaff();
   const roles = useBranchRoles(me);
@@ -671,13 +680,11 @@ export function RecordSale() {
       ) : sale ? (
         <>
           {/* Share receipt is the main action here (issue #534): New sale comes after the receipt actions, and is the
-              main action only when this sale offers no receipt to share. */}
+              main action until Share receipt is drawn, or when this sale offers no receipt to share. */}
           <Receipt sale={sale} received={received} />
           <ShareReceipt sale={sale} madeHere />
           {sale.id && <SaleDocuments saleId={sale.id} status={sale.status} branchId={sale.branch_id} />}
-          <button type="button" className={canShareReceipt(me, sale, true) ? 'btn rt-next' : 'rt-primary'} onClick={() => { setSale(null); setReceived(undefined); setRound((n) => n + 1); }}>
-            New sale
-          </button>
+          <NewSale sale={sale} onNew={() => { setSale(null); setReceived(undefined); setRound((n) => n + 1); }} />
         </>
       ) : (
         <>

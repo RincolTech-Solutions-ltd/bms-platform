@@ -89,6 +89,23 @@ describe('finding an item to count', () => {
     expect(screen.queryByText('No items yet. Find an item above, or scan it.')).toBeNull();
   });
 
+  // Review of #535: a full count still walks the whole sheet, so an item gone from the shelf gets its 0.
+  it('shows the rest of the sheet on request, sends a 0 typed there, and keeps that line in sight when the rest is hidden', async () => {
+    listStock.mockResolvedValue([...active, inactiveHeld]);
+    open();
+    const more = await screen.findByRole('button', { name: 'Show the rest of the sheet (2 items)' });
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(more);
+    expect(screen.getByRole('heading', { name: 'The rest of the sheet' })).toBeTruthy();
+    fireEvent.change(document.getElementById('count-I-1') as HTMLInputElement, { target: { value: '0' } });
+    expect(screen.getByRole('button', { name: 'Review variance (1 counted)' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Hide the rest of the sheet' }));
+    expect(screen.queryByRole('heading', { name: 'The rest of the sheet' })).toBeNull();
+    expect((document.getElementById('count-I-1') as HTMLInputElement).value).toBe('0');
+    expect(document.getElementById('count-A-1')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Show the rest of the sheet (1 item)' })).toBeTruthy();
+  });
+
   it('says so when no item matches', async () => {
     listStock.mockResolvedValue(active);
     open();

@@ -46,7 +46,9 @@ describe('the item picker', () => {
     render(<Picker onPick={() => undefined} />);
     fireEvent.change(box(), { target: { value: 'bulb' } });
     expect(screen.queryAllByRole('option')).toHaveLength(0);
-    expect(screen.getByRole('status').textContent).toBe('Searching');
+    expect(screen.getByText('Searching', { selector: '.cb-empty' })).toBeTruthy();
+    // The live region waits for the answer, so a screen reader hears it once per pause.
+    expect(screen.getByRole('status').textContent).toBe('');
     act(() => {
       vi.advanceTimersByTime(SEARCH_DELAY_MS);
     });
@@ -131,6 +133,50 @@ describe('the item picker', () => {
     expect(screen.getAllByRole('option')).toHaveLength(2);
   });
 
+  it('hides the matches of the earlier text as soon as more is typed, so a quick tap cannot pick one', () => {
+    vi.useFakeTimers();
+    const onPick = vi.fn();
+    render(<Picker onPick={onPick} />);
+    box().focus();
+    type('bulb');
+    expect(screen.getAllByRole('option')).toHaveLength(2);
+    fireEvent.change(box(), { target: { value: 'bulb 15' } });
+    expect(screen.queryAllByRole('option')).toHaveLength(0);
+    act(() => {
+      vi.advanceTimersByTime(SEARCH_DELAY_MS);
+    });
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['Test Bulb 15W']);
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it('starts a new answer with nothing highlighted in the same render', () => {
+    vi.useFakeTimers();
+    const onPick = vi.fn();
+    render(<Picker onPick={onPick} />);
+    box().focus();
+    type('bulb');
+    fireEvent.keyDown(box(), { key: 'ArrowDown' });
+    type('test');
+    expect(box().getAttribute('aria-activedescendant')).toBeNull();
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it('keeps Escape to itself, so a panel around it does not close as well', () => {
+    vi.useFakeTimers();
+    const outer = vi.fn();
+    render(
+      <div onKeyDown={(e) => { if (e.key === 'Escape') outer(); }}>
+        <Picker onPick={() => undefined} />
+      </div>,
+    );
+    box().focus();
+    type('bulb');
+    fireEvent.keyDown(box(), { key: 'Escape' });
+    fireEvent.keyDown(box(), { key: 'Escape' });
+    expect(outer).not.toHaveBeenCalled();
+  });
+
   it('says plainly when no item matches', () => {
     vi.useFakeTimers();
     render(<Picker onPick={() => undefined} />);
@@ -152,7 +198,9 @@ describe('the item picker', () => {
 
 describe('the item picker status line', () => {
   it('says nothing for an empty box, and one item in the singular', () => {
-    expect(pickerStatus({ text: '', term: '', pending: false, fetching: false, count: undefined, more: false })).toBe('');
-    expect(pickerStatus({ text: 'x', term: 'x', pending: false, fetching: false, count: 1, more: false })).toBe('1 item found');
+    expect(pickerStatus({ text: '', term: '', settled: false, count: undefined, more: false })).toBe('');
+    expect(pickerStatus({ text: 'x', term: 'x', settled: false, count: 1, more: false })).toBe('');
+    expect(pickerStatus({ text: 'x', term: 'x', settled: true, count: 1, more: false })).toBe('1 item found');
+    expect(pickerStatus({ text: 'x', term: 'x', settled: true, count: 0, more: false, empty: 'Nothing here.' })).toBe('Nothing here.');
   });
 });

@@ -145,13 +145,29 @@ export function canShareReceipt(me: Parameters<typeof holdsAt>[0] & { user_id?: 
 export const receiptKey = (sale: Pick<Sale, 'id' | 'version' | 'paid_minor' | 'balance_minor'>) =>
   `${sale.id ?? ''}:${sale.version ?? ''}:${sale.paid_minor ?? ''}:${sale.balance_minor ?? ''}`;
 
+/** The receipt facts of a sale the person may share, read once for every part of the screen that needs them. */
+function useReceiptFacts(sale: Sale, madeHere: boolean) {
+  const { me } = useStaff();
+  const allowed = canShareReceipt(me, sale, madeHere);
+  const key = receiptKey(sale);
+  const facts = useQuery({ queryKey: ['retail', 'sale-receipt', key], queryFn: () => retail.saleReceipt(sale.id ?? ''), enabled: allowed, retry: false });
+  return { allowed, key, facts };
+}
+
+/**
+ * True once Share receipt is drawn for this sale (issue #534): until then, while the facts load or when they fail, the
+ * sale-complete screen keeps New sale as its main action, so the screen is never without one.
+ */
+export function useShareReady(sale: Sale, madeHere = false): boolean {
+  const { allowed, facts } = useReceiptFacts(sale, madeHere);
+  return allowed && facts.data !== undefined;
+}
+
 /** Share receipt and WhatsApp customer for one sale. `madeHere`: the sale was just made on this screen by this person. */
 export function ShareReceipt({ sale, madeHere = false }: { sale: Sale; madeHere?: boolean }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
-  const allowed = canShareReceipt(me, sale, madeHere);
-  const key = receiptKey(sale);
-  const facts = useQuery({ queryKey: ['retail', 'sale-receipt', key], queryFn: () => retail.saleReceipt(sale.id ?? ''), enabled: allowed, retry: false });
+  const { allowed, key, facts } = useReceiptFacts(sale, madeHere);
   const [typed, setTyped] = useState<string | null>(null);
   const [phoneProblem, setPhoneProblem] = useState<string | null>(null);
   const [keep, setKeep] = useState(false);

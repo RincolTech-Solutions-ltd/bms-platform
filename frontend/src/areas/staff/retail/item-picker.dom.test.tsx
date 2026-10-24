@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Product, Sale } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
-import { PICKER_LABEL, pickItem } from '../../../app/ui/item-combobox-kit';
+import { PICKER_LABEL, pickItem } from '../../../test-utils/item-picker';
 
 // Issue #534 on the retail screens: the item picker lists items only while something is typed, with what a seller needs on
 // each option and no grouped browse list; and on the sale-complete screen Share receipt is the main action, with New sale
@@ -15,6 +15,7 @@ vi.setConfig({ testTimeout: 20000 });
 
 const listProducts = vi.fn();
 const createSale = vi.fn();
+const saleReceipt = vi.fn((..._a: unknown[]) => Promise.resolve({ receipt_no: 'R-TEST-1', buyer_name: 'Test Buyer' }));
 const bulb: Product = { id: 'p1', code: 'P003', description: 'Test Bulb 9W', unit: 'piece', category: 'Lighting', sell_minor: 6000, active: true, qty: '12.000' };
 const lamp: Product = { id: 'p2', code: 'P004', description: 'Test Lamp 15W', unit: 'piece', category: 'Lighting', sell_minor: 39000, active: true, qty: '-2.000' };
 
@@ -26,7 +27,7 @@ vi.mock('../../../api/retail', async (original) => {
       listProducts: (...a: unknown[]) => listProducts(...a),
       listCustomers: () => Promise.resolve([]),
       createSale: (...a: unknown[]) => createSale(...a),
-      saleReceipt: () => Promise.resolve({ receipt_no: 'R-TEST-1', buyer_name: 'Test Buyer' }),
+      saleReceipt: (...a: unknown[]) => saleReceipt(...a),
     },
   };
 });
@@ -55,6 +56,7 @@ afterEach(() => {
   sessionStorage.clear();
   listProducts.mockReset();
   createSale.mockReset();
+  saleReceipt.mockClear();
 });
 
 describe('the item picker on the retail screens', () => {
@@ -134,6 +136,19 @@ describe('the sale-complete screen', () => {
     expect(share.compareDocumentPosition(screen.getByRole('button', { name: 'View receipt' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect([...document.querySelectorAll('.rt-primary')]).toEqual([share]);
     expect(next.classList.contains('rt-next')).toBe(true);
+  });
+
+  it('keeps New sale the main action while Share receipt is not drawn yet, or when its facts cannot be read', async () => {
+    saleReceipt.mockImplementationOnce(() => new Promise(() => {}));
+    await finish(sold());
+    expect(screen.queryByRole('button', { name: 'Share receipt' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'New sale' }).classList.contains('rt-primary')).toBe(true);
+    cleanup();
+    saleReceipt.mockImplementationOnce(() => Promise.reject(new Error('offline')));
+    await finish(sold());
+    await waitFor(() => expect(saleReceipt).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('button', { name: 'Share receipt' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'New sale' }).classList.contains('rt-primary')).toBe(true);
   });
 
   it('keeps New sale the main action when the sale has no receipt to share', async () => {

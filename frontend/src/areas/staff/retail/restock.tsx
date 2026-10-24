@@ -205,7 +205,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
       <ScanBar id="restock-scan" onFound={scanAdd} autoFocus />
 
       <h2>Items</h2>
-      {lines.length === 0 && <p className="empty-state">No items yet.</p>}
+      {lines.length === 0 && <p className="empty-state">No items yet. Type an item above and tap it in the list, or scan it.</p>}
       {lines.map((l, i) => {
         const newSell = parseMinor(l.sell, RETAIL_CURRENCY);
         const enteredCost = parseMinor(l.cost, RETAIL_CURRENCY);

@@ -54,7 +54,7 @@ describe('sale screen', () => {
   const client = new QueryClient();
   client.setQueryData(['retail', 'products', branch, ''], products);
 
-  // The items show only while something is typed (issue #534); item-combobox.dom.test.tsx draws the matches.
+  // The items show only while something is typed (issue #534); ItemCombobox.dom.test.tsx and item-picker.dom.test.tsx draws the matches.
   it('shows a labelled item search with no list of items until something is typed', () => {
     const html = page('sales', <SaleForm branchId={branch} />, client);
     expect(html).not.toContain('LED bulb 9W screw');

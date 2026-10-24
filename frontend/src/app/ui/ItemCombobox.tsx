@@ -10,16 +10,21 @@ import type { LiveSearch } from './useLiveSearch';
 /** The most matches the list shows; typing more narrows it. */
 export const PICKER_LIMIT = 10;
 
-/** What the status line says, and a screen reader announces. */
-export function pickerStatus(s: { text: string; term: string; pending: boolean; fetching: boolean; count: number | undefined; more: boolean }): string {
-  if (s.text.trim() === '') return '';
-  if (s.pending || s.fetching || s.count === undefined) return 'Searching';
-  if (s.count === 0) return `No item matches "${s.term}".`;
+/** The words for no match, unless the screen gives its own (the offline picker says what the phone holds). */
+export const noMatch = (term: string) => `No item matches "${term}".`;
+
+/**
+ * What the status line says, and a screen reader announces. Nothing while a search is on its way, so a reader hears the
+ * answer once per pause and not "Searching" before it; the list itself says Searching.
+ */
+export function pickerStatus(s: { text: string; term: string; settled: boolean; count: number | undefined; more: boolean; empty?: string }): string {
+  if (s.text.trim() === '' || !s.settled || s.count === undefined) return '';
+  if (s.count === 0) return s.empty ?? noMatch(s.term);
   const n = s.count === 1 ? '1 item' : `${s.count} items`;
   return s.more ? `First ${n} shown. Type more to narrow.` : `${n} found`;
 }
 
-export function ItemCombobox<T>({ id, label, search, results, fetching = false, error, optionKey, renderOption, onPick, hint }: {
+export function ItemCombobox<T>({ id, label, search, results, fetching = false, error, optionKey, renderOption, onPick, hint, emptyText }: {
   id: string;
   label: string;
   search: LiveSearch;
@@ -33,20 +38,27 @@ export function ItemCombobox<T>({ id, label, search, results, fetching = false, 
   renderOption: (item: T) => ReactNode;
   onPick: (item: T) => void;
   hint?: string;
+  /** What no match says, in place of noMatch(term). */
+  emptyText?: (term: string) => string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const listId = `${id}-list`;
   const optionId = useId();
   const [open, setOpen] = useState(true);
-  const [active, setActive] = useState(-1);
-  const shown = (results ?? []).slice(0, PICKER_LIMIT);
+  // Matches show only once the answer is for what is in the box: while more is typed, or the answer is on its way, the list
+  // says Searching and holds no option, so neither a tap nor Enter can pick a match of an earlier search.
+  const settled = !search.pending && !fetching && results !== undefined;
+  const shown = settled ? results.slice(0, PICKER_LIMIT) : [];
+  const answer = settled ? `${search.term}\n${results.map(optionKey).join('|')}` : null;
+  // The highlight belongs to one answer, so a new answer starts with nothing highlighted in the same render.
+  const [highlight, setHighlight] = useState<{ answer: string | null; index: number }>({ answer: null, index: -1 });
+  const active = highlight.answer === answer && answer !== null ? highlight.index : -1;
+  const setActive = (index: number) => setHighlight({ answer, index });
   const typed = search.text.trim() !== '';
   const expanded = open && typed;
-  const status = pickerStatus({ text: search.text, term: search.term, pending: search.pending, fetching, count: results ? shown.length : undefined, more: (results?.length ?? 0) > PICKER_LIMIT });
+  const empty = emptyText?.(search.term);
+  const status = pickerStatus({ text: search.text, term: search.term, settled, count: settled ? shown.length : undefined, more: (results?.length ?? 0) > PICKER_LIMIT, empty });
 
-  // A new answer starts with nothing highlighted, so Enter never picks an item the person has not seen.
-  const answer = results ? results.map(optionKey).join('|') : null;
-  useEffect(() => setActive(-1), [search.term, answer]);
   useEffect(() => {
     if (active >= 0) document.getElementById(`${optionId}-${active}`)?.scrollIntoView?.({ block: 'nearest' });
   }, [active, optionId]);
@@ -63,15 +75,16 @@ export function ItemCombobox<T>({ id, label, search, results, fetching = false, 
       e.preventDefault();
       setOpen(true);
       if (shown.length === 0) return;
-      setActive((a) => (e.key === 'ArrowDown' ? Math.min(a + 1, shown.length - 1) : Math.max(a - 1, 0)));
+      setActive(e.key === 'ArrowDown' ? Math.min(active + 1, shown.length - 1) : Math.max(active - 1, 0));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      // Enter picks only from a settled answer: with more typed and the search still on its way, it settles the search.
-      const item = expanded && active >= 0 && !search.pending && !fetching ? shown[active] : undefined;
+      const item = expanded && active >= 0 ? shown[active] : undefined;
       if (item !== undefined) pick(item);
       else search.flush();
     } else if (e.key === 'Escape') {
+      // Escape belongs to the picker: a panel or dialog around it does not close on it as well.
       e.preventDefault();
+      e.stopPropagation();
       if (expanded) setOpen(false);
       else search.clear();
       setActive(-1);
@@ -112,7 +125,7 @@ export function ItemCombobox<T>({ id, label, search, results, fetching = false, 
           )}
         </div>
         {expanded && (
-          <div className="cb-pop" aria-busy={fetching || search.pending}>
+          <div className="cb-pop">
             <ul id={listId} role="listbox" aria-label="Matching items" className="cb-list">
               {shown.map((item, i) => (
                 <li
@@ -123,7 +136,7 @@ export function ItemCombobox<T>({ id, label, search, results, fetching = false, 
                   className="cb-option"
                   // The press keeps the cursor in the box, so the list does not close before the tap lands.
                   onMouseDown={(e) => e.preventDefault()}
-                  onMouseMove={() => setActive(i)}
+                  onMouseMove={() => { if (i !== active) setActive(i); }}
                   onClick={() => pick(item)}
                 >
                   {renderOption(item)}
@@ -131,8 +144,8 @@ export function ItemCombobox<T>({ id, label, search, results, fetching = false, 
               ))}
             </ul>
             {error}
-            {results && shown.length === 0 && !search.pending && !fetching && <p className="cb-empty">{`No item matches "${search.term}".`}</p>}
-            {(!results || search.pending || fetching) && shown.length === 0 && <p className="cb-empty">Searching</p>}
+            {settled && shown.length === 0 && <p className="cb-empty">{empty ?? noMatch(search.term)}</p>}
+            {!settled && !error && <p className="cb-empty">Searching</p>}
           </div>
         )}
       </div>

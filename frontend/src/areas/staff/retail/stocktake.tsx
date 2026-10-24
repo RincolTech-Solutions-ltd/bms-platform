@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Highlight } from '../../../app/ui/SearchBox';
 import { ItemCombobox } from '../../../app/ui/ItemCombobox';
 import { matchesSearch, useLiveSearch } from '../../../app/ui/useLiveSearch';
-import { retail, type Product, type Stocktake, type StocktakeLine } from '../../../api/retail';
+import { retail, type Product, type StockRow, type Stocktake, type StocktakeLine } from '../../../api/retail';
 import { milliOf, parseCount, parseQty, showQty } from './maths';
 import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne } from './barcode-state';
@@ -86,6 +86,7 @@ function CountSheet({ branchId }: { branchId: string }) {
   // The items on the count, in the order they were picked or scanned (issue #534): the sheet is searched, not shown whole.
   const [listed, setListed] = useState<string[]>([]);
   const list = (id: string) => setListed((l) => (l.includes(id) ? l : [...l, id]));
+  const [showRest, setShowRest] = useState(false);
   const stock = useQuery({ queryKey: ['retail', 'stock', branchId, '', false], queryFn: () => countableStock(branchId) });
 
   // A scan (issue #345) counts one more of the item, or a whole pack when the barcode is on a pack, and puts it on the count.
@@ -122,7 +123,7 @@ function CountSheet({ branchId }: { branchId: string }) {
         <StocktakeReview stocktake={draft} onCommit={() => commit.mutate()} busy={commit.isPending} />
         <Problem error={commit.error} />
         {draft.status === 'draft' && <button type="button" onClick={() => setDraft(null)}>Back to the count</button>}
-        {draft.status === 'committed' && <button type="button" onClick={() => { setDraft(null); setCounts({}); setListed([]); }}>Start another count</button>}
+        {draft.status === 'committed' && <button type="button" onClick={() => { setDraft(null); setCounts({}); setListed([]); setShowRest(false); }}>Start another count</button>}
       </>
     );
   }
@@ -130,6 +131,26 @@ function CountSheet({ branchId }: { branchId: string }) {
   const found = search.term === '' || !stock.data ? undefined : stock.data.filter((r) => matchesSearch(`${r.description ?? ''} ${r.code ?? ''} ${r.category ?? ''}`, search.term));
   const byId = new Map((stock.data ?? []).map((r) => [r.product_id ?? '', r]));
   const rows = listed.flatMap((id) => byId.get(id) ?? []);
+  // The rest of the sheet, on request, for a full count that walks the shelf list and types 0 for what is gone (review of #535).
+  const rest = (stock.data ?? []).filter((r) => !listed.includes(r.product_id ?? ''));
+  // Hiding the rest keeps every line that has a count in sight: a count is never sent from a line the counter cannot see.
+  const hideRest = () => {
+    setListed((l) => [...l, ...rest.map((r) => r.product_id ?? '').filter((id) => (counts[id] ?? '').trim() !== '')]);
+    setShowRest(false);
+  };
+  const line = (r: StockRow) => {
+    const id = r.product_id ?? '';
+    return (
+      <div key={id} className={id === scanned ? 'rt-card scan-hit' : 'rt-card'} data-testid={id === scanned ? 'scan-hit' : undefined}
+        ref={id === scanned ? (el) => el?.scrollIntoView?.({ block: 'nearest' }) : undefined}>
+        <label htmlFor={`count-${id}`}>{r.description} ({r.unit})</label>
+        <CategoryLabel category={r.category} />
+        <input id={`count-${id}`} inputMode="decimal" value={counts[id] ?? ''} placeholder="Counted"
+          aria-invalid={(counts[id] ?? '').trim() !== '' && parseCount(counts[id] ?? '') === null}
+          onChange={(e) => setCounts({ ...counts, [id]: e.target.value })} />
+      </div>
+    );
+  };
   return (
     <>
       <Note>Find each item you counted and type how many you counted. Leave an item blank to skip it.</Note>
@@ -157,19 +178,21 @@ function CountSheet({ branchId }: { branchId: string }) {
       <Problem error={stock.error} />
       <h2>Counted items</h2>
       {stock.data && rows.length === 0 && <p className="empty-state">No items yet. Find an item above, or scan it.</p>}
-      {rows.map((r) => {
-        const id = r.product_id ?? '';
-        return (
-          <div key={id} className={id === scanned ? 'rt-card scan-hit' : 'rt-card'} data-testid={id === scanned ? 'scan-hit' : undefined}
-            ref={id === scanned ? (el) => el?.scrollIntoView?.({ block: 'nearest' }) : undefined}>
-            <label htmlFor={`count-${id}`}>{r.description} ({r.unit})</label>
-            <CategoryLabel category={r.category} />
-            <input id={`count-${id}`} inputMode="decimal" value={counts[id] ?? ''} placeholder="Counted"
-              aria-invalid={(counts[id] ?? '').trim() !== '' && parseCount(counts[id] ?? '') === null}
-              onChange={(e) => setCounts({ ...counts, [id]: e.target.value })} />
-          </div>
-        );
-      })}
+      {rows.map(line)}
+      {stock.data && rest.length > 0 && (
+        <button type="button" className="btn rt-next" aria-expanded={showRest} aria-controls="count-rest" onClick={() => (showRest ? hideRest() : setShowRest(true))}>
+          {showRest ? 'Hide the rest of the sheet' : `Show the rest of the sheet (${rest.length} ${rest.length === 1 ? 'item' : 'items'})`}
+        </button>
+      )}
+      <div id="count-rest" hidden={!showRest}>
+        {showRest && (
+          <>
+            <h2>The rest of the sheet</h2>
+            <p className="hint">For a full count: type how many are on the shelf, 0 for an item that is gone. Leave an item blank to skip it.</p>
+            {rest.map(line)}
+          </>
+        )}
+      </div>
       {bad && <p role="alert" className="rt-flag">Some counts are not valid quantities.</p>}
       <Problem error={review.error} />
       <BusyButton type="button" className="rt-primary" busy={review.isPending} disabled={entered.length === 0 || bad} onClick={() => review.mutate()} data-tour="count-review">

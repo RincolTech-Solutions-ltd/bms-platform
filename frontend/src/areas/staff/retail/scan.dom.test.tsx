@@ -17,10 +17,12 @@ import { OfflineProvider, type Offline } from '../../../offline/offline-context'
 import type { Product } from '../../../api/retail';
 import { TransferForm } from './transfer';
 import { PACK_UNUSABLE } from './barcode-state';
-import { pickItem } from '../../../app/ui/item-combobox-kit';
+import { pickItem } from '../../../test-utils/item-picker';
 
 /** The count sheet before anything is found or scanned (issue #534). */
 const EMPTY_COUNT = 'No items yet. Find an item above, or scan it.';
+/** The picker of the barcode assign panel has its own label, so it is told apart from the sale's (review of #535). */
+const ASSIGN = 'Find the item this barcode belongs to';
 
 // Scanning on the forms and the label sheet (ADR-070, issue #345; FR-RET-68): a scan into the Scan box adds the item at 1
 // and the next scan of it adds one more, an unknown code says so (with Add this barcode to a product for an
@@ -155,7 +157,7 @@ describe('FR-RET-68 scanning on the sale form', () => {
     scan('TEST-UNKNOWN');
     await waitFor(() => expect(screen.getByTestId('scan-unknown').textContent).toContain('No item has the barcode TEST-UNKNOWN.'));
     fireEvent.click(screen.getByRole('button', { name: 'Add this barcode to a product' }));
-    await pickItem('LED bulb 9W screw', { typed: 'bulb' });
+    await pickItem('LED bulb 9W screw', { typed: 'bulb', box: ASSIGN });
     await waitFor(() => expect(qtyOf(0)).toBe('1'));
     expect((await retail.findByBarcode('TEST-UNKNOWN'))?.product?.id).toBe(LAMP);
   });
@@ -176,7 +178,7 @@ describe('FR-RET-68 scanning on the sale form', () => {
     await waitFor(() => expect(screen.getByTestId('scan-unknown').textContent).toContain(`No item has the barcode ${GTIN}.`));
     fireEvent.click(screen.getByRole('button', { name: 'Add this barcode to a product' }));
     fireEvent.click(await screen.findByRole('checkbox', { name: /This code is exactly as printed \(Code 128\)/ }));
-    await pickItem('LED bulb 9W screw', { typed: 'bulb' });
+    await pickItem('LED bulb 9W screw', { typed: 'bulb', box: ASSIGN });
     await waitFor(() => expect(qtyOf(0)).toBe('1'));
     expect((await retail.findByBarcode(GTIN))?.barcode?.format).toBe('code128');
   });
@@ -185,7 +187,8 @@ describe('FR-RET-68 scanning on the sale form', () => {
     screenOf(<SaleForm branchId={BRANCH} />);
     scan('TEST-UNKNOWN');
     fireEvent.click(await screen.findByRole('button', { name: 'Add this barcode to a product' }));
-    await waitFor(() => expect(screen.getAllByRole('combobox')).toHaveLength(2));
+    expect(await screen.findByRole('combobox', { name: ASSIGN })).toBeTruthy();
+    expect(screen.getAllByRole('combobox', { name: 'Find an item by name, code or category' })).toHaveLength(1);
     expect(screen.queryByRole('checkbox', { name: /exactly as printed/ })).toBeNull();
   });
 

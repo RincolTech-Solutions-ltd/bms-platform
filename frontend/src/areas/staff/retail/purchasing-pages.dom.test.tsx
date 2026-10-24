@@ -12,7 +12,7 @@ import { PurchaseOrderPage } from './purchase-order';
 import { PurchaseOrderEditPage, PurchaseOrderNewPage } from './purchase-order-form';
 import { SupplierBillNewPage } from './supplier-bill-new';
 import { SupplierPaymentNewPage } from './supplier-payment-new';
-import { pickItem } from '../../../app/ui/item-combobox-kit';
+import { pickItem } from '../../../test-utils/item-picker';
 
 // The purchasing pages end to end on the fabricated in-memory API (issue #198): the real pages, their queries, drafts and
 // buttons, against the mock that follows the server's rules in small. Each test mounts one page on a small router that has the

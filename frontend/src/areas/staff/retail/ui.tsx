@@ -232,8 +232,10 @@ export function useProfitAccess(): boolean {
  * show only while something is typed and close once one is picked (ItemCombobox, issue #534): there is
  * no browsable list here, the Stock page has the whole list.
  */
-export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStock = true, addLabel = 'Add' }: {
+export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStock = true, addLabel = 'Add', label = 'Find an item by name, code or category' }: {
   id: string;
+  /** The box's label; a second picker on a screen has its own, so the two are told apart. */
+  label?: string;
   /** Absent for a screen that is about an item and not a branch's stock (the price list editor), which also sets showStock false. */
   branchId?: string;
   onAdd: (p: Product) => void;
@@ -250,7 +252,7 @@ export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStoc
   return (
     <ItemCombobox
       id={id}
-      label="Find an item by name, code or category"
+      label={label}
       search={search}
       // Only the answer to the term in the box: an earlier term's matches are never shown, so never picked.
       results={search.term === '' ? undefined : products.data}

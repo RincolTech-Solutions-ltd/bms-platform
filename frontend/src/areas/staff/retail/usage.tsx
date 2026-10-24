@@ -65,7 +65,7 @@ export function UsageForm({ branchId, onSaved }: { branchId: string; onSaved?: (
       </div>
 
       <h2>Items</h2>
-      {lines.length === 0 && <p className="empty-state">No items yet.</p>}
+      {lines.length === 0 && <p className="empty-state">No items yet. Type an item above and tap it in the list.</p>}
       {lines.map((l, i) => (
         <div key={l.product.id} className="rt-card">
           <strong>{l.product.description}</strong>

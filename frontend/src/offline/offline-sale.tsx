@@ -1,5 +1,6 @@
 import type { Product } from '../api/retail';
 import { ItemCombobox } from '../app/ui/ItemCombobox';
+import { Highlight } from '../app/ui/SearchBox';
 import { useLiveSearch } from '../app/ui/useLiveSearch';
 import { showQty } from '../areas/staff/retail/maths';
 import { money } from '../areas/staff/retail/ui';
@@ -27,7 +28,8 @@ export function OfflineNote() {
 export function OfflineProductPicker({ branchId, onAdd }: { branchId: string; onAdd: (p: Product) => void }) {
   const offline = useOffline();
   const search = useLiveSearch();
-  const found = search.term === '' ? undefined : searchCatalogue(offline?.catalogue ?? null, branchId, search.term);
+  const catalogue = offline?.catalogue ?? null;
+  const found = search.term === '' ? undefined : searchCatalogue(catalogue, branchId, search.term);
   return (
     <ItemCombobox
       id="sale-search"
@@ -35,12 +37,13 @@ export function OfflineProductPicker({ branchId, onAdd }: { branchId: string; on
       search={search}
       results={found}
       hint="Only the items saved on this phone show. Items are saved while the phone is online."
+      emptyText={(term) => (catalogue ? `No item on this phone matches "${term}". Items are saved while the phone is online.` : 'No items are saved on this phone yet. Items are saved while the phone is online.')}
       optionKey={(p) => p.id ?? p.code ?? ''}
       onPick={onAdd}
       renderOption={(p) => (
         <>
           <span className="cb-text">
-            <strong>{p.description}</strong> ({p.code})
+            <strong><Highlight text={p.description ?? ''} term={search.term} /></strong> (<Highlight text={p.code ?? ''} term={search.term} />)
             <span className="cb-meta">
               {p.sell_minor !== undefined && `${money(p.sell_minor)} each, `}
               in stock when saved: {showQty(p.qty ?? '0')} {p.unit}

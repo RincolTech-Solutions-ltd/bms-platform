@@ -1251,16 +1251,22 @@ the items show only while you search, and go away once one is picked. Every item
   Each option is a row at least 48px tall: the photo, the name and code with the typed words marked, then the category, the
   price where the screen shows one and the stock here (a negative balance flagged), and the verb of the screen (Add, Choose,
   Join this item, Add as a size). At most 10 show; with more the status line says "First 10 items shown. Type more to narrow."
-  No match shows `No item matches "<text>".` in the list and the status line.
+  No match shows `No item matches "<text>".` in the list and the status line. The offline picker says `No item on this phone
+  matches "<text>".` instead, or that nothing is saved on the phone yet. While more is typed, or the answer is on its way, the
+  list says Searching and holds no option, so a quick tap or Enter can never pick a match of the earlier text; the status line
+  stays quiet until the answer, so a screen reader hears it once per pause.
 - **Picking.** A tap, or Up and Down then Enter, adds the item. The box empties, the list closes and the cursor stays in
   the box for the next item. Enter with nothing highlighted only settles the search; it never picks. Escape closes the list,
-  and a second Escape empties the box. The list closes when the cursor leaves the picker and opens again on return.
+  and a second Escape empties the box; Escape never reaches a panel around the picker. The list closes when the cursor leaves the picker and opens again on return.
 - **Accessibility.** The input is `role="combobox"` with `aria-expanded`, `aria-controls` and `aria-autocomplete="list"`; the
   list is a `listbox` named "Matching items" and its rows `option`s, the highlighted one `aria-selected` and named on the
-  input by `aria-activedescendant`; the status line under the box is a polite live region.
-- **Count stock.** The sheet is searched, not shown whole: a found or scanned item goes on the list "Counted items" with its
-  count box, in the order found, and the last one is marked. Before any, the screen says "No items yet. Find an item above, or
-  scan it." Only counted lines are sent, as before.
+  input by `aria-activedescendant`; the status line under the box is a polite live region. A second picker on a screen has its
+  own label: the barcode assign panel's is "Find the item this barcode belongs to".
+- **Count stock.** A found or scanned item goes on the list "Counted items" with its count box, in the order found, and the
+  last one is marked. Before any, the screen says "No items yet. Find an item above, or scan it." For a full count, **Show the
+  rest of the sheet (N items)** lists every other item of the sheet with its count box, so the counter can walk the shelf list
+  and type 0 for an item that is gone (review of #535); hiding it again moves every line with a count into Counted items, so a
+  count is never sent from a line out of sight. Only counted lines are sent, as before.
 - **Scan box.** Unchanged (ADR-070 decision 11, owner decision D7): a scanner types only into the Scan box, which adds the item or one more.
 - **Tours.** `retail-sales` version 16, `page-stocktake` 3, `page-restock` 3, `page-usage` 2, `page-transfer` 3,
   `page-sizes-join` 2 and `page-labels` 2 word their search steps for the list that shows while you type.
@@ -1311,8 +1317,8 @@ changes, so after a payment on the same screen the next share sends the new rece
   version 10: its Save step names Share receipt and WhatsApp customer.
 - **On the sale-complete screen (issue #534)** Share receipt is the first of the receipt actions and the screen's one main
   action, right under the receipt; View receipt, the WhatsApp number and WhatsApp customer follow, then the sale's documents,
-  and **New sale** comes last as a full width secondary button 48px tall. When the sale has no receipt to share (the seller may
-  not share it), New sale is the main action.
+  and **New sale** comes last as a full width secondary button 48px tall. Until Share receipt is drawn (its facts loading or
+  failed to load), or when the sale has no receipt to share, New sale is the main action, so the screen always has one.
 
 ## Sell offline (issue #458, ADR-067, FR-RET-67)
 

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mockMe } from '../../../api/retail-mock';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
-import { pickItem } from '../../../app/ui/item-combobox-kit';
+import { pickItem } from '../../../test-utils/item-picker';
 
 // The screen that makes an item with sizes and colours (issue #384): the sizes and prints typed once give the list of what will
 // be made, each with its code and price the owner may change, and Save sends exactly that list. Fabricated items.

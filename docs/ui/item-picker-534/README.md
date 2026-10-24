@@ -11,4 +11,5 @@ screen scrolled sideways and no option of the list was under 48px.
 | `03-sale-after-pick` | Two items picked (a tap, then Down and Enter): the box empty, the list closed, the cursor back in the box |
 | `04-count-stock-typing` | Stock-take with "cable" typed: the matches of the count sheet under the box |
 | `04b-count-stock-after-pick` | The picked item on the list "Counted items" with its count box, the list closed |
+| `04c-count-stock-rest-of-sheet` | The whole page with Show the rest of the sheet opened (review of #535): every other item of the sheet with its count box, for a full count |
 | `05-sale-complete` | The sale-complete screen, the whole page: Share receipt first as the main action, New sale below the receipt actions |

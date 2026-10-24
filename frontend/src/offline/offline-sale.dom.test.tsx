@@ -63,6 +63,20 @@ afterEach(() => {
 });
 
 describe('Record a sale offline', () => {
+  it('says what the phone holds when no item on it matches, and when nothing is saved on it yet', async () => {
+    const withCopy = testOffline(seller, { online: false, catalogue });
+    if (!withCopy) throw new Error('a seller sells offline');
+    screenWith(withCopy);
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Find an item by name, code or category' }), { target: { value: 'fridge' } });
+    expect(await screen.findByText('No item on this phone matches "fridge". Items are saved while the phone is online.', { selector: '.cb-empty' })).toBeTruthy();
+    cleanup();
+    const empty = testOffline(seller, { online: false, catalogue: null });
+    if (!empty) throw new Error('a seller sells offline');
+    screenWith(empty);
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Find an item by name, code or category' }), { target: { value: 'bulb' } });
+    expect(await screen.findByText('No items are saved on this phone yet. Items are saved while the phone is online.', { selector: '.cb-empty' })).toBeTruthy();
+  });
+
   it('saves a sale on the phone from the copy and shows a provisional receipt, then the server number', async () => {
     const send = vi.fn(async () => ({ status: 201, body: { id: 'sale-1', sale_no: 'RS00000042' } }));
     const offline = testOffline(seller, { online: false, catalogue, deps: { send } });

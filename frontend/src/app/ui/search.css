@@ -96,16 +96,14 @@
   right: 0;
   z-index: var(--z-dropdown);
   max-height: min(360px, 55vh);
+  /* The visible height where the browser knows it, so the list stays above a phone's keyboard more often. */
+  max-height: min(360px, 55dvh);
   overflow-y: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   background: var(--color-surface);
   box-shadow: var(--shadow-lg);
   animation: cb-in 150ms cubic-bezier(0.2, 0, 0, 1);
-}
-
-.cb-pop[aria-busy='true'] .cb-list {
-  opacity: 0.55;
 }
 
 .cb-list {
