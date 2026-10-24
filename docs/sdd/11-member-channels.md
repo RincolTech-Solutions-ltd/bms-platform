@@ -134,7 +134,7 @@ separate retail bar are gone. From 720px the menu is a sidebar at the left of th
 folding to 64px of icons, folded at first below 1024px and unfolded from there until the person
 chooses, the choice kept on the device, each folded item keeping its label as its accessible name and
 tooltip), and the content takes the remaining width. Below 720px the staff area has bottom tabs
-(issue #539, FR-UXN-07): Sell, My stock, Buy, Money and More, fixed to the bottom over the iPhone's
+(issue #539, FR-UXN-08): Sell, My stock, Buy, Money and More, fixed to the bottom over the iPhone's
 safe-area insets, each shown only while its module is on and the session may use its page; More
 lists the same areas as the sidebar, from the same list and permission checks, with the shop in use
 and Sign out, and the sticky primary action bar sits on top of the tabs. The operator portal keeps a

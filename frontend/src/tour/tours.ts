@@ -409,8 +409,9 @@ export const retailSales: Tour = {
   // Version 13 adds the Online or offline step (issue #458, ADR-067): the dot, and selling with no network.
   // Version 14 adds the Scan step (issue #345): a barcode scanner, a typed barcode or the phone camera adds the item.
   // Version 15 makes it the Scan here step (ADR-070 decision 11): a scanner types only into the Scan box.
-  // Version 16 adds the bottom tabs step (issue #539) and words the phone steps for the tabs and More.
-  version: 16,
+  // Version 16 words the Find the item step for the picker that lists items only while you type (issue #534).
+  // Version 17 adds the bottom tabs step (issue #539) and words the phone steps for the tabs and More.
+  version: 17,
   title: 'Selling tour',
   audience: isSeller,
   autoStart: true,
@@ -437,7 +438,7 @@ export const retailSales: Tour = {
       module: 'retail',
       optional: true,
       title: 'Find the item',
-      body: 'Type part of the name or code, then tap Add.',
+      body: 'Type part of the name, code or category. The matching items show under the box: tap one to add it. The list closes, ready for the next item.',
     },
     {
       id: 'sale-scan',
@@ -867,7 +868,8 @@ export const cataloguePage: Tour = {
 export const stocktakePage: Tour = {
   id: 'page-stocktake',
   // Version 2 adds the Scan here step (issue #345, ADR-070).
-  version: 2,
+  // Version 3 words the Count step for the search on top and the list Not counted yet below it (issue #534).
+  version: 3,
   title: 'This page: stock-take',
   audience: (me) => STOCKTAKE.every((p) => held(me, p)),
   autoStart: false,
@@ -877,7 +879,7 @@ export const stocktakePage: Tour = {
       id: 'count',
       target: 'count-search',
       title: 'Count each item',
-      body: 'Find an item and type how many you counted. Leave an item blank to skip it.',
+      body: 'Find an item by typing part of its name, or work down the list Not counted yet. Type how many you counted, or tap 0 for an item that is gone.',
     },
     {
       id: 'scan',
