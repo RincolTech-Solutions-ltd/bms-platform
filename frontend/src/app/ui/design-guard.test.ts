@@ -201,7 +201,8 @@ describe('design guard, the rules the kit holds every screen to', () => {
   it('the kit uses the two radii and the two shadows only', () => {
     const radii = [...kit.matchAll(/border-radius:\s*([^;]+);/g)].flatMap(([, v]) => (v as string).split(/\s+/));
     expect(new Set(radii)).toEqual(new Set(['var(--radius)', 'var(--radius-lg)', '0']));
-    const shadows = [...kit.matchAll(/box-shadow:\s*([^;]+);/g)].map(([, v]) => v);
+    // The focus ring is not a depth: it is the keyboard ring, put back where a reset removed it.
+    const shadows = [...kit.matchAll(/box-shadow:\s*([^;]+);/g)].flatMap(([, v]) => (v as string).split(/,\s*/)).filter((v) => v !== 'var(--focus-ring)');
     expect(new Set(shadows)).toEqual(new Set(['none', 'var(--shadow-sm)', 'var(--shadow-lg)']));
   });
 

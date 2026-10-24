@@ -5,8 +5,9 @@
  * components are in this folder (Segmented.tsx and the rest) and are shown together on /staff/kit.
  */
 
-/* Segmented: one neutral tray, the chosen option raised on the surface. No brand fill, so it never competes with the one
-   primary action of the screen. On a phone the tray takes the full width and the options share it. */
+/* Segmented: one neutral tray, the chosen option raised on the surface, with room around the tray so two of them never touch
+   (the look of #519, which drew it on the old .cluster.filters rows). No brand fill, so it never competes with the one primary
+   action of the screen. On a phone the tray takes the full width and the options share it. */
 .segmented {
   display: inline-flex;
   flex-wrap: wrap;
@@ -24,22 +25,33 @@
   padding: 8px 16px;
   border-color: transparent;
   background: transparent;
-  color: var(--color-text-muted);
+  color: var(--color-text);
   font-weight: var(--weight-semibold);
   box-shadow: none;
 }
 
-.segmented > button:hover:not(:disabled) {
-  background: transparent;
-  color: var(--color-text);
+@media (hover: hover) {
+  .segmented > button:hover:not([data-state='on']):not(:disabled) {
+    background: var(--color-hover);
+  }
 }
 
 .segmented > button[data-state='on'],
 .segmented > button[data-state='on']:hover {
-  border-color: var(--color-border);
+  border-color: var(--color-border-strong);
   background: var(--color-surface);
   color: var(--color-text);
   box-shadow: var(--shadow-sm);
+}
+
+/* The keyboard ring is the global button ring (an outline plus --focus-ring); the shadow resets above would hide its shadow half,
+   so it is put back here, raised or not. */
+.segmented > button:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+.segmented > button[data-state='on']:focus-visible {
+  box-shadow: var(--shadow-sm), var(--focus-ring);
 }
 
 /* In a row that already spaces its children (Correct an item puts Close beside it), the row's gap is the only space. */
