@@ -41,7 +41,7 @@ split per branch, posting trade creditors against the method's account, with the
    oldest thing it pays, as a customer payment is dated between its sale and today. A cash payment is refused once a banking that
    stands at the paying branch is dated on that day or later (422 `cash_day_banked`): the cash book carries unbanked cash forward,
    so such a banking already counted that day's cash, and a banked day is not changed after the fact (today too, once today is
-   banked). The check runs under the supplier row lock. The cash book has no other close of a day and expenses no back-date
+   banked). The check runs after the supplier row lock, which does not serialise it with a banking being recorded at the same moment (a watch for below). The cash book has no other close of a day and expenses no back-date
    window, so none is copied here; the ledger refuses a date in a closed period. Mobile money and bank never touch the till. On
    the screen the date stays empty, meaning today, until the person picks one, so a form left open overnight pays the day it is
    sent. A reversal stays dated the day it is made.
@@ -69,6 +69,6 @@ purchasing on sees the same payments and adds invoices beside them.
 as a back-dated expense does.
 How far back a payment may go, beyond the oldest purchase it pays and the last banking, is the owner's call if they want a window.
 
-**Watch for:** a ledger period closed by an accountant refuses a payment dated inside it (the ledger's own rule), which the screen
+**Watch for:** a banking and a back-dated cash payment of the same branch and day recorded at the same moment can each miss the other; a branch-day lock shared with the cash book would close it. A ledger period closed by an accountant refuses a payment dated inside it (the ledger's own rule), which the screen
 shows as the server's message. Unapplied supplier credits and a cash refund from a supplier stay deferred (issue #199). A PDF of the
 supplier statement, if owners ask for one, belongs with the documents capability like the customer statement's.

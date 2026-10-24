@@ -382,6 +382,89 @@ class RetailBuyOnCreditIT extends IntegrationTest {
         assertThat(after.get("closing_minor").asLong()).isEqualTo(900).isEqualTo(owed());
     }
 
+    /** A mobile money payment from the head office that pays only purchase {@code b}. */
+    JsonNode payToB(UUID b, long amount, String paidOn) {
+        Map<String, Object> manual = new LinkedHashMap<>();
+        manual.put("supplier_id", supplier);
+        manual.put("branch_id", hq);
+        manual.put("method", "mobile_money");
+        manual.put("amount_minor", amount);
+        manual.put("paid_on", paidOn);
+        manual.put("allocation", "manual");
+        manual.put("allocations", List.of(Map.of("purchase_id", b, "amount_minor", amount)));
+        ResponseEntity<JsonNode> r = api.postKeyed("/supplier-payments", manual, OWNER, "*", key());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return r.getBody();
+    }
+
+    @Test
+    void aBranchScopedStatementClosesAtWhatIsStillToPayInScope() {
+        UUID br2 = t.secondBranch();
+        // A: bought on credit into both branches, 500 each. B: into the head office only, 300.
+        Map<String, Object> l = new LinkedHashMap<>();
+        l.put("product_id", product);
+        l.put("cost_minor", 100);
+        l.put("qty_by_branch", List.of(Map.of("branch_id", hq, "qty", "5"), Map.of("branch_id", br2, "qty", "5")));
+        Map<String, Object> two = new LinkedHashMap<>();
+        two.put("purchased_on", "2026-10-01");
+        two.put("payment_method", "credit");
+        two.put("supplier_id", supplier);
+        two.put("lines", List.of(l));
+        ResponseEntity<JsonNode> a = api.postKeyed("/purchases", two, OWNER, "*", key());
+        assertThat(a.getStatusCode()).as("%s", a.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID b = buy("credit", "3", "2026-10-02");
+        // 600 oldest first goes to A; 200 and then 100 chosen for B, the 100 reversed.
+        pay("bank", 600, "2026-10-03");
+        payToB(b, 200, "2026-10-04");
+        JsonNode undone = payToB(b, 100, TODAY);
+        api.postKeyed(
+                "/supplier-payments/" + undone.get("id").asString() + "/reverse",
+                Map.of("reason", "Paid twice by mistake"),
+                OWNER,
+                "*",
+                key());
+        // Every branch: A owes 400, B owes 100.
+        assertThat(statement("2026-10-01", TODAY).get("closing_minor").asLong())
+                .isEqualTo(500)
+                .isEqualTo(owed());
+        // A payer of the head office only: A also went into the second branch, so neither A nor what paid it counts.
+        ResponseEntity<JsonNode> scoped = api.call(
+                org.springframework.http.HttpMethod.GET,
+                "/suppliers/" + supplier + "/statement?from=2026-10-01&to=" + TODAY,
+                null,
+                OWNER,
+                hq.toString(),
+                Map.of());
+        assertThat(scoped.getStatusCode()).as("%s", scoped.getBody()).isEqualTo(HttpStatus.OK);
+        List<String> rows = new ArrayList<>();
+        for (JsonNode line : scoped.getBody().get("lines")) {
+            rows.add(line.get("kind").asString() + " +"
+                    + line.get("increase_minor").asLong() + " -"
+                    + line.get("decrease_minor").asLong() + " = "
+                    + line.get("balance_minor").asLong());
+        }
+        assertThat(rows)
+                .containsExactly(
+                        "purchase +300 -0 = 300",
+                        "payment +0 -200 = 100",
+                        "payment +0 -100 = 0",
+                        "payment_reversed +100 -0 = 100");
+        long scopedOwed = api.call(
+                        org.springframework.http.HttpMethod.GET,
+                        "/reports/supplier-payables",
+                        null,
+                        OWNER,
+                        hq.toString(),
+                        Map.of())
+                .getBody()
+                .get("totals")
+                .get("owed_minor")
+                .asLong();
+        assertThat(scoped.getBody().get("closing_minor").asLong())
+                .isEqualTo(100)
+                .isEqualTo(scopedOwed);
+    }
+
     @Test
     void theStatementRefusesABackwardRange() {
         ResponseEntity<JsonNode> r =

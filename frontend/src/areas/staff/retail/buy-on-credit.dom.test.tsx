@@ -141,6 +141,18 @@ describe('Pay a supplier', () => {
     expect(buildPaymentRequest(sent.mock.calls[0]?.[0] as PaymentForm, items)).toMatchObject({ paid_on: businessToday(), amount_minor: 40000, method: 'cash' });
   });
 
+  it('draws every amount on the form in tabular figures: what is owed, what is left to give out and the warnings', () => {
+    render(<Form onSubmit={() => undefined} />);
+    expect(screen.getByTestId('owed-total').querySelector('.num')?.textContent).toBe('UGX 42,000');
+    for (const li of screen.getByTestId('owed-list').querySelectorAll('li')) expect(li.querySelector('.num')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/Amount paid/), { target: { value: '50000' } });
+    const alert = screen.getAllByRole('alert')[0]!;
+    expect(alert.textContent).toMatch(/UGX 42,000/);
+    expect(alert.className).toContain('num');
+    fireEvent.click(screen.getByLabelText('Let me choose'));
+    expect(screen.getByTestId('pay-remaining').className).toContain('num');
+  });
+
   it('refuses a date in the future, and an earlier day pays only what was owed then', () => {
     const tomorrow = new Date(Date.parse(`${businessToday()}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
     const form = { ...blankPayment('s1', branch), amount: '100' };

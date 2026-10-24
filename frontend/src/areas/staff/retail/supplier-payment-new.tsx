@@ -103,16 +103,16 @@ export function PaymentFormView({ form, suppliers, branches, items, owed, loadin
                   Pay on {KIND_WORDS[i.kind ?? 'bill']} {i.number}{i.supplier_ref ? ` (invoice ${i.supplier_ref})` : ''}, due {showDate(i.due_date)}, {lateWords(i.days_past_due).toLowerCase()}, owed <Money minor={i.open_minor ?? 0} />
                 </label>
                 <input id={`amt-${itemKey(i)}`} inputMode="numeric" value={text} onChange={(e) => onChange({ ...form, amounts: { ...form.amounts, [itemKey(i)]: e.target.value } })} aria-invalid={bad !== null} />
-                {bad && <p role="alert" className="rt-flag">{bad}</p>}
+                {bad && <p role="alert" className="rt-flag num">{bad}</p>}
               </div>
             );
           })}
-          <p data-testid="pay-remaining" aria-live="polite">
+          <p className="num" data-testid="pay-remaining" aria-live="polite">
             Given out <Money minor={allocatedMinor(form.amounts)} /> of <Money minor={paymentAmount(form) ?? 0} />. {left === 0 ? 'Nothing is left to give out.' : left > 0 ? `${money(left)} is left to give out.` : `${money(-left)} too much is given out.`}
           </p>
         </section>
       )}
-      {problem && (form.amount.trim() !== '' || form.supplierId !== '') && <p role="alert" className="rt-flag">{problem}</p>}
+      {problem && (form.amount.trim() !== '' || form.supplierId !== '') && <p role="alert" className="rt-flag num">{problem}</p>}
       <Problem error={error} />
       <BusyButton type="submit" className="rt-primary" busy={busy === true} disabled={problem !== null} data-tour="payment-save">Save payment</BusyButton>
 
