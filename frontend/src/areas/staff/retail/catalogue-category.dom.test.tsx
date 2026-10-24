@@ -90,7 +90,7 @@ describe('the category page', () => {
     expect(screen.getByText('Leave it empty and the app gives it the next code of Bulbs, BLB-0002. Or type your own.')).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Test bulb 12W' } });
     await waitFor(() => expect(screen.getAllByRole('option').length).toBeGreaterThan(1));
-    fireEvent.change(screen.getByLabelText(/^Unit/), { target: { value: 'u1' } });
+    fireEvent.change(screen.getByLabelText(/^Counted in/), { target: { value: 'u1' } });
     fireEvent.change(screen.getByLabelText(/^Selling price/), { target: { value: '6000' } });
     fireEvent.click(screen.getByRole('button', { name: /^Add item/ }));
     await waitFor(() => expect(createProduct).toHaveBeenCalledTimes(1));
@@ -109,7 +109,7 @@ describe('the category page', () => {
     fireEvent.change(screen.getByLabelText('Item code'), { target: { value: ' OWN-1 ' } });
     fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Test bulb 15W' } });
     await waitFor(() => expect(screen.getAllByRole('option').length).toBeGreaterThan(1));
-    fireEvent.change(screen.getByLabelText(/^Unit/), { target: { value: 'u1' } });
+    fireEvent.change(screen.getByLabelText(/^Counted in/), { target: { value: 'u1' } });
     fireEvent.change(screen.getByLabelText(/^Selling price/), { target: { value: '6000' } });
     fireEvent.click(screen.getByRole('button', { name: /^Add item/ }));
     await waitFor(() => expect(createProduct).toHaveBeenCalledTimes(1));
