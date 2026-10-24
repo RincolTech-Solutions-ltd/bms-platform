@@ -144,6 +144,16 @@ describe('Sheet', () => {
     expect(dialog()).toBeNull();
   });
 
+  it('springs back, and stays open, when the browser cancels a long drag', () => {
+    openIt();
+    const head = document.querySelector('.sheet-head')!;
+    fireEvent.pointerDown(head, { clientY: 100, pointerId: 1, pointerType: 'touch' });
+    fireEvent.pointerMove(head, { clientY: 300, pointerId: 1 });
+    fireEvent.pointerCancel(head, { pointerId: 1 });
+    expect(dialog()).toBeTruthy();
+    expect((dialog() as HTMLElement).style.transform).toBe('');
+  });
+
   it.each(['mouse', 'pen'])('never closes on a %s drag, only a touch', (pointerType) => {
     openIt();
     const head = document.querySelector('.sheet-head')!;

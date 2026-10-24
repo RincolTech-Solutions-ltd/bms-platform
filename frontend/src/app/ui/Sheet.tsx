@@ -1,5 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { icons } from '../../components/icons';
 import { hearToasts } from './announce';
 
@@ -28,9 +28,11 @@ export function Sheet({ open, onClose, title, children, actions }: {
   const panel = useRef<HTMLDivElement>(null);
   // What had focus when the sheet opened, given it back on close (Radix gives it back only to a Dialog.Trigger).
   const opener = useRef<HTMLElement | null>(null);
-  const wasOpen = useRef(false);
-  if (open && !wasOpen.current) opener.current = document.activeElement as HTMLElement | null;
-  wasOpen.current = open;
+  // Taken when the open is committed, before Radix moves focus inside (its focus runs in a later effect), never in a render that
+  // might be thrown away.
+  useLayoutEffect(() => {
+    if (open) opener.current = document.activeElement as HTMLElement | null;
+  }, [open]);
   const drag = useRef<{ from: number; by: number } | null>(null);
   // The last toast said again, numbered so the same words twice are said twice; an error is said assertively.
   const [heard, setHeard] = useState<{ text: string; n: number; urgent: boolean } | null>(null);
@@ -57,9 +59,10 @@ export function Sheet({ open, onClose, title, children, actions }: {
     drag.current.by = Math.max(0, e.clientY - drag.current.from);
     panel.current.style.transform = drag.current.by ? `translateY(${drag.current.by}px)` : '';
   };
-  const release = () => {
+  // A finger lifted far enough down closes the sheet; a gesture the browser cancelled (a scroll took over) only springs back.
+  const release = (cancelled: boolean) => {
     if (!drag.current || !panel.current) return;
-    const far = drag.current.by >= SWIPE_CLOSE;
+    const far = !cancelled && drag.current.by >= SWIPE_CLOSE;
     drag.current = null;
     panel.current.style.transform = '';
     if (far) onClose();
@@ -86,7 +89,7 @@ export function Sheet({ open, onClose, title, children, actions }: {
               (first ?? panel.current)?.focus();
             }}
           >
-            <header className="sheet-head" onPointerDown={grab} onPointerMove={pull} onPointerUp={release} onPointerCancel={release}>
+            <header className="sheet-head" onPointerDown={grab} onPointerMove={pull} onPointerUp={() => release(false)} onPointerCancel={() => release(true)}>
               <span className="sheet-grab" aria-hidden="true" />
               <Dialog.Title>{title}</Dialog.Title>
               <Dialog.Close className="sheet-close" aria-label="Close">
