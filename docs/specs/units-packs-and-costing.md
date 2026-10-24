@@ -1,11 +1,11 @@
 # Units, packs, buying and selling in packs, and profit per piece
 
-Status: decided (Hillary, 23 and 24 Oct 2026: D16, D22 to D26 and D32 yes). Built so far: average cost (#529, ADR-079, V94) and shop EAN-13 barcodes (#528, V93). It follows the Modern Electronics set-up with George and Hatibu.
+Status: decided (the owner, 23 and 24 Oct 2026: D16, D22 to D26 and D32 yes). Built so far: average cost (#529, ADR-079, V94) and shop EAN-13 barcodes (#528, V93). It follows the set-up of an electronics shop in the pilot.
 Applies to every retail business: small shops, wholesalers and the ones in between.
 
-## 1. The problem, in George's words
+## 1. The problem, in the shop owner's words
 
-- George buys some goods by the carton. Cartons of the same item do not always hold the same number of pieces: one supplier's carton has 24, another's has 30.
+- The shop owner buys some goods by the carton. Cartons of the same item do not always hold the same number of pieces: one supplier's carton has 24, another's has 30.
 - Sometimes he buys in other packs: a box, a dozen, a sack, a bale, a tray.
 - He sells in many ways: a full carton, a half carton, a dozen, or single pieces. Each way has its own price, and the carton price is not just 24 times the piece price.
 - What he paid for a carton is not what he sells a carton for.
@@ -26,7 +26,7 @@ The gaps:
 - A carton's size cannot change per delivery.
 - A half carton has no clean way in.
 - Walk-in pack prices cannot be set.
-- The cost jumps with every delivery instead of averaging, so profit is wrong when two cartons of different sizes or prices are in stock together.
+- Fixed in #529: the cost used to jump with every delivery instead of averaging; it now keeps the moving average per item per branch.
 
 ## 3. The model, in plain words
 
@@ -62,12 +62,12 @@ The gaps:
 - The app never assumes one from the other, except to suggest a starting selling price.
 
 **Profit is per piece, using the average buying price.**
-- Each delivery updates the item's average cost per piece. The formula is (pieces already in stock × old average + pieces received × this delivery's cost per piece) ÷ the new number of pieces. This is the moving weighted average, the usual method for shops (ADR-079, built in #529).
+- Each delivery updates the item's average cost per piece in that branch (per item per branch, as V94 stores it). The formula is (pieces already in stock in that branch × old average + pieces received × this delivery's cost per piece) ÷ the new number of pieces. This is the moving weighted average, the usual method for shops (ADR-079, built in #529).
 - Each sale line keeps a copy of the average cost per piece at the moment of sale. Profit on the line is its price minus the pieces sold times that cost.
 - Reports add up the lines, so the profit is right whether the goods were sold as cartons, dozens or pieces.
 - The last buying price is still shown ("last paid 750 a piece"), because owners use it to set prices.
 
-**Selling below cost is still caught.** If a pack's price works out below the average cost per piece, the app warns, as it does today for single items.
+**Selling below cost is still caught.** If a pack's price is below its size times the average cost per piece (for example a carton of 24 below 24 × 750), the app warns, as it does today for single items.
 
 ## 4. Starting points (defaults) so nobody starts from nothing
 
@@ -91,7 +91,7 @@ The unit list is seeded with names Ugandans use: piece, kilo, litre, metre, pair
 
 | Today | Proposed | Why |
 |---|---|---|
-| Restock | Buy stock | Hillary: "restocking is buying". Restock is a rare word here |
+| Restock | Buy stock | The owner: "restocking is buying". Restock is a rare word here |
 | Cost price / cost | Buying price | Done in #495 |
 | Sell price | Selling price | Done in #495 |
 | Unit (of an item) | Counted in (smallest unit) | "Unit" is unclear |
@@ -102,11 +102,11 @@ The unit list is seeded with names Ugandans use: piece, kilo, litre, metre, pair
 | Suppliers | Suppliers (where you buy) | Keep, with the hint |
 | Variance | Difference | Plain |
 | Shrinkage | Lost or damaged stock | Plain |
-| Item code | Item code | D16: Hillary chose "Item code" |
+| Item code | Item code | D16: the owner chose "Item code" |
 
 Rule: every label is a word a shop attendant in Kampala uses. There is a glossary file in the frontend, and a test fails when a banned word ("SKU", "variance", "shrinkage", "UOM") appears in UI copy.
 
-## 6. Item codes from the category (story #493, D14 yes)
+## 6. Item codes from the category (story #493, D14 yes: codes are made from the category)
 
 - Each category has a short prefix of 2 to 4 letters, made from its name and editable: Bulbs BLB, TVs TV, Phone accessories PHA, Extensions EXT.
 - A new item added inside a category gets the next number: BLB-0001, BLB-0002. Two people adding at once still get different numbers.
@@ -132,15 +132,15 @@ Rule: every label is a word a shop attendant in Kampala uses. There is a glossar
 
 ## 8. Moving stock between branches and GS1
 
-- **U-TIMBER uses GS1 for traceability between organisations.** Timber moves from forest to sawmill to buyer, so it uses GS1 logistics labels (SSCC) and event records. Regulators and other companies need to follow each consignment.
-- **A shop's own store-to-shop move stays inside one business.** The store and the shop already know both ends. Full GS1 logistics (SSCC labels, EPCIS events) would add labels and steps and give George nothing.
+- **A timber traceability project uses GS1 between organisations.** Timber moves from forest to sawmill to buyer, so it uses GS1 logistics labels (SSCC) and event records. Regulators and other companies need to follow each consignment.
+- **A shop's own store-to-shop move stays inside one business.** The store and the shop already know both ends. Full GS1 logistics (SSCC labels, EPCIS events) would add labels and steps and give the shop nothing.
 - **What we take from GS1:**
   1. GTINs per packaging level, so a carton can be scanned when moving and when receiving.
   2. Scan to receive: the shop scans what arrived, and the app compares it with what was sent. This replaces typing counts.
   3. Optional batch and expiry dates, for businesses that sell food, drinks or medicine, so the oldest stock is moved and sold first. This would be a later capability, off by default.
 - **SSCC** comes in only if a business moves pallets to another company that asks for it. It is not needed for our shops today.
 
-## 9. Build order (after Hillary's decisions)
+## 9. Build order (after the owner's decisions)
 
 1. **Average cost per piece** (moving weighted average), with sale lines keeping their cost. Built in #529 (ADR-079, V94). Everything else depends on profit being right.
 2. **Pack size per delivery on Buy stock.** The restock line keeps its own size. Includes "use this size from now on".
@@ -161,3 +161,4 @@ Each step is its own pull request with tests. Migrations take their numbers in m
 - **D25 yes:** shop barcodes as GS1 EAN-13 for new labels (built, #528); **D32 yes:** the layout is `210` + 9 digits + check.
 - **D26 yes:** serial numbers and batch with expiry come later, as optional capabilities.
 - **D16:** the field is called Item code.
+- **D14 yes:** item codes are made from the category prefix (#493).
