@@ -185,6 +185,12 @@ describe('the bottom tabs on a phone (issue #539)', () => {
     expect(document.documentElement.classList.contains('has-tab-bar')).toBe(true);
   });
 
+  it('stays while a select has focus, as its picker is not the keyboard', () => {
+    show(admin, { children: <select aria-label="Size"><option>Small</option></select> });
+    act(() => screen.getByRole('combobox', { name: 'Size' }).focus());
+    expect(bar()).toBeTruthy();
+  });
+
   it('is not drawn from 720px, where the sidebar holds the areas', () => {
     widthIs(1280);
     show(admin);

@@ -82,12 +82,17 @@ export function currentTab(tabs: Tab[], pathname: string): TabId | undefined {
   return tabs.find((t) => t.paths.some((p) => under(pathname, p)))?.id;
 }
 
-const TEXT_ENTRY = 'input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=range]):not([type=file]), textarea, select, [contenteditable="true"]';
+// The fields that bring up the keyboard. A select is left out: its picker is not the keyboard, and focus stays on it after a choice.
+const TEXT_ENTRY = ['', 'text', 'search', 'tel', 'number', 'email', 'password', 'url'].map((t) => (t ? `input[type=${t}]` : 'input:not([type])')).concat('textarea', '[contenteditable="true"]').join(', ');
 const typingIn = (el: EventTarget | null) => el instanceof Element && el.matches(TEXT_ENTRY);
 
-/** True while a text field has focus: the phone's keyboard is up, so the tabs step aside and the action bar sits on the keyboard. */
-function useTyping(): boolean {
+/**
+ * True while a text field has focus: the phone's keyboard is up, so the tabs step aside and the action bar sits on the keyboard.
+ * Read again on every page, since a focused field that leaves the page takes its focus with it without a focusout.
+ */
+function useTyping(pathname: string): boolean {
   const [typing, setTyping] = useState(() => typeof document !== 'undefined' && typingIn(document.activeElement));
+  useEffect(() => setTyping(typingIn(document.activeElement)), [pathname]);
   useEffect(() => {
     const onIn = (event: FocusEvent) => setTyping(typingIn(event.target));
     const onOut = (event: FocusEvent) => setTyping(typingIn(event.relatedTarget));
@@ -162,7 +167,7 @@ export function TabBar({ me }: { me: Me }) {
 /** The tabs on a phone only, and not while a text field has focus; the root carries has-tab-bar while they show. */
 export function StaffTabBar({ me }: { me: Me }) {
   const phone = useIsPhone();
-  const typing = useTyping();
+  const typing = useTyping(useRouterState({ select: (state) => state.location.pathname }));
   const shown = phone && !typing;
   useEffect(() => {
     if (!shown) return;
