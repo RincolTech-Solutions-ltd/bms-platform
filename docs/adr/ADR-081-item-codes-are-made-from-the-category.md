@@ -4,7 +4,7 @@
 
 Proposed (owner decisions D14 and D16, issue #493; docs/specs/units-packs-and-costing.md section 6), accepted on merge. Amends
 FR-RET-01 (a code is no longer typed on every item) and the CSV import of #146 (the code column may be empty or left out). Adds
-FR-RET-70. Migration `V96` (claimed after `V95`, pull request #540); renumbered at merge if the order changes.
+FR-RET-70. Migration `V96`, the next number after `V95` (pull request #540, merged).
 
 ## Context
 
