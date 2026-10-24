@@ -1465,4 +1465,5 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
 - Routes (`/staff/retail/restock`, `/restocks`, `/stocktake`, `/catalogue/buyers`), API fields, permission names and error
   codes are unchanged. The backend's plain-words refusals that a person reads use the same words.
 - `glossary.test.ts` fails when SKU, variance, shrinkage, UOM or restock (any case), or a retired label, shows in the
-  strings or JSX text of a screen, in a tour or in the menu help. The tours whose words changed took a new version.
+  source strings or JSX text of a screen, in a tour or in the menu help. It reads source, not the rendered page: words
+  built at run time and the backend's refusals are worded by hand. The tours whose words changed took a new version.

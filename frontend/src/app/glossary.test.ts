@@ -8,8 +8,9 @@ import { CATALOGUE_LINKS, SCREENS } from '../areas/staff/retail/permissions';
 import { BANNED_WORDS, RETIRED_WORDS, WORDS, offendingWords } from './glossary';
 
 // The glossary guard (issue #547): no banned word (SKU, variance, shrinkage, UOM, restock, in any case) and no retired label
-// (stock-take, credit buyer, pack size) shows in the copy of the app. It reads every source file's strings and JSX text, as the
-// screens render them, and every tour and menu hint. Names a person never sees stay as they are: routes, API fields, error
+// (stock-take, credit buyer, pack size) shows in the copy of the app. It reads every source file's strings and JSX text, and
+// every tour and menu hint. It reads source, not the rendered page: words built at run time and the backend's refusals are not
+// checked here. Names a person never sees stay as they are: routes, API fields, error
 // codes, permission names, data-tour targets, imports and type names.
 
 const SRC = fileURLToPath(new URL('../', import.meta.url));
@@ -28,8 +29,8 @@ const CODE_ATTRIBUTES = new Set(['to', 'href', 'className', 'id', 'htmlFor', 'ke
 // Properties and attributes whose value is words for a person even when it is one lower case word ('purchases').
 const COPY_NAMES = new Set(['noun', 'plural', 'rowsWord', 'label', 'title', 'hint', 'rootLabel', 'aria-label', 'placeholder']);
 
-/** A string a person may read: words with a space, or one capitalised word; a route, a code or a key is not. */
-const isCopy = (text: string) => !text.startsWith('/') && (/\S\s+\S/.test(text) || /^[A-Z][a-z']+[.!?]?$/.test(text.trim()));
+/** A string a person may read: words with a space, or one capitalised word (Stock-take too); a route, a code or a key is not. */
+const isCopy = (text: string) => !text.startsWith('/') && (/\S\s+\S/.test(text) || /^[A-Z][a-z'-]+[.!?]?$/.test(text.trim()));
 
 /** Whether a string literal names something for the code: an import, a type, a property key, a data attribute. */
 function isCodeName(node: ts.Node): boolean {
@@ -44,17 +45,21 @@ function isCodeName(node: ts.Node): boolean {
   return false;
 }
 
-/** Whether a string is the value of a property or attribute that always holds words for a person. */
+/** Whether a string is shown as it is: a child of a JSX element, or the value of a property or attribute that holds words. */
 function isNamedCopy(node: ts.Node): boolean {
-  const parent = node.parent;
+  let parent = node.parent;
+  if (ts.isJsxExpression(parent)) {
+    if (!ts.isJsxAttribute(parent.parent)) return true;
+    parent = parent.parent;
+  }
   if (ts.isPropertyAssignment(parent) && parent.initializer === node) return COPY_NAMES.has(parent.name.getText().replace(/['"]/g, ''));
   if (ts.isJsxAttribute(parent)) return COPY_NAMES.has(parent.name.getText());
   return false;
 }
 
-/** The copy of one source file: every string, template and JSX text a person may read, with its line. */
-function copyOf(path: string): { line: number; text: string }[] {
-  const source = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, path.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+/** The copy of one source: every string, template and JSX text a person may read, with its line. */
+function copyOfSource(path: string, text: string): { line: number; text: string }[] {
+  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, path.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const found: { line: number; text: string }[] = [];
   const add = (node: ts.Node, text: string) => {
     if (isCopy(text) || isNamedCopy(node)) found.push({ line: source.getLineAndCharacterOfPosition(node.getStart()).line + 1, text });
@@ -62,12 +67,15 @@ function copyOf(path: string): { line: number; text: string }[] {
   const visit = (node: ts.Node) => {
     if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && !isCodeName(node)) add(node, node.text);
     else if (ts.isTemplateExpression(node)) add(node, [node.head.text, ...node.templateSpans.map((s) => s.literal.text)].join('X'));
-    else if (ts.isJsxText(node)) add(node, node.text.trim());
+    else if (ts.isJsxText(node) && node.text.trim() !== '') found.push({ line: source.getLineAndCharacterOfPosition(node.getStart()).line + 1, text: node.text.trim() });
     ts.forEachChild(node, visit);
   };
   visit(source);
   return found;
 }
+
+const copyOf = (path: string) => copyOfSource(path, readFileSync(path, 'utf8'));
+const offencesIn = (text: string) => copyOfSource('fixture.tsx', text).flatMap((c) => offendingWords(c.text));
 
 describe('glossary (issue #547)', () => {
   it('holds the renamed words', () => {
@@ -101,7 +109,17 @@ describe('glossary (issue #547)', () => {
     expect(isCopy('/staff/retail/restock')).toBe(false);
     expect(isCopy('Restock')).toBe(true);
     expect(isCopy('Save the restock')).toBe(true);
+    expect(isCopy('Stock-take')).toBe(true);
     expect(BANNED_WORDS.length + Object.keys(RETIRED_WORDS).length).toBeGreaterThan(5);
+  });
+
+  it('reads one word JSX text and strings shown in JSX, and leaves code names alone', () => {
+    expect(offencesIn('export const A = () => <a href="/x">Stock-take</a>;')).toEqual(['stock-take']);
+    expect(offencesIn('export const A = () => <span>restocks</span>;')).toEqual(['restock']);
+    expect(offencesIn("export const A = () => <span>{'restocks'}</span>;")).toEqual(['restock']);
+    expect(offencesIn("export const A = () => <Link label={'restocks'} to=\"/staff/retail/restocks\">Buy stock</Link>;")).toEqual(['restock']);
+    expect(offencesIn("export const A = () => <Link to=\"/staff/retail/restock\" data-tour=\"restock-save\">Buy stock</Link>;")).toEqual([]);
+    expect(offencesIn("const code = 'restock_voids'; const kind = 'restock'; type K = 'restock';")).toEqual([]);
   });
 
   it('finds no banned or retired word in the copy of any screen', () => {

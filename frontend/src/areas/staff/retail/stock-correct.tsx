@@ -11,6 +11,7 @@ import { REASONS, correctionRequest, correctionWords, differenceWords, movementT
 import { Problem, Success } from './ui';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Segmented } from '../../../app/ui/Segmented';
+import { WORDS } from '../../../app/glossary';
 
 // "Correct" on a row of the stock list (issue #351, ADR-044): the owner fixes a mistake where he sees it, with a trail. Four small
 // choices, each opened on its own: the right quantity (a reason, posted as a correction that is not shrinkage), the category, a wrong
@@ -217,7 +218,7 @@ export function CorrectItem({ row, branchId, onClose }: { row: StockRow; branchI
             <strong>The item is kept in the wrong unit:</strong> a unit is never converted once the item has stock, because 10 rolls would become 10 metres. Add a new item with the right unit, correct this one to none here, and buy stock of the new one.
           </p>
           <p>
-            <strong>The shelf holds a different number than the list:</strong> choose The quantity is wrong above, or count it in <Link to="/staff/retail/stocktake">Stock-take</Link>.
+            <strong>The shelf holds a different number than the list:</strong> choose The quantity is wrong above, or count it in <Link to="/staff/retail/stocktake">{WORDS.countStock}</Link>.
           </p>
         </div>
       )}

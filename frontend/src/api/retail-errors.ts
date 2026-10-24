@@ -31,7 +31,7 @@ const BY_CODE: Record<string, string> = {
   unknown_price_list: 'That price list does not exist or is switched off.',
   unit_in_use_by_price_list: 'This item has prices in a price list, so its unit cannot change.',
   // Customer accounts (ADR-033, issue #196).
-  customer_required: 'A credit sale needs a customer from the list of customers who owe. Choose the customer, or add them first.',
+  customer_required: 'A credit sale needs a customer from the list. Choose the customer, or add them first.',
   credit_limit_exceeded: 'This sale takes the buyer above their credit limit.',
   payment_exceeds_allocatable: 'That is more than this buyer owes on the credit sales you can take payment for.',
   allocations_must_equal_amount: 'The amounts given to the sales must add up to the payment.',

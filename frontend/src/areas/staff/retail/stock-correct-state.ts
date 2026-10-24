@@ -1,6 +1,5 @@
 import type { StockMovement } from '../../../api/retail';
 import { milliOf, parseCount, qtyString, showQty } from './maths';
-import { WORDS } from '../../../app/glossary';
 
 // Correcting the quantity of an item on the stock list (issue #351, ADR-044). The server decides; these helpers only prepare the
 // request and put the answers in plain words.
@@ -42,7 +41,7 @@ export function correctionRequest(branchId: string, productId: string, typed: st
 }
 
 const KIND: Record<string, string> = {
-  purchase: WORDS.buyStock,
+  purchase: 'Purchase',
   sale: 'Sale',
   usage: 'Used',
   damage: 'Damaged',

@@ -1486,7 +1486,7 @@ export const customerAccountsCapability: Tour = {
     {
       id: 'intro',
       title: 'Customer accounts are on',
-      body: 'Each customer who owes can now have a credit limit and payment terms. A credit sale needs a customer from the list. It is refused above their limit, unless someone you allow gives a reason.',
+      body: 'Each customer on the list can now have a credit limit and payment terms. A credit sale needs a customer from the list. It is refused above their limit, unless someone you allow gives a reason.',
     },
     {
       id: 'tile',

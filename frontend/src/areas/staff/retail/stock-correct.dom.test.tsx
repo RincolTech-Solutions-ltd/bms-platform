@@ -294,7 +294,7 @@ describe('the history', () => {
     expect(shown[0]?.textContent).toContain('By you');
     expect(shown[1]?.textContent).toContain('Sale');
     expect(shown[1]?.textContent).toContain('By a colleague');
-    expect(shown[2]?.textContent).toContain('Buy stock');
+    expect(shown[2]?.textContent).toContain('Purchase');
     expect(shown[2]?.textContent).toContain('+10 roll');
   });
 

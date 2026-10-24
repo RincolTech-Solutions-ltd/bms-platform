@@ -38,7 +38,7 @@ export function showWhen(iso: string | undefined): string {
   return `${d}, ${t}`;
 }
 
-const SOURCES: Record<string, string> = { initial: 'First price', manual: 'Changed by hand', purchase: WORDS.buyStock, import: 'Import' };
+const SOURCES: Record<string, string> = { initial: 'First price', manual: 'Changed by hand', purchase: 'Purchase', import: 'Import' };
 
 /** One price change in words: the old and new selling price, and the cost too when the server sent it. */
 export function ChangeLine({ change }: { change: PriceChange }) {

@@ -211,7 +211,7 @@ export function BuyersPage() {
     <Gate screen="buyers" title={WORDS.customersWhoOwe}>
       <PeopleList
         note="What each buyer owes is counted over all the branches you may read, whichever branch is chosen."
-        noun="customer who owes" plural="customers who owe" queryKey="buyers"
+        noun="customer" plural="customers who owe" queryKey="buyers"
         list={(q) => retail.listCustomerPage(q)} create={(b) => retail.createCustomer(b)}
         update={(id, v, b) => retail.updateCustomer(id, v, b)}
         canAdd canSwitch={false} searchable

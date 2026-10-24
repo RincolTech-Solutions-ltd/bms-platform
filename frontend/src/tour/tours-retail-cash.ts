@@ -32,18 +32,19 @@ const step = (s: Omit<TourStep, 'module'>): TourStep => ({ module: 'retail', ...
 
 export const productsPage: Tour = {
   id: 'page-products',
-  version: 4,
+  // Version 5 says what an item is counted in, as the item form now does (issue #547).
+  version: 5,
   title: 'This page: items',
   audience: (me) => held(me, CATALOGUE) && held(me, STOCK_READ),
   autoStart: false,
   page: '/staff/retail/catalogue/products',
   steps: [
-    step({ id: 'add', target: 'product-add', title: 'Add an item', body: 'Tap here to add something you sell. Type the code, the name, pick the category and the unit, then the price.' }),
+    step({ id: 'add', target: 'product-add', title: 'Add an item', body: 'Tap here to add something you sell. Type the code, the name, pick the category and what it is counted in, then the price.' }),
     step({ id: 'sizes', target: 'product-add-sizes', title: 'Sizes and colours', body: 'Sell one design in several sizes or prints? Tap here, type the sizes and the colours once, and each one gets its own code, price and stock.' }),
     step({ id: 'join', target: 'product-join-sizes', title: 'One item per size?', body: 'If you typed each size as its own item, tap here to join them. Each keeps its stock and history.' }),
     step({ id: 'search', target: 'product-search', title: 'Find an item', body: 'Type a name, a code or a category. The list narrows as you type.' }),
     step({ id: 'filters', target: 'product-filters', title: 'Narrow the list', body: 'Pick a category, or choose Switched off to see items you no longer sell.' }),
-    step({ id: 'edit', target: 'product-list', title: 'Change an item', body: 'Tap Edit on an item to change its name, category or unit. Tap Stock to see how much of it you hold.' }),
+    step({ id: 'edit', target: 'product-list', title: 'Change an item', body: 'Tap Edit on an item to change its name, category or what it is counted in. Tap Stock to see how much of it you hold.' }),
     // Issue #412: the low-stock level is on the item's page, under Edit.
     step({ id: 'minimum', target: 'product-list', title: 'Warn me when stock is below', body: 'Tap Edit on an item to set when you are told it is running low. Set one level for every shop and store, or a different one for a shop. With no level, you are told when it would run out within 14 days.' }),
     step({ id: 'price', target: 'product-list', needs: [PRICE_EDIT], optional: true, title: 'Change a price', body: 'Tap Change price on an item. The old price stays in its history, so earlier sales keep the price they were made at.' }),
@@ -60,7 +61,7 @@ export const sizesNewPage: Tour = {
   autoStart: false,
   page: '/staff/retail/catalogue/products/sizes/new',
   steps: [
-    step({ id: 'name', target: 'sizes-name', title: 'Name it once', body: 'Type what it is called, a short code, the category, the unit and the price. Every size and colour starts from these.' }),
+    step({ id: 'name', target: 'sizes-name', title: 'Name it once', body: 'Type what it is called, a short code, the category, what it is counted in and the price. Every size and colour starts from these.' }),
     step({ id: 'options', target: 'sizes-options', title: 'Sizes and colours', body: 'Type the sizes, then the colours or prints, each list separated by commas. Every size comes in every colour.' }),
     step({ id: 'preview', target: 'sizes-preview', title: 'Check the list', body: 'Each one shows its code and price. Change a price here if a bigger size costs more.' }),
     step({ id: 'save', target: 'sizes-save', title: 'Make them', body: 'Tap here. Each size and colour is then an item you can sell, buy, move and count on its own.' }),
@@ -152,7 +153,7 @@ export const buyersPage: Tour = {
   autoStart: false,
   page: '/staff/retail/catalogue/buyers',
   steps: [
-    step({ id: 'add', target: 'person-add', optional: true, title: 'Add a customer who owes', body: 'Tap here and type the name and a phone number. A credit sale needs a customer from this list.' }),
+    step({ id: 'add', target: 'person-add', optional: true, title: 'Add a customer', body: 'Tap here and type the name and a phone number. A credit sale needs a customer from this list.' }),
     step({ id: 'search', target: 'person-search', title: 'Find a buyer', body: 'Type a name or a phone number. The list narrows as you type.' }),
     step({ id: 'list', target: 'person-list', title: 'What each buyer owes', body: 'Each card shows what the buyer owes. Tap Edit to fix a name or phone. If customer accounts are on, tap Open account to see their limit, take a payment or read their statement.' }),
   ],

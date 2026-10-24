@@ -54,7 +54,7 @@ export const restockPage: Tour = {
     retail({ id: 'search', target: 'restock-search', title: 'Add the items', body: 'Type part of the name or code, and tap each item you bought in the list under the box. Then fill in the cost, the sell price and how many went to each branch.' }),
     retail({ id: 'scan', target: 'scan-bar', title: 'Scan here', body: 'Or scan each item in the Scan box. It is added for the branch at the top, and a second scan adds one more.' }),
     retail({ id: 'paid', target: 'restock-paid', title: 'How you paid', body: 'Choose Cash, Bank or Credit. Credit means you pay the supplier later.' }),
-    retail({ id: 'save', target: 'restock-save', title: 'Save the purchase', body: 'Tap Save the purchase. Stock goes up, and the cost and sell price of each item change to what you typed.' }),
+    retail({ id: 'save', target: 'restock-save', title: 'Save the purchase', body: 'Tap Save the purchase. Stock goes up, and the buying and selling price of each item change to what you typed.' }),
   ],
 };
 
