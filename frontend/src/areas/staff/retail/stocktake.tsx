@@ -88,10 +88,11 @@ function CountSheet({ branchId }: { branchId: string }) {
   const list = (id: string) => setListed((l) => (l.includes(id) ? l : [...l, id]));
   // The lines whose count is entered, in the order they were done; and the question asked before a count with lines left.
   const [done, setDone] = useState<string[]>([]);
-  const [confirming, setConfirming] = useState(false);
-  // The question answers the counts it was asked about: any change to a count withdraws it, so Finish anyway never sends
-  // counts the counter has not seen it for (review of #535).
-  useEffect(() => setConfirming(false), [counts]);
+  // The question answers the counts it was asked about: it shows only while the counts are those it was asked on, so any
+  // change to a count withdraws it in the same render and Finish anyway never sends counts it was not asked about (#535).
+  const [askedOn, setAskedOn] = useState<Record<string, string> | null>(null);
+  const confirming = askedOn !== null && askedOn === counts;
+  const setConfirming = (on: boolean) => setAskedOn(on ? counts : null);
   // A picked item's count box takes the cursor, after the picker has put it back in the search (review of #535).
   const [focusOn, setFocusOn] = useState<{ id: string; pick: number } | null>(null);
   useEffect(() => {
@@ -169,9 +170,15 @@ function CountSheet({ branchId }: { branchId: string }) {
         <div className="count-entry">
           <input id={`count-${id}`} inputMode="decimal" value={counts[id] ?? ''} placeholder="Counted"
             aria-invalid={(counts[id] ?? '').trim() !== '' && parseCount(counts[id] ?? '') === null}
-            onChange={(e) => setCounts({ ...counts, [id]: e.target.value })}
+            onChange={(e) => { const v = e.target.value; setCounts((c) => ({ ...c, [id]: v })); }}
             onBlur={() => settle(id)}
-            onKeyDown={(e) => { if (e.key === 'Enter') settle(id); }} />
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return;
+              settle(id);
+              // A keypad counter goes on down the list: the line moves up to Counted items, the cursor to the next line.
+              const next = waiting ? notCounted[notCounted.findIndex((x) => x.product_id === id) + 1]?.product_id : undefined;
+              if (next) setFocusOn((f) => ({ id: next, pick: (f?.pick ?? 0) + 1 }));
+            }} />
           {waiting && (
             <button type="button" className="btn-sm" aria-label={`Count 0 of ${r.description ?? ''}`} onClick={() => { setCounts((c) => ({ ...c, [id]: '0' })); setDone((d) => (d.includes(id) ? d : [...d, id])); }}>
               0

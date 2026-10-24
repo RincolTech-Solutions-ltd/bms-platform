@@ -139,6 +139,20 @@ describe('counting the sheet', () => {
     expect(createStocktake.mock.calls[0]?.[0]).toEqual({ branch_id: expect.any(String), lines: [{ product_id: 'I-1', counted_qty: '0' }] });
   });
 
+  it('on Enter moves the counted line up and the cursor to the next line not counted yet', async () => {
+    const third = row('A-2', 'Test Lamp Second', '2.000');
+    listStock.mockResolvedValue([...active, third, inactiveHeld]);
+    open();
+    await screen.findByText(EMPTY);
+    const order = [...document.querySelectorAll('.rt-card input[id^="count-"]')].map((i) => i.id);
+    const first = document.getElementById(order[0] ?? '') as HTMLInputElement;
+    first.focus();
+    fireEvent.change(first, { target: { value: '5' } });
+    fireEvent.keyDown(first, { key: 'Enter' });
+    await waitFor(() => expect(document.activeElement?.id).toBe(order[1]));
+    expect(inside(/^Counted items/, (order[0] ?? '').replace('count-', ''))).toBe(true);
+  });
+
   // Review of #535: the question answers the counts it was asked about, and Finish anyway keeps the Review button's guards.
   it('withdraws the question when a count changes, so Finish anyway never sends an invalid or empty count', async () => {
     listStock.mockResolvedValue([...active, inactiveHeld]);
