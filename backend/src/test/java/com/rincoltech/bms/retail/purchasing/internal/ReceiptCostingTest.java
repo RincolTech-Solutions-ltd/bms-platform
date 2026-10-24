@@ -1,6 +1,7 @@
 package com.rincoltech.bms.retail.purchasing.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.rincoltech.bms.retail.purchasing.internal.LotRepository.Lot;
 import java.math.BigDecimal;
@@ -71,5 +72,21 @@ class ReceiptCostingTest {
         assertThat(ReceiptCosting.spread(lot(home), 300, Map.of())).containsExactly(Map.entry(home, 300L));
         assertThat(ReceiptCosting.spread(lot(home), 0, Map.of(UUID.randomUUID(), BigDecimal.TEN)))
                 .isEmpty();
+    }
+
+    @Test
+    void aBalanceRowOutsideTheLockedSetIsRefusedBeforeItIsRevalued() {
+        UUID hq = UUID.randomUUID();
+        UUID br2 = UUID.randomUUID();
+        UUID product = UUID.randomUUID();
+        Map<UUID, java.util.Set<UUID>> locked = Map.of(hq, java.util.Set.of(product));
+        ReceiptCosting.requireLocked(locked, hq, product);
+        assertThatThrownBy(() -> ReceiptCosting.requireLocked(locked, br2, product))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("did not lock");
+        assertThatThrownBy(() -> ReceiptCosting.requireLocked(locked, hq, UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> ReceiptCosting.requireLocked(null, hq, product))
+                .isInstanceOf(IllegalStateException.class);
     }
 }

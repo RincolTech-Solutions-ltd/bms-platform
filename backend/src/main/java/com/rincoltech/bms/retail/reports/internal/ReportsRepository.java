@@ -58,7 +58,8 @@ class ReportsRepository {
                         + " FROM (" + quantities + ") q"
                         + " JOIN retail_products p ON p.id = q.product_id JOIN retail_units u ON u.id = p.unit_id"
                         // ADR-079: each branch's average cost now; a valuation as of an earlier date reads it too.
-                        + " LEFT JOIN retail_stock_balances a ON a.branch_id = q.branch_id AND a.product_id = q.product_id"
+                        + " LEFT JOIN retail_stock_balances a ON a.tenant_id = p.tenant_id AND a.branch_id = q.branch_id"
+                        + " AND a.product_id = q.product_id"
                         + " JOIN retail_categories c ON c.id = p.category_id"
                         + " WHERE q.qty <> 0");
         if (branchIds != null) {

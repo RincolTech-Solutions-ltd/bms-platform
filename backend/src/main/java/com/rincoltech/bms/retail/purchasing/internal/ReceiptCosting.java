@@ -234,6 +234,7 @@ class ReceiptCosting {
         // ADR-079: the part each branch's inventory takes re-averages that branch's cost, whatever happened to the last
         // paid cost above. The caller locked the product rows, then lockStock the balances in branch and product order,
         // and the spread names only rows it locked, so this takes no lock out of that order.
+        e.byBranch().forEach((branch, part) -> requireLocked(locked, branch, lot.productId()));
         e.byBranch()
                 .forEach((branch, part) -> stock.revalue(
                         on, branch, lot.productId(), raise ? part : -part, sourceType, documentId, false));
@@ -291,8 +292,20 @@ class ReceiptCosting {
         if (parts.isEmpty()) {
             parts = spread(lot, inventory, held(lot.productId(), locked));
         }
+        parts.keySet().forEach(branch -> requireLocked(locked, branch, lot.productId()));
         parts.forEach((branch, part) ->
                 stock.revalue(on, branch, lot.productId(), raise ? -part : part, sourceType, documentId, true));
+    }
+
+    /**
+     * ADR-079: a balance row is revalued only when lockStock locked it in its ordered pass; revaluing any other would take its
+     * lock late and out of order, a deadlock against a transfer. Fails fast instead.
+     */
+    static void requireLocked(Map<UUID, Set<UUID>> locked, UUID branch, UUID product) {
+        if (locked == null || !locked.getOrDefault(branch, Set.of()).contains(product)) {
+            throw new IllegalStateException(
+                    "revaluing a stock balance that lockStock did not lock: branch " + branch + ", product " + product);
+        }
     }
 
     /** The charge per base unit, rounded down: no more is capitalised than was charged. */
