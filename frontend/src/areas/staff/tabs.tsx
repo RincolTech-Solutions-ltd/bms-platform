@@ -127,7 +127,8 @@ function useLowStock(me: Me): number {
   const parts = homeParts(me, branch);
   // Home's own options, so the badge asks only when Home would, and only when it shows a count.
   const options = homeSummaryQuery(parts, branch);
-  const home = useQuery({ ...options, enabled: options.enabled && parts.lowStock });
+  // A minute between reads for the badge only, so moving between pages does not re-read the summary (#539).
+  const home = useQuery({ ...options, enabled: options.enabled && parts.lowStock, staleTime: 60_000 });
   return parts.lowStock ? (home.data?.low_stock ?? 0) : 0;
 }
 
