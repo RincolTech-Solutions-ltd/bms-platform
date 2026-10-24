@@ -82,7 +82,7 @@ EOF
 
 # The staging Pi runs Compose 2.26, which has no `run --pull` (it failed the first real deploy of
 # ADR-078); never pulling is the service's pull_policy instead.
-if grep -nE 'run .*--pull' "$REPO/deploy/deploy.sh"; then
+if grep -nE '^[^#]*run .*--pull' "$REPO/deploy/deploy.sh"; then
     echo "FAIL deploy.sh uses run --pull, which Compose 2.26 on the staging Pi does not have"
     exit 1
 fi
