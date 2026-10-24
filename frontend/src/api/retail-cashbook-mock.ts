@@ -192,9 +192,9 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
         const reason = (body.overwrite_reason ?? '').trim();
         const row = { ...r, amount, total_sold: s.total, suggested: s.suggested, overwritten, ...(overwritten && reason !== '' ? { reason } : {}) };
         savings.push(row);
-        // The writer sees the amount only when the writer typed it; a default taken without profit access is not echoed.
-        const { amount_minor: _hidden, ...rest } = savingsRow(row);
-        return body.amount_minor !== undefined ? savingsRow(row) : rest;
+        // savingsRow shows the amount only with profit access, as the server's view does, so a default taken without it
+        // is not echoed and a profit reader sees what was saved.
+        return savingsRow(row);
       })),
 
     listSavings: (q) => delay(newestFirst(savings.filter((r) => inWindow(r, q))).map(savingsRow)),
