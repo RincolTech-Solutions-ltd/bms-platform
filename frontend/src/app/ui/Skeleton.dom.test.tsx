@@ -56,6 +56,26 @@ describe('Skeleton', () => {
     expect(screen.getByText('Low stock')).toBeTruthy();
   });
 
+  it('waits a fresh second for a new list after a slow first one, never flashing the old skeleton', () => {
+    const { rerender } = render(<Skeleton loading of="all">All items</Skeleton>);
+    act(() => vi.advanceTimersByTime(SKELETON_DELAY));
+    expect(rows()).toBe(3);
+    rerender(<Skeleton loading={false} of="all">All items</Skeleton>);
+    expect(rows()).toBe(0);
+    // Records every node put on the page, so a skeleton drawn for one frame and taken away by an effect still counts.
+    const seen = new MutationObserver(() => undefined);
+    seen.observe(document.body, { childList: true, subtree: true });
+    rerender(<Skeleton loading of="low">All items</Skeleton>);
+    const drawn = seen.takeRecords().flatMap((r) => [...r.addedNodes]).some((n) => n instanceof Element && n.matches('.skeleton-rows'));
+    seen.disconnect();
+    expect(drawn).toBe(false);
+    expect(rows()).toBe(0);
+    act(() => vi.advanceTimersByTime(SKELETON_DELAY - 1));
+    expect(rows()).toBe(0);
+    act(() => vi.advanceTimersByTime(1));
+    expect(rows()).toBe(3);
+  });
+
   it('shows nothing when the load ends inside the second', () => {
     const { rerender } = render(<Skeleton loading>Content</Skeleton>);
     act(() => vi.advanceTimersByTime(400));

@@ -23,19 +23,25 @@ export function Skeleton({ loading, of, rows = 3, label = 'Loading', children }:
     list.current = of;
     shown.current = false;
   }
-  const [late, setLate] = useState(false);
   if (!loading) shown.current = true;
   const waiting = loading && !shown.current;
+  // Each wait (a load starting, or a new list while loading) has its own number, and the one-second timer marks only the wait it
+  // was started for, so a skeleton from an earlier wait never shows at 0ms on the next one.
+  const turn = useRef({ waiting: false, of, id: 0 });
+  if (waiting && (!turn.current.waiting || turn.current.of !== of)) turn.current.id += 1;
+  turn.current.waiting = waiting;
+  turn.current.of = of;
+  const id = turn.current.id;
+  const [lateFor, setLateFor] = useState(0);
 
   useEffect(() => {
     if (!waiting) return;
-    setLate(false);
-    const timer = window.setTimeout(() => setLate(true), SKELETON_DELAY);
+    const timer = window.setTimeout(() => setLateFor(id), SKELETON_DELAY);
     return () => window.clearTimeout(timer);
-  }, [waiting]);
+  }, [waiting, id]);
 
   if (!waiting) return <>{children}</>;
-  if (!late) return null;
+  if (lateFor !== id) return null;
   return (
     <div className="skeleton-rows" role="status" aria-busy="true">
       <span className="visually-hidden">{label}</span>
