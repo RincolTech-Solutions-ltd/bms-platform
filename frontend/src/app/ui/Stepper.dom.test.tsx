@@ -70,6 +70,15 @@ describe('Stepper', () => {
     expect(field().value).toBe('3');
   });
 
+  it('never raises a value below the minimum with ArrowDown, nor lowers one above the maximum with ArrowUp', () => {
+    render(<Example start="0.5" max={9} />);
+    fireEvent.keyDown(field(), { key: 'ArrowDown' });
+    expect(field().value).toBe('0.5');
+    fireEvent.change(field(), { target: { value: '12' } });
+    fireEvent.keyDown(field(), { key: 'ArrowUp' });
+    expect(field().value).toBe('12');
+  });
+
   it('steps without drift, counts an empty or unreadable value as min, and keeps within the bounds', () => {
     expect(stepped('0.2', 0.1, 0)).toBe('0.3');
     expect(stepped('', 1, 1)).toBe('2');

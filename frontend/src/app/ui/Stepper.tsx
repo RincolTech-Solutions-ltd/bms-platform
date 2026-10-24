@@ -38,14 +38,15 @@ export function Stepper({ id, label, value, onChange, min = 0, max, step = 1, na
   const atMin = known && now <= min;
   const atMax = known && max !== undefined && now >= max;
   const keys = (e: KeyboardEvent<HTMLInputElement>) => {
-    const moves: Record<string, () => string> = {
-      ArrowUp: () => stepped(value, step, min, max),
-      ArrowDown: () => stepped(value, -step, min, max),
+    // At an end the key does nothing, as the button does: ArrowDown on 0.5 with a minimum of 1 never raises it to 1.
+    const moves: Record<string, () => string | null> = {
+      ArrowUp: () => (atMax ? null : stepped(value, step, min, max)),
+      ArrowDown: () => (atMin ? null : stepped(value, -step, min, max)),
     };
     const next = moves[e.key]?.();
     if (next === undefined) return;
     e.preventDefault();
-    onChange(next);
+    if (next !== null) onChange(next);
   };
   const suffix = name ? ` ${name}` : '';
   return (
