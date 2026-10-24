@@ -4,7 +4,8 @@ import { RetailError, businessToday, daysBefore, type Savings, type SavingsSugge
 import { createMockRetail, setMockProfitAccess } from '../../../api/retail-mock';
 import { ALL_BRANCHES } from '../../../auth/branch';
 import { branch, page, pageAs, sessionOf } from './cashbook-test-utils';
-import { changedSuggestion, planSavings } from './savings-state';
+import { changedSuggestion, planSavings, reasonText, savedWords } from './savings-state';
+import { showDate } from './maths';
 import { SavingsForm, SavingsRecords } from './savings';
 import { BranchRequired } from './ui';
 
@@ -105,12 +106,38 @@ describe('savings rules', () => {
     expect('overwrite_reason' in plan.request).toBe(false);
   });
 
-  it('needs a reason of at least 5 characters for an amount that differs', () => {
-    expect(planSavings({ ...input, amount: '15000' }).problem).toMatch(/at least 5/);
-    expect(planSavings({ ...input, amount: '15000', reason: 'abcd' }).problem).toMatch(/at least 5/);
-    const ok = planSavings({ ...input, amount: '15,000', reason: 'Owner asked' });
+  it('takes a changed amount with no reason, and sends a reason only when one is given (#538)', () => {
+    const none = planSavings({ ...input, amount: '15000' });
+    expect(none.problem).toBeNull();
+    expect(none.overwrite).toBe(true);
+    expect(none.request).toMatchObject({ amount_minor: 15000 });
+    expect('overwrite_reason' in none.request).toBe(false);
+    const ok = planSavings({ ...input, amount: '15,000', reason: 'Debt' });
     expect(ok.problem).toBeNull();
-    expect(ok.request).toMatchObject({ amount_minor: 15000, overwrite_reason: 'Owner asked' });
+    expect(ok.request).toMatchObject({ amount_minor: 15000, overwrite_reason: 'Debt' });
+  });
+
+  it('turns the pick list into the reason sent: a pick, the words under Other, or nothing', () => {
+    expect(reasonText('', 'ignored')).toBe('');
+    expect(reasonText('Paying a debt', 'ignored')).toBe('Paying a debt');
+    expect(reasonText('Other', '  Rent due  ')).toBe('Rent due');
+    expect(reasonText('Other', '')).toBe('');
+    expect(reasonText('Made up', '')).toBe('');
+  });
+
+  it('refuses an amount above the available in plain words, and allows it at the available (ADR-080)', () => {
+    const capped = { ...input, suggestion: { ...withAmounts, day_expenses_minor: 10000, available_minor: 30000 }, today };
+    const above = planSavings({ ...capped, amount: '30001' });
+    expect(above.problem).toBe('You can save at most UGX 30,000 today (profit UGX 40,000 minus expenses UGX 10,000).');
+    expect('amount_minor' in above.request).toBe(false);
+    expect(planSavings({ ...capped, amount: '30000' }).problem).toBeNull();
+    const yesterday = daysBefore(today, 1);
+    expect(planSavings({ ...capped, date: yesterday, amount: '30001' }).problem).toContain(`for ${showDate(yesterday)} (profit`);
+  });
+
+  it('words the toast with the amount and the day, and without an amount for a caller who may not see it', () => {
+    expect(savedWords({ amount_minor: 4000, business_date: '2026-10-24' })).toBe('Savings of UGX 4,000 saved for 24 Oct');
+    expect(savedWords({ business_date: '2026-10-24' })).toBe('Savings saved for 24 Oct');
   });
 
   it('sends the amount without a reason when it equals the suggestion, and allows zero', () => {
@@ -174,15 +201,23 @@ describe('savings against the mock', () => {
     expect(list.every((r) => !('amount_minor' in r) && !('suggested_minor' in r))).toBe(true);
   });
 
-  it('needs a reason for an overwrite, and a repeated key posts once', async () => {
+  it('takes an overwrite without a reason, refuses one above the available, and a repeated key posts once', async () => {
     const mock = createMockRetail();
-    const s = await mock.savingsSuggestion({ branchId: branch, date: daysBefore(today, 1) });
-    const body = { branch_id: branch, business_date: daysBefore(today, 1), suggestion_token: s.suggestion_token, amount_minor: 7 };
-    expect(((await mock.createSavings(body, 'k3').catch((e: unknown) => e)) as RetailError).code).toBe('reason_required');
+    const products = await mock.listProducts({ branchId: branch });
+    await mock.createSale({ branch_id: branch, payment_method: 'cash', lines: [{ product_id: products[2]?.id ?? '', qty: '1' }] }, 'sale-key-ow');
+    const s = await mock.savingsSuggestion({ branchId: branch, date: today });
+    expect(s.available_minor).toBeGreaterThan(7);
+    const body = { branch_id: branch, business_date: today, suggestion_token: s.suggestion_token, amount_minor: 7 };
+    const above = (await mock.createSavings({ ...body, amount_minor: (s.available_minor ?? 0) + 1 }, 'k2').catch((e: unknown) => e)) as RetailError;
+    expect(above.code).toBe('savings_above_available');
+    expect(above.message).toMatch(/^You can save at most UGX/);
+    const bare = await mock.createSavings(body, 'k3');
+    expect(bare.overwritten).toBe(true);
+    await mock.voidSavings(bare.id ?? '', 'Redo', 'k3v');
     const one = await mock.createSavings({ ...body, overwrite_reason: 'Owner asked' }, 'k4');
     const two = await mock.createSavings({ ...body, overwrite_reason: 'Owner asked' }, 'k4');
     expect(two.id).toBe(one.id);
-    expect((await mock.listSavings({})).filter((r) => r.business_date === daysBefore(today, 1))).toHaveLength(1);
+    expect((await mock.listSavings({})).filter((r) => r.business_date === today)).toHaveLength(1);
   });
 
   it('voids once, and refuses a second void', async () => {
