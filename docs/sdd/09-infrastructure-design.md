@@ -130,6 +130,14 @@ only, stored in the production host's `.env` only. It cannot read or change anyt
 Policy of `default-src 'self'` with no inline scripts (chapter 8 section 8.8). Request bodies
 are capped at 6 MB (5 MB uploads plus framing). HTTP/3 is enabled on UDP 443.
 
+**Upstreams** (`deploy/caddy/upstreams.caddy`, imported by both Caddyfiles, ADR-082). Every route
+proxies to `dynamic a api 8080` or `dynamic a web 8080`, refreshed each second, so during a deploy
+both the old and the new container of a service take requests. A refused connection marks that
+address down for 2 seconds and the request goes to another; with none answering, Caddy tries again
+every 250 ms for up to 30 seconds before a 502. Only a failed connection is retried, and keep-alive
+to the containers is off so that a POST is never written on a connection the old container is
+closing.
+
 ## 9.6 Images and containers
 
 | Image | Built from | Runs as | Health |
@@ -182,6 +190,10 @@ that left the live build more than 14 days ago, then copies that build's `/asset
 60 seconds before a deploy's switch (`BMS_KEEP_ASSETS_TIMEOUT`) and 20 before a rollback's. A
 failure or a timeout is a warning, never a failed deploy or rollback. The volume is not backed up; losing it costs
 a reload on an old copy, not data.
+
+During a deploy a new `api` or `web` container starts beside the old one and the old one stops
+only once the new one's health check passes (`/readyz` for the api, a `wget` of `/` every 5
+seconds for web), ADR-082. The proxy is recreated only when what it runs changed.
 
 The API image carries two commands: the default starts the application; `migrate` applies the
 Flyway migrations as `bms_owner` and exits (ADR-006, ADR-010). The API image also carries the
@@ -449,7 +461,8 @@ Staging runs on an ARM64 host that already exists at a Rincol home site: a Raspb
   | `cloudflared` | 48 MB | |
   | `proxy`, `web` | 32 MB each | Caddy |
   | `migrate` | 160 MB | Only while a deploy runs, next to the old API |
-  | **Total** | 736 MB steady, 896 MB during a deploy | `bms.slice`: `MemoryMax=900M`, `MemoryHigh=860M`, no swap, `CPUQuota=250%` |
+  | second `api`, `web` | 448 MB, 32 MB | Only during a switch, beside the old ones until they are healthy (ADR-082). The second api starts only while `BMS_ROLL_MIN_FREE_MB` (320) is free in the slice and on the host; an API measures about 235 MB after start. Otherwise the api restarts in place, with the old gap |
+  | **Total** | 736 MB steady, 896 MB while migrations run | `bms.slice`: `MemoryMax=900M`, `MemoryHigh=860M`, no swap, `CPUQuota=250%` |
 
   Every container is started with `cgroup_parent: bms.slice`, so the slice is a hard cap for the
   whole stack: under pressure the kernel reclaims and then kills inside BMS, never in the other

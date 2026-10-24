@@ -66,6 +66,28 @@ The volume holds copies only; deleting it (`docker volume rm bms_web_assets` whi
 loses nothing but those copies. The CI test `deploy/tests/keep-assets-test.sh` runs the same switch
 against both compose files with three small builds.
 
+## No gap during the switch (ADR-082)
+
+`deploy.sh` starts the new `api` and `web` container beside the running one and stops the old one
+only once the new one is healthy, so the site keeps answering through a deploy and a rollback. The
+deploy log shows `starting a new api container beside the running one` and `api switched` (the
+same for web), and `proxy unchanged; kept running` when the proxy image holds the same caddy and
+Caddyfiles. Lines to know:
+
+- `the new api container is not healthy; removing it, the old one keeps serving`: the release did
+  not start. Its last 40 log lines follow; the previous release is still live and the rollback
+  finds nothing to change.
+- `less than 320 MB free for a second api; restarting api in place (a short gap)`: the host or
+  `bms.slice` was short of memory, so the api restarted as before. Caddy holds requests for up to
+  30 seconds and the app says it is updating. If it shows on every staging deploy, check
+  `cat /sys/fs/cgroup/bms.slice/memory.current` and what else runs in the slice before changing
+  `BMS_ROLL_MIN_FREE_MB` in `.env`.
+- During a switch `docker compose ps` shows two `api` (or `web`) containers, numbered on; that is
+  expected. Two left after a deploy means it was interrupted: the next deploy removes the extra one.
+
+The CI test `deploy/tests/no-gap-test.sh` drives the same switch on both compose files under GET
+and POST traffic and fails on any answer that is not 200 within 3 seconds.
+
 ## Manual deploy (only when the pipeline is unavailable)
 
 Run exactly what the pipeline runs, on the host: as `deploy` in production, as `bms` on staging.
