@@ -115,7 +115,7 @@ const search: TourStep = {
   id: 'search',
   target: 'feature-search',
   title: 'Find any screen',
-  body: 'Tap Search at the top and type what you want to do, like sell, buy stock, expenses or owe. Tap the screen to open it. On a laptop, press / or Ctrl and K. On a phone it is also at the top of More.',
+  body: 'Tap Search at the top and type what you want to do, like sell, buy stock, expenses or owe. Tap the screen to open it. On a laptop, press / or Ctrl and K (Cmd and K on a Mac). On a phone it is also at the top of More.',
 };
 
 // The bottom tabs on a phone (issue #539): the daily jobs one tap away. On a laptop there is no bar and the step is skipped.

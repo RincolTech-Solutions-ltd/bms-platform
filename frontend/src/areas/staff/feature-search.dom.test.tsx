@@ -11,6 +11,7 @@ import { offendingWords } from '../../app/glossary';
 import { router as appRouter } from '../../app/router';
 import { TourProvider } from '../../tour/host';
 import { StaffContext } from './context';
+import { isSearchShortcut } from './feature-search';
 import { SYNONYMS } from './feature-search-state';
 import { StaffBar } from './route';
 import { MorePage } from './tab-pages';
@@ -209,5 +210,28 @@ describe('feature search (issue #551)', () => {
     await screen.findByRole('dialog', { name: 'Find a screen' });
     await typeIn('buy');
     expect(options()).toContain('Buy stock');
+  });
+});
+
+describe('the search shortcut (issue #551)', () => {
+  const key = (over: Partial<KeyboardEvent>) =>
+    ({ key: '/', ctrlKey: false, metaKey: false, altKey: false, defaultPrevented: false, isComposing: false, target: document.body, ...over }) as KeyboardEvent;
+
+  it('ignores a key typed while composing a word, and / in any editable element', () => {
+    expect(isSearchShortcut(key({}))).toBe(true);
+    expect(isSearchShortcut(key({ isComposing: true }))).toBe(false);
+    expect(isSearchShortcut(key({ key: 'k', ctrlKey: true, isComposing: true }))).toBe(false);
+    for (const value of ['', 'true', 'plaintext-only']) {
+      const div = document.createElement('div');
+      div.setAttribute('contenteditable', value);
+      document.body.append(div);
+      expect(isSearchShortcut(key({ target: div })), value).toBe(false);
+      div.remove();
+    }
+    const off = document.createElement('div');
+    off.setAttribute('contenteditable', 'false');
+    document.body.append(off);
+    expect(isSearchShortcut(key({ target: off }))).toBe(true);
+    off.remove();
   });
 });

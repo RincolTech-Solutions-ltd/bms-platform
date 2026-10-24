@@ -11,7 +11,7 @@ import { canManageUsers } from './users/state';
 // screen the session may not open, or whose module or capability is off, is never in the list: there is no second permission
 // list here. Each entry carries its glossary name (#548) and the everyday words people type for it, in English and Luganda.
 // The synonyms are only matched, never shown, so a word the glossary bans ('restock') may stand here: glossary.test.ts reads
-// SYNONYMS and every `synonyms` property as match-only.
+// SYNONYMS and every `synonyms` property of this file, and of no other, as match-only.
 
 export interface Feature {
   to: string;
@@ -97,8 +97,11 @@ export const SYNONYMS: Record<string, readonly string[]> = {
   '/staff/retail/catalogue/labels': ['barcode', 'label', 'sticker', 'print'],
 };
 
-/** The main actions that are a step inside a screen, each opened by the check its screen already makes. */
-const ACTIONS: { to: string; label: string; hint: string; may: (me: Me) => boolean; synonyms: readonly string[] }[] = [
+/**
+ * The main actions that are a step inside a screen, each opened by the check its screen already makes. Add an item needs the
+ * categories screen, whose check includes retail.catalogue.manage, the permission the Add an item button in a category asks for.
+ */
+export const ACTIONS: { to: string; label: string; hint: string; may: (me: Me) => boolean; synonyms: readonly string[] }[] = [
   {
     to: '/staff/retail/catalogue/categories',
     label: 'Add an item',

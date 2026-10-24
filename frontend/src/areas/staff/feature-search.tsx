@@ -19,11 +19,12 @@ import { useSells } from './retail/nav';
 const SCREENS_NOUN = { one: 'screen', many: 'screens' };
 
 // The fields where / is a character being typed, not the shortcut.
-const FIELDS = 'input, textarea, select, [contenteditable="true"]';
+const FIELDS = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
 
 /** True for / outside a field, and for Ctrl+K or Cmd+K anywhere; never while another dialog is open. */
-export function isSearchShortcut(e: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'target' | 'defaultPrevented'>): boolean {
-  if (e.defaultPrevented || e.altKey) return false;
+export function isSearchShortcut(e: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'target' | 'defaultPrevented' | 'isComposing'>): boolean {
+  // A key that is part of composing a word (an input method) is never the shortcut.
+  if (e.defaultPrevented || e.altKey || e.isComposing) return false;
   if (document.querySelector('[role="dialog"], dialog[open]')) return false;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') return true;
   return e.key === '/' && !e.ctrlKey && !e.metaKey && !(e.target instanceof Element && e.target.closest(FIELDS));
@@ -33,6 +34,7 @@ function FindScreen({ me, onGo, onClose }: { me: Me; onGo: (feature: Feature) =>
   const sells = useSells(me);
   const features = useMemo(() => featuresFor(me, { sells }), [me, sells]);
   const search = useLiveSearch();
+  const results = useMemo(() => (search.term === '' ? undefined : findFeatures(features, search.term)), [features, search.term]);
   return (
     <div
       className="find-screen"
@@ -48,7 +50,7 @@ function FindScreen({ me, onGo, onClose }: { me: Me; onGo: (feature: Feature) =>
         id="feature-search"
         label="What do you want to do?"
         search={search}
-        results={search.term === '' ? undefined : findFeatures(features, search.term)}
+        results={results}
         optionKey={(f) => `${f.to} ${f.label}`}
         noun={SCREENS_NOUN}
         emptyText={(term) => `Nothing matches "${term}". Try another word, like sell, buy or owe.`}

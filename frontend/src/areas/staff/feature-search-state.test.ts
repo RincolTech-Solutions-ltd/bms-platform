@@ -3,7 +3,7 @@ import type { Me } from '../../api/client';
 import { mockMe } from '../../api/retail-mock';
 import { router } from '../../app/router';
 import { offendingWords } from '../../app/glossary';
-import { SYNONYMS, featuresFor, findFeatures } from './feature-search-state';
+import { ACTIONS, SYNONYMS, featuresFor, findFeatures } from './feature-search-state';
 import { staffAreas } from './menu';
 import { REPORT_PERMISSIONS } from './reports/permissions';
 import { CATALOGUE_LINKS, SCREENS, canUse, needsOf, screensFor, showRetail } from './retail/permissions';
@@ -163,9 +163,23 @@ describe('feature search: how it matches (issue #551)', () => {
 });
 
 describe('feature search: the synonym table (issue #551)', () => {
+  const routes = Object.keys(router.routesByPath).map((p) => (p.length > 1 ? p.replace(/\/$/, '') : p));
+
   it('names only real screens', () => {
-    const routes = Object.keys(router.routesByPath).map((p) => (p.length > 1 ? p.replace(/\/$/, '') : p));
     for (const to of Object.keys(SYNONYMS)) expect(routes, to).toContain(to);
+  });
+
+  it('opens only real routes: every action, and everything listed with everything on', () => {
+    expect(ACTIONS.map((a) => a.to)).toEqual(['/staff/retail/catalogue/categories', '/staff/users/new', '/staff/lending/members/new']);
+    for (const a of ACTIONS) expect(routes, a.to).toContain(a.to);
+    for (const f of featuresFor(everything, { sells: true })) expect(routes, f.to).toContain(f.to);
+  });
+
+  it('offers Add an item only with the catalogue permission the Add an item button asks for', () => {
+    const withoutManage = { ...everything, permissions: (everything.permissions ?? []).filter((p) => p !== 'retail.catalogue.manage') } as Me;
+    expect(labels(everything, 'add an item')).toContain('Add an item');
+    expect(labels(withoutManage, 'add an item')).not.toContain('Add an item');
+    expect(labels(seller, 'add an item')).not.toContain('Add an item');
   });
 
   it('gives every screen of the menu its own everyday words, in lower case', () => {
