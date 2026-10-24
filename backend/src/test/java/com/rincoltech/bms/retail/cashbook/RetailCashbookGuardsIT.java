@@ -157,15 +157,23 @@ class RetailCashbookGuardsIT {
         assertThat(savings(200, 5)).isNotNull();
     }
 
+    /** The reason is optional since V95 (issue #538, ADR-080); a reason that is given is never blank. */
     @Test
-    void anOverwrittenAmountNeedsASuggestionAndAReason() {
+    void anOverwrittenAmountNeedsASuggestionAndItsReasonIsOptionalButNeverBlank() throws SQLException {
         UUID id = UUID.randomUUID();
         assertThatThrownBy(() -> asApp(c -> exec(c, """
                         INSERT INTO retail_daily_savings (id, tenant_id, branch_id, business_date, amount_minor, currency,
-                                                          suggested_minor, overwritten, occurred_at, recorded_by)
-                        VALUES (?, ?, ?, CURRENT_DATE - 9, 300, 'UGX', 500, true, now(), ?)
+                                                          suggested_minor, overwritten, overwrite_reason, occurred_at,
+                                                          recorded_by)
+                        VALUES (?, ?, ?, CURRENT_DATE - 9, 300, 'UGX', 500, true, '  ', now(), ?)
                         """, id, t.tenantId(), t.headOffice(), user)))
-                .isInstanceOf(SQLException.class);
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("retail_daily_savings_overwrite_reason_chk");
+        asApp(c -> exec(c, """
+                        INSERT INTO retail_daily_savings (id, tenant_id, branch_id, business_date, amount_minor, currency,
+                                                          suggested_minor, overwritten, occurred_at, recorded_by)
+                        VALUES (?, ?, ?, CURRENT_DATE - 10, 300, 'UGX', 500, true, now(), ?)
+                        """, UUID.randomUUID(), t.tenantId(), t.headOffice(), user));
         assertThatThrownBy(() -> asApp(c -> exec(c, """
                         INSERT INTO retail_daily_savings (id, tenant_id, branch_id, business_date, amount_minor, currency,
                                                           suggested_minor, overwritten, occurred_at, recorded_by)
