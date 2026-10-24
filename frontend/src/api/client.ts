@@ -1,5 +1,6 @@
 import createClient, { type Middleware } from 'openapi-fetch';
 import { getAccessToken, refreshSession, tenantHeaders } from '../auth/session';
+import { APP_UPDATING } from './retail-errors';
 import type { components, paths } from './schema';
 
 // The typed API client. `schema.d.ts` is generated from docs/api/openapi.json (the committed
@@ -40,11 +41,64 @@ const auth: Middleware = {
   },
 };
 
+/** How long a request with an Idempotency-Key waits before its one retry; tests shorten it. */
+export const updatingRetry = { delayMs: 4000 };
+
+// A 502, 503 or 504 that is not the API's own problem body is the proxy (Caddy or Cloudflare) answering while no
+// API is up, and so is a dropped connection while the device says it is online. Nothing reached the API, so the
+// answer is plain words in a problem body every screen already shows, and the form keeps what was typed. A request
+// with an Idempotency-Key is safe to send again, so it is, once, after a few seconds: the server replays the first
+// result if the first attempt did land. Offline, a dropped connection stays the TypeError the offline paths expect.
+const isGap = (response: Response) =>
+  [502, 503, 504].includes(response.status) && !(response.headers.get('content-type') ?? '').includes('json');
+const online = () => typeof navigator === 'undefined' || navigator.onLine !== false;
+const updating = (status: number) =>
+  new Response(JSON.stringify({ code: 'app_updating', detail: APP_UPDATING }), {
+    status,
+    headers: { 'content-type': 'application/problem+json' },
+  });
+
+const replays = new WeakMap<Request, Request>();
+async function retryOnce(request: Request, send: typeof fetch): Promise<Response | undefined> {
+  const replay = replays.get(request);
+  replays.delete(request);
+  if (!replay) return undefined;
+  await new Promise((resolve) => setTimeout(resolve, updatingRetry.delayMs));
+  if (request.signal?.aborted) return undefined;
+  try {
+    return await send(replay);
+  } catch {
+    return undefined;
+  }
+}
+
+const deployGap: Middleware = {
+  onRequest({ request }) {
+    // The body is spent by the first attempt, so the retry needs its own copy taken before it is sent.
+    if (request.headers.has('Idempotency-Key')) replays.set(request, request.clone());
+    return request;
+  },
+  async onResponse({ request, response, options }) {
+    if (!isGap(response)) return response;
+    const retried = await retryOnce(request, options.fetch);
+    return retried && !isGap(retried) ? retried : updating(response.status);
+  },
+  async onError({ request, error, options }) {
+    if (!online() || (error as { name?: string } | null)?.name === 'AbortError') return;
+    const retried = await retryOnce(request, options.fetch);
+    if (retried) return retried;
+    return new TypeError(APP_UPDATING);
+  },
+};
+
+export { APP_UPDATING };
 export const api = createClient<paths>({ baseUrl: '/' });
 api.use(auth);
+api.use(deployGap);
 
 /** The problem body of a failed call, for showing its detail (chapter 7 section 7.7). */
 export function problemOf(error: unknown): Problem {
+  if (error instanceof Error && error.message === APP_UPDATING) return { code: 'app_updating', detail: APP_UPDATING };
   return (error ?? {}) as Problem;
 }
 

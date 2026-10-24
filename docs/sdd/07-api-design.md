@@ -279,6 +279,15 @@ Server behaviour:
 The protocol is implemented once, `Idempotency` in `core.operations`, and every vertical's
 money-moving routes call it.
 
+Client behaviour during a deploy (issue #496): the PWA's API client (`frontend/src/api/client.ts`)
+reads a 502, 503 or 504 that is not the API's own `application/problem+json` body (the proxy or
+Cloudflare answering while no API is up), and a dropped connection while the device is online, as
+the app updating. A request that carries an `Idempotency-Key` is sent once more by itself after 4
+seconds with the same key and body, which is safe by the rules above; if that also fails, or the
+request has no key, the screen shows "The app is updating. Nothing was saved yet. Try again in a
+minute." as a problem with the code `app_updating`, and the form keeps what was typed. Offline, a
+dropped connection stays the `TypeError` the offline paths expect.
+
 Gateway callbacks use the provider's transaction reference as the idempotency key
 (FR-PAY-03).
 

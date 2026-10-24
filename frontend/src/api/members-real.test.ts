@@ -17,10 +17,12 @@ const fetchImpl = vi.hoisted(() => {
   return state;
 });
 
+import { APP_UPDATING, updatingRetry } from './client';
 import { FormError, unknownOutcome } from './lending-forms';
 import { realCollateral } from './collateral';
 import { realMembers } from './members';
 
+updatingRetry.delayMs = 0;
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/problem+json' } });
 const BRANCH = '00000000-0000-4000-8000-0000000000b1';
 const member = { branch_id: BRANCH, full_name: 'Test Borrower 01', phone: '0700000001', id_type: 'none' };
@@ -53,7 +55,8 @@ describe('a connection that drops', () => {
       const error = await failure(call);
       expect(error.status).toBe(0);
       expect(error.code).toBe('network');
-      expect(error.message).toMatch(/connection/i);
+      // Online, a dropped connection is most often a deploy switching the server over (issue #496).
+      expect(error.message).toBe(APP_UPDATING);
       expect(unknownOutcome(error)).toBe(true);
     }
   });
