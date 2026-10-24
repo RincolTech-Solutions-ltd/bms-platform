@@ -321,7 +321,7 @@ class SalesService {
         if (accountsOn && r.customerId() == null) {
             throw ApiException.rule(
                     "customer_required",
-                    "A credit sale names a credit buyer from the list; a typed name is not enough.");
+                    "A credit sale names a customer from the list of customers who owe; a typed name is not enough.");
         }
         if (credit && r.customerId() == null && buyerName == null) {
             problems.add(new FieldProblem("customer_id", "required", "A credit sale names its buyer."));
