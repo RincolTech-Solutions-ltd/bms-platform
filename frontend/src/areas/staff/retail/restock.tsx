@@ -15,6 +15,7 @@ import { UNITS, capabilityOn } from './permissions';
 import { activePacks, baseCostMinor, baseQtyMilli, chosenPack, packPriceMinor } from './units-state';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { WORDS } from '../../../app/glossary';
+import { NewItemHere, type AddedItem } from './new-item-here';
 
 // Restock (FR-RET-06): supplier, lines with cost, sell price and a quantity per branch. Saving sets
 // the product's cost and sell price in the same transaction and leaves a price history row.
@@ -167,6 +168,14 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
     setLines((ls) => scanInto(ls, p, unit, (l) => ({ ...l, qtyByBranch: { ...l.qtyByBranch, [here]: plusOne(l.qtyByBranch[here]) } }), () => (unit ? withUnit(fresh, unit) : fresh)));
     return undefined;
   };
+  // Issue #505: an item added here goes on the purchase with what was typed for it, its quantity at this branch.
+  const addNew = ({ product, qty, cost, sell }: AddedItem) => {
+    const prices = { cost: cost || (product.cost_minor !== undefined ? String(product.cost_minor) : ''), sell: sell ?? (product.sell_minor !== undefined ? String(product.sell_minor) : '') };
+    setLines((ls) => ls.some((l) => l.product.id === product.id)
+      ? ls.map((l) => (l.product.id === product.id && here ? { ...l, qtyByBranch: { ...l.qtyByBranch, [here]: qty } } : l))
+      : [...ls, { product, ...prices, qtyByBranch: here ? { [here]: qty } : {} }]);
+  };
+  const hereBranch = branches.find((b) => b.id === here);
   const patch = (i: number, change: Partial<RestockLine>) => setLines((ls) => ls.map((l, n) => (n === i ? { ...l, ...change } : l)));
   const patchWhole = (i: number, line: RestockLine) => setLines((ls) => ls.map((l, n) => (n === i ? line : l)));
 
@@ -203,6 +212,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
       <div data-tour="restock-search">
       <ProductPicker id="restock-search" showStock={false} onAdd={add} />
       </div>
+      <NewItemHere id="restock-new" askCost qtyLabel={hereBranch ? `Quantity bought (${branchLabel(hereBranch)})` : undefined} onAdded={addNew} />
       <ScanBar id="restock-scan" onFound={scanAdd} autoFocus />
 
       <h2>Items</h2>
