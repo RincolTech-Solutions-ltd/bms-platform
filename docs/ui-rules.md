@@ -40,7 +40,7 @@ back to what opened it.
     most fields are required may mark the few optional ones "(optional)" instead, never both styles on one form. The
     asterisk is the one allowed use of red on a normal screen. The send button stays enabled and takes the person to the
     first missing field. The kit's `Field` does all of this, and the lending forms (`form-fields.tsx`) follow it.
-11. Amounts open the numeric keypad (`inputmode="numeric"`), quantities use steppers, and a choice of 2 to 4 options is a
+11. Amounts open the numeric keypad (`inputmode="numeric"`), quantities use steppers, and a choice of 2 to 5 options is a
     segmented control.
 12. Touch targets are at least 48px.
 

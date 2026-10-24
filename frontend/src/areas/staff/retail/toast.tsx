@@ -23,8 +23,8 @@ export function Toast({ message, tone, silent = false }: { message: string; tone
   const announce = silent ? { 'aria-hidden': true } : tone === 'error' ? { role: 'alert', 'aria-live': 'assertive' as const } : { role: 'status', 'aria-live': 'polite' as const };
   const pill = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
-    if (!silent) announceToSheet(message, pill.current);
-  }, [message, silent]);
+    if (!silent) announceToSheet(message, pill.current, tone === 'error');
+  }, [message, silent, tone]);
   return (
     <p ref={pill} {...announce} className={`toast toast-${tone}`}>
       <span className="toast-icon">{TONE_ICON[tone]}</span>

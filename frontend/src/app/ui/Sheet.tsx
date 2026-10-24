@@ -32,17 +32,18 @@ export function Sheet({ open, onClose, title, children, actions }: {
   if (open && !wasOpen.current) opener.current = document.activeElement as HTMLElement | null;
   wasOpen.current = open;
   const drag = useRef<{ from: number; by: number } | null>(null);
-  const [heard, setHeard] = useState('');
+  // The last toast said again, numbered so the same words twice are said twice; an error is said assertively.
+  const [heard, setHeard] = useState<{ text: string; n: number; urgent: boolean } | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    const hear = (message: string, from: Element | null) => {
-      if (!from || from.closest('[aria-hidden="true"]')) setHeard(message);
+    const hear = (message: string, from: Element | null, urgent: boolean) => {
+      if (!from || from.closest('[aria-hidden="true"]')) setHeard((was) => ({ text: message, n: (was?.n ?? 0) + 1, urgent }));
     };
     const stop = hearToasts(hear);
     return () => {
       stop();
-      setHeard('');
+      setHeard(null);
     };
   }, [open]);
 
@@ -93,7 +94,10 @@ export function Sheet({ open, onClose, title, children, actions }: {
               </Dialog.Close>
             </header>
             <p className="visually-hidden" role="status" aria-live="polite">
-              {heard}
+              {heard && !heard.urgent && <span key={heard.n}>{heard.text}</span>}
+            </p>
+            <p className="visually-hidden" role="alert" aria-live="assertive">
+              {heard?.urgent && <span key={heard.n}>{heard.text}</span>}
             </p>
             <div className="sheet-body">{children}</div>
             {actions && <div className="sheet-actions">{actions}</div>}

@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Sheet } from './Sheet';
+import { announceToSheet } from './announce';
 import { Toast } from '../../areas/staff/retail/toast';
 
 // The one sheet (#520): modal, focus inside and trapped, Escape, the close button, the dimmed page and a swipe down close it.
@@ -83,8 +84,16 @@ describe('Sheet', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Mobile money' }));
     const pill = document.querySelector('.toast')!;
     expect(pill.closest('[aria-hidden="true"]')).toBeTruthy();
-    const relay = dialog()!.querySelector('[aria-live="polite"]')!;
+    // An error is said again assertively, and the same words a second time are said again (a new node in the region).
+    const relay = dialog()!.querySelector('[aria-live="assertive"]')!;
     await waitFor(() => expect(relay.textContent).toBe('Mobile money is not set up for this shop.'));
+    const first = relay.firstElementChild;
+    act(() => announceToSheet('Mobile money is not set up for this shop.', null, true));
+    expect(relay.textContent).toBe('Mobile money is not set up for this shop.');
+    expect(relay.firstElementChild).not.toBe(first);
+    act(() => announceToSheet('Added Sample soap', null));
+    expect(dialog()!.querySelector('[aria-live="polite"]')!.textContent).toBe('Added Sample soap');
+    expect(relay.textContent).toBe('');
   });
 
   it('keeps Tab inside, both ways', () => {

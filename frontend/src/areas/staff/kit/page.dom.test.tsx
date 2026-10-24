@@ -38,6 +38,6 @@ describe('the component kit page', () => {
   it('shows anyone else only that the page is for administrators', () => {
     show(person('retail_seller'));
     expect(screen.getByText('This page is for administrators.')).toBeTruthy();
-    expect(screen.queryByRole('group')).toBeNull();
+    expect(screen.queryByRole('radiogroup')).toBeNull();
   });
 });
