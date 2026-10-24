@@ -183,10 +183,10 @@ describe('Buy stock: add an item that is not in the list', () => {
     await waitFor(() => expect(createProduct).toHaveBeenCalledTimes(1));
   });
 
-  it('refuses offline in plain words and sends nothing', async () => {
-    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+  it('refuses offline in plain words and sends nothing, also when the connection went after the form was filled', async () => {
     open(<RestockForm />);
     await fill(/^Quantity bought/, '5');
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     save();
     expect(within(form()).getByTestId('restock-new-offline').textContent).toBe('You are offline. Adding a new item needs the internet. Connect, then tap Save the item again.');
     expect(similarProducts).not.toHaveBeenCalled();

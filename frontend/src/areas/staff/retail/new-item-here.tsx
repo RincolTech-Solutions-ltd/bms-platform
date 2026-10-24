@@ -156,7 +156,6 @@ function NewItemForm({ id, qtyLabel, counting, askCost, onAdded, onClose }: {
     mutationFn: async (productId: string) => added(await retail.getProduct(productId), false),
   });
   const busy = save.isPending || check.isPending || pickExisting.isPending;
-  const isOffline = !online || (typeof navigator !== 'undefined' && navigator.onLine === false);
 
   const submit = () => {
     if (!complete) {
@@ -166,7 +165,8 @@ function NewItemForm({ id, qtyLabel, counting, askCost, onAdded, onClose }: {
     }
     if (busy || sending.current) return;
     // Nothing is kept for later: a new item is made on the server, so without the internet it is refused here, plainly.
-    if (isOffline) return setOffline(true);
+    // Read at the press: the browser's flag does not render the form again when the connection drops.
+    if (!online || (typeof navigator !== 'undefined' && navigator.onLine === false)) return setOffline(true);
     setOffline(false);
     sending.current = true;
     if (acceptedKey !== nameKey) check.mutate();
