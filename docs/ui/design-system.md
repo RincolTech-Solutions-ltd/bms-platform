@@ -192,12 +192,17 @@ query, so the number is the token.
   its page and the pages under it, such as Count under My stock) takes `--color-link`, a semibold label and a tinted pill
   (`--color-accent-tint`) behind the icon that fades and widens in by opacity and transform over `--motion`: no stripe, no
   glow, no shadow. Home and the pages only More lists have no current tab. My stock carries a badge with the count of items low
-  on stock (the Home summary's own read, `['retail', 'home', branch]`, so the two share one request); the number is
-  `aria-hidden` and the link says ", 3 items low on stock" after its label. No other tab has a badge. The bar pads itself with
-  `env(safe-area-inset-bottom)`, `-left` and `-right`; while it shows, the root has `has-tab-bar` and `--tab-bar` (64px and its hairline plus the
-  bottom inset), the body ends that far up, the sale bar and the member form's save bar stick at `bottom: var(--tab-bar)` so they
-  sit on top of the tabs and never under them, and a toast rises above both. While a text field has focus the bar steps aside
-  (the keyboard is up) and the action bar sits on the keyboard. The staff bar has no menu button and no Sell button on a phone.
+  on stock (the Home summary's own read, `homeSummaryKey(branch)`, so the two share one request, held fresh for a minute); the
+  number is `aria-hidden` and the link says ", 3 items low on stock" after its label. No other tab has a badge. The bar pads itself
+  with `env(safe-area-inset-bottom)`, `-left` and `-right`; while it shows, the root has `has-tab-bar` and `--tab-bar`, the bar's
+  measured height (a `ResizeObserver`, as the sale bar measures `--bottom-bar`, so a large font or text zoom is counted; the CSS
+  value, 64px and the hairline plus the bottom inset, is only the first paint's). The body ends that far up, the sale bar and the
+  member form's save bar stick at `bottom: var(--tab-bar)` so they sit on top of the tabs and never under them, and a toast rises
+  above both. The bar steps aside only while the soft keyboard is up: a text field has focus and `visualViewport` is more than
+  150px shorter than the window. A field that only has focus (a page that focuses its Scan box, a barcode scanner or a Bluetooth
+  keyboard) leaves it in place, and a browser without `visualViewport` never hides it. While aside it stays mounted with `hidden`,
+  so its read is not asked again. The staff bar has no menu button and no Sell button on a phone, except that Sign out stays in it
+  while two-step set-up blocks the page (`signOutInBar`), since the tabs and More are not drawn then.
 - **Below 720px in the operator portal, the drawer** (`SideMenu`): a menu button (`.menu-button`, the `menu` icon,
   `aria-label="Menu"`) at the top left of the bar opens the list in a side drawer from the left: 85% of the width, at most 320px, over a dimmed backdrop
   (`--color-scrim`). The person's name and Sign out sit at the bottom (one `BusyButton` in `SideMenu`, with an `onSignOut` prop and a `busy`

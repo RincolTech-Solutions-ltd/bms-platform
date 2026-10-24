@@ -75,12 +75,15 @@ const METHODS: Record<string, string> = { cash: 'Cash', mobile_money: 'Mobile mo
 type Parts = ReturnType<typeof homeParts>;
 type Summary = ReturnType<typeof useHomeSummary>;
 
+/** The cache key of the Home summary of a branch (undefined for all of them); the phone's My stock badge reads the same entry (#539). */
+export const homeSummaryKey = (branchId: string | undefined) => ['retail', 'home', branchId ?? 'all'];
+
 /** The one read behind every shop figure on Home, under the branch chosen in the header. */
 function useHomeSummary(parts: Parts) {
   const { branch } = useStaff();
   const branchId = branch && branch !== ALL_BRANCHES ? branch : undefined;
   return useQuery({
-    queryKey: ['retail', 'home', branchId ?? 'all'],
+    queryKey: homeSummaryKey(branchId),
     queryFn: ({ signal }) => retailAnalytics.home(branchId, signal),
     enabled: parts.summary && (parts.sales || parts.lowStock || parts.orders) && branch !== null,
   });

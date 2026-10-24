@@ -1,13 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useRouterState } from '@tanstack/react-router';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, type Ref, useEffect, useRef, useState } from 'react';
 import type { Me } from '../../api/client';
 import { retailAnalytics } from '../../api/retail-analytics';
 import { ALL_BRANCHES } from '../../auth/branch';
 import { icons } from '../../components/icons';
 import { useIsPhone } from '../../components/side-menu';
 import { useOptionalStaff } from './context';
-import { homeParts } from './home-cards';
+import { homeParts, homeSummaryKey } from './home-cards';
 import { showSavings } from './lending/savings-permissions';
 import { staffAreas } from './menu';
 import { showReceivePayments } from './payments/state';
@@ -18,8 +18,8 @@ import { SCREENS, canUse, showRetail, type RetailScreen } from './retail/permiss
 // icon above its label. Below 720px they replace the side menu's drawer; from 720px the sidebar stays and there are no tabs. A tab
 // whose module or capability is off, or whose pages the session may not use, is not drawn; More is always there and lists the
 // staff areas the session may open (menu.tsx). The bar is fixed to the bottom, takes the iPhone's home indicator inset, and sets
-// the class has-tab-bar on the root while it shows, so a sticky action bar (the sale's total, a save bar) sits on top of it and
-// never under it (navigation.css). While a text field has focus the bar steps aside, as the phone's keyboard is up.
+// the class has-tab-bar and its measured height on the root while it shows, so a sticky action bar (the sale's total, a save bar)
+// sits on top of it and never under it (navigation.css). While the soft keyboard is up the bar steps aside.
 
 export type TabId = 'sell' | 'stock' | 'buy' | 'money' | 'more';
 
@@ -86,35 +86,52 @@ export function currentTab(tabs: Tab[], pathname: string): TabId | undefined {
 const TEXT_ENTRY = ['', 'text', 'search', 'tel', 'number', 'email', 'password', 'url'].map((t) => (t ? `input[type=${t}]` : 'input:not([type])')).concat('textarea', '[contenteditable="true"]').join(', ');
 const typingIn = (el: EventTarget | null) => el instanceof Element && el.matches(TEXT_ENTRY);
 
+// How far the visual viewport must shrink under the layout one before it counts as the soft keyboard, not a browser bar.
+const KEYBOARD_PX = 150;
+
 /**
- * True while a text field has focus: the phone's keyboard is up, so the tabs step aside and the action bar sits on the keyboard.
- * Read again on every page, since a focused field that leaves the page takes its focus with it without a focusout.
+ * True while the phone's soft keyboard is up: a text field has focus and the visual viewport has shrunk by a keyboard's height. A
+ * field that only has focus (a page that focuses its search or Scan box, a barcode scanner or a Bluetooth keyboard typing into it)
+ * leaves the tabs where they are. A browser without visualViewport never hides them.
  */
-function useTyping(pathname: string): boolean {
-  const [typing, setTyping] = useState(() => typeof document !== 'undefined' && typingIn(document.activeElement));
-  useEffect(() => setTyping(typingIn(document.activeElement)), [pathname]);
+function useSoftKeyboard(): boolean {
+  const [up, setUp] = useState(false);
   useEffect(() => {
-    const onIn = (event: FocusEvent) => setTyping(typingIn(event.target));
-    const onOut = (event: FocusEvent) => setTyping(typingIn(event.relatedTarget));
-    document.addEventListener('focusin', onIn);
-    document.addEventListener('focusout', onOut);
+    const view = window.visualViewport;
+    if (!view) return;
+    let frame = 0;
+    // Read after the event, when the focus has moved and the viewport has its new size.
+    const check = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => setUp(typingIn(document.activeElement) && window.innerHeight - view.height > KEYBOARD_PX));
+    };
+    check();
+    view.addEventListener('resize', check);
+    document.addEventListener('focusin', check);
+    document.addEventListener('focusout', check);
     return () => {
-      document.removeEventListener('focusin', onIn);
-      document.removeEventListener('focusout', onOut);
+      window.cancelAnimationFrame(frame);
+      view.removeEventListener('resize', check);
+      document.removeEventListener('focusin', check);
+      document.removeEventListener('focusout', check);
     };
   }, []);
-  return typing;
+  return up;
 }
 
-/** How many items are low on stock in the branch chosen: the Home summary's own read, so the two share one request. */
+/**
+ * How many items are low on stock in the branch chosen: the Home summary's own read (homeSummaryKey), so the two share one request,
+ * held fresh for a minute so moving between pages does not ask the heavy summary again.
+ */
 function useLowStock(me: Me): number {
   const branch = useOptionalStaff()?.branch ?? null;
   const parts = homeParts(me, branch);
   const branchId = branch && branch !== ALL_BRANCHES ? branch : undefined;
   const home = useQuery({
-    queryKey: ['retail', 'home', branchId ?? 'all'],
+    queryKey: homeSummaryKey(branchId),
     queryFn: ({ signal }) => retailAnalytics.home(branchId, signal),
     enabled: parts.lowStock && branch !== null,
+    staleTime: 60_000,
   });
   return parts.lowStock ? (home.data?.low_stock ?? 0) : 0;
 }
@@ -124,7 +141,7 @@ function useLowStock(me: Me): number {
  * current one; My stock carries a badge with the count of items low on stock, read out with its label. The More tab also answers
  * for the tour's menu anchors (data-tour-also), since on a phone the links they name live under More.
  */
-export function TabBar({ me }: { me: Me }) {
+export function TabBar({ me, away = false, barRef }: { me: Me; away?: boolean; barRef?: Ref<HTMLElement> }) {
   const sells = useSells(me);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const low = useLowStock(me);
@@ -132,7 +149,7 @@ export function TabBar({ me }: { me: Me }) {
   const current = currentTab(tabs, pathname);
   const underMore = staffAreas(me, { sells }).flatMap((l) => (l.tour ? [l.tour] : []));
   return (
-    <nav className="tab-bar" aria-label="Main" data-tour="tab-bar" data-tour-also="retail-nav">
+    <nav ref={barRef} className="tab-bar" aria-label="Main" data-tour="tab-bar" data-tour-also="retail-nav" hidden={away}>
       <ul>
         {tabs.map((t) => {
           const badge = t.id === 'stock' && low > 0 ? low : 0;
@@ -164,16 +181,34 @@ export function TabBar({ me }: { me: Me }) {
   );
 }
 
-/** The tabs on a phone only, and not while a text field has focus; the root carries has-tab-bar while they show. */
+/**
+ * The tabs on a phone only. While the soft keyboard is up they stay mounted but hidden, so the badge's read is not asked again on
+ * every focus. While they show, the root carries has-tab-bar and --tab-bar is their measured height (safe-area inset and edge
+ * included, at any font size), as the sale bar measures --bottom-bar; the CSS value is only the first paint's.
+ */
 export function StaffTabBar({ me }: { me: Me }) {
   const phone = useIsPhone();
-  const typing = useTyping(useRouterState({ select: (state) => state.location.pathname }));
-  const shown = phone && !typing;
+  const keyboard = useSoftKeyboard();
+  const bar = useRef<HTMLElement>(null);
+  const shown = phone && !keyboard;
   useEffect(() => {
-    if (!shown) return;
+    const el = bar.current;
+    if (!shown || !el) return;
     const root = document.documentElement;
     root.classList.add('has-tab-bar');
-    return () => root.classList.remove('has-tab-bar');
+    const measure = () => {
+      const height = Math.ceil(el.getBoundingClientRect().height);
+      if (height > 0) root.style.setProperty('--tab-bar', `${height}px`);
+      else root.style.removeProperty('--tab-bar');
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(el);
+    return () => {
+      observer?.disconnect();
+      root.classList.remove('has-tab-bar');
+      root.style.removeProperty('--tab-bar');
+    };
   }, [shown]);
-  return shown ? <TabBar me={me} /> : null;
+  return phone ? <TabBar me={me} away={keyboard} barRef={bar} /> : null;
 }

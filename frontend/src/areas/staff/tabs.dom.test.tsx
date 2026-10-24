@@ -14,6 +14,7 @@ import { router as appRouter } from '../../app/router';
 import { TourProvider, useTour } from '../../tour/host';
 import type { Tour } from '../../tour/model';
 import { StaffContext } from './context';
+import { homeSummaryKey } from './home-cards';
 import { StaffBar, StaffSideNav } from './route';
 import { MoneyPage, MorePage } from './tab-pages';
 import { StaffTabBar, currentTab, moneyLinks, staffTabs } from './tabs';
@@ -47,9 +48,8 @@ function widthIs(px: number) {
   );
 }
 
-function show(me: Me, { at = '/staff', children = null as ReactNode } = {}) {
+function show(me: Me, { at = '/staff', children = null as ReactNode, client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }) } = {}) {
   const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: [at] }) });
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   render(
     <RouterContextProvider router={router}>
       <QueryClientProvider client={client}>
@@ -79,6 +79,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   document.documentElement.className = '';
+  document.documentElement.removeAttribute('style');
 });
 
 describe('the bottom tabs on a phone (issue #539)', () => {
@@ -174,21 +175,101 @@ describe('the bottom tabs on a phone (issue #539)', () => {
     expect(document.documentElement.classList.contains('has-tab-bar')).toBe(false);
   });
 
-  it('steps aside while a text field has focus, as the keyboard is up, and comes back after', () => {
-    show(admin, { children: <><input aria-label="Item" /><button type="button">Add</button></> });
-    const input = screen.getByRole('textbox', { name: 'Item' });
-    act(() => input.focus());
-    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull();
-    expect(document.documentElement.classList.contains('has-tab-bar')).toBe(false);
-    act(() => screen.getByRole('button', { name: 'Add' }).focus());
-    expect(bar()).toBeTruthy();
+  // A visual viewport the test sizes: 900 tall like the window, or shrunk by a keyboard. Frames run at once.
+  function viewport(height: number) {
+    const view = Object.assign(new EventTarget(), { height });
+    vi.stubGlobal('visualViewport', view);
+    vi.stubGlobal('innerHeight', 900);
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((step) => {
+      step(0);
+      return 0;
+    });
+    return {
+      resize(to: number) {
+        act(() => {
+          view.height = to;
+          view.dispatchEvent(new Event('resize'));
+        });
+      },
+    };
+  }
+
+  it('stays while a field only has focus: a page that focuses its Scan box, or a barcode scanner typing into it', () => {
+    viewport(900);
+    show(admin, { children: <input aria-label="Scan here" /> });
+    act(() => screen.getByRole('textbox', { name: 'Scan here' }).focus());
+    expect(bar().hidden).toBe(false);
     expect(document.documentElement.classList.contains('has-tab-bar')).toBe(true);
   });
 
-  it('stays while a select has focus, as its picker is not the keyboard', () => {
+  it('steps aside while the soft keyboard is up, staying mounted, and comes back when it goes', () => {
+    const view = viewport(900);
+    show(admin, { children: <input aria-label="Item" /> });
+    const nav = bar();
+    act(() => screen.getByRole('textbox', { name: 'Item' }).focus());
+    view.resize(520);
+    expect(nav.isConnected).toBe(true);
+    expect(nav.hidden).toBe(true);
+    expect(document.documentElement.classList.contains('has-tab-bar')).toBe(false);
+    view.resize(900);
+    expect(nav.hidden).toBe(false);
+    expect(document.documentElement.classList.contains('has-tab-bar')).toBe(true);
+  });
+
+  it('stays while a select has focus, even with the viewport short, as its picker is not the keyboard', () => {
+    const view = viewport(900);
     show(admin, { children: <select aria-label="Size"><option>Small</option></select> });
     act(() => screen.getByRole('combobox', { name: 'Size' }).focus());
-    expect(bar()).toBeTruthy();
+    view.resize(520);
+    expect(bar().hidden).toBe(false);
+  });
+
+  it('asks the Home summary once, however often the keyboard comes and goes', async () => {
+    const view = viewport(900);
+    show(admin, { children: <input aria-label="Item" />, client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) });
+    await waitFor(() => expect(retailAnalytics.home).toHaveBeenCalledTimes(1));
+    const input = screen.getByRole('textbox', { name: 'Item' });
+    for (let i = 0; i < 5; i++) {
+      act(() => input.focus());
+      view.resize(520);
+      act(() => input.blur());
+      view.resize(900);
+    }
+    expect(retailAnalytics.home).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the low stock count from the Home summary entry, so Home and the badge share one request', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(homeSummaryKey(admin.branches?.[0]?.id), { low_stock: 5 });
+    show(admin, { client });
+    await waitFor(() => expect(document.querySelector('.tab-badge')?.textContent).toBe('5'));
+    expect(retailAnalytics.home).not.toHaveBeenCalled();
+  });
+
+  it('sets --tab-bar to its measured height, so a bar grown by a large font still ends where the action bar begins', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { height: this.classList.contains('tab-bar') ? 97.4 : 0 } as DOMRect;
+    });
+    show(admin);
+    expect(document.documentElement.style.getPropertyValue('--tab-bar')).toBe('98px');
+    cleanup();
+    expect(document.documentElement.style.getPropertyValue('--tab-bar')).toBe('');
+  });
+
+  it('keeps Sign out in the staff bar on a phone while two-step set-up blocks the page, which has no tabs', () => {
+    const signOut = vi.fn();
+    const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff'] }) });
+    render(
+      <RouterContextProvider router={router}>
+        <QueryClientProvider client={new QueryClient()}>
+          <StaffContext.Provider value={{ me: admin, branch: null }}>
+            <StaffBar me={admin} branch={null} onBranch={() => undefined} onSignOut={signOut} signOutInBar />
+          </StaffContext.Provider>
+        </QueryClientProvider>
+      </RouterContextProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(signOut).toHaveBeenCalledTimes(1);
   });
 
   it('is not drawn from 720px, where the sidebar holds the areas', () => {

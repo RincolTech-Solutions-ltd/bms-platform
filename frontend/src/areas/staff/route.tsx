@@ -156,7 +156,7 @@ function StaffLayout() {
           <div className="nav-layout">
             <StaffSideNav me={profile} />
             <div className="nav-layout-main">
-              <StaffBar me={profile} branch={branch} onBranch={choose} busy={signingOut} onSignOut={() => void signOut()} />
+              <StaffBar me={profile} branch={branch} onBranch={choose} busy={signingOut} onSignOut={() => void signOut()} signOutInBar={mustSetUp(profile)} />
               <InstallPrompt />
               <OthersWaitingNote />
               {!mock && <NewLogoCard />}
@@ -200,8 +200,8 @@ export function StaffSideNav({ me }: { me: Me }) {
 }
 
 /**
- * Who is signed in, Help, the branch switcher and Sign out. Below 720px Sign out moves to the More tab's page and Sell is the first
- * bottom tab (issue #539, which replaced the phone's menu button and one-tap Sell of issue #455). With StaffSideNav and the tab bar it
+ * Who is signed in, Help, the branch switcher and Sign out. Below 720px Sign out moves to the More tab's page (it stays here while
+ * two-step set-up blocks the page, which has no tabs) and Sell is the first bottom tab (issue #539, which replaced the phone's menu button and one-tap Sell of issue #455). With StaffSideNav and the tab bar it
  * carries the data-tour anchors the first-run tours light up (tour/tours.ts).
  */
 export function StaffBar({
@@ -210,6 +210,7 @@ export function StaffBar({
   onBranch,
   onSignOut,
   busy = false,
+  signOutInBar = false,
 }: {
   me: Me;
   branch: string | null;
@@ -217,6 +218,8 @@ export function StaffBar({
   onSignOut: () => void;
   /** True while signing out runs: Sign out shows its spinner and takes no second press. */
   busy?: boolean;
+  /** Sign out in the bar on a phone too: while two-step set-up blocks the page there are no tabs and no More page to reach it. */
+  signOutInBar?: boolean;
 }) {
   const phone = useIsPhone();
   return (
@@ -229,7 +232,7 @@ export function StaffBar({
         <SyncStatus />
         <HelpMenu feedback />
         <BranchPicker me={me} branch={branch} onChoose={onBranch} />
-        {!phone && (
+        {(!phone || signOutInBar) && (
           <BusyButton type="button" className="btn-ghost btn-sm" busy={busy} onClick={onSignOut}>
             Sign out
           </BusyButton>
