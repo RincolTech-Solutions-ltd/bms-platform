@@ -486,24 +486,22 @@ example Home / Retail / Catalogue / Items. A new route gets its place by declari
   link. Labels longer than 16rem are cut with an ellipsis (the full text is the title). Below 720px the trail
   collapses to "Back to <parent>" and the current page.
 
-**Category groups.** Stock per branch, stock across branches (table, and cards on a phone), the catalogue
-items and the shared product picker (the sale and Move stock screens) group by category
-(`retail/category-groups.tsx`). The low and out of stock lists are the same Stock screen with its level filter,
+**Category groups.** Stock per branch, stock across branches (table, and cards on a phone) and the catalogue
+items group by category (`retail/category-groups.tsx`). The item pickers no longer do: since issue #534 they
+list matches only while something is typed (see "Item pickers" below). The low and out of stock lists are the same Stock screen with its level filter,
 so they group too.
 
 - A header per category (a button with `aria-expanded` and `aria-controls`) shows the count and, on the stock
   lists, a subtotal: the quantity when every item of the group has the same unit, and what the group holds at
-  the selling price. The catalogue and the pickers show the count only. Expand all and Collapse all sit above
+  the selling price. The catalogue shows the count only. Expand all and Collapse all sit above
   the list.
 - Categories are A to Z; items without one are in "Uncategorised", last; items keep the order the server sent.
-- Sections start open for 30 items or fewer and closed above that. A search (the stock and items search boxes,
-  the picker's) opens them, so a match inside a closed section shows. The default is decided when results first
+- Sections start open for 30 items or fewer and closed above that. A search (the stock and items search boxes)
+  opens them, so a match inside a closed section shows. The default is decided when results first
   arrive for a search and filters and held while more load, so "Show more items" never opens or closes a section.
-- The "Group by category" switch is remembered per screen (`stock`, `items`, `picker`) in `localStorage`, inside
-  try and catch: with storage blocked it defaults to on and is forgotten at reload. The picker shows the switch
-  only when its matches span more than one category.
-- The restock and usage screens have pickers of their own and stay flat for now.
-- Grouping is within the items the screen holds. Stock and the pickers are not paged. The catalogue items list is
+- The "Group by category" switch is remembered per screen (`stock`, `items`) in `localStorage`, inside
+  try and catch: with storage blocked it defaults to on and is forgotten at reload.
+- Grouping is within the items the screen holds. Stock is not paged. The catalogue items list is
   (cursor paging): its hint says "Grouped within the items loaded so far. Show more items loads the rest."
 - Search and filters stay the screen's own (plain component state, sent to the server as before); the grouping
   takes the already filtered items. Grouped lists drop the Category column and the per-row category label,
@@ -1237,6 +1235,36 @@ own: the order is copied from the chat, so the form asks for the phone first and
 - Tours: `page-stock-health` v2 adds the Slow movers step (`health-slow`), `page-retail-settings` v4 the settings step
   (`retail-slow-movers`).
 
+## Item pickers (issue #534, FR-UXN-07)
+
+Hatibu (HATS Gayaza) found the always-open list of items under the search box confusing, and asked for the AppSheet dropdown:
+the items show only while you search, and go away once one is picked. Every item picker is now the one shared component
+`ItemCombobox` (`frontend/src/app/ui/ItemCombobox.tsx`); `ProductPicker` (`retail/ui.tsx`) wraps it with the catalogue search.
+
+- **Where.** Record a sale (and the offline picker, which searches the copy on the phone), restock, usage and damage, Move
+  stock, count stock, price lists, orders and their items, quotations, labels, purchase orders, goods received without an
+  order, joining sizes, and the item chosen for an unknown barcode. Correct stock opens from a line of the Stock page, which
+  keeps its full list with Group by category, Expand all and Collapse all. No picker has the grouped browse list any more.
+- **Empty box.** Only the label "Find an item by name, code or category" and the box: no list, and no request to the server.
+- **Typing.** The term follows 250 ms after the last key (`useLiveSearch`). The matches open under the box, over the page, in
+  a card with the larger shadow (no stripe), with a 150 ms fade and 4px rise that eases out and is off under reduced motion.
+  Each option is a row at least 48px tall: the photo, the name and code with the typed words marked, then the category, the
+  price where the screen shows one and the stock here (a negative balance flagged), and the verb of the screen (Add, Choose,
+  Join this item, Add as a size). At most 10 show; with more the status line says "First 10 items shown. Type more to narrow."
+  No match shows `No item matches "<text>".` in the list and the status line.
+- **Picking.** A tap, or Up and Down then Enter, adds the item. The box empties, the list closes and the cursor stays in
+  the box for the next item. Enter with nothing highlighted only settles the search; it never picks. Escape closes the list,
+  and a second Escape empties the box. The list closes when the cursor leaves the picker and opens again on return.
+- **Accessibility.** The input is `role="combobox"` with `aria-expanded`, `aria-controls` and `aria-autocomplete="list"`; the
+  list is a `listbox` named "Matching items" and its rows `option`s, the highlighted one `aria-selected` and named on the
+  input by `aria-activedescendant`; the status line under the box is a polite live region.
+- **Count stock.** The sheet is searched, not shown whole: a found or scanned item goes on the list "Counted items" with its
+  count box, in the order found, and the last one is marked. Before any, the screen says "No items yet. Find an item above, or
+  scan it." Only counted lines are sent, as before.
+- **Scan box.** Unchanged (ADR-070 decision 11, owner decision D7): a scanner types only into the Scan box, which adds the item or one more.
+- **Tours.** `retail-sales` version 16, `page-stocktake` 3, `page-restock` 3, `page-usage` 2, `page-transfer` 3,
+  `page-sizes-join` 2 and `page-labels` 2 word their search steps for the list that shows while you type.
+
 ## Share the receipt (issue #439, ADR-061, FR-RET-66)
 
 A card **Send the receipt** under the receipt, right after a sale is saved (`sale.tsx`) and on an opened sale (`sales.tsx`, beside
@@ -1281,6 +1309,10 @@ changes, so after a payment on the same screen the next share sends the new rece
   `*`, `_`, `~` and the backtick are taken out of the names so they cannot break WhatsApp's bold, and half an emoji is dropped.
 - Nothing is written to the server except the optional number; the typed number is never logged. The tour `retail-sales` is
   version 10: its Save step names Share receipt and WhatsApp customer.
+- **On the sale-complete screen (issue #534)** Share receipt is the first of the receipt actions and the screen's one main
+  action, right under the receipt; View receipt, the WhatsApp number and WhatsApp customer follow, then the sale's documents,
+  and **New sale** comes last as a full width secondary button 48px tall. When the sale has no receipt to share (the seller may
+  not share it), New sale is the main action.
 
 ## Sell offline (issue #458, ADR-067, FR-RET-67)
 
