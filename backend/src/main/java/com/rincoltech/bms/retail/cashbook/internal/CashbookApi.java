@@ -105,7 +105,11 @@ final class CashbookApi {
             @Schema(description = PROFIT_ONLY + "; profit less expenses, never below 0, the most the day may save")
             Long availableMinor,
 
-            @JsonInclude(JsonInclude.Include.NON_NULL) UUID existingId) {}
+            @JsonInclude(JsonInclude.Include.NON_NULL) UUID existingId,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(description = PROFIT_ONLY + "; the amount of the active record for the day, if any")
+            Long existingAmountMinor) {}
 
     @Schema(name = "RetailSavingsRequest")
     record SavingsRequest(

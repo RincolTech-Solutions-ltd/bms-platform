@@ -499,7 +499,8 @@ class CashbookRepository {
     /**
      * Serialises a savings create with an expense create for one branch and business date, until commit (ADR-080
      * decision 3): the savings cap reads the day's expenses after this lock, so an expense committing in between cannot
-     * leave savings above the day's available amount. An expense void only raises the available amount and takes no lock.
+     * leave savings above the day's available amount. An expense void takes it too, so every change to the day's
+     * expenses is ordered with the savings create.
      */
     void lockBranchDay(UUID branch, LocalDate date) {
         jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(current_setting('app.tenant_id') || ':retail.cash_day:'"

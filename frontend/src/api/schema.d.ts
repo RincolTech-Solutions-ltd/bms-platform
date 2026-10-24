@@ -16146,6 +16146,11 @@ export interface components {
              * @description Present only with retail.profit.read in the record's branch; the branch's expenses recorded for the day, voided ones left out
              */
             day_expenses_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch; the amount of the active record for the day, if any
+             */
+            existing_amount_minor?: number;
             /** Format: uuid */
             existing_id?: string;
             /**

@@ -28,6 +28,17 @@ export function capWords(s: SavingsSuggestion, date: string, today: string): str
   return `You can save at most ${money(s.available_minor ?? 0)} ${when} (profit ${money(s.daily_profit_minor ?? 0)} minus expenses ${money(s.day_expenses_minor ?? 0)}).`;
 }
 
+/**
+ * "Saved UGX X; profit less expenses is now UGX Y." for a day whose savings are above what it has now, after an expense
+ * or a void entered later (ADR-080 decision 3); null otherwise, and always without profit read.
+ */
+export function nowAboveWords(s: SavingsSuggestion): string | null {
+  const saved = s.existing_amount_minor;
+  const available = s.available_minor;
+  if (s.existing_id == null || saved === undefined || available === undefined || saved <= available) return null;
+  return `Saved ${money(saved)}; profit less expenses is now ${money(available)}.`;
+}
+
 /** The toast after a save: "Savings of UGX 4,000 saved for 24 Oct". No amount for a caller who may not see it. */
 export function savedWords(saved: { amount_minor?: number; business_date?: string }): string {
   const day = showDate(saved.business_date).split(' ').slice(0, 2).join(' ');

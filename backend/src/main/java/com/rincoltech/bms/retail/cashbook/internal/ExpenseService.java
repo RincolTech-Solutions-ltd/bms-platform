@@ -210,6 +210,8 @@ class ExpenseService {
             if (row.historical()) {
                 throw CashbookSupport.historicalRecord();
             }
+            // The same branch-day lock as the savings create and the expense create (ADR-080 decision 3).
+            repo.lockBranchDay(row.branchId(), row.businessDate());
             String reason = CashbookSupport.reason(r);
             Instant at = support.now();
             if (row.journalEntryId() != null) {

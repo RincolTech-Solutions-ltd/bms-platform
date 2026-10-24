@@ -112,6 +112,7 @@ class SavingsService {
         LocalDate on = support.businessDate(date, "date");
         Day d = day(branch, on);
         boolean gate = mayProfit(branch);
+        UUID existing = repo.activeSavings(branch, on).orElse(null);
         return new SavingsSuggestion(
                 branch,
                 on,
@@ -121,7 +122,12 @@ class SavingsService {
                 gate ? d.profit() : null,
                 gate ? d.expenses() : null,
                 gate ? d.available() : null,
-                repo.activeSavings(branch, on).orElse(null));
+                existing,
+                gate && existing != null
+                        ? repo.savings(existing, false)
+                                .map(SavingsRow::amountMinor)
+                                .orElse(null)
+                        : null);
     }
 
     @Transactional

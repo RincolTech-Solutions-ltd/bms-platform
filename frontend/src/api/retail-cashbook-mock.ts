@@ -170,7 +170,7 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
         const s = suggestion(branchId, date);
         const existing = savings.find((r) => !r.voided && r.branch_id === branchId && r.business_date === date);
         return {
-          branch_id: branchId, business_date: date, total_sold_minor: s.total, suggestion_token: s.token, ...(existing ? { existing_id: existing.id } : {}),
+          branch_id: branchId, business_date: date, total_sold_minor: s.total, suggestion_token: s.token, ...(existing ? { existing_id: existing.id, ...(env.profit() ? { existing_amount_minor: existing.amount } : {}) } : {}),
           ...(env.profit() ? { suggested_minor: s.suggested, daily_profit_minor: s.profit, day_expenses_minor: s.expenses, available_minor: s.available } : {}),
         };
       }),

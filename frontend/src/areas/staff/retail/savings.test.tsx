@@ -4,7 +4,7 @@ import { RetailError, businessToday, daysBefore, type Savings, type SavingsSugge
 import { createMockRetail, setMockProfitAccess } from '../../../api/retail-mock';
 import { ALL_BRANCHES } from '../../../auth/branch';
 import { branch, page, pageAs, sessionOf } from './cashbook-test-utils';
-import { changedSuggestion, planSavings, reasonText, savedWords } from './savings-state';
+import { changedSuggestion, nowAboveWords, planSavings, reasonText, savedWords } from './savings-state';
 import { showDate } from './maths';
 import { SavingsForm, SavingsRecords, showInRecords } from './savings';
 import { BranchRequired } from './ui';
@@ -157,6 +157,16 @@ describe('savings rules', () => {
     expect(planSavings({ ...capped, amount: '30000' }).problem).toBeNull();
     const yesterday = daysBefore(today, 1);
     expect(planSavings({ ...capped, date: yesterday, amount: '30001' }).problem).toContain(`for ${showDate(yesterday)} (profit`);
+  });
+
+  it('says when a saved day now has less than was saved, and says nothing otherwise or without profit read', () => {
+    const day = { ...withAmounts, existing_id: 'sv-1', available_minor: 2000, day_expenses_minor: 38000 };
+    expect(nowAboveWords({ ...day, existing_amount_minor: 5000 })).toBe('Saved UGX 5,000; profit less expenses is now UGX 2,000.');
+    expect(nowAboveWords({ ...day, existing_amount_minor: 2000 })).toBeNull();
+    expect(nowAboveWords({ ...withoutAmounts, existing_id: 'sv-1' })).toBeNull();
+    expect(nowAboveWords({ ...day, existing_id: undefined, existing_amount_minor: 5000 })).toBeNull();
+    const out = page('admin', <SavingsForm branchId={branch} />, clientWith({ ...day, existing_amount_minor: 5000 }));
+    expect(out).toContain('Saved UGX 5,000; profit less expenses is now UGX 2,000.');
   });
 
   it('words the toast with the amount and the day, and without an amount for a caller who may not see it', () => {

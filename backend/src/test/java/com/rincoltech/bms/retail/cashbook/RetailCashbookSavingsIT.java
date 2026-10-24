@@ -309,6 +309,80 @@ class RetailCashbookSavingsIT extends IntegrationTest {
         }
     }
 
+    /**
+     * The same race through the API, looped: a savings save of the whole available amount and an expense of 1,000 for the
+     * same branch and day sent at once. The lock orders them, and both take their clock reading ({@code occurred_at}) after
+     * it, so the later row is the one that waited. Savings never exceed the profit less the expenses that committed before
+     * them; an expense that came after is a later change (ADR-080 decision 3).
+     */
+    @Test
+    void racingASavingsSaveAgainstAnExpenseNeverSavesAboveWhatTheDayHadAtCommit() throws Exception {
+        rent = cb.categoryWithItem("Premises", "Rent", false);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            for (int round = 0; round < 8; round++) {
+                JsonNode s = suggestion(ALL);
+                long available = s.get("available_minor").asLong();
+                java.util.concurrent.CountDownLatch go = new java.util.concurrent.CountDownLatch(1);
+                var save = pool.submit(() -> {
+                    go.await();
+                    return cb.post("/savings", body(s, available, null), ALL);
+                });
+                var spend = pool.submit(() -> {
+                    go.await();
+                    return cb.expense(hq, rent[0], rent[1], 1_000, day);
+                });
+                go.countDown();
+                ResponseEntity<JsonNode> saved = save.get(60, java.util.concurrent.TimeUnit.SECONDS);
+                ResponseEntity<JsonNode> spent = spend.get(60, java.util.concurrent.TimeUnit.SECONDS);
+                assertThat(spent.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+                assertThat(saved.getStatusCode())
+                        .isIn(HttpStatus.CREATED, HttpStatus.CONFLICT, HttpStatus.UNPROCESSABLE_CONTENT);
+                if (saved.getStatusCode() == HttpStatus.CREATED) {
+                    UUID id = RetailTestSupport.id(saved);
+                    long before = TestDatabase.owner()
+                            .sql("""
+                                    SELECT coalesce(sum(e.amount_minor), 0) FROM retail_expenses e, retail_daily_savings v
+                                     WHERE v.id = ? AND e.tenant_id = v.tenant_id AND e.branch_id = v.branch_id
+                                       AND e.business_date = v.business_date AND e.voided_at IS NULL
+                                       AND e.occurred_at < v.occurred_at
+                                    """)
+                            .param(id)
+                            .query(Long.class)
+                            .single();
+                    assertThat(saved.getBody().get("amount_minor").asLong())
+                            .as("round %d", round)
+                            .isLessThanOrEqualTo(Math.max(0, 5_000 - before));
+                    cb.voidIt("/savings/" + id, "Next round", ALL);
+                }
+                assertThat(cb.voidIt("/expenses/" + RetailTestSupport.id(spent), "Next round", ALL)
+                                .getStatusCode())
+                        .isEqualTo(HttpStatus.OK);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void anExpenseAfterTheSaveLeavesTheSavingsAndTheSuggestionSaysTheDayNowHasLess() {
+        assertThat(cb.post("/savings", body(suggestion(ALL), 5_000, null), ALL).getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        expense(3_000);
+
+        JsonNode s = suggestion(PROFIT_RECORDER);
+        assertThat(s.get("existing_amount_minor").asLong()).isEqualTo(5_000);
+        assertThat(s.get("available_minor").asLong()).isEqualTo(2_000);
+        assertThat(cb.get("/savings", ALL)
+                        .getBody()
+                        .get("items")
+                        .get(0)
+                        .get("voided")
+                        .asBoolean())
+                .isFalse();
+        assertThat(suggestion(CASHIER).has("existing_amount_minor")).isFalse();
+    }
+
     @Test
     void expensesAboveTheProfitLeaveZeroAvailableNeverLess() {
         expense(7_000);

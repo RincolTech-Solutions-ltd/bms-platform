@@ -17916,6 +17916,11 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "existing_amount_minor" : {
+            "description" : "Present only with retail.profit.read in the record's branch; the amount of the active record for the day, if any",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "existing_id" : {
             "format" : "uuid",
             "type" : "string"

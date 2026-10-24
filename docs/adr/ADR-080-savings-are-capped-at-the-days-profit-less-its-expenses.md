@@ -37,15 +37,14 @@ they are left for the business owner to decide one by one.
    `retail.profit.read` can type an amount, so the words reveal nothing that caller cannot read. The form says the same under the
    field on blur, before anything is sent, and the cap is checked before the overwrite permission.
 
-   **It is checked when the savings are saved, and only then.** The savings create and the expense create take one
-   transaction-scoped advisory lock per tenant, branch and business date before the savings read the day's expenses, so an
-   expense committing at the same moment is either seen or waits; savings never commit above the available amount of that
-   moment. An expense void only raises the available amount, so it takes no lock. Two savings creates are already serialised
-   by the one active record per day. **Later changes do nothing to a saved record:** an expense entered afterwards (or
-   back-dated to that day), a sale voided afterwards or a cost correction can leave a saved amount above the day's new
-   available amount. Nothing refuses, warns or flags it; to correct it the owner voids the savings record and saves again.
-   Whether a later expense should warn on the expense form or flag the savings record is left for the business owner to
-   decide.
+   **It is checked when the savings are saved.** The savings create, the expense create and the expense void take one
+   transaction-scoped advisory lock per tenant, branch and business date (`pg_advisory_xact_lock`) before they read or change
+   the day's expenses, so an expense committing at the same moment is either seen or waits; savings never commit above the
+   available amount of that moment. Two savings creates are already serialised by the one active record per day.
+   **A later change does not undo savings:** an expense entered afterwards (or back-dated to that day), a sale voided
+   afterwards or a cost correction can leave a saved amount above the day's new available amount, and the record stays. The
+   Savings screen then says so for that day: "Saved UGX X; profit less expenses is now UGX Y" when X is above Y, from the
+   suggestion's `existing_amount_minor*`. To correct it the owner voids the savings record and saves again.
 4. **The screen** shows the three figures (profit, expenses, available) to a caller with `retail.profit.read`, from the new
    suggestion fields `day_expenses_minor*` and `available_minor*` (absent without it, as `daily_profit_minor` is).
 5. **The overwrite reason is optional.** The form offers "Add a reason (optional)", which opens a short pick list (Paying a debt,
@@ -66,8 +65,9 @@ changed savings amount no longer stops the person to type.
 
 **Worse:** The suggestion endpoint reads the day's expenses as well as its profit. An expense entered or voided after the form was
 shown can change the suggestion and send the person back to look again. An overwrite without a reason tells a later reader less.
-The cap holds only at save time: savings saved in the morning are not revisited when that day's expenses grow in the afternoon.
-An expense create for a branch and day waits for a savings create on the same day (and the other way round); both are short.
+The cap holds at save time: savings saved in the morning are not undone when that day's expenses grow in the afternoon; the
+screen only says the day now has less. An expense create or void for a branch and day waits for a savings create on the same
+day (and the other way round); both are short.
 
 **Watch for:** Expenses dated on another day than the money was spent move the cap with them; the cap reads `business_date`. A
 tenant rate above 10,000 basis points would suggest more than the day has; the suggestion is clamped to the available amount.

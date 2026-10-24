@@ -6,7 +6,7 @@ import { useStaff } from '../context';
 import { DateField, RecordsByShop, Saved, WindowFields, useReadScope, useSavedFor, useWindow } from './cash-ui';
 import { usePersistedDraft } from './idempotency';
 import { CASHBOOK_READ, SAVINGS_OVERWRITE, SAVINGS_RECORD, holds } from './permissions';
-import { SAVINGS_REASONS, afterSavingsConflict, planSavings, reasonText, savedWords, seesAmounts } from './savings-state';
+import { SAVINGS_REASONS, afterSavingsConflict, nowAboveWords, planSavings, reasonText, savedWords, seesAmounts } from './savings-state';
 import { ScreenLink } from './screen-link';
 import { useToast } from './toast';
 import { BranchRequired, Gate, Note, Problem, money, useSingleBranch } from './ui';
@@ -94,6 +94,7 @@ export function SavingsForm({ branchId, onSaved }: { branchId: string; onSaved?:
             Sold on {showDate(s.business_date ?? draft.date)}: <strong>{money(s.total_sold_minor ?? 0)}</strong>
           </p>
           {s.existing_id != null && <Note>Savings are already recorded for this shop on this day. If that record is wrong, void it in the records below, then save again.</Note>}
+          {nowAboveWords(s) && <Note>{nowAboveWords(s)}</Note>}
           {profitView ? (
             <>
               {s.available_minor !== undefined ? (
