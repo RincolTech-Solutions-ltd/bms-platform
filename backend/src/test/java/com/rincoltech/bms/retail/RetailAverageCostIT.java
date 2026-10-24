@@ -258,7 +258,16 @@ class RetailAverageCostIT extends IntegrationTest {
         assertThat(average(br2, cable)).isEqualTo(1_300);
         assertThat(average(hq, cable)).isEqualTo(1_000);
         assertThat(lastPaid(cable)).isEqualTo(1_600);
-        JsonNode sale = sell(br2, cable, null, "1", 2_500);
+        // The price floor is the average, not the last paid 1,600: 1,300 is refused, 1,400 is sold.
+        Map<String, Object> atCost = new LinkedHashMap<>();
+        atCost.put("branch_id", br2);
+        atCost.put("payment_method", "cash");
+        atCost.put("lines", List.of(Map.of("product_id", cable, "qty", "1", "unit_price_minor", 1_300)));
+        ResponseEntity<JsonNode> floor =
+                api.postKeyed("/sales", atCost, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(floor.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(floor.getBody().get("code").asString()).isEqualTo("price_below_cost");
+        JsonNode sale = sell(br2, cable, null, "1", 1_400);
         assertThat(lineCost(sale)).isEqualTo(1_300);
         // Each branch's inventory account is its valuation at its own average.
         assertThat(account("inventory", br2)).isEqualTo(valuation(br2)).isEqualTo(19 * 1_300);

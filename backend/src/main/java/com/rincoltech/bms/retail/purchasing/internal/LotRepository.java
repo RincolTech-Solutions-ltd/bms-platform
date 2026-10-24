@@ -206,11 +206,16 @@ class LotRepository {
      * branch's average, for its void to take back from the same branches.
      */
     void insertSpread(UUID lineId, UUID productId, Map<UUID, Long> byBranch) {
-        byBranch.forEach((branch, part) ->
+        // Only positive parts are recorded, as the column's check requires.
+        // spread() makes no other: a branch whose share rounds to nothing is left out.
+        byBranch.forEach((branch, part) -> {
+            if (part > 0) {
                 jdbc.sql("""
                         INSERT INTO retail_cost_spreads (tenant_id, line_id, branch_id, product_id, inventory_minor)
                         VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?)
-                        """).params(lineId, branch, productId, part).update());
+                        """).params(lineId, branch, productId, part).update();
+            }
+        });
     }
 
     /** The parts {@link #insertSpread} recorded for a line, by branch in branch order; empty for a line recorded before V94. */

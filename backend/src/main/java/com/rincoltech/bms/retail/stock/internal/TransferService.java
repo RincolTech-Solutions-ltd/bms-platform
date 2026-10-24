@@ -154,10 +154,8 @@ class TransferService {
             problems.add(new FieldProblem("transfer_date", "invalid", "A transfer cannot be dated in the future."));
         }
         // ADR-079: the balance rows of both branches are locked in branch and product order, the order the movements
-        // take
-        // them, before the source's average is read, so a delivery committing meanwhile cannot leave the transfer at
-        // the
-        // average it replaced, and two opposite transfers still cannot deadlock.
+        // take them, before the source's average is read, so a delivery committing meanwhile cannot leave the transfer
+        // at the average it replaced, and two opposite transfers still cannot deadlock.
         List<UUID> known = r.lines().stream()
                 .map(TransferLineRequest::productId)
                 .filter(java.util.Objects::nonNull)

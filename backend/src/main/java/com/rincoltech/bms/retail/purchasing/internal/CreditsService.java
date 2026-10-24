@@ -172,8 +172,7 @@ class CreditsService {
         }
         boolean goods = r.kind().equals("goods");
         // The receipts of the invoice's lines are locked in id order, as a landed cost or a void of a receipt does, so
-        // the
-        // lot a credit is worked out from cannot change under it.
+        // the lot a credit is worked out from cannot change under it.
         new TreeSet<>(lotRepo
                         .lots(billRepo.lines(List.of(bill.id())).getOrDefault(bill.id(), List.of()).stream()
                                 .map(LineRow::receiptLineId)
@@ -206,8 +205,7 @@ class CreditsService {
         costing.lockStock(ps.stream().map(Planned::lot).toList());
         if (goods) {
             // Only units of the receipt that are still in its branch can go back: the stock may hold the product from a
-            // later
-            // delivery at another cost, and units of this receipt that were sold are not there to return.
+            // later delivery at another cost, and units of this receipt that were sold are not there to return.
             for (int i = 0; i < ps.size(); i++) {
                 Planned p = ps.get(i);
                 BigDecimal here = costing.onHandInBranch(p.lot());
@@ -329,8 +327,7 @@ class CreditsService {
             stock.record(on, movements);
         }
         // One entry per branch: the stock accounts credited where the goods are, trade creditors debited in the
-        // invoice's
-        // branch and inter-branch clearing for the other branches' parts.
+        // invoice's branch and inter-branch clearing for the other branches' parts.
         byBranch.computeIfAbsent(home, k -> new long[3]);
         long elsewhere = 0;
         for (Map.Entry<UUID, long[]> e : byBranch.entrySet()) {
@@ -563,7 +560,9 @@ class CreditsService {
         new TreeSet<>(ls.stream().map(CreditsRepository.LineRow::productId).toList()).forEach(catalogue::lock);
         Map<UUID, Lot> lots = lotRepo.lots(
                 ls.stream().map(CreditsRepository.LineRow::receiptLineId).toList());
-        costing.lockStock(lots.values());
+        Map<UUID, UUID> lineProducts = new LinkedHashMap<>();
+        ls.forEach(l -> lineProducts.put(l.id(), l.productId()));
+        costing.lockStock(lots.values(), lineProducts);
         boolean goods = c.kind().equals("goods");
         if (!goods) {
             for (CreditsRepository.LineRow l : ls) {
@@ -689,8 +688,7 @@ class CreditsService {
         if (detail) {
             Principal principal = CurrentPrincipal.require();
             // Only the lines of branches the caller may read; a document across branches shows a reader scoped to one
-            // of them
-            // that branch's lines.
+            // of them that branch's lines.
             ls = repo.lines(List.of(c.id())).getOrDefault(c.id(), List.of()).stream()
                     .filter(l -> principal.may(PERMISSION, l.branchId()))
                     .map(l -> line(l, principal.may(LandedCostService.PROFIT_READ, l.branchId())))

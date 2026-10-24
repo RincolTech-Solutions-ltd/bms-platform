@@ -40,8 +40,10 @@ class JdbcStockLedger implements StockLedger {
     /** The source type of the entry that posts what an average does not carry (ADR-079). */
     static final String AVERAGE_COST = "retail.average_cost";
 
-    /** The kind {@link #averaged} is told for a change of value alone ({@link #revalue}). */
+    /** The kinds {@link #averaged} is told for a change of value alone ({@link #revalue}): a document, or its void. */
     private static final String REVALUE = "revalue";
+
+    private static final String REVALUE_VOID = "revalue_void";
 
     private final JdbcClient jdbc;
     private final BusinessClock clock;
@@ -162,6 +164,14 @@ class JdbcStockLedger implements StockLedger {
     private Quantities.Averaged averaged(UUID productId, String kind, Locked locked, BigDecimal qty, long valueMinor) {
         Quantities.Averaged a = Quantities.average(locked.qty(), locked.average(), qty, valueMinor);
         if (a.averageMinor() < 0 && REVALUE.equals(kind)) {
+            // A supplier price credit takes more off this branch's stock than it is carried at now.
+            throw ApiException.rule(
+                    "average_cost_negative",
+                    itemName(productId) + ": this credit would take more off the stock at this branch than it is worth"
+                            + " now, because the stock there is carried at a lower cost. Record a smaller price credit,"
+                            + " or send the goods back to the supplier instead.");
+        }
+        if (a.averageMinor() < 0 && REVALUE_VOID.equals(kind)) {
             // The void of a landed cost or a price credit takes back the part this branch took, from what it holds now.
             throw ApiException.rule(
                     "average_cost_negative",
@@ -170,8 +180,7 @@ class JdbcStockLedger implements StockLedger {
                             + " cannot be voided now.");
         }
         if (a.averageMinor() < 0 && "return_to_supplier".equals(kind)) {
-            // Goods sent back leave at what their receipt's units are carried at (#199), above what the rest is worth
-            // now.
+            // Goods sent back leave at their receipt's carrying cost (#199), above what the rest is worth now.
             throw ApiException.rule(
                     "average_cost_negative",
                     itemName(productId) + ": sending this many back at what they were bought for would leave the rest"
@@ -278,7 +287,8 @@ class JdbcStockLedger implements StockLedger {
             return;
         }
         Locked locked = lockRow(branchId, productId);
-        Quantities.Averaged a = averaged(productId, REVALUE, locked, BigDecimal.ZERO, valueMinor);
+        Quantities.Averaged a = averaged(
+                productId, sourceType.endsWith("_void") ? REVALUE_VOID : REVALUE, locked, BigDecimal.ZERO, valueMinor);
         jdbc.sql("""
                         UPDATE retail_stock_balances SET avg_cost_minor = ?, updated_at = now()
                          WHERE branch_id = ? AND product_id = ?

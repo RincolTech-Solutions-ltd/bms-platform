@@ -157,8 +157,7 @@ class LandedCostService {
         UUID home = ps.getFirst().lot().branchId();
 
         // Lock the products and then the stock balances of every branch that holds them, in id order, before reading
-        // what
-        // is on hand.
+        // what is on hand.
         new TreeSet<>(ps.stream().map(p -> p.lot().productId()).toList()).forEach(catalogue::lock);
         costing.lockStock(ps.stream().map(Planned::lot).toList());
 
@@ -565,7 +564,9 @@ class LandedCostService {
         new TreeSet<>(ls.stream().map(LineRow::productId).toList()).forEach(catalogue::lock);
         Map<UUID, Lot> lots =
                 lotRepo.lots(ls.stream().map(LineRow::receiptLineId).toList());
-        costing.lockStock(lots.values());
+        Map<UUID, UUID> lineProducts = new LinkedHashMap<>();
+        ls.forEach(l -> lineProducts.put(l.id(), l.productId()));
+        costing.lockStock(lots.values(), lineProducts);
         for (LineRow l : ls) {
             if (l.toInventoryMinor() > 0
                     && costing.onHand(lots.get(l.receiptLineId())).compareTo(l.onHandQty()) < 0) {
@@ -678,8 +679,7 @@ class LandedCostService {
                     .map(c -> new Charge(c.lineNo(), c.kind(), c.description(), c.amountMinor()))
                     .toList();
             // Only the lines of branches the caller may read; a document across branches shows a reader scoped to one
-            // of them
-            // that branch's lines.
+            // of them that branch's lines.
             ls = repo.lines(List.of(d.id())).getOrDefault(d.id(), List.of()).stream()
                     .filter(l -> principal.may(PERMISSION, l.branchId()))
                     .map(l -> line(l, principal.may(PROFIT_READ, l.branchId())))

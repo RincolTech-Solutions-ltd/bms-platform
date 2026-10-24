@@ -56,7 +56,10 @@ one figure for the business or one per branch, and what happens to remainders, v
      the goods in proportion to what each holds) into those branches' averages (`StockLedger.revalue`). The part each branch took
      is recorded (`retail_cost_spreads`), and the void takes exactly those parts back from exactly those branches, as its reversed
      entries take them out of their inventory accounts; when a branch has since sold so much of the product that its part would
-     leave the rest below zero, the void is refused (`average_cost_negative`, "It cannot be voided now"). A line posted before
+     leave the rest below zero, the void is refused (`average_cost_negative`, "It cannot be voided now"); a price credit worth more
+     than a branch's stock is carried at is refused when it is recorded, in words about the credit ("Record a smaller price
+     credit, or send the goods back to the supplier instead"). A void locks every balance row it will revalue, the recorded
+     branches included, in one pass in branch and product order after the product rows. A line posted before
      `V94` has no recorded parts and its void spreads its part over what each branch holds then.
    - Undoing an earlier movement (the void of a restock, a goods receipt, a customer return or a transfer, goods sent back to a
      supplier) takes its units out at the cost they came in at, which re-averages what stays. Goods sent back to a supplier leave at
@@ -82,7 +85,8 @@ one figure for the business or one per branch, and what happens to remainders, v
 7. **Imports.** History posts nothing (ADR-020 decision 9), so historical movements do not re-average; the opening balance
    (`legacy_balance`) of an import is valued, in the opening journal, at the cost it carries: into a branch that holds nothing it
    becomes the branch's average, added to stock already held it re-averages with it, and a legacy balance that takes stock away
-   leaves the average alone.
+   leaves the average alone. History posts nothing, so the rounding of that re-average (at most half a minor unit per unit held)
+   is not posted either and shows as part of the revaluation difference against the opening journal.
 8. **Profit is the sale lines' snapshots; history never changes.** A sale line keeps the branch's average at the moment of sale in
    `unit_cost_minor`, and `line_cost_minor` is the base quantity times it, whether the line was sold in cartons, dozens or pieces.
    The daily profit, the margins, the sales analysis, the dashboard and the evaluation already add up `line_cost_minor` (and returns

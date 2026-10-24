@@ -76,6 +76,15 @@ class ReceiptCosting {
      * what is on hand cannot change while a charge is worked out. Call it after the products are locked.
      */
     void lockStock(Collection<Lot> forLots) {
+        lockStock(forLots, Map.of());
+    }
+
+    /**
+     * As {@link #lockStock(Collection)}, for a void: also the balance rows of the branches the voided lines' recorded parts
+     * went to ({@code lineProducts}: line id to product), which may hold none of the product now, all in one pass in branch and
+     * product order, so the void takes every balance lock it will need before any revaluation (ADR-079).
+     */
+    void lockStock(Collection<Lot> forLots, Map<UUID, UUID> lineProducts) {
         TreeMap<UUID, TreeSet<UUID>> byBranch = new TreeMap<>();
         for (Lot lot : forLots) {
             byBranch.computeIfAbsent(lot.branchId(), k -> new TreeSet<>()).add(lot.productId());
@@ -83,6 +92,10 @@ class ReceiptCosting {
                 byBranch.computeIfAbsent(branch, k -> new TreeSet<>()).add(lot.productId());
             }
         }
+        lineProducts.forEach((line, product) -> lots.spread(line)
+                .keySet()
+                .forEach(branch ->
+                        byBranch.computeIfAbsent(branch, k -> new TreeSet<>()).add(product)));
         byBranch.forEach((branch, products) -> products.forEach(product -> stock.lock(branch, product)));
     }
 
@@ -189,10 +202,8 @@ class ReceiptCosting {
                             + ": cost not applied. " + e.note());
         }
         // ADR-079: the part each branch's inventory takes re-averages that branch's cost, whatever happened to the last
-        // paid
-        // cost above. The caller locked the product rows before the balances (the order a restock takes them) and
-        // lockStock
-        // took the balances in branch and product order, so this takes no lock out of that order.
+        // paid cost above. The caller locked the product rows before the balances (the order a restock takes them) and
+        // lockStock took the balances in branch and product order, so this takes no lock out of that order.
         e.byBranch()
                 .forEach((branch, part) ->
                         stock.revalue(on, branch, lot.productId(), raise ? part : -part, sourceType, documentId));

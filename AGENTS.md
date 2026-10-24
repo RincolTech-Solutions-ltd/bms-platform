@@ -908,12 +908,6 @@ Accepted (this list is the ADR index):
   decides; stopping a module and cancelling take effect the day after the last day paid for (at once when nothing is paid ahead), applied
   by a quarter-hour job once; the business read only with `subscription_ended` after a cancellation's end date, data kept (proposed,
   #472; FR-SUB-03 to FR-SUB-07; migration `V90`; renumbered at merge if needed)
-- ADR-079 Profit from the moving weighted average buying price per smallest unit, kept per branch on the stock balance row: a
-  delivery, goods received, a transfer in (at the source's average) and a customer return re-average it, sales, usage, counts,
-  corrections and transfers out take it, voids re-average or are refused (`average_cost_negative`), the rounding remainder goes to
-  purchase rounding, sale lines keep it and profit reads those snapshots; `cost_minor` is the last price paid (proposed, #523, owner
-  decision D22; FR-RET-69; takes the place of the never written pending ADR-021; supersedes ADR-020 decision 6; migration `V94`; renumbered at
-  merge if needed)
 - ADR-076 The shop Home reads one summary built from the existing report queries: today's sales, takings by cash, mobile money and
   any other way, credit owed with the oldest due date, the top five items today and this week, a line per shop over two or more, the
   low stock count and the open orders, the money parts left out without `retail.sale.all_sellers` (proposed, #485; FR-UXN-06;
@@ -934,6 +928,12 @@ Accepted (this list is the ADR index):
   web image once (local image ID, `--pull never`, 60 seconds at most) as `keep-assets` to copy its `/assets` and workbox runtime into the `web_assets` volume, which `web` serves read-only
   from `/srv/previous` after `/srv`; files pruned 14 days after they leave the live build; `index.html` and `sw.js` stay `no-cache`
   (proposed, #525; no migration; renumbered at merge if needed)
+- ADR-079 Profit from the moving weighted average buying price per smallest unit, kept per branch on the stock balance row: a
+  delivery, goods received, a transfer in (at the source's average) and a customer return re-average it, sales, usage, counts,
+  corrections and transfers out take it, voids re-average or are refused (`average_cost_negative`), the rounding remainder goes to
+  purchase rounding, sale lines keep it and profit reads those snapshots; `cost_minor` is the last price paid (proposed, #523, owner
+  decision D22; FR-RET-69; takes the place of the never written pending ADR-021; supersedes ADR-020 decision 6; migration `V94`; renumbered at
+  merge if needed)
 - ADR-046 Two-step sign-in is optional by default (migration `V67`) and a tenant policy can require it for everyone or for chosen roles after a grace
   period; one deadline, enforced-now versus due-by, the forgotten-password rules unchanged (proposed, #348; FR-IAM-06, FR-IAM-16)
 - ADR-063 Production is created by Terraform on production day (`infra/production/`, a Hetzner root and an AWS root over shared

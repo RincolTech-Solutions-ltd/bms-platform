@@ -73,11 +73,9 @@ public final class Quantities {
                 .longValueExact();
     }
 
-    // ---- Moving weighted average cost (ADR-079, issue #523) ------------------------------------
-    // A branch holds each product at one average cost per base unit, in whole minor units. What does not divide exactly
-    // is
-    // the remainder: the value that came in less the value the new average gives the new quantity, posted to purchase
-    // rounding.
+    // ---- Moving weighted average cost (ADR-079, issue #523) ------------------------------------ A branch holds each
+    // product at one average cost per base unit, in whole minor units. What does not divide exactly is the remainder:
+    // the value that came in less the value the new average gives the new quantity, posted to purchase rounding.
 
     /** The average after a movement, and the remainder of the rounding (positive: less is carried than came in). */
     public record Averaged(long averageMinor, long remainderMinor) {}

@@ -1173,8 +1173,8 @@ class RetailLandedCostIT extends LandedCostTestBase {
         assertThat(api.sell(br2, "cash", product, "3").getStatusCode()).isEqualTo(HttpStatus.CREATED);
 
         assertThat(voidLanded(uuid(doc, "id")).getStatusCode()).isEqualTo(HttpStatus.OK);
-        // Head office gives back its 500 (10 at 100 again); branch two its 500 from the 7 left (1,050 less 500, 79
-        // each).
+        // Head office gives back its 500 (10 at 100 again).
+        // Branch two gives back its 500 from the 7 left: 1,050 less 500 is 550, carried as 79 each.
         assertThat(valuation(hq, product)).isEqualTo(1_000);
         assertThat(balance("inventory", hq)).isEqualTo(valuation(hq, product));
         assertThat(valuation(br2, product)).isEqualTo(7 * 79);
