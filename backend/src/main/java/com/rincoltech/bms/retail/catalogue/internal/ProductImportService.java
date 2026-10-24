@@ -32,7 +32,8 @@ import org.springframework.transaction.annotation.Transactional;
  * Importing a new client's items from CSV (#146). A dry run reads the file and reports, row by row,
  * what would be added, what would be skipped (a code that exists already, or repeats in the file)
  * and what is wrong; an apply does the same and adds the rows that are fine, in one transaction.
- * Applying is idempotent on the product code: run twice, the second run skips every row. An apply
+ * Applying is idempotent on the product code, and a row without a code on its name and unit (issue #352's name rule, which
+ * skips a name already held in that unit): run twice, the second run skips every row. An apply
  * with any error row adds nothing, so a half-read file never lands. Codes are normalised by
  * {@link RetailCatalogue#normaliseCode} as the pilot importer does; categories and units are created
  * on demand, matched by name ignoring case. A row with a blank code, or a file without the code column,

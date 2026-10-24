@@ -106,17 +106,20 @@ class CatalogueRepository {
     }
 
     /**
-     * Issue #493, ADR-081: the category's next item code, such as BLB-0001, under the category row's lock to the commit, so a
-     * second add in the same category waits and takes the next number (V96).
+     * Issue #493: the category row, locked to the commit, before the import makes codes in it; the lock of {@link
+     * #nextItemCode}, which leaves the foreign key checks of item inserts free.
      */
-    /** Issue #493: the category row, locked to the commit, before the import makes codes in it. */
     void lockCategory(UUID categoryId) {
-        jdbc.sql("SELECT id FROM retail_categories WHERE id = ? FOR UPDATE")
+        jdbc.sql("SELECT id FROM retail_categories WHERE id = ? FOR NO KEY UPDATE")
                 .param(categoryId)
                 .query(UUID.class)
                 .optional();
     }
 
+    /**
+     * Issue #493, ADR-081: the category's next item code, such as BLB-0001, under the category row's lock to the commit, so a
+     * second add in the same category waits and takes the next number (V96).
+     */
     String nextItemCode(UUID categoryId) {
         return jdbc.sql("SELECT bms_next_item_code(?)")
                 .param(categoryId)

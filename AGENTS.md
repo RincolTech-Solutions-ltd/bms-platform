@@ -949,8 +949,6 @@ Accepted (this list is the ADR index):
   `savings_above_available` in plain words) and under the field; the suggestion is the rate times that amount; the overwrite reason
   is an optional pick list; every other screen's typed reason stays required until decided one by one (proposed, #538; amends
   ADR-022 decision 11; migration `V95`; renumbered at merge if needed)
-  decision D22; FR-RET-69; takes the place of the never written pending ADR-021; supersedes ADR-020 decision 6; migration `V94`; renumbered at
-  merge if needed)
 - ADR-081 Item codes are made from the category: a category has a code start of 2 to 4 letters, unique per business, suggested
   from its name (Bulbs BLB, TVs TV, Phone accessories PHA) and editable; an item added without a typed code gets `PREFIX-0001`, the
   next number no item holds, under the category row's lock; typed codes are kept, existing codes never change, a moved item keeps its

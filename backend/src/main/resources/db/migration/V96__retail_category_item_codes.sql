@@ -170,7 +170,9 @@ CREATE UNIQUE INDEX retail_categories_code_prefix ON retail_categories (tenant_i
 
 -- The next item code of a category: PREFIX-0001, four digits at least, the first number from code_next that no item of the
 -- business holds as its code (a typed or imported code is skipped, ignoring case as the unique index does). The category row is
--- locked to the commit, so a second add in the same category waits and then takes the next number.
+-- locked to the commit, so a second add in the same category waits and then takes the next number. FOR NO KEY UPDATE, not FOR
+-- UPDATE: it still queues the next add in the category, but not the FOR KEY SHARE that the foreign key check of every item insert or
+-- move into the category takes, so an add with a typed code never waits for it and two imports cannot deadlock through it.
 CREATE FUNCTION bms_next_item_code(p_category uuid) RETURNS text
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -180,7 +182,7 @@ DECLARE
     candidate text;
 BEGIN
     SELECT tenant_id, code_prefix, code_next INTO v_tenant, v_prefix, n
-      FROM public.retail_categories WHERE id = p_category FOR UPDATE;
+      FROM public.retail_categories WHERE id = p_category FOR NO KEY UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'bms_next_item_code: no category %', p_category USING ERRCODE = 'no_data_found';
     END IF;

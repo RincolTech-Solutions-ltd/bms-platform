@@ -145,7 +145,9 @@ class CatalogueService {
     /** Issue #493: the prefix a new category of this name would get now; the form shows it before saving. */
     @Transactional(readOnly = true)
     CatalogueApi.PrefixSuggestion suggestPrefix(String name) {
-        return new CatalogueApi.PrefixSuggestion(repo.suggestPrefix(name == null ? "" : name.trim(), null));
+        // A category name is at most 100 characters, so nothing longer is ever worth reading.
+        String n = name == null ? "" : name.trim();
+        return new CatalogueApi.PrefixSuggestion(repo.suggestPrefix(n.length() > 100 ? n.substring(0, 100) : n, null));
     }
 
     @Transactional
