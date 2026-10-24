@@ -83,7 +83,7 @@ describe('glossary (issue #547)', () => {
   it('uses no banned or retired word and no dash in its own words', () => {
     for (const word of Object.values(WORDS)) {
       expect(offendingWords(word)).toEqual([]);
-      expect(word).not.toMatch(/[–—]/);
+      expect(word).not.toMatch(/[\u2013\u2014]/);
     }
   });
 
