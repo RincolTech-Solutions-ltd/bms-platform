@@ -109,7 +109,8 @@ export function ItemCombobox<T>({ id, label, search, results, fetching = false, 
             {...search.inputProps}
             role="combobox"
             aria-expanded={expanded}
-            aria-controls={listId}
+            // Names the list only while it is drawn, so it never points at nothing.
+            aria-controls={expanded ? listId : undefined}
             aria-autocomplete="list"
             aria-activedescendant={expanded && active >= 0 ? `${optionId}-${active}` : undefined}
             aria-describedby={`${id}-status`}

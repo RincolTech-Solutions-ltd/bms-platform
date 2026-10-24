@@ -36,7 +36,7 @@ describe('the item picker', () => {
     render(<Picker onPick={() => undefined} />);
     expect(box().getAttribute('aria-expanded')).toBe('false');
     expect(box().getAttribute('aria-autocomplete')).toBe('list');
-    expect(box().getAttribute('aria-controls')).toBe('t-item-list');
+    expect(box().getAttribute('aria-controls')).toBeNull();
     expect(screen.queryByRole('listbox')).toBeNull();
     expect(screen.queryAllByRole('option')).toHaveLength(0);
   });
@@ -54,6 +54,8 @@ describe('the item picker', () => {
     });
     expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['Test Bulb 9W', 'Test Bulb 15W']);
     expect(screen.getByRole('status').textContent).toBe('2 items found');
+    expect(box().getAttribute('aria-controls')).toBe('t-item-list');
+    expect(document.getElementById('t-item-list')?.getAttribute('role')).toBe('listbox');
     expect(box().getAttribute('aria-expanded')).toBe('true');
   });
 
