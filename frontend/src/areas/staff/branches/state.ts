@@ -54,3 +54,34 @@ export function branchLine(b: AdminBranch): string {
   if (!keepsGoods(b)) return 'Keeps no goods: no sales, purchases or stock counts here, and no goods can be moved in. Cash records still work, and goods left here can be moved out.';
   return b.is_head_office ? 'Head office.' : 'Open.';
 }
+
+/** What a new branch is (issue #581, ADR-048, ADR-089): the three kinds the Add a branch form offers. */
+export type BranchKind = 'shop' | 'store' | 'office';
+
+export const BRANCH_KINDS: readonly { value: BranchKind; label: string }[] = [
+  { value: 'shop', label: 'Shop (sells)' },
+  { value: 'store', label: 'Store (keeps stock, does not sell)' },
+  { value: 'office', label: 'Head office (keeps no goods)' },
+];
+
+/** The two flags each kind is sent as: a store keeps stock and does not sell, a head office keeps no goods. */
+export const KIND_FLAGS: Record<BranchKind, { sells_goods: boolean; stocks_goods: boolean }> = {
+  shop: { sells_goods: true, stocks_goods: true },
+  store: { sells_goods: false, stocks_goods: true },
+  office: { sells_goods: true, stocks_goods: false },
+};
+
+/** A typed code in the shape the server takes, or the words that say what is wrong; empty is fine, the app makes one. */
+export function codeProblem(code: string): string | null {
+  const c = code.trim();
+  if (c === '') return null;
+  return /^[A-Z0-9]{2,10}$/.test(c) ? null : 'Use 2 to 10 letters or digits, no spaces.';
+}
+
+/** The toast after a branch is added: its name and what it is, in the words of the people who run it. */
+export function addedWords(b: AdminBranch): string {
+  const name = b.name ?? 'The branch';
+  if (!sellsGoods(b)) return `${name} added. It is a store: it keeps stock and does not sell.`;
+  if (!keepsGoods(b)) return `${name} added. It keeps no goods, like a head office.`;
+  return `${name} added. It is a shop: it keeps stock and sells.`;
+}

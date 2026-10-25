@@ -7,14 +7,17 @@ import { ShopLogo } from '../branch-picker';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { useStaff } from '../context';
 import { money, useBranchRoles } from '../retail/ui';
-import { branchLine, canManageBranches, closedCount, closedOn, isClosed, keepsGoods, sellsGoods, showBranches, visibleBranches } from './state';
+import { useToast } from '../retail/toast';
+import { AddBranchForm } from './add-branch';
+import { addedWords, branchLine, canManageBranches, closedCount, closedOn, isClosed, keepsGoods, sellsGoods, showBranches, visibleBranches } from './state';
 import { NoAccess } from '../../../app/ui/EmptyState';
 
 // Branches (issue #329; ADR-041): which branches are open, close one without losing its history, reopen it, and say that a branch
 // keeps no goods (a head office). Everyone who may read branches sees the list; an administrator also closes, reopens and switches.
 // Closed branches are hidden until asked for. Closing over stock or transfers on the road shows the server's warning with the stock
 // value and asks for a reason; nothing is moved or written off. An administrator also gives each open branch its own logo, with the
-// rules of the business logo (issue #461, ADR-068); a branch without one shows the business logo on its receipts.
+// rules of the business logo (issue #461, ADR-068); a branch without one shows the business logo on its receipts. An administrator adds
+// a shop, a store or a head office that keeps no goods (issue #581, ADR-089); the new branch is in every list at once.
 
 // The ADR-033 branch role, when roles are on, shown beside the Store flag so the two are never read as one (ADR-048).
 const roleWords = (roles: { branch_id?: string; role?: string }[] | undefined, id: string | undefined): string | null => {
@@ -41,6 +44,8 @@ export function BranchesScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<{ id: string; text: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const { show, toast } = useToast();
   // One action at a time: a second tap before the first answer must not send a second request.
   const working = useRef(false);
 
@@ -53,6 +58,21 @@ export function BranchesScreen() {
     );
   }
 
+  // Pickers, defaults and stock lists follow the branch list.
+  async function refreshLists() {
+    await queryClient.invalidateQueries({ queryKey: ['staff-branches'] });
+    await queryClient.invalidateQueries({ queryKey: ['me'] });
+    void queryClient.invalidateQueries({ queryKey: ['setup-branches'] });
+    void queryClient.invalidateQueries({ queryKey: ['retail'] });
+  }
+
+  async function added(branch: AdminBranch) {
+    setAdding(false);
+    setNotice(null);
+    show(addedWords(branch), 'success');
+    await refreshLists();
+  }
+
   async function act(branch: AdminBranch, run: () => Promise<string>, onRefusal?: (e: BranchesError) => boolean) {
     if (working.current) return;
     working.current = true;
@@ -62,11 +82,7 @@ export function BranchesScreen() {
     try {
       setNotice(await run());
       setPanel(null);
-      await queryClient.invalidateQueries({ queryKey: ['staff-branches'] });
-      // Pickers, defaults and stock lists follow the branch list.
-      await queryClient.invalidateQueries({ queryKey: ['me'] });
-      void queryClient.invalidateQueries({ queryKey: ['setup-branches'] });
-      void queryClient.invalidateQueries({ queryKey: ['retail'] });
+      await refreshLists();
     } catch (e) {
       if (!(e instanceof BranchesError && onRefusal?.(e))) setError({ id: branch.id ?? '', text: messageOf(e) });
     } finally {
@@ -135,7 +151,18 @@ export function BranchesScreen() {
         Your shops, stores and head office. Close a branch you no longer use: its sales and stock records stay for your reports,
         and it leaves the branch lists and the sale, buy stock and move stock screens.
       </p>
-      {!canManage && <p className="hint">Only an administrator can close or reopen a branch.</p>}
+      {!canManage && <p className="hint">Only an administrator can add, close or reopen a branch.</p>}
+      {canManage && !adding && (
+        <p>
+          <button type="button" /* busy-exempt: opens the form */ disabled={busyId !== null} onClick={() => setAdding(true)}>
+            Add a branch
+          </button>
+        </p>
+      )}
+      {canManage && adding && (
+        <AddBranchForm canOpenBilling={(me.permissions ?? []).includes('core.billing.read')} onAdded={added} onCancel={() => setAdding(false)} />
+      )}
+      {toast}
       {notice && <p role="status" className="alert alert-success">{notice}</p>}
       {list.isPending && <p className="loading">Loading your branches</p>}
       {list.isError && <p role="alert" className="alert alert-danger">{messageOf(list.error)}</p>}
