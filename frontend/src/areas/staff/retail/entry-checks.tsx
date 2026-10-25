@@ -40,9 +40,10 @@ export interface EntryChecks {
 
 /**
  * `warnings` are the screen's warnings as it renders now and `save` its save with the values it shows now; both are read at the
- * moment Save or Confirm is pressed, never kept from an earlier render.
+ * moment Save or Confirm is pressed, never kept from an earlier render. `form` is what the lines hold: any change to it clears the
+ * warnings showing and the save waiting on them.
  */
-export function useEntryChecks(screen: EntryScreen, branchId: string | undefined, warnings: EntryWarning[], save: () => void): EntryChecks {
+export function useEntryChecks(screen: EntryScreen, branchId: string | undefined, warnings: EntryWarning[], save: () => void, form: unknown): EntryChecks {
   const [shownKeys, setShownKeys] = useState<ReadonlySet<string>>(new Set());
   const confirmed = useRef(new Set<string>());
   const pending = useRef(false);
@@ -51,6 +52,14 @@ export function useEntryChecks(screen: EntryScreen, branchId: string | undefined
   // The confirmations of the warnings the last save was sent with, recorded once it succeeds.
   const sentWith = useRef<EntryWarning[]>([]);
   const first = useRef<HTMLDivElement | null>(null);
+  // Any change to the lines (`form`) takes the warnings and the waiting save away: Save asks again about the form as it is.
+  const formKey = JSON.stringify(form);
+  const formWas = useRef(formKey);
+  if (formWas.current !== formKey) {
+    formWas.current = formKey;
+    pending.current = false;
+    if (shownKeys.size > 0) setShownKeys(new Set());
+  }
   // Only warnings the screen still raises show: editing a line takes its stale warning away.
   const visible = warnings.filter((w) => shownKeys.has(w.key));
   const firstKey = visible[0]?.key;

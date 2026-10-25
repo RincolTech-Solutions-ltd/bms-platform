@@ -254,7 +254,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
       ...(pack ? { unitId: pack.unit_id, unitName: pack.unit, factor: lineFactor(l) ?? undefined } : {}),
     });
   });
-  const entry = useEntryChecks('buy', here, warnings, () => save.mutate());
+  const entry = useEntryChecks('buy', here, warnings, () => save.mutate(), lines);
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (!blocked && !save.isPending) entry.check(); }}>

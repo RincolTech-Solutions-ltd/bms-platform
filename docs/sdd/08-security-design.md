@@ -655,8 +655,9 @@ Notes:
 - The entry warnings (issue #353, ADR-093, FR-RET-74 and FR-RET-75) add no permission, so the matrix is unchanged. `GET
   /retail/products/{id}/entry-norms` and `POST /retail/entry-warnings/confirmations` need `retail.stock.read`, which every retail role
   that enters stock or sales holds; the last selling price is in the norms only for a caller who sees prices (ADR-055), so a storekeeper
-  reads quantities only. `GET /retail/products/name-hints` needs `retail.catalogue.manage`, the permission that adds items. A confirmation
-  only writes an audit row on an item of the caller's business; its branch is kept only when the caller works there.
+  reads quantities only, and a seller who sees only their own figures gets the last price of their own sales. `GET /retail/products/name-hints` needs `retail.catalogue.manage`, the permission that adds items. A confirmation
+  only writes an audit row on an item of the caller's business, with the warning's kind and its numbers and no text from the
+  client; its branch is kept only when the caller works there.
 - `retail.controls.read` (issue #357, ADR-047, migration V66) opens the read-only Controls page: voids, returns, credit write-offs (ADR-087, valued at the amount owed, never the loss), changed prices,
   discounts, sales below cost and sales cancelled at once, by shop, by named person, by day and by reason. It names staff and compares
   them by a rate (a cancelled sale is credited to the person whose sale it was, the approver is shown apart and never ranked), so it is the tenant administrator's alone by default and a business gives it to an owner's or an auditor's custom

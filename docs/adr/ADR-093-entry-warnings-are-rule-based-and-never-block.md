@@ -26,7 +26,12 @@ the one category picker (#584) and item codes made by the app (#568, #562).
    more than half of those lines (a pack's unit, or the item's own). A median and a usual unit need at least 3 lines; with fewer
    the screens warn about nothing. The median of an even count is the mean of the two middle lines. It also returns the price per
    base unit of the last sale (line total over base quantity, rounded half up) and its date, only to someone who sees prices
-   (ADR-055): a storekeeper gets quantities only. The thresholds are sent with the norms (`quantity_factor` 10, `price_factor` 2,
+   (ADR-055): a storekeeper gets quantities only, and a seller who sees only their own figures (no `retail.sale.all_sellers`)
+   gets the last price of their own sales among the item's newest 200 sale lines, never another seller's. History is a sale
+   whose status is `completed` (a sale is `completed` or `voided`; a credit sale written off, an imported one and one recorded
+   offline are `completed`, so they count; a return does not take a line out), a purchase with no void, and a move that is
+   neither voided nor cancelled. Quantities are base units: a line sold or bought in a pack keeps `qty` as the packs times
+   the factor (V39), and its pack is its unit. The thresholds are sent with the norms (`quantity_factor` 10, `price_factor` 2,
    `min_lines` 3) so the screens never hold their own copy. A screen reads an item's norms once and keeps them five minutes;
    a read that fails or has not answered yet means no warning, never a wait.
 3. **Bounded reads.** Each read walks one item's index entries newest first and stops at its limit: `V104` adds
@@ -45,15 +50,17 @@ the one category picker (#584) and item codes made by the app (#568, #562).
    or less, says the last price in the unit sold; a price the app filled (the item's, a price list's) is the owner's own and is not
    questioned. The price floor stays the server's refusal, unchanged.
 5. **Never a block.** The warnings show only when the person saves, each next to its field as a tinted note with Confirm and
-   Change. Confirm checks the screen as it is at that moment: a warning whose line was edited since is gone, a new one shows,
+   Change. Any change to a line takes the warnings showing and the save waiting on them away, so Save asks again about the
+   form as it is. Confirm checks the screen as it is at that moment: a warning whose line was edited since is gone, a new one shows,
    and only when none is open does the save go on, with the values the screen shows then (never a request built earlier); Change takes the warning away, puts
    the cursor in the field and saves nothing. The save button is never disabled by a warning, and the server never refuses a
    line for being unusual. A confirmed warning stays confirmed while the line says the same; a changed line is checked again.
    Offline, or for a sale whose request was already sent, nothing is read or asked.
 6. **Recorded when confirmed and saved.** Once the save a confirmation went with has succeeded, the screen sends each confirmed
    warning of that save to `POST /retail/entry-warnings/confirmations` (`retail.stock.read`, 204), which writes one audit row,
-   `retail.entry_warning.confirmed`, on the item, with the screen, the kind, the sentence read, the quantity and unit entered,
-   the median compared with and, for a price, both prices; the branch is kept only when the caller works there. A warning
+   `retail.entry_warning.confirmed`, on the item, with the screen, the kind (the warning's code) and its numbers only: the
+   quantity entered (digits only), the pack unit's id, the median or records compared with and, for a price, both prices. No
+   text from the client is stored; the branch is kept only when the caller works there. A warning
    confirmed beside one that was changed, or a save the server refused, records nothing. No table is
    added: the audit log is where the owner already reviews what staff did. A failed record never stops the save.
 7. **Naming a new item.** While a new item's name is typed (Add an item, the item form in a category, and the new item on Buy
@@ -64,7 +71,7 @@ the one category picker (#584) and item codes made by the app (#568, #562).
    in (ties to the one with more items sharing any word, then by name), with one of them as the example. Fewer than 3 letters and
    digits give nothing. The person taps an item to open it (on Buy stock and Count stock, to use it instead), or taps Choose
    Cables to choose the category; nothing is chosen for them, no code is typed (#562), and the save-time name rules of #352 are
-   unchanged. Not offered while an existing item is changed.
+   unchanged. Not offered while an existing item is changed. The typed name is read up to 200 characters.
 
 ## Consequences
 
@@ -73,6 +80,9 @@ the one category picker (#584) and item codes made by the app (#568, #562).
 - A new item, or one with fewer than 3 lines, is never warned about; a business's first weeks see few warnings.
 - A genuinely unusual delivery (a year's stock bought at once) is warned about once per line and confirmed; the confirmation is
   on record, which the owner wanted.
+- A known limit of the name hints: the close names (a few letters apart) and the items sharing words are taken in item code
+  order up to a bound (5,000 and 200) before they are scored, so on a very large catalogue a close name or the best category
+  can be missed because of where its code sorts. A catalogue of that size needs a search index on the name, not built here.
 - The thresholds are fixed (10 for quantities, 2 for prices). A per-business setting is left for when the owner asks.
 - The AI step stays parked; if it is ever built it sits behind the AI gateway, off by default, and only adds a suggestion with
   its reason beside these rules, never replacing or saving.

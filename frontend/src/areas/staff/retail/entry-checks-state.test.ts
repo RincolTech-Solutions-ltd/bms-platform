@@ -58,7 +58,7 @@ describe('Buy stock', () => {
   it('names the usual unit when a line is in another one', () => {
     const warnings = entryWarnings(norms, buy({ unitId: undefined, unitName: undefined, factor: undefined, qtyMilli: 200_000 }));
     expect(warnings.map((w) => w.text)).toEqual(['You usually buy this in rolls; you entered 200 metres. Is that right?']);
-    expect(warnings[0]).toMatchObject({ kind: 'unit', fieldId: 'u', confirmation: { product_id: 'p-cable', screen: 'buy', kind: 'unit', entered_qty: '200', entered_unit: 'metre', median_qty: '350' } });
+    expect(warnings[0]).toMatchObject({ kind: 'unit', fieldId: 'u', confirmation: { product_id: 'p-cable', screen: 'buy', kind: 'unit', entered_qty: '200', median_qty: '350' } });
     expect(offendingWords(warnings[0]?.text ?? '')).toEqual([]);
   });
 

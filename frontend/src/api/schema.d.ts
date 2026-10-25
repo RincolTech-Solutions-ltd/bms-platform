@@ -13115,7 +13115,7 @@ export interface components {
             /** @description One to eight capital letters or digits, starting with a letter */
             prefix: string;
         };
-        /** @description Issue #353: the person saw an entry warning and chose Confirm. Recorded in the audit log, never a refusal and never needed to save */
+        /** @description Issue #353: the person confirmed an entry warning and the save it went with succeeded. Recorded in the audit log as the warning's kind and its numbers (no free text), never needed to save */
         RetailEntryConfirmation: {
             /** Format: uuid */
             branch_id?: string;
@@ -13126,14 +13126,16 @@ export interface components {
              * @example 200
              */
             entered_qty?: string;
-            entered_unit?: string;
+            /**
+             * Format: uuid
+             * @description The pack unit entered; absent for the item's own unit
+             */
+            entered_unit_id?: string;
             kind: string;
             /** Format: int64 */
             last_price_minor?: number;
-            /** @description The median it was compared with, in base units */
+            /** @description What it was compared with, in base units: the median, or on Count stock what the records hold */
             median_qty?: string;
-            /** @description The warning as the person read it */
-            message: string;
             /** Format: uuid */
             product_id: string;
             screen: string;

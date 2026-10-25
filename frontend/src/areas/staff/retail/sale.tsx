@@ -353,7 +353,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
     if (offline) setDraft((d) => ({ ...d, sent: d.sent ?? { body, at: new Date().toISOString() } }));
     save.mutate(body);
   };
-  const entry = useEntryChecks('sell', branchId, warnings, send);
+  const entry = useEntryChecks('sell', branchId, warnings, send, draft.lines);
   const lost = locked && !save.isPending && !(save.error instanceof RetailError);
   const keep = useMutation({
     mutationFn: async () => {

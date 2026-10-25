@@ -118,7 +118,7 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
   const warnings = draft.lines.flatMap((l, i) => entryWarnings(norms(l.product.id), {
     screen: 'move', product: l.product, lineKey: l.product.id ?? String(i), qtyMilli: parseQty(l.qty), qtyFieldId: `tq-${i}`,
   }));
-  const entry = useEntryChecks('move', fromBranchId, warnings, () => save.mutate());
+  const entry = useEntryChecks('move', fromBranchId, warnings, () => save.mutate(), draft.lines);
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (!problem && !save.isPending) entry.check(); }}>

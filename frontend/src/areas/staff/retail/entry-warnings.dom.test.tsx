@@ -187,7 +187,7 @@ describe('Sell', () => {
 });
 
 describe('Confirm checks the screen as it is now (review of #590)', () => {
-  it('records the sale the screen shows when a line was edited after the warnings, and drops the stale warning', async () => {
+  it('clears the warnings when a line is edited, then records the sale the screen shows', async () => {
     const saved = vi.fn();
     const create = vi.spyOn(retail, 'createSale');
     open(<SaleForm branchId={BRANCH} onSaved={saved} />);
@@ -198,15 +198,22 @@ describe('Confirm checks the screen as it is now (review of #590)', () => {
     await normsRead();
     fireEvent.click(save);
     await screen.findByTestId('entry-warning-quantity');
-    // The seller edits the quantity without Change: its warning goes at once.
+    expect(warning('price')).toBeTruthy();
+    // The seller edits the quantity without Change: every warning and the waiting save go.
     type('qty-0', '1');
     expect(warning()).toBeNull();
-    expect(warning('price')).toBeTruthy();
+    expect(warning('price')).toBeNull();
+    await settle();
+    expect(create).not.toHaveBeenCalled();
+    // Save asks again about the sale as it is now: only the price.
+    fireEvent.click(save);
+    await screen.findByTestId('entry-warning-price');
+    expect(warning()).toBeNull();
     press('Confirm');
     await waitFor(() => expect(saved).toHaveBeenCalledTimes(1));
     expect(create).toHaveBeenCalledTimes(1);
     expect(create.mock.calls[0]?.[0].lines?.[0]).toMatchObject({ qty: expect.stringMatching(/^1(\.000)?$/) });
-    expect(mockEntryConfirmations.map((c) => `${c.kind} ${c.entered_qty}`)).toEqual(['price 1']);
+    await waitFor(() => expect(mockEntryConfirmations.map((c) => `${c.kind} ${c.entered_qty}`)).toEqual(['price 1']));
   });
 
   it('asks again about a quantity changed after the warning, rather than saving it unchecked', async () => {

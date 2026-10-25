@@ -6,7 +6,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.PositiveOrZero;
-import jakarta.validation.constraints.Size;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -18,6 +17,9 @@ import java.util.UUID;
 final class EntryChecksApi {
 
     private EntryChecksApi() {}
+
+    /** A quantity as the screens send it: digits, at most three decimals. */
+    static final String QTY = "\\d{1,11}(\\.\\d{1,3})?";
 
     @Schema(
             name = "RetailEntryUsage",
@@ -122,8 +124,8 @@ final class EntryChecksApi {
     @Schema(
             name = "RetailEntryConfirmation",
             description =
-                    "Issue #353: the person saw an entry warning and chose Confirm. Recorded in the audit log, never a"
-                            + " refusal and never needed to save")
+                    "Issue #353: the person confirmed an entry warning and the save it went with succeeded. Recorded in"
+                            + " the audit log as the warning's kind and its numbers (no free text), never needed to save")
     record Confirmation(
             @NotNull UUID productId,
             UUID branchId,
@@ -134,15 +136,16 @@ final class EntryChecksApi {
             @NotNull @Pattern(regexp = "unit|quantity|price")
             String kind,
 
-            @NotNull @Size(min = 1, max = 300) @Schema(description = "The warning as the person read it")
-            String message,
-
-            @Size(max = 40) @Schema(description = "The quantity entered, in the unit entered", example = "200")
+            @Pattern(regexp = QTY) @Schema(description = "The quantity entered, in the unit entered", example = "200")
             String enteredQty,
 
-            @Size(max = 40) String enteredUnit,
+            @Schema(description = "The pack unit entered; absent for the item's own unit")
+            UUID enteredUnitId,
 
-            @Size(max = 40) @Schema(description = "The median it was compared with, in base units")
+            @Pattern(regexp = QTY)
+            @Schema(
+                    description =
+                            "What it was compared with, in base units: the median, or on Count stock what the records hold")
             String medianQty,
 
             @PositiveOrZero Long enteredPriceMinor,

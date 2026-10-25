@@ -242,6 +242,36 @@ class EntryChecksIT extends IntegrationTest {
         assertThat(n.get("last_sell_minor").asLong()).isEqualTo(60);
     }
 
+    /** Review of #590, ADR-055: a seller who sees only their own figures gets the last price of their own sales. */
+    @Test
+    void aSellerLimitedToTheirOwnFiguresGetsTheirOwnLastPrice() {
+        buy(roll, "10", 3_000);
+        RetailTestSupport mine = new RetailTestSupport(http, t);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("payment_method", "cash");
+        body.put("lines", List.of(Map.of("product_id", cable, "qty", "1", "unit_price_minor", 65)));
+        assertThat(mine.postKeyed(
+                                "/sales",
+                                body,
+                                SALES + ",retail.price.override",
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        // Another seller sells later, at 70.
+        sell("1", 70);
+        JsonNode own = mine.get("/products/" + cable + "/entry-norms", SALES).getBody();
+        assertThat(own.get("last_sell_minor").asLong()).isEqualTo(65);
+        // Someone who oversees every seller gets the last sale of all.
+        assertThat(norms(ADMIN).get("last_sell_minor").asLong()).isEqualTo(70);
+        // A seller with no sale of the item gets none.
+        JsonNode none = new RetailTestSupport(http, t)
+                .get("/products/" + cable + "/entry-norms", SALES)
+                .getBody();
+        assertThat(none.has("last_sell_minor")).isFalse();
+    }
+
     /** Review of #590: a sale in a pack counts in base units (V39 keeps qty = packs times the factor), and its unit is the pack's. */
     @Test
     void aSaleInAPackCountsInBaseUnitsAndNamesThePack() {
@@ -320,16 +350,15 @@ class EntryChecksIT extends IntegrationTest {
         body.put("branch_id", hq);
         body.put("screen", "buy");
         body.put("kind", "unit");
-        body.put("message", "You usually buy this in rolls; you entered 200 metres. Is that right?");
         body.put("entered_qty", "200");
-        body.put("entered_unit", "metre");
         body.put("median_qty", "350");
         ResponseEntity<JsonNode> r = api.post("/entry-warnings/confirmations", body, STOREKEEPER);
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.NO_CONTENT);
         Map<String, Object> row =
                 TestDatabase.owner().sql("""
                         SELECT entity_id, branch_id, data -> 'after' ->> 'kind' AS kind, data -> 'after' ->> 'screen' AS screen,
-                               data -> 'after' ->> 'entered_qty' AS qty
+                               data -> 'after' ->> 'entered_qty' AS qty,
+                               (data -> 'after' -> 'message') IS NOT NULL AS has_text
                           FROM audit_log WHERE tenant_id = ? AND action = 'retail.entry_warning.confirmed'
                         """).params(t.tenantId()).query().singleRow();
         assertThat(row.get("entity_id")).isEqualTo(cable);
@@ -338,6 +367,14 @@ class EntryChecksIT extends IntegrationTest {
                 .containsEntry("kind", "unit")
                 .containsEntry("screen", "buy")
                 .containsEntry("qty", "200");
+        // The warning's kind and its numbers only: no text from the client is stored.
+        assertThat(row).containsEntry("has_text", false);
+        Map<String, Object> words = new LinkedHashMap<>(body);
+        words.put("entered_qty", "two hundred, says the boss");
+        assertThat(api.post("/entry-warnings/confirmations", words, STOREKEEPER)
+                        .getStatusCode()
+                        .is4xxClientError())
+                .isTrue();
 
         body.put("kind", "mood");
         assertThat(api.post("/entry-warnings/confirmations", body, STOREKEEPER)

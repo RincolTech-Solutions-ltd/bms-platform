@@ -172,7 +172,7 @@ function CountSheet({ branchId }: { branchId: string }) {
     const usual = here > 0 ? { product_id: id, unit: row.unit, quantity_factor: norms(id)?.quantity_factor ?? 10 } : norms(id);
     return entryWarnings(usual, { screen: 'count', product, lineKey: id, qtyMilli: parseCount(v), qtyFieldId: `count-${id}`, recordedMilli: here });
   });
-  const entry = useEntryChecks('count', branchId, warnings, () => review.mutate());
+  const entry = useEntryChecks('count', branchId, warnings, () => review.mutate(), counts);
   const commit = useMutation({
     mutationFn: () => retail.commitStocktake(draft?.id ?? ''),
     onSuccess: (st) => {

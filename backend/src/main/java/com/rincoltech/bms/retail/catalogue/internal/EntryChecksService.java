@@ -3,6 +3,7 @@ package com.rincoltech.bms.retail.catalogue.internal;
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
+import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.internal.EntryChecksApi.CategoryHint;
 import com.rincoltech.bms.retail.catalogue.internal.EntryChecksApi.Confirmation;
@@ -52,6 +53,7 @@ class EntryChecksService {
     static final int MOST_WORDS = 6;
     static final int CANDIDATES = 200;
     static final int NAME_READ = 200;
+    static final String ALL_SELLERS = "retail.sale.all_sellers";
 
     private final EntryChecksRepository repo;
     private final AuditLog audit;
@@ -67,8 +69,12 @@ class EntryChecksService {
         if (unit == null) {
             throw ApiException.notFound();
         }
-        boolean prices = RetailCatalogue.maySeePrices(CurrentPrincipal.require());
-        LastSale last = prices ? repo.lastSale(productId) : null;
+        Principal principal = CurrentPrincipal.require();
+        boolean prices = RetailCatalogue.maySeePrices(principal);
+        // ADR-055: a seller who sees only their own figures gets the last price of their own sales, never another
+        // seller's.
+        UUID ownOnly = principal.hasPermission(ALL_SELLERS) ? null : principal.userId();
+        LastSale last = prices ? repo.lastSale(productId, ownOnly) : null;
         return new EntryNorms(
                 productId,
                 unit,
@@ -252,9 +258,8 @@ class EntryChecksService {
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("screen", c.screen());
         after.put("kind", c.kind());
-        after.put("message", c.message().strip());
         putIf(after, "entered_qty", c.enteredQty());
-        putIf(after, "entered_unit", c.enteredUnit());
+        putIf(after, "entered_unit_id", c.enteredUnitId());
         putIf(after, "median_qty", c.medianQty());
         putIf(after, "entered_price_minor", c.enteredPriceMinor());
         putIf(after, "last_price_minor", c.lastPriceMinor());

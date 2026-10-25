@@ -11836,7 +11836,7 @@
         "required" : [ "prefix" ]
       },
       "RetailEntryConfirmation" : {
-        "description" : "Issue #353: the person saw an entry warning and chose Confirm. Recorded in the audit log, never a refusal and never needed to save",
+        "description" : "Issue #353: the person confirmed an entry warning and the save it went with succeeded. Recorded in the audit log as the warning's kind and its numbers (no free text), never needed to save",
         "properties" : {
           "branch_id" : {
             "format" : "uuid",
@@ -11850,13 +11850,12 @@
           "entered_qty" : {
             "description" : "The quantity entered, in the unit entered",
             "example" : "200",
-            "maxLength" : 40,
-            "minLength" : 0,
+            "pattern" : "\\d{1,11}(\\.\\d{1,3})?",
             "type" : "string"
           },
-          "entered_unit" : {
-            "maxLength" : 40,
-            "minLength" : 0,
+          "entered_unit_id" : {
+            "description" : "The pack unit entered; absent for the item's own unit",
+            "format" : "uuid",
             "type" : "string"
           },
           "kind" : {
@@ -11869,15 +11868,8 @@
             "type" : "integer"
           },
           "median_qty" : {
-            "description" : "The median it was compared with, in base units",
-            "maxLength" : 40,
-            "minLength" : 0,
-            "type" : "string"
-          },
-          "message" : {
-            "description" : "The warning as the person read it",
-            "maxLength" : 300,
-            "minLength" : 1,
+            "description" : "What it was compared with, in base units: the median, or on Count stock what the records hold",
+            "pattern" : "\\d{1,11}(\\.\\d{1,3})?",
             "type" : "string"
           },
           "product_id" : {
@@ -11889,7 +11881,7 @@
             "type" : "string"
           }
         },
-        "required" : [ "kind", "message", "product_id", "screen" ]
+        "required" : [ "kind", "product_id", "screen" ]
       },
       "RetailEntryNorms" : {
         "description" : "Issue #353, ADR-093: the item's recent history the entry screens warn against: Buy stock, Sell, Move stock and Count stock call this once per item. The thresholds are sent so the screens use the server's",

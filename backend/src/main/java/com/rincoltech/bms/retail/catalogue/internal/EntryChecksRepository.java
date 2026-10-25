@@ -52,6 +52,9 @@ class EntryChecksRepository {
              LIMIT :limit
             """;
 
+    /** How many of the item's newest sale lines a seller's own last price is looked for in. */
+    static final int OWN_SALE_WINDOW = 200;
+
     private final JdbcClient jdbc;
 
     EntryChecksRepository(JdbcClient jdbc) {
@@ -99,15 +102,25 @@ class EntryChecksRepository {
                 .list();
     }
 
-    LastSale lastSale(UUID productId) {
+    /**
+     * The item's last completed sale; with {@code sellerId}, the last of that seller's own among the item's newest
+     * {@link #OWN_SALE_WINDOW} lines (ADR-055: a seller who sees only their own figures), so the read stays bounded.
+     */
+    LastSale lastSale(UUID productId, UUID sellerId) {
         return jdbc.sql("""
-                        SELECT l.line_total_minor, l.qty, s.sale_date
-                          FROM retail_sale_lines l JOIN retail_sales s ON s.id = l.sale_id
-                         WHERE l.product_id = :p AND s.status = 'completed'
-                         ORDER BY l.created_at DESC, l.id DESC
+                        SELECT r.line_total_minor, r.qty, r.sale_date
+                          FROM (SELECT l.line_total_minor, l.qty, s.sale_date, s.created_by, l.created_at, l.id
+                                  FROM retail_sale_lines l JOIN retail_sales s ON s.id = l.sale_id
+                                 WHERE l.product_id = :p AND s.status = 'completed'
+                                 ORDER BY l.created_at DESC, l.id DESC
+                                 LIMIT :window) r
+                         WHERE CAST(:seller AS uuid) IS NULL OR r.created_by = CAST(:seller AS uuid)
+                         ORDER BY r.created_at DESC, r.id DESC
                          LIMIT 1
                         """)
                 .param("p", productId)
+                .param("seller", sellerId)
+                .param("window", sellerId == null ? 1 : OWN_SALE_WINDOW)
                 .query((rs, n) -> new LastSale(
                         rs.getLong("line_total_minor"),
                         rs.getBigDecimal("qty"),
