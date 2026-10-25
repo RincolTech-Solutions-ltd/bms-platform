@@ -121,10 +121,13 @@ export function staffMenu(me: Me, { sells, counts = {} }: { sells: boolean; coun
   return groups.map((g) => ({ ...g, links: g.links.filter((l): l is MenuLink => l !== false) }));
 }
 
-/** The pages of the menu's footer that are links; Help and feedback there opens the Help sheet, whose Send feedback is a page. */
+/**
+ * The pages of the menu's footer. The menu draws Notifications; Help and feedback there is a button that opens the Help sheet, whose
+ * Send feedback opens the Feedback page, so the More page lists Feedback itself and the More tab answers for its tour anchor.
+ */
 export const FOOT_LINKS: MenuLink[] = [
   { to: '/staff/notifications', label: 'Notifications', icon: icons.bell, tour: 'nav-notifications' },
-  { to: '/staff/feedback', label: 'Feedback', icon: icons.chat },
+  { to: '/staff/feedback', label: 'Feedback', icon: icons.chat, tour: 'nav-feedback' },
 ];
 
 /**

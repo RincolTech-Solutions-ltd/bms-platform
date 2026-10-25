@@ -43,7 +43,7 @@ const notifications: TourStep = {
   id: 'notifications',
   target: 'nav-notifications',
   title: 'Install the app and get notifications',
-  body: 'Tap Notifications to install BMS on your phone. On a phone it is under More. There you can also turn on a notice for when something needs you, such as an approval.',
+  body: 'Tap Notifications at the bottom of the menu to install BMS on your phone. On a phone the menu is the button at the top left. There you can also turn on a notice for when something needs you, such as an approval.',
 };
 
 // Feedback (issue #447): every member of staff can tell the BMS team an idea, a problem or a question.
@@ -51,7 +51,7 @@ const feedback: TourStep = {
   id: 'feedback',
   target: 'nav-feedback',
   title: 'Tell us what you think',
-  body: 'Tap Feedback to send the BMS team an idea, a problem or a question. Add a picture of the screen if it helps. You see our reply there too. On a phone it is under More, and under Help.',
+  body: 'Tap Help and feedback at the bottom of the menu, then Send feedback, to send the BMS team an idea, a problem or a question. Add a picture of the screen if it helps. You see our reply there too.',
 };
 
 const insights: TourStep = {
@@ -141,7 +141,8 @@ export const adminWelcome: Tour = {
   // Version 21 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
   // Version 22 adds the Find any screen step (issue #551): the Search button at the top.
   // Version 23 puts Help, Refresh and Light or dark in the one menu of the top bar, and the branch in its title (issue #526).
-  version: 23,
+  // Version 24 words the menu, Notifications and Feedback steps for the grouped menu and its footer (issue #564).
+  version: 24,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -219,7 +220,7 @@ export const adminWelcome: Tour = {
       id: 'modules',
       target: 'nav-areas',
       title: 'Your modules',
-      body: 'Each part of the business you use has its own item in the menu, like Retail or Lending. On a phone, tap More at the bottom. To add or remove one, contact us.',
+      body: 'The menu groups your pages under Today, Stock, Money and Business, with Lending when you use it. On a phone, tap the menu button at the top left. To add or remove a module, contact us.',
     },
     {
       id: 'billing',
@@ -408,7 +409,8 @@ export const retailSales: Tour = {
   // Version 18 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
   // Version 19 adds the Find any screen step (issue #551): the Search button at the top.
   // Version 20 puts Help, Refresh and Light or dark in the one menu of the top bar, and the branch in its title (issue #526).
-  version: 20,
+  // Version 21 words the menu, Notifications and Feedback steps for the grouped menu and its footer (issue #564).
+  version: 21,
   title: 'Selling tour',
   audience: isSeller,
   autoStart: true,
@@ -566,8 +568,8 @@ export const retailSales: Tour = {
       target: 'retail-nav',
       module: 'retail',
       optional: true,
-      title: 'Shortcuts',
-      body: 'Your most used retail pages are listed under Retail in the menu. On a phone they are the tabs at the bottom: Sell, My stock, Buy and Money.',
+      title: 'The menu',
+      body: 'Sell and Orders are under Today in the menu, and your stock pages under Stock. On a phone the tabs at the bottom hold Sell, My stock, Buy and Money, and the menu button at the top left has the rest.',
     },
     search,
     notifications,
@@ -585,7 +587,8 @@ export const staffWelcome: Tour = {
   // Version 7 adds the bottom tabs step (issue #539) and words the phone steps for the tabs and More.
   // Version 8 adds the Find any screen step (issue #551): the Search button at the top.
   // Version 9 puts Help, Refresh and Light or dark in the one menu of the top bar, and the branch in its title (issue #526).
-  version: 9,
+  // Version 10 points the shop step at Today in the grouped menu and words Notifications and Feedback for its footer (issue #564).
+  version: 10,
   title: 'Welcome tour',
   audience: (me) => !isTenantAdmin(me) && !isSeller(me),
   autoStart: true,
@@ -619,11 +622,11 @@ export const staffWelcome: Tour = {
     },
     {
       id: 'retail',
-      target: 'nav-retail',
+      target: 'retail-nav',
       module: 'retail',
       optional: true,
-      title: 'Retail',
-      body: 'Sales and stock live here.',
+      title: 'Your shop',
+      body: 'Sell and Orders are under Today in the menu, and your stock pages under Stock.',
     },
     search,
     notifications,
