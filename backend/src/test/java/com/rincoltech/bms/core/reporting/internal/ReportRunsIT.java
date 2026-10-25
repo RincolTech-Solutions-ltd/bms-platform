@@ -420,15 +420,11 @@ class ReportRunsIT extends ReportsItSupport {
     }
 
     // JUSTIFICATION-A3: new cases for the order of the repeat check and the limit, and for the limit under concurrent
-    // requests.
-    // Issue #267: a repeat finds the first run only while it is open, and a runner of another cached context once
-    // claimed
-    // and finished it first, so the repeat met the limit. Beyond IntegrationTest's switch (#285), another user's run
-    // holds
-    // the tenant's one running place with a heartbeat that never goes stale, so no runner on any clock can start or
-    // sweep
-    // this user's runs before the repeat (closeOpenRuns cancels it).
-    // JUSTIFICATION-A3: the fixture row is the fix; it is inline because only this test needs the place held.
+    // requests. Issue #267: a repeat finds the first run only while it is open, and a runner of another cached
+    // context once claimed and finished it first, so the repeat met the limit. Beyond IntegrationTest's switch
+    // (#285), another user's run holds the tenant's one running place with a heartbeat that never goes stale, so no
+    // runner on any clock can start or sweep this user's runs before the repeat (closeOpenRuns cancels every open
+    // run, whoever asked for it).
     @Test
     void anIdenticalRepeatPastTheLimitGetsTheExistingRunNotA429() {
         TestDatabase.Fixture t = tenant(true);
@@ -453,10 +449,9 @@ class ReportRunsIT extends ReportsItSupport {
             }
         }
         // The eleventh distinct request is refused; a repeat of the first is answered with the first.
-        assertThat(post(t, user, PORTFOLIO, "test.rows", Map.of("n", 11), "json")
-                        .getStatusCode()
-                        .value())
-                .isEqualTo(429);
+        ResponseEntity<JsonNode> eleventh = post(t, user, PORTFOLIO, "test.rows", Map.of("n", 11), "json");
+        assertThat(eleventh.getStatusCode().value()).isEqualTo(429);
+        assertThat(eleventh.getBody().get("code").asString()).isEqualTo("rate_limited");
         ResponseEntity<JsonNode> again = post(t, user, PORTFOLIO, "test.rows", Map.of("n", 1), "json");
         assertThat(again.getStatusCode().value()).as("%s", again.getBody()).isEqualTo(200);
         assertThat(again.getBody().get("id").asString()).isEqualTo(first);
