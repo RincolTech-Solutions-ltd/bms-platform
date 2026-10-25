@@ -8,6 +8,8 @@ interface ImportMetaEnv {
   readonly VITE_RETAIL_MOCK?: string;
   // With the mock on: "sales" or "admin" (default) decides which permissions the fake session holds.
   readonly VITE_RETAIL_MOCK_ROLE?: string;
+  // With the mock on: action types that wait for an administrator, comma separated (issue #343), e.g. "retail_sale_void".
+  readonly VITE_RETAIL_MOCK_APPROVALS?: string;
 }
 
 interface ImportMeta {
