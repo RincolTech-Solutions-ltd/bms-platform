@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AdminBranch } from '../../../api/branches';
-import { branchLine, canManageBranches, closedCount, closedOn, isClosed, keepsGoods, sellsGoods, showBranches, stockValueWords, visibleBranches } from './state';
+import { KIND_FLAGS, addedWords, branchLine, canManageBranches, codeProblem, closedCount, closedOn, isClosed, keepsGoods, sellsGoods, showBranches, stockValueWords, visibleBranches } from './state';
 
 const open: AdminBranch = { id: 'a', code: 'KLA', name: 'Test Shop', status: 'active' };
 const closed: AdminBranch = { id: 'b', code: 'OLD', name: 'Test Old', status: 'inactive', closed_at: '2026-08-14T10:00:00Z' };
@@ -47,5 +47,29 @@ describe('the Branches rules (#329)', () => {
     expect(stockValueWords({ currency: 'UGX', stockValueMinor: 1250000 })).toBe('UGX 1,250,000');
     expect(stockValueWords({ currency: 'XXX', stockValueMinor: 5 })).toBeNull();
     expect(stockValueWords(undefined)).toBeNull();
+  });
+});
+
+describe('adding a branch (#581)', () => {
+  it('sends each kind as the two flags, and never a store that keeps no goods', () => {
+    expect(KIND_FLAGS.shop).toEqual({ sells_goods: true, stocks_goods: true });
+    expect(KIND_FLAGS.store).toEqual({ sells_goods: false, stocks_goods: true });
+    expect(KIND_FLAGS.office).toEqual({ sells_goods: true, stocks_goods: false });
+    for (const flags of Object.values(KIND_FLAGS)) expect(flags.sells_goods || flags.stocks_goods).toBe(true);
+  });
+
+  it('takes an empty code (the app makes one) or 2 to 10 capitals and digits', () => {
+    expect(codeProblem('')).toBeNull();
+    expect(codeProblem('  ')).toBeNull();
+    expect(codeProblem('GAYAZA2')).toBeNull();
+    expect(codeProblem('G')).toBe('Use 2 to 10 letters or digits, no spaces.');
+    expect(codeProblem('G A')).not.toBeNull();
+    expect(codeProblem('ABCDEFGHIJK')).not.toBeNull();
+  });
+
+  it('says in the toast what was added', () => {
+    expect(addedWords({ ...open, name: 'Test Gayaza Store', sells_goods: false })).toBe('Test Gayaza Store added. It is a store: it keeps stock and does not sell.');
+    expect(addedWords({ ...open, stocks_goods: false })).toBe('Test Shop added. It keeps no goods, like a head office.');
+    expect(addedWords(open)).toBe('Test Shop added. It is a shop: it keeps stock and sells.');
   });
 });

@@ -1,0 +1,56 @@
+# ADR-089: Add a branch from the app as a shop, a store or a head office
+
+## Status
+
+Proposed (2026-10-25, issue #581; the owner and the pilot tenant asked for it on 25 October 2026, the ADR is not yet accepted).
+Amends ADR-041 and ADR-048. No migration.
+
+## Context
+
+The pilot tenant wants many stores and many shops. The server has created branches since FR-BR-01 (`POST /branches`,
+`core.branches.manage`, the plan's `max_branches` checked first), and ADR-048 let that call make a Store with `sells_goods`
+false. No screen called it, so a business could not add a branch without the operator. Two gaps stood in the way of a plain
+form: the code was required (2 to 10 capital letters or digits), which a shopkeeper should not have to invent, and a branch
+that keeps no goods (ADR-041, a head office) could only be made as a shop and then switched, in two calls.
+
+## Decision
+
+- **One form on the Branches screen**, "Add a branch", for whoever holds `core.branches.manage`: the name (needed), a code
+  (optional), What is it? as one segmented control with Shop (sells), Store (keeps stock, does not sell) and Head office (keeps
+  no goods), and where it is (the existing `location`). The API takes no phone, so the form asks for none.
+- **The kind is sent as the two flags.** Shop is `sells_goods` true and `stocks_goods` true; Store is `sells_goods` false and
+  `stocks_goods` true; Head office is `stocks_goods` false. `POST /branches` now takes `stocks_goods` beside `sells_goods`, both
+  optional and true when omitted, and refuses both false with 422 `store_must_stock` before writing, as the PATCH does. The words
+  "head office" in the form name a branch that keeps no goods; the one `is_head_office` branch of each business is unchanged.
+- **The code is made on the server when none is typed**: the letters and digits of the name in capitals, at most six, and a
+  number after them when that code is taken in the business (Kasubi Store is KASUBI, a second Kasubi branch KASUBI2). A name with
+  fewer than two such characters starts from BR. Typing a code stays allowed, because the code is printed in document and
+  credit note numbers (`INV-HQ-000001`) and an owner may want a known one; a typed code that is taken is refused with 409
+  `duplicate_branch_code` as before. The insert uses `ON CONFLICT (tenant_id, code) DO NOTHING`, so two adds at the same moment
+  that make the same code end in the same 409, never a 500.
+- **The rules apply from creation.** A Store refuses a sale with `branch_does_not_sell` and a branch that keeps no goods with
+  `branch_not_stocking` from the moment it exists, through the existing server checks (ADR-041, ADR-048); nothing new is
+  enforced. A store becomes a shop and a store again through `PATCH /branches/{id}` as before.
+- **The plan limit is said in plain words.** On `plan_limit_reached` the form says the plan has no room for another branch,
+  with a link to Plan and billing for whoever holds `core.billing.read`, and "Ask the owner to change the plan" for others. The
+  server's detail, which names `max_branches`, is never shown.
+- **Every list follows at once.** A dark toast names the branch and what it is ("Gayaza Store added. It is a store: it keeps
+  stock and does not sell."), and the screen reads `/me`, the branch list and the retail queries again, so the branch picker,
+  Move stock and the stock lists carry it without a reload.
+- **Permission: the existing `core.branches.manage`.** No permission is added.
+
+## Consequences
+
+**Better:**
+- An owner adds a shop, a store or a head office in one step, with no code to invent, and the kind cannot be left half set.
+- A store or a head office never exists, even for a moment, as a shop that sells.
+
+**Worse:**
+- A made code can be less telling than a typed one (two branches of one town are KASUBI and KASUBI2), and the code never changes
+  after creation.
+- The form's "Head office" is a branch that keeps no goods, not the one head office of the business; the list keeps the Head
+  office badge for that one only.
+
+**Watch for:**
+- A plan raised by the operator is read on the next add; nothing caches the limit.
+- Many branches of one name make longer codes; the suffix stays within the 10 characters of the check.
