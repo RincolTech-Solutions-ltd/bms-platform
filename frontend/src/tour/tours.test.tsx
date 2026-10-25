@@ -52,6 +52,7 @@ import { ReferralsPage } from '../areas/staff/referrals/page';
 import { BusinessNotificationsScreen } from '../areas/staff/notifications/business';
 import { BillingScreen } from '../areas/staff/billing/page';
 import { TwoStepPolicyScreen } from '../areas/staff/two-step/page';
+import { ApprovalRulesScreen } from '../areas/staff/approval-rules/page';
 import { UsersScreen } from '../areas/staff/users/page';
 import { FEATURES, type Tour, stepsFor } from './model';
 import { CORE_TOURS, TOURS, tabNamesFor } from './tours';
@@ -106,6 +107,8 @@ function screen(path: string | undefined): ReactElement {
       return <ReferralsPage />;
     case '/staff/setup/two-step':
       return <TwoStepPolicyScreen />;
+    case '/staff/setup/approvals':
+      return <ApprovalRulesScreen />;
     case '/staff/setup/notifications':
       return <BusinessNotificationsScreen />;
     case '/staff/setup/billing':
@@ -206,6 +209,11 @@ function render(me: Me, path: string | undefined): string {
     plan_code: 'test', plan_name: 'Test Plan', currency: 'UGX', monthly_minor: 10000, annual_months: 11, annual_minor: 110000,
     state: 'active', paid_until: '2026-11-30', grace_days: 7, how_to_pay: 'Test: pay to the test account',
     payments: [{ id: 'p1', amount_minor: 10000, currency: 'UGX', method: 'mtn_momo', paid_on: '2026-11-01', months: 1, period_start: '2026-11-01', period_end: '2026-11-30', receipt_no: 'RT-2026-000001' }],
+  });
+  // What the approval rules read (issue #343): one rule, so the page and its save button are in the static markup.
+  client.setQueryData(['approval-rules'], {
+    currency: 'UGX', version: 1,
+    rules: [{ action_type: 'retail_sale_void', module: 'retail', label: 'Sale voids', has_amount: true, switchable: true, on: false, threshold_minor: 0 }],
   });
   // What the retail settings screens read, so their targets are in the static markup.
   client.setQueryData(['retail', 'capabilities'], { capabilities: { profile: 'shop' }, version: 1 });
@@ -310,6 +318,7 @@ const AUDIENCE: Record<string, Me[]> = {
   'page-feedback': [ADMIN, CASHIER],
   'page-referrals': [REFERRER],
   'page-two-step': [ADMIN],
+  'page-approval-rules': [ADMIN],
   'page-business-notifications': [ADMIN],
   'page-billing': [ADMIN],
   'page-members': [CLERK, OFFICER],
