@@ -116,6 +116,9 @@ class AddBranchIT extends IntegrationTest {
             assertThat(waiting)
                     .as("every call waits on the branch lock before it counts")
                     .isEqualTo(calls.size());
+            // And they stay held: none of them has answered while the lock is ours.
+            Thread.sleep(1_500);
+            assertThat(sent).as("no call answers while the branch lock is held").noneMatch(Future::isDone);
             try (PreparedStatement unlock =
                     held.prepareStatement("SELECT pg_advisory_unlock(hashtextextended(? || ':core.branch.open', 0))")) {
                 unlock.setString(1, t.tenantId().toString());
@@ -311,6 +314,73 @@ class AddBranchIT extends IntegrationTest {
                         .query(Long.class)
                         .single())
                 .isEqualTo(3);
+    }
+
+    /**
+     * The same closed branch reopened twice with the same If-Match: once at a time the second gets a plain 409, and at the same
+     * moment the second waits on the branch row, then finds it open; either way it opens once, with one audit row.
+     */
+    @Test
+    void reopeningOneBranchTwiceOpensItOnce() throws Exception {
+        UUID shut = UUID.randomUUID();
+        TestDatabase.owner().sql("""
+                        INSERT INTO branches (id, tenant_id, code, name, status, closed_at)
+                        VALUES (?, ?, 'SHUTX', 'Test Shut Shop X', 'inactive', now())
+                        """).params(shut, t.tenantId()).update();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        List<ResponseEntity<JsonNode>> answers = new ArrayList<>();
+        try (Connection held = TestDatabase.ownerDataSource().getConnection()) {
+            try (PreparedStatement lock =
+                    held.prepareStatement("SELECT pg_advisory_lock(hashtextextended(? || ':core.branch.open', 0))")) {
+                lock.setString(1, t.tenantId().toString());
+                lock.execute();
+            }
+            List<Future<ResponseEntity<JsonNode>>> sent =
+                    List.of(pool.submit(reopening(shut)), pool.submit(reopening(shut)));
+            // One holds the branch row and waits on the business lock; the other waits on the row.
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            long waiting = 0;
+            while (waiting < 2 && System.nanoTime() < deadline) {
+                waiting = TestDatabase.owner().sql("""
+                                SELECT count(DISTINCT pid) FROM pg_locks WHERE NOT granted
+                                """).query(Long.class).single();
+                if (waiting < 2) Thread.sleep(50);
+            }
+            assertThat(waiting).as("both reopens are held").isEqualTo(2);
+            try (PreparedStatement unlock =
+                    held.prepareStatement("SELECT pg_advisory_unlock(hashtextextended(? || ':core.branch.open', 0))")) {
+                unlock.setString(1, t.tenantId().toString());
+                unlock.execute();
+            }
+            for (Future<ResponseEntity<JsonNode>> f : sent) answers.add(f.get(30, TimeUnit.SECONDS));
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(answers.stream().filter(r -> r.getStatusCode() == HttpStatus.OK))
+                .as("%s", answers)
+                .hasSize(1);
+        ResponseEntity<JsonNode> second = answers.stream()
+                .filter(r -> r.getStatusCode() != HttpStatus.OK)
+                .findFirst()
+                .orElseThrow();
+        assertThat(second.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(code(second)).isIn("version_conflict", "invalid_status_transition");
+        // Once at a time: the same If-Match again is a plain 409 too.
+        ResponseEntity<JsonNode> again = reopening(shut).call();
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'core.branch.reopened' AND entity_id = ?")
+                        .params(t.tenantId(), shut)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT version FROM branches WHERE id = ?")
+                        .params(shut)
+                        .query(Integer.class)
+                        .single())
+                .isEqualTo(2);
     }
 
     /** Two adds of the same name at the same moment both succeed, with different codes made from the name. */

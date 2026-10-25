@@ -35,8 +35,10 @@ that keeps no goods (ADR-041, a head office) could only be made as a shop and th
   statement after the lock). Two adds of one name at the same moment therefore also get two codes (KASUBI and KASUBI2), never
   a refusal; `ON CONFLICT` answers only a typed code that is taken, and is no substitute for the lock. `AddBranchIT` proves it without leaning on thread timing: the
   test holds the same lock on its own connection, sends two adds (or two reopens, or three adds of one name) and waits until
-  `pg_locks` shows every request blocked on it, then lets go. With room for one, exactly one wins and the other gets
-  `plan_limit_reached`. With the lock taken out of `BranchService` no request ever waits, so all three tests fail every time.
+  `pg_locks` shows every request blocked on it, checks that none has answered 1.5 seconds later, then lets go. With room for one, exactly one wins and the other gets
+  `plan_limit_reached`. With the lock taken out of `BranchService` no request ever waits, so all three tests fail every time. A reopen also
+  updates only an inactive row at the version it read, after taking the branch row `FOR UPDATE`, so the same branch reopened
+  twice at once opens once, with one audit row; the second gets a plain 409 (`reopeningOneBranchTwiceOpensItOnce`).
   **Why an advisory lock and not `SELECT ... FROM tenants ... FOR UPDATE`:** a row lock on the tenant needs the application role
   to hold UPDATE on `tenants` (it reads its own row under RLS and changes nothing there), and it would queue every other writer
   of that row, such as a settings or plan change, behind a branch add. The advisory lock names only this count, is released at
