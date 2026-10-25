@@ -124,7 +124,7 @@ The platform host and a tenant without a colour show the Rincol blue.
 | Success, error | `<StatusPanel tone="success" title="...">` | `role="status"` or `"alert"`; the title in the status colour |
 | Loading | `<BrandLoader />` for a page, `<SkeletonList />` for a list, `.loading` for a line of text, `.spinner`, `.skeleton` | Every loader names what loads in words; motion stops with `prefers-reduced-motion` |
 | Dialog | `<dialog>`, `<dialog className="sheet">`, `.dialog-actions` | Rises in over 200ms with a fading backdrop; a bottom sheet that slides up below 560px, actions full width |
-| Toast | `<Toast message tone />` and `useToast()` (`areas/staff/retail/toast.tsx`), `.toast`, `.toast-success`, `.toast-error`, `.toast-info` | A dark neutral pill (`--color-toast`, dark in both themes) with a leading check, error or info icon and no coloured edge; at the bottom of the screen, centred on the content column beside the sidebar and above the sticky sale bar, rises in, gone after 4 seconds. A status for success and info, an alert for an error, hidden where the screen already says the same |
+| Toast | `<Toast message tone />` and `useToast()` (`areas/staff/retail/toast.tsx`), `.toast`, `.toast-success`, `.toast-error`, `.toast-info` | A dark neutral pill (`--color-toast`, dark in both themes) with a leading check, error or info icon and no coloured edge; at the bottom of the screen, centred on the content column beside the sidebar and above the sticky sale bar, rises in, gone after 4 seconds. A status for success and info, an alert for an error, hidden where the screen already says the same. `useItemAdded()` (#498) is the same toast for an item going on Sell, Buy stock, Move stock or Count stock: "Added <item>, now 3" for 2.5 seconds, and the line's `.line-added` flash (`.line-card`, a tint that fades over 1.2s on `--ease-out`, a still tint gone in one step under reduced motion), picked or scanned alike |
 | Illustration | `illustrations.hero`, `.shopfront`, `.secure`, `.success`, `.error`, and the four empty ones | Decorative (`aria-hidden`), under 2 KB each, no colour attribute: `.ill-tint`, `.ill-tint-strong`, `.ill-accent`, `.ill-primary` follow the tenant colour; `.ill-surface`, `.ill-line` are neutral; `.ill-success-*`, `.ill-danger-*` stay status colours. `shopfront` is the sign-up hero for the onboarding pages of #97 to adopt |
 | iPhone install pictures | `IosSteps` in `frontend/src/install/InstallPrompt.tsx`, drawings in `src/install/ios-pictures.tsx` (#448) | One drawing of the part of Safari beside each of the four install steps (a normal tab, Share in the toolbar, Add to Home Screen and View More in the share sheet, Add at the top right): our own simple shapes, never screenshots or Apple artwork; unlike the decorative illustrations each is `role="img"` with a short `aria-label` that describes the drawing ("Picture: ..."), so a screen reader does not read the step twice; a 100 unit viewBox drawn at 104px with 11 unit labels, so they read at about 11px on a 360px phone; under 2 KB each; painted by the `.ill-*` classes plus `.ill-accent-ring` (what to tap), `.ill-thin` (the Share icon), `.ill-dashed` and `.ill-text*`; View More sits in a frame of its own under the Add to Home Screen row, since it is a second place to look, not a row seen beside it; step 2 says that on an iPad Share is at the top right; `.ios-step` keeps the words first and moves the picture under them on a narrow phone |
 | New logo on the home screen | `NewIconNote` and `NewLogoCard` in `frontend/src/install/NewIcon.tsx` (#453, ADR-066) | The note sits in the Logo fieldset of set-up after a logo or colour save while a logo is set: plain words with the home screen name, no `role="status"` (the save message already is one), and a Show me how on an iPhone button that reveals `IosSteps`. The card is a `.card` headed Your app has a new icon, in the staff area, only in the installed app on an iPhone or iPad, once per new icon version, with the business's address, `IosSteps` and a Done button; never on the first run, nor on the device that made the save. Neither names an iOS menu item: press and hold the icon, then remove it |
@@ -148,7 +148,8 @@ is a fixed sidebar; below 720px the menu button at the top left of the top bar o
 the bottom tabs for the five daily jobs stay as they are (#539, decisions D29 and D31). Where the navigation sits changes at the
 design system's phone width, `(max-width: 719px)`, read in code by `useIsPhone` (`components/side-menu.tsx`; the retail screens
 re-export it) and in CSS by the `720px` media queries. CSS custom properties cannot be used in a media query, so the number is
-the token.
+the token. Tablets from 720 to 1023px therefore keep the sidebar and get no tabs; whether decision D29 ("side menu for laptops only")
+means tablets should have the tabs too waits for the owner's sign-off (#544), and nothing changes until then.
 
 - **One list, in groups.** `staffMenu` (`areas/staff/menu.tsx`) builds the groups once with the permission checks, and both the
   sidebar and the drawer draw them with the same component (`MenuLinks`, one `MenuItemLink` per row), so the rows, icons and the
@@ -183,10 +184,14 @@ the token.
   screen, one link per tab, in this order: **Sell** (the sale screen, for `useSells`), **My stock** (the stock list, for the
   `stock` screen), **Buy** (restock, the D24 word for it, for the `restock` screen), **Money** (`/staff/money`, while
   `moneyLinks` lists a page: the cash book pages, Customers who owe, Credit control, the customer accounts and ageing pages
-  while `customer_accounts` is on, What you owe suppliers, member Savings with lending and Receive payments) and **More**
+  while `customer_accounts` is on, What you owe suppliers, Member savings with lending and Receive payments; the shop's own Savings is
+  named Shop savings there, with its own hint, so the two are told apart, #544) and **More**
   (`/staff/more`, always). A tab whose module is off or whose page the session may not use is not drawn, so the bar holds one
-  to five tabs; a business with lending only has Money (when it has a money page) and More. More lists `staffAreas` as rows,
-  under the Shop and Lending headings for a business with both, the Reports row standing for every shop page, then the shop in
+  to five tabs; a business with lending only has Money (when it has a money page) and More, or More alone. A bar holding only More
+  stays (#544): More lists the other areas and Sign out as well as the drawer does (#564). More lists `staffAreas` as rows; for a
+  business with both modules the areas before the first one of a module (Home) come first, then the Shop and Lending headings
+  with the rows of each module in menu order, then the other shared areas under Business; the Reports row stands for every shop
+  page; then the shop in
   use (`CurrentShop`), the person's name and Sign out (the staff layout passes `signOut` and `signingOut` in `StaffContext`).
   Each tab is an icon above its label on a target 64px tall and at least 48px wide; the current one (`aria-current="page"`, on
   its page and the pages under it, such as Count under My stock) takes `--color-link`, a semibold label and a tinted pill
@@ -196,12 +201,15 @@ the token.
   number is `aria-hidden` and the link says ", 3 items low on stock" after its label. No other tab has a badge. The bar pads itself
   with `env(safe-area-inset-bottom)`, `-left` and `-right`; while it shows, the root has `has-tab-bar` and `--tab-bar`, the bar's
   measured height (a `ResizeObserver`, as the sale bar measures `--bottom-bar`, so a large font or text zoom is counted; the CSS
-  value, 64px and the hairline plus the bottom inset, is only the first paint's). The body ends that far up, the sale bar and the
-  member form's save bar stick at `bottom: var(--tab-bar)` so they sit on top of the tabs and never under them, and a toast rises
-  above both. The bar steps aside only while the soft keyboard is up: a text field has focus and `visualViewport` is more than
+  value, `--tab-height` and the hairline plus the bottom inset, is only the first paint's). Every size of the bar is a token derived from `--tap`, `--space-*` and `--text-xs` (`--tab-height` 64px, `--tab-pill-width` 56px, `--tab-pill-height` 32px, `--tab-gap` 2px, `--tab-badge` 18px at the default font size, in `theme.css`, #544), and the badge's number is `--color-on-danger` on `--color-danger-fill`, its text growing with the font size up to 16px (`--tab-badge-text`) so it never covers the icon. `frontend/layout/tabs.layout.test.ts` (`npm run test:layout`, Chromium through Playwright, a CI step) lays the bar out at 360 and 412 wide, with a 34px home indicator inset simulated, at the default and double font size: five tabs of at least 48px that never overlap, each label under its icon, the badge off the next tab, the bar on the inset, the action bar on top of it and the page ending above both, and no sideways scroll. The body ends that far up, the sale bar and the
+  member form's save bar stick at `bottom: var(--tab-bar-offset)` (the bar's height) so they sit on top of the tabs and never under them, and a toast rises
+  above both. The bar steps aside only while the soft keyboard is up: a text field (an input that types, a textarea, or a `contenteditable` that is not `"false"`, so `""` and `"plaintext-only"` count, #544) has focus and `visualViewport` is more than
   150px shorter than the window, its height multiplied by its scale so a pinch zoom is not a keyboard. Under `interactive-widget=resizes-content` (Android) the window shrinks with the viewport and the bar stays, which is accepted. A field that only has focus (a page that focuses its Scan box, a barcode scanner or a Bluetooth
   keyboard) leaves it in place, and a browser without `visualViewport` never hides it. While aside it stays mounted with `hidden`,
-  so its read is not asked again. The staff bar has the menu button at its left on a phone (#564) and no Sell button; Sign out
+  so its read is not asked again, and the root keeps `has-tab-bar` and the measured `--tab-bar`, so the body keeps its padding and
+  the page does not get shorter under the field while the keyboard opens; the root takes `tab-bar-aside`, which only drops
+  `--tab-bar-offset` to 0 so the sticky bars sit at the bottom (#544). A test fails if `index.html` ever sets
+  `interactive-widget=resizes-content`. The staff bar has the menu button at its left on a phone (#564) and no Sell button; Sign out
   stays in its one menu while two-step set-up blocks the page (`signOutInBar`), since the tabs and More are not drawn then.
 - **Below 720px, the drawer** (`SideMenu`): a menu button (`.menu-button`, the `menu` icon, `aria-label="Menu"`) at the top
   left of the bar opens the list in a drawer from the left: 85% of the width, at most 320px, over a dimmed backdrop
@@ -223,7 +231,9 @@ the token.
   `nav-users`, `nav-retail` (Reports of a shop), `nav-notifications` and `nav-feedback` (the foot). A step that points at one
   opens the drawer at once, without animation and without taking focus from the tour card. The More tab still carries
   `data-tour-also` for them (#539); the tour host prefers the element with the id itself, so on a phone the drawer answers.
-  The copy says "On a phone, tap the menu button at the top left".
+  The welcome tours have a `tabs` step on `data-tour="tab-bar"`, skipped on a laptop, worded for the tabs the person has
+  (`bodyFor` on a step, `tabNamesFor` in `tour/tours.ts`, which a test holds to `staffTabs`; #544). The menu copy says "On a
+  phone, tap the menu button at the top left".
 - **One icon per item (#483):** no two items of one menu draw the same picture, and the same item keeps its icon wherever it
   shows: a shop row and its tile on the Retail page both read `icons[screen]`. Today: Sell `sale`, Orders `orders`, Approvals
   `approve`; Stock: My stock `stock`, Buy stock `restock`, Count stock `stocktake`, Move stock `transfer`, Items and categories
@@ -292,6 +302,7 @@ Token pairs (light, dark). Every text role is 4.5:1 or more on its surface in bo
 | `--color-success` / `-tint` | `#067647` / `#ecfdf3` | `#47cd89` / `#0f2c1e` |
 | `--color-warning` / `-tint` | `#b54708` / `#fffaeb` | `#fdb022` / `#352509` |
 | `--color-danger-fill` (destructive button, white text) | `#b42318` | `#d92d20` |
+| `--color-on-danger` (text on the danger fill: the tab badge, #544) | `#ffffff` | `#ffffff` |
 | `--color-neutral-tint` (disabled, neutral badge, skeleton, hairline) | `#eeeeee` | `#222c39` |
 | `--color-hover` (button hover) | `#f5f7f9` | `#1b2430` |
 | `--color-inverse` / `--color-on-inverse` (toast, chart read-out) | `#1d2939` / `#ffffff` | `#e8edf3` / `#0e141b` |
