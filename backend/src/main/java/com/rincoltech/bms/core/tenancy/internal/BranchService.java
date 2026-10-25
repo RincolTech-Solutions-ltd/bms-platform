@@ -125,30 +125,64 @@ class BranchService implements BranchProvisioning {
                 .query(Long.class)
                 .single();
         planLimits.checkRoomFor(PlanLimits.MAX_BRANCHES, active);
-        boolean codeTaken = jdbc.sql("SELECT count(*) FROM branches WHERE code = ?")
-                        .param(request.code())
-                        .query(Long.class)
-                        .single()
-                > 0;
-        if (codeTaken) {
+        boolean sells = request.sellsGoods() == null || request.sellsGoods();
+        boolean stocks = request.stocksGoods() == null || request.stocksGoods();
+        if (!sells && !stocks) {
+            throw ApiException.rule(
+                    "store_must_stock",
+                    "A Store holds stock, so it cannot also be a branch that keeps no goods. Make it a shop that sells,"
+                            + " or let it keep goods.");
+        }
+        String code = request.code() == null ? codeFrom(request.name()) : request.code();
+        UUID id = UUID.randomUUID();
+        // A code taken in between, by a second add at the same moment, is refused like a typed one, never a 500.
+        int inserted = jdbc.sql("""
+                        INSERT INTO branches (id, tenant_id, code, name, location, sells_goods, stocks_goods)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
+                        ON CONFLICT (tenant_id, code) DO NOTHING
+                        """)
+                .params(id, code, request.name().trim(), request.location(), sells, stocks)
+                .update();
+        if (inserted == 0) {
             throw new ApiException(
                     HttpStatus.CONFLICT, "duplicate_branch_code", "Duplicate branch code", "The code is in use.");
         }
-        UUID id = UUID.randomUUID();
-        boolean sells = request.sellsGoods() == null || request.sellsGoods();
-        jdbc.sql("""
-                        INSERT INTO branches (id, tenant_id, code, name, location, sells_goods)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?)
-                        """)
-                .params(id, request.code(), request.name().trim(), request.location(), sells)
-                .update();
         Map<String, Object> after = new LinkedHashMap<>();
-        after.put("code", request.code());
+        after.put("code", code);
         after.put("sells_goods", sells);
+        after.put("stocks_goods", stocks);
         after.put("name", request.name().trim());
         after.put("location", request.location());
         audit.record(AuditLog.Entry.created("core.branch.created", "core.branch", id, id, after));
         return find(id).orElseThrow();
+    }
+
+    private boolean codeTaken(String code) {
+        return jdbc.sql("SELECT count(*) FROM branches WHERE code = ?")
+                        .param(code)
+                        .query(Long.class)
+                        .single()
+                > 0;
+    }
+
+    /**
+     * A code made from the name when none is typed (issue #581, ADR-089): its letters and digits in capitals, at most six, and
+     * a number after them when that is taken ("Gayaza Store" is GAYAZA, a second Gayaza branch GAYAZA2). A name with fewer than
+     * two such characters starts from BR.
+     */
+    private String codeFrom(String name) {
+        String base = name.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "");
+        base = base.length() < 2 ? "BR" : base.substring(0, Math.min(6, base.length()));
+        if (!codeTaken(base)) {
+            return base;
+        }
+        for (int n = 2; ; n++) {
+            String suffix = String.valueOf(n);
+            String code = base.substring(0, Math.min(base.length(), 10 - suffix.length())) + suffix;
+            if (!codeTaken(code)) {
+                return code;
+            }
+        }
     }
 
     @Override
@@ -158,7 +192,7 @@ class BranchService implements BranchProvisioning {
             throw ApiException.rule(
                     "invalid_branch", "A branch needs a code of 2 to 10 capital letters or digits and a name.");
         }
-        return create(new CreateBranchRequest(code, name, null, null)).id();
+        return create(new CreateBranchRequest(code, name, null, null, null)).id();
     }
 
     @Transactional
