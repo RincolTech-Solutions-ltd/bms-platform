@@ -186,6 +186,75 @@ describe('Sell', () => {
   });
 });
 
+describe('Confirm checks the screen as it is now (review of #590)', () => {
+  it('records the sale the screen shows when a line was edited after the warnings, and drops the stale warning', async () => {
+    const saved = vi.fn();
+    const create = vi.spyOn(retail, 'createSale');
+    open(<SaleForm branchId={BRANCH} onSaved={saved} />);
+    await pickItem(NAME);
+    type('qty-0', '10');
+    type('price-0', '60000');
+    const save = screen.getByRole('button', { name: /Record sale/ });
+    await normsRead();
+    fireEvent.click(save);
+    await screen.findByTestId('entry-warning-quantity');
+    // The seller edits the quantity without Change: its warning goes at once.
+    type('qty-0', '1');
+    expect(warning()).toBeNull();
+    expect(warning('price')).toBeTruthy();
+    press('Confirm');
+    await waitFor(() => expect(saved).toHaveBeenCalledTimes(1));
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]?.[0].lines?.[0]).toMatchObject({ qty: expect.stringMatching(/^1(\.000)?$/) });
+    expect(mockEntryConfirmations.map((c) => `${c.kind} ${c.entered_qty}`)).toEqual(['price 1']);
+  });
+
+  it('asks again about a quantity changed after the warning, rather than saving it unchecked', async () => {
+    const saved = vi.fn();
+    open(<RestockForm onSaved={saved} />);
+    await pickItem(NAME);
+    type(`q-0-${BRANCH}`, '500');
+    await normsRead();
+    fireEvent.click(screen.getByRole('button', { name: 'Save the purchase' }));
+    await screen.findByTestId('entry-warning-quantity');
+    type(`q-0-${BRANCH}`, '50000');
+    expect(warning()).toBeNull();
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Save the purchase' }));
+    await screen.findByTestId('entry-warning-quantity');
+    expect(warning()?.textContent).toContain('you entered 50,000 pieces');
+    expect(saved).not.toHaveBeenCalled();
+    press('Confirm');
+    await waitFor(() => expect(saved).toHaveBeenCalledTimes(1));
+    expect(mockEntryConfirmations.map((c) => c.entered_qty)).toEqual(['50000']);
+  });
+
+  it('records nothing when one warning is confirmed and the other changed, or the save is refused', async () => {
+    const saved = vi.fn();
+    open(<SaleForm branchId={BRANCH} onSaved={saved} />);
+    await pickItem(NAME);
+    type('qty-0', '10');
+    type('price-0', '60000');
+    await normsRead();
+    fireEvent.click(screen.getByRole('button', { name: /Record sale/ }));
+    await screen.findByTestId('entry-warning-price');
+    fireEvent.click(warning()?.querySelector('button') as HTMLElement);
+    fireEvent.click(warning('price')?.querySelector('button:last-child') as HTMLElement);
+    await settle();
+    expect(saved).not.toHaveBeenCalled();
+    expect(mockEntryConfirmations).toEqual([]);
+
+    // A price at or below cost is refused by the server: the confirmation of the quantity is not recorded.
+    vi.spyOn(retail, 'createSale').mockRejectedValueOnce(new Error('refused'));
+    type('price-0', '6000');
+    fireEvent.click(screen.getByRole('button', { name: /Record sale/ }));
+    await waitFor(() => expect(retail.createSale).toHaveBeenCalled());
+    await settle();
+    expect(saved).not.toHaveBeenCalled();
+    expect(mockEntryConfirmations).toEqual([]);
+  });
+});
+
 describe('Move stock', () => {
   it('warns about 8 when about 100 are moved; Change keeps the move, Confirm records it and saves', async () => {
     const saved = vi.fn();
@@ -237,6 +306,8 @@ describe('Count stock', () => {
     await screen.findByTestId('entry-warning-quantity');
     press('Confirm');
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    // Recorded once the review is made.
+    await waitFor(() => expect(mockEntryConfirmations).toHaveLength(1));
     expect(mockEntryConfirmations).toEqual([expect.objectContaining({ screen: 'count', kind: 'quantity', product_id: LAMP, entered_qty: '1000', median_qty: '10' })]);
   });
 });

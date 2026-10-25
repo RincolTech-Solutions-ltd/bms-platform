@@ -4,7 +4,7 @@
 
 Proposed (issue #353, the owner's request of 20 Oct 2026 in the go-live queue), accepted on merge. Builds on ADR-044 (entry
 mistakes corrected inside the app, the name key of #352), ADR-055 (who sees prices), ADR-079 (base units) and ADR-082 (a buying
-pack's size per delivery). Adds FR-RET-74 and FR-RET-75 and migration `V104` (two indexes only). The AI suggestion step the issue
+pack's size per delivery). Adds FR-RET-74 and FR-RET-75 and migration `V104` (three indexes only). The AI suggestion step the issue
 calls optional is parked by the owner and is not built: nothing here calls a model.
 
 ## Context
@@ -30,9 +30,10 @@ the one category picker (#584) and item codes made by the app (#568, #562).
    `min_lines` 3) so the screens never hold their own copy. A screen reads an item's norms once and keeps them five minutes;
    a read that fails or has not answered yet means no warning, never a wait.
 3. **Bounded reads.** Each read walks one item's index entries newest first and stops at its limit: `V104` adds
-   `(tenant_id, product_id, created_at DESC)` on `retail_sale_lines` and `retail_purchase_lines` (neither had an index on the
-   product), and moves use the existing `retail_transfer_lines_product`. `EntryChecksIT` checks the plans at the size of a busy
-   shop: no line table is scanned whole. `V104` is indexes only, built in Flyway's transaction behind a five second `lock_timeout`,
+   `(tenant_id, product_id, created_at DESC, id DESC)`, the order the reads ask for, on `retail_sale_lines`,
+   `retail_purchase_lines` (neither had an index on the product) and `retail_transfer_lines` (whose `(tenant_id, product_id)`
+   index has no order, so a move read would have taken and sorted every move the item ever had). `EntryChecksIT` checks the
+   plans at the size of a busy shop: each is a Limit over that index, with no sort and no scan of the line table. `V104` is indexes only, built in Flyway's transaction behind a five second `lock_timeout`,
    as `V101`.
 4. **The checks.** On Buy stock and Sell, where a unit is chosen, a line in another unit than the usual one says so: "You
    usually buy this in rolls; you entered 200 metres. Is that right?". Otherwise a quantity ten times the median or more, or a
@@ -44,13 +45,16 @@ the one category picker (#584) and item codes made by the app (#568, #562).
    or less, says the last price in the unit sold; a price the app filled (the item's, a price list's) is the owner's own and is not
    questioned. The price floor stays the server's refusal, unchanged.
 5. **Never a block.** The warnings show only when the person saves, each next to its field as a tinted note with Confirm and
-   Change. Confirm records it and, once the last open warning is confirmed, the save goes on; Change takes the warning away, puts
+   Change. Confirm checks the screen as it is at that moment: a warning whose line was edited since is gone, a new one shows,
+   and only when none is open does the save go on, with the values the screen shows then (never a request built earlier); Change takes the warning away, puts
    the cursor in the field and saves nothing. The save button is never disabled by a warning, and the server never refuses a
    line for being unusual. A confirmed warning stays confirmed while the line says the same; a changed line is checked again.
    Offline, or for a sale whose request was already sent, nothing is read or asked.
-6. **Recorded when confirmed.** `POST /retail/entry-warnings/confirmations` (`retail.stock.read`, 204) writes one audit row,
+6. **Recorded when confirmed and saved.** Once the save a confirmation went with has succeeded, the screen sends each confirmed
+   warning of that save to `POST /retail/entry-warnings/confirmations` (`retail.stock.read`, 204), which writes one audit row,
    `retail.entry_warning.confirmed`, on the item, with the screen, the kind, the sentence read, the quantity and unit entered,
-   the median compared with and, for a price, both prices; the branch is kept only when the caller works there. No table is
+   the median compared with and, for a price, both prices; the branch is kept only when the caller works there. A warning
+   confirmed beside one that was changed, or a save the server refused, records nothing. No table is
    added: the audit log is where the owner already reviews what staff did. A failed record never stops the save.
 7. **Naming a new item.** While a new item's name is typed (Add an item, the item form in a category, and the new item on Buy
    stock and Count stock), `GET /retail/products/name-hints` (`retail.catalogue.manage`) gives "Did you mean": at most 5 active

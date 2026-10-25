@@ -188,6 +188,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
       return { saved, context: { supplierName, before } };
     },
     onSuccess: ({ saved, context }) => {
+      entry.saved();
       finish();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onSaved?.(saved, context);
@@ -243,7 +244,6 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
   const blocked = lines.length === 0 || problems.some((p) => p !== null) || supplierProblem !== null;
   // Issue #353: each line against the item's own purchases, said before saving, never blocking.
   const norms = useEntryNorms(lines.map((l) => l.product.id));
-  const entry = useEntryChecks('buy', here);
   const warnings = lines.flatMap((l, i): EntryWarning[] => {
     const pack = unitsOn ? chosenPack(l.product, l.unitId) : undefined;
     const total = Object.values(l.qtyByBranch).reduce((sum, q) => sum + (branchQty(q) ?? 0), 0);
@@ -254,9 +254,10 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
       ...(pack ? { unitId: pack.unit_id, unitName: pack.unit, factor: lineFactor(l) ?? undefined } : {}),
     });
   });
+  const entry = useEntryChecks('buy', here, warnings, () => save.mutate());
 
   return (
-    <form onSubmit={(e) => { e.preventDefault(); if (!blocked && !save.isPending) entry.check(warnings, () => save.mutate()); }}>
+    <form onSubmit={(e) => { e.preventDefault(); if (!blocked && !save.isPending) entry.check(); }}>
       <Note>Saving a purchase changes the buying and selling price of every item below to the values you enter. The change is recorded in the price history.</Note>
       <FieldsNeededNote />
 

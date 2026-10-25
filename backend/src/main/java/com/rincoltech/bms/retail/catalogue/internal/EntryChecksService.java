@@ -51,6 +51,7 @@ class EntryChecksService {
     static final int SHORTEST_WORD = 3;
     static final int MOST_WORDS = 6;
     static final int CANDIDATES = 200;
+    static final int NAME_READ = 200;
 
     private final EntryChecksRepository repo;
     private final AuditLog audit;
@@ -138,7 +139,9 @@ class EntryChecksService {
 
     @Transactional(readOnly = true)
     NameHints nameHints(String description) {
-        String key = repo.nameKey(description == null ? "" : description.strip());
+        String typed = description == null ? "" : description.strip();
+        // A name is at most 300 characters (the description column); a hint needs no more than its first 200.
+        String key = repo.nameKey(typed.length() > NAME_READ ? typed.substring(0, NAME_READ) : typed);
         String compact = key.replace(" ", "");
         if (compact.length() < SHORTEST_TYPED) {
             return new NameHints(List.of(), null);

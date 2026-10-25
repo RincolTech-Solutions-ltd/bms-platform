@@ -59,6 +59,7 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
   const save = useMutation({
     mutationFn: () => retail.createTransfer(buildTransfer(fromBranchId, draft), key),
     onSuccess: (t) => {
+      entry.saved();
       finish();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onSaved?.(t);
@@ -114,13 +115,13 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
   const sends = capabilityOn(me, 'retail', TRANSFER_RECEIPT);
   // Issue #353: each line against the item's own moves (or its purchases while it has few moves), said before saving, never blocking.
   const norms = useEntryNorms(draft.lines.map((l) => l.product.id));
-  const entry = useEntryChecks('move', fromBranchId);
   const warnings = draft.lines.flatMap((l, i) => entryWarnings(norms(l.product.id), {
     screen: 'move', product: l.product, lineKey: l.product.id ?? String(i), qtyMilli: parseQty(l.qty), qtyFieldId: `tq-${i}`,
   }));
+  const entry = useEntryChecks('move', fromBranchId, warnings, () => save.mutate());
 
   return (
-    <form onSubmit={(e) => { e.preventDefault(); if (!problem && !save.isPending) entry.check(warnings, () => save.mutate()); }}>
+    <form onSubmit={(e) => { e.preventDefault(); if (!problem && !save.isPending) entry.check(); }}>
       <p>From: {label(fromBranchId)}</p>
       <NoStockHere branchId={fromBranchId} />
       <div data-tour="transfer-to">

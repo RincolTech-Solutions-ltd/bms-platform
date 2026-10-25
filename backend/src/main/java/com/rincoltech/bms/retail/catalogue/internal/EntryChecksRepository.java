@@ -9,7 +9,7 @@ import org.springframework.stereotype.Repository;
 
 /**
  * Read-only SQL of the entry warnings (issue #353, ADR-093). Every statement reads one item's newest lines through an index
- * that leads on the product (V104 for sale and purchase lines, {@code retail_transfer_lines_product} for moves) and stops at
+ * that leads on the product in the order asked for (V104, on sale, purchase and transfer lines) and stops at
  * {@code limit} rows; row-level security supplies the tenant predicate (ADR-003). The name hints read one tenant's catalogue,
  * bounded the same way as {@link CatalogueRepository#neighbours}.
  */

@@ -232,6 +232,39 @@ class EntryChecksIT extends IntegrationTest {
         assertThat(kept.has("last_sold_on")).isFalse();
     }
 
+    /** Review of #590: a seller (the sales role) reads the norms and the last price, so Sell warns for the people who sell. */
+    @Test
+    void aSellerReadsTheNormsWithTheLastPrice() {
+        buy(roll, "10", 3_000);
+        sell("2", 60);
+        JsonNode n = norms(SALES);
+        assertThat(n.get("sell").get("lines_read").asInt()).isEqualTo(1);
+        assertThat(n.get("last_sell_minor").asLong()).isEqualTo(60);
+    }
+
+    /** Review of #590: a sale in a pack counts in base units (V39 keeps qty = packs times the factor), and its unit is the pack's. */
+    @Test
+    void aSaleInAPackCountsInBaseUnitsAndNamesThePack() {
+        buy(roll, "10", 3_000);
+        for (String rolls : List.of("1", "2", "1")) {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("branch_id", hq);
+            body.put("payment_method", "cash");
+            body.put(
+                    "lines",
+                    List.of(Map.of("product_id", cable, "unit_id", roll, "qty", rolls, "unit_price_minor", 6_000)));
+            ResponseEntity<JsonNode> r =
+                    api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString());
+            assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        }
+        JsonNode sell = norms(ADMIN).get("sell");
+        assertThat(sell.get("median_qty").asString()).isEqualTo("100");
+        assertThat(sell.get("usual_unit_id").asString()).isEqualTo(roll.toString());
+        assertThat(sell.get("usual_unit").asString()).isEqualTo("roll");
+        // 6,000 for 100 metres is 60 a metre.
+        assertThat(norms(ADMIN).get("last_sell_minor").asLong()).isEqualTo(60);
+    }
+
     @Test
     void movesCountCompletedOnesOnly() {
         buy(roll, "10", 3_000);
@@ -366,7 +399,7 @@ class EntryChecksIT extends IntegrationTest {
     // ---- bounded reads ------------------------------------------------------------------------
 
     /**
-     * At the size of a busy shop (3,000 sale lines and 3,000 purchase lines of other items, 300 of this one), each read of
+     * At the size of a busy shop (3,000 sale, purchase and move lines of other items, 300 of each of this one), each read of
      * an item's history goes through the V104 index on the product and stops at its limit; no line table is scanned whole.
      * Read as {@code bms_app} under row-level security, as the service reads it.
      */
@@ -406,22 +439,40 @@ class EntryChecksIT extends IntegrationTest {
                           FROM retail_sales s
                          WHERE s.tenant_id = ?
                         """).params(cable, other, t.tenantId()).update();
-        owner.sql("ANALYZE retail_purchases, retail_purchase_lines, retail_sales, retail_sale_lines")
+        owner.sql("""
+                        INSERT INTO retail_transfers (id, tenant_id, from_branch_id, to_branch_id, transfer_date, currency,
+                                                      cost_total_minor, status, created_by)
+                        SELECT gen_random_uuid(), ?, ?, ?, DATE '2026-01-01' + (n % 250), 'UGX', 300, 'completed', ?
+                          FROM generate_series(1, 3300) n
+                        """).params(t.tenantId(), hq, t.secondBranch(), api.userId()).update();
+        owner.sql("""
+                        INSERT INTO retail_transfer_lines (id, tenant_id, transfer_id, line_no, product_id, qty, unit_cost_minor,
+                                                           line_cost_minor, created_at)
+                        SELECT gen_random_uuid(), tr.tenant_id, tr.id, 1,
+                               CASE WHEN row_number() OVER (ORDER BY tr.id) <= 300 THEN ?::uuid ELSE ?::uuid END,
+                               4, 30, 120, now() - (random() * interval '300 days')
+                          FROM retail_transfers tr
+                         WHERE tr.tenant_id = ?
+                        """).params(cable, other, t.tenantId()).update();
+        owner.sql("ANALYZE retail_purchases, retail_purchase_lines, retail_sales, retail_sale_lines, retail_transfers,"
+                        + " retail_transfer_lines")
                 .update();
 
-        assertThat(plan(EntryChecksRepository.PURCHASES))
-                .contains("retail_purchase_lines_product_recent")
-                .doesNotContain("Seq Scan on retail_purchase_lines");
-        assertThat(plan(EntryChecksRepository.SALES))
-                .contains("retail_sale_lines_product_recent")
-                .doesNotContain("Seq Scan on retail_sale_lines");
-        // The test seeds no moves, so the transfer tables hold a row or two and a scan of them is the right plan; what
-        // matters is
-        // that the existing index on the product serves the read once the table is large, so the scan is priced out
-        // here.
-        assertThat(plan(EntryChecksRepository.MOVES, true))
-                .contains("retail_transfer_lines_product")
-                .doesNotContain("Seq Scan on retail_transfer_lines");
+        // Each read is the newest 20 entries of the item's own index, in the order asked for: a Limit over an index
+        // walk,
+        // with no sort of the item's whole history and no scan of the line table.
+        for (var read : List.of(
+                List.of(EntryChecksRepository.PURCHASES, "retail_purchase_lines"),
+                List.of(EntryChecksRepository.SALES, "retail_sale_lines"),
+                List.of(EntryChecksRepository.MOVES, "retail_transfer_lines"))) {
+            String plan = plan(read.get(0));
+            assertThat(plan)
+                    .as(plan)
+                    .startsWith("Limit")
+                    .contains(read.get(1) + "_product_recent")
+                    .doesNotContain("Sort")
+                    .doesNotContain("Seq Scan on " + read.get(1));
+        }
 
         // And the answer is still the item's own newest 20 lines.
         JsonNode n = norms(ADMIN);
@@ -429,26 +480,18 @@ class EntryChecksIT extends IntegrationTest {
         assertThat(n.get("buy").get("median_qty").asString()).isEqualTo("10");
         assertThat(n.get("sell").get("lines_read").asInt()).isEqualTo(20);
         assertThat(n.get("sell").get("median_qty").asString()).isEqualTo("1");
+        assertThat(n.get("move").get("lines_read").asInt()).isEqualTo(20);
+        assertThat(n.get("move").get("median_qty").asString()).isEqualTo("4");
     }
 
     /** The plan of one statement for the cable, limit 20, as {@code bms_app} bound to the tenant. */
     String plan(String sql) throws Exception {
-        return plan(sql, false);
-    }
-
-    /** As {@link #plan(String)}; {@code noScans} prices sequential scans out, to show an index can serve the read. */
-    String plan(String sql, boolean noScans) throws Exception {
         String bound = sql.replace(":p", "'" + cable + "'::uuid").replace(":limit", "20");
         try (Connection c = TestDatabase.appDataSource().getConnection()) {
             c.setAutoCommit(false);
             try (PreparedStatement ps = c.prepareStatement("SELECT set_config('app.tenant_id', ?, true)")) {
                 ps.setString(1, t.tenantId().toString());
                 ps.execute();
-            }
-            if (noScans) {
-                try (PreparedStatement ps = c.prepareStatement("SET LOCAL enable_seqscan = off")) {
-                    ps.execute();
-                }
             }
             try (PreparedStatement ps = c.prepareStatement("EXPLAIN " + bound);
                     ResultSet rs = ps.executeQuery()) {

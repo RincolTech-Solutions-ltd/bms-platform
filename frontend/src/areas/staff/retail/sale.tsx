@@ -261,6 +261,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
       if (e instanceof RetailError) setDraft((d) => ({ ...d, sent: undefined }));
     },
     onSuccess: (sale) => {
+      entry.saved();
       finish();
       void queryClient.invalidateQueries({ queryKey: ['retail', 'products'] });
       void queryClient.invalidateQueries({ queryKey: ['retail', 'stock'] });
@@ -336,7 +337,6 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
   // sent, nothing is read or asked. Only a price the seller typed is compared with the last one; the item's or a list's price is
   // the owner's own.
   const norms = useEntryNorms(offlineMode ? [] : draft.lines.map((l) => l.product.id));
-  const entry = useEntryChecks('sell', branchId);
   const warnings = offlineMode || draft.sent ? [] : shown.lines.flatMap((l, i): EntryWarning[] => {
     const pack = unitsOn ? chosenPack(l.product, l.unitId) : undefined;
     const f = lineFigures(l);
@@ -347,6 +347,13 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
       ...(l.typed ? { priceMinor: f?.priceMinor ?? null, priceFieldId: `price-${i}` } : {}),
     });
   });
+  /** Sends the sale as the screen shows it now (or the request already sent, which is all that can go again). */
+  const send = () => {
+    const body = draft.sent?.body ?? { ...buildSaleRequest(shown, pricing, accounts), ...(offline ? { client_sale_id: key } : {}) };
+    if (offline) setDraft((d) => ({ ...d, sent: d.sent ?? { body, at: new Date().toISOString() } }));
+    save.mutate(body);
+  };
+  const entry = useEntryChecks('sell', branchId, warnings, send);
   const lost = locked && !save.isPending && !(save.error instanceof RetailError);
   const keep = useMutation({
     mutationFn: async () => {
@@ -394,11 +401,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
           keep.mutate();
           return;
         }
-        const body = draft.sent?.body ?? { ...buildSaleRequest(shown, pricing, accounts), ...(offline ? { client_sale_id: key } : {}) };
-        entry.check(warnings, () => {
-          if (offline) setDraft((d) => ({ ...d, sent: d.sent ?? { body, at: new Date().toISOString() } }));
-          save.mutate(body);
-        });
+        entry.check();
       }}
     >
       {offlineMode && <OfflineNote />}

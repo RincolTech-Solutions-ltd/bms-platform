@@ -153,14 +153,16 @@ function CountSheet({ branchId }: { branchId: string }) {
   const bad = entered.some(([, v]) => parseCount(v) === null);
   const review = useMutation({
     mutationFn: () => retail.createStocktake({ branch_id: branchId, lines: entered.map(([productId, countedQty]) => ({ product_id: productId, counted_qty: countedQty.trim() })) }),
-    onSuccess: setDraft,
+    onSuccess: (st) => {
+      entry.saved();
+      setDraft(st);
+    },
   });
   // Issue #353: each count against what the records hold here, or, where they hold nothing, against the item's usual purchase;
   // said before the review, never blocking. Only the counts whose records hold nothing read the item's history.
   const sheet = new Map((stock.data ?? []).map((r) => [r.product_id ?? '', r]));
   const recorded = new Map([...sheet].map(([id, r]) => [id, milliOf(r.qty ?? '0')]));
   const norms = useEntryNorms(entered.filter(([id]) => (recorded.get(id) ?? 0) <= 0).map(([id]) => id));
-  const entry = useEntryChecks('count', branchId);
   const warnings = entered.flatMap(([id, v]) => {
     const row = sheet.get(id);
     if (!row) return [];
@@ -170,6 +172,7 @@ function CountSheet({ branchId }: { branchId: string }) {
     const usual = here > 0 ? { product_id: id, unit: row.unit, quantity_factor: norms(id)?.quantity_factor ?? 10 } : norms(id);
     return entryWarnings(usual, { screen: 'count', product, lineKey: id, qtyMilli: parseCount(v), qtyFieldId: `count-${id}`, recordedMilli: here });
   });
+  const entry = useEntryChecks('count', branchId, warnings, () => review.mutate());
   const commit = useMutation({
     mutationFn: () => retail.commitStocktake(draft?.id ?? ''),
     onSuccess: (st) => {
@@ -206,7 +209,7 @@ function CountSheet({ branchId }: { branchId: string }) {
     setDone((d) => [...d, ...Object.keys(counts).filter((id) => isCounted(id) && !d.includes(id))]);
     if (uncounted > 0 && !confirming) return setConfirming(true);
     setConfirming(false);
-    entry.check(warnings, () => review.mutate());
+    entry.check();
   };
   const line = (r: StockRow, waiting: boolean) => {
     const id = r.product_id ?? '';
