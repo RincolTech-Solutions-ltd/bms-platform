@@ -139,7 +139,7 @@ export function ReturnsThresholdWarning({ capabilities }: { capabilities: Capabi
       <Hint>
         Returns need no second administrator yet. With no approval limit, any administrator can refund up to the whole of a sale, and void
         a return, alone. The limit counts the returns of one sale together, not a person&apos;s returns across sales, so many small returns
-        on different sales still need no second administrator. The business can ask for a limit to be set.
+        on different sales still need no second administrator.
       </Hint>
     </div>
   );
