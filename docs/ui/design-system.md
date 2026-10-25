@@ -206,11 +206,14 @@ query, so the number is the token.
   with `env(safe-area-inset-bottom)`, `-left` and `-right`; while it shows, the root has `has-tab-bar` and `--tab-bar`, the bar's
   measured height (a `ResizeObserver`, as the sale bar measures `--bottom-bar`, so a large font or text zoom is counted; the CSS
   value, `--tab-height` and the hairline plus the bottom inset, is only the first paint's). Every size of the bar is a token derived from `--tap`, `--space-*` and `--text-xs` (`--tab-height` 64px, `--tab-pill-width` 56px, `--tab-pill-height` 32px, `--tab-gap` 2px, `--tab-badge` 18px at the default font size, in `theme.css`, #544), and the badge's number is `--color-on-danger` on `--color-danger-fill`. The body ends that far up, the sale bar and the
-  member form's save bar stick at `bottom: var(--tab-bar)` so they sit on top of the tabs and never under them, and a toast rises
-  above both. The bar steps aside only while the soft keyboard is up: a text field has focus and `visualViewport` is more than
+  member form's save bar stick at `bottom: var(--tab-bar-offset)` (the bar's height) so they sit on top of the tabs and never under them, and a toast rises
+  above both. The bar steps aside only while the soft keyboard is up: a text field (an input that types, a textarea, or a `contenteditable` that is not `"false"`, so `""` and `"plaintext-only"` count, #544) has focus and `visualViewport` is more than
   150px shorter than the window, its height multiplied by its scale so a pinch zoom is not a keyboard. Under `interactive-widget=resizes-content` (Android) the window shrinks with the viewport and the bar stays, which is accepted. A field that only has focus (a page that focuses its Scan box, a barcode scanner or a Bluetooth
   keyboard) leaves it in place, and a browser without `visualViewport` never hides it. While aside it stays mounted with `hidden`,
-  so its read is not asked again. The staff bar has no menu button and no Sell button on a phone, except that Sign out stays in it
+  so its read is not asked again, and the root keeps `has-tab-bar` and the measured `--tab-bar`, so the body keeps its padding and
+  the page does not get shorter under the field while the keyboard opens; the root takes `tab-bar-aside`, which only drops
+  `--tab-bar-offset` to 0 so the sticky bars sit at the bottom (#544). A test fails if `index.html` ever sets
+  `interactive-widget=resizes-content`. The staff bar has no menu button and no Sell button on a phone, except that Sign out stays in it
   while two-step set-up blocks the page (`signOutInBar`), since the tabs and More are not drawn then.
 - **Below 720px in the operator portal, the drawer** (`SideMenu`): a menu button (`.menu-button`, the `menu` icon,
   `aria-label="Menu"`) at the top left of the bar opens the list in a side drawer from the left: 85% of the width, at most 320px, over a dimmed backdrop

@@ -210,10 +210,60 @@ describe('the bottom tabs on a phone (issue #539)', () => {
     view.resize(520);
     expect(nav.isConnected).toBe(true);
     expect(nav.hidden).toBe(true);
-    expect(document.documentElement.classList.contains('has-tab-bar')).toBe(false);
+    expect(document.documentElement.classList.contains('tab-bar-aside')).toBe(true);
     view.resize(900);
     expect(nav.hidden).toBe(false);
-    expect(document.documentElement.classList.contains('has-tab-bar')).toBe(true);
+    expect(document.documentElement.classList.contains('tab-bar-aside')).toBe(false);
+  });
+
+  // Issue #544: dropping has-tab-bar while the keyboard opened took the body's padding away, and a page with a field near its end
+  // got about 65px shorter under it. The padding and the measured height stay; only the sticky bars' offset drops.
+  it('keeps the body padding and the measured height while the keyboard has it aside', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { height: this.classList.contains('tab-bar') && !this.hidden ? 65 : 0 } as DOMRect;
+    });
+    const view = viewport(900);
+    show(admin, { children: <input aria-label="Item" /> });
+    const root = document.documentElement;
+    expect(root.style.getPropertyValue('--tab-bar')).toBe('65px');
+    act(() => screen.getByRole('textbox', { name: 'Item' }).focus());
+    view.resize(520);
+    expect((document.querySelector('.tab-bar') as HTMLElement).hidden).toBe(true);
+    expect(root.classList.contains('has-tab-bar')).toBe(true);
+    expect(root.style.getPropertyValue('--tab-bar')).toBe('65px');
+    expect(root.classList.contains('tab-bar-aside')).toBe(true);
+  });
+
+  it.each([
+    ['an empty contenteditable', ''],
+    ['a contenteditable="true"', 'true'],
+    ['a contenteditable="plaintext-only"', 'plaintext-only'],
+  ])('steps aside for the keyboard of %s, and not for contenteditable="false"', (_name, value) => {
+    const view = viewport(900);
+    show(admin, {
+      children: (
+        <>
+          <div aria-label="Note" tabIndex={0} contentEditable={value as never} suppressContentEditableWarning />
+          <div aria-label="Shut" tabIndex={0} contentEditable="false" suppressContentEditableWarning />
+        </>
+      ),
+    });
+    // React writes contentEditable="" as the attribute only through setAttribute, so the test sets the exact value.
+    const note = document.querySelector('[aria-label="Note"]') as HTMLElement;
+    note.setAttribute('contenteditable', value);
+    const nav = bar();
+    act(() => note.focus());
+    view.resize(520);
+    expect(nav.hidden).toBe(true);
+    act(() => (document.querySelector('[aria-label="Shut"]') as HTMLElement).focus());
+    view.resize(519);
+    expect(nav.hidden).toBe(false);
+  });
+
+  // Under interactive-widget=resizes-content (Android) the window shrinks with the viewport, so the bar never steps aside. That is
+  // accepted in docs/ui/design-system.md as long as the app never sets it: this fails the day it does, so the check is revisited.
+  it('relies on the viewport meta not setting interactive-widget=resizes-content', () => {
+    expect(readFileSync(join(process.cwd(), 'index.html'), 'utf8')).not.toMatch(/interactive-widget\s*=\s*resizes-content/);
   });
 
   it('stays while a select has focus, even with the viewport short, as its picker is not the keyboard', () => {
@@ -415,8 +465,12 @@ describe('the tab bar styles', () => {
     const kitCss = read('kit.css');
     const lendingCss = read('lending.css');
     // The sale's bar is the kit's ActionBar since issue #526.
-    expect(kitCss).toMatch(/\.has-tab-bar \.action-bar \{\s*bottom: var\(--tab-bar\);/);
-    expect(lendingCss).toMatch(/\.has-tab-bar \.mf-savebar \{\s*bottom: var\(--tab-bar\);/);
-    expect(read('feedback.css')).toMatch(/var\(--tab-bar, 0px\)/);
+    expect(kitCss).toMatch(/\.has-tab-bar \.action-bar \{\s*bottom: var\(--tab-bar-offset\);/);
+    expect(lendingCss).toMatch(/\.has-tab-bar \.mf-savebar \{\s*bottom: var\(--tab-bar-offset\);/);
+    expect(read('feedback.css')).toMatch(/var\(--tab-bar-offset, 0px\)/);
+    // The offset is the bar's height, and 0 while the keyboard has the bar aside; the body's padding stays --tab-bar (#544).
+    expect(rule('.has-tab-bar')).toMatch(/--tab-bar-offset: var\(--tab-bar\);/);
+    expect(rule('.has-tab-bar.tab-bar-aside')).toMatch(/--tab-bar-offset: 0px;/);
+    expect(rule('.has-tab-bar body')).toMatch(/padding-bottom: var\(--tab-bar\);/);
   });
 });

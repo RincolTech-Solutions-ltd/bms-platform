@@ -81,7 +81,8 @@ export function currentTab(tabs: Tab[], pathname: string): TabId | undefined {
 }
 
 // The fields that bring up the keyboard. A select is left out: its picker is not the keyboard, and focus stays on it after a choice.
-const TEXT_ENTRY = ['', 'text', 'search', 'tel', 'number', 'email', 'password', 'url'].map((t) => (t ? `input[type=${t}]` : 'input:not([type])')).concat('textarea', '[contenteditable="true"]').join(', ');
+// contenteditable is editable as "", "true" and "plaintext-only", so only "false" is left out (#544).
+const TEXT_ENTRY = ['', 'text', 'search', 'tel', 'number', 'email', 'password', 'url'].map((t) => (t ? `input[type=${t}]` : 'input:not([type])')).concat('textarea', '[contenteditable]:not([contenteditable="false"])').join(', ');
 const typingIn = (el: EventTarget | null) => el instanceof Element && el.matches(TEXT_ENTRY);
 
 // How far the visual viewport must shrink under the layout one before it counts as the soft keyboard, not a browser bar.
@@ -179,23 +180,24 @@ export function TabBar({ me, away = false, barRef }: { me: Me; away?: boolean; b
 
 /**
  * The tabs on a phone only. While the soft keyboard is up they stay mounted but hidden, so the badge's read is not asked again on
- * every focus. While they show, the root carries has-tab-bar and --tab-bar is their measured height (safe-area inset and edge
- * included, at any font size), as the sale bar measures --bottom-bar; the CSS value is only the first paint's.
+ * every focus. On a phone the root carries has-tab-bar and --tab-bar is their measured height (safe-area inset and edge included,
+ * at any font size), as the sale bar measures --bottom-bar; the CSS value is only the first paint's. While the keyboard has them
+ * aside the root also carries tab-bar-aside: the body keeps its padding, so the page does not get shorter under a field while the
+ * keyboard opens, and only the sticky bars drop to the bottom (--tab-bar-offset, navigation.css; #544).
  */
 export function StaffTabBar({ me }: { me: Me }) {
   const phone = useIsPhone();
   const keyboard = useSoftKeyboard();
   const bar = useRef<HTMLElement>(null);
-  const shown = phone && !keyboard;
   useEffect(() => {
     const el = bar.current;
-    if (!shown || !el) return;
+    if (!phone || !el) return;
     const root = document.documentElement;
     root.classList.add('has-tab-bar');
+    // A hidden bar measures 0: the height it had when it last showed is kept.
     const measure = () => {
       const height = Math.ceil(el.getBoundingClientRect().height);
       if (height > 0) root.style.setProperty('--tab-bar', `${height}px`);
-      else root.style.removeProperty('--tab-bar');
     };
     measure();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
@@ -205,6 +207,12 @@ export function StaffTabBar({ me }: { me: Me }) {
       root.classList.remove('has-tab-bar');
       root.style.removeProperty('--tab-bar');
     };
-  }, [shown]);
+  }, [phone]);
+  useEffect(() => {
+    if (!phone || !keyboard) return;
+    const root = document.documentElement;
+    root.classList.add('tab-bar-aside');
+    return () => root.classList.remove('tab-bar-aside');
+  }, [phone, keyboard]);
   return phone ? <TabBar me={me} away={keyboard} barRef={bar} /> : null;
 }

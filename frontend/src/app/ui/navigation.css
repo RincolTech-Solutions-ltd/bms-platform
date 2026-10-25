@@ -857,11 +857,17 @@ body.side-menu-open {
  * on a target taller than 48px. The current tab is in the brand colour, its label semibold, and its icon sits on a tinted pill that
  * fades and widens in by opacity and transform: no stripe, no glow. The bar takes the iPhone's home indicator and side insets. While
  * it shows, the root has the class has-tab-bar and --tab-bar is its full height, edge included, so the page ends above it, a sticky action bar
- * stops on top of it (retail.css, lending.css) and a toast rises above both (feedback.css).
+ * stops on top of it at --tab-bar-offset (kit.css, lending.css) and a toast rises above both (feedback.css).
  */
-/* The first paint's value, until the bar is measured: the tabs' height and the hairline above them. */
+/* The first paint's value, until the bar is measured: the tabs' height and the hairline above them. The sticky bars stop at
+   --tab-bar-offset, which drops to 0 while the soft keyboard has the tabs aside; the body keeps its padding then (#544). */
 .has-tab-bar {
   --tab-bar: calc(var(--tab-height) + 1px + env(safe-area-inset-bottom));
+  --tab-bar-offset: var(--tab-bar);
+}
+
+.has-tab-bar.tab-bar-aside {
+  --tab-bar-offset: 0px;
 }
 
 .has-tab-bar body {
