@@ -189,6 +189,7 @@ class ProductImportService {
                         line, typed, description.strip(), "skipped", "An item with this code exists already."));
                 continue;
             }
+            // The code is made on apply, so a dry run reports the row with none.
             String code = "";
             String categoryKey = category.toLowerCase(Locale.ROOT);
             String unitKey = unit.toLowerCase(Locale.ROOT);
