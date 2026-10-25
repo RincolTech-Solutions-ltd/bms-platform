@@ -145,18 +145,31 @@ public final class RetailTestSupport {
         return id(post("/units", Map.of("name", name), ADMIN));
     }
 
-    /** A product in a fresh category and unit; prices in minor units. */
+    /**
+     * A product in a fresh category and unit; prices in minor units. The app makes its code (issue #562); the test's code is
+     * then written as the owner, as the pilot importer brings an item in with the code it already had, so the tests that
+     * scan, search or report by code keep their fabricated codes.
+     */
     public UUID product(String code, long costMinor, long sellMinor) {
         UUID category = category("Test Category " + code);
         UUID unit = unit("u-" + code.toLowerCase());
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("code", code);
         body.put("description", "Test Product " + code);
         body.put("category_id", category);
         body.put("unit_id", unit);
         body.put("cost_minor", costMinor);
         body.put("sell_minor", sellMinor);
-        return id(post("/products", body, ADMIN));
+        UUID id = id(post("/products", body, ADMIN));
+        existingCode(id, code);
+        return id;
+    }
+
+    /** Gives an item the code it held before the app made codes (issue #562): an existing item keeps its code. */
+    public void existingCode(UUID productId, String code) {
+        TestDatabase.owner()
+                .sql("UPDATE retail_products SET code = ? WHERE id = ?")
+                .params(code, productId)
+                .update();
     }
 
     public static UUID id(ResponseEntity<JsonNode> response) {
