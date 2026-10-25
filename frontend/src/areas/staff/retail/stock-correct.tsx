@@ -37,18 +37,24 @@ function QuantityForm({ row, branchId, onDone }: { row: StockRow; branchId: stri
   // A draft typed against another quantity (kept from an earlier opening, or the shelf moved and the list was read again) starts
   // again from the quantity on the list now, with a new key: the quantity sent as expected is always the one on the list.
   const [restarted, setRestarted] = useState<string | null>(null);
-  // Starts the form again from the quantity on the list: a new key, nothing typed, expected is the list's quantity.
-  const restart = (touched: boolean) => {
+  // A 409 that did not name the quantity now: the list is being read again, and the notice waits for it (issue #370).
+  const [rereading, setRereading] = useState(false);
+  // Starts the form again from a quantity (the list's, or the one a 409 named): a new key, nothing typed, expected is that quantity.
+  const restart = (touched: boolean, from: string = current) => {
     discard();
-    setDraft({ qty: showQty(current), reason: '', note: '', expected: current });
-    setRestarted(touched ? current : null);
+    setDraft({ qty: showQty(from), reason: '', note: '', expected: from });
+    setRestarted(touched ? from : null);
+    setRereading(false);
   };
   useEffect(() => {
     if (draft.expected === current) return;
-    restart(draft.reason !== '' || draft.note !== '' || draft.qty !== showQty(draft.expected));
+    // A notice already showing, or waiting for the list, stays and names the list's quantity now (issue #370).
+    restart(rereading || restarted !== null || draft.reason !== '' || draft.note !== '' || draft.qty !== showQty(draft.expected));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current]);
-  const problem = quantityProblem(draft.qty, current);
+  // The quantity the server will compare with: the list's, or the one a 409 named before the list was read again.
+  const shown = draft.expected;
+  const problem = quantityProblem(draft.qty, shown);
   const ready = problem === null && draft.reason !== '';
   // A second press before the first request has started must not send another one: the ref answers at once.
   const sending = useRef(false);
@@ -63,12 +69,18 @@ function QuantityForm({ row, branchId, onDone }: { row: StockRow; branchId: stri
       // The shelf moved while the form was open: read the list again, and type against the new quantity with a new key.
       if (error instanceof RetailError && ['stock_moved', 'stocktake_in_progress'].includes(error.code ?? '')) {
         void queryClient.invalidateQueries({ queryKey: ['retail'] });
-        if (error.code === 'stock_moved') restart(true);
+        // The refusal names the quantity now (current_qty): show it at once, never the one the form was opened with.
+        const now = error.problem?.current_qty;
+        if (error.code === 'stock_moved' && typeof now === 'string') restart(true, now);
+        else if (error.code === 'stock_moved') {
+          restart(false);
+          setRereading(true);
+        }
       }
     },
     onSettled: () => { sending.current = false; },
   });
-  const difference = differenceWords(draft.qty, current, row.unit);
+  const difference = differenceWords(draft.qty, shown, row.unit);
   const press = () => {
     if (!ready || sending.current) return;
     sending.current = true;
@@ -76,12 +88,13 @@ function QuantityForm({ row, branchId, onDone }: { row: StockRow; branchId: stri
   };
   return (
     <form className="stack" aria-label="Correct the quantity" onSubmit={(e) => { e.preventDefault(); press(); }}>
-      <p>In stock now: <strong>{showQty(current)} {row.unit}</strong>.</p>
+      <p>In stock now: <strong>{showQty(shown)} {row.unit}</strong>.</p>
       {restarted !== null && <p role="status" className="hint">The quantity on the list changed to {showQty(restarted)}; type it again.</p>}
+      {rereading && <p role="status" className="hint">The quantity changed while you were typing. Reading the list again.</p>}
       <label htmlFor="correct-qty">Right quantity ({row.unit})</label>
-      <input id="correct-qty" inputMode="decimal" value={draft.qty} onChange={(e) => setDraft((d) => ({ ...d, qty: e.target.value }))} aria-invalid={problem !== null && draft.qty !== showQty(current)} autoComplete="off" />
+      <input id="correct-qty" inputMode="decimal" value={draft.qty} onChange={(e) => setDraft((d) => ({ ...d, qty: e.target.value }))} aria-invalid={problem !== null && draft.qty !== showQty(shown)} autoComplete="off" />
       {difference && <p className="hint" aria-live="polite">{difference}</p>}
-      {problem && draft.qty !== showQty(current) && <p role="alert" className="rt-flag">{problem}</p>}
+      {problem && draft.qty !== showQty(shown) && <p role="alert" className="rt-flag">{problem}</p>}
       <label htmlFor="correct-reason">Why is it being corrected?</label>
       <select id="correct-reason" value={draft.reason} onChange={(e) => setDraft((d) => ({ ...d, reason: e.target.value as ReasonCode | '' }))}>
         <option value="">Choose a reason</option>
