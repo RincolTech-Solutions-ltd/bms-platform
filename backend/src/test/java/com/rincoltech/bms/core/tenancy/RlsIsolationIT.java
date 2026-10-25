@@ -681,7 +681,7 @@ public class RlsIsolationIT {
                         INSERT INTO retail_documents (id, tenant_id, created_by, type, number, seq_no, branch_id, issue_date,
                                                       sale_id, buyer_name, currency, total_minor, snapshot)
                         VALUES (?, ?, ?, 'invoice', 'TAX-HQ-000001', 1, ?, DATE '2026-01-15', ?, 'Test Buyer 01', 'UGX', 150,
-                                '{"v": 1, "buyer": {"name": "Test Buyer 01", "contact": "+256700000004"}}')
+                                '{"v": 1, "buyer": {"name": "Test Buyer 01", "contact": "+256700000004", "tin": "1000000001"}}')
                         """)
                 .params(UUID.randomUUID(), t.tenantId(), user, t.headOffice(), sale)
                 .update();

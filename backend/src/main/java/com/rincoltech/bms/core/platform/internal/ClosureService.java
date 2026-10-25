@@ -2,6 +2,7 @@ package com.rincoltech.bms.core.platform.internal;
 
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.audit.PlatformAuditLog;
+import com.rincoltech.bms.core.documents.Documents;
 import com.rincoltech.bms.core.identity.TenantAdmins;
 import com.rincoltech.bms.core.notifications.Outbox;
 import com.rincoltech.bms.core.platform.internal.ClosureAdminController.QueuedClosure;
@@ -15,9 +16,11 @@ import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.PersonalDataEraser;
+import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.TenantContext;
 import java.time.LocalDate;
 import java.time.Month;
+import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
@@ -29,6 +32,7 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -65,6 +69,7 @@ class ClosureService {
     private final PlatformHost hosts;
     private final BusinessClock clock;
     private final DataExports exports;
+    private final Documents documents;
     private final PlanService plans;
     private final List<PersonalDataEraser> erasers;
     private final TransactionTemplate transactions;
@@ -84,6 +89,7 @@ class ClosureService {
             PlatformHost hosts,
             BusinessClock clock,
             DataExports exports,
+            Documents documents,
             PlanService plans,
             List<PersonalDataEraser> erasers,
             ObjectMapper json,
@@ -100,6 +106,7 @@ class ClosureService {
         this.hosts = hosts;
         this.clock = clock;
         this.exports = exports;
+        this.documents = documents;
         this.plans = plans;
         this.erasers = erasers;
         this.json = json;
@@ -242,7 +249,7 @@ class ClosureService {
                             rs.getTimestamp("requested_at").toInstant(),
                             rs.getString("requested_by_name"),
                             removeAfter,
-                            "requested".equals(state) && !removeAfter.isAfter(today),
+                            ("requested".equals(state) || "removing".equals(state)) && !removeAfter.isAfter(today),
                             PlatformService.instant(rs.getTimestamp("cancelled_at")),
                             PlatformService.instant(rs.getTimestamp("removed_at")),
                             rs.getObject("keep_until", LocalDate.class),
@@ -284,7 +291,8 @@ class ClosureService {
                 .query((rs, n) -> new Row(rs.getString("status"), rs.getObject("remove_after", LocalDate.class)))
                 .optional()
                 .orElseThrow(ApiException::notFound);
-        if (!"requested".equals(row.status())) {
+        // A request the operator began whose erasure failed is still removing: removing it again resumes it.
+        if (!"requested".equals(row.status()) && !"removing".equals(row.status())) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
                     "closure_not_open",
@@ -301,35 +309,58 @@ class ClosureService {
     }
 
     /**
-     * The operator removes the business, in one transaction bound to it: begin (the request open and its cooling-off over,
-     * checked again under the row lock), every eraser, then finish (the business closed, the request removed with the day its
-     * money records may be deleted, a row in the platform's log). Any failure rolls everything back.
+     * The operator removes the business, in two steps. First, bound to no business, {@code platform_begin_tenant_removal}
+     * authenticates the operator (their live platform session and the authenticator code they just used), checks the
+     * cooling-off against the business's own date, and moves the request to removing. Then, in one transaction bound to the
+     * business, the request is marked for the erasers, the core's eraser and every module's run, and the removal ends: the
+     * business closed, the request removed with the day its money records may be deleted, a row in the platform's log with the
+     * reason. A failure there rolls the erasure back and leaves the request removing; removing it again resumes.
      */
     Removed remove(UUID closureId, String reason) {
-        UUID operator = CurrentPrincipal.require().userId();
-        UUID tenantId = tenantOf(closureId);
+        Principal principal = CurrentPrincipal.require();
+        UUID tenantId;
+        try {
+            tenantId = transactions.execute(status -> jdbc.sql("SELECT platform_begin_tenant_removal(?, ?, ?, ?)")
+                    .params(closureId, principal.userId(), principal.sessionId(), reason.trim())
+                    .query(UUID.class)
+                    .optional()
+                    .orElse(null));
+        } catch (DataAccessException e) {
+            String message = String.valueOf(e.getMostSpecificCause().getMessage());
+            if (message.contains("cooling_off")) {
+                throw ApiException.rule(
+                        "cooling_off",
+                        "The business cannot be removed yet. Until then its owner can still cancel the closing.");
+            }
+            if (message.contains("operator_not_verified")) {
+                throw new ApiException(
+                        HttpStatus.FORBIDDEN,
+                        "operator_not_verified",
+                        "Code needed",
+                        "Type a current code from your own authenticator app and remove again.");
+            }
+            throw e;
+        }
+        if (tenantId == null) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT, "closure_not_open", "Not open", "This request is no longer open.");
+        }
         return TenantContext.callAs(
                 tenantId,
                 () -> transactions.execute(status -> {
-                    checkRemovable(closureId);
-                    LocalDate today = clock.today(tenant.profile().timezone());
-                    Boolean begun = jdbc.sql("SELECT platform_begin_tenant_removal(?, ?, ?, ?)")
-                            .params(closureId, operator, reason.trim(), today)
+                    jdbc.sql("SELECT app_mark_tenant_removal(?)")
+                            .param(closureId)
                             .query(Boolean.class)
                             .single();
-                    if (!Boolean.TRUE.equals(begun)) {
-                        throw new ApiException(
-                                HttpStatus.CONFLICT, "closure_not_open", "Not open", "This request is no longer open.");
-                    }
-                    // The business's own log keeps the removal as the operator's act, written before its details are
-                    // erased like
-                    // every other row's.
-                    Map<String, Object> started = new LinkedHashMap<>();
-                    started.put("closure_id", closureId);
-                    started.put("reason", reason.trim());
+                    // The business's own log keeps the removal as the operator's act; its reason is in the platform's
+                    // log, which keeps it.
                     tenantAudit.record(
                             AuditLog.Entry.created(
-                                    "core.business.removed", "core.business_closure", closureId, null, started),
+                                    "core.business.removed",
+                                    "core.business_closure",
+                                    closureId,
+                                    null,
+                                    Map.of("closure_id", closureId)),
                             null,
                             "platform");
                     Map<String, Integer> erased = new LinkedHashMap<>();
@@ -341,7 +372,7 @@ class ClosureService {
                     for (PersonalDataEraser eraser : erasers) {
                         erased.merge(eraser.area(), eraser.erase(), Integer::sum);
                     }
-                    LocalDate keepUntil = keepUntil(today, retentionYears);
+                    LocalDate keepUntil = keepUntil(closedOn(closureId), financialYearEndMonth(), retentionYears);
                     jdbc.sql("SELECT platform_finish_tenant_removal(?, ?, ?::jsonb)")
                             .params(closureId, keepUntil, json.writeValueAsString(erased))
                             .query(String.class)
@@ -351,32 +382,51 @@ class ClosureService {
                 }));
     }
 
-    /**
-     * The last day the kept money records of a business removed on {@code removedOn} are kept: {@code years}
-     * ({@code BMS_CLOSED_RETENTION_YEARS}, 5 by default) after the end of the financial year (1 July to 30 June) in which it
-     * was removed (owner decision D46, ADR-090). The daily job deletes them the day after.
-     */
-    static LocalDate keepUntil(LocalDate removedOn, int years) {
-        int endYear =
-                removedOn.getMonthValue() <= Month.JUNE.getValue() ? removedOn.getYear() : removedOn.getYear() + 1;
-        return LocalDate.of(endYear + years, Month.JUNE, 30);
+    /** "The closing" of D46: the business's own date of the request, the day it went read only (ADR-090). */
+    private LocalDate closedOn(UUID closureId) {
+        java.time.Instant requested = jdbc.sql("SELECT requested_at FROM tenant_closures WHERE id = ?")
+                .param(closureId)
+                .query((rs, n) -> rs.getTimestamp("requested_at").toInstant())
+                .single();
+        return requested.atZone(tenant.profile().timezone()).toLocalDate();
+    }
+
+    /** The month the bound business's financial year ends in, from its settings; June (the Uganda tax year) when unset. */
+    private int financialYearEndMonth() {
+        return jdbc.sql("SELECT (settings ->> 'financial_year_end_month')::int FROM tenant_settings")
+                .query(Integer.class)
+                .optional()
+                .filter(m -> m != null && m >= 1 && m <= 12)
+                .orElse(Month.JUNE.getValue());
     }
 
     /**
-     * The daily job's work (owner decision D46): every removed business whose {@code keep_until} is before {@code today} has
+     * The last day the kept money records are kept (owner decision D46, ADR-090): {@code years} ({@code
+     * BMS_CLOSED_RETENTION_YEARS}, 5 by default) after the end of the financial year, ending in month {@code yearEndMonth}, in
+     * which the business closed on {@code closedOn}. The daily job deletes them the day after.
+     */
+    static LocalDate keepUntil(LocalDate closedOn, int yearEndMonth, int years) {
+        int endYear = closedOn.getMonthValue() <= yearEndMonth ? closedOn.getYear() : closedOn.getYear() + 1;
+        return YearMonth.of(endYear + years, yearEndMonth).atEndOfMonth();
+    }
+
+    /**
+     * The daily job's work (owner decision D46): every removed business past its {@code keep_until} in its own time zone has
      * every row it still holds deleted, money records included, each in its own transaction; one failure is logged and does
      * not stop the others. Returns how many businesses were purged.
      */
-    int purgeDue(LocalDate today) {
-        List<UUID> due = transactions.execute(status -> jdbc.sql("SELECT platform_closures_due_for_purge(?)")
-                .param(today)
+    int purgeDue() {
+        List<UUID> due = transactions.execute(status -> jdbc.sql("SELECT platform_closures_due_for_purge()")
                 .query(UUID.class)
                 .list());
         int purged = 0;
         for (UUID closureId : due) {
             try {
-                Integer rows = transactions.execute(status -> jdbc.sql("SELECT platform_purge_closed_tenant(?, ?)")
-                        .params(closureId, today)
+                // The files first, while the rows still name them; a purge that then fails runs again the next night.
+                UUID tenantId = tenantOf(closureId);
+                TenantContext.callAs(tenantId, documents::deleteAllStoredFiles);
+                Integer rows = transactions.execute(status -> jdbc.sql("SELECT platform_purge_closed_tenant(?)")
+                        .param(closureId)
                         .query(Integer.class)
                         .single());
                 log.info(

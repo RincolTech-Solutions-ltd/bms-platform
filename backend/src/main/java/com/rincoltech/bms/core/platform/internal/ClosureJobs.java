@@ -24,8 +24,8 @@ class ClosureJobs {
             name = "bms.platform.closed-retention-job-enabled",
             havingValue = "true",
             matchIfMissing = true)
-    RecurringTask<Void> closedRetention(ClosureService closures, BusinessClock clock) {
+    RecurringTask<Void> closedRetention(ClosureService closures) {
         return Tasks.recurring(PURGE, Schedules.cron("0 20 3 * * *", BusinessClock.DEFAULT_ZONE))
-                .execute((instance, context) -> closures.purgeDue(clock.today(BusinessClock.DEFAULT_ZONE)));
+                .execute((instance, context) -> closures.purgeDue());
     }
 }

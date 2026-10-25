@@ -525,6 +525,7 @@ write. Keys and defaults:
 | `mfa_enforce_from` | ISO instant or absent | absent (at once); written by the server only, to now plus the grace days when the policy is turned on or widened or a grace period is sent, and cleared when the policy is turned off or the grace is 0; until then a covered user without a factor signs in and is shown the date | FR-IAM-16 |
 | `go_live_date` | ISO date or absent | stored at the first sign-in of an administrator unless already set (`go_live_source` `first_admin_sign_in`; V89 backfills it for a business with an administrator sign-in or a loan): the earliest, in the business's time zone, of that sign-in, the first session of anyone ever an administrator, the earliest staff `last_login_at`, the tenant's `created_at` and the first `lending_loans` `created_at` or `disbursed_on`, so it never lands later than the real start; set only by the Owner (`PATCH /settings`, only earlier once a date is stored) or the platform operator (either way), today or earlier; existing loans come in only with a disbursement date before it (issue #466, ADR-071) | FR-EXL-03 |
 | `go_live_source` | `set` or `first_admin_sign_in`, with `go_live_date` | `set` when the Owner or the operator set the date; `first_admin_sign_in` when it was stored at that sign-in (issue #466, ADR-071) | FR-EXL-03 |
+| `financial_year_end_month` | 1 to 12, or absent | the month the business's financial year ends in; absent means June, the end of the Uganda tax year; set only by the Owner (`PATCH /settings`, 403 `owner_only` otherwise); the retention of a closed business's money records counts from the end of that financial year (issue #571, ADR-090, owner decision D46) | FR-TEN-09 |
 | `reports_enabled` | boolean | false; the tenant switch of the report runs (ADR-038, issue #214): off, nothing is queued, run or listed | FR-RPT-04 |
 
 `logo_document_id` is set only by the logo upload route, never by a settings patch: it names a
@@ -718,18 +719,24 @@ set its export run once and cancel it; only the definer functions running as `bm
 `removed`. `tenants.status` gains `closed` (V102): a removed business, which the resolver never serves. `app_resolve_tenant_status`
 answers `closing` while a request is open for an active business or one whose Owner's cancellation ended it, and
 `platform_tenants_cancelling()` lists such a business so billing leaves it out. The removal runs through
-`platform_begin_tenant_removal(closure, operator, reason, today)` (bound to the business: the request open, its day come; marks
-the transaction with `bms.erasing_tenant`), the erasers `app_erase_core_personal_data()`, `lending_erase_personal_data()` and
-`retail_erase_personal_data()` (each refuses to run outside a removal through `bms_removing_tenant()`), and
+`platform_begin_tenant_removal(closure, operator, session, reason)` (bound to no business, refused otherwise; the cooling-off
+checked against the business's own date computed from its time zone; the operator authenticated by an active account with
+two-step sign-in, a live platform session of theirs and an authenticator code used in the last two minutes, else
+`operator_not_verified`; the request moved to `removing`, or a `removing` request resumed), then, bound to the business,
+`app_mark_tenant_removal(closure)` (only a `removing` request; marks the transaction with `bms.erasing_tenant`), the erasers
+`app_erase_core_personal_data()` (also the free text of every note, memo, reason, explanation, purpose and message column of the
+business's tables, read from the catalogue, and the personal keys and values of its audit rows and its platform log rows through
+`bms_strip_personal(jsonb)`), `lending_erase_personal_data()` and `retail_erase_personal_data()` (each refuses to run outside a
+removal through `bms_removing_tenant()`; the retail one keeps the buyer's TIN in a document's snapshot), and
 `platform_finish_tenant_removal(closure, keep_until, summary)` (the business `closed`, the subscription ended, the sign-up
-application anonymised, `platform.tenant.removed`). Owner decision D46: the daily job lists the removed requests past `keep_until`
-(`platform_closures_due_for_purge(today)`) and `platform_purge_closed_tenant(closure, today)` deletes, unbound and in passes over
+application anonymised, `platform.tenant.removed` with the reason). Owner decision D46: the daily job lists the removed requests past `keep_until`
+(`platform_closures_due_for_purge()`, each business's date computed from its time zone) and `platform_purge_closed_tenant(closure)` deletes, unbound and in passes over
 every table with a `tenant_id` read from the catalogue, every row of the business except its `tenants` row, its `users` and its
 `tenant_closures` rows, then marks the request `purged` and writes `platform.tenant.purged`; every other guard that fires on
-DELETE (`ai_calls_guard`, `bms_commission_line_guard`, `bms_owner_keeps_admin`, `bms_payment_outcome_guard`, `bms_referral_guard`,
-`lending_loan_charges_guard`, `lending_loan_collateral_guard`, `lending_loan_guarantors_guard`, `payment_callbacks_guard`,
-`retail_purchase_order_lines_guard`) returns OLD for a delete while `bms_erasing` holds, which it does for a request `removing`
-or `purging`. The guard functions `reject_mutation`, `retail_sales_guard_update`,
+DELETE on a business's table, read from the catalogue, returns the row for a change while `bms_erasing` holds, which it does for a
+request `removing` or `purging`. V102 also replaces `app_list_active_tenants`, `app_list_active_tenants_with_module` and
+`app_tenant_is_active` so a business with an open request is left out of the scheduled jobs and the outbox's SMS and push, as a
+suspended one is. The guard functions `reject_mutation`, `retail_sales_guard_update`,
 `retail_quotations_guard_update`, `retail_customer_orders_guard_update`, `payment_intents_guard`, `retail_cashbook_guard_update` and
 `lending_collection_actions_guard` let a change through when `bms_erasing(to_jsonb(OLD))` holds: the caller runs as `bms_owner`,
 the transaction is marked for the row's business and its request is `removing`. The operator reads the requests through

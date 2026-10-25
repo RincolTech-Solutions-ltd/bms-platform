@@ -26,6 +26,7 @@ import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -165,6 +166,22 @@ class BusinessClosureIT extends IntegrationTest {
                         b.ownerSession().accessToken());
     }
 
+    /** The Owner (or anyone) sets the month the financial year ends in, through the settings with their version. */
+    ResponseEntity<JsonNode> yearEnd(Business b, Session by, int month) {
+        String version = b.api()
+                .get("/api/v1/settings", by.accessToken())
+                .getBody()
+                .get("version")
+                .asString();
+        return b.api()
+                .call(
+                        HttpMethod.PATCH,
+                        "/api/v1/settings",
+                        Map.of("financial_year_end_month", month),
+                        by.accessToken(),
+                        Map.of("If-Match", "\"" + version + "\""));
+    }
+
     void coolingOffOver(UUID closureId) {
         TestDatabase.owner()
                 .sql("UPDATE tenant_closures SET remove_after = ? WHERE id = ?")
@@ -277,6 +294,11 @@ class BusinessClosureIT extends IntegrationTest {
                         .value())
                 .as("the sign-in routes are not the read-only lock")
                 .isNotEqualTo(HttpStatus.LOCKED.value());
+        ResponseEntity<JsonNode> login = b.api().login(b.adminEmail(), Api.PASSWORD);
+        assertThat(login.getStatusCode())
+                .as("staff still sign in: %s", login.getBody())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(jobsSee(b)).as("no job runs for a closing business").isFalse();
 
         assertRefused(
                 b.api().post("/api/v1/closure/cancel", null, b.adminSession().accessToken()),
@@ -287,6 +309,7 @@ class BusinessClosureIT extends IntegrationTest {
         assertThat(cancelled.getStatusCode()).as("%s", cancelled.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(cancelled.getBody().get("status").asString()).isEqualTo("none");
         assertThat(write(b).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(jobsSee(b)).as("the jobs run for it again").isTrue();
         assertThat(b.api()
                         .get("/api/v1/plan/status", b.cashierSession().accessToken())
                         .getBody()
@@ -307,6 +330,29 @@ class BusinessClosureIT extends IntegrationTest {
         coolingOffOver(closureId);
         Operator op = operator();
         assertRefused(remove(op, closureId, code(op)), HttpStatus.CONFLICT, "closure_not_open");
+    }
+
+    /**
+     * Whether the scheduled jobs see the business: the lists they iterate (the lending arrears run and its penalties, interest,
+     * the daily notices) and the check the outbox's SMS and push channels make. A closing business is in none of them.
+     */
+    static boolean jobsSee(Business b) {
+        JdbcClient app = JdbcClient.create(TestDatabase.appDataSource());
+        boolean all = app.sql("SELECT app_list_active_tenants()")
+                .query(UUID.class)
+                .list()
+                .contains(b.t().tenantId());
+        boolean lending = app.sql("SELECT app_list_active_tenants_with_module('lending')")
+                .query(UUID.class)
+                .list()
+                .contains(b.t().tenantId());
+        boolean outbox = Boolean.TRUE.equals(app.sql("SELECT app_tenant_is_active(?)")
+                .param(b.t().tenantId())
+                .query(Boolean.class)
+                .single());
+        assertThat(lending).isEqualTo(all);
+        assertThat(outbox).isEqualTo(all);
+        return all;
     }
 
     String lastClosure(Business b) {
@@ -330,6 +376,11 @@ class BusinessClosureIT extends IntegrationTest {
         personalData(b);
         personalData(other);
         assertThat(write(b).getStatusCode()).isEqualTo(HttpStatus.OK);
+        // D46: the clock is the business's own financial year; only the Owner sets where it ends.
+        assertRefused(yearEnd(b, b.adminSession(), 12), HttpStatus.FORBIDDEN, "owner_only");
+        ResponseEntity<JsonNode> yearEnd = yearEnd(b, b.ownerSession(), 12);
+        assertThat(yearEnd.getStatusCode()).as("%s", yearEnd.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(yearEnd.getBody().get("financial_year_end_month").asInt()).isEqualTo(12);
         ResponseEntity<JsonNode> made = request(b);
         UUID closureId = UUID.fromString(made.getBody().get("id").asString());
         Operator op = operator();
@@ -367,7 +418,9 @@ class BusinessClosureIT extends IntegrationTest {
         assertThat(removed.getStatusCode()).as("%s", removed.getBody()).isEqualTo(HttpStatus.OK);
         LocalDate keepUntil =
                 LocalDate.parse(removed.getBody().get("keep_until").asString());
-        assertThat(keepUntil).isEqualTo(ClosureService.keepUntil(today, 5));
+        assertThat(keepUntil)
+                .as("the end of the calendar financial year of the request, plus five years")
+                .isEqualTo(ClosureService.keepUntil(today, 12, 5));
 
         UUID id = b.t().tenantId();
         assertThat(TestDatabase.owner()
@@ -415,10 +468,28 @@ class BusinessClosureIT extends IntegrationTest {
                         id,
                         saleTotal))
                 .isEqualTo(1);
+        // The audit trails keep what happened (amounts, dates, ids, codes) and lose who it was about.
         assertThat(count(
-                        "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND (data <> '{}'::jsonb OR ip IS NOT NULL)",
-                        id))
+                        "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND (data::text ~ ? OR ip IS NOT NULL)",
+                        id,
+                        PERSONAL))
                 .isZero();
+        assertThat(count("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND data <> '{}'::jsonb", id))
+                .as("the details that name nobody stay")
+                .isPositive();
+        assertThat(count(
+                        "SELECT count(*) FROM platform_audit_log WHERE tenant_id = ? AND (data::text ~ ? OR lower(data::text) LIKE ?)",
+                        id,
+                        PERSONAL,
+                        "%" + b.ownerEmail().toLowerCase() + "%"))
+                .as("the platform's log of the business names nobody")
+                .isZero();
+        assertThat(count(
+                        "SELECT count(*) FROM platform_audit_log WHERE tenant_id = ? AND action = 'platform.tenant.removed'"
+                                + " AND data ->> 'reason' = 'Test: the owner asked and the cooling-off is over'",
+                        id))
+                .as("the operator's reason is kept in the platform's log")
+                .isEqualTo(1);
         assertThat(count("SELECT count(*) FROM notification_outbox WHERE tenant_id = ? AND recipient <> 'removed'", id))
                 .isZero();
         assertThat(count("SELECT count(*) FROM billing_contacts WHERE tenant_id = ?", id))
@@ -451,7 +522,11 @@ class BusinessClosureIT extends IntegrationTest {
     @Test
     void frTen09_theBusinessCannotRemoveItself() throws SQLException {
         Business b = business();
-        assertThat(request(b).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> made = request(b);
+        assertThat(made.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        UUID closure = UUID.fromString(made.getBody().get("id").asString());
+        coolingOffOver(closure);
+        UUID operator = operator().id();
         try (Connection c = TestDatabase.appDataSource().getConnection()) {
             c.setAutoCommit(false);
             try (Statement s = c.createStatement()) {
@@ -460,6 +535,28 @@ class BusinessClosureIT extends IntegrationTest {
                 assertThatThrownBy(() ->
                                 s.execute("UPDATE tenant_closures SET status = 'removing' WHERE status = 'requested'"))
                         .hasMessageContaining("tenant_closures");
+            }
+            c.rollback();
+            try (Statement s = c.createStatement()) {
+                s.execute("SELECT set_config('app.tenant_id', '" + b.t().tenantId() + "', true)");
+                assertThatThrownBy(() -> s.execute("SELECT platform_begin_tenant_removal('" + closure + "', '"
+                                + operator + "', '" + UUID.randomUUID() + "', 'Test: from the business')"))
+                        .as("begun from a business's transaction")
+                        .hasMessageContaining("never from a business");
+            }
+            c.rollback();
+            try (Statement s = c.createStatement()) {
+                assertThatThrownBy(() -> s.execute("SELECT platform_begin_tenant_removal('" + closure + "', '"
+                                + operator + "', '" + UUID.randomUUID() + "', 'Test: no session, no code')"))
+                        .as("an operator's id alone, with no session and no code just used")
+                        .hasMessageContaining("operator_not_verified");
+            }
+            c.rollback();
+            try (Statement s = c.createStatement()) {
+                s.execute("SELECT set_config('app.tenant_id', '" + b.t().tenantId() + "', true)");
+                assertThatThrownBy(() -> s.execute("SELECT app_mark_tenant_removal('" + closure + "')"))
+                        .as("a request the operator did not begin")
+                        .hasMessageContaining("erased only during a removal");
             }
             c.rollback();
             for (String eraser : List.of(
@@ -481,15 +578,26 @@ class BusinessClosureIT extends IntegrationTest {
                         b.t().tenantId(),
                         b.ownerEmail()))
                 .isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM tenant_closures WHERE id = ? AND status = 'requested'", closure))
+                .isEqualTo(1);
     }
 
-    /** ADR-090: money records are kept five years after the end of the tax year (1 July to 30 June) of the removal. */
+    /**
+     * D46, ADR-090: money records are kept the set years (5) after the end of the financial year in which the business closed
+     * (the request): June, the Uganda tax year, unless the business set its own year end.
+     */
     @Test
-    void frTen09_moneyRecordsAreKeptFiveYearsAfterTheTaxYear() {
-        assertThat(ClosureService.keepUntil(LocalDate.of(2026, 10, 25), 5)).isEqualTo(LocalDate.of(2032, 6, 30));
-        assertThat(ClosureService.keepUntil(LocalDate.of(2026, 6, 30), 5)).isEqualTo(LocalDate.of(2031, 6, 30));
-        assertThat(ClosureService.keepUntil(LocalDate.of(2027, 1, 1), 5)).isEqualTo(LocalDate.of(2032, 6, 30));
-        assertThat(ClosureService.keepUntil(LocalDate.of(2026, 10, 25), 7))
+    void frTen09_moneyRecordsAreKeptFromTheEndOfTheFinancialYear() {
+        assertThat(ClosureService.keepUntil(LocalDate.of(2026, 10, 25), 6, 5)).isEqualTo(LocalDate.of(2032, 6, 30));
+        assertThat(ClosureService.keepUntil(LocalDate.of(2026, 6, 30), 6, 5)).isEqualTo(LocalDate.of(2031, 6, 30));
+        assertThat(ClosureService.keepUntil(LocalDate.of(2027, 1, 1), 6, 5)).isEqualTo(LocalDate.of(2032, 6, 30));
+        assertThat(ClosureService.keepUntil(LocalDate.of(2026, 11, 15), 12, 5))
+                .as("a calendar financial year")
+                .isEqualTo(LocalDate.of(2031, 12, 31));
+        assertThat(ClosureService.keepUntil(LocalDate.of(2026, 3, 15), 2, 5))
+                .as("a year ending in February, a leap year's end")
+                .isEqualTo(LocalDate.of(2032, 2, 29));
+        assertThat(ClosureService.keepUntil(LocalDate.of(2026, 10, 25), 6, 7))
                 .as("BMS_CLOSED_RETENTION_YEARS")
                 .isEqualTo(LocalDate.of(2034, 6, 30));
     }
@@ -504,6 +612,17 @@ class BusinessClosureIT extends IntegrationTest {
     void frTen09_theRemovalLeavesNoPersonalDataInAnyTable() {
         TestDatabase.Fixture t = TestDatabase.tenant("close-all", true, true);
         RlsIsolationIT.seedOneRowInEveryTable(t);
+        // Free text people typed on money records (D46: erased too): a purchase note, a journal memo, a stock movement
+        // note.
+        TestDatabase.owner()
+                .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
+                        + " UPDATE retail_purchases SET note = 'Paid Test Borrower 01 on +256700000005' WHERE tenant_id = '"
+                        + t.tenantId()
+                        + "'; UPDATE journal_entries SET memo = 'For Test Customer 01' WHERE tenant_id = '"
+                        + t.tenantId()
+                        + "'; UPDATE retail_stock_movements SET note = 'Given to Test Kin 01' WHERE tenant_id = '"
+                        + t.tenantId() + "'; END $$")
+                .update();
         TestDatabase.owner()
                 .sql("INSERT INTO retail_customers (id, tenant_id, name, contact) VALUES (?, ?, 'Test Customer 01', ?)")
                 .params(UUID.randomUUID(), t.tenantId(), "+256700000002")
@@ -539,6 +658,16 @@ class BusinessClosureIT extends IntegrationTest {
         assertThat(withPersonalData(t.tenantId()))
                 .as("tables still holding personal data")
                 .isEmpty();
+        assertThat(count(
+                        "SELECT count(*) FROM retail_documents WHERE tenant_id = ? AND snapshot -> 'buyer' ->> 'tin' = '1000000001'"
+                                + " AND snapshot -> 'buyer' ->> 'name' = 'Buyer' AND snapshot -> 'buyer' -> 'contact' = 'null'::jsonb",
+                        t.tenantId()))
+                .as("D46: the buyer's TIN stays on the kept tax invoice")
+                .isEqualTo(1);
+        assertThat(count(
+                        "SELECT count(*) FROM retail_purchases WHERE tenant_id = ? AND note IS NOT NULL AND note <> 'Removed'",
+                        t.tenantId()))
+                .isZero();
         assertThat(count("SELECT count(*) FROM retail_sales WHERE tenant_id = ?", t.tenantId()))
                 .as("the money records stay until keep_until")
                 .isPositive();
@@ -546,16 +675,14 @@ class BusinessClosureIT extends IntegrationTest {
         // Owner decision D46: the day after keep_until the daily job deletes everything the business still holds,
         // except its
         // tenants row, its anonymised users and its closure rows, which the platform's history points at.
-        assertThat(closures.purgeDue(today))
-                .as("nothing is due before keep_until")
-                .isZero();
+        assertThat(closures.purgeDue()).as("nothing is due before keep_until").isZero();
         assertThat(count("SELECT count(*) FROM retail_sales WHERE tenant_id = ?", t.tenantId()))
                 .isPositive();
         TestDatabase.owner()
                 .sql("UPDATE tenant_closures SET keep_until = ? WHERE id = ?")
                 .params(today.minusDays(1), closureId)
                 .update();
-        assertThat(closures.purgeDue(today)).isGreaterThanOrEqualTo(1);
+        assertThat(closures.purgeDue()).isGreaterThanOrEqualTo(1);
         List<String> kept = new ArrayList<>();
         for (String table : RlsIsolationIT.tenantOwnedTables()) {
             if (List.of("tenants", "users", "tenant_closures").contains(table)) {
@@ -572,7 +699,7 @@ class BusinessClosureIT extends IntegrationTest {
                 .isEqualTo(1);
         assertThat(platformAudits("platform.tenant.purged", t.tenantId())).isEqualTo(1);
         assertThat(withPersonalData(t.tenantId())).isEmpty();
-        assertThat(closures.purgeDue(today))
+        assertThat(closures.purgeDue())
                 .as("a purged request is never purged again")
                 .isZero();
     }

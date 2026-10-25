@@ -139,6 +139,34 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
      WHERE t.slug = p_slug AND t.status IN ('active', 'suspended')
 $$;
 
+-- A business that is closing is read only for its jobs too, as a suspended one is: the scheduled jobs that iterate the active
+-- businesses (the lending arrears run and its penalty charges, interest, returns, the daily notices, the approvals' expiry)
+-- leave it out, and the outbox's channels, which check app_tenant_is_active, send no SMS or push for it. The exports, the
+-- report runner and the weekly copy keep their own lists and still serve it.
+CREATE OR REPLACE FUNCTION app_list_active_tenants() RETURNS SETOF uuid
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    SELECT t.id FROM tenants t
+     WHERE t.status = 'active'
+       AND NOT EXISTS (SELECT 1 FROM tenant_closures k WHERE k.tenant_id = t.id AND k.status IN ('requested', 'removing'))
+     ORDER BY t.id
+$$;
+
+CREATE OR REPLACE FUNCTION app_list_active_tenants_with_module(p_module text) RETURNS SETOF uuid
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    SELECT t.id FROM tenants t
+     WHERE t.status = 'active'
+       AND EXISTS (SELECT 1 FROM tenant_modules m WHERE m.tenant_id = t.id AND m.module_key = p_module)
+       AND NOT EXISTS (SELECT 1 FROM tenant_closures k WHERE k.tenant_id = t.id AND k.status IN ('requested', 'removing'))
+     ORDER BY t.id
+$$;
+
+CREATE OR REPLACE FUNCTION app_tenant_is_active(p_tenant_id uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    SELECT EXISTS (SELECT 1 FROM tenants t WHERE t.id = p_tenant_id AND t.status = 'active'
+                     AND NOT EXISTS (SELECT 1 FROM tenant_closures k
+                                      WHERE k.tenant_id = t.id AND k.status IN ('requested', 'removing')))
+$$;
+
 -- A business that is closing gets no reminder and is never made overdue (ADR-075 decision 8 skips a cancelling business the
 -- same way): it is not told to pay to keep using BMS.
 CREATE OR REPLACE FUNCTION platform_tenants_cancelling() RETURNS TABLE (tenant_id uuid)
@@ -155,14 +183,18 @@ END
 $$;
 
 -- ---------------------------------------------------------------------------------------------
--- 5. Removal. The operator confirms after the cooling-off; the API then, in one transaction bound to the business,
---    begins (platform_begin_tenant_removal), runs each module's eraser, and finishes (platform_finish_tenant_removal). A
---    failure anywhere rolls the whole removal back. bms_owner has BYPASSRLS, so every statement below names the tenant.
+-- 5. Removal, in two steps. The operator confirms after the cooling-off: platform_begin_tenant_removal, in a transaction bound
+--    to no business, authenticates the operator (an active operator with a live platform session who used an authenticator
+--    code in the last two minutes), checks the cooling-off against the business's own date computed here, and moves the
+--    request to removing. Then, in one transaction bound to the business, app_mark_tenant_removal marks the transaction, each
+--    module's eraser runs and platform_finish_tenant_removal ends it; a failure there rolls the erasure back and leaves the
+--    request removing, so the operator removes again. Only a request the operator began can be erased: the business itself,
+--    bound to its own host, can neither begin nor erase. bms_owner has BYPASSRLS, so every statement below names the tenant.
 -- ---------------------------------------------------------------------------------------------
 
 -- True only inside a removal or a purge: the caller runs as bms_owner (a definer function of sections 5 and 8), the transaction
--- was marked for this business by platform_begin_tenant_removal or platform_purge_closed_tenant, and the business's request is
--- being removed or purged. SECURITY INVOKER on
+-- was marked for this business by app_mark_tenant_removal or platform_purge_closed_tenant, and the business's request is being
+-- removed or purged. SECURITY INVOKER on
 -- purpose: current_user is the caller's.
 CREATE FUNCTION bms_erasing(p_row jsonb) RETURNS boolean
 LANGUAGE plpgsql STABLE SET search_path = public, pg_temp AS $$
@@ -197,46 +229,102 @@ END
 $$;
 REVOKE ALL ON FUNCTION bms_removing_tenant() FROM PUBLIC;
 
--- Starts the removal of the bound business: the request is open, its cooling-off is over on p_today (the business's own
--- date), and the operator is named. Marks the transaction for this business. Returns false when the request is not open
--- (cancelled meanwhile, or removed already) and raises cooling_off when its day has not come.
-CREATE FUNCTION platform_begin_tenant_removal(p_closure uuid, p_operator uuid, p_reason text, p_today date)
-RETURNS boolean
+-- Begins (or resumes) the removal of a request, outside any business's transaction. Returns the business, or null when the
+-- request is not open (cancelled meanwhile, or removed already). Raises cooling_off before its day in the business's own time
+-- zone, and operator_not_verified unless the operator is active, the session is theirs and live, and they used an authenticator
+-- code in the last two minutes (the API's step-up, which records the code's step as used).
+CREATE FUNCTION platform_begin_tenant_removal(p_closure uuid, p_operator uuid, p_session uuid, p_reason text)
+RETURNS uuid
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
-    v_tenant uuid := nullif(current_setting('app.tenant_id', true), '')::uuid;
-    v_row    tenant_closures%ROWTYPE;
+    v_row   tenant_closures%ROWTYPE;
+    v_today date;
 BEGIN
-    IF v_tenant IS NULL THEN
-        RAISE EXCEPTION 'a removal runs bound to its business' USING ERRCODE = 'insufficient_privilege';
+    IF nullif(current_setting('app.tenant_id', true), '') IS NOT NULL THEN
+        RAISE EXCEPTION 'a removal is begun by the platform operator, never from a business' USING ERRCODE = 'insufficient_privilege';
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM platform_users u WHERE u.id = p_operator AND u.is_active) THEN
-        RAISE EXCEPTION 'only an active platform operator removes a business' USING ERRCODE = 'insufficient_privilege';
+    IF NOT EXISTS (SELECT 1 FROM platform_users u
+                    WHERE u.id = p_operator AND u.is_active AND u.mfa_enabled AND u.totp_last_step IS NOT NULL
+                      AND u.totp_last_step >= floor(extract(epoch FROM now()) / 30)::bigint - 4)
+       OR NOT EXISTS (SELECT 1 FROM platform_sessions x
+                       WHERE x.id = p_session AND x.platform_user_id = p_operator AND x.revoked_at IS NULL
+                         AND x.expires_at > now()) THEN
+        RAISE EXCEPTION 'operator_not_verified' USING ERRCODE = 'insufficient_privilege';
     END IF;
-    SELECT * INTO v_row FROM tenant_closures k WHERE k.id = p_closure AND k.tenant_id = v_tenant FOR UPDATE;
-    IF NOT FOUND OR v_row.status <> 'requested' THEN
-        RETURN false;
+    IF p_reason IS NULL OR char_length(btrim(p_reason)) < 5 THEN
+        RAISE EXCEPTION 'a removal needs a reason' USING ERRCODE = 'check_violation';
     END IF;
-    IF v_row.remove_after > p_today THEN
+    SELECT * INTO v_row FROM tenant_closures k WHERE k.id = p_closure FOR UPDATE;
+    IF NOT FOUND OR v_row.status NOT IN ('requested', 'removing') THEN
+        RETURN NULL;
+    END IF;
+    SELECT (now() AT TIME ZONE t.timezone)::date INTO v_today FROM tenants t WHERE t.id = v_row.tenant_id;
+    IF v_row.remove_after > v_today THEN
         RAISE EXCEPTION 'cooling_off' USING ERRCODE = 'check_violation', DETAIL = v_row.remove_after::text;
     END IF;
     UPDATE tenant_closures k
        SET status = 'removing', removed_by_platform_user_id = p_operator, removal_reason = left(btrim(p_reason), 300)
-     WHERE k.id = p_closure AND k.tenant_id = v_tenant;
+     WHERE k.id = p_closure;
+    RETURN v_row.tenant_id;
+END
+$$;
+
+-- In the removal's transaction bound to the business: marks it for the erasers, only for a request the operator began.
+CREATE FUNCTION app_mark_tenant_removal(p_closure uuid) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+    v_tenant uuid := nullif(current_setting('app.tenant_id', true), '')::uuid;
+BEGIN
+    IF v_tenant IS NULL OR NOT EXISTS (SELECT 1 FROM tenant_closures k
+                                        WHERE k.id = p_closure AND k.tenant_id = v_tenant AND k.status = 'removing') THEN
+        RAISE EXCEPTION 'personal data is erased only during a removal the operator began'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
     PERFORM set_config('bms.erasing_tenant', v_tenant::text, true);
     RETURN true;
 END
 $$;
 
+-- Personal data out of a JSON value, for the audit logs (owner decision D46): every key that names, reaches or describes a
+-- person, and every string that looks like a phone number, an email or a national ID, wherever it sits. Amounts, dates, ids,
+-- codes and statuses stay, so the trail of a money change is kept.
+CREATE FUNCTION bms_strip_personal(p jsonb) RETURNS jsonb
+LANGUAGE plpgsql IMMUTABLE SET search_path = public, pg_temp AS $$
+DECLARE
+    v_out jsonb;
+BEGIN
+    CASE jsonb_typeof(p)
+        WHEN 'object' THEN
+            SELECT coalesce(jsonb_object_agg(e.key, bms_strip_personal(e.value)), '{}'::jsonb) INTO v_out
+              FROM jsonb_each(p) e
+             WHERE e.key !~* '(^|_)(name|names|phone|phones|msisdn|email|emails|contact|contacts|nin|national|id_number|birth|dob|village|district|county|location|address|occupation|income|note|notes|memo|reason|message|recipient|recipients|ip|agent|buyer|customer|kin|valuer|counterparty|description|delivered|reference|explanation|purpose|tin)($|_)';
+            RETURN v_out;
+        WHEN 'array' THEN
+            SELECT coalesce(jsonb_agg(bms_strip_personal(e.value)), '[]'::jsonb) INTO v_out FROM jsonb_array_elements(p) e;
+            RETURN v_out;
+        WHEN 'string' THEN
+            IF (p #>> '{}') ~ '(\+?256|\m0)7[0-9]{8}|[^@[:space:]]+@[^@[:space:]]+|C[MF][A-Z0-9]{12}' THEN
+                RETURN 'null'::jsonb;
+            END IF;
+            RETURN p;
+        ELSE
+            RETURN p;
+    END CASE;
+END
+$$;
+REVOKE ALL ON FUNCTION bms_strip_personal(jsonb) FROM PUBLIC;
+
 -- The core's own tables: staff and member sign-in rows anonymised and their credentials, sessions, devices and links
--- deleted; messages, SMS log recipients and opt-outs, feedback text, payment request phones, the billing contact and the
--- details of the business's audit rows removed. Returns the rows touched.
+-- deleted; messages, SMS log recipients and opt-outs, feedback text, payment request phones and the billing contact removed;
+-- the personal data in the business's audit rows and its rows in the platform's log stripped; and the free text people typed
+-- on any record of the business. Returns the rows touched.
 CREATE FUNCTION app_erase_core_personal_data() RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
     v_tenant uuid := bms_removing_tenant();
     v_rows   integer := 0;
     v_n      integer;
+    v_col    record;
 BEGIN
     DELETE FROM auth_sessions WHERE tenant_id = v_tenant;              GET DIAGNOSTICS v_n = ROW_COUNT; v_rows := v_rows + v_n;
     DELETE FROM user_credentials WHERE tenant_id = v_tenant;           GET DIAGNOSTICS v_n = ROW_COUNT; v_rows := v_rows + v_n;
@@ -268,10 +356,35 @@ BEGIN
     -- A placeholder number of the right shape: the column is required and checked.
     UPDATE payment_intents SET payer_phone_e164 = '+100000000' WHERE tenant_id = v_tenant;
     GET DIAGNOSTICS v_n = ROW_COUNT; v_rows := v_rows + v_n;
-    -- The audit trail keeps who did what and when (the people now anonymised); the details, which can name a member or
-    -- a buyer, and the addresses go.
-    UPDATE audit_log SET data = '{}'::jsonb, ip = NULL WHERE tenant_id = v_tenant;
+    -- The audit trail keeps who did what and when and every amount and date of a money change; the keys and values that name
+    -- or reach a person go (bms_strip_personal), and so do the addresses. The platform's own log of this business the same.
+    UPDATE audit_log SET data = bms_strip_personal(data), ip = NULL WHERE tenant_id = v_tenant;
     GET DIAGNOSTICS v_n = ROW_COUNT; v_rows := v_rows + v_n;
+    UPDATE platform_audit_log SET data = bms_strip_personal(data), ip = NULL WHERE tenant_id = v_tenant;
+    GET DIAGNOSTICS v_n = ROW_COUNT; v_rows := v_rows + v_n;
+    -- Free text people typed on any record of the business, money records included (owner decision D46): a note, a memo, a
+    -- reason, an explanation, a purpose or a message becomes 'Removed', which every non-blank and minimum-length check
+    -- accepts. Columns are read from the catalogue; one whose check lists codes or patterns holds a code, not text, and
+    -- stays. A table added later is covered without a change here.
+    FOR v_col IN
+        SELECT c.relname AS tbl, a.attname AS col
+          FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+          JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+         WHERE ns.nspname = 'public' AND c.relkind = 'r'
+           AND a.atttypid IN ('text'::regtype, 'varchar'::regtype)
+           AND EXISTS (SELECT 1 FROM pg_attribute t WHERE t.attrelid = c.oid AND t.attname = 'tenant_id' AND NOT t.attisdropped)
+           AND c.relname NOT IN ('tenant_closures', 'users', 'tenants')
+           AND a.attname ~ '^(note|notes|memo|explanation|message|reason|purpose|purpose_text|visit_notes)$|_(note|notes|reason)$'
+           AND a.attname NOT IN ('failure_reason', 'revoked_reason')
+           AND NOT EXISTS (SELECT 1 FROM pg_constraint k
+                            WHERE k.conrelid = c.oid AND k.contype = 'c' AND a.attnum = ANY (k.conkey)
+                              AND (pg_get_constraintdef(k.oid) ~ 'ANY \(ARRAY\[' OR pg_get_constraintdef(k.oid) ~ ' ~ '))
+         ORDER BY 1, 2
+    LOOP
+        EXECUTE format('UPDATE %I SET %I = ''Removed'' WHERE tenant_id = $1 AND %I IS NOT NULL AND %I <> ''Removed''',
+                       v_col.tbl, v_col.col, v_col.col, v_col.col) USING v_tenant;
+        GET DIAGNOSTICS v_n = ROW_COUNT; v_rows := v_rows + v_n;
+    END LOOP;
     RETURN v_rows;
 END
 $$;
@@ -286,6 +399,9 @@ DECLARE
     v_operator uuid;
     v_slug     text;
 BEGIN
+    IF p_keep_until IS NULL OR p_keep_until < current_date THEN
+        RAISE EXCEPTION 'keep_until is a day to come' USING ERRCODE = 'check_violation';
+    END IF;
     UPDATE tenant_closures k SET status = 'removed', removed_at = now(), keep_until = p_keep_until
      WHERE k.id = p_closure AND k.tenant_id = v_tenant AND k.status = 'removing'
     RETURNING k.removed_by_platform_user_id INTO v_operator;
@@ -301,8 +417,10 @@ BEGIN
            activation_note = NULL, link_token_hash = NULL, updated_at = now()
      WHERE activated_tenant = v_tenant;
     INSERT INTO platform_audit_log (id, action, platform_user_id, tenant_id, data)
-    VALUES (gen_random_uuid(), 'platform.tenant.removed', v_operator, v_tenant,
-            jsonb_build_object('closure_id', p_closure, 'keep_until', p_keep_until, 'erased', p_summary));
+    SELECT gen_random_uuid(), 'platform.tenant.removed', v_operator, v_tenant,
+           jsonb_build_object('closure_id', p_closure, 'keep_until', p_keep_until, 'erased', p_summary,
+                              'reason', k.removal_reason)
+      FROM tenant_closures k WHERE k.id = p_closure;
     PERFORM set_config('bms.erasing_tenant', '', true);
     RETURN v_slug;
 END
@@ -375,13 +493,15 @@ BEGIN
        SET buyer_name = CASE WHEN buyer_name IS NULL THEN NULL ELSE 'Buyer' END, buyer_contact = NULL, notes = NULL
      WHERE tenant_id = v_tenant;
     GET DIAGNOSTICS v_n = ROW_COUNT; v_rows := v_rows + v_n;
-    -- The document keeps its printed snapshot (lines, totals, the business's own header) without the buyer's name and contact.
+    -- The document keeps its printed snapshot (lines, totals, the business's own header) without the buyer's name and contact;
+    -- any other key of the buyer, the TIN a tax invoice must show among them (owner decision D46), stays.
     UPDATE retail_documents
        SET buyer_name = CASE WHEN buyer_name IS NULL THEN NULL ELSE 'Buyer' END,
            snapshot = CASE WHEN jsonb_typeof(snapshot -> 'buyer') = 'object'
-                           THEN jsonb_set(snapshot, '{buyer}', jsonb_build_object(
-                                    'name', CASE WHEN snapshot -> 'buyer' ->> 'name' IS NULL THEN NULL ELSE 'Buyer' END,
-                                    'contact', NULL))
+                           THEN jsonb_set(jsonb_set(snapshot, '{buyer,name}',
+                                                    CASE WHEN snapshot -> 'buyer' ->> 'name' IS NULL THEN 'null'::jsonb
+                                                         ELSE '"Buyer"'::jsonb END),
+                                          '{buyer,contact}', 'null'::jsonb)
                            ELSE snapshot END
      WHERE tenant_id = v_tenant AND (buyer_name IS NOT NULL OR snapshot ? 'buyer');
     GET DIAGNOSTICS v_n = ROW_COUNT; v_rows := v_rows + v_n;
@@ -401,9 +521,10 @@ END
 $$;
 
 -- ---------------------------------------------------------------------------------------------
--- 6. The guard triggers of the tables the erasers change: the bypass that only a migration had (session_user bms_owner with
---    bms.allow_mutation) also lets a removal through, for the business being removed only (bms_erasing). The functions are
---    rewritten from their current definitions with exactly that one condition added, and checked afterwards.
+-- 6. The guard triggers of the business's tables: the bypass that only a migration had (session_user bms_owner with
+--    bms.allow_mutation) also lets a removal or a purge through, for that business only (bms_erasing). The functions are
+--    read from the catalogue, rewritten from their current definitions with exactly that one condition added, and checked
+--    afterwards. A later migration that replaces one of them must keep it.
 -- ---------------------------------------------------------------------------------------------
 
 DO $$
@@ -412,31 +533,32 @@ DECLARE
     v_def text;
     v_old constant text := 'session_user = ''bms_owner'' AND coalesce(current_setting(''bms.allow_mutation'', true), '''') = ''on''';
 BEGIN
-    FOREACH v_fn IN ARRAY ARRAY['reject_mutation', 'retail_sales_guard_update', 'retail_quotations_guard_update',
-                                'retail_customer_orders_guard_update', 'payment_intents_guard', 'retail_cashbook_guard_update',
-                                'lending_collection_actions_guard'] LOOP
+    -- Every function of a BEFORE UPDATE or DELETE row trigger on a business's table (tenant_closures' own guard aside, it lets
+    -- bms_owner through already). One that has the owner bypass gets bms_erasing beside it; any other gets, as its first
+    -- statement, a return of the row for a change made inside a removal or a purge. Nothing else in them changes.
+    FOR v_fn IN
+        SELECT DISTINCT p.oid::regproc::text
+          FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_proc p ON p.oid = t.tgfoid
+          JOIN pg_namespace ns ON ns.oid = c.relnamespace
+         WHERE NOT t.tgisinternal AND ns.nspname = 'public'
+           AND (t.tgtype & 1) = 1 AND (t.tgtype & 2) = 2 AND (t.tgtype & 24) <> 0
+           AND p.proname <> 'tenant_closures_guard'
+           AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname IN ('tenant_id', 'id')
+                                                      AND NOT a.attisdropped)
+         ORDER BY 1
+    LOOP
         v_def := pg_get_functiondef(v_fn::regproc);
-        IF position(v_old IN v_def) = 0 THEN
-            RAISE EXCEPTION 'V102: % has no owner bypass to extend', v_fn;
+        IF position('bms_erasing(' IN v_def) > 0 THEN
+            CONTINUE;
         END IF;
-        v_def := replace(v_def, v_old, '(' || v_old || ') OR bms_erasing(to_jsonb(OLD))');
-        EXECUTE v_def;
-        IF position('bms_erasing(to_jsonb(OLD))' IN pg_get_functiondef(v_fn::regproc)) = 0 THEN
-            RAISE EXCEPTION 'V102: % was not extended', v_fn;
-        END IF;
-    END LOOP;
-    -- The other guards that fire on DELETE let the purge of section 8 through, and only it: the first statement of their
-    -- body returns OLD for a delete inside a purge.
-    FOREACH v_fn IN ARRAY ARRAY['ai_calls_guard', 'bms_commission_line_guard', 'bms_owner_keeps_admin', 'bms_payment_outcome_guard',
-                                'bms_referral_guard', 'lending_loan_charges_guard', 'lending_loan_collateral_guard',
-                                'lending_loan_guarantors_guard', 'payment_callbacks_guard',
-                                'retail_purchase_order_lines_guard'] LOOP
-        v_def := pg_get_functiondef(v_fn::regproc);
-        IF v_def !~ E'\nBEGIN\n' THEN
+        IF position(v_old IN v_def) > 0 THEN
+            v_def := replace(v_def, v_old, '(' || v_old || ') OR bms_erasing(to_jsonb(OLD))');
+        ELSIF v_def ~ E'\nBEGIN\n' THEN
+            v_def := regexp_replace(v_def, E'\nBEGIN\n',
+                E'\nBEGIN\n    IF TG_OP IN (''UPDATE'', ''DELETE'') AND bms_erasing(to_jsonb(OLD)) THEN\n        IF TG_OP = ''DELETE'' THEN\n            RETURN OLD;\n        END IF;\n        RETURN NEW;\n    END IF;\n');
+        ELSE
             RAISE EXCEPTION 'V102: % has no body to extend', v_fn;
         END IF;
-        v_def := regexp_replace(v_def, E'\nBEGIN\n',
-                                E'\nBEGIN\n    IF TG_OP = ''DELETE'' AND bms_erasing(to_jsonb(OLD)) THEN\n        RETURN OLD;\n    END IF;\n');
         EXECUTE v_def;
         IF position('bms_erasing(to_jsonb(OLD))' IN pg_get_functiondef(v_fn::regproc)) = 0 THEN
             RAISE EXCEPTION 'V102: % was not extended', v_fn;
@@ -453,18 +575,19 @@ $$;
 --    referenced waiting for a later pass, so a table added later is purged without a change here. Returns the rows deleted.
 -- ---------------------------------------------------------------------------------------------
 
-CREATE FUNCTION platform_closures_due_for_purge(p_today date) RETURNS SETOF uuid
+CREATE FUNCTION platform_closures_due_for_purge() RETURNS SETOF uuid
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 BEGIN
     IF nullif(current_setting('app.tenant_id', true), '') IS NOT NULL THEN
         RAISE EXCEPTION 'listed by the platform job only' USING ERRCODE = 'insufficient_privilege';
     END IF;
-    RETURN QUERY SELECT k.id FROM tenant_closures k WHERE k.status = 'removed' AND k.keep_until < p_today
+    RETURN QUERY SELECT k.id FROM tenant_closures k JOIN tenants t ON t.id = k.tenant_id
+                  WHERE k.status = 'removed' AND k.keep_until < (now() AT TIME ZONE t.timezone)::date
                   ORDER BY k.keep_until, k.id;
 END
 $$;
 
-CREATE FUNCTION platform_purge_closed_tenant(p_closure uuid, p_today date) RETURNS integer
+CREATE FUNCTION platform_purge_closed_tenant(p_closure uuid) RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
     v_tenant  uuid;
@@ -479,7 +602,9 @@ BEGIN
         RAISE EXCEPTION 'purged by the platform job only' USING ERRCODE = 'insufficient_privilege';
     END IF;
     UPDATE tenant_closures k SET status = 'purging'
-     WHERE k.id = p_closure AND k.status = 'removed' AND k.keep_until < p_today
+      FROM tenants t
+     WHERE k.id = p_closure AND t.id = k.tenant_id AND k.status = 'removed'
+       AND k.keep_until < (now() AT TIME ZONE t.timezone)::date
     RETURNING k.tenant_id INTO v_tenant;
     IF v_tenant IS NULL THEN
         RETURN 0;
@@ -519,10 +644,10 @@ BEGIN
 END
 $$;
 
-REVOKE ALL ON FUNCTION platform_closures_due_for_purge(date) FROM PUBLIC;
-REVOKE ALL ON FUNCTION platform_purge_closed_tenant(uuid, date) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION platform_closures_due_for_purge(date) TO bms_app;
-GRANT EXECUTE ON FUNCTION platform_purge_closed_tenant(uuid, date) TO bms_app;
+REVOKE ALL ON FUNCTION platform_closures_due_for_purge() FROM PUBLIC;
+REVOKE ALL ON FUNCTION platform_purge_closed_tenant(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION platform_closures_due_for_purge() TO bms_app;
+GRANT EXECUTE ON FUNCTION platform_purge_closed_tenant(uuid) TO bms_app;
 
 -- ---------------------------------------------------------------------------------------------
 -- 7. The operator's lists: the closure requests across businesses, the business of one request, and the businesses with no
@@ -589,7 +714,8 @@ BEGIN
 END
 $$;
 
-REVOKE ALL ON FUNCTION platform_begin_tenant_removal(uuid, uuid, text, date) FROM PUBLIC;
+REVOKE ALL ON FUNCTION platform_begin_tenant_removal(uuid, uuid, uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_mark_tenant_removal(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_erase_core_personal_data() FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_finish_tenant_removal(uuid, date, jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION lending_erase_personal_data() FROM PUBLIC;
@@ -597,7 +723,8 @@ REVOKE ALL ON FUNCTION retail_erase_personal_data() FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_closures() FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_closure_tenant(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_tenants_without_owner() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION platform_begin_tenant_removal(uuid, uuid, text, date) TO bms_app;
+GRANT EXECUTE ON FUNCTION platform_begin_tenant_removal(uuid, uuid, uuid, text) TO bms_app;
+GRANT EXECUTE ON FUNCTION app_mark_tenant_removal(uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION app_erase_core_personal_data() TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_finish_tenant_removal(uuid, date, jsonb) TO bms_app;
 GRANT EXECUTE ON FUNCTION lending_erase_personal_data() TO bms_app;

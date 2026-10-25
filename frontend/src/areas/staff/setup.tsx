@@ -228,6 +228,23 @@ export function Setup() {
     });
   }
 
+  // ADR-090 (owner decision D46): the month the financial year ends in; a closed business's money records are kept from its end.
+  // Only the Owner changes it (the server answers owner_only for anyone else).
+  function setYearEnd(month: number) {
+    void run(async () => {
+      const { error } = await api.PATCH('/api/v1/settings', {
+        params: { header: { 'If-Match': `"${current.version}"` } },
+        body: { financial_year_end_month: month },
+      });
+      if (error) {
+        const problem = problemOf(error);
+        throw new Error(problem.errors?.[0]?.message ?? problem.detail ?? 'Could not save the end of the financial year.');
+      }
+      await refresh();
+      return `The financial year ends on the last day of ${MONTHS[month - 1]}.`;
+    });
+  }
+
   function dismiss() {
     void run(async () => {
       const { error } = await api.PATCH('/api/v1/settings', {
@@ -385,6 +402,29 @@ export function Setup() {
           </fieldset>
         )}
 
+        {permissions.includes('core.settings.manage') && (
+          <fieldset>
+            <legend>Financial year</legend>
+            <label htmlFor="year-end">The month your financial year ends in</label>
+            <select
+              id="year-end"
+              disabled={busy || me.is_owner !== true}
+              value={String(current.financial_year_end_month ?? 6)}
+              onChange={(e) => setYearEnd(Number(e.target.value))}
+            >
+              {MONTHS.map((name, i) => (
+                <option key={name} value={String(i + 1)}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <Hint full>
+              June unless you change it, the end of the Uganda tax year. If the business is ever closed, its money records are kept for five
+              years after the end of that financial year. Only the owner of the business changes it.
+            </Hint>
+          </fieldset>
+        )}
+
         <BusyButton busy={busy} disabled={colour !== '' && !check.ok} onClick={save} data-tour="setup-save">
           Save
         </BusyButton>
@@ -418,5 +458,8 @@ export function Setup() {
     </main>
   );
 }
+
+/** The months, for the end of the financial year. */
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export const Route = createLazyRoute('/staff/setup')({ component: Setup });

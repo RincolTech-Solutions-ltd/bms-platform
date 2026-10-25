@@ -16,6 +16,8 @@ export function closureLine(c: PlatformClosure): string {
     return `Removed on ${formatMoment(c.removed_at)}${c.removed_by_name ? ` by ${c.removed_by_name}` : ''}. Money records kept until ${formatDay(c.keep_until)}.`;
   }
   if (c.status === 'cancelled') return `Cancelled by the owner on ${formatMoment(c.cancelled_at)}.`;
+  if (c.status === 'removing') return 'The removal was begun and did not finish. Remove it again to finish it.';
+  if (c.status === 'purged') return `Removed on ${formatMoment(c.removed_at)}; the kept money records were deleted after ${formatDay(c.keep_until)}.`;
   if (c.removable) return `Asked for on ${formatMoment(c.requested_at)} by ${c.requested_by_name ?? 'the owner'}. The waiting period is over: it can be removed.`;
   return `Asked for on ${formatMoment(c.requested_at)} by ${c.requested_by_name ?? 'the owner'}. It can be removed from ${formatDay(c.remove_after)}.`;
 }
@@ -24,7 +26,7 @@ export function closureLine(c: PlatformClosure): string {
 export function removeSentence(c: PlatformClosure): string {
   return (
     `Remove ${c.tenant_name ?? 'this business'} for good? Its staff can no longer sign in. Names, phone numbers, ID numbers, emails and ` +
-    'every stored file are deleted or replaced. Money records stay, without names, until five years after the end of this financial year, then deleted. ' +
+    'every stored file but the invoices and receipts are deleted or replaced. Money records stay read only, without names, for five years after the end of the financial year, then deleted. ' +
     'This cannot be undone.'
   );
 }
@@ -44,12 +46,13 @@ function Row({ c }: { c: PlatformClosure }) {
       void queryClient.invalidateQueries({ queryKey: ['platform-closures'] });
     },
   });
-  const badge = c.status === 'requested' ? (c.removable ? 'badge badge-danger' : 'badge badge-warning') : 'badge';
-  const label = c.status === 'requested' ? (c.removable ? 'Can be removed' : 'Waiting') : c.status === 'removed' ? 'Removed' : 'Cancelled';
+  const open_ = c.status === 'requested' || c.status === 'removing';
+  const badge = open_ ? (c.removable ? 'badge badge-danger' : 'badge badge-warning') : 'badge';
+  const label = open_ ? (c.removable ? 'Can be removed' : 'Waiting') : c.status === 'cancelled' ? 'Cancelled' : 'Removed';
   return (
     <li className="ln-item">
       <p className="ln-item-head">
-        {c.status === 'removed' ? (
+        {c.status === 'removed' || c.status === 'purged' ? (
           <strong>{c.tenant_name}</strong>
         ) : (
           <Link to="/platform/businesses/$tenantId" params={{ tenantId: c.tenant_id ?? '' }}>

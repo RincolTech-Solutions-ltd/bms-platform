@@ -18887,6 +18887,11 @@ export interface components {
             /** @description True when the business has a name: the one given at onboarding or one the admin saved */
             display_name_set?: boolean;
             /**
+             * Format: int32
+             * @description The month the business's financial year ends in (1 to 12), or null for June, the end of the Uganda tax year; the retention of a closed business's money records counts from it (ADR-090)
+             */
+            financial_year_end_month?: number;
+            /**
              * Format: date
              * @description The day the app became the business's register: as the Owner or the operator set it, else the business date of the first administrator sign-in, stored then; null before either. An existing loan is brought in only with a disbursement date before it (ADR-071)
              */
@@ -19204,6 +19209,11 @@ export interface components {
             approval_validity_days?: number;
             disabled_collateral_types?: string[];
             display_name?: string;
+            /**
+             * Format: int32
+             * @description The month the financial year ends in, 1 to 12; only the Owner sets it, 403 owner_only otherwise (ADR-090)
+             */
+            financial_year_end_month?: number;
             /**
              * Format: date
              * @description The go-live date, today or earlier; only the Owner of the business sets it, 403 owner_only otherwise (ADR-071)

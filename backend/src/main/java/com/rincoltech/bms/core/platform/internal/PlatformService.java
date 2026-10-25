@@ -436,7 +436,6 @@ class PlatformService implements TenantProvisioning {
                 }));
     }
 
-    /** Read-only: what {@link #transferOwnership} would refuse, checked before the operator's authenticator code is spent. */
     /** The businesses with no Owner and their active administrators, in the order the definer function gives (ADR-090). */
     List<PlatformController.TenantWithoutOwner> tenantsWithoutOwner() {
         record Row(PlatformController.TenantWithoutOwner tenant, PlatformController.OwnerCandidate admin) {}
@@ -468,6 +467,7 @@ class PlatformService implements TenantProvisioning {
         return List.copyOf(byTenant.values());
     }
 
+    /** Read-only: what {@link #transferOwnership} would refuse, checked before the operator's authenticator code is spent. */
     void requireOwnerCandidate(UUID tenantId, UUID userId) {
         transactions.execute(status -> tenant(tenantId));
         TenantContext.callAs(

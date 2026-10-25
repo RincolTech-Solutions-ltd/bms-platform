@@ -27,15 +27,21 @@ people's data.
 
 What removal deletes and keeps is listed in ADR-090 decisions 7 and 8. In short: names, phone numbers, ID numbers, emails, notes
 about people and every stored file are deleted or replaced by placeholders; sign-in is gone; the money records stay, without names,
-until the set years (5 unless `BMS_CLOSED_RETENTION_YEARS` says otherwise) after the end of the financial year (1 July to 30 June) of the removal, then the daily job deletes them.
+for the set years (5 unless `BMS_CLOSED_RETENTION_YEARS` says otherwise) after the end of the business's financial year in which the owner asked, then the daily job deletes them. A buyer's TIN stays on a kept tax invoice.
 
-If a removal fails, nothing was changed (one transaction). The error log names the business; fix the cause and remove again.
+The removal checks in the database that you are signed in and used your code in the last two minutes; if it answers that your
+code is needed, type a fresh one and remove again. If the erasure fails, nothing was erased (one transaction) and the request
+shows as begun and not finished; fix the cause the error log names and press Remove the business again to finish it.
+
+While a business is closing, its scheduled jobs (penalties, interest, returns, daily notices) and its SMS and push messages stop,
+as for a suspended business; they start again if the owner cancels.
 
 ## The kept money records are deleted after `keep_until`
 
 Owner decision D46: the money records a removed business kept (sales, payments, invoices, credit notes, expenses, the journal,
-tax figures) stay read only for `BMS_CLOSED_RETENTION_YEARS` (5 unless set) after the end of the financial year (1 July to 30
-June) of the removal. The day after `keep_until` the job `core.platform.closed-retention` (daily, 03:20 Kampala time) deletes
+tax figures, the generated invoice and receipt PDFs) stay read only for `BMS_CLOSED_RETENTION_YEARS` (5 unless set) after the
+end of the business's financial year in which the owner asked to close it. The year ends in the month the owner set in Business
+set-up, else in June. The day after `keep_until` the job `core.platform.closed-retention` (daily, 03:20 Kampala time) deletes
 every row the business still holds, except its `tenants` row, its anonymised users and its closure rows. The platform history
 has `platform.tenant.purged` with the number of rows. Nothing is needed from you. If the error log names a closure the job could
 not purge, the request stays `removed` and the job tries again the next night; fix the cause (usually a table added later whose

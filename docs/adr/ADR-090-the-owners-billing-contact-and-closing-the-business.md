@@ -32,53 +32,76 @@ in a migration log line. Sign-in itself is out of scope: #322 and #349 change it
    `closure_already_requested`). It is audited in the business's log (`core.business.closure_requested`) and the platform's
    (`platform.tenant.closure_requested`), every active operator is emailed, and the Owner is emailed what happens and when. A
    business whose subscription ended (ADR-073) may still ask. Closing is separate from cancelling: cancelling keeps the data.
-3. **Read only at once.** While a request is open the resolver answers `closing` and every write is refused with 423
-   `business_closing`, except staff sign-in, refresh and sign-out, the exports (the audit CSV, report runs, Download my data and
-   the signed address of any file, which is a read) and the Owner's cancel. Every member of staff sees the notice with the day
-   of removal (`GET /plan/status`, `closing_remove_after`). Background jobs keep running, as for an active business; billing
-   leaves it out (no reminder, never made overdue), as it does a cancelling business (ADR-075 decision 8).
+3. **Read only at once, for people and for jobs.** While a request is open the resolver answers `closing` and every write is
+   refused with 423 `business_closing`, except staff sign-in (`/auth/staff/...`, unchanged), refresh and sign-out, the exports
+   (the audit CSV, report runs, Download my data and the signed address of any file, which is a read) and the Owner's cancel.
+   Every member of staff sees the notice with the day of removal (`GET /plan/status`, `closing_remove_after`). The scheduled jobs
+   leave the business out as they leave out a suspended one: `app_list_active_tenants`, `app_list_active_tenants_with_module`
+   and `app_tenant_is_active` exclude a business with an open request, so the lending arrears run and its penalty charges,
+   interest and returns, the daily notices and the approvals' expiry do not run for it, and the outbox's SMS and push channels
+   send nothing for it (an email still goes, in the platform's look). Billing leaves it out (no reminder, never made overdue). The
+   report runner, the weekly copy of its data and a payment that arrives (ADR-073 decision 5) keep their own lists and still
+   serve it. A cancel puts it back in every list at once.
 4. **A full data export for the Owner.** The request queues the full "Download my data" workbook of ADR-074 for the Owner,
    through the new public port `DataExports` of `core.reporting`; it is the full copy (personal columns included), made for the
    Owner alone and fetched after sign-in, never emailed. A failure to queue it never refuses the request: the Owner can make it
    from Business set-up, which keeps working.
 5. **The Owner may cancel until the removal.** `POST /closure/cancel` (the Owner only) closes the request as `cancelled`, audited
    in both logs; the business works again at once. A cancelled request is never removed.
-6. **The operator removes after the cooling-off.** `GET /platform/closures` lists the requests, the soonest removable first.
-   `POST /platform/closures/{id}/remove` needs the operator's own authenticator code and a reason (the operator's step-up of
-   ADR-042), is refused during the cooling-off (422 `cooling_off`, checked before the code is spent) and for a request no longer
-   open (409 `closure_not_open`). The removal is the Owner's request and the operator's confirmation: two people, which is how
-   this reads FR-TEN-09's "two-person action on the platform side".
-7. **What removal does, in one transaction bound to the business.** `platform_begin_tenant_removal` checks the request again under
-   its row lock and marks the transaction; then the core's eraser and every module's `PersonalDataEraser` (a kernel port, so the
-   core names no vertical) run; then `platform_finish_tenant_removal` closes the business (`tenants.status = 'closed'`, so its host
-   resolves nothing and no job lists it), ends the subscription, anonymises the sign-up application it came from, and writes
-   `platform.tenant.removed`. Any failure rolls all of it back. Deleted: sign-in credentials, recovery codes, sessions,
+6. **The operator removes after the cooling-off, and only the operator can.** `GET /platform/closures` lists the requests, the
+   soonest removable first. `POST /platform/closures/{id}/remove` needs the operator's own authenticator code and a reason (the
+   operator's step-up of ADR-042), is refused during the cooling-off (422 `cooling_off`, checked before the code is spent) and for
+   a request no longer open (409 `closure_not_open`). The removal starts in `platform_begin_tenant_removal`, which refuses a
+   transaction bound to a business, computes the business's own date from its time zone (no date comes from the caller), and
+   authenticates the operator in the database: an active operator with two-step sign-in, a live platform session of theirs (the
+   access token's session) and an authenticator code used in the last two minutes (the step-up just made records it); otherwise
+   `operator_not_verified`. Only then does the request become `removing`, and only a `removing` request can be erased
+   (`app_mark_tenant_removal`, the erasers' own check). So a request of the business itself, or a fault in any of its routes,
+   can neither start a removal nor skip the cooling-off. The removal is the Owner's request and the operator's confirmation: two
+   people, which is how this reads FR-TEN-09's "two-person action on the platform side".
+7. **What removal does, in one transaction bound to the business.** After the begin of decision 6, one transaction bound to the
+   business marks itself for the erasers, runs the core's eraser and every module's `PersonalDataEraser` (a kernel port, so the
+   core names no vertical), and ends in `platform_finish_tenant_removal`: the business closed (`tenants.status = 'closed'`, so its
+   host resolves nothing and no job lists it), the subscription ended, the sign-up application it came from anonymised, and
+   `platform.tenant.removed` written with the operator, the reason and what was erased. A failure rolls the erasure back and
+   leaves the request `removing`; the operator removes again. Deleted at once: sign-in credentials, recovery codes, sessions,
    invitations, password links, push devices, SMS opt-outs, next of kin, the billing contact, and every stored file (member ID
-   images, item photos, logos, report files, screenshots), deleted from the object store after the commit. Anonymised: staff and
-   member users (a placeholder name and email, no phone, deactivated, nobody the Owner), members (the member number kept; name,
-   phones, ID, birth date, place, occupation and income removed), customers, suppliers and cash book people (numbered
-   placeholders without contact details), the buyer's name and contact on sales, quotations, invoices, credit notes and orders
-   (in the printed snapshot too), collateral descriptions, owners, valuers and notes, collection and appraisal notes, message
-   recipients and their values, SMS log recipients, feedback text, payment request phones, and the details and addresses of the
-   business's audit rows (who did what and when stays, the people anonymised). The append-only and guard triggers of those tables
-   let a change through only inside such a removal (`bms_erasing`: a definer function running as `bms_owner`, the transaction
-   marked for this business, its request `removing`); the business itself can neither start a removal nor run an eraser.
-8. **Which money records are kept, for how long, and who deletes them: the owner's decision D46 (Hillary, 26 Oct 2026).**
-   Kept read only, without the people in them: the money records, that is sales with their lines and payments, invoices and
-   other documents, returns and credit notes, expenses and the rest of the cash book, purchases, supplier bills and payments,
-   the journal (entries and lines), the tax figures in them, stock movements, loans with their schedules, transactions and
-   repayments, savings and investments, and the subscription payments and receipts. They are kept for
-   `BMS_CLOSED_RETENTION_YEARS` (5 by default) after the end of the financial year (1 July to 30 June) in which the business was
-   removed: `tenant_closures.keep_until` is 30 June of that year plus the setting, shown to the operator and in the removal's
-   answer. The day after it a scheduled job (`core.platform.closed-retention`, daily at 03:20 Kampala time) deletes every row the
-   business still holds through `platform_purge_closed_tenant`, except its `tenants` row, its anonymised `users` and its
-   `tenant_closures` rows, which the platform's own history points at; the request becomes `purged` and
-   `platform.tenant.purged` is written. Staff accounts, sign-in data and the personal details of customers and members are
-   removed or anonymised at once when the removal is confirmed (decision 7), not at the end of the period. The one exception
-   D46 allows is a buyer's TIN that a tax invoice must show: **no such field is stored today** (no column on customers, credit
-   buyers, sales, quotations, documents or credit notes holds a TIN, and the invoice snapshot carries the buyer's name and
-   contact only, both removed); when one is added, it is the one field the retail eraser leaves on the invoice and on its
-   snapshot, and this decision names it. The five years are the owner's decision, still to be confirmed by an accountant.
+   images, item photos, logos, report files, screenshots, quotations and delivery notes) except the generated invoices, receipts,
+   credit notes and payment vouchers, which are money records (decision 8). Anonymised at once: staff and member users (a
+   placeholder name and email, no phone, deactivated, nobody the Owner), members (the member number kept; name, phones, ID,
+   birth date, place, occupation and income removed), customers, suppliers and cash book people (numbered placeholders without
+   contact details), the buyer's name and contact on sales, quotations, invoices, credit notes and orders (in the printed snapshot
+   too), collateral descriptions, owners, valuers and notes, message recipients and their values, SMS log recipients, feedback
+   text, payment request phones, and the free text people typed on any record, money records included: every note, memo,
+   reason, explanation, purpose and message column of the business's tables, read from the catalogue, becomes `Removed` (a
+   column whose check lists codes holds a code and stays). The business's audit rows and its rows in the platform's log keep
+   who did what, when, and every amount, date, id, code and status of a money change; `bms_strip_personal` takes out every key
+   that names, reaches or describes a person and every value that looks like a phone number, an email or a national ID, and the
+   addresses go. The append-only and guard triggers of the business's tables (every BEFORE UPDATE or DELETE row trigger, read
+   from the catalogue) let a change through only inside such a removal or the purge of decision 8 (`bms_erasing`: a definer
+   function running as `bms_owner`, the transaction marked for this business, its request `removing` or `purging`).
+8. **Which money records are kept, for how long, and who deletes them: the owner's decision D46 (Hillary, 26 Oct 2026),
+   the years still to be confirmed by an accountant.** Kept read only, without the people in them: the money records, that is
+   sales with their lines and payments, invoices (and their generated PDFs), receipts, returns and credit notes, expenses and the
+   rest of the cash book, purchases, supplier bills and payments, the journal (entries and lines), the tax figures in them, stock
+   movements, loans with their schedules, transactions, repayments and vouchers, savings and investments, and the subscription
+   payments and receipts. They are kept for `BMS_CLOSED_RETENTION_YEARS` (5 by default) after the end of the business's own
+   financial year in which it closed. **The closing** is the day of the Owner's request, in the business's own time zone: the
+   day it went read only, so the clock does not move with the 30 days or with when the operator acts. **The financial year**
+   ends in the month the Owner set in Business set-up (`financial_year_end_month`, the Owner's alone, 403 `owner_only`
+   otherwise); the ledger's periods are calendar months and say nothing about a year end, so without a setting it is June, the
+   end of the Uganda tax year. `tenant_closures.keep_until` is the last day of that month in the year the financial year ends,
+   plus the setting's years, shown to the operator and in the removal's answer. The day after it, in the business's own time
+   zone, a scheduled job (`core.platform.closed-retention`, daily at 03:20 Kampala time) deletes every stored file of the
+   business and then every row it still holds through `platform_purge_closed_tenant`, which refuses before `keep_until`
+   (computing the date itself) and refuses a transaction bound to a business; it keeps only the `tenants` row, the anonymised
+   `users` and the `tenant_closures` rows, which the platform's own history points at. The request becomes `purged` and
+   `platform.tenant.purged` is written with the number of rows and no personal data. No trigger is switched off by hand. Staff
+   accounts, sign-in data and the personal details of customers and members are removed or anonymised at once when the removal
+   is confirmed (decision 7), not at the end of the period. **The buyer's TIN** is the one exception D46 allows, on a kept tax
+   document: the retail eraser keeps the buyer's `tin` (and any other key but the name and contact) in the snapshot of every
+   kept document (`retail_documents.snapshot -> 'buyer'`), from which the invoice is printed. No column on customers, sales,
+   quotations, documents or credit notes holds a buyer TIN today; one added later is kept the same way and named here.
 9. **Businesses with no Owner, listed for the operator.** `GET /platform/tenants/without-owner` lists every active or suspended
    business with no Owner and its active administrators (`platform_tenants_without_owner`), and the portal page Businesses with
    no owner offers Set as the owner, which is ADR-062's existing route: the operator's code and a reason, audited in both logs.
@@ -94,11 +117,15 @@ tenant table afterwards.
 **Worse:** removal cannot be undone, and a business that removes by mistake loses its people for good (the cooling-off, the review
 step, the Owner's step-up, the emails and the operator's own code are the guards). The anonymised money records no longer say who
 bought or borrowed. The guard trigger functions now carry one more condition, so a later migration that replaces one of them must
-keep `OR bms_erasing(to_jsonb(OLD))`, or the removal fails (loudly, and `BusinessClosureIT` fails first).
+keep `bms_erasing(to_jsonb(OLD))`, or the removal or the purge fails (loudly, and `BusinessClosureIT` fails first). A closing
+business's interest, returns and penalties do not run during the cooling-off; one that cancels does not get those days back.
 
 **Watch for:** the five years of decision 8 are the owner's decision D46, still to be confirmed by an accountant (change
-`BMS_CLOSED_RETENTION_YEARS`, which applies to removals made after the change); before the first real removal, also whether the
-anti-money-laundering record-keeping duty applies to a lender, in which case borrowers' identification would have to be kept with the loans for its own period instead of being removed;
-free text a person typed into a money record's own note (a purchase note, a repayment reference) is kept as typed; the platform's
-own audit log keeps the operator's acts, which can name the Owner's email; a new tenant table with personal data needs its
-module's eraser, and `BusinessClosureIT.frTen09_theRemovalLeavesNoPersonalDataInAnyTable` fails until it has one.
+`BMS_CLOSED_RETENTION_YEARS`; it applies to removals made after the change). Whether the anti-money-laundering record-keeping
+duty applies to a lender, so that borrowers' identification would have to be kept with the loans, is an open question: answering
+it needs a new owner decision, and until one is made the identification is removed with every other personal detail as D46
+says. Accepted gaps under D46, each listed here on purpose: the generated invoice, receipt, credit note and voucher PDFs kept as
+money records still print the buyer's or borrower's name as it was on the day, until the purge deletes them; a payment's or
+repayment's reference (often a mobile money transaction number) is kept as part of the money record; the platform's own log
+keeps the operator's name and the reasons operators typed, which name no customer. A new tenant table with personal data needs
+its module's eraser, and `BusinessClosureIT.frTen09_theRemovalLeavesNoPersonalDataInAnyTable` fails until it has one.
