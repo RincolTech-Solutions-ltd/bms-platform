@@ -192,10 +192,14 @@ query, so the number is the token.
   screen, one link per tab, in this order: **Sell** (the sale screen, for `useSells`), **My stock** (the stock list, for the
   `stock` screen), **Buy** (restock, the D24 word for it, for the `restock` screen), **Money** (`/staff/money`, while
   `moneyLinks` lists a page: the cash book pages, Customers who owe, Credit control, the customer accounts and ageing pages
-  while `customer_accounts` is on, What you owe suppliers, member Savings with lending and Receive payments) and **More**
+  while `customer_accounts` is on, What you owe suppliers, Member savings with lending and Receive payments; the shop's own Savings is
+  named Shop savings there, with its own hint, so the two are told apart, #544) and **More**
   (`/staff/more`, always). A tab whose module is off or whose page the session may not use is not drawn, so the bar holds one
-  to five tabs; a business with lending only has Money (when it has a money page) and More. More lists `staffAreas` as rows,
-  under the Shop and Lending headings for a business with both, the Retail row standing for every shop page, then the shop in
+  to five tabs; a business with lending only has Money (when it has a money page) and More, or More alone. A bar holding only More
+  stays (#544): on a phone there is no drawer, so More is the only way to the other areas and to Sign out. More lists `staffAreas`
+  as rows; for a business with both modules it keeps the sidebar's order (FR-UXN-04, #544): the shared areas before the first
+  section (Home, Approvals) first, then the Shop and Lending headings, then the other shared areas under Business; the Retail row
+  stands for every shop page; then the shop in
   use (`CurrentShop`), the person's name and Sign out (the staff layout passes `signOut` and `signingOut` in `StaffContext`).
   Each tab is an icon above its label on a target 64px tall and at least 48px wide; the current one (`aria-current="page"`, on
   its page and the pages under it, such as Count under My stock) takes `--color-link`, a semibold label and a tinted pill
@@ -237,7 +241,8 @@ query, so the number is the token.
   rest) is in the sidebar from 720px, which a step that points at one unfolds while it shows. On a phone the More tab answers
   for them: it carries `data-tour-also` with `nav-areas` and the `tour` id of every link More lists, the tab bar carries
   `retail-nav`, and the tour host looks for `[data-tour-also~=id]` when no element has the id itself. The welcome tours have a
-  `tabs` step on `data-tour="tab-bar"`, skipped on a laptop, and the copy says "On a phone, tap More at the bottom". In the
+  `tabs` step on `data-tour="tab-bar"`, skipped on a laptop, worded for the tabs the person has (`bodyFor` on a step,
+  `tabNamesFor` in `tour/tours.ts`, which a test holds to `staffTabs`; #544), and the copy says "On a phone, tap More at the bottom". In the
   operator portal a step on a drawer link opens the drawer at once, without animation and without taking focus from the tour
   card.
 - **One icon per item (#483):** no two items of one menu draw the same picture, counting the Retail shortcuts and the section

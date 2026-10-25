@@ -406,15 +406,28 @@ describe('the tabs and their pages, read from /me (issue #539)', () => {
   it('Money lists its pages as rows', () => {
     page(admin, <MoneyPage />);
     const rows = within(screen.getByRole('list', { name: 'Money pages' })).getAllByRole('link').map((a) => a.querySelector('.list-row-title')?.textContent);
-    expect(rows.slice(0, 3)).toEqual(['Cash summary', 'Banking', 'Savings']);
+    expect(rows.slice(0, 3)).toEqual(['Cash summary', 'Banking', 'Shop savings']);
     expect(rows).toContain('Customers who owe');
+  });
+
+  // Issue #544: the shop's savings and the lending members' savings sat side by side as "Savings" and "Member savings".
+  it('tells the shop savings from the member savings by name and by hint', () => {
+    const both = { ...admin, permissions: [...(admin.permissions ?? []), 'lending.savings.read'], modules: ['retail', 'lending'] } as Me;
+    const savings = moneyLinks(both).filter((l) => /savings/i.test(l.label));
+    expect(savings.map((l) => l.label)).toEqual(['Shop savings', 'Member savings']);
+    expect(savings.map((l) => l.hint)).toEqual(["The shop's money set aside each day", 'Deposits and withdrawals of lending members']);
   });
 
   it('More lists the areas the session may open, under Shop and Lending for a business with both, and signs out', () => {
     const signOut = vi.fn();
-    const both = { ...admin, permissions: [...(admin.permissions ?? []), 'lending.loans.read'], modules: ['retail', 'lending'] } as Me;
+    const both = { ...admin, permissions: [...(admin.permissions ?? []), 'lending.loans.read', 'core.approvals.read'], modules: ['retail', 'lending'] } as Me;
     page(both, <MorePage />, signOut);
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Shop', 'Lending', 'Business', 'You']);
+    // The sidebar's order (FR-UXN-04, #544): Home and Approvals first, then Shop and Lending, then the other shared areas.
+    const lists = screen.getAllByRole('list').map((l) => l.getAttribute('aria-label'));
+    expect(lists.slice(0, 4)).toEqual(['Start', 'Shop', 'Lending', 'Business']);
+    expect(within(screen.getByRole('list', { name: 'Start' })).getAllByRole('link').map((a) => a.textContent)).toEqual(['Home', 'Approvals']);
+    expect(within(screen.getByRole('list', { name: 'Business' })).queryByRole('link', { name: 'Home' })).toBeNull();
     expect(within(screen.getByRole('list', { name: 'Lending' })).getByRole('link', { name: 'Loans' })).toBeTruthy();
     expect(within(screen.getByRole('list', { name: 'Business' })).getByRole('link', { name: 'Business set-up' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));

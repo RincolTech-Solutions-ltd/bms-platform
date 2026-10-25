@@ -10,7 +10,7 @@ import { showSavings } from './lending/savings-permissions';
 import { staffAreas } from './menu';
 import { showReceivePayments } from './payments/state';
 import { useSells } from './retail/nav';
-import { SCREENS, canUse, showRetail, type RetailScreen } from './retail/permissions';
+import { MONEY_SCREENS, SCREENS, canUse, showRetail, type RetailScreen } from './retail/permissions';
 
 // The bottom tabs on a phone (issue #539, decisions D29 and D31): the five daily jobs, Sell, My stock, Buy, Money and More, each an
 // icon above its label. Below 720px they replace the side menu's drawer; from 720px the sidebar stays and there are no tabs. A tab
@@ -32,24 +32,23 @@ export interface Tab {
 
 const pathOf = (screen: RetailScreen) => SCREENS.find((s) => s.screen === screen)?.path ?? '';
 
-/** The money pages under the Money tab: the cash book, then who owes and what is owed, then lending savings and payments in. */
-const MONEY_SCREENS: RetailScreen[] = [
-  'cashSummary', 'banking', 'savings', 'expenses', 'withdrawals', 'advances', 'creditSales', 'creditControl', 'customerAccounts', 'customerAgeing', 'supplierPayables',
-];
-
 export interface MoneyLink {
   to: string;
   label: string;
   hint: string;
 }
 
+// The Money page's own words where the menu's would be unclear side by side: the shop's Savings sits next to Member savings (#544).
+const MONEY_LABELS: Partial<Record<RetailScreen, string>> = { creditSales: 'Customers who owe', savings: 'Shop savings' };
+const MONEY_HINTS: Partial<Record<RetailScreen, string>> = { savings: "The shop's money set aside each day" };
+
 /** The money pages the session may use, in the order the Money page lists them. Empty means no Money tab. */
 export function moneyLinks(me: Me): MoneyLink[] {
   const retail = showRetail(me) ? SCREENS.filter((s) => MONEY_SCREENS.includes(s.screen) && canUse(me, s.screen)) : [];
   const links: MoneyLink[] = retail
     .sort((a, b) => MONEY_SCREENS.indexOf(a.screen) - MONEY_SCREENS.indexOf(b.screen))
-    .map((s) => ({ to: s.path, label: s.screen === 'creditSales' ? 'Customers who owe' : s.label, hint: s.hint }));
-  if (showSavings(me)) links.push({ to: '/staff/lending/savings', label: 'Member savings', hint: 'Deposits and withdrawals of members' });
+    .map((s) => ({ to: s.path, label: MONEY_LABELS[s.screen] ?? s.label, hint: MONEY_HINTS[s.screen] ?? s.hint }));
+  if (showSavings(me)) links.push({ to: '/staff/lending/savings', label: 'Member savings', hint: 'Deposits and withdrawals of lending members' });
   if (showReceivePayments(me)) links.push({ to: '/staff/payments', label: 'Receive payments', hint: 'Mobile money and card payments into the business' });
   return links;
 }
