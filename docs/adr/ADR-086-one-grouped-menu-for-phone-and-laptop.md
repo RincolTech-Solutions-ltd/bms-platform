@@ -53,9 +53,12 @@ shop owner thinks, the same on a phone and a laptop (D38), and approved the pict
    menu in its order, Approvals there moves from the top card to the Business card.
 8. **The business name comes from the business, never the platform.** `/me` carries no business name, so the top of the menu
    takes the business's own name and logo from its branding (`GET /branding`, `display_name`, ADR-068), the source the top bar
-   uses on a business's host. Off a business's host, or before its branding loads, the top shows a plain tile and no name, never
-   the product's name; the Rincol logo shows only on the operator side and the platform's own pages. Moving the name to `/me` is
-   an API change left to a later pull request.
+   uses on a business's host (`useBusinessName`: the loaded branding's non-empty `display_name`, never the shell brand's fallback
+   name). Off a business's host, while its branding loads, when `/branding` fails (an error answer or no network), and when the
+   branding carries no `display_name` (null, empty or blank), the top shows the same plain tile and no name, never the product's
+   or the platform's name; the role and the branch still show. The Rincol logo shows only on the operator side and the platform's
+   own pages. The owner accepted this source on pull request #569; moving the name to `/me` is an API change left to a later pull
+   request.
 
 ## Consequences
 

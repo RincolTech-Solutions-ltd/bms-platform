@@ -454,6 +454,11 @@ img.menu-shop-logo {
   max-width: 88px;
 }
 
+/* The tile while the business is not known: plain, with nothing in it. */
+.menu-shop-blank {
+  background: var(--color-neutral-tint);
+}
+
 .menu-shop-initials {
   display: grid;
   place-items: center;

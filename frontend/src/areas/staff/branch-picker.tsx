@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import type { Me } from '../../api/client';
-import { PLATFORM_BRAND, useLogo, useLogoSrc, useShellBrand } from '../../app/branding';
+import { PLATFORM_BRAND, useBusinessName, useLogo, useLogoSrc, useShellBrand } from '../../app/branding';
 import { icons } from '../../components/icons';
 import { retail } from '../../api/retail';
 import { ALL_BRANCHES, branchLabel, initialBranch, loadBranch, saveBranch } from '../../auth/branch';
@@ -85,7 +85,7 @@ export function initials(name: string): string {
     .filter((w) => /^[a-z]/i.test(w))
     .slice(0, 2)
     .map((w) => w[0]?.toUpperCase())
-    .join('');
+    .join('') || ([...name.trim()][0]?.toUpperCase() ?? '');
 }
 
 /**
@@ -98,9 +98,9 @@ export function initials(name: string): string {
  * then the branch step's anchor, on the branch row, or on the whole top for a session with no branch to show.
  */
 export function MenuShop({ me, branch, role, onChoose, tour }: { me: Me; branch: string | null; role: string; onChoose: (selection: string) => void; tour?: string }) {
-  const { active, loading, src, fromShop, broke, brand } = useShopImage(me, branch);
-  // The business's own name, from its branding (`/me` carries none); null while only the platform's brand is known.
-  const business = brand === PLATFORM_BRAND ? null : brand.name;
+  const { active, loading, src, fromShop, broke } = useShopImage(me, branch);
+  // The business's own name: its loaded branding's non-empty display_name, never the shell brand's fallback (ADR-086 decision 8).
+  const business = useBusinessName();
   const branches = me.branches ?? [];
   const choices = branches.length + (me.all_branches ? 1 : 0);
   const name = active ? branchLabel(active) : branch === ALL_BRANCHES ? 'All branches' : choices > 1 ? 'Choose a branch' : '';
@@ -111,7 +111,7 @@ export function MenuShop({ me, branch, role, onChoose, tour }: { me: Me; branch:
       ) : src ? (
         <img className="menu-shop-logo" src={src} alt={`Logo of ${fromShop && active ? branchLabel(active) : (business ?? 'the business')}`} onError={() => broke(src)} />
       ) : (
-        <span className="menu-shop-logo menu-shop-initials" aria-hidden="true">
+        <span className={business ? 'menu-shop-logo menu-shop-initials' : 'menu-shop-logo menu-shop-blank'} aria-hidden="true">
           {business ? initials(business) : null}
         </span>
       )}

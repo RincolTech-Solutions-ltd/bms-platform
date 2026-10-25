@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Me } from '../../api/client';
+import { api, type Me } from '../../api/client';
 import { PLATFORM_BRAND, type ShellBrand } from '../../app/branding';
 import { router as appRouter } from '../../app/router';
 import { ALL_BRANCHES } from '../../auth/branch';
@@ -28,6 +28,7 @@ vi.mock('../../app/branding', async (original) => ({
 const me = {
   user_id: 'u-self',
   full_name: 'Test Cashier 01',
+  roles: [{ role_key: 'cashier', role_name: 'Cashier' }],
   kind: 'staff',
   permissions: [],
   modules: [],
@@ -67,6 +68,21 @@ function show(branch: string | null, who: Me = me) {
   );
 }
 
+/**
+ * What GET /api/v1/branding answers on this business host (the dev server's tenant slug makes it one): still loading, a 500, a
+ * network failure, or a body. Every other read waits forever, so only the branding decides the menu's top.
+ */
+type BrandingAnswer = 'pending' | 'error' | 'network' | { display_name?: string | null; logo_url?: string | null };
+function brandingIs(answer: BrandingAnswer) {
+  vi.stubEnv('VITE_DEV_TENANT', 'test-traders');
+  vi.spyOn(api, 'GET').mockImplementation(((path: string) => {
+    if (path !== '/api/v1/branding' || answer === 'pending') return new Promise(() => undefined);
+    if (answer === 'network') return Promise.reject(new TypeError('Failed to fetch'));
+    if (answer === 'error') return Promise.resolve({ data: undefined, error: { code: 'internal' }, response: new Response(null, { status: 500 }) });
+    return Promise.resolve({ data: answer, response: new Response() });
+  }) as never);
+}
+
 const sidebarShop = () => document.querySelector('.side-nav .menu-shop') as HTMLElement;
 
 beforeEach(() => {
@@ -75,25 +91,33 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   document.body.className = '';
   window.localStorage.clear();
 });
 
 describe('the shop in use at the top of the sidebar (issues #461, #564)', () => {
-  beforeEach(() => widthIs(1280));
+  beforeEach(() => {
+    widthIs(1280);
+    brandingIs({ display_name: 'Test Traders', logo_url: null });
+  });
 
-  it('shows the shop logo, rounded, with the business name and the branch at the right', async () => {
+  it('shows the shop logo, rounded, with the branch under it', async () => {
+    // The logo tests run off a business host: there the dev server's tenant would make loadLogo fetch each logo as a blob.
+    vi.unstubAllEnvs();
     brand = { name: 'Test Traders', logoSrc: null, themePrimary: null, themeText: null };
     show('b-two');
     const image = (await within(sidebarShop()).findByAltText('Logo of Test Shop Two (KLA)')) as HTMLImageElement;
     expect(image.getAttribute('src')).toBe(LOGO);
     expect(image.className).toBe('menu-shop-logo');
-    expect(within(sidebarShop()).getByText('Test Traders').className).toBe('menu-shop-name');
     expect(sidebarShop().querySelector('.menu-shop-branch-name')?.textContent).toBe('Test Shop Two (KLA)');
   });
 
   it('holds an empty space the size of the logo while the shop logo loads, never the business logo', async () => {
+    // The logo tests run off a business host: there the dev server's tenant would make loadLogo fetch each logo as a blob.
+    vi.unstubAllEnvs();
     brand = { name: 'Test Traders', logoSrc: BUSINESS, themePrimary: null, themeText: null };
     show('b-two');
     const space = sidebarShop().querySelector('.menu-shop-logo') as HTMLElement;
@@ -113,21 +137,25 @@ describe('the shop in use at the top of the sidebar (issues #461, #564)', () => 
     expect(image.getAttribute('src')).toBe(BUSINESS);
   });
 
-  it('falls back to the business logo when the shop logo fails to load, and to the initials when that fails too', async () => {
+  it('falls back to the business logo when the shop logo fails to load, and to a tile with no image when that fails too', async () => {
+    // The logo tests run off a business host: there the dev server's tenant would make loadLogo fetch each logo as a blob.
+    vi.unstubAllEnvs();
     brand = { name: 'Test Traders', logoSrc: BUSINESS, themePrimary: null, themeText: null };
     show('b-two');
     const image = (await within(sidebarShop()).findByAltText('Logo of Test Shop Two (KLA)')) as HTMLImageElement;
     expect(image.getAttribute('src')).toBe(LOGO);
     fireEvent.error(image);
-    expect(within(sidebarShop()).getByAltText('Logo of Test Traders').getAttribute('src')).toBe(BUSINESS);
-    fireEvent.error(within(sidebarShop()).getByAltText('Logo of Test Traders'));
+    expect(within(sidebarShop()).getByAltText('Logo of the business').getAttribute('src')).toBe(BUSINESS);
+    fireEvent.error(within(sidebarShop()).getByAltText('Logo of the business'));
     expect(within(sidebarShop()).queryByRole('img')).toBeNull();
-    expect(sidebarShop().querySelector('.menu-shop-initials')?.textContent).toBe('TT');
+    // Off a business host the name is not known, so the tile is the plain one, with no initials.
+    expect(sidebarShop().querySelector('.menu-shop-blank')).not.toBeNull();
   });
 
-  it('shows the business initials when neither the shop nor the business has a logo', () => {
+  it('shows the business initials when neither the shop nor the business has a logo', async () => {
     brand = { name: 'Test Traders', logoSrc: null, themePrimary: null, themeText: null };
     show('b-one');
+    await within(sidebarShop()).findByText('Test Traders');
     expect(within(sidebarShop()).queryByRole('img')).toBeNull();
     expect(sidebarShop().querySelector('.menu-shop-initials')?.textContent).toBe('TT');
   });
@@ -138,15 +166,50 @@ describe('the shop in use at the top of the sidebar (issues #461, #564)', () => 
     expect((await within(sidebarShop()).findByAltText('Logo of Test Traders')).getAttribute('src')).toBe(BUSINESS);
   });
 
-  it('never shows the platform logo or a product name: before the business is known, a plain tile and no name (ADR-068)', () => {
-    // brand is PLATFORM_BRAND here, as off a business host or before its branding loads.
+  // ADR-086 decision 8: the business's name only from its loaded branding; until then, on a failure or with no name in it, a
+  // plain tile and no name, never the platform's or a product name, and the role and the branch still show.
+  async function expectNoBusinessYet() {
+    // Let the branding read settle (or keep waiting) before looking.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const top = sidebarShop();
+    expect(top.querySelector('.menu-shop-name')).toBeNull();
+    expect(top.querySelector('.menu-shop-blank')?.textContent).toBe('');
+    expect(top.querySelector('.menu-shop-initials')).toBeNull();
+    expect(within(top).queryByRole('img')).toBeNull();
+    expect(top.textContent).not.toMatch(/Rincoltech|BMS/);
+    expect(top.querySelector('.menu-shop-role')?.textContent).toBe('Cashier');
+    expect(top.querySelector('.menu-shop-branch-name')?.textContent).toBe('Test Shop One (HQ)');
+  }
+
+  it('shows a plain tile and no name while GET /branding is still loading', async () => {
+    brandingIs('pending');
     show('b-one');
-    expect(within(sidebarShop()).queryByRole('img')).toBeNull();
-    expect(sidebarShop().querySelector('.menu-shop-initials')?.textContent).toBe('');
-    expect(sidebarShop().querySelector('.menu-shop-name')).toBeNull();
-    expect(sidebarShop().textContent).not.toMatch(/Rincoltech|BMS/);
-    // The role and the branch still show.
-    expect(sidebarShop().querySelector('.menu-shop-branch-name')?.textContent).toBe('Test Shop One (HQ)');
+    await expectNoBusinessYet();
+  });
+
+  it.each(['error', 'network'] as const)('shows a plain tile and no name when GET /branding fails (%s)', async (failure) => {
+    brandingIs(failure);
+    show('b-one');
+    await expectNoBusinessYet();
+  });
+
+  it.each([null, '', '   '])('shows a plain tile and no name for an unbranded business: display_name %j and no logo', async (name) => {
+    brandingIs({ display_name: name, logo_url: null });
+    show('b-one');
+    await expectNoBusinessYet();
+  });
+
+  it('shows a plain tile and no name off a business host, where the shell shows the platform brand', async () => {
+    vi.unstubAllEnvs();
+    show('b-one');
+    await expectNoBusinessYet();
+  });
+
+  it('shows the name and the initials once the branding names the business', async () => {
+    show('b-one');
+    expect((await within(sidebarShop()).findByText('Test Traders')).className).toBe('menu-shop-name');
+    expect(sidebarShop().querySelector('.menu-shop-initials')?.textContent).toBe('TT');
+    expect(sidebarShop().querySelector('.menu-shop-role')?.textContent).toBe('Cashier');
   });
 
   it("shows the business's own logo when the shop has none, named after the business", async () => {
