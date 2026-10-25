@@ -461,8 +461,8 @@ BEGIN
 END
 $$;
 
--- Every active or suspended business with no Owner (ADR-062 decision 7 left some, named only in the migration log), one row per
--- active administrator (any one of whom the operator may make the Owner), or one row with no administrator.
+-- Every active or suspended business with no Owner (ADR-062 decision 7 left some, named only in the migration log), newest first
+-- and at most 500, one row per active administrator (any one of whom the operator may make the Owner), or one row with no administrator.
 CREATE FUNCTION platform_tenants_without_owner() RETURNS TABLE (
     tenant_id uuid, tenant_slug text, tenant_name text, tenant_status text, created_at timestamptz, admin_id uuid,
     admin_name text, admin_email text, admin_last_login_at timestamptz)
@@ -476,15 +476,15 @@ BEGIN
       FROM (SELECT * FROM tenants x
              WHERE x.status IN ('active', 'suspended')
                AND NOT EXISTS (SELECT 1 FROM users o WHERE o.tenant_id = x.id AND o.is_owner)
-             ORDER BY x.created_at, x.id
-             LIMIT 200) t
+             ORDER BY x.created_at DESC, x.id
+             LIMIT 500) t
       LEFT JOIN LATERAL (
             SELECT u.id, u.full_name, u.email, u.last_login_at, u.created_at FROM users u
              WHERE u.tenant_id = t.id AND u.kind = 'staff' AND u.status = 'active'
                AND EXISTS (SELECT 1 FROM user_role_assignments r
                             WHERE r.tenant_id = u.tenant_id AND r.user_id = u.id AND r.role_key = 'tenant_admin'
                               AND r.revoked_at IS NULL)) a ON true
-     ORDER BY t.created_at, t.id, a.created_at, a.id;
+     ORDER BY t.created_at DESC, t.id, a.created_at, a.id;
 END
 $$;
 
