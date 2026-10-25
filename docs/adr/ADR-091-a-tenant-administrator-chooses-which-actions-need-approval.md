@@ -5,7 +5,7 @@
 Proposed (2026-10-25, issue #343, go-live priority; the owner asked for it to be built in the best order without waiting on him).
 Builds on ADR-015 (actions registered by the modules that own them), ADR-043 (the write-off of a credit sale), ADR-046 (the
 step-up of an administrator who loosens a safeguard) and ADR-050 (push notices). No migration: the choices are two keys of the
-tenant settings row. The number follows pending ADR-088 (#579), pending ADR-089 (#583) and pending ADR-090 (left for #571).
+tenant settings row. The number follows ADR-088 (#579), pending ADR-089 (#583) and pending ADR-090 (left for #571).
 
 ## Context
 
@@ -113,7 +113,7 @@ expenses.
 **Worse:**
 
 - A 202 is a second success shape for three routes. Only a business that switches the approval on sees it; an old app version
-  shows the request as done until it reloads (pending ADR-088 makes old versions update).
+  shows the request as done until it reloads (ADR-088 makes old versions update).
 - A pending expense or correction is not in the cash book or the stock list, so a till count made while it waits differs by it.
 - One waiting correction per item across branches.
 
