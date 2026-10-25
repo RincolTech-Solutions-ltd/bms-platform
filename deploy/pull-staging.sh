@@ -63,9 +63,11 @@ unit_drift_notices() {
             continue
         fi
         if [[ ! -e "$installed/$name" ]]; then
-            script="$(sed -n 's/^ExecStart=//p' "$units/${name%.*}.service" 2>/dev/null | head -n 1)"
-            script="${script%% *}"
-            if [[ -n "$script" ]] && grep -qF -- "$script" <<< "$jobs"; then
+            # The script is the first absolute path ending in .sh after the systemd prefixes (- @ + !), so
+            # ExecStart=/bin/bash /opt/bms/x.sh names x.sh, not bash; it must appear in a cron line as a whole word.
+            script="$(sed -n 's/^ExecStart=[-@+!]*//p' "$units/${name%.*}.service" 2>/dev/null | head -n 1 \
+                | grep -oE '(^|[[:space:]])/[^[:space:]]+\.sh([[:space:]]|$)' | head -n 1 | tr -d '[:space:]')"
+            if [[ -n "$script" ]] && grep -qE -- "(^|[[:space:]])${script//./\\.}([[:space:]]|$)" <<< "$jobs"; then
                 continue
             fi
         fi
@@ -79,7 +81,9 @@ unit_drift_notices() {
 # the image ID, not the name. deploy/tests/cleanup-test.sh runs this function against a stub docker.
 remove_old_images() {
     local keep_tag="$1" keep_previous="$2" in_use ref id
-    in_use="$(docker ps --all --quiet | xargs -r docker inspect --format '{{.Image}}')"
+    # A container removed between ps and inspect only drops out of the list. If the list comes back empty, Docker's own
+    # refusal to remove an image in use is the backstop, and the caller ignores this function's status.
+    in_use="$(docker ps --all --quiet | xargs -r docker inspect --format '{{.Image}}' 2>/dev/null || true)"
     docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' \
         | grep -E "^${RELEASE_PREFIX//./\\.}-(api|web|proxy):sha-[0-9a-f]+ " \
         | while read -r ref id; do

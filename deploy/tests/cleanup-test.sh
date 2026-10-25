@@ -139,7 +139,20 @@ echo "# changed" >> "$installed/bms.slice"
 out="$(unit_drift_notices "$units" "$installed")"
 if [[ "$out" == *"systemd/bms.slice differs"* && "$(grep -c notice <<< "$out")" == 1 ]]; then ok "names an installed unit that differs, and only it"; else fail "notices: '$out'"; fi
 
-# 9. The slice cites ADR-083 as merged, so it matches the host's copy.
+# 9. A systemd prefix and a script run through bash still name the script; a cron line must run that path as a whole word.
+setup_units
+sed -i 's|^ExecStart=.*|ExecStart=-/bin/bash /opt/bms/restore-drill.sh|' "$units/bms-restore-drill.service"
+cp "$units/bms-restore-drill.service" "$installed/"
+out="$(unit_drift_notices "$units" "$installed")"
+if [[ -z "$out" ]]; then ok "reads the script past a systemd prefix and a bash wrapper"; else fail "notices: $out"; fi
+printf '%s\n' "30 3 * * 0 /bin/bash /opt/bms/restore-drill.sh.disabled" > "$WORK/crontab"
+out="$(unit_drift_notices "$units" "$installed")"
+if grep -q "systemd/bms-restore-drill.timer differs" <<< "$out"; then ok "a cron line for another path that only starts the same does not count"; else fail "no notice for the timer in: '$out'"; fi
+printf '%s\n' "30 3 * * 0 /bin/bash /opt/bms/monitor.sh" > "$WORK/crontab"
+out="$(unit_drift_notices "$units" "$installed")"
+if grep -q "systemd/bms-restore-drill.timer differs" <<< "$out"; then ok "a cron line that only shares the interpreter does not count"; else fail "no notice for the timer in: '$out'"; fi
+
+# 10. The slice cites ADR-083 as merged, so it matches the host's copy.
 if grep -q "pending ADR-083" "$HERE/../systemd/bms.slice"; then
     fail "deploy/systemd/bms.slice still says pending ADR-083"
 else

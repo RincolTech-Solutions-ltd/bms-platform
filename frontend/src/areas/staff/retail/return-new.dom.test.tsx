@@ -17,11 +17,6 @@ const ready = (b: unknown) => !(b as HTMLButtonElement).disabled && (b as HTMLEl
 
 afterEach(cleanup);
 
-vi.mock('@tanstack/react-router', async (original) => {
-  const real = await original<typeof import('@tanstack/react-router')>();
-  return { ...real, Link: ({ children, to }: { children: unknown; to: string }) => <a href={to}>{children as never}</a> };
-});
-
 const branches = [{ id: 'b1', name: 'Test Branch A', code: 'BR1' }, { id: 'b2', name: 'Test Store B', code: 'ST2' }];
 const sale = (over: Partial<Sale> = {}): Sale => ({
   id: 's1', sale_no: 'RS00000001', branch_id: 'b1', payment_method: 'cash', status: 'completed', total_minor: 1000, paid_minor: 1000, balance_minor: 0,
@@ -180,9 +175,11 @@ describe('the settings note', () => {
   it('says so in one neutral Hint line while returns are on and no approval limit is set, and stays quiet otherwise', () => {
     const { unmount } = render(<ReturnsThresholdWarning capabilities={{ returns: true } as never} />);
     const note = screen.getByTestId('returns-no-threshold');
-    expect(note.textContent).toMatch(/^Returns need no second person yet\. Set a limit\./);
+    expect(note.textContent).toMatch(/^Returns need no second person yet\. /);
     expect(note.textContent).toMatch(/no approval limit/i);
-    expect(screen.getByRole('link', { name: 'Set a limit' }).getAttribute('href')).toBe('/staff/setup');
+    expect(note.getAttribute('role')).toBe('note');
+    // No screen sets the limit yet, so the note offers no link that would lead nowhere.
+    expect(note.querySelector('a')).toBeNull();
     expect(note.querySelector('.alert, .alert-warning')).toBeNull();
     unmount();
     render(<ReturnsThresholdWarning capabilities={{ returns: true, returns_approval_threshold_minor: 500 } as never} />);

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, createLazyRoute } from '@tanstack/react-router';
+import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import { retail, type CapabilitiesRead } from '../../../api/retail';
 import { SkeletonList } from '../../../components/states';
@@ -129,16 +129,16 @@ function Editor({ read, onSaved, onEdit }: { read: CapabilitiesRead; onSaved: ()
  * While customer returns are on and the business has set no approval threshold for them, one administrator can refund cash up to
  * the whole of a sale with no second person. That is the default on purpose (the system invents no amount), so it is said here, as
  * one neutral Hint line (issue #575: no status colour on a normal screen); the full explanation is behind the Hint's info button.
- * The link goes to Business setup, where the safeguard notice of a raised limit also points.
+ * No screen sets the limit yet, so the Hint offers no link: a link that leads to no field would promise an action it cannot keep.
  */
 export function ReturnsThresholdWarning({ capabilities }: { capabilities: CapabilitiesRead['capabilities'] }) {
   if (capabilities.returns !== true || (capabilities.returns_approval_threshold_minor ?? 0) > 0) return null;
   return (
-    <div data-testid="returns-no-threshold">
+    <div role="note" data-testid="returns-no-threshold">
       <Hint>
-        Returns need no second person yet. <Link to="/staff/setup">Set a limit</Link>. With no approval limit, any administrator can refund up to the
-        whole of a sale, and void a return, alone. The limit counts the returns of one sale together, not a person&apos;s returns across sales,
-        so many small returns on different sales still need no second administrator.
+        Returns need no second person yet. With no approval limit, any administrator can refund up to the whole of a sale, and void a
+        return, alone. The limit counts the returns of one sale together, not a person&apos;s returns across sales, so many small returns on
+        different sales still need no second administrator. There is no screen to set the limit yet.
       </Hint>
     </div>
   );
