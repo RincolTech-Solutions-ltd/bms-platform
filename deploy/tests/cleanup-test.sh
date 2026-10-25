@@ -182,6 +182,7 @@ if grep -qE '^\s*-\s*\$\{BMS_HOST_ROOT:-/opt/bms\}/postgres/initdb:' <<< "$mount
 else
     fail "postgres initdb mount is not the host's fixed path: $mount"
 fi
+# shellcheck disable=SC2016 # the literal $release_dir and $ROOT are what the script must contain
 if grep -q 'cp -R "$release_dir/postgres/initdb" "$ROOT/postgres/initdb"' "$HERE/../pull-staging.sh"; then
     ok "pull-staging.sh seeds the fixed postgres/initdb on a new host"
 else
