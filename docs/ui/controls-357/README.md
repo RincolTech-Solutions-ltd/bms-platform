@@ -10,9 +10,10 @@ page scrolled sideways (scroll width 412 and 1280 on every capture).
 |---|---|
 | `01-controls-cards-412` | Phone: the days, then the cards; Credit written off after Goods taken back, with its rate, trend and share |
 | `02-controls-write-offs-opened-412` | Phone: Credit written off by person, a seller opened by day, and the record: "Written off by ...", the reason and Open sale |
-| `01-controls-cards-1280` | Laptop: the flat menu's Controls entry (current; Retail is not), and the cards four across |
+| `01-controls-cards-1280` | Laptop: the grouped menu (#564) and the cards four across |
+| `03-controls-in-business-menu-1280` | Laptop: the menu scrolled to Business: Reports, Controls (current; Reports is not), Business set-up |
 | `02-controls-write-offs-opened-1280` | Laptop: the same opened groups and record |
 
 | Phone cards | Phone record | Laptop |
 |---|---|---|
-| ![Cards](01-controls-cards-412.png) | ![Record](02-controls-write-offs-opened-412.png) | ![Laptop](01-controls-cards-1280.png) |
+| ![Cards](01-controls-cards-412.png) | ![Record](02-controls-write-offs-opened-412.png) | ![Laptop](03-controls-in-business-menu-1280.png) |

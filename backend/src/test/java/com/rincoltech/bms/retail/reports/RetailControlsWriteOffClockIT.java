@@ -183,4 +183,34 @@ class RetailControlsWriteOffClockIT extends IntegrationTest {
         assertThat(stored(big)).isEqualTo(DAY);
         assertThat(count(DAY)).isEqualTo(1);
     }
+
+    @Test
+    void aWriteOffWhoseEntryWasReversedIsLeftOut() throws Exception {
+        UUID sale = creditSale(1);
+        assertThat(writeOff(sale).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(count(DAY)).isEqualTo(1);
+        // No path reverses a write-off today (V64 is append-only); a reversing entry made by hand, as the superuser
+        // with the
+        // balance trigger off, stands for one, should a reversal ever be added.
+        try (java.sql.Connection c = new org.springframework.jdbc.datasource.DriverManagerDataSource(
+                        TestDatabase.url(), "postgres", "test-superuser-password")
+                .getConnection()) {
+            c.setAutoCommit(false);
+            try (java.sql.Statement st = c.createStatement()) {
+                st.execute("SET LOCAL session_replication_role = replica");
+            }
+            try (java.sql.PreparedStatement ps =
+                    c.prepareStatement("INSERT INTO journal_entries (id, tenant_id, branch_id,"
+                            + " entry_no, entry_date, period_id, reference, memo, source_module, source_type, source_id,"
+                            + " reverses_entry_id, created_by) SELECT gen_random_uuid(), e.tenant_id, e.branch_id, e.entry_no ||"
+                            + " 'R', e.entry_date, e.period_id, e.reference, e.memo, e.source_module, e.source_type, e.source_id,"
+                            + " e.id, e.created_by FROM journal_entries e JOIN retail_sale_writeoffs w ON w.tenant_id ="
+                            + " e.tenant_id AND w.journal_entry_id = e.id WHERE w.sale_id = ?")) {
+                ps.setObject(1, sale);
+                assertThat(ps.executeUpdate()).isEqualTo(1);
+            }
+            c.commit();
+        }
+        assertThat(count(DAY)).isZero();
+    }
 }

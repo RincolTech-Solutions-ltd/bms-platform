@@ -66,9 +66,9 @@ to be stated rather than assumed.
   caller's shops and, for groups and records, by a page. The returns and write-offs of a year across every shop are joined to the
   sales by a hash join over the year's sales, because there are tens of thousands of them in this seed; at a real rate they are
   read by their own day.
-- **Where it is found.** The page stays at `/staff/retail/controls` behind `retail.controls.read` (ADR-047). The grouped menu
-  of issue #564 (pull request #569, pending ADR-086, open when this was written) puts it under Business; until that merges, main's
-  flat menu gets a Controls entry after Retail for a session that may open the page, and the Retail page keeps listing it.
+- **Where it is found.** The page stays at `/staff/retail/controls` behind `retail.controls.read` (ADR-047). In the grouped menu
+  of issue #564 (pull request #569, ADR-086) it is the Controls row of the Business group, after Reports, for a session that may
+  open the page; on the page, Controls is the current row and Reports is not. The Retail page keeps listing it.
 
 ## Consequences
 
@@ -84,20 +84,18 @@ to be stated rather than assumed.
   someone decided it, which is the day to see it.
 - The approver of a write-off approved by a second administrator is the maker, not the checker. The approvals page has both.
 
-- The two builds of `V101` hold a SHARE lock on `retail_sale_lines` from the first build to the commit, so a sale waits for them
-  (reports do not). Measured on the harness's 2,040,060 lines: 283 ms and 229 ms; at staging's size, about 60,000 lines, about
-  15 ms. `lock_timeout` (5 s) bounds only the wait to take the lock, behind a sale being recorded, not the builds.
+- `lock_timeout` (5 s) in `V101` bounds only the wait for the SHARE lock on `retail_sale_lines`; once the two builds start, every
+  sale waits for both full scans until the commit (reports do not). Staging has 22,110 rows (11 MB, measured by the maintainer on
+  25 Oct 2026), so well under a second; the harness measured 283 ms and 229 ms on 2,040,060 rows. At about 2 million lines a
+  deploy needs a window, or a separate migration that builds the indexes CONCURRENTLY outside Flyway's transaction.
 - The item patterns still read every line of the window's sales, about 0.6 s for a month on this seed; they are one request a page.
 
 **Watch for:**
 
 - Re-run `ControlsQueryPlansIT` when a metric is added; a new metric read from a large table needs an index on its own day or a
   partial index on its exception, as here.
-
 - If the patterns are extended to write-offs, use a longer window than the page's, not the same thresholds.
 - Credit write-offs and returns for every shop at once are read through their day indexes, which lead with the branch
   (`retail_sale_writeoffs_by_day`, V64), so without a shop they read the whole table: about 1,800 buffers on the heavy seed. Accepted
   while the tables are small (one row per write-off or return); add `(tenant_id, written_off_on)` or its returns twin when a plan shows
   it matters.
-- When pull request #569 merges, its Business group carries the menu entry and the flat entry added here goes away with
-  main's flat menu.

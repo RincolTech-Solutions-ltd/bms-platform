@@ -11,17 +11,15 @@
 -- of all lines, so a partial index on (tenant_id, sale_id) for each keeps them small and lets the planner join only them to
 -- the window's sales; the plans after the change are in docs/specs/controls-query-plans-357.md.
 --
--- Locks. Flyway runs this file in one transaction. Each CREATE INDEX first takes a SHARE lock on retail_sale_lines and then
--- holds it to the commit, through both builds. SHARE conflicts with writers, not readers: reports and the sales lists go on,
--- while a sale (which inserts lines) waits until the migration commits. Taking the lock waits only for transactions that
--- are writing sale lines at that moment (a sale being recorded), never for a report; SET LOCAL lock_timeout bounds that
--- wait, and only that wait, at 5 seconds, after which the file fails and is re-run rather than queue the sales behind it.
--- It does not bound the builds. Measured by ControlsQueryPlansIT on 2,040,060 rows of retail_sale_lines (PostgreSQL 16 in
--- Testcontainers): 283 ms and 229 ms, about half a second in all. Staging holds a twenty-fifth of the db-bench seed's
--- 1.5 million lines (scripts/db-bench/seed.sql, scale 25), about 60,000, so at the same rate the builds there and at the
--- pilot's size take about 15 ms; sales wait that long once, at deploy. A plain CREATE INDEX, not CONCURRENTLY, which cannot
--- run inside Flyway's transaction (ADR-028). A tenant near the harness size would see about a second of held sales: still
--- acceptable at deploy, and the reason to re-measure before a much larger one.
+-- Locks. Flyway runs this file in one transaction. lock_timeout bounds only the wait for the SHARE lock on retail_sale_lines
+-- (behind a transaction that is writing sale lines at that moment; SHARE does not conflict with readers, so a report does
+-- not hold it up); after 5 seconds the file fails and is re-run. It does not bound the builds: once they start, the SHARE
+-- lock is held to the commit and every writer (a sale) waits for both full scans of the table. Staging, measured by the
+-- maintainer on 2026-10-25: 22,110 rows of retail_sale_lines (11 MB), so both builds take well under a second there.
+-- ControlsQueryPlansIT measured 283 ms and 229 ms on 2,040,060 rows (PostgreSQL 16 in Testcontainers). A plain CREATE
+-- INDEX, not CONCURRENTLY, which cannot run inside Flyway's transaction (ADR-028). At about 2 million lines, on a slower
+-- host, the held sales would no longer be negligible: such a database needs a deploy window or a separate migration that
+-- builds the indexes CONCURRENTLY outside Flyway's transaction.
 --
 -- Flyway runs with outOfOrder off: V98 is one staff phone per business, V99 is the placeholder that placeholder-migration-guard refuses and
 -- V100 is the shop Home takings index (pull request #572), so this is V101.

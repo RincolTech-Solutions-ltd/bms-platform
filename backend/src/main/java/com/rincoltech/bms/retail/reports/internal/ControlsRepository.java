@@ -132,8 +132,9 @@ class ControlsRepository {
             // person whose sale it was, the approver who wrote it off. The value is what the buyer still owed
             // at the sale's prices, never the loss, which can be a cost. A row is a write-off that was made:
             // the write-off path inserts it only when it runs (after the second administrator's approval when
-            // one is needed) and the table is append-only (V64), so there is no pending, reversed or
-            // cancelled row to leave out (RetailControlsWriteOffClockIT).
+            // one is needed) and the table is append-only (V64), so no row waits for approval. A write-off
+            // whose journal entry was reversed is left out, should a reversal ever be made (found by the
+            // unique (tenant_id, reverses_entry_id) of journal_entries; RetailControlsWriteOffClockIT).
             case "credit_writeoffs" ->
                 "SELECT 'credit_writeoffs'"
                         + COLUMNS.formatted(
@@ -149,7 +150,9 @@ class ControlsRepository {
                                 "CAST(NULL AS text)",
                                 "w.created_by")
                         + " FROM retail_sale_writeoffs w JOIN retail_sales s ON s.tenant_id = w.tenant_id AND s.id ="
-                        + " w.sale_id WHERE NOT s.historical AND w.written_off_on >= :from AND w.written_off_on <= :to";
+                        + " w.sale_id WHERE NOT s.historical AND w.written_off_on >= :from AND w.written_off_on <= :to"
+                        + " AND NOT EXISTS (SELECT 1 FROM journal_entries r WHERE r.tenant_id = w.tenant_id AND"
+                        + " r.reverses_entry_id = w.journal_entry_id)";
             case "price_overrides" ->
                 "SELECT 'price_overrides'" + lineColumns("l.price_override_reason", "l.line_total_minor") + lines
                         + " AND l.price_source = 'override'";

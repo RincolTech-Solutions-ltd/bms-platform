@@ -105,12 +105,15 @@ The inline `<style>` element the screens used to render (`RetailStyles`) is gone
 a no-op export.
 
 - The retail home shows one large tile per screen, with an icon, two per row on a phone. Each tile has its own icon
-  (`icons[screen]`, issue #483), the same one its shortcut shows in the side menu; so do the catalogue tiles (`TILE_ICONS`).
-- The retail shortcuts (`retail/nav.tsx`, up to five the user may use) are a group under Retail in the
-  sidebar from 720px (issue #455). Retail stays current on every retail page and is drawn as the section above a
-  current shortcut. On a phone the bottom tabs hold the daily jobs instead (issue #539): Sell, My stock (with the
-  count of items low on stock), Buy, Money and More, each shown only when the session may use it, and the sale's
-  sticky total sits on top of them.
+  (`icons[screen]`, issue #483), the same one its row shows in the staff menu; so do the catalogue tiles (`TILE_ICONS`).
+- The staff menu lists the shop's pages in groups (issue #564, ADR-086): Today (Sell, Orders with the open count),
+  Stock (My stock with "N low", Buy stock, Count stock, Move stock, Items and categories) and Money (Cash book, Expenses,
+  Customers who owe, What I owe suppliers, Savings and advances), then Reports under Business, which opens this retail
+  home with the figures and every shop page. Each row shows only when the session may use its page, with no cap (the five
+  retail shortcuts of issue #455 and the Retail item they hung under are gone). On a phone the bottom tabs hold the daily jobs
+  (issue #539): Sell, My stock (with the count of items low on stock), Buy, Money and More, each shown only when the session
+  may use it, and the sale's sticky total sits on top of them; the menu button at the top left opens the same menu as the
+  laptop's sidebar.
 - Tables sit in a `.table-wrap` that scrolls sideways inside its card on a phone, with a shadow on the
   side that has more columns; quantities and money are right-aligned in tabular figures.
 - Forms end with the main action full width, and any secondary action ("Clear this sale") under it.
@@ -432,7 +435,7 @@ The administrator's two screens for the trade capabilities, and the rule every c
 - **Branch roles** (`/staff/retail/branch-roles`, tile "Branch roles", `retail.branch_role.manage`): one choice per
   branch (store, shop, both). It exists only while `branch_roles` is on.
 - **The rule** (`SCREEN_CAPABILITY` in `retail/permissions.ts`): a screen of a capability is offered, in the tiles,
-  the bottom bar shortcuts and the route gate, only while `/me` lists the capability, whatever permissions the user
+  the menu rows and the route gate, only while `/me` lists the capability, whatever permissions the user
   holds. A screen not listed there behaves as before capabilities existed, so a shop (every capability off) sees the
   same menu as today plus, for the administrator, the Retail settings tile. A later slice adds its screens to that
   map, sets `ready` for its capability in `retail/capabilities-state.ts` and adds its tour; `capabilities.test.tsx`
@@ -1160,8 +1163,8 @@ No migration beyond the permission; no write anywhere on the page.
 - **Credit written off (issue #357, ADR-087).** A card after Goods taken back: the credit sales written off in the days, worth what the
   buyers still owed (never the loss, which can be a cost), with the rate per 100 sales and the share of sales like the other sale cards.
   Person is whose sale it was; the record reads "Written off by ..." and opens the sale. Not in the repeat patterns.
-- **Menu.** Until the grouped menu of #564 (pull request #569) puts Controls under Business, the flat menu has a Controls entry after Retail
-  for a session that may open the page; on the page, Controls is the current link and Retail is not.
+- **Menu.** Controls is a row of the Business group of the grouped menu (#564, ADR-086), after Reports, for a session that may
+  open the page; on the page, Controls is the current row and Reports is not.
 - **Not yet.** Groups 2 to 6 of #357 are separate pages.
 
 ## Sizes and colours (issue #384, ADR-051, FR-RET-51, FR-RET-52)
