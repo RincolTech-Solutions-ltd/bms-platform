@@ -182,6 +182,12 @@ done
 # The unit runs with UMask=0077, but the postgres container (another uid) must read initdb/ and sql/.
 # Both hold no secrets, only scripts and SQL.
 chmod -R a+rX "$release_dir/postgres" "$release_dir/sql"
+# postgres mounts the host's fixed postgres/initdb (compose.pi-staging.yml), which is refreshed only after a deploy
+# succeeds. On a new host it does not exist yet, so seed it from this release before the first deploy.
+if [[ ! -d "$ROOT/postgres/initdb" ]]; then
+    mkdir -p "$ROOT/postgres" && cp -R "$release_dir/postgres/initdb" "$ROOT/postgres/initdb"
+    chmod -R a+rX "$ROOT/postgres"
+fi
 
 status=0
 DOCKER_CONFIG="$ROOT/dockercfg" BMS_STATE_DIR="$ROOT/state" BMS_COSIGN_PUBKEY="$ROOT/cosign.pub" BMS_ENV_FILE="$ROOT/.env" \

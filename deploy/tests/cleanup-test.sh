@@ -6,6 +6,7 @@
 #   - unit_drift_notices names a unit that differs from the installed copy, but not one left uninstalled because the
 #     bms user's crontab runs its job (the restore drill, Sunday 03:30).
 #   - deploy/systemd/bms.slice cites ADR-083 as merged.
+#   - postgres mounts the host's fixed postgres/initdb, so a deploy never recreates it.
 # Run: bash deploy/tests/cleanup-test.sh
 set -uo pipefail
 
@@ -171,6 +172,20 @@ if grep -q "pending ADR-083" "$HERE/../systemd/bms.slice"; then
     fail "deploy/systemd/bms.slice still says pending ADR-083"
 else
     ok "bms.slice cites ADR-083 as merged"
+fi
+
+# 12. postgres mounts the host's fixed initdb, never a path inside the release: a per-release bind source changes the
+#     service's config hash and made every deploy recreate (restart) postgres.
+mount="$(grep -E '/docker-entrypoint-initdb\.d' "$HERE/../compose.pi-staging.yml")"
+if grep -qE '^\s*-\s*\$\{BMS_HOST_ROOT:-/opt/bms\}/postgres/initdb:' <<< "$mount"; then
+    ok "postgres mounts the host's fixed postgres/initdb"
+else
+    fail "postgres initdb mount is not the host's fixed path: $mount"
+fi
+if grep -q 'cp -R "$release_dir/postgres/initdb" "$ROOT/postgres/initdb"' "$HERE/../pull-staging.sh"; then
+    ok "pull-staging.sh seeds the fixed postgres/initdb on a new host"
+else
+    fail "pull-staging.sh does not seed the fixed postgres/initdb"
 fi
 
 echo
