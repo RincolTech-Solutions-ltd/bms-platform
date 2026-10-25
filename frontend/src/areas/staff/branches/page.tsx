@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
-import { type ChangeEvent, useRef, useState } from 'react';
+import { type ChangeEvent, useEffect, useRef, useState } from 'react';
 import { type AdminBranch, BranchesError, branches } from '../../../api/branches';
 import { branchLabel } from '../../../auth/branch';
 import { ShopLogo } from '../branch-picker';
@@ -45,9 +45,18 @@ export function BranchesScreen() {
   const [error, setError] = useState<{ id: string; text: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  // The branch just added, brought into view once the list that holds it has rendered.
+  const [justAdded, setJustAdded] = useState<string | null>(null);
   const { show, toast } = useToast();
   // One action at a time: a second tap before the first answer must not send a second request.
   const working = useRef(false);
+
+  useEffect(() => {
+    const card = justAdded ? document.getElementById(`branch-${justAdded}`) : null;
+    if (!card) return;
+    card.scrollIntoView?.({ block: 'center' });
+    setJustAdded(null);
+  }, [justAdded, list.data]);
 
   if (!allowed) {
     return (
@@ -70,6 +79,7 @@ export function BranchesScreen() {
     setAdding(false);
     setNotice(null);
     show(addedWords(branch), 'success');
+    setJustAdded(branch.id ?? null);
     await refreshLists();
   }
 
@@ -181,7 +191,7 @@ export function BranchesScreen() {
                 const closed = isClosed(b);
                 const open = panel?.id === b.id;
                 return (
-                  <li key={b.id} className="rt-card stack">
+                  <li key={b.id} id={`branch-${b.id ?? ''}`} className="rt-card stack">
                     <p>
                       <ShopLogo url={b.logo_url} name={branchLabel(b)} /> <strong>{branchLabel(b)}</strong>{' '}
                       {b.is_head_office && <span className="badge">Head office</span>}{' '}

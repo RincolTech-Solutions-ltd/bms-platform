@@ -79,8 +79,10 @@ export function AddBranchForm({ takenCodes, canOpenBilling, onAdded, onCancel }:
       {refusal &&
         (refusal.code === 'plan_limit_reached' ? (
           <p role="alert" className="alert alert-warning">
-            Your plan has no room for another branch. Change your plan, or close a branch you no longer use.{' '}
-            {canOpenBilling ? <Link to={'/staff/setup/billing' as never}>Open Plan and billing</Link> : 'Ask the owner to change the plan.'}
+            <span>
+              Your plan has no room for another branch. Change your plan, or close a branch you no longer use.{' '}
+              {canOpenBilling ? <Link to={'/staff/setup/billing' as never}>Open Plan and billing</Link> : 'Ask the owner to change the plan.'}
+            </span>
           </p>
         ) : (
           <p role="alert" className="alert alert-danger">{refusal.text}</p>
