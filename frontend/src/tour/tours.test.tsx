@@ -51,6 +51,7 @@ import { FeedbackPage } from '../areas/staff/feedback/page';
 import { ReferralsPage } from '../areas/staff/referrals/page';
 import { BusinessNotificationsScreen } from '../areas/staff/notifications/business';
 import { BillingScreen } from '../areas/staff/billing/page';
+import { CloseScreen } from '../areas/staff/close/page';
 import { TwoStepPolicyScreen } from '../areas/staff/two-step/page';
 import { ApprovalRulesScreen } from '../areas/staff/approval-rules/page';
 import { UsersScreen } from '../areas/staff/users/page';
@@ -113,6 +114,8 @@ function screen(path: string | undefined): ReactElement {
       return <BusinessNotificationsScreen />;
     case '/staff/setup/billing':
       return <BillingScreen />;
+    case '/staff/setup/close':
+      return <CloseScreen />;
     case '/staff/retail':
       return <RetailHome />;
     case '/staff/retail/sale':
@@ -215,8 +218,10 @@ function render(me: Me, path: string | undefined): string {
     currency: 'UGX', version: 1,
     rules: [{ action_type: 'retail_sale_void', module: 'retail', label: 'Sale voids', has_amount: true, switchable: true, on: false, threshold_minor: 0 }],
   });
+  // What Close the business reads (issue #571): no request yet, seen by the owner.
+  client.setQueryData(['closure'], { status: 'none', cooling_off_days: 30, can_change: true });
   // What the retail settings screens read, so their targets are in the static markup.
-  client.setQueryData(['retail', 'capabilities'], { capabilities: { profile: 'shop' }, version: 1 });
+  client.setQueryData(['retail', 'capabilities'], { capabilities: { profile: 'shops' }, version: 1 });
   client.setQueryData(['retail', 'branch-roles'], (me.branches ?? []).map((b) => ({ branch_id: b.id, code: b.code, name: b.name, role: 'both', can_sell: true })));
   const branch = path === undefined ? (me.default_branch_id ?? null) : (me.branches?.[0]?.id ?? null);
   return renderToString(
@@ -321,6 +326,7 @@ const AUDIENCE: Record<string, Me[]> = {
   'page-approval-rules': [ADMIN],
   'page-business-notifications': [ADMIN],
   'page-billing': [ADMIN],
+  'page-close': [ADMIN],
   'page-members': [CLERK, OFFICER],
   'page-member-new': [CLERK],
   'page-member': [CLERK, CHECKER],
@@ -347,6 +353,7 @@ const AUDIENCE: Record<string, Me[]> = {
   'capability-transfer-receipt': [TRADER],
   'capability-units': [ADMIN],
   'capability-price-lists': [PRICER],
+  'capability-wholesale': [PRICER],
   'page-price-lists': [PRICER],
   'capability-customer-accounts': [LENDER],
   'page-accounts': [LENDER],

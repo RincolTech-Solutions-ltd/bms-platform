@@ -101,7 +101,15 @@ class PlatformController {
             String suspendedFrom,
 
             @Schema(description = "A pilot or complimentary business: free, no free month end (ADR-024 decision 6)")
-            boolean pilot) {}
+            boolean pilot,
+
+            @Schema(
+                    description =
+                            "The kind of business its administrator chose (issue #424, ADR-092): the profile a module's"
+                                    + " settings group stores, read through that module's group, for retail shops,"
+                                    + " stores_and_shops, wholesale or wholesale_and_shops; null when none was saved"
+                                    + " (a retail business is then shops)")
+            String businessType) {}
 
     @Schema(name = "PlatformTenantList")
     record TenantList(List<TenantResponse> items) {}
@@ -352,6 +360,32 @@ class PlatformController {
             @RequestParam(name = "status", required = false) List<String> status,
             @RequestParam(name = "module", required = false) String module) {
         return new TenantList(service.tenants(q, status, module));
+    }
+
+    @Schema(name = "OwnerCandidate", description = "An active administrator of a business with no Owner")
+    record OwnerCandidate(UUID id, String fullName, String email, Instant lastLoginAt) {}
+
+    @Schema(name = "TenantWithoutOwner")
+    record TenantWithoutOwner(
+            UUID tenantId,
+            String slug,
+            String name,
+
+            @Schema(description = "active or suspended") String status,
+
+            Instant createdAt,
+
+            @Schema(description = "Its active administrators, oldest first; any one of them can be made the Owner")
+            List<OwnerCandidate> admins) {}
+
+    @GetMapping("/tenants/without-owner")
+    @RequiresPermission("platform.tenants.read")
+    @Operation(
+            summary =
+                    "Every active or suspended business with no Owner, with its active administrators, so the operator sets the Owner (ADR-062, ADR-090)",
+            operationId = "platformTenantsWithoutOwner")
+    List<TenantWithoutOwner> tenantsWithoutOwner() {
+        return service.tenantsWithoutOwner();
     }
 
     @PostMapping("/tenants")
