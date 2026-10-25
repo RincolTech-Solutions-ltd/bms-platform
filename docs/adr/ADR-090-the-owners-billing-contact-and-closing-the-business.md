@@ -6,8 +6,8 @@ Proposed (issue #571, the rest of #325 found in the #570 review, FR-SUB-13, FR-T
 the owner step-up), ADR-073 (the Owner's own plan, the read-only business), ADR-074 (Download my data), ADR-075 (reminders and
 receipts) and ADR-016 (platform operations through definer functions). Amends FR-TEN-09 (the operator's export and scheduled
 deletion becomes the Owner's request with the operator's confirmation). Migration `V102`, directly after `V101` (#577, merged);
-renumbered at merge if the order changes. The decision numbers 087 and 088 went to #577 and
-#579, and 089 is held by the open pull request #583.
+renumbered at merge if the order changes. The decision numbers 087 to 089 went to #577, #579
+and #583.
 
 ## Context
 
