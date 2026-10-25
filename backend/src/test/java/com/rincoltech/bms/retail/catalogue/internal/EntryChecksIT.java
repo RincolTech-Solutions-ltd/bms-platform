@@ -415,7 +415,11 @@ class EntryChecksIT extends IntegrationTest {
         assertThat(plan(EntryChecksRepository.SALES))
                 .contains("retail_sale_lines_product_recent")
                 .doesNotContain("Seq Scan on retail_sale_lines");
-        assertThat(plan(EntryChecksRepository.MOVES))
+        // The test seeds no moves, so the transfer tables hold a row or two and a scan of them is the right plan; what
+        // matters is
+        // that the existing index on the product serves the read once the table is large, so the scan is priced out
+        // here.
+        assertThat(plan(EntryChecksRepository.MOVES, true))
                 .contains("retail_transfer_lines_product")
                 .doesNotContain("Seq Scan on retail_transfer_lines");
 
@@ -429,12 +433,22 @@ class EntryChecksIT extends IntegrationTest {
 
     /** The plan of one statement for the cable, limit 20, as {@code bms_app} bound to the tenant. */
     String plan(String sql) throws Exception {
+        return plan(sql, false);
+    }
+
+    /** As {@link #plan(String)}; {@code noScans} prices sequential scans out, to show an index can serve the read. */
+    String plan(String sql, boolean noScans) throws Exception {
         String bound = sql.replace(":p", "'" + cable + "'::uuid").replace(":limit", "20");
         try (Connection c = TestDatabase.appDataSource().getConnection()) {
             c.setAutoCommit(false);
             try (PreparedStatement ps = c.prepareStatement("SELECT set_config('app.tenant_id', ?, true)")) {
                 ps.setString(1, t.tenantId().toString());
                 ps.execute();
+            }
+            if (noScans) {
+                try (PreparedStatement ps = c.prepareStatement("SET LOCAL enable_seqscan = off")) {
+                    ps.execute();
+                }
             }
             try (PreparedStatement ps = c.prepareStatement("EXPLAIN " + bound);
                     ResultSet rs = ps.executeQuery()) {
