@@ -47,22 +47,25 @@ to be stated rather than assumed.
   whole line history. The lines they want are a small part of all lines, so the indexes stay small.
 - **The query plans, stated.** `ControlsQueryPlansIT` (off by default, `-Dbms.controls.plans=true`) makes real rows through the
   API, copies them to one tenant of 10 shops, 31 people and two years (1,020,030 sales, 2,040,060 lines, 2,182,072 stock
-  movements; 68,002 each of voids, returns and write-offs, a deliberately heavy 6.7 in 100 sales each) and explains every
+  movements, 1,077,951 journal entries; 68,002 each of voids, returns and write-offs, a deliberately heavy 6.7 in 100 sales each) and explains every
   statement as `bms_app` under row-level security. The full plans are in `docs/specs/controls-query-plans-357.md`. In short:
 
   | Statement (every shop unless named) | Before | After | Access path after |
   |---|---|---|---|
-  | Sales entered, a month | 24 ms | 15 ms | `retail_sales_by_date` |
-  | Every card, a month | 956 ms | 240 ms | voids by `retail_sales_voided`; changed prices, discounts and below cost by the new partial indexes joined to the month's sales by `retail_sales_by_date`; write-offs and returns by their day; restocks voided through `retail_stock_movements_source` |
-  | Every card, a month, one shop | 143 ms | 60 ms | the same, with the shop in every index condition |
-  | Every card, a year (366 days, the widest window) | 6,039 ms | 1,952 ms | the same; 208,000 events sorted for the distinct sales |
-  | Groups by person, a month (voids, write-offs, changed prices, restocks voided) | 39 to 293 ms | 29 to 73 ms | as the cards, then the sales of the window by `retail_sales_by_date` for the rate |
-  | Groups of returns by day, a year | 374 ms | 375 ms | returns by day, sales of the year for the rate |
-  | Records, 51 a page | up to 30 ms | up to 17 ms | as the cards, ordered and limited |
-  | Patterns, people, a month | 417 ms | 102 ms | as the cards, per shop and person |
-  | Patterns, items, a month | 744 ms | 593 ms | every line of the month's sales (the denominator is the lines each item sold) |
+  | Sales entered, a month | 24 ms | 20 ms | `retail_sales_by_date` |
+  | Every card, a month | 956 ms | 392 ms | voids by `retail_sales_voided`; changed prices, discounts and below cost by the new partial indexes joined to the month's sales by `retail_sales_by_date`; write-offs and returns by their day; restocks voided through `retail_stock_movements_source` |
+  | Every card, a month, one shop | 143 ms | 63 ms | the same, with the shop in every index condition |
+  | Every card, a year (366 days, the widest window) | 6,039 ms | 2,563 ms | the same; 208,000 events sorted for the distinct sales |
+  | Groups by person, a month (voids, write-offs, changed prices, restocks voided) | 39 to 293 ms | 31 to 86 ms | as the cards, then the sales of the window by `retail_sales_by_date` for the rate |
+  | Groups of returns by day, a year | 374 ms | 569 ms | returns by day, sales of the year for the rate |
+  | Records, 51 a page | up to 30 ms | up to 25 ms | as the cards, ordered and limited |
+  | Patterns, people, a month | 417 ms | 162 ms | as the cards, per shop and person |
+  | Patterns, items, a month | 744 ms | 848 ms | every line of the month's sales (the denominator is the lines each item sold) |
 
-  "Before" is main's code with JIT on; "after" is this change. Every statement is bounded by its window (at most 366 days), by the
+  "Before" is main's code with JIT on; "after" is this change, with the reversal check of the write-offs, measured on a journal
+  of 1,077,951 entries (one in a hundred reversed): the check is an anti-join on `journal_entries_tenant_id_reverses_entry_id_key`
+  (index only, about 2 ms over the year's write-offs). The two columns come from separate runs on a shared machine, where the same
+  statement varies by about a third between runs; the access paths, not the last millisecond, are the finding. Every statement is bounded by its window (at most 366 days), by the
   caller's shops and, for groups and records, by a page. The returns and write-offs of a year across every shop are joined to the
   sales by a hash join over the year's sales, because there are tens of thousands of them in this seed; at a real rate they are
   read by their own day.
@@ -86,9 +89,9 @@ to be stated rather than assumed.
 
 - `lock_timeout` (5 s) in `V101` bounds only the wait for the SHARE lock on `retail_sale_lines`; once the two builds start, every
   sale waits for both full scans until the commit (reports do not). Staging has 22,110 rows (11 MB, measured by the maintainer on
-  25 Oct 2026), so well under a second; the harness measured 283 ms and 229 ms on 2,040,060 rows. At about 2 million lines a
+  25 Oct 2026), so well under a second; the harness measured each build at 229 to 440 ms on 2,040,060 rows over three runs. At about 2 million lines a
   deploy needs a window, or a separate migration that builds the indexes CONCURRENTLY outside Flyway's transaction.
-- The item patterns still read every line of the window's sales, about 0.6 s for a month on this seed; they are one request a page.
+- The item patterns still read every line of the window's sales, about 0.6 to 0.9 s for a month on this seed; they are one request a page.
 
 **Watch for:**
 

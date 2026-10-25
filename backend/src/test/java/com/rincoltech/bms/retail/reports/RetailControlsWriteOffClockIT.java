@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
@@ -67,6 +68,12 @@ class RetailControlsWriteOffClockIT extends IntegrationTest {
         RetailControlsIT.user(t, api.userId(), "Test Admin One", "active");
         product = api.product("WK-1", 600, 1_000);
         api.stockUp(t.headOffice(), product, "20");
+    }
+
+    /** The clock back where MovableClockConfig starts it, so no later class inherits this one's night. */
+    @AfterEach
+    void resetClock() {
+        clock.set(MovableClockConfig.BEFORE_MIDNIGHT);
     }
 
     UUID creditSale(int qty) {
@@ -182,6 +189,17 @@ class RetailControlsWriteOffClockIT extends IntegrationTest {
         // Approved: written off now, on the day of the approval, and counted.
         assertThat(stored(big)).isEqualTo(DAY);
         assertThat(count(DAY)).isEqualTo(1);
+        // The approver of the record is the administrator who made the write-off, not the checker (ADR-087).
+        ResponseEntity<JsonNode> after = api.call(
+                HttpMethod.GET,
+                "/controls/records?metric=credit_writeoffs&from=" + DAY + "&to=" + DAY,
+                null,
+                CONTROLS,
+                "*",
+                Map.of());
+        JsonNode record = after.getBody().get("items").get(0);
+        assertThat(record.get("approver_id").asString()).isEqualTo(api.userId().toString());
+        assertThat(record.get("approver_name").asString()).isEqualTo("Test Admin One");
     }
 
     @Test

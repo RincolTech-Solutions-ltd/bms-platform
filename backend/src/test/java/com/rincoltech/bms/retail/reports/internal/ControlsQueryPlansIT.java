@@ -276,8 +276,61 @@ class ControlsQueryPlansIT extends IntegrationTest {
             wo.put("branch_id", "m.branch_id");
             wo.put("written_off_on", "x.written_off_on - m.back");
             wo.put("created_at", "x.created_at - m.back");
+            wo.put("journal_entry_id", "gen_random_uuid()");
             put(su, "retail_sale_writeoffs", wo);
             su.sql(copy(su, "retail_sale_writeoffs", wo, "FROM retail_sale_writeoffs x JOIN m ON m.old_id = x.sale_id"))
+                    .update();
+            // Each copied write-off gets its own journal entry, a copy of a real write-off's entry, so the reversal
+            // check
+            // (NOT EXISTS on journal_entries.reverses_entry_id) is measured as it runs on a real tenant.
+            Map<String, String> woEntry = new LinkedHashMap<>();
+            woEntry.put("id", "w.journal_entry_id");
+            woEntry.put("entry_no", "left('W' || md5(w.id::text), 20)");
+            woEntry.put("entry_date", "w.written_off_on");
+            woEntry.put("branch_id", "w.branch_id");
+            woEntry.put("source_id", "w.id");
+            woEntry.put("reverses_entry_id", "NULL");
+            woEntry.put("idempotency_key", "NULL");
+            put(su, "journal_entries", woEntry);
+            UUID woBase = su.sql(
+                            "SELECT b.journal_entry_id FROM retail_sale_writeoffs b JOIN journal_entries e ON e.id ="
+                                    + " b.journal_entry_id WHERE b.tenant_id = ? ORDER BY b.created_at LIMIT 1")
+                    .param(tenant)
+                    .query(UUID.class)
+                    .single();
+            su.sql(copy(
+                            su,
+                            "journal_entries",
+                            woEntry,
+                            "FROM retail_sale_writeoffs w JOIN journal_entries x ON x.id = '" + woBase + "' WHERE"
+                                    + " w.tenant_id = '" + tenant + "' AND w.journal_entry_id NOT IN (SELECT id FROM"
+                                    + " journal_entries WHERE tenant_id = '" + tenant + "')"))
+                    .update();
+            // And the tenant's books as a whole: the base entries copied to about a million, one in a hundred of them
+            // reversed, so the reversal check runs against a journal of real size.
+            long base = su.sql("SELECT count(*) FROM journal_entries WHERE tenant_id = ? AND entry_no NOT LIKE 'W%'")
+                    .param(tenant)
+                    .query(Long.class)
+                    .single();
+            Map<String, String> filler = new LinkedHashMap<>();
+            filler.put("id", "gen_random_uuid()");
+            filler.put("entry_no", "left('F' || md5(x.id::text || '-' || g), 20)");
+            filler.put("reverses_entry_id", "NULL");
+            filler.put("idempotency_key", "NULL");
+            put(su, "journal_entries", filler);
+            su.sql(copy(
+                            su,
+                            "journal_entries",
+                            filler,
+                            "FROM journal_entries x, generate_series(1, " + Math.max(1, 1_000_000 / Math.max(1, base))
+                                    + ") g WHERE x.tenant_id = '" + tenant + "' AND x.entry_no NOT LIKE 'W%'"))
+                    .update();
+            su.sql("INSERT INTO journal_entries (id, tenant_id, branch_id, entry_no, entry_date, period_id, reference,"
+                            + " source_module, source_type, reverses_entry_id) SELECT gen_random_uuid(), e.tenant_id,"
+                            + " e.branch_id, left('R' || md5(e.id::text), 20), e.entry_date, e.period_id, e.reference,"
+                            + " e.source_module, e.source_type, e.id FROM journal_entries e WHERE e.tenant_id = ? AND"
+                            + " e.entry_no LIKE 'F%' AND e.reverses_entry_id IS NULL AND random() < 0.01")
+                    .param(tenant)
                     .update();
             // Restocks voided and quantities corrected: a few thousand each, over the same shops and days.
             su.sql(
@@ -413,6 +466,10 @@ class ControlsQueryPlansIT extends IntegrationTest {
                 .param(t.tenantId())
                 .query(Long.class)
                 .single();
+        long journal = owner.sql("SELECT count(*) FROM journal_entries WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
         long moves = owner.sql("SELECT count(*) FROM retail_stock_movements WHERE tenant_id = ?")
                 .param(t.tenantId())
                 .query(Long.class)
@@ -497,7 +554,9 @@ class ControlsQueryPlansIT extends IntegrationTest {
                 .append(lines)
                 .append(" sale lines, ")
                 .append(moves)
-                .append(" stock movements; ")
+                .append(" stock movements, ")
+                .append(journal)
+                .append(" journal entries; ")
                 .append(counts)
                 .append(". Today is ")
                 .append(today)

@@ -13,13 +13,15 @@
 --
 -- Locks. Flyway runs this file in one transaction. lock_timeout bounds only the wait for the SHARE lock on retail_sale_lines
 -- (behind a transaction that is writing sale lines at that moment; SHARE does not conflict with readers, so a report does
--- not hold it up); after 5 seconds the file fails and is re-run. It does not bound the builds: once they start, the SHARE
--- lock is held to the commit and every writer (a sale) waits for both full scans of the table. Staging, measured by the
--- maintainer on 2026-10-25: 22,110 rows of retail_sale_lines (11 MB), so both builds take well under a second there.
--- ControlsQueryPlansIT measured 283 ms and 229 ms on 2,040,060 rows (PostgreSQL 16 in Testcontainers). A plain CREATE
--- INDEX, not CONCURRENTLY, which cannot run inside Flyway's transaction (ADR-028). At about 2 million lines, on a slower
--- host, the held sales would no longer be negligible: such a database needs a deploy window or a separate migration that
--- builds the indexes CONCURRENTLY outside Flyway's transaction.
+-- not hold it up). While the request waits, new writers queue behind it, for up to those 5 seconds; then the migration
+-- fails, nothing is changed, and the deploy stops, to be retried by hand (nothing re-runs it). It does not bound the
+-- builds: once they start, the SHARE lock is held to the commit and every writer (a sale) waits for both full scans of
+-- the table. Staging, measured by the maintainer on 2026-10-25: 22,110 rows of retail_sale_lines (11 MB), so both builds
+-- take well under a second there. ControlsQueryPlansIT measured each build at 229 to 440 ms on 2,040,060 rows (three runs, a cloud machine;
+-- PostgreSQL 16 in Testcontainers). A plain CREATE INDEX, not CONCURRENTLY, which cannot run inside Flyway's transaction
+-- (ADR-028). The hold grows with the table and on a slower host: at about 2 million lines on the small hosts
+-- this runs on (the staging Pi reads an SD card), it can reach seconds of held sales, so such a database needs a deploy
+-- window or a separate migration that builds the indexes CONCURRENTLY outside Flyway's transaction.
 --
 -- Flyway runs with outOfOrder off: V98 is one staff phone per business, V99 is the placeholder that placeholder-migration-guard refuses and
 -- V100 is the shop Home takings index (pull request #572), so this is V101.
