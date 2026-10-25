@@ -27,7 +27,9 @@
 # (ADR-083). deploy.sh starts the second api only while its own limit plus 64 MB (512 MB) is free below
 # the slice's MemoryHigh and on the host, so the new JVM's start-up peak can never bring the slice's OOM
 # killer onto the old api or postgres (reclaim, a slowdown, stays possible); otherwise it restarts the
-# api in place, with the old short gap.
+# api in place, with the old short gap. On this Pi the slice is MemoryHigh=1500M / MemoryMax=1600M
+# (D37), so about 700 MB is free and the overlap is the expected path on every deploy; an in-place
+# restart here means the stack has grown and is worth a look (docs/runbooks/deploy.md).
 # BMS_ROLL_MIN_FREE_MB in .env replaces the limit with a measured start-up peak (memory.peak).
 
 name: bms
