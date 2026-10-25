@@ -174,6 +174,7 @@
 .cp-trigger {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   width: 100%;
   min-height: var(--tap);
   padding: 0 40px 0 var(--space-3);
@@ -279,8 +280,11 @@
   cursor: pointer;
 }
 
-.cp-option:hover {
-  background: var(--color-hover);
+/* A touch screen keeps :hover on the last row tapped, which would read as a second choice. */
+@media (hover: hover) {
+  .cp-option:hover {
+    background: var(--color-hover);
+  }
 }
 
 .cp-option[aria-selected='true'] {

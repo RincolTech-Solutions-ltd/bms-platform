@@ -239,7 +239,9 @@ export function CategoryPicker({ id, label = 'Category', categories, value, onCh
   };
   const choices = <Choices id={id} categories={categories} value={value} noneLabel={noneLabel} canAdd={canAdd} onPick={pick} onAdded={added} />;
 
-  const trigger = (props: FieldControlProps) => (
+  // The field's blur is left out: opening the list moves the focus into it, which is not leaving the field unchosen. A Save with
+  // no category still shows the error (showError).
+  const trigger = ({ onBlur: _left, ...props }: FieldControlProps) => (
     <button
       {...props}
       type="button"
