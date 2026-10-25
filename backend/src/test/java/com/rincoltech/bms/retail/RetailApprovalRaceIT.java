@@ -22,9 +22,10 @@ import tools.jackson.databind.JsonNode;
 
 /**
  * The race of ADR-091 (review of #588): an administrator switches an action off between the module's own read of the rule and its
- * request. The module's read is made to say "on" while the stored switch is off, so {@code Approvals.request} reads it off and runs
- * the action at once. The route must answer with the record it made (201), never a 202 with no approval; the audit row
- * {@code core.approval.executed_switched_off} is written; and the idempotent replay gives the same true outcome. Fabricated data.
+ * request. The module passes the rule it read to {@code Approvals.request}, so the rule is read once and the module's decision
+ * stands: the request waits for a checker, the route answers 202 with a real approval, nothing runs at once, and no
+ * {@code core.approval.executed_switched_off} row is written (that path is for a caller that read no rule, {@code ApprovalsIT}).
+ * The module's read is made to say "on" while the stored switch is off. Fabricated data.
  */
 class RetailApprovalRaceIT extends IntegrationTest {
 
@@ -52,6 +53,11 @@ class RetailApprovalRaceIT extends IntegrationTest {
 
     /** Stored off; the module's own read says on from 0, as it would have just before the switch committed. */
     void switchedOffAfterTheModuleRead(String action) {
+        switchedOffAfterTheModuleRead(action, 0);
+    }
+
+    /** As above, with the amount the module read. */
+    void switchedOffAfterTheModuleRead(String action, long thresholdMinor) {
         TestDatabase.owner()
                 .sql("INSERT INTO tenant_settings (id, tenant_id) VALUES (?, ?) ON CONFLICT (tenant_id) DO NOTHING")
                 .params(UUID.randomUUID(), t.tenantId())
@@ -61,7 +67,7 @@ class RetailApprovalRaceIT extends IntegrationTest {
                                || jsonb_build_object('approval_switches', jsonb_build_object(?::text, false))
                          WHERE tenant_id = ?
                         """).params(action, t.tenantId()).update();
-        doReturn(new Approvals.Rule(true, 0)).when(approvals).rule(action);
+        doReturn(new Approvals.Rule(true, thresholdMinor)).when(approvals).rule(action);
     }
 
     long count(String sql, Object... params) {
@@ -74,8 +80,25 @@ class RetailApprovalRaceIT extends IntegrationTest {
                 t.tenantId());
     }
 
+    /** The route waited: 202 with an approval that exists and is pending, nothing made, and the replay is the same answer. */
+    void waited(ResponseEntity<JsonNode> made, ResponseEntity<JsonNode> replay) {
+        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        String approval = made.getBody().get("approval_id").asString();
+        assertThat(count(
+                        "SELECT count(*) FROM approval_requests WHERE tenant_id = ? AND id = ? AND status = 'pending'",
+                        t.tenantId(),
+                        UUID.fromString(approval)))
+                .isEqualTo(1);
+        assertThat(switchedOffAudits()).isZero();
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(replay.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
+        assertThat(replay.getBody().get("approval_id").asString()).isEqualTo(approval);
+        assertThat(count("SELECT count(*) FROM approval_requests WHERE tenant_id = ?", t.tenantId()))
+                .isEqualTo(1);
+    }
+
     @Test
-    void anExpenseRunAtOnceIsAnsweredWithTheExpenseAndReplaysTheSame() {
+    void anExpenseAskedForWaitsAlthoughTheSwitchWentOff() {
         switchedOffAfterTheModuleRead("retail_expense");
         UUID[] ci = cb.categoryWithItem("Transport", "Boda fare", false);
         Map<String, Object> body = new LinkedHashMap<>();
@@ -85,26 +108,14 @@ class RetailApprovalRaceIT extends IntegrationTest {
         body.put("amount_minor", 70_000);
         String key = UUID.randomUUID().toString();
         ResponseEntity<JsonNode> made = api.postKeyed("/expenses", body, CashbookTestSupport.ALL, "*", key);
-        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
-        assertThat(made.getBody().has("approval_id")).isFalse();
-        String id = made.getBody().get("id").asString();
-        assertThat(made.getBody().get("amount_minor").asLong()).isEqualTo(70_000);
-        assertThat(count("SELECT count(*) FROM retail_expenses WHERE tenant_id = ?", t.tenantId()))
-                .isEqualTo(1);
-        assertThat(count("SELECT count(*) FROM approval_requests WHERE tenant_id = ?", t.tenantId()))
-                .isZero();
-        assertThat(switchedOffAudits()).isEqualTo(1);
-        // The stored outcome is the true one: the replay is the same expense, made once.
         ResponseEntity<JsonNode> replay = api.postKeyed("/expenses", body, CashbookTestSupport.ALL, "*", key);
-        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(replay.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
-        assertThat(replay.getBody().get("id").asString()).isEqualTo(id);
+        waited(made, replay);
         assertThat(count("SELECT count(*) FROM retail_expenses WHERE tenant_id = ?", t.tenantId()))
-                .isEqualTo(1);
+                .isZero();
     }
 
     @Test
-    void aCorrectionRunAtOnceIsAnsweredWithTheCorrectionAndReplaysTheSame() {
+    void aCorrectionAskedForWaitsAlthoughTheSwitchWentOff() {
         switchedOffAfterTheModuleRead("retail_stock_correction");
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("branch_id", hq);
@@ -114,23 +125,75 @@ class RetailApprovalRaceIT extends IntegrationTest {
         body.put("reason_code", "miscount");
         String key = UUID.randomUUID().toString();
         ResponseEntity<JsonNode> made = api.postKeyed("/stock/corrections", body, RetailTestSupport.ADMIN, "*", key);
-        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
-        assertThat(made.getBody().has("approval_id")).isFalse();
-        assertThat(made.getBody().get("new_qty").asString()).isEqualTo("15.000");
-        String id = made.getBody().get("id").asString();
+        ResponseEntity<JsonNode> replay = api.postKeyed("/stock/corrections", body, RetailTestSupport.ADMIN, "*", key);
+        waited(made, replay);
         assertThat(TestDatabase.owner()
                         .sql(
                                 "SELECT coalesce(sum(qty), 0) FROM retail_stock_balances WHERE branch_id = ? AND product_id = ?")
                         .params(hq, product)
                         .query(BigDecimal.class)
                         .single())
-                .isEqualByComparingTo("15");
-        assertThat(switchedOffAudits()).isEqualTo(1);
-        ResponseEntity<JsonNode> replay = api.postKeyed("/stock/corrections", body, RetailTestSupport.ADMIN, "*", key);
-        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(replay.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
-        assertThat(replay.getBody().get("id").asString()).isEqualTo(id);
-        assertThat(count("SELECT count(*) FROM retail_stock_corrections WHERE tenant_id = ?", t.tenantId()))
-                .isEqualTo(1);
+                .isEqualByComparingTo("20");
+    }
+
+    /** A write-off never runs unflagged and untold through the switched-off path: it waits, as the module decided. */
+    @Test
+    void aWriteOffAskedForWaitsAlthoughTheSwitchWentOff() {
+        // From 500: a debt of 1,500 asks whatever the number of administrators (with 0 it would ask only with two or
+        // more).
+        switchedOffAfterTheModuleRead("retail_sale_write_off", 500);
+        ResponseEntity<JsonNode> credit = api.sell(hq, "credit", product, "1");
+        assertThat(credit.getStatusCode()).as("%s", credit.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID sale = RetailTestSupport.id(credit);
+        String perms = RetailTestSupport.ADMIN + ",retail.credit.manage,retail.credit.write_off";
+        String key = UUID.randomUUID().toString();
+        ResponseEntity<JsonNode> made =
+                api.postKeyed("/sales/" + sale + "/write-off", Map.of("reason", "Buyer left town"), perms, "*", key);
+        ResponseEntity<JsonNode> replay =
+                api.postKeyed("/sales/" + sale + "/write-off", Map.of("reason", "Buyer left town"), perms, "*", key);
+        waited(made, replay);
+        assertThat(made.getBody().get("executed").asBoolean()).isFalse();
+        assertThat(count("SELECT count(*) FROM retail_sale_writeoffs WHERE tenant_id = ?", t.tenantId()))
+                .isZero();
+    }
+
+    @Test
+    void aPurchaseOrderAskedForWaitsAlthoughTheSwitchWentOff() {
+        String etag = api.get("/settings/capabilities", "core.settings.manage")
+                .getHeaders()
+                .getETag();
+        assertThat(api.call(
+                                org.springframework.http.HttpMethod.PUT,
+                                "/settings/capabilities",
+                                Map.of("purchasing", true),
+                                "core.settings.manage",
+                                "*",
+                                etag == null ? Map.of() : Map.of("If-Match", etag))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        switchedOffAfterTheModuleRead("retail_purchase_order");
+        String buyer = RetailTestSupport.ADMIN + ",retail.purchase.approve";
+        UUID supplier = RetailTestSupport.id(api.post("/suppliers", Map.of("name", "Test Supplier 01"), buyer));
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("product_id", product);
+        line.put("qty", "10");
+        line.put("cost_minor", 1_000);
+        Map<String, Object> order = new LinkedHashMap<>();
+        order.put("supplier_id", supplier);
+        order.put("branch_id", hq);
+        order.put("lines", java.util.List.of(line));
+        ResponseEntity<JsonNode> draft = api.postKeyed(
+                "/purchase-orders", order, buyer, "*", UUID.randomUUID().toString());
+        assertThat(draft.getStatusCode()).as("%s", draft.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID id = RetailTestSupport.id(draft);
+        String key = UUID.randomUUID().toString();
+        ResponseEntity<JsonNode> made = api.postKeyed("/purchase-orders/" + id + "/send", Map.of(), buyer, "*", key);
+        ResponseEntity<JsonNode> replay = api.postKeyed("/purchase-orders/" + id + "/send", Map.of(), buyer, "*", key);
+        waited(made, replay);
+        assertThat(api.get("/purchase-orders/" + id, buyer)
+                        .getBody()
+                        .get("status")
+                        .asString())
+                .isEqualTo("draft");
     }
 }

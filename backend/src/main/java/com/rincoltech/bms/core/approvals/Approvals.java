@@ -14,6 +14,13 @@ public interface Approvals {
     Outcome request(ActionRequest request);
 
     /**
+     * As {@link #request(ActionRequest)}, weighed against the rule the caller already read to decide to ask (ADR-091), so the rule
+     * is read once: a switch saved between the caller's read and this call cannot run at once an action the caller will answer as
+     * waiting. The request then waits for a checker as the caller decided.
+     */
+    Outcome request(ActionRequest request, Rule decided);
+
+    /**
      * ADR-091: the bound business's rule for an action type: whether it asks now and from what amount. A module that decides for
      * itself whether to ask (a return, a write-off, a void) reads this, so the switch on the approval rules is kept everywhere.
      */

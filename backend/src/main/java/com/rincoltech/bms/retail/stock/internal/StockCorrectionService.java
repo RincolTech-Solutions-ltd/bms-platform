@@ -108,7 +108,8 @@ class StockCorrectionService {
         // meanwhile) is
         // answered with the correction it made.
         UUID id = UUID.randomUUID();
-        if (approvals.rule(StockCorrectionAction.TYPE).asks(value)) {
+        Approvals.Rule rule = approvals.rule(StockCorrectionAction.TYPE);
+        if (rule.asks(value)) {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put(StockCorrectionAction.CORRECTION_ID, id.toString());
             payload.put("branch_id", branch.toString());
@@ -117,14 +118,16 @@ class StockCorrectionService {
             payload.put("expected_qty", Quantities.format(r.expectedQty()));
             payload.put("reason_code", r.reasonCode());
             payload.put("note", r.note());
-            Approvals.Outcome o = approvals.request(new ActionRequest(
-                    StockCorrectionAction.TYPE,
-                    branch,
-                    c.product().id(),
-                    null,
-                    value,
-                    tenant.profile().currency(),
-                    payload));
+            Approvals.Outcome o = approvals.request(
+                    new ActionRequest(
+                            StockCorrectionAction.TYPE,
+                            branch,
+                            c.product().id(),
+                            null,
+                            value,
+                            tenant.profile().currency(),
+                            payload),
+                    rule);
             if (o.executed()) {
                 return new CorrectionOutcome(repo.correction(id).orElseThrow(), null);
             }

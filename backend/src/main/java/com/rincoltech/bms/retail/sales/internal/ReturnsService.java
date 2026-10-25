@@ -80,7 +80,8 @@ class ReturnsService {
         Principal principal = CurrentPrincipal.require();
         Plan plan = servicer.plan(saleId, r);
         long cumulative = Math.addExact(plan.priorReturnedMinor(), plan.totalMinor());
-        if (approvals.rule(ReturnAction.TYPE).asks(cumulative)) {
+        Approvals.Rule rule = approvals.rule(ReturnAction.TYPE);
+        if (rule.asks(cumulative)) {
             // The till is fixed now, so a checker with another scope executes the same return.
             ReturnRequest fixed =
                     new ReturnRequest(r.lines(), r.refundMethod(), r.moneyMethod(), plan.refundBranchId(), r.note());
@@ -88,14 +89,16 @@ class ReturnsService {
             // The amount is what the sale's returns come to with this one, so the pending request is never taken for a
             // small one
             // and executed at once by the approvals module.
-            Approvals.Outcome o = approvals.request(new ActionRequest(
-                    ReturnAction.TYPE,
-                    plan.sale().branchId(),
-                    saleId,
-                    plan.sale().version(),
-                    cumulative,
-                    plan.sale().currency(),
-                    payload));
+            Approvals.Outcome o = approvals.request(
+                    new ActionRequest(
+                            ReturnAction.TYPE,
+                            plan.sale().branchId(),
+                            saleId,
+                            plan.sale().version(),
+                            cumulative,
+                            plan.sale().currency(),
+                            payload),
+                    rule);
             return new ReturnOutcome(false, o.approvalId(), null);
         }
         return new ReturnOutcome(true, null, servicer.record(plan, r.note(), principal.userId(), null, null));

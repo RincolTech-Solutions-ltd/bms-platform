@@ -95,6 +95,12 @@ class ApprovalService implements Approvals {
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public Outcome request(ActionRequest request) {
+        return request(request, rule(action(request.actionType())));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Outcome request(ActionRequest request, Rule decided) {
         Principal maker = CurrentPrincipal.require();
         ApprovalAction action = action(request.actionType());
         if (!maker.may(action.makerPermission(), request.branchId())) {
@@ -103,13 +109,14 @@ class ApprovalService implements Approvals {
         if ((request.amountMinor() == null) != (request.currency() == null)) {
             throw new IllegalArgumentException("amount and currency go together");
         }
-        // ADR-091: an action the business switched off runs at once, whatever its module decided, so no caller misses
-        // it.
-        boolean off = !rule(action).on();
+        // ADR-091: the rule is read once, by the caller when it decided to ask (so a switch saved a moment later never
+        // turns a
+        // request it answered as waiting into one that ran), else here. Switched off, the action runs at once.
+        boolean off = !decided.on();
         if (off
                 || (action.thresholdApplies()
                         && request.thresholdMinor() != null
-                        && request.thresholdMinor() < settings.approvalThresholdMinor(action.actionType()))) {
+                        && request.thresholdMinor() < decided.thresholdMinor())) {
             action.execute(new ApprovalAction.Execution(
                     null, request.branchId(), request.subjectId(), request.payload(), maker.userId(), null));
             audit.record(new AuditLog.Entry(

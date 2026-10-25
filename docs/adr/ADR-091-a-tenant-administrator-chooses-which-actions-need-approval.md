@@ -37,8 +37,12 @@ expenses.
 2. **Each action says what it may be.** `ApprovalAction` gains `switchable()` (false by default) and `onByDefault(threshold)`
    (true by default). The approvals module resolves one rule per action, `Approvals.rule(actionType)`, as `on` (the stored switch,
    else the default) and the amount (the stored threshold, else 0); `Rule.asks(amount)` is `on && amount >= threshold`. Every
-   module that decides whether to ask reads that rule, and `Approvals.request` runs an action that is switched off at once, audited
-   as `core.approval.executed_switched_off`, so no caller can miss the switch.
+   module that decides whether to ask reads that rule and passes it to `Approvals.request(request, rule)`, so the rule is read
+   once: a switch saved between the module's read and its request never turns a request the module answers as waiting into one
+   that ran (a waiting void, expense, correction, return, write-off or order stays waiting, and a write-off is never made without
+   ADR-043's flag and notice). A caller that read no rule uses `Approvals.request(request)`, which reads it there and runs a
+   switched-off action at once, audited as `core.approval.executed_switched_off`. The modules still answer with the record if a
+   request ever runs at once.
 
 3. **Lending stays on.** Every lending action keeps `switchable() == false`: it always asks, as today, and its row reads "Always
    on". A licensed lender keeps a second person on money that leaves or is forgiven; turning that off is not one click. Lending

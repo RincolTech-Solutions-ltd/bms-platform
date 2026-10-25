@@ -1225,15 +1225,18 @@ class SalesService {
         refuseVoid(h);
         Sale s = h.sale();
         String reason = r.reason().trim();
-        if (approvals.rule(SaleVoidAction.TYPE).asks(s.totalMinor())) {
-            Approvals.Outcome o = approvals.request(new ActionRequest(
-                    SaleVoidAction.TYPE,
-                    s.branchId(),
-                    id,
-                    s.version(),
-                    s.totalMinor(),
-                    s.currency(),
-                    Map.of(SaleVoidAction.REASON, reason)));
+        Approvals.Rule rule = approvals.rule(SaleVoidAction.TYPE);
+        if (rule.asks(s.totalMinor())) {
+            Approvals.Outcome o = approvals.request(
+                    new ActionRequest(
+                            SaleVoidAction.TYPE,
+                            s.branchId(),
+                            id,
+                            s.version(),
+                            s.totalMinor(),
+                            s.currency(),
+                            Map.of(SaleVoidAction.REASON, reason)),
+                    rule);
             if (o.executed()) {
                 return new VoidOutcome(
                         visible(repo.find(id, false).orElseThrow().sale()), null);

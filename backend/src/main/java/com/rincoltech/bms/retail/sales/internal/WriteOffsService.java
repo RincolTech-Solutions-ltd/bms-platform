@@ -97,18 +97,20 @@ class WriteOffsService {
         // ADR-091: switched off on the approval rules, a write-off never waits, and is still flagged and told below.
         boolean ask = rule.on() && (threshold > 0 ? plan.unpaidMinor() >= threshold : admins.size() >= 2);
         if (ask) {
-            Approvals.Outcome o = approvals.request(new ActionRequest(
-                    SaleWriteOffAction.TYPE,
-                    plan.sale().branchId(),
-                    saleId,
-                    plan.sale().version(),
-                    plan.unpaidMinor(),
-                    plan.sale().currency(),
-                    Map.of(
-                            SaleWriteOffAction.REASON,
-                            r.reason().trim(),
-                            SaleWriteOffAction.UNPAID,
-                            plan.unpaidMinor())));
+            Approvals.Outcome o = approvals.request(
+                    new ActionRequest(
+                            SaleWriteOffAction.TYPE,
+                            plan.sale().branchId(),
+                            saleId,
+                            plan.sale().version(),
+                            plan.unpaidMinor(),
+                            plan.sale().currency(),
+                            Map.of(
+                                    SaleWriteOffAction.REASON,
+                                    r.reason().trim(),
+                                    SaleWriteOffAction.UNPAID,
+                                    plan.unpaidMinor())),
+                    rule);
             return new WriteOffOutcome(false, o.approvalId(), null);
         }
         // Done without a second person. The others who count are told; when the maker is the only one it is a notice to

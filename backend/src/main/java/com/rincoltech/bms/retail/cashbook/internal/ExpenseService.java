@@ -102,7 +102,8 @@ class ExpenseService {
     private ExpenseOutcome recordOrAsk(ExpenseRequest r) {
         UUID branch = branchContext.resolve(CashbookSupport.EXPENSE_RECORD, r.branchId());
         Checked c = check(branch, r);
-        if (approvals.rule(ExpenseAction.TYPE).asks(r.amountMinor())) {
+        Approvals.Rule rule = approvals.rule(ExpenseAction.TYPE);
+        if (rule.asks(r.amountMinor())) {
             ExpenseRequest fixed = new ExpenseRequest(
                     branch,
                     c.date(),
@@ -113,14 +114,16 @@ class ExpenseService {
                     r.explanation(),
                     r.receiptDocumentId());
             UUID id = UUID.randomUUID();
-            Approvals.Outcome o = approvals.request(new ActionRequest(
-                    ExpenseAction.TYPE,
-                    branch,
-                    id,
-                    null,
-                    r.amountMinor(),
-                    support.currency(),
-                    mapper.convertValue(fixed, MAP)));
+            Approvals.Outcome o = approvals.request(
+                    new ActionRequest(
+                            ExpenseAction.TYPE,
+                            branch,
+                            id,
+                            null,
+                            r.amountMinor(),
+                            support.currency(),
+                            mapper.convertValue(fixed, MAP)),
+                    rule);
             // Run at once when the switch went off between the module's read and the request: answer with the expense
             // made.
             if (o.executed()) {

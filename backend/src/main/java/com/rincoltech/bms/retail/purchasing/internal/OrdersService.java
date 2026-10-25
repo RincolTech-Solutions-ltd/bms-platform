@@ -202,9 +202,21 @@ class OrdersService {
                     "Order not a draft",
                     "This order has been sent or cancelled already.");
         }
-        if (approvals.rule(PurchaseOrderAction.TYPE).asks(o.totalMinor())) {
-            Approvals.Outcome a = approvals.request(new ActionRequest(
-                    PurchaseOrderAction.TYPE, o.branchId(), id, o.version(), o.totalMinor(), o.currency(), Map.of()));
+        Approvals.Rule rule = approvals.rule(PurchaseOrderAction.TYPE);
+        if (rule.asks(o.totalMinor())) {
+            Approvals.Outcome a = approvals.request(
+                    new ActionRequest(
+                            PurchaseOrderAction.TYPE,
+                            o.branchId(),
+                            id,
+                            o.version(),
+                            o.totalMinor(),
+                            o.currency(),
+                            Map.of()),
+                    rule);
+            if (a.executed()) {
+                return new OrderOutcome(true, null, view(repo.find(id, false).orElseThrow(), true));
+            }
             return new OrderOutcome(false, a.approvalId(), null);
         }
         sending.markSent(o, CurrentPrincipal.require().userId(), null, null);
