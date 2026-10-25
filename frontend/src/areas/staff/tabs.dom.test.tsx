@@ -83,11 +83,12 @@ afterEach(() => {
 });
 
 describe('the bottom tabs on a phone (issue #539)', () => {
-  it('shows the five tabs in order for an owner, as links in one labelled navigation, with no menu button and no sidebar', () => {
+  it('shows the five tabs in order for an owner, as links in one labelled navigation, beside the menu button and no sidebar', () => {
     show(admin);
     expect(tabNames()).toEqual(['Sell', 'My stock', 'Buy', 'Money', 'More']);
     expect(bar().tagName).toBe('NAV');
-    expect(screen.queryByRole('button', { name: 'Menu' })).toBeNull();
+    // The grouped menu's drawer opens from the top left on a phone too (issue #564); the tabs stay as they are.
+    expect(screen.getByRole('button', { name: 'Menu' })).toBeTruthy();
     expect(document.querySelector('.side-nav')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
   });
@@ -301,7 +302,7 @@ describe('the bottom tabs on a phone (issue #539)', () => {
     expect(document.documentElement.classList.contains('has-tab-bar')).toBe(false);
   });
 
-  it('lights up the More tab for a tour step on a menu link, since the link lives under More on a phone', async () => {
+  it('opens the menu drawer for a tour step on a menu link, the More tab still answering for the links it lists', async () => {
     const tour: Tour = {
       id: 'test-tabs-tour',
       version: 1,
@@ -321,8 +322,9 @@ describe('the bottom tabs on a phone (issue #539)', () => {
     await screen.findByRole('heading', { name: 'Feedback here' });
     const more = within(bar()).getByRole('link', { name: 'More' });
     expect(more.getAttribute('data-tour-also')?.split(' ')).toEqual(expect.arrayContaining(['nav-areas', 'nav-feedback', 'nav-notifications', 'nav-retail']));
+    // On a phone the drawer holds the link itself since issue #564, so the step opens the drawer rather than lighting up More.
     expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
-    expect(vi.mocked(Element.prototype.scrollIntoView).mock.contexts[0]).toBe(more);
+    expect(vi.mocked(Element.prototype.scrollIntoView).mock.contexts[0]).toBe(document.querySelector('.side-menu [data-tour="nav-feedback"]'));
   });
 });
 
@@ -372,9 +374,9 @@ describe('the tabs and their pages, read from /me (issue #539)', () => {
     cleanup();
     page(seller, <MorePage />, signOut);
     const links = within(screen.getByRole('list', { name: 'Areas' })).getAllByRole('link').map((a) => a.querySelector('.list-row-title')?.textContent);
-    expect(links).toContain('Retail');
+    expect(links).toContain('Reports');
     expect(links).not.toContain('Business set-up');
-    expect(links).not.toContain('Users');
+    expect(links).not.toContain('Staff');
   });
 });
 

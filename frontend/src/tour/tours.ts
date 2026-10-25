@@ -51,7 +51,7 @@ const feedback: TourStep = {
   id: 'feedback',
   target: 'nav-feedback',
   title: 'Tell us what you think',
-  body: 'Tap Help and feedback at the bottom of the menu, then Send feedback, to send the BMS team an idea, a problem or a question. Add a picture of the screen if it helps. You see our reply there too.',
+  body: 'Tap Help and feedback at the bottom of the menu, then Send feedback. Tell the BMS team an idea, a problem or a question. Add a picture of the screen if it helps. You see our reply there too.',
 };
 
 const insights: TourStep = {
@@ -569,7 +569,7 @@ export const retailSales: Tour = {
       module: 'retail',
       optional: true,
       title: 'The menu',
-      body: 'Sell and Orders are under Today in the menu, and your stock pages under Stock. On a phone the tabs at the bottom hold Sell, My stock, Buy and Money, and the menu button at the top left has the rest.',
+      body: 'Sell and Orders are under Today in the menu, and your stock pages under Stock. On a phone the tabs at the bottom hold Sell, My stock, Buy and Money. The menu button at the top left has the rest.',
     },
     search,
     notifications,
