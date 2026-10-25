@@ -3,6 +3,7 @@ package com.rincoltech.bms.retail.cashbook.internal;
 import com.rincoltech.bms.core.approvals.ApprovalWaiting;
 import com.rincoltech.bms.core.approvals.Approvals;
 import com.rincoltech.bms.core.approvals.Approvals.ActionRequest;
+import com.rincoltech.bms.core.approvals.RequestSupersededException;
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.documents.Documents;
 import com.rincoltech.bms.core.ledger.LedgerPosting.PostedEntry;
@@ -139,7 +140,27 @@ class ExpenseService {
     /** On approval (ADR-091): checked again as it stands now, recorded under the request's id in the maker's name. */
     void recordApproved(UUID id, Map<String, Object> payload, UUID makerId) {
         ExpenseRequest r = mapper.convertValue(payload, ExpenseRequest.class);
-        write(id, check(r.branchId(), r), r, makerId);
+        Checked c;
+        try {
+            c = check(r.branchId(), r);
+        } catch (RequestSupersededException e) {
+            throw e;
+        } catch (ApiException e) {
+            if (!e.status().is4xxClientError()) {
+                throw e;
+            }
+            // What was asked can no longer be recorded as it stands (its business date, category or item no longer
+            // passes):
+            // the request goes stale with the reason, as a correction does, rather than failing every time it is
+            // approved.
+            throw new RequestSupersededException(
+                    e.code(),
+                    e.title(),
+                    "The expense can no longer be recorded as it was asked for: " + e.getMessage()
+                            + " Record it again.",
+                    e.extensions());
+        }
+        write(id, c, r, makerId);
     }
 
     private Checked check(UUID branch, ExpenseRequest r) {

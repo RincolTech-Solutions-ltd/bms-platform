@@ -32,15 +32,28 @@ class ApprovalOutcomeGuardTest {
     private static final Pattern CALL = Pattern.compile("approvals\\.request\\(");
     private static final Pattern KEPT = Pattern.compile("(\\w+)\\s*=\\s*approvals\\.request\\($");
 
-    /** Same answer either way: file, the number of calls exempted, and why. */
-    private record Exempt(int calls, String why) {}
-
-    private static final Map<String, Exempt> SAME_ANSWER = Map.of(
+    /**
+     * Call sites that answer with the same record either way, each named by the action it asks for, and why. Only a call whose
+     * request names one of these actions is exempt; any other call in the same file is checked.
+     */
+    private static final Map<String, Map<String, String>> SAME_ANSWER = Map.of(
             "ExistingLoanService.java",
-            new Exempt(
-                    2,
-                    "answers with the loan's detail, whose state says brought in or waiting; loan_bring_in and its reversal"
-                            + " always wait and are not switchable"));
+            Map.of(
+                    "BringInAction.TYPE",
+                    "answers with the loan's detail, which says it waits; loan_bring_in always waits and is not switchable",
+                    "BringInReversalAction.TYPE",
+                    "answers with the loan's detail, which says it waits; its reversal always waits and is not switchable"));
+
+    /**
+     * The callers allowed the one-argument {@code request(request)}, which reads the rule inside the approvals module: lending,
+     * whose actions are never switchable, so no switch can race them. Every other caller passes the rule it read.
+     */
+    private static final java.util.Set<String> ONE_ARGUMENT = java.util.Set.of(
+            "CollateralService.java",
+            "ExistingLoanService.java",
+            "ServicingService.java",
+            "SavingsService.java",
+            "InvestmentService.java");
 
     @Test
     void everyCallerOfRequestAnswersByExecutedAndPassesTheRuleItRead() throws IOException {
@@ -54,16 +67,17 @@ class ApprovalOutcomeGuardTest {
                 }
                 String code = Files.readString(file);
                 boolean readsRule = code.contains("approvals.rule(");
-                Exempt exempt = SAME_ANSWER.get(name);
-                int inFile = 0;
+                Map<String, String> exempt = SAME_ANSWER.getOrDefault(name, Map.of());
                 Matcher m = CALL.matcher(code);
                 while (m.find()) {
                     calls++;
-                    inFile++;
-                    if (readsRule && arguments(code, m.end()) != 2) {
-                        problems.add(name + ": reads approvals.rule(...) but calls request without the rule it read");
+                    int args = arguments(code, m.end());
+                    if (args != 2 && (readsRule || !ONE_ARGUMENT.contains(name))) {
+                        problems.add(name
+                                + ": calls request without the rule it read (only the listed lending callers may)");
                     }
-                    if (exempt != null) {
+                    String call = code.substring(m.end(), Math.min(code.length(), m.end() + 80));
+                    if (exempt.keySet().stream().anyMatch(call::contains)) {
                         continue;
                     }
                     String before = code.substring(Math.max(0, m.start() - 120), m.end())
@@ -84,9 +98,6 @@ class ApprovalOutcomeGuardTest {
                     if (!read) {
                         problems.add(name + ": " + var + ".executed() is not read in the calling method");
                     }
-                }
-                if (exempt != null && inFile != exempt.calls()) {
-                    problems.add(name + ": exempt for " + exempt.calls() + " calls but has " + inFile);
                 }
             }
         }

@@ -266,6 +266,30 @@ class RetailApprovalRulesIT extends IntegrationTest {
                 .isEqualTo(1);
     }
 
+    /**
+     * Review of #588: what was asked can no longer be recorded when it is approved (here its category was switched off meanwhile).
+     * The request goes stale with the reason, rather than failing on every approval until it expires.
+     */
+    @Test
+    void anExpenseThatNoLongerPassesWhenApprovedGoesStaleWithTheReason() {
+        rule("retail_expense", true, 0);
+        UUID[] ci = cb.categoryWithItem("Repairs", "Door lock", false);
+        ResponseEntity<JsonNode> asked = cb.expense(hq, ci[0], ci[1], 20_000, null);
+        assertThat(asked.getStatusCode()).as("%s", asked.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        String id = asked.getBody().get("approval_id").asString();
+        TestDatabase.owner()
+                .sql("UPDATE retail_expense_categories SET active = false WHERE id = ?")
+                .param(ci[0])
+                .update();
+        ResponseEntity<JsonNode> late = approve(id, new RetailTestSupport(http, t), CHECKER);
+        assertThat(late.getStatusCode()).as("%s", late.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(late.getBody().get("code").asString()).isEqualTo("category_inactive");
+        assertThat(approval(id, cb.api, MAKER).getBody().get("status").asString())
+                .isEqualTo("stale");
+        assertThat(count("SELECT count(*) FROM retail_expenses WHERE tenant_id = ?", t.tenantId()))
+                .isZero();
+    }
+
     @Test
     void switchedOffAgainAnAmountSetBeforeAsksNothing() {
         rule("retail_expense", false, 1);
