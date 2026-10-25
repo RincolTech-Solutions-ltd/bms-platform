@@ -354,6 +354,16 @@ describe('design guard, the cross-cutting fixes of the 70-screen audit', () => {
     expect(rulesFor(/^\s*\.hint-line > \.hint\s*$/)[0]?.body).toMatch(/white-space: nowrap;[\s\S]*text-overflow: ellipsis/);
   });
 
+  // Issue #575: a normal settings screen draws no status colour. A note about a default (returns with no approval limit) is one
+  // neutral Hint line with a link to the setting, the long explanation behind the Hint's info button.
+  it('draws the Retail settings screens without an amber note, and the returns note as a Hint with a link', () => {
+    for (const file of ['settings', 'purchasing-settings', 'credit-recognition', 'slow-movers']) {
+      expect(code(`areas/staff/retail/${file}.tsx`), file).not.toMatch(/alert-warning/);
+    }
+    const note = code('areas/staff/retail/settings.tsx').match(/export function ReturnsThresholdWarning[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(note).toMatch(/<Hint>\s*Returns need no second person yet\. <Link to="[^"]+">Set a limit<\/Link>/);
+  });
+
   // Item 3: on a phone the crumb is one back link with no slash before it.
   it('draws no slash before the one crumb a phone shows', () => {
     const nav = code('app/ui/navigation.css');

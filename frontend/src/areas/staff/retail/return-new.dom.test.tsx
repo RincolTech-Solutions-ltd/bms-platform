@@ -17,6 +17,11 @@ const ready = (b: unknown) => !(b as HTMLButtonElement).disabled && (b as HTMLEl
 
 afterEach(cleanup);
 
+vi.mock('@tanstack/react-router', async (original) => {
+  const real = await original<typeof import('@tanstack/react-router')>();
+  return { ...real, Link: ({ children, to }: { children: unknown; to: string }) => <a href={to}>{children as never}</a> };
+});
+
 const branches = [{ id: 'b1', name: 'Test Branch A', code: 'BR1' }, { id: 'b2', name: 'Test Store B', code: 'ST2' }];
 const sale = (over: Partial<Sale> = {}): Sale => ({
   id: 's1', sale_no: 'RS00000001', branch_id: 'b1', payment_method: 'cash', status: 'completed', total_minor: 1000, paid_minor: 1000, balance_minor: 0,
@@ -171,10 +176,14 @@ describe('a credit note on screen', () => {
   });
 });
 
-describe('the settings warning', () => {
-  it('says so while returns are on and no approval limit is set, and stays quiet otherwise', () => {
+describe('the settings note', () => {
+  it('says so in one neutral Hint line while returns are on and no approval limit is set, and stays quiet otherwise', () => {
     const { unmount } = render(<ReturnsThresholdWarning capabilities={{ returns: true } as never} />);
-    expect(screen.getByTestId('returns-no-threshold').textContent).toMatch(/no approval limit/i);
+    const note = screen.getByTestId('returns-no-threshold');
+    expect(note.textContent).toMatch(/^Returns need no second person yet\. Set a limit\./);
+    expect(note.textContent).toMatch(/no approval limit/i);
+    expect(screen.getByRole('link', { name: 'Set a limit' }).getAttribute('href')).toBe('/staff/setup');
+    expect(note.querySelector('.alert, .alert-warning')).toBeNull();
     unmount();
     render(<ReturnsThresholdWarning capabilities={{ returns: true, returns_approval_threshold_minor: 500 } as never} />);
     expect(screen.queryByTestId('returns-no-threshold')).toBeNull();
