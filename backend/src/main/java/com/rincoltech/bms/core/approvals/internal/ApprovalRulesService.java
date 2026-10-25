@@ -112,7 +112,7 @@ class ApprovalRulesService {
             }
             before.put(c.actionType(), words(action, was));
             after.put(c.actionType(), words(action, now));
-            if ((was.on() && !now.on()) || (now.on() && now.thresholdMinor() > was.thresholdMinor())) {
+            if (was.on() && (!now.on() || now.thresholdMinor() > was.thresholdMinor())) {
                 loosened.add(action.label());
             }
         }

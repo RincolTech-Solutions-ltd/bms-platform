@@ -9,10 +9,10 @@ import java.util.UUID;
  */
 @Schema(name = "ApprovalWaiting")
 public record ApprovalWaiting(
-        @Schema(description = "The pending approval request")
+        @Schema(description = "The pending approval request", requiredMode = Schema.RequiredMode.REQUIRED)
         UUID approvalId,
 
-        @Schema(description = "The action type, as on the request")
+        @Schema(description = "The action type, as on the request", requiredMode = Schema.RequiredMode.REQUIRED)
         String actionType,
 
         @Schema(description = "The amount the checker sees, in minor units")

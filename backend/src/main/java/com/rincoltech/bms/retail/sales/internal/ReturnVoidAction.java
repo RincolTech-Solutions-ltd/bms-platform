@@ -50,6 +50,12 @@ class ReturnVoidAction implements ApprovalAction {
         return false;
     }
 
+    /** ADR-091: the void of a return follows the returns rule, so it is not a row of its own. */
+    @Override
+    public boolean listed() {
+        return false;
+    }
+
     @Override
     public Optional<Integer> subjectVersion(UUID subjectId) {
         return repo.find(subjectId, false).map(ReturnsRepository.Row::version);

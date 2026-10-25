@@ -257,10 +257,23 @@ class ApprovalsIT extends IntegrationTest {
     @Test
     void belowTheThresholdTheActionExecutesAtOnce() {
         ResponseEntity<JsonNode> settings = api.get("/api/v1/settings", tenantAdmin.accessToken());
-        ResponseEntity<JsonNode> set = api.call(
+        // ADR-091 decision 7: changing an amount needs the administrator's proof, here too.
+        ResponseEntity<JsonNode> unproved = api.call(
                 HttpMethod.PATCH,
                 "/api/v1/settings",
                 Map.of("approval_thresholds_minor", Map.of(TestApprovalAction.TYPE, 1_000_000)),
+                tenantAdmin.accessToken(),
+                Map.of("If-Match", settings.getHeaders().getETag()));
+        assertThat(unproved.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(unproved.getBody().get("code").asString()).isEqualTo("password_required");
+        ResponseEntity<JsonNode> set = api.call(
+                HttpMethod.PATCH,
+                "/api/v1/settings",
+                Map.of(
+                        "approval_thresholds_minor",
+                        Map.of(TestApprovalAction.TYPE, 1_000_000),
+                        "password",
+                        Api.PASSWORD),
                 tenantAdmin.accessToken(),
                 Map.of("If-Match", settings.getHeaders().getETag()));
         assertThat(set.getStatusCode()).as("%s", set.getBody()).isEqualTo(HttpStatus.OK);
