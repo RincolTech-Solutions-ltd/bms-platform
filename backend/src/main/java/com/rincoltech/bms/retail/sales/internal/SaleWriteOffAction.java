@@ -5,6 +5,7 @@ import com.rincoltech.bms.core.approvals.RequestSupersededException;
 import com.rincoltech.bms.retail.sales.internal.WriteOffsServicer.Plan;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 /**
@@ -25,8 +26,11 @@ class SaleWriteOffAction implements ApprovalAction {
 
     private final WriteOffsServicer servicer;
     private final SalesRepository sales;
+    // Lazy: the write-off service asks the approvals module, which holds this action.
+    private final WriteOffsService writeOffs;
 
-    SaleWriteOffAction(WriteOffsServicer servicer, SalesRepository sales) {
+    SaleWriteOffAction(WriteOffsServicer servicer, SalesRepository sales, @Lazy WriteOffsService writeOffs) {
+        this.writeOffs = writeOffs;
         this.servicer = servicer;
         this.sales = sales;
     }
@@ -91,6 +95,12 @@ class SaleWriteOffAction implements ApprovalAction {
                     "The amount owed changed from " + n.longValue() + " to " + plan.unpaidMinor()
                             + " since the write-off was asked for. Ask for it again.",
                     java.util.Map.of("approved_minor", n.longValue(), "owed_minor", plan.unpaidMinor()));
+        }
+        if (e.approvalId() == null) {
+            // Run at once with no checker because the switch is off (ADR-091): flagged and told like any write-off done
+            // alone.
+            writeOffs.writeAlone(plan, (String) e.payload().get(REASON), e.makerId(), null, "approval_switched_off");
+            return;
         }
         servicer.record(plan, (String) e.payload().get(REASON), e.makerId(), e.approvalId(), e.checkerId(), null);
     }

@@ -182,11 +182,15 @@ class ApprovalService implements Approvals {
      */
     Rule rule(ApprovalAction action) {
         long threshold = action.thresholdApplies() ? settings.approvalThresholdMinor(action.actionType()) : 0;
+        return ruleAt(action, threshold, settings.approvalSwitches().get(action.actionType()));
+    }
+
+    /** The rule of an action at a given amount and stored switch (null when none was saved). */
+    static Rule ruleAt(ApprovalAction action, long thresholdMinor, Boolean stored) {
         if (!action.switchable()) {
-            return new Rule(true, threshold);
+            return new Rule(true, thresholdMinor);
         }
-        Boolean stored = settings.approvalSwitches().get(action.actionType());
-        return new Rule(stored != null ? stored : action.onByDefault(threshold), threshold);
+        return new Rule(stored != null ? stored : action.onByDefault(thresholdMinor), thresholdMinor);
     }
 
     /** The registered actions, for the approval rules (ADR-091). */

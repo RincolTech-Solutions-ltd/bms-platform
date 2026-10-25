@@ -99,6 +99,11 @@ class ReturnsService {
                             plan.sale().currency(),
                             payload),
                     rule);
+            if (o.executed()) {
+                // Run at once by the approvals module: answer with the return it made, the sale's newest.
+                return new ReturnOutcome(
+                        true, null, servicer.view(repo.forSale(saleId).getLast(), true));
+            }
             return new ReturnOutcome(false, o.approvalId(), null);
         }
         return new ReturnOutcome(true, null, servicer.record(plan, r.note(), principal.userId(), null, null));
@@ -130,6 +135,10 @@ class ReturnsService {
                     row.totalMinor(),
                     row.currency(),
                     Map.of(ReturnVoidAction.REASON, r.reason().trim())));
+            if (o.executed()) {
+                return new ReturnOutcome(
+                        true, null, servicer.view(repo.find(returnId, false).orElseThrow(), true));
+            }
             return new ReturnOutcome(false, o.approvalId(), null);
         }
         return new ReturnOutcome(true, null, servicer.voidReturn(returnId, r.reason()));

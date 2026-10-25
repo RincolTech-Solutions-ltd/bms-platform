@@ -96,7 +96,11 @@ expenses.
 
 8. **The other administrators are told when a safeguard is loosened.** Switching an action off or raising its amount sends the
    push `core.approval_policy_weakened` to the holders of `core.settings.manage` with a device (ADR-050), never to the person who
-   changed it, naming the actions in words and opening the approval rules.
+   changed it, naming the actions in words and opening the approval rules. The same holds for `PATCH /settings`: the settings
+   module publishes `ApprovalAmountsChanged` and the approvals module, which knows each action's default, tells a raised amount and
+   an amount lowered to 0 that switches an action off by its default (returns and purchase orders with no saved switch).
+   Every caller of `Approvals.request` answers by `executed()` (`ApprovalOutcomeGuardTest` fails on one that does not), and a
+   write-off the approvals module runs at once is written through the same flag-and-tell as any write-off done alone.
 
 9. **What a person sees while an action waits.** The maker's screen says it in plain words at once: "Sent for approval. Nothing
    changes until an administrator approves it. You can see it, or cancel it, on Approvals." The approvers hear it by the push

@@ -2,6 +2,7 @@ package com.rincoltech.bms.core.tenancy.internal;
 
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.documents.Documents;
+import com.rincoltech.bms.core.tenancy.ApprovalAmountsChanged;
 import com.rincoltech.bms.core.tenancy.ApprovalRuleStore;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.core.tenancy.GoLiveDate;
@@ -323,27 +324,17 @@ class SettingsService implements TenantSettings, ModuleSettings, GoLiveDate, App
     }
 
     /**
-     * The administrators with a device are told when a safeguard is loosened (ADR-050): the amount that needs a second person
-     * raised for an action. The person who changed it is not told. The
-     * names of the actions are the ones the approvals inbox shows.
+     * The approval amounts that changed go to the approvals module (ADR-050, ADR-091 decision 8), which tells the administrators
+     * with a device when a rule was loosened: a higher amount, or 0 switching an action off by its default. The person who
+     * changed it is not told.
      */
     private void announceWeakening(SettingsResponse before, SettingsResponse after) {
-        UUID by = CurrentPrincipal.get().map(Principal::userId).orElse(null);
-        List<String> raised = after.approvalThresholdsMinor().entrySet().stream()
-                .filter(e -> e.getValue() > before.approvalThresholdsMinor().getOrDefault(e.getKey(), 0L))
-                .map(e -> e.getKey().replace('_', ' '))
-                .sorted()
-                .toList();
-        if (!raised.isEmpty()) {
-            events.publishEvent(new PushNotice(
-                    "core.approval_policy_weakened",
-                    "settings-v" + after.version(),
-                    new PushNotice.Holders("core.settings.manage", null, by),
-                    Map.of(
-                            "action_label",
-                            String.join(", ", raised.subList(0, Math.min(3, raised.size()))),
-                            "path",
-                            "/staff/setup/approvals")));
+        if (!before.approvalThresholdsMinor().equals(after.approvalThresholdsMinor())) {
+            events.publishEvent(new ApprovalAmountsChanged(
+                    before.approvalThresholdsMinor(),
+                    after.approvalThresholdsMinor(),
+                    CurrentPrincipal.get().map(Principal::userId).orElse(null),
+                    after.version()));
         }
     }
 
