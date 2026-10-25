@@ -588,8 +588,8 @@ single units. The credit of each line and the credit note total are shown before
 the last piece taking the remainder). **How the customer is repaid** offers cash, mobile money, bank, or "Take it off what they owe" (only for a credit sale that owes; for a
 cash sale, an imported credit sale or one that is paid up the option is shown and cannot be chosen, with the reason beneath); when the credit is more than is owed, the form says how much comes off the balance and asks how the rest is paid out. A "Pay the money out of the till of" box appears when money is paid out and the person may use more than one branch. The
 button waits for a form the server would accept, and the draft and its Idempotency-Key survive a reload (`usePersistedDraft`). A return that takes the sale's returns to the tenant's
-threshold answers "needs a second administrator" instead of a credit note, and so does voiding a return that was approved. **Retail settings** shows a warning
-while returns are on and no approval limit is set. **The credit note** (`/staff/retail/returns/$returnId`, crumb "Credit note", named after
+threshold answers "needs a second administrator" instead of a credit note, and so does voiding a return that was approved. **Retail settings** shows one neutral Hint line
+while returns are on and no approval limit is set ("Returns need no second administrator yet.", the full explanation behind the Hint's More (its info button, "Show more"); issue #575: no amber on a normal screen, held by `design-guard.test.ts`). No screen sets the limit yet (the approval limits screen is issue #343), so the Hint has no link; it gains the link with #343. **The credit note** (`/staff/retail/returns/$returnId`, crumb "Credit note", named after
 its number) shows the facts, each line with its reason and where the goods went, the total and how it was settled, and for `retail.sale.return` a Void form that needs a
 reason of at least five characters and says what voiding does (the goods come off the shelf again, the money or balance goes back); the printable credit note is the
 documents slice. The customer statement names a return "Goods returned, credit note" and its void "Credit note voided". `returns` is marked ready in
@@ -1139,8 +1139,8 @@ No migration beyond the permission; no write anywhere on the page.
 - **Days.** Today, This week (Monday to today), This month (the 1st to today) or Choose days (two dates, at most 366 days). Every count is
   set against the days just before ("the day before", "the 7 days before"). "Cancelled at once means within" is a choice of 2, 5, 10, 15, 30
   or 60 minutes.
-- **Cards.** One tappable card per kind of thing, in a fixed order: Sales cancelled, Cancelled at once, Goods taken back, Prices changed,
-  Discounts given, and Sold below cost (only when the server sent it, that is for someone who may read profit in every shop shown; a line
+- **Cards.** One tappable card per kind of thing, in a fixed order: Sales cancelled, Cancelled at once, Goods taken back, Credit written off,
+  Prices changed, Discounts given, Purchases cancelled, Quantities corrected, and Sold below cost (only when the server sent it, that is for someone who may read profit in every shop shown; a line
   of words says so otherwise). Each shows the count (for a price, a discount or a cost it says "3 lines in 2 sales, lines worth ..."), what it is worth at sale prices, the rate ("2.5 per 100 sales", always sales with such an event per 100 sales entered, so the units match), the trend ("Up 3, from 5
   in the 7 days before"; "None, and none in ...") and its share of the value of sales. A card whose capability is off and never counted says
   "Not switched on for this business, so nothing is recorded" instead of a calm zero. A card is a button: the chosen one sets the table below.
@@ -1173,8 +1173,12 @@ No migration beyond the permission; no write anywhere on the page.
   cards, Group by, the tables and the patterns.
 - **Stock cards.** Restocks cancelled and Quantities corrected (#356) are cards too: a count and a value, no rate (not about sales), no Open sale
   on their records, and no Approver level for a correction.
-- **Not yet.** Credit write-offs (#349) have no card until that table is on `main`; groups
-  2 to 6 of #357 are separate pages.
+- **Credit written off (issue #357, ADR-087).** A card after Goods taken back: the credit sales written off in the days, worth what the
+  buyers still owed (never the loss, which can be a cost), with the rate per 100 sales and the share of sales like the other sale cards.
+  Person is whose sale it was; the record reads "Written off by ..." and opens the sale. Not in the repeat patterns.
+- **Menu.** Controls is a row of the Business group of the grouped menu (#564, ADR-086), after Reports, for a session that may
+  open the page; on the page, Controls is the current row and Reports is not.
+- **Not yet.** Groups 2 to 6 of #357 are separate pages.
 
 ## Sizes and colours (issue #384, ADR-051, FR-RET-51, FR-RET-52)
 
@@ -1270,6 +1274,41 @@ own: the order is copied from the chat, so the form asks for the phone first and
   settings version like the other retail settings and audited as `retail.capabilities.changed`.
 - Tours: `page-stock-health` v2 adds the Slow movers step (`health-slow`), `page-retail-settings` v4 the settings step
   (`retail-slow-movers`).
+
+## Category picker (issue #578, FR-UXN-10)
+
+The pilot tenant found the category select on Add an item a long list with no search and no way to add a category,
+and showed the sheet of their old AppSheet app: Search, New, the list and Done. Every place a category is chosen now uses one
+`CategoryPicker` (`frontend/src/areas/staff/retail/category-picker.tsx`).
+
+- **Where.** Add an item and an item's own form (Items), the new item on Buy stock and Count stock, Add an item with sizes and
+  colours, Change the name or category of an item with sizes, and the Category filters of Items and Stock (with All
+  categories first and no Add). Expense categories are a different list and keep their select.
+- **The field.** Looks like a select and names the chosen category, or "Choose a category". It is required where the
+  category is, with the red asterisk; a Save with no category goes to it.
+- **Phone (below 720px).** The kit's Sheet at full height, "Choose a category": the search box with the cursor in it, Add a
+  new category, the list in rows of at least 48px with the chosen one tinted and ticked (no stripe), and Done. A tap on a
+  row chooses it and closes the sheet; Done or a swipe down closes it as it was.
+- **Laptop.** The same search, Add row and list open under the field in a card (Radix Popover), as wide as the field or at
+  least 280px.
+- **Search.** Any part of the name, whatever the case, on the categories already loaded (no request per key). Names show as
+  the owner typed them. Nothing matching says `No category called "Rice". Add it?` with an Add Rice button, or without the
+  question and the button for someone who cannot add.
+- **Add a new category.** Only for `retail.catalogue.manage`. A short form in place: Name of the new category (the search
+  text filled in), and the line "Item codes here will start with RCE, like RCE-0001, made by the app." from the code start
+  suggestion as the name is typed. No code is typed (#562). Add category creates it (`POST /retail/categories`), chooses it,
+  closes the picker and shows the dark toast "Added the category Rice. Its item codes start with RCE." It is the screen's own
+  toast (`ScreenToast` in `retail/toast.tsx`), so a screen never shows two; the picker says the same in a live region by the
+  field. The new category goes
+  into every category list the screens keep (the catalogue's and the Stock filter's) before they are fetched again, so the
+  field and the item code line name it at once.
+- **A name already used.** Checked against every category, switched-off ones too, whatever the case, before anything is
+  sent: "There is already a category called Bulbs." with Choose Bulbs, or "There is already a category called Torches
+  (switched off)." with Switch Torches on and choose it. A name another phone added a moment ago is refused by the server and
+  reads "A category with this name already exists." in place.
+- **Keyboard and screen reader.** The field is a combobox that opens with a press, Enter, Space or the down arrow. The search
+  is a combobox over the listbox "Categories": Up, Down, Home and End move the highlight (aria-activedescendant), Enter
+  chooses it (or the only match), Escape closes, and the focus goes back to the field. The number found is announced.
 
 ## Item pickers (issue #534, FR-UXN-07)
 
