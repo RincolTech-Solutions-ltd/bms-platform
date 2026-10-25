@@ -2,8 +2,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactElement } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { retail } from '../../../api/retail';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+import { retail, type RetailApi } from '../../../api/retail';
 import { createMockRetail, mockEntryConfirmations, mockMe, setMockEntryNorms } from '../../../api/retail-mock';
 import { offendingWords } from '../../../app/glossary';
 import { pickItem } from '../../../test-utils/item-picker';
@@ -38,7 +38,7 @@ const HISTORY = {
   last_sell_minor: 6000,
 };
 
-let normsSpy: ReturnType<typeof vi.spyOn<typeof retail, 'entryNorms'>>;
+let normsSpy: MockInstance<RetailApi['entryNorms']>;
 beforeEach(() => {
   Object.assign(retail, createMockRetail());
   setMockEntryNorms(LAMP, HISTORY);

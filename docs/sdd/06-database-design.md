@@ -2194,6 +2194,10 @@ Indexes: `(tenant_id, branch_id, sale_date, created_at, id)` for a branch's list
 is computed from these, never from the product's current prices (ADR-020 decision 5). Index
 `(tenant_id, sale_id) INCLUDE (line_total_minor, line_cost_minor)` (V26): a list page loads the lines
 of all its sales in one statement, and the daily profit sums them without reading the heap.
+`retail_sale_lines_product_recent` `(tenant_id, product_id, created_at DESC)` (V104, issue #353, ADR-093) gives an item's
+newest lines for the entry warnings, as `retail_purchase_lines_product_recent` does on `retail_purchase_lines`: each read stops
+at 20 entries of one item instead of reading the tenant's line history. Indexes only, built in the migration's transaction
+under a SHARE lock with a five second `lock_timeout`, as V101.
 
 ### `retail_suppliers` (RLS; `bms_app` SELECT, INSERT, UPDATE)
 
