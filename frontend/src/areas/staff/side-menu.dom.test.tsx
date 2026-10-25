@@ -499,6 +499,12 @@ describe('the staff sidebar from 720px', () => {
     expect(within(sidebar()).getByRole('link', { name: 'Home' }).getAttribute('aria-current')).toBeNull();
   });
 
+  it('makes Controls the current link on its page, not Retail as well (issue #357)', () => {
+    show(admin, { at: '/staff/retail/controls' });
+    expect(within(sidebar()).getByRole('link', { name: 'Controls' }).getAttribute('aria-current')).toBe('page');
+    expect(within(sidebar()).getByRole('link', { name: 'Retail' }).getAttribute('aria-current')).toBeNull();
+  });
+
   it('keeps Retail current on a retail page without a shortcut, and draws it as the section above a current shortcut', () => {
     show(admin, { at: '/staff/retail/catalogue' });
     const retail = () => within(sidebar()).getByRole('link', { name: 'Retail' });
@@ -701,9 +707,9 @@ describe('the same areas for the same permissions on every size', () => {
     { role: 'members and collateral', me: session(['lending.members.read', 'lending.collateral.read'], ['lending']), has: ['Members'], lacks: ['Collateral'] },
     { role: 'settings manager', me: session(['core.settings.manage'], []), has: ['Business set-up'], lacks: ['Retail', 'Members'] },
     { role: 'no settings', me: session(['core.approvals.read'], []), has: ['Approvals'], lacks: ['Business set-up'] },
-    { role: 'retail seller', me: { ...mockMe('sales'), tours: TOURS_OFF } as unknown as Me, has: ['Retail'], lacks: ['Business set-up', 'Members'] },
-    { role: 'retail admin', me: admin, has: ['Retail', 'Business set-up'], lacks: ['Collateral'] },
-    { role: 'retail switched off', me: { ...admin, modules: ['lending'] } as Me, has: ['Business set-up'], lacks: ['Retail'] },
+    { role: 'retail seller', me: { ...mockMe('sales'), tours: TOURS_OFF } as unknown as Me, has: ['Retail'], lacks: ['Business set-up', 'Members', 'Controls'] },
+    { role: 'retail admin', me: admin, has: ['Retail', 'Controls', 'Business set-up'], lacks: ['Collateral'] },
+    { role: 'retail switched off', me: { ...admin, modules: ['lending'] } as Me, has: ['Business set-up'], lacks: ['Retail', 'Controls'] },
   ];
 
   it.each(cases)('$role', ({ me, has, lacks }) => {

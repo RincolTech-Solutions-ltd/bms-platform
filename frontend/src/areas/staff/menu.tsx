@@ -9,7 +9,7 @@ import { showSavings } from './lending/savings-permissions';
 import { showReceivePayments } from './payments/state';
 import { showReports } from './reports/permissions';
 import { RetailMenuGroup, shortcutsFor } from './retail/nav';
-import { showRetail } from './retail/permissions';
+import { canUse, showRetail } from './retail/permissions';
 import { showSms } from './sms/state';
 import { showUsers } from './users/state';
 
@@ -32,6 +32,9 @@ export const STAFF_SECTIONS: MenuSection[] = [
 export function staffAreas(me: Me, { sells }: { sells: boolean }): MenuLink[] {
   const permissions = me.permissions ?? [];
   const shortcuts = showRetail(me) ? shortcutsFor(me, { sells }) : [];
+  // The Controls page (issue #357, ADR-087) has its own entry until the grouped menu of #564 puts it under Business.
+  const controls = showRetail(me) && canUse(me, 'controls');
+  const controlsPath = '/staff/retail/controls';
   const areas: (MenuLink | false)[] = [
     { to: '/staff', label: 'Home', icon: icons.home, exact: true },
     permissions.includes('core.approvals.read') && { to: '/staff/approvals', label: 'Approvals', icon: icons.approve, tour: 'nav-approvals' },
@@ -49,9 +52,11 @@ export function staffAreas(me: Me, { sells }: { sells: boolean }): MenuLink[] {
       icon: icons.retail,
       tour: 'nav-retail',
       group: <RetailMenuGroup shortcuts={shortcuts} />,
-      groupPaths: shortcuts.map((s) => s.path),
+      // Controls is its own entry, so on its page Retail is not the current link too.
+      groupPaths: [...shortcuts.map((s) => s.path), ...(controls ? [controlsPath] : [])],
       section: 'shop',
     },
+    controls && { to: controlsPath, label: 'Controls', icon: icons.controls, section: 'shop' },
     showSms(me) && { to: '/staff/sms', label: 'SMS', icon: icons.phone },
     showReceivePayments(me) && { to: '/staff/payments', label: 'Receive payments', icon: icons.receivePayments },
     showUsers(me) && { to: '/staff/users', label: 'Users', icon: icons.user, tour: 'nav-users' },

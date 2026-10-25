@@ -86,7 +86,7 @@ function sideMenu(me: Me) {
   return [...staffAreas(me, { sells: true }), ...shortcuts, ...STAFF_SECTIONS.map((s) => ({ label: `${s.label} heading`, icon: s.icon }))];
 }
 
-const AREA_LABELS = ['Home', 'Approvals', 'Loans', 'Members', 'Savings', 'Investments', 'Insights', 'AI assistant', 'Reports', 'Retail', 'SMS', 'Receive payments', 'Users', 'Notifications', 'Feedback', 'Business set-up'];
+const AREA_LABELS = ['Home', 'Approvals', 'Loans', 'Members', 'Savings', 'Investments', 'Insights', 'AI assistant', 'Reports', 'Retail', 'Controls', 'SMS', 'Receive payments', 'Users', 'Notifications', 'Feedback', 'Business set-up'];
 
 describe('menu icons (issue #483)', () => {
   it('gives every item of the staff side menu its own icon', () => {
