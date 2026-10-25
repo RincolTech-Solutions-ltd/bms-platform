@@ -6110,6 +6110,10 @@
             },
             "type" : "array"
           },
+          "business_name" : {
+            "description" : "The business's display name, as its branding names it (the name given at onboarding until one is saved): the top of the staff menu shows it (issue #564, ADR-086)",
+            "type" : "string"
+          },
           "default_branch_id" : {
             "format" : "uuid",
             "type" : "string"

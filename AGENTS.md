@@ -602,7 +602,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   (`/platform/feedback`), the tours `page-feedback` and `page-operator-feedback`, and a Feedback step in `admin-welcome` v18,
   `retail-sales` v12 and `staff-welcome` v6. Tests: `FeedbackIT`, `RlsIsolationIT`, `ModularityTest`, `feedback-state.test.ts`,
   `feedback.dom.test.tsx`, `tours-operator.test.tsx`.
-- **Built (one grouped menu, issue #564, ADR-086, FR-UXN-04):** PWA only, no migration, no API change. `staffMenu` in
+- **Built (one grouped menu, issue #564, ADR-086, FR-UXN-04):** no migration; one additive API field, `business_name` on `GET /me` (`TenantSettings.displayName()`), which the menu's top shows. `staffMenu` in
   `frontend/src/areas/staff/menu.tsx` builds the groups (Home, Today, Stock, Money, Lending, Business) with the permission checks,
   `useMenuCounts` reads the open orders and "N low" from Home's summary, and `SideNav` and `SideMenu` (`components/side-menu.tsx`)
   draw them with `MenuShop` (`branch-picker.tsx`) at the top and `StaffMenuFoot` (`route.tsx`) at the foot: a fixed 264px sidebar

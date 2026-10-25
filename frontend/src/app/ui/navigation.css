@@ -477,6 +477,16 @@ img.menu-shop-logo {
   white-space: nowrap;
 }
 
+/* The business's name while the profile has none yet: a muted bar the height of the name, never a product name. */
+.menu-shop-name-skeleton {
+  display: block;
+  width: 60%;
+  height: 0.9em;
+  margin: 0.15em 0;
+  border-radius: var(--radius-sm);
+  background: var(--color-neutral-tint);
+}
+
 .menu-shop-role {
   overflow: hidden;
   color: var(--color-text-muted);
