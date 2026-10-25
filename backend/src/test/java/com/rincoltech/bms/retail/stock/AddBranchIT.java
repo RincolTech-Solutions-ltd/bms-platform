@@ -205,6 +205,8 @@ class AddBranchIT extends IntegrationTest {
     /** A store that keeps no goods cannot be made, and nothing is written. */
     @Test
     void aStoreThatKeepsNoGoodsIsRefused() {
+        // Checked before the plan limit, so a full plan still names what is wrong with the request.
+        planOf(2);
         ResponseEntity<JsonNode> r = add("Test Empty Store", false, false);
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(r)).isEqualTo("store_must_stock");

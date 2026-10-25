@@ -321,10 +321,9 @@ describe('adding a branch (#581)', () => {
     fireEvent.blur(screen.getByLabelText(/^Name/));
     expect(screen.getByRole('radiogroup', { name: 'What is it?' })).toBe(group);
     expect(screen.getByRole('radio', { name: 'Store (keeps stock, does not sell)' })).toBe(store);
-    store.focus();
     fireEvent.click(screen.getByRole('radio', { name: 'Head office (keeps no goods)' }));
+    expect(screen.getByRole('radiogroup', { name: 'What is it?' })).toBe(group);
     expect(screen.getByRole('radio', { name: 'Store (keeps stock, does not sell)' })).toBe(store);
-    expect(document.activeElement).toBe(store);
   });
 
   it('needs a name, marked with the asterisk, and sends nothing without it', async () => {

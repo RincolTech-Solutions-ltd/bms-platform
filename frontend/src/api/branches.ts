@@ -34,7 +34,7 @@ const MESSAGES: Record<string, string | undefined> = {
   branch_has_open_accounts: 'This branch still has open loans, savings or investments. Close or move those first.',
   invalid_status_transition: 'This branch changed while you were looking. Reload the page to see how it is now.',
   version_conflict: 'Someone else changed this branch. Reload the page and try again.',
-  duplicate_branch_code: 'Another branch took this code at the same moment. Press Add the branch again and the app makes another.',
+  duplicate_branch_code: 'Another branch already has this code. Each branch needs its own.',
   plan_limit_reached: 'Your plan has no room for another open branch. Close one you no longer use, or ask us to change your plan.',
   permission_denied: 'You are not allowed to do this. Ask an administrator.',
 };

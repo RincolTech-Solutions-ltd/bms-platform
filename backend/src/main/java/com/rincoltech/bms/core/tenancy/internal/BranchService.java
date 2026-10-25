@@ -121,7 +121,6 @@ class BranchService implements BranchProvisioning {
 
     @Transactional
     BranchResponse create(CreateBranchRequest request) {
-        checkRoomForAnOpenBranch();
         boolean sells = request.sellsGoods() == null || request.sellsGoods();
         boolean stocks = request.stocksGoods() == null || request.stocksGoods();
         if (!sells && !stocks) {
@@ -130,9 +129,12 @@ class BranchService implements BranchProvisioning {
                     "A Store holds stock, so it cannot also be a branch that keeps no goods. Make it a shop that sells,"
                             + " or let it keep goods.");
         }
+        checkRoomForAnOpenBranch();
         String code = request.code() == null ? codeFrom(request.name()) : request.code();
         UUID id = UUID.randomUUID();
-        // A code taken in between, by a second add at the same moment, is refused like a typed one, never a 500.
+        // The lock above serialises adds, so a made code is never taken in between; a typed code that is taken is
+        // refused here,
+        // never a 500.
         int inserted = jdbc.sql("""
                         INSERT INTO branches (id, tenant_id, code, name, location, sells_goods, stocks_goods)
                         VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
