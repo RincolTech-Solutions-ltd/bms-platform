@@ -92,7 +92,7 @@ function looksRight(save: HTMLElement) {
   expect(note?.className).toBe('alert alert-warning entry-warning');
   expect(note?.getAttribute('role')).toBe('alert');
   expect(offendingWords(note?.textContent ?? '')).toEqual([]);
-  expect(note?.textContent).not.toMatch(/[–—]/);
+  expect(note?.textContent).not.toMatch(/[\u2013\u2014]/);
   expect(save.hasAttribute('disabled')).toBe(false);
 }
 
