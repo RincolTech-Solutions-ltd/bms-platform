@@ -82,8 +82,10 @@ Controls page all read `retail_sales`.
 6. **Cancel releases the stock and keeps the reason** (at least three characters), with the day it was cancelled, for the cancellations
    report. A delivered or cancelled order changes no more.
 7. **Where it came from and the quick entry.** Every order has a `source` (whatsapp, instagram, facebook, phone, walk_in, other); the list
-   filters by it and the fees and cancellations reports group by it. `GET /retail/orders/customer-lookup?phone=` matches the last nine digits
-   of a phone number (so +256 700 000 011 and 0700 000 011 are one number) against the caller's earlier orders and the credit buyers, and
+   filters by it and the fees and cancellations reports group by it. `GET /retail/orders/customer-lookup?phone=` matches the whole
+   phone number with its country code (so +256 700 000 011 and 0700 000 011 are one number; amended by issue #441: the last nine digits
+   alone joined +254 700 000 011 to it; a local `07...` or bare nine-digit number is read as `+256`, since a tenant has no country of its
+   own yet) against the caller's earlier orders and the credit buyers, and
    returns the name, the place and the fee of the newest order to fill in again. The screen asks for the phone first.
 8. **One permission, `retail.order.manage`**, money moving, given to the administrator and to every role that holds `retail.sale.create`,
    scoped by branch. An order is taken at a shop (a Store refuses with `branch_does_not_sell`, ADR-048). No capability switch: the screens
