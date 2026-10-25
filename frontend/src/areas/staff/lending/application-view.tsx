@@ -223,7 +223,7 @@ function NoteForm({ name, label, button, send, onDone }: { name: string; label: 
     }
   }
   return (
-    <form className="rt-card stack" aria-label={label} onSubmit={(e) => void submit(e)} noValidate>
+    <form className="rt-card stack" aria-label={button} onSubmit={(e) => void submit(e)} noValidate>
       <FieldsNeededNote />
       <TextField name="note" label={label} form={form} required type="textarea" rows={2} maxLength={1000} value={note} onChange={setNote} />
       <Problem error={failure ? new Error(failure) : null} />
