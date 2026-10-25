@@ -94,7 +94,7 @@ export function ImportPage() {
     <Gate screen="importer" title="Import items">
       <div data-tour="import-note">
         <Note>
-          The first row names the columns: code, description, category, unit{profit ? ', buying price (if you wish)' : ''}, selling price. Then one item on each row. Leave a code empty, or leave out the code column, and the app gives the item the next code of its category, such as BLB-0001.
+          The first row names the columns: description, category, unit{profit ? ', buying price (if you wish)' : ''}, selling price. Then one item on each row. The app gives each new item the next code of its category, such as BLB-0001. A code column is not used for new items; a row whose code an item already has is skipped.
           {profit ? '' : ' Leave the buying price out.'} Check the file first: nothing is saved until you add the items.
         </Note>
       </div>

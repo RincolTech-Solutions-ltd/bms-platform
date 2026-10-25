@@ -164,6 +164,24 @@ public final class RetailTestSupport {
         return id;
     }
 
+    /**
+     * POST /products for a fixture whose body names a {@code code}: the app makes the code (issue #562), so the item is
+     * added without it and then given the fixture's code as an existing item's (see {@link #existingCode}). Answers as the
+     * add does, 201 with the item as it now reads, or the refusal unchanged.
+     */
+    public ResponseEntity<JsonNode> postItem(Map<String, Object> body, String permissions) {
+        Map<String, Object> made = new LinkedHashMap<>(body);
+        Object code = made.remove("code");
+        ResponseEntity<JsonNode> added = post("/products", made, permissions);
+        if (code == null || added.getStatusCode().value() != 201) {
+            return added;
+        }
+        UUID id = id(added);
+        existingCode(id, code.toString().strip());
+        ResponseEntity<JsonNode> now = get("/products/" + id, ADMIN);
+        return ResponseEntity.status(201).headers(now.getHeaders()).body(now.getBody());
+    }
+
     /** Gives an item the code it held before the app made codes (issue #562): an existing item keeps its code. */
     public void existingCode(UUID productId, String code) {
         TestDatabase.owner()

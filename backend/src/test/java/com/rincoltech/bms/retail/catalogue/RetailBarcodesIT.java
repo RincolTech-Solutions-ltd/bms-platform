@@ -474,7 +474,7 @@ class RetailBarcodesIT extends IntegrationTest {
         ResponseEntity<JsonNode> applied =
                 api.post("/products/import?dry_run=false", Map.of("csv", csv), ADMINISTRATOR);
         assertThat(applied.getStatusCode()).as("%s", applied.getBody()).isEqualTo(HttpStatus.OK);
-        assertThat(lookup(EAN).getBody().get("product").get("code").asString()).isEqualTo("IMP-OFF1");
+        assertThat(lookup(EAN).getBody().get("product").get("description").asString()).isEqualTo("Test soap");
         assertThat(api.get("/products/" + old + "/barcodes", ADMIN).getBody().get("items"))
                 .isEmpty();
         long released = TestDatabase.owner()
@@ -527,8 +527,8 @@ class RetailBarcodesIT extends IntegrationTest {
                 Map.of("csv", header + "IMP-BC1,Test soap,Soap,bar,1000," + EAN + "|TEST-SOAP\n"),
                 ADMINISTRATOR);
         assertThat(applied.getStatusCode()).as("%s", applied.getBody()).isEqualTo(HttpStatus.OK);
-        assertThat(lookup("TEST-SOAP").getBody().get("product").get("code").asString())
-                .isEqualTo("IMP-BC1");
+        assertThat(lookup("TEST-SOAP").getBody().get("product").get("description").asString())
+                .isEqualTo("Test soap");
         assertThat(lookup(EAN).getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 }

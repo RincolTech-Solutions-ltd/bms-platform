@@ -33,10 +33,11 @@ import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
 
 /**
- * Item codes made from the category (issue #493, owner decisions D14 and D16, ADR-081): a category has a code start of 2 to 4
- * letters, unique in the business, suggested from its name and editable; an item added without a typed code gets the
- * category's next free number, PREFIX-0001, also when two people add at once; a typed code is kept; the import fills blank
- * codes from each row's category; moving an item to another category keeps its code. Fabricated data.
+ * Item codes made from the category (issue #493, owner decisions D14 and D16, ADR-081 as amended by issue #562): a category
+ * has a code start of 2 to 4 letters, unique in the business, suggested from its name and editable; every item added gets the
+ * category's next free number, PREFIX-0001, also when two people add at once; a typed code is refused on add and on edit; the
+ * import gives every new row its category's next code and uses no typed one; existing codes never change, and moving an item to
+ * another category keeps its code. Fabricated data.
  */
 class RetailItemCodesIT extends IntegrationTest {
 
@@ -148,20 +149,49 @@ class RetailItemCodesIT extends IntegrationTest {
     }
 
     @Test
-    void anItemWithoutACodeGetsTheCategorysNextNumberAndATypedCodeIsKept() {
+    void theAppMakesEveryNewItemsCodeAndRefusesATypedOne() {
         UUID bulbs = api.category("Bulbs");
         assertThat(category(bulbs).get("next_code").asString()).isEqualTo("BLB-0001");
         assertThat(codeOf(add(bulbs, null, "Test bulb 9W"))).isEqualTo("BLB-0001");
+        // A blank code is no code.
         assertThat(codeOf(add(bulbs, "  ", "Test bulb 12W"))).isEqualTo("BLB-0002");
-        assertThat(codeOf(add(bulbs, "LED-OWN-1", "Test bulb 15W"))).isEqualTo("LED-OWN-1");
-        // A code typed in the category's own shape is kept, and the numbering steps over it.
-        assertThat(codeOf(add(bulbs, "blb-0003", "Test bulb 18W"))).isEqualTo("blb-0003");
-        assertThat(category(bulbs).get("next_code").asString()).isEqualTo("BLB-0004");
-        assertThat(codeOf(add(bulbs, null, "Test bulb 20W"))).isEqualTo("BLB-0004");
-        // Uniqueness is unchanged: a typed code another item holds is refused.
-        ResponseEntity<JsonNode> twice = add(bulbs, "BLB-0001", "Test bulb 25W");
-        assertThat(twice.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-        assertThat(twice.getBody().get("code").asString()).isEqualTo("duplicate_product_code");
+        // Issue #562: a typed code is refused, not dropped, and nothing is added or numbered.
+        for (String typed : List.of("LED-OWN-1", "BLB-0003")) {
+            ResponseEntity<JsonNode> refused = add(bulbs, typed, "Test bulb 15W");
+            assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(refused.getBody().get("code").asString()).isEqualTo("item_code_made_by_app");
+            assertThat(refused.getBody().get("errors").get(0).get("field").asString()).isEqualTo("code");
+        }
+        assertThat(codesByName()).hasSize(2);
+        assertThat(category(bulbs).get("next_code").asString()).isEqualTo("BLB-0003");
+        // An existing item that holds a code of the category's shape keeps it, and the numbering steps over it.
+        UUID older = RetailTestSupport.id(add(bulbs, null, "Test bulb 18W"));
+        api.existingCode(older, "blb-0004");
+        assertThat(codeOf(add(bulbs, null, "Test bulb 20W"))).isEqualTo("BLB-0005");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.product.created'"
+                                + " AND data::text LIKE '%code_source%'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(4);
+    }
+
+    @Test
+    void editingAnItemNeverChangesItsCode() {
+        UUID bulbs = api.category("Bulbs");
+        UUID made = RetailTestSupport.id(add(bulbs, null, "Test bulb 9W"));
+        ResponseEntity<JsonNode> recoded = patch("/products/" + made, Map.of("code", "MY-OWN-1"));
+        assertThat(recoded.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(recoded.getBody().get("code").asString()).isEqualTo("item_code_made_by_app");
+        // The item's own code sent back with a change is not a change of code.
+        ResponseEntity<JsonNode> same =
+                patch("/products/" + made, Map.of("code", "BLB-0001", "description", "Test bulb 9 W"));
+        assertThat(same.getStatusCode()).as("%s", same.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(same.getBody().get("code").asString()).isEqualTo("BLB-0001");
+        assertThat(same.getBody().get("description").asString()).isEqualTo("Test bulb 9 W");
+        assertThat(api.get("/products/" + made, ADMIN).getBody().get("code").asString())
+                .isEqualTo("BLB-0001");
     }
 
     @Test
@@ -192,36 +222,47 @@ class RetailItemCodesIT extends IntegrationTest {
     }
 
     @Test
-    void theImportFillsBlankCodesFromEachRowsCategoryAndKeepsTypedOnes() {
+    void theImportGivesEveryNewRowItsCategorysNextCodeAndUsesNoTypedCode() {
         UUID bulbs = api.category("Bulbs");
         codeOf(add(bulbs, null, "Test bulb 9W"));
         String csv = "code,description,category,unit,sell_price\n"
                 + ",Test bulb 12W,Bulbs,test-piece,2000\n"
-                + "BLB-0002,Test bulb 15W,Bulbs,test-piece,2500\n"
+                + "BLB-0007,Test bulb 15W,Bulbs,test-piece,2500\n"
                 + ",Test bulb 18W,bulbs,test-piece,3000\n"
                 + ",Test extension 4 way,Extensions,test-piece,9000\n"
-                + "OWN-7,Test extension 6 way,Extensions,test-piece,12000\n";
+                + "OWN-7,Test extension 6 way,Extensions,test-piece,12000\n"
+                + "blb-0001,Test bulb 9W again,Bulbs,test-piece,1500\n";
         ResponseEntity<JsonNode> dry = api.post("/products/import?dry_run=true", Map.of("csv", csv), ADMINISTRATOR);
         assertThat(dry.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(dry.getBody().get("added").asInt()).isEqualTo(5);
+        // A row whose code an item holds already is that item: skipped, as before.
+        assertThat(dry.getBody().get("skipped").asInt()).isEqualTo(1);
+        assertThat(dry.getBody().get("rows").get(5).get("message").asString()).contains("exists already");
         assertThat(dry.getBody().get("rows").get(0).get("code").asString()).isEmpty();
         assertThat(dry.getBody().get("rows").get(0).get("message").asString()).contains("next code of Bulbs");
+        assertThat(dry.getBody().get("rows").get(1).get("code").asString()).isEmpty();
+        assertThat(dry.getBody().get("rows").get(1).get("message").asString())
+                .contains("next code of Bulbs")
+                .contains("The code BLB-0007 in the file is not used");
 
         ResponseEntity<JsonNode> applied =
                 api.post("/products/import?dry_run=false", Map.of("csv", csv), ADMINISTRATOR);
         assertThat(applied.getStatusCode()).isEqualTo(HttpStatus.OK);
         List<String> reported = new ArrayList<>();
         applied.getBody().get("rows").forEach(r -> reported.add(r.get("code").asString()));
-        // The typed BLB-0002 goes in first, so the blank rows of Bulbs step over it.
-        assertThat(reported).containsExactly("BLB-0003", "BLB-0002", "BLB-0004", "EXT-0001", "OWN-7");
+        // Issue #562: the typed BLB-0007 and OWN-7 are not used; each row takes its category's next number in file order.
+        assertThat(reported).containsExactly("BLB-0002", "BLB-0003", "BLB-0004", "EXT-0001", "EXT-0002", "blb-0001");
         assertThat(codesByName())
-                .containsEntry("Test bulb 12W", "BLB-0003")
-                .containsEntry("Test bulb 15W", "BLB-0002")
+                .containsEntry("Test bulb 12W", "BLB-0002")
+                .containsEntry("Test bulb 15W", "BLB-0003")
                 .containsEntry("Test bulb 18W", "BLB-0004")
                 .containsEntry("Test extension 4 way", "EXT-0001")
-                .containsEntry("Test extension 6 way", "OWN-7");
+                .containsEntry("Test extension 6 way", "EXT-0002")
+                .doesNotContainKey("Test bulb 9W again")
+                .doesNotContainValue("BLB-0007")
+                .doesNotContainValue("OWN-7");
 
-        // A file without a code column at all is read as every code blank.
+        // A file without a code column at all is read the same way.
         ResponseEntity<JsonNode> noColumn = api.post(
                 "/products/import?dry_run=false",
                 Map.of("csv", "description,category,unit,sell_price\nTest bulb 30W,Bulbs,test-piece,4000\n"),
@@ -234,7 +275,9 @@ class RetailItemCodesIT extends IntegrationTest {
     void existingCodesStayWhenTheCodeStartChangesAndMovingAnItemKeepsItsCode() {
         UUID bulbs = api.category("Bulbs");
         UUID lamps = api.category("Lamps");
-        UUID typed = RetailTestSupport.id(add(bulbs, "OLD-CODE-1", "Test bulb 9W"));
+        // An item from before the app made codes keeps the code it had.
+        UUID typed = RetailTestSupport.id(add(bulbs, null, "Test bulb 9W"));
+        api.existingCode(typed, "OLD-CODE-1");
         UUID made = RetailTestSupport.id(add(bulbs, null, "Test bulb 12W"));
 
         assertThat(patch("/categories/" + bulbs, Map.of("code_prefix", "BUL")).getStatusCode())
@@ -242,13 +285,13 @@ class RetailItemCodesIT extends IntegrationTest {
         assertThat(api.get("/products/" + typed, ADMIN).getBody().get("code").asString())
                 .isEqualTo("OLD-CODE-1");
         assertThat(api.get("/products/" + made, ADMIN).getBody().get("code").asString())
-                .isEqualTo("BLB-0001");
+                .isEqualTo("BLB-0002");
         // The numbering of the category goes on under its new start.
-        assertThat(codeOf(add(bulbs, null, "Test bulb 15W"))).isEqualTo("BUL-0002");
+        assertThat(codeOf(add(bulbs, null, "Test bulb 15W"))).isEqualTo("BUL-0003");
 
         ResponseEntity<JsonNode> moved = patch("/products/" + made, Map.of("category_id", lamps));
         assertThat(moved.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(moved.getBody().get("code").asString()).isEqualTo("BLB-0001");
+        assertThat(moved.getBody().get("code").asString()).isEqualTo("BLB-0002");
         assertThat(moved.getBody().get("category").asString()).isEqualTo("Lamps");
         assertThat(TestDatabase.owner()
                         .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.product.updated'"
