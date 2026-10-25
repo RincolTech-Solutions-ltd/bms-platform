@@ -134,7 +134,8 @@ class RetailApprovalRaceIT extends IntegrationTest {
         STOCK_CORRECTION,
         CUSTOMER_RETURN,
         CREDIT_WRITE_OFF,
-        PURCHASE_ORDER
+        PURCHASE_ORDER,
+        RETURN_VOID
     }
 
     Case prepare(Kind kind) {
@@ -217,6 +218,44 @@ class RetailApprovalRaceIT extends IntegrationTest {
                         true,
                         () -> count("SELECT count(*) FROM retail_sale_writeoffs WHERE tenant_id = ?", t.tenantId())
                                 == 0);
+            }
+            case RETURN_VOID -> {
+                // A return made while returns ask for nothing, then voided while the module reads them as on from 0:
+                // the void
+                // of a return follows the returns rule (ADR-091 decision 6), and the rule it read goes with the
+                // request.
+                capability("returns");
+                UUID s = sale("cash");
+                String line = api.get("/sales/" + s, RetailTestSupport.ADMIN)
+                        .getBody()
+                        .get("lines")
+                        .get(0)
+                        .get("id")
+                        .asString();
+                Map<String, Object> l = new LinkedHashMap<>();
+                l.put("sale_line_id", line);
+                l.put("qty", "1");
+                l.put("reason", "defective");
+                l.put("disposition", "restock");
+                ResponseEntity<JsonNode> back = api.postKeyed(
+                        "/sales/" + s + "/returns",
+                        Map.of("lines", List.of(l), "refund_method", "cash"),
+                        RETURNER,
+                        "*",
+                        UUID.randomUUID().toString());
+                assertThat(back.getStatusCode()).as("%s", back.getBody()).isEqualTo(HttpStatus.CREATED);
+                String id = back.getBody().get("sale_return").get("id").asString();
+                switchedOffAfterTheModuleRead("retail_sale_return", 0);
+                yield new Case(
+                        "/returns/" + id + "/void",
+                        Map.of("reason", "Entered twice"),
+                        RETURNER,
+                        true,
+                        () -> api.get("/returns/" + id, RETURNER)
+                                .getBody()
+                                .get("status")
+                                .asString()
+                                .equals("completed"));
             }
             case PURCHASE_ORDER -> {
                 capability("purchasing");

@@ -127,14 +127,16 @@ class ReturnsService {
         // so does one worth the threshold alone.
         boolean asks = rule.on() && (row.approvalId() != null || rule.asks(row.totalMinor()));
         if (asks && row.status().equals("completed") && r.reason().trim().length() >= ReturnsServicer.MIN_REASON) {
-            Approvals.Outcome o = approvals.request(new ActionRequest(
-                    ReturnVoidAction.TYPE,
-                    row.branchId(),
-                    row.id(),
-                    row.version(),
-                    row.totalMinor(),
-                    row.currency(),
-                    Map.of(ReturnVoidAction.REASON, r.reason().trim())));
+            Approvals.Outcome o = approvals.request(
+                    new ActionRequest(
+                            ReturnVoidAction.TYPE,
+                            row.branchId(),
+                            row.id(),
+                            row.version(),
+                            row.totalMinor(),
+                            row.currency(),
+                            Map.of(ReturnVoidAction.REASON, r.reason().trim())),
+                    rule);
             if (o.executed()) {
                 return new ReturnOutcome(
                         true, null, servicer.view(repo.find(returnId, false).orElseThrow(), true));
