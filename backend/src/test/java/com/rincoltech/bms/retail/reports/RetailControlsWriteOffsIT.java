@@ -26,7 +26,8 @@ import tools.jackson.databind.JsonNode;
  * sells on credit at head office three times (1, 2 and 3 pieces) and once at branch two (1 piece), and once for cash at head
  * office; the buyer of the 3-piece sale pays 1,000 of it. Test Admin One writes off the 3-piece sale (2,000 still owed) and the
  * branch two sale. The value is what the buyer still owed, never the loss; the person is whose sale it was and the approver who
- * wrote it off; the rate is sales written off per 100 sales entered. Everything is fabricated.
+ * wrote it off; the rate is sales written off per 100 sales entered. The Kampala day and the maker-checker wait are in
+ * RetailControlsWriteOffClockIT, which moves the application's clock. Everything is fabricated.
  */
 class RetailControlsWriteOffsIT extends IntegrationTest {
 
@@ -153,43 +154,6 @@ class RetailControlsWriteOffsIT extends IntegrationTest {
         assertThat(RetailControlsIT.group(reasons, "test buyer moved away")
                         .get("count")
                         .asLong())
-                .isEqualTo(1);
-    }
-
-    @Test
-    void aWriteOffAtHalfPastElevenAtNightInKampalaIsOnThatDayNotTheNext() {
-        // Written off yesterday at 23:30 in Kampala, which is 20:30 UTC: it belongs to yesterday, not today.
-        LocalDate yesterday = today().minusDays(1);
-        // The table is append-only; the owner role may change it for a restore (bms.allow_mutation).
-        TestDatabase.owner()
-                .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
-                        + " UPDATE retail_sale_writeoffs SET written_off_on = DATE '" + yesterday + "', created_at ="
-                        + " (TIMESTAMP '" + yesterday + " 23:30:00') AT TIME ZONE 'Africa/Kampala' WHERE sale_id = '"
-                        + branchTwoSale + "'; END $$")
-                .update();
-        String todayOnly = "?from=" + today() + "&to=" + today();
-        assertThat(RetailControlsStockIT.card(get("/summary" + todayOnly, Map.of()), "credit_writeoffs")
-                        .get("count")
-                        .asLong())
-                .isEqualTo(1);
-        String yesterdayOnly = "?from=" + yesterday + "&to=" + yesterday;
-        JsonNode before = RetailControlsStockIT.card(get("/summary" + yesterdayOnly, Map.of()), "credit_writeoffs");
-        assertThat(before.get("count").asLong()).isEqualTo(1);
-        assertThat(before.get("value_minor").asLong()).isEqualTo(1_000);
-        // No sale was entered yesterday: nothing to set the rate against.
-        assertThat(before.has("rate_per_100")).isFalse();
-        // Today's card sets its one against yesterday's one.
-        assertThat(RetailControlsStockIT.card(get("/summary" + todayOnly, Map.of()), "credit_writeoffs")
-                        .get("previous_count")
-                        .asLong())
-                .isEqualTo(1);
-        JsonNode days =
-                get("/groups?metric=credit_writeoffs&group_by=day&from=" + yesterday + "&to=" + today(), Map.of());
-        assertThat(RetailControlsIT.group(days, yesterday.toString())
-                        .get("count")
-                        .asLong())
-                .isEqualTo(1);
-        assertThat(RetailControlsIT.group(days, today().toString()).get("count").asLong())
                 .isEqualTo(1);
     }
 

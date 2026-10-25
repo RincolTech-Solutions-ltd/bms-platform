@@ -128,11 +128,12 @@ class ControlsRepository {
                         + " FROM retail_sale_returns r JOIN retail_sales s ON s.tenant_id = r.tenant_id AND s.id ="
                         + " r.sale_id WHERE r.status = 'completed' AND r.returned_on >= :from AND r.returned_on <="
                         + " :to";
-            // A credit sale written off (ADR-087): on the business day it was written off, credited to the person whose
-            // sale
-            // it was, the approver who wrote it off. The value is what the buyer still owed at the sale's prices, never
-            // the
-            // loss, which can be a cost.
+            // A credit sale written off (ADR-087): on the business day it was written off, credited to the
+            // person whose sale it was, the approver who wrote it off. The value is what the buyer still owed
+            // at the sale's prices, never the loss, which can be a cost. A row is a write-off that was made:
+            // the write-off path inserts it only when it runs (after the second administrator's approval when
+            // one is needed) and the table is append-only (V64), so there is no pending, reversed or
+            // cancelled row to leave out (RetailControlsWriteOffClockIT).
             case "credit_writeoffs" ->
                 "SELECT 'credit_writeoffs'"
                         + COLUMNS.formatted(

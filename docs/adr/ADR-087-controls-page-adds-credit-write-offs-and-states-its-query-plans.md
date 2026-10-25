@@ -52,23 +52,23 @@ to be stated rather than assumed.
 
   | Statement (every shop unless named) | Before | After | Access path after |
   |---|---|---|---|
-  | Sales entered, a month | 24 ms | 23 ms | `retail_sales_by_date` |
-  | Every card, a month | 956 ms | 201 ms | voids by `retail_sales_voided`; changed prices, discounts and below cost by the new partial indexes joined to the month's sales by `retail_sales_by_date`; write-offs and returns by their day; restocks voided through `retail_stock_movements_source` |
-  | Every card, a month, one shop | 143 ms | 37 ms | the same, with the shop in every index condition |
-  | Every card, a year (366 days, the widest window) | 6,039 ms | 1,993 ms | the same; 208,000 events sorted for the distinct sales |
-  | Groups by person, a month (voids, write-offs, changed prices, restocks voided) | 39 to 293 ms | 22 to 69 ms | as the cards, then the sales of the window by `retail_sales_by_date` for the rate |
-  | Groups of returns by day, a year | 374 ms | 363 ms | returns by day, sales of the year for the rate |
-  | Records, 51 a page | up to 30 ms | up to 11 ms | as the cards, ordered and limited |
-  | Patterns, people, a month | 417 ms | 124 ms | as the cards, per shop and person |
-  | Patterns, items, a month | 744 ms | 691 ms | every line of the month's sales (the denominator is the lines each item sold) |
+  | Sales entered, a month | 24 ms | 15 ms | `retail_sales_by_date` |
+  | Every card, a month | 956 ms | 240 ms | voids by `retail_sales_voided`; changed prices, discounts and below cost by the new partial indexes joined to the month's sales by `retail_sales_by_date`; write-offs and returns by their day; restocks voided through `retail_stock_movements_source` |
+  | Every card, a month, one shop | 143 ms | 60 ms | the same, with the shop in every index condition |
+  | Every card, a year (366 days, the widest window) | 6,039 ms | 1,952 ms | the same; 208,000 events sorted for the distinct sales |
+  | Groups by person, a month (voids, write-offs, changed prices, restocks voided) | 39 to 293 ms | 29 to 73 ms | as the cards, then the sales of the window by `retail_sales_by_date` for the rate |
+  | Groups of returns by day, a year | 374 ms | 375 ms | returns by day, sales of the year for the rate |
+  | Records, 51 a page | up to 30 ms | up to 17 ms | as the cards, ordered and limited |
+  | Patterns, people, a month | 417 ms | 102 ms | as the cards, per shop and person |
+  | Patterns, items, a month | 744 ms | 593 ms | every line of the month's sales (the denominator is the lines each item sold) |
 
   "Before" is main's code with JIT on; "after" is this change. Every statement is bounded by its window (at most 366 days), by the
   caller's shops and, for groups and records, by a page. The returns and write-offs of a year across every shop are joined to the
   sales by a hash join over the year's sales, because there are tens of thousands of them in this seed; at a real rate they are
   read by their own day.
 - **Where it is found.** The page stays at `/staff/retail/controls` behind `retail.controls.read` (ADR-047). The grouped menu
-  of #564 (pull request #569, pending ADR-086, open when this was written) puts it under Business; until that merges, main's flat menu
-  gets a Controls entry beside Reports for a session that may open the page, and the Retail page keeps listing it.
+  of issue #564 (pull request #569, pending ADR-086, open when this was written) puts it under Business; until that merges, main's
+  flat menu gets a Controls entry after Retail for a session that may open the page, and the Retail page keeps listing it.
 
 ## Consequences
 
@@ -84,9 +84,10 @@ to be stated rather than assumed.
   someone decided it, which is the day to see it.
 - The approver of a write-off approved by a second administrator is the maker, not the checker. The approvals page has both.
 
-- The two builds of `V101` take a SHARE lock on `retail_sale_lines` while the migration runs, so a sale waits for them (well under a
-  second at the pilot's size).
-- The item patterns still read every line of the window's sales, about 0.7 s for a month on this seed; they are one request a page.
+- The two builds of `V101` hold a SHARE lock on `retail_sale_lines` from the first build to the commit, so a sale waits for them
+  (reports do not). Measured on the harness's 2,040,060 lines: 283 ms and 229 ms; at staging's size, about 60,000 lines, about
+  15 ms. `lock_timeout` (5 s) bounds only the wait to take the lock, behind a sale being recorded, not the builds.
+- The item patterns still read every line of the window's sales, about 0.6 s for a month on this seed; they are one request a page.
 
 **Watch for:**
 
@@ -94,5 +95,9 @@ to be stated rather than assumed.
   partial index on its exception, as here.
 
 - If the patterns are extended to write-offs, use a longer window than the page's, not the same thresholds.
+- Credit write-offs and returns for every shop at once are read through their day indexes, which lead with the branch
+  (`retail_sale_writeoffs_by_day`, V64), so without a shop they read the whole table: about 1,800 buffers on the heavy seed. Accepted
+  while the tables are small (one row per write-off or return); add `(tenant_id, written_off_on)` or its returns twin when a plan shows
+  it matters.
 - When pull request #569 merges, its Business group carries the menu entry and the flat entry added here goes away with
   main's flat menu.

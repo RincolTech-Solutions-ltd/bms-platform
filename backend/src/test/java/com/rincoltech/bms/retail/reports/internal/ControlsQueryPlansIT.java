@@ -62,6 +62,9 @@ class ControlsQueryPlansIT extends IntegrationTest {
 
     TestDatabase.Fixture t;
     RetailTestSupport api;
+    /** How long V101's two index builds took on the full table. */
+    String builds = "";
+
     UUID product;
     UUID product2;
 
@@ -318,6 +321,30 @@ class ControlsQueryPlansIT extends IntegrationTest {
             su.sql("SET session_replication_role = origin").update();
             c.setAutoCommit(true);
             su.sql("VACUUM (ANALYZE, PARALLEL 0)").update();
+            // V101's two builds again on the full table, timed, as the migration runs them: each reads the whole table
+            // under
+            // a SHARE lock that holds sale inserts back until the commit.
+            long rows = su.sql("SELECT count(*) FROM retail_sale_lines")
+                    .query(Long.class)
+                    .single();
+            StringBuilder b = new StringBuilder();
+            for (String index : List.of(
+                    "retail_sale_lines_price_changed ON retail_sale_lines (tenant_id, sale_id) WHERE price_source ="
+                            + " 'override'",
+                    "retail_sale_lines_below_cost ON retail_sale_lines (tenant_id, sale_id) WHERE line_total_minor <"
+                            + " line_cost_minor")) {
+                String name = index.substring(0, index.indexOf(' '));
+                su.sql("DROP INDEX " + name).update();
+                long started = System.nanoTime();
+                su.sql("CREATE INDEX " + index).update();
+                b.append(b.isEmpty() ? "" : ", ")
+                        .append('`')
+                        .append(name)
+                        .append("` ")
+                        .append((System.nanoTime() - started) / 1_000_000)
+                        .append(" ms");
+            }
+            builds = "V101's builds on " + rows + " rows of retail_sale_lines: " + b + ".";
         }
     }
 
@@ -474,7 +501,9 @@ class ControlsQueryPlansIT extends IntegrationTest {
                 .append(counts)
                 .append(". Today is ")
                 .append(today)
-                .append(" (Africa/Kampala). Fabricated data.\n\n");
+                .append(" (Africa/Kampala). Fabricated data. ")
+                .append(builds)
+                .append("\n\n");
         try (Connection c = TestDatabase.appDataSource().getConnection()) {
             c.setAutoCommit(false);
             NamedParameterJdbcTemplate app = new NamedParameterJdbcTemplate(new SingleConnectionDataSource(c, true));

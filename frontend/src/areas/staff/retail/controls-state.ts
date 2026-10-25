@@ -77,7 +77,7 @@ export const METRICS: MetricWords[] = [
   { metric: 'voided_sales', title: 'Sales cancelled', noun: 'sales', what: () => 'Sales that were recorded and then cancelled (voided). The goods went back into stock.' },
   { metric: 'quick_cancels', title: 'Cancelled at once', noun: 'sales', what: (m) => `Sales cancelled within ${m} ${m === 1 ? 'minute' : 'minutes'} of being recorded, often a slip at the till.` },
   { metric: 'returns', title: 'Goods taken back', noun: 'returns', what: () => 'Customer returns, each with a credit note.' },
-  { metric: 'credit_writeoffs', title: 'Credit written off', noun: 'sales', what: () => 'Sales on credit the buyer never paid, written off as a loss. The value is what the buyer still owed.' },
+  { metric: 'credit_writeoffs', title: 'Credit written off', noun: 'sales', what: () => 'Sales on credit the buyer never paid, written off. The value is what the buyer still owed.' },
   { metric: 'price_overrides', title: 'Prices changed', noun: 'lines', what: () => 'Sale lines where the price typed was not the price the system chose. A reason is always given.' },
   { metric: 'discounts', title: 'Discounts given', noun: 'lines', what: () => 'Sale lines sold for less than the price the system chose. The money is what was given up.' },
   { metric: 'restock_voids', title: 'Purchases cancelled', noun: 'purchases', what: () => 'Purchases of stock entered wrongly and voided, one line for each shop the purchase stocked. The stock, the books and the prices went back. The value is the quantity at the selling price now. No rate: it is not about sales.' },
