@@ -979,7 +979,7 @@ body.side-menu-open {
   border-radius: var(--radius-pill);
   background: var(--color-danger-fill);
   color: var(--color-on-danger);
-  font-size: var(--text-xs);
+  font-size: var(--tab-badge-text);
   font-weight: var(--weight-semibold);
   line-height: var(--tab-badge);
   text-align: center;

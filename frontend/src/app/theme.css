@@ -267,7 +267,8 @@ body {
   --tab-pill-width: calc(var(--tap) + var(--space-2)); /* 56px: the current tab's pill behind the icon */
   --tab-pill-height: var(--space-6); /* 32px */
   --tab-gap: calc(var(--space-1) / 2); /* 2px: between icon and label, and at the tab's sides */
-  --tab-badge: calc(var(--text-xs) * 1.5); /* 18px at the default size; it grows with the phone's font size */
+  --tab-badge-text: min(var(--text-xs), var(--space-4)); /* 12px, growing with the phone's font size up to 16px so it never covers the icon */
+  --tab-badge: calc(var(--tab-badge-text) * 1.5); /* 18px at the default size */
   --focus-ring: 0 0 0 4px color-mix(in srgb, var(--color-accent) 30%, transparent);
   --content-width: 1120px;
   --transition: var(--motion-fast) var(--ease-out);
