@@ -42,7 +42,7 @@ export const productsPage: Tour = {
   page: '/staff/retail/catalogue/products',
   steps: [
     step({ id: 'add', target: 'product-add', title: 'Add an item', body: 'Tap here to add something you sell. Pick the category first, then type the name, what it is counted in and the price. The app gives it the next code of the category, such as BLB-0001: you never type one. Adding from the category\'s own page saves picking the category.' }),
-    step({ id: 'sizes', target: 'product-add-sizes', title: 'Sizes and colours', body: 'Sell one design in several sizes or prints? Tap here, type the sizes and the colours once, and each one gets its own price, stock and item code made by the app.' }),
+    step({ id: 'sizes', target: 'product-add-sizes', title: 'Sizes and colours', body: 'Sell one design in several sizes or prints? Tap here and type the sizes and the colours once. Each one gets its own price, stock and item code.' }),
     step({ id: 'join', target: 'product-join-sizes', title: 'One item per size?', body: 'If you typed each size as its own item, tap here to join them. Each keeps its stock and history.' }),
     step({ id: 'search', target: 'product-search', title: 'Find an item', body: 'Type a name, a code or a category. The list narrows as you type.' }),
     step({ id: 'filters', target: 'product-filters', title: 'Narrow the list', body: 'Pick a category, or choose Switched off to see items you no longer sell.' }),
