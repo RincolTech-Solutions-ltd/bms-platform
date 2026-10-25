@@ -79,7 +79,8 @@ export function createUpdater(deps: UpdaterDeps) {
   const safeToLeave = () => writes === 0 && !deps.typing();
   /**
    * A reload held back by the one-reload-a-minute rule tries again after the minute, since nothing else would wake it; a few times
-   * at most, because a phone clock set back keeps that minute from ending for hours.
+   * at most, because a phone clock set back keeps that minute from ending for hours. After that the tab coming back into view or a
+   * move between screens tries again.
    */
   const retryLater = () => {
     if (retries >= MAX_RETRIES) return;
@@ -105,6 +106,7 @@ export function createUpdater(deps: UpdaterDeps) {
     }
     applying = true;
     target = href;
+    retries = 0;
     deps.announce(() => {
       const to = target;
       const still = to === undefined ? safe() : safeToLeave();
@@ -221,7 +223,12 @@ export function setWorkerRegistration(reg: ServiceWorkerRegistration | undefined
 export function startAutoUpdate(
   router: { subscribe: (event: 'onBeforeNavigate', fn: (e: { toLocation: { href: string }; pathChanged: boolean }) => void) => () => void },
 ): void {
-  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && updater.check());
+  // Back in view: look for a new build, and try a waiting update again (its retries after a refused reload are capped).
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    updater.check();
+    updater.trySoon();
+  });
   window.addEventListener('online', () => {
     updater.check();
     updater.trySoon();

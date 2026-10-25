@@ -171,6 +171,28 @@ describe('a save on its way (review of #579)', () => {
   });
 });
 
+describe('a save that never ends (second review of #579)', () => {
+  it('stops holding the update back after two minutes', async () => {
+    vi.useFakeTimers();
+    const Base = globalThis.Request;
+    vi.stubGlobal('Request', class extends Base {
+      constructor(input: RequestInfo | URL, init?: RequestInit) {
+        super(typeof input === 'string' && input.startsWith('/') ? `http://localhost${input}` : input, init);
+      }
+    });
+    vi.stubGlobal('fetch', () => new Promise<Response>(() => undefined));
+    const { api, WRITE_HOLD_MS } = await import('../api/client');
+    const { updater } = await import('./auto-update');
+    void api.POST('/api/v1/retail/sales', { body: {} as never });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(updater.writing).toBe(1);
+    await vi.advanceTimersByTimeAsync(WRITE_HOLD_MS - 1);
+    expect(updater.writing).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(updater.writing).toBe(0);
+  });
+});
+
 describe('the update screen never hangs', () => {
   it('a load that fails offers the button', async () => {
     const { AutoUpdateLayer, forceUpdate } = await import('./auto-update');
@@ -203,7 +225,7 @@ describe('a money form after finish and discard', () => {
 });
 
 describe('a money form kept on screen after finish (second review of #579)', () => {
-  it('registers the next change as unsaved work without a discard', async () => {
+  it('registers and saves the next cart, with its own key, without a discard', async () => {
     const { usePersistedDraft } = await import('../areas/staff/retail/idempotency');
     const { hasUnsavedWork } = await import('./unsaved-work');
     let form: ReturnType<typeof usePersistedDraft<{ lines: string[] }>> | undefined;
@@ -213,10 +235,16 @@ describe('a money form kept on screen after finish (second review of #579)', () 
     }
     const view = render(<Cart />);
     act(() => form?.setDraft({ lines: ['Test Item 01'] }));
+    const firstKey = form?.key;
     act(() => form?.finish());
     expect(hasUnsavedWork()).toBe(false);
-    act(() => form?.setDraft({ lines: ['Test Item 01', 'Test Item 02'] }));
+    expect(sessionStorage.getItem('retail-draft:test-cart-3')).toBeNull();
+    act(() => form?.setDraft({ lines: ['Test Item 02'] }));
     expect(hasUnsavedWork()).toBe(true);
+    const kept = JSON.parse(sessionStorage.getItem('retail-draft:test-cart-3') ?? '{}') as { key?: string; draft?: { lines: string[] } };
+    expect(kept.draft?.lines).toEqual(['Test Item 02']);
+    expect(kept.key).toBe(form?.key);
+    expect(kept.key).not.toBe(firstKey);
     view.unmount();
     expect(hasUnsavedWork()).toBe(false);
   });

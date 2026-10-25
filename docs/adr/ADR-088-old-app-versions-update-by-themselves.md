@@ -42,10 +42,11 @@ commit time as well.
    second before the reload; when the second is over everything is checked again and the reload is claimed only then, so a save
    tapped during the toast calls it off (the toast goes, the reload waits). The toast shows only when the reload could be
    claimed (a peek at the one-a-minute rule), so a reload that cannot happen never flashes it. A reload held back by that rule is
-   tried again after the minute, five times at most (a phone clock set back can keep the minute from ending); where reloads
-   cannot be counted it is never tried. A second move between screens during the toast takes the full load to the latest
-   screen. A money form changed after `finish` is unsaved work again, and Sell holds the reload while the receipt of the sale
-   just made is on screen.
+   tried again after the minute, five times at most (a phone clock set back can keep the minute from ending), then at the next
+   view of the tab or move between screens; where reloads cannot be counted it is never tried. A second move between screens during the toast takes the full load to the latest
+   screen. A money form changed after `finish` starts the next record (a fresh key, kept in the tab and unsaved work again), and
+   Sell holds the reload while the receipt of the sale just made is on screen. A write that never ends stops holding the reload
+   back after two minutes.
 3. **Force it for breaking changes.** The API reads `BMS_MIN_CLIENT_BUILD`, empty by default, the commit time (UTC
    `YYYYMMDDHHMMSS`) of the oldest web build it serves; any other value stops the API at start. The app sends
    `Bms-Client-Build: <sha tag>; built=<commit time>` on every request. A request under `/api/` whose build time is before the

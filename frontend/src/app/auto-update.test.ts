@@ -236,6 +236,22 @@ describe('the moment the toast shows (review of #579)', () => {
     expect(reloads).toEqual([]);
   });
 
+  it('after the capped retries, the next view or move tries again: one toast for the one real attempt', () => {
+    const storage = memory();
+    claimReload(1_000_000 + 3_600_000, storage);
+    let toasts = 0;
+    const { updater, reloads, later, tick } = setUp({ announce: (then) => (toasts++, then()) }, storage);
+    updater.workerChanged();
+    drain(later);
+    expect(toasts).toBe(0);
+    // The clock is right again and the minute is long over; the tab comes back into view.
+    tick(3_700_000);
+    updater.trySoon();
+    expect(toasts).toBe(1);
+    expect(reloads).toEqual([undefined]);
+    expect(drain(later)).toBe(0);
+  });
+
   it('when the reloads cannot be counted: no toast, no retry, however long it runs', () => {
     let toasts = 0;
     const { updater, reloads, later } = setUp({ announce: (then) => (toasts++, then()) }, null);
