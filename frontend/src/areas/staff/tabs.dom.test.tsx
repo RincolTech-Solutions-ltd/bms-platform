@@ -388,9 +388,22 @@ describe('the tab bar styles', () => {
     expect(rule('.tab-bar')).toMatch(/position: fixed/);
     expect(rule('.tab-bar')).toMatch(/env\(safe-area-inset-bottom\)/);
     expect(rule('.tab-bar')).toMatch(/env\(safe-area-inset-left\)/);
-    expect(rule('.tab')).toMatch(/min-height: 64px/);
+    expect(rule('.tab')).toMatch(/min-height: var\(--tab-height\)/);
     expect(rule('.tab')).toMatch(/min-width: var\(--tap\)/);
-    expect(rule('.has-tab-bar')).toMatch(/--tab-bar: calc\(65px \+ env\(safe-area-inset-bottom\)\)/);
+    expect(rule('.has-tab-bar')).toMatch(/--tab-bar: calc\(var\(--tab-height\) \+ 1px \+ env\(safe-area-inset-bottom\)\)/);
+  });
+
+  // Issue #544: every size comes from a token, so the bar changes with the target and the spacing steps.
+  it('uses no raw size but the 1px hairline and the 2px focus ring, and the badge text takes the on-danger role', () => {
+    const tabRules = [...css.matchAll(/\n(\.has-tab-bar|\.tab[\w\s.:'=\[\]()-]*) \{([^}]*)\}/g)].map(([, selector, body]) => [selector, body] as const);
+    expect(tabRules.length).toBeGreaterThan(8);
+    for (const [selector, body] of tabRules) {
+      const raw = (body ?? '').replace(/outline: 2px solid/g, '').replace(/border-top: 1px solid/g, '').replace(/\+ 1px \+/g, '').match(/-?\d+px/g);
+      expect(raw, selector).toBeNull();
+    }
+    expect(rule('.tab-badge')).toMatch(/color: var\(--color-on-danger\)/);
+    const theme = readFileSync(join(process.cwd(), 'src/app/theme.css'), 'utf8');
+    expect(theme).toMatch(/--tab-height: calc\(var\(--tap\) \+ var\(--space-4\)\);/);
   });
 
   it('marks the current tab without a stripe: the colour, the weight and a pill behind the icon', () => {

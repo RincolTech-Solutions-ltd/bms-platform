@@ -205,7 +205,7 @@ query, so the number is the token.
   number is `aria-hidden` and the link says ", 3 items low on stock" after its label. No other tab has a badge. The bar pads itself
   with `env(safe-area-inset-bottom)`, `-left` and `-right`; while it shows, the root has `has-tab-bar` and `--tab-bar`, the bar's
   measured height (a `ResizeObserver`, as the sale bar measures `--bottom-bar`, so a large font or text zoom is counted; the CSS
-  value, 64px and the hairline plus the bottom inset, is only the first paint's). The body ends that far up, the sale bar and the
+  value, `--tab-height` and the hairline plus the bottom inset, is only the first paint's). Every size of the bar is a token derived from `--tap`, `--space-*` and `--text-xs` (`--tab-height` 64px, `--tab-pill-width` 56px, `--tab-pill-height` 32px, `--tab-gap` 2px, `--tab-badge` 18px at the default font size, in `theme.css`, #544), and the badge's number is `--color-on-danger` on `--color-danger-fill`. The body ends that far up, the sale bar and the
   member form's save bar stick at `bottom: var(--tab-bar)` so they sit on top of the tabs and never under them, and a toast rises
   above both. The bar steps aside only while the soft keyboard is up: a text field has focus and `visualViewport` is more than
   150px shorter than the window, its height multiplied by its scale so a pinch zoom is not a keyboard. Under `interactive-widget=resizes-content` (Android) the window shrinks with the viewport and the bar stays, which is accepted. A field that only has focus (a page that focuses its Scan box, a barcode scanner or a Bluetooth
@@ -307,6 +307,7 @@ Token pairs (light, dark). Every text role is 4.5:1 or more on its surface in bo
 | `--color-success` / `-tint` | `#067647` / `#ecfdf3` | `#47cd89` / `#0f2c1e` |
 | `--color-warning` / `-tint` | `#b54708` / `#fffaeb` | `#fdb022` / `#352509` |
 | `--color-danger-fill` (destructive button, white text) | `#b42318` | `#d92d20` |
+| `--color-on-danger` (text on the danger fill: the tab badge, #544) | `#ffffff` | `#ffffff` |
 | `--color-neutral-tint` (disabled, neutral badge, skeleton, hairline) | `#eeeeee` | `#222c39` |
 | `--color-hover` (button hover) | `#f5f7f9` | `#1b2430` |
 | `--color-inverse` / `--color-on-inverse` (toast, chart read-out) | `#1d2939` / `#ffffff` | `#e8edf3` / `#0e141b` |
