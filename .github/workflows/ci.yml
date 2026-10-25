@@ -109,7 +109,7 @@ jobs:
   delivery:
     name: Workflows, scripts and compose files
     runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["self-hosted","jerome-laptop"]') }}
-    # The two deploy switch tests take about 2 and 4 minutes (ADR-078, ADR-083).
+    # The two deploy switch tests take about 2 and 5 minutes (ADR-078, ADR-083).
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7

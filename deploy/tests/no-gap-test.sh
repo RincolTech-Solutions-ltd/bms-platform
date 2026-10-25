@@ -358,8 +358,9 @@ EOF
     fi
 
     # Enough memory, as the staging Pi has it since decision D37: a fake bms.slice with MemoryHigh 1500 MB, MemoryMax
-    # 1600 MB and about 830 MB in use, and the default need (the api's own limit plus the margin, 448 + 64 on the Pi). The
-    # memory check itself runs here (every other switch above sets ROLL_MIN_FREE_MB=0), and the api must overlap.
+    # 1600 MB and about 830 MB in use (more than the 790 MB measured, on purpose: 670 MB free), and the default need (the
+    # api's own limit plus the margin, 448 + 64 on the Pi). The memory check itself runs here (every other switch above
+    # sets ROLL_MIN_FREE_MB=0), and the api must overlap.
     if [[ "$file" == compose.pi-staging.yml ]]; then
         mkdir -p "$WORK/slice"
         echo 1677721600 > "$WORK/slice/memory.max"
@@ -375,7 +376,12 @@ EOF
         # shellcheck disable=SC2034 # read by roll, copied out of deploy.sh above
         SLICE_DIR=/nonexistent ROLL_MIN_FREE_MB=0
         stop_client "$file: during a switch with the D37 slice"
-        if grep -qE '\] [0-9]+ MB free, a second api needs 512 MB$' "$WORK/switch.log" \
+        # free_memory_mb takes the lesser of the slice's headroom and the host's MemAvailable; a runner with less than
+        # 512 MB available would fall back for that reason, so say which.
+        host_mb="$(awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo)"
+        if (( host_mb < 512 )); then
+            fail "$file: the runner has only ${host_mb} MB available, so the D37 overlap case cannot run here"
+        elif grep -qE "\\] $(( host_mb < 670 ? host_mb : 670 )) MB free, a second api needs 512 MB\$" "$WORK/switch.log" \
             && grep -q 'starting a new api container beside the running one' "$WORK/switch.log" \
             && ! grep -q 'restarting api in place' "$WORK/switch.log" && [[ "$(ask /api/v1/me)" == 'api v2' ]]; then
             ok "$file: with the D37 slice (about 670 MB free below MemoryHigh) the api overlaps"

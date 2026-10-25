@@ -103,7 +103,9 @@ NFR-AVL-03 allows 30 seconds of unavailability per deploy, written when deploys 
    refused release and during a rollback; a request the api took and dropped must answer a bare 502, and with no api up the
    answer must carry `Bms-Not-Delivered`; an
    unchanged proxy must be kept, a changed one recreated, and with too little free memory below `MemoryHigh` the api must
-   restart in place. The staging file runs under a pinned, checksummed Compose 2.26.1.
+   restart in place. On the staging file the memory check also runs against a fake slice shaped like D37 (`MemoryHigh` 1500
+   MB, about 830 MB in use, more than measured on purpose), and the api must overlap under traffic. The staging file runs
+   under a pinned, checksummed Compose 2.26.1.
 
 ## Consequences
 
