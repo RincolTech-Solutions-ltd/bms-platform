@@ -309,21 +309,21 @@ describe('adding a branch (#581)', () => {
   it('keeps the chosen kind and its focus on the same control while the person types', async () => {
     shell();
     await openForm();
+    const group = screen.getByRole('radiogroup', { name: 'What is it?' });
     const store = screen.getByRole('radio', { name: 'Store (keeps stock, does not sell)' });
+    const office = screen.getByRole('radio', { name: 'Head office (keeps no goods)' });
     store.focus();
     fireEvent.click(store);
     expect(store.getAttribute('aria-checked')).toBe('true');
+    // The form renders again on every key in the name; the picker is the same element, so the focused option keeps focus.
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Test Kasubi Store' } });
     expect(document.activeElement).toBe(store);
-    // The form renders again on every key in the name, and on a blur of it; the chosen option is still the same node, still
-    // focused when focus comes back, so a keyboard or screen reader user never loses their place.
-    const group = screen.getByRole('radiogroup', { name: 'What is it?' });
-    type(/^Name/, 'Test Kasubi Store');
-    fireEvent.blur(screen.getByLabelText(/^Name/));
     expect(screen.getByRole('radiogroup', { name: 'What is it?' })).toBe(group);
+    fireEvent.click(office);
+    expect(office.getAttribute('aria-checked')).toBe('true');
+    expect(store.getAttribute('aria-checked')).toBe('false');
     expect(screen.getByRole('radio', { name: 'Store (keeps stock, does not sell)' })).toBe(store);
-    fireEvent.click(screen.getByRole('radio', { name: 'Head office (keeps no goods)' }));
-    expect(screen.getByRole('radiogroup', { name: 'What is it?' })).toBe(group);
-    expect(screen.getByRole('radio', { name: 'Store (keeps stock, does not sell)' })).toBe(store);
+    expect(screen.getByText('Keeps no goods. Cash records and expenses still work.')).toBeTruthy();
   });
 
   it('needs a name, marked with the asterisk, and sends nothing without it', async () => {

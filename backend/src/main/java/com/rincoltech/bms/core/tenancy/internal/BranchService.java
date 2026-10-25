@@ -132,9 +132,8 @@ class BranchService implements BranchProvisioning {
         checkRoomForAnOpenBranch();
         String code = request.code() == null ? codeFrom(request.name()) : request.code();
         UUID id = UUID.randomUUID();
-        // The lock above serialises adds, so a made code is never taken in between; a typed code that is taken is
-        // refused here,
-        // never a 500.
+        // The lock above serialises adds, so a made code is never taken in between.
+        // A typed code that is taken is refused here with a 409, never a 500.
         int inserted = jdbc.sql("""
                         INSERT INTO branches (id, tenant_id, code, name, location, sells_goods, stocks_goods)
                         VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
@@ -336,10 +335,14 @@ class BranchService implements BranchProvisioning {
                     "The branch is already open.");
         }
         checkRoomForAnOpenBranch();
-        jdbc.sql("""
+        // Guarded by the version and status read above, so the row is changed exactly once whatever ran in between.
+        int reopened = jdbc.sql("""
                         UPDATE branches SET status = 'active', closed_at = NULL, closed_reason = NULL, updated_at = now(),
-                               version = version + 1 WHERE id = ?
-                        """).param(branchId).update();
+                               version = version + 1 WHERE id = ? AND status = 'inactive' AND version = ?
+                        """).params(branchId, before.version()).update();
+        if (reopened == 0) {
+            throw Versions.conflict(before.version());
+        }
         audit.record(new AuditLog.Entry(
                 "core.branch.reopened",
                 "core.branch",

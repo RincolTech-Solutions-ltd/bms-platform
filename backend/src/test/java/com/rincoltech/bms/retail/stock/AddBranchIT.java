@@ -8,14 +8,18 @@ import com.rincoltech.bms.retail.RetailTestSupport;
 import com.rincoltech.bms.testsupport.Api;
 import com.rincoltech.bms.testsupport.Api.Role;
 import com.rincoltech.bms.testsupport.Api.Session;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.StreamSupport;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -83,24 +87,59 @@ class AddBranchIT extends IntegrationTest {
                 Map.of("If-Match", etag));
     }
 
-    /** Sends the adds at the same moment, each from its own thread, and returns the answers in order. */
-    List<ResponseEntity<JsonNode>> atOnce(List<String> names) throws Exception {
-        ExecutorService pool = Executors.newFixedThreadPool(names.size());
-        try {
-            CountDownLatch go = new CountDownLatch(1);
-            List<Future<ResponseEntity<JsonNode>>> sent = names.stream()
-                    .map(name -> pool.submit(() -> {
-                        go.await();
-                        return add(name, null, null);
-                    }))
-                    .toList();
-            go.countDown();
-            List<ResponseEntity<JsonNode>> answers = new java.util.ArrayList<>();
-            for (Future<ResponseEntity<JsonNode>> f : sent) answers.add(f.get());
+    /**
+     * Sends the calls while the test itself holds the business's branch lock (ADR-089), waits until every call is blocked on
+     * that lock in pg_locks, then lets go and returns the answers in order. So every call has read nothing before the others
+     * start: the race is certain, not left to thread timing. Without the lock in BranchService no call ever waits, and the
+     * wait below fails.
+     */
+    List<ResponseEntity<JsonNode>> racing(List<Callable<ResponseEntity<JsonNode>>> calls) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(calls.size());
+        try (Connection held = TestDatabase.ownerDataSource().getConnection()) {
+            try (PreparedStatement lock =
+                    held.prepareStatement("SELECT pg_advisory_lock(hashtextextended(? || ':core.branch.open', 0))")) {
+                lock.setString(1, t.tenantId().toString());
+                lock.execute();
+            }
+            List<Future<ResponseEntity<JsonNode>>> sent =
+                    calls.stream().map(pool::submit).toList();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            long waiting = 0;
+            while (waiting < calls.size() && System.nanoTime() < deadline) {
+                waiting = TestDatabase.owner().sql("""
+                                SELECT count(*) FROM pg_locks
+                                WHERE locktype = 'advisory' AND NOT granted
+                                  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+                                """).query(Long.class).single();
+                if (waiting < calls.size()) Thread.sleep(50);
+            }
+            assertThat(waiting)
+                    .as("every call waits on the branch lock before it counts")
+                    .isEqualTo(calls.size());
+            try (PreparedStatement unlock =
+                    held.prepareStatement("SELECT pg_advisory_unlock(hashtextextended(? || ':core.branch.open', 0))")) {
+                unlock.setString(1, t.tenantId().toString());
+                unlock.execute();
+            }
+            List<ResponseEntity<JsonNode>> answers = new ArrayList<>();
+            for (Future<ResponseEntity<JsonNode>> f : sent) answers.add(f.get(30, TimeUnit.SECONDS));
             return answers;
         } finally {
             pool.shutdownNow();
         }
+    }
+
+    Callable<ResponseEntity<JsonNode>> adding(String name) {
+        return () -> add(name, null, null);
+    }
+
+    Callable<ResponseEntity<JsonNode>> reopening(UUID branch) {
+        return () -> api.call(
+                HttpMethod.POST,
+                "/api/v1/branches/" + branch + "/reopen",
+                null,
+                admin.accessToken(),
+                Map.of("If-Match", "\"1\""));
     }
 
     long branchCount() {
@@ -232,18 +271,15 @@ class AddBranchIT extends IntegrationTest {
     @Test
     void twoAddsAtOnceNeverPassThePlanLimit() throws Exception {
         planOf(3);
-        for (int round = 0; round < 3; round++) {
-            List<ResponseEntity<JsonNode>> answers =
-                    atOnce(List.of("Test Race One " + round, "Test Race Two " + round));
-            assertThat(answers.stream().filter(r -> r.getStatusCode() == HttpStatus.CREATED))
-                    .as("%s", answers)
-                    .hasSize(round == 0 ? 1 : 0);
-            assertThat(answers.stream()
-                            .filter(r -> r.getStatusCode() == HttpStatus.UNPROCESSABLE_CONTENT)
-                            .map(AddBranchIT::code))
-                    .containsOnly("plan_limit_reached");
-            assertThat(branchCount()).isEqualTo(3);
-        }
+        List<ResponseEntity<JsonNode>> answers = racing(List.of(adding("Test Race One"), adding("Test Race Two")));
+        assertThat(answers.stream().filter(r -> r.getStatusCode() == HttpStatus.CREATED))
+                .as("%s", answers)
+                .hasSize(1);
+        assertThat(answers.stream()
+                        .filter(r -> r.getStatusCode() != HttpStatus.CREATED)
+                        .map(AddBranchIT::code))
+                .containsExactly("plan_limit_reached");
+        assertThat(branchCount()).isEqualTo(3);
     }
 
     /** Two reopens at the same moment with room for one: one branch opens, the other is refused (ADR-089). */
@@ -260,26 +296,8 @@ class AddBranchIT extends IntegrationTest {
                     .params(closed.get(i), t.tenantId(), "SHUT" + i, "Test Shut Shop " + i)
                     .update();
         }
-        ExecutorService pool = Executors.newFixedThreadPool(closed.size());
-        List<ResponseEntity<JsonNode>> answers = new java.util.ArrayList<>();
-        try {
-            CountDownLatch go = new CountDownLatch(1);
-            List<Future<ResponseEntity<JsonNode>>> sent = closed.stream()
-                    .map(id -> pool.submit(() -> {
-                        go.await();
-                        return api.call(
-                                HttpMethod.POST,
-                                "/api/v1/branches/" + id + "/reopen",
-                                null,
-                                admin.accessToken(),
-                                Map.of("If-Match", "\"1\""));
-                    }))
-                    .toList();
-            go.countDown();
-            for (Future<ResponseEntity<JsonNode>> f : sent) answers.add(f.get());
-        } finally {
-            pool.shutdownNow();
-        }
+        List<ResponseEntity<JsonNode>> answers =
+                racing(closed.stream().map(this::reopening).toList());
         assertThat(answers.stream().filter(r -> r.getStatusCode() == HttpStatus.OK))
                 .as("%s", answers)
                 .hasSize(1);
@@ -298,7 +316,8 @@ class AddBranchIT extends IntegrationTest {
     /** Two adds of the same name at the same moment both succeed, with different codes made from the name. */
     @Test
     void twoAddsOfOneNameAtOnceGetTwoCodes() throws Exception {
-        List<ResponseEntity<JsonNode>> answers = atOnce(List.of("Kasubi Store", "Kasubi Store", "Kasubi Store"));
+        List<ResponseEntity<JsonNode>> answers =
+                racing(List.of(adding("Kasubi Store"), adding("Kasubi Store"), adding("Kasubi Store")));
         assertThat(answers)
                 .allSatisfy(
                         r -> assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED));
