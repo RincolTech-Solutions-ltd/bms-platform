@@ -15,8 +15,8 @@ import org.springframework.stereotype.Repository;
 /**
  * Read-only SQL of the Controls page (issue #357, group 1). Every number is a count or a sum over one "events"
  * statement per metric, all in the same column shape, so a card, a group and a record list always agree. The events
- * read the existing tables only: sales (voids), customer returns, and sale lines (changed prices, discounts, lines
- * below cost). Imported history ({@code historical}) is never an event and never a sale in a rate: it was not done
+ * read the existing tables only: sales (voids), customer returns, credit write-offs, sale lines (changed prices, discounts,
+ * lines below cost), voided restocks and stock corrections. Imported history ({@code historical}) is never an event and never a sale in a rate: it was not done
  * by staff in this system. Every statement is bounded by a date window, by the caller's branch scope and by a row
  * limit; row-level security supplies the tenant predicate (ADR-003). Nothing here returns a cost.
  */
@@ -27,6 +27,7 @@ class ControlsRepository {
             "voided_sales",
             "quick_cancels",
             "returns",
+            "credit_writeoffs",
             "price_overrides",
             "discounts",
             "below_cost",
@@ -118,6 +119,27 @@ class ControlsRepository {
                         + " FROM retail_sale_returns r JOIN retail_sales s ON s.tenant_id = r.tenant_id AND s.id ="
                         + " r.sale_id WHERE r.status = 'completed' AND r.returned_on >= :from AND r.returned_on <="
                         + " :to";
+            // A credit sale written off (ADR-087): on the business day it was written off, credited to the person whose
+            // sale
+            // it was, the approver who wrote it off. The value is what the buyer still owed at the sale's prices, never
+            // the
+            // loss, which can be a cost.
+            case "credit_writeoffs" ->
+                "SELECT 'credit_writeoffs'"
+                        + COLUMNS.formatted(
+                                "w.sale_id",
+                                "s.sale_no",
+                                "CAST(NULL AS text)",
+                                "w.branch_id",
+                                "s.created_by",
+                                "w.written_off_on",
+                                "w.created_at",
+                                "w.reason",
+                                "w.unpaid_minor",
+                                "CAST(NULL AS text)",
+                                "w.created_by")
+                        + " FROM retail_sale_writeoffs w JOIN retail_sales s ON s.tenant_id = w.tenant_id AND s.id ="
+                        + " w.sale_id WHERE NOT s.historical AND w.written_off_on >= :from AND w.written_off_on <= :to";
             case "price_overrides" ->
                 "SELECT 'price_overrides'" + lineColumns("l.price_override_reason", "l.line_total_minor") + lines
                         + " AND l.price_source = 'override'";
