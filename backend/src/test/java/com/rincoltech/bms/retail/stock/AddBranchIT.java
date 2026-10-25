@@ -9,8 +9,13 @@ import com.rincoltech.bms.testsupport.Api;
 import com.rincoltech.bms.testsupport.Api.Role;
 import com.rincoltech.bms.testsupport.Api.Session;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.StreamSupport;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -78,6 +83,48 @@ class AddBranchIT extends IntegrationTest {
                 Map.of("If-Match", etag));
     }
 
+    /** Sends the adds at the same moment, each from its own thread, and returns the answers in order. */
+    List<ResponseEntity<JsonNode>> atOnce(List<String> names) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(names.size());
+        try {
+            CountDownLatch go = new CountDownLatch(1);
+            List<Future<ResponseEntity<JsonNode>>> sent = names.stream()
+                    .map(name -> pool.submit(() -> {
+                        go.await();
+                        return add(name, null, null);
+                    }))
+                    .toList();
+            go.countDown();
+            List<ResponseEntity<JsonNode>> answers = new java.util.ArrayList<>();
+            for (Future<ResponseEntity<JsonNode>> f : sent) answers.add(f.get());
+            return answers;
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    long branchCount() {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM branches WHERE tenant_id = ?")
+                .params(t.tenantId())
+                .query(Long.class)
+                .single();
+    }
+
+    void planOf(int maxBranches) {
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO plans (id, code, name, max_branches, max_staff_users, max_active_members, allowed_modules)
+                        VALUES (?, ?, 'Test Small Plan', ?, 10, 0, '{retail}')
+                        """)
+                .params(UUID.randomUUID(), "small-" + t.slug(), maxBranches)
+                .update();
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET plan_id = (SELECT id FROM plans WHERE code = ?) WHERE id = ?")
+                .params("small-" + t.slug(), t.tenantId())
+                .update();
+    }
+
     static String code(ResponseEntity<JsonNode> r) {
         return r.getBody().get("code").asString();
     }
@@ -132,8 +179,10 @@ class AddBranchIT extends IntegrationTest {
         // A typed code is kept, and a taken one is still refused.
         assertThat(code(api.post("/api/v1/branches", Map.of("code", "KSB", "name", "Typed"), admin.accessToken())))
                 .isEqualTo("KSB");
-        assertThat(code(api.post("/api/v1/branches", Map.of("code", "KSB", "name", "Again"), admin.accessToken())))
-                .isEqualTo("duplicate_branch_code");
+        ResponseEntity<JsonNode> taken =
+                api.post("/api/v1/branches", Map.of("code", "KSB", "name", "Again"), admin.accessToken());
+        assertThat(taken.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(code(taken)).isEqualTo("duplicate_branch_code");
     }
 
     /** The owner's ask: a store becomes a shop and a store again, and the sale rule follows each switch. */
@@ -170,26 +219,39 @@ class AddBranchIT extends IntegrationTest {
     /** FR-TEN-04: past the plan's branch limit the add is refused with plan_limit_reached, and nothing is written. */
     @Test
     void thePlanLimitRefusesAnotherBranch() {
-        TestDatabase.owner()
-                .sql("""
-                        INSERT INTO plans (id, code, name, max_branches, max_staff_users, max_active_members, allowed_modules)
-                        VALUES (?, ?, 'Test Two Branch Plan', 2, 10, 0, '{retail}')
-                        """)
-                .params(UUID.randomUUID(), "two-" + t.slug())
-                .update();
-        TestDatabase.owner()
-                .sql("UPDATE tenants SET plan_id = (SELECT id FROM plans WHERE code = ?) WHERE id = ?")
-                .params("two-" + t.slug(), t.tenantId())
-                .update();
+        planOf(2);
         ResponseEntity<JsonNode> r = add("Test One Too Many", null, null);
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(r)).isEqualTo("plan_limit_reached");
-        assertThat(TestDatabase.owner()
-                        .sql("SELECT count(*) FROM branches WHERE tenant_id = ?")
-                        .params(t.tenantId())
-                        .query(Long.class)
-                        .single())
-                .isEqualTo(2);
+        assertThat(branchCount()).isEqualTo(2);
+    }
+
+    /** Two adds at the same moment with room for one: one is added, the other is refused, never both (ADR-089). */
+    @Test
+    void twoAddsAtOnceNeverPassThePlanLimit() throws Exception {
+        planOf(3);
+        for (int round = 0; round < 3; round++) {
+            List<ResponseEntity<JsonNode>> answers =
+                    atOnce(List.of("Test Race One " + round, "Test Race Two " + round));
+            assertThat(answers.stream().filter(r -> r.getStatusCode() == HttpStatus.CREATED))
+                    .as("%s", answers)
+                    .hasSize(round == 0 ? 1 : 0);
+            assertThat(answers.stream()
+                            .filter(r -> r.getStatusCode() == HttpStatus.UNPROCESSABLE_CONTENT)
+                            .map(AddBranchIT::code))
+                    .containsOnly("plan_limit_reached");
+            assertThat(branchCount()).isEqualTo(3);
+        }
+    }
+
+    /** Two adds of the same name at the same moment both succeed, with different codes made from the name. */
+    @Test
+    void twoAddsOfOneNameAtOnceGetTwoCodes() throws Exception {
+        List<ResponseEntity<JsonNode>> answers = atOnce(List.of("Kasubi Store", "Kasubi Store", "Kasubi Store"));
+        assertThat(answers)
+                .allSatisfy(
+                        r -> assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED));
+        assertThat(answers.stream().map(AddBranchIT::code)).containsExactlyInAnyOrder("KASUBI", "KASUBI2", "KASUBI3");
     }
 
     /** Only core.branches.manage adds a branch. */
@@ -200,5 +262,6 @@ class AddBranchIT extends IntegrationTest {
         ResponseEntity<JsonNode> r =
                 api.post("/api/v1/branches", Map.of("name", "Test Not Allowed"), auditor.accessToken());
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(branchCount()).isEqualTo(2);
     }
 }

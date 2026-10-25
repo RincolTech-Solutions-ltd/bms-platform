@@ -164,7 +164,7 @@ export function BranchesScreen() {
       {!canManage && <p className="hint">Only an administrator can add, close or reopen a branch.</p>}
       {canManage && !adding && (
         <p>
-          <button type="button" /* busy-exempt: opens the form */ disabled={busyId !== null} onClick={() => setAdding(true)}>
+          <button type="button" /* busy-exempt: opens the form */ className="rt-primary" data-tour="branches-add" disabled={busyId !== null} onClick={() => setAdding(true)}>
             Add a branch
           </button>
         </p>

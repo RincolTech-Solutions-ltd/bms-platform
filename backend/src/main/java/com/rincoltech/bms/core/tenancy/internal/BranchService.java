@@ -121,10 +121,7 @@ class BranchService implements BranchProvisioning {
 
     @Transactional
     BranchResponse create(CreateBranchRequest request) {
-        long active = jdbc.sql("SELECT count(*) FROM branches WHERE status = 'active'")
-                .query(Long.class)
-                .single();
-        planLimits.checkRoomFor(PlanLimits.MAX_BRANCHES, active);
+        checkRoomForAnOpenBranch();
         boolean sells = request.sellsGoods() == null || request.sellsGoods();
         boolean stocks = request.stocksGoods() == null || request.stocksGoods();
         if (!sells && !stocks) {
@@ -155,6 +152,21 @@ class BranchService implements BranchProvisioning {
         after.put("location", request.location());
         audit.record(AuditLog.Entry.created("core.branch.created", "core.branch", id, id, after));
         return find(id).orElseThrow();
+    }
+
+    /**
+     * The plan's branch limit, counted under a lock per business (issue #581, ADR-089): two adds or reopens at the same moment
+     * queue here, and the second counts the first's branch once it commits, so neither goes past {@code max_branches}. The
+     * count is its own statement after the lock, so under read committed it sees what the first committed.
+     */
+    private void checkRoomForAnOpenBranch() {
+        jdbc.sql(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(current_setting('app.tenant_id') || ':core.branch.open', 0))")
+                .query(rs -> {});
+        long active = jdbc.sql("SELECT count(*) FROM branches WHERE status = 'active'")
+                .query(Long.class)
+                .single();
+        planLimits.checkRoomFor(PlanLimits.MAX_BRANCHES, active);
     }
 
     private boolean codeTaken(String code) {
@@ -321,10 +333,7 @@ class BranchService implements BranchProvisioning {
                     "Invalid status transition",
                     "The branch is already open.");
         }
-        long active = jdbc.sql("SELECT count(*) FROM branches WHERE status = 'active'")
-                .query(Long.class)
-                .single();
-        planLimits.checkRoomFor(PlanLimits.MAX_BRANCHES, active);
+        checkRoomForAnOpenBranch();
         jdbc.sql("""
                         UPDATE branches SET status = 'active', closed_at = NULL, closed_reason = NULL, updated_at = now(),
                                version = version + 1 WHERE id = ?

@@ -29,6 +29,12 @@ that keeps no goods (ADR-041, a head office) could only be made as a shop and th
   internal `BranchProvisioning` port and existing callers send one; a typed code that is taken is refused with 409
   `duplicate_branch_code` as before. The insert uses `ON CONFLICT (tenant_id, code) DO NOTHING`, so two adds at the same moment
   that make the same code end in the same 409, never a 500.
+- **The plan limit holds under concurrent adds.** The create and the reopen take a transaction advisory lock per business
+  (`pg_advisory_xact_lock` on the tenant id and `core.branch.open`) before they count the open branches, so two adds or reopens
+  at the same moment queue, and the second counts the first's branch once it commits (read committed: the count is its own
+  statement after the lock). Two adds of one name at the same moment therefore also get two codes (KASUBI and KASUBI2), never
+  a refusal; the `ON CONFLICT` guard remains for a typed code. `AddBranchIT` sends the adds from parallel threads and fails
+  without the lock.
 - **The rules apply from creation.** A Store refuses a sale with `branch_does_not_sell` and a branch that keeps no goods with
   `branch_not_stocking` from the moment it exists, through the existing server checks (ADR-041, ADR-048); nothing new is
   enforced. A store becomes a shop and a store again through `PATCH /branches/{id}` as before.

@@ -1220,7 +1220,9 @@ export const branchesPage: Tour = {
     },
     {
       id: 'add',
-      target: 'branches-intro',
+      target: 'branches-add',
+      // Only whoever may add a branch has the button, so only they see the step.
+      needs: ['core.branches.manage'],
       title: 'Add a shop, a store or a head office',
       body: 'An administrator taps Add a branch, types the name and picks what it is. The app makes the code from the name. A store keeps stock and does not sell from the moment it is added.',
     },
