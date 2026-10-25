@@ -576,6 +576,13 @@ export const icons = {
     </Svg>
   ),
   // A circle with an i: a toast that only informs (#508).
+  help: (
+    <Svg>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" />
+      <path d="M12 17h.01" />
+    </Svg>
+  ),
   info: (
     <Svg>
       <circle cx="12" cy="12" r="9" />

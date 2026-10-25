@@ -14,15 +14,18 @@ import { createPush } from '../../push/push';
 import { TurnOnCard } from '../../push/TurnOnCard';
 import { TourProvider } from '../../tour/host';
 import { CrumbProvider, StaffBreadcrumbs } from '../../components/breadcrumbs';
-import { SideNav, useIsPhone } from '../../components/side-menu';
+import { icons } from '../../components/icons';
+import { MenuItemLink, SideMenu, SideNav, useCloseMenu, useIsPhone } from '../../components/side-menu';
+import { BusyButton } from '../../app/ui/BusyButton';
+import { useHelpSheet } from '../../tour/host';
 import { BrandLoader } from '../../components/states';
 import { BillingBanner } from './billing/banner';
-import { CurrentShop, useActiveBranch } from './branch-picker';
+import { MenuShop, initials, useActiveBranch } from './branch-picker';
 import { BranchTitle, OfflineBanner, TopMenu } from './top-bar';
 import { StaffContext, useOptionalStaff } from './context';
 import { FeatureSearch } from './feature-search';
 import { PlanNotice } from './plan';
-import { STAFF_SECTIONS, staffAreas } from './menu';
+import { FOOT_LINKS, roleOf, staffMenu, useMenuCounts } from './menu';
 import { useSells } from './retail/nav';
 import { StaffTabBar } from './tabs';
 import { canSeeProfit } from './retail/permissions';
@@ -155,7 +158,7 @@ function StaffLayout() {
       <TourProvider me={profile} saveProgress={!mock}>
         <CrumbProvider>
           <div className="nav-layout">
-            <StaffSideNav me={profile} />
+            <StaffSideNav me={profile} onBranch={choose} busy={signingOut} onSignOut={() => void signOut()} />
             <div className="nav-layout-main">
               <StaffBar me={profile} branch={branch} onBranch={choose} busy={signingOut} onSignOut={() => void signOut()} signOutInBar={mustSetUp(profile)} />
               <InstallPrompt />
@@ -188,24 +191,114 @@ function StaffLayout() {
   );
 }
 
-/**
- * The sidebar at the left from 720px (issue #455), the shop in use above it (issue #461); nothing on a phone, where the bottom tabs
- * and their More page hold the same list (issue #539).
- */
-export function StaffSideNav({ me }: { me: Me }) {
-  const phone = useIsPhone();
+const [NOTIFICATIONS] = FOOT_LINKS;
+// The anchors of the menu's head and foot, which the drawer opens for as it does for its links.
+const FOOT_TOURS = ['nav-notifications', 'nav-feedback'];
+
+/** The staff menu's groups for the session, with the open orders and the items low on stock (issue #564). */
+function useStaffGroups(me: Me) {
   const sells = useSells(me);
+  const counts = useMenuCounts(me);
+  return staffMenu(me, { sells, counts });
+}
+
+/**
+ * The foot of the staff menu (issue #564): Notifications, Help and feedback, which opens the Help sheet with its tours and Send
+ * feedback, then the person's initials, name and role, and Sign out. In the drawer Help closes the drawer before the sheet opens.
+ */
+function StaffMenuFoot({ me, busy, onSignOut, onHelp }: { me: Me; busy: boolean; onSignOut: () => void; onHelp: () => void }) {
+  const close = useCloseMenu();
+  const role = roleOf(me);
+  return (
+    <>
+      <ul className="side-menu-foot-list">
+        <li>
+          <MenuItemLink to={NOTIFICATIONS?.to ?? '/staff/notifications'} label="Notifications" icon={icons.bell} tour="nav-notifications" />
+        </li>
+        <li>
+          <button
+            type="button"
+            className="side-menu-help"
+            aria-haspopup="dialog"
+            data-tour="nav-feedback"
+            onClick={() => {
+              close();
+              window.setTimeout(onHelp, 0);
+            }}
+          >
+            {icons.help}
+            <span className="side-menu-label">Help and feedback</span>
+          </button>
+        </li>
+      </ul>
+      <div className="side-menu-me">
+        <span className="side-menu-avatar" aria-hidden="true">
+          {initials(me.full_name ?? '')}
+        </span>
+        <span className="side-menu-me-text">
+          <span className="side-menu-me-name">{me.full_name}</span>
+          {role && <span className="side-menu-me-role">{role}</span>}
+        </span>
+        <BusyButton type="button" className="btn-ghost side-menu-sign-out" busy={busy} onClick={onSignOut}>
+          Sign out
+        </BusyButton>
+      </div>
+    </>
+  );
+}
+
+/**
+ * The staff menu as a fixed sidebar at the left from 720px (issues #455, #564): the business, its role and the branch at the top,
+ * the groups, then the foot; nothing on a phone, where the menu button of the top bar opens the same list in a drawer.
+ */
+export function StaffSideNav({ me, onBranch = () => undefined, busy = false, onSignOut = () => undefined }: { me: Me; onBranch?: (selection: string) => void; busy?: boolean; onSignOut?: () => void }) {
+  const phone = useIsPhone();
+  const groups = useStaffGroups(me);
   const branch = useOptionalStaff()?.branch ?? null;
+  const help = useHelpSheet(true);
   if (phone) return null;
-  return <SideNav label="Staff areas" tour="nav-areas" links={staffAreas(me, { sells })} tours={['retail-nav']} sections={STAFF_SECTIONS} person={me.user_id} head={<CurrentShop me={me} branch={branch} />} />;
+  return (
+    <>
+      <SideNav
+        label="Staff areas"
+        tour="nav-areas"
+        groups={groups}
+        head={<MenuShop me={me} branch={branch} role={roleOf(me)} onChoose={onBranch} />}
+        foot={<StaffMenuFoot me={me} busy={busy} onSignOut={onSignOut} onHelp={help.open} />}
+      />
+      {help.sheet}
+    </>
+  );
+}
+
+/** The menu button at the top left of the phone's top bar and its drawer: the same list as the sidebar (issue #564). */
+function StaffDrawer({ me, branch, onBranch, busy, onSignOut }: { me: Me; branch: string | null; onBranch: (selection: string) => void; busy: boolean; onSignOut: () => void }) {
+  const groups = useStaffGroups(me);
+  const help = useHelpSheet(true);
+  return (
+    <>
+      <SideMenu
+        label="Staff areas"
+        tour="nav-areas"
+        groups={groups}
+        tours={FOOT_TOURS}
+        onSignOut={onSignOut}
+        busy={busy}
+        head={<MenuShop me={me} branch={branch} role={roleOf(me)} onChoose={onBranch} />}
+        foot={<StaffMenuFoot me={me} busy={busy} onSignOut={onSignOut} onHelp={help.open} />}
+      />
+      {help.sheet}
+    </>
+  );
 }
 
 /**
  * The one top bar of the staff area (issue #526, replacing the brand bar and the staff bar of two rows): the business and the
  * branch in use as the title, which switches branch; Search (issue #551); the Online dot only while it has something to say;
- * and one menu holding who is signed in, Help, Refresh, Light or dark and Sign out. Below 720px Sign out moves to the More
- * tab's page (it stays in the menu while two-step set-up blocks the page, which has no tabs) and Sell is the first bottom tab
- * (issue #539). With StaffSideNav and the tab bar it carries the data-tour anchors the first-run tours light up (tour/tours.ts).
+ * and one menu holding who is signed in, Help, Refresh, Light or dark and Sign out. Below 720px the menu button at its left opens
+ * the staff menu's drawer (issue #564), Sign out moves to the drawer and the More tab's page (it stays in the top menu while
+ * two-step set-up blocks the page, which has no tabs) and Sell is the first bottom tab (issue #539). With StaffSideNav and the tab
+ * bar it carries the data-tour anchors the first-run tours light up (tour/tours.ts).
  */
 export function StaffBar({
   me,
@@ -230,6 +323,7 @@ export function StaffBar({
     <>
       <header className="staff-bar">
         <div className="staff-bar-top">
+          {phone && <StaffDrawer me={me} branch={branch} onBranch={onBranch} busy={busy} onSignOut={onSignOut} />}
           {!phone && logo && <img className="top-logo" src={logo} alt="" />}
           <BranchTitle me={me} branch={branch} onChoose={onBranch} />
           <SyncStatus />

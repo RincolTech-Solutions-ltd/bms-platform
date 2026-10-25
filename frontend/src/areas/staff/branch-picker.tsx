@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import type { Me } from '../../api/client';
 import { PLATFORM_BRAND, useLogo, useLogoSrc, useShellBrand } from '../../app/branding';
-import { useFolded } from '../../components/side-menu';
+import { icons } from '../../components/icons';
 import { retail } from '../../api/retail';
 import { ALL_BRANCHES, branchLabel, initialBranch, loadBranch, saveBranch } from '../../auth/branch';
 
@@ -51,25 +51,85 @@ export function ShopLogo({ url, name }: { url?: string | null; name: string }) {
 }
 
 /**
- * The shop in use at the top of the side menu and the phone drawer (issue #461, ADR-068): its own logo, small and rounded, beside
- * its name; a shop without one, or whose logo cannot be read, shows the business logo, and without that no image. The folded
- * sidebar keeps only the image, the name as its tooltip. While the shop's logo loads, an empty space the size of the logo holds its
- * place, so the business logo never shows for a moment first. In production the image loads straight from its URL, so an image
- * that fails to load is passed over for the next one (the business logo, then none).
+ * The picture of the shop in use (issue #461, ADR-068): its own logo; a shop without one, or whose logo cannot be read, shows the
+ * business logo, and without that none. While the shop's logo loads `loading` holds its place, so the business logo never shows
+ * for a moment first. In production the image loads straight from its URL, so an image that fails to load (`broke`) is passed
+ * over for the next one.
  */
-export function CurrentShop({ me, branch }: { me: Me; branch: string | null }) {
-  const folded = useFolded();
+function useShopImage(me: Me, branch: string | null) {
   const active = (me.branches ?? []).find((b) => b.id === branch);
   const shop = useLogo(active?.logo_url ?? null);
   const brand = useShellBrand();
   const [broken, setBroken] = useState<string[]>([]);
+  const src = [shop.src, brand === PLATFORM_BRAND ? null : brand.logoSrc].find((s) => s && !broken.includes(s)) ?? null;
+  return { active, loading: shop.loading, src, broke: (s: string) => setBroken((b) => [...b, s]), brand };
+}
+
+/** The shop in use, its logo beside its name, on the More page (issues #461, #539). */
+export function CurrentShop({ me, branch }: { me: Me; branch: string | null }) {
+  const { active, loading, src, broke } = useShopImage(me, branch);
   if (!active && branch !== ALL_BRANCHES) return null;
   const name = active ? branchLabel(active) : 'All branches';
-  const src = [shop.src, brand === PLATFORM_BRAND ? null : brand.logoSrc].find((s) => s && !broken.includes(s)) ?? null;
   return (
-    <div className="current-shop" title={folded ? name : undefined}>
-      {shop.loading ? <span className="current-shop-logo" aria-hidden="true" /> : src && <img className="current-shop-logo" src={src} alt={`Logo of ${name}`} onError={() => setBroken((b) => [...b, src])} />}
-      <span className={folded ? 'visually-hidden' : 'current-shop-name'}>{name}</span>
+    <div className="current-shop">
+      {loading ? <span className="current-shop-logo" aria-hidden="true" /> : src && <img className="current-shop-logo" src={src} alt={`Logo of ${name}`} onError={() => broke(src)} />}
+      <span className="current-shop-name">{name}</span>
+    </div>
+  );
+}
+
+/** Up to two capitals from a name, for a business with no logo: "Test Shop 01" gives "TS". */
+export function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter((w) => /^[a-z]/i.test(w))
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join('');
+}
+
+/**
+ * The top of the staff menu (issue #564): the shop's logo, or the business's initials, the business name and the person's role,
+ * and on the right the branch in use, which switches branch when there is more than one to choose (a native select laid over it,
+ * as in the top bar's title).
+ */
+export function MenuShop({ me, branch, role, onChoose }: { me: Me; branch: string | null; role: string; onChoose: (selection: string) => void }) {
+  const { active, loading, src, broke, brand } = useShopImage(me, branch);
+  const branches = me.branches ?? [];
+  const choices = branches.length + (me.all_branches ? 1 : 0);
+  const name = active ? branchLabel(active) : branch === ALL_BRANCHES ? 'All branches' : '';
+  return (
+    <div className="menu-shop">
+      {loading ? (
+        <span className="menu-shop-logo" aria-hidden="true" />
+      ) : src ? (
+        <img className="menu-shop-logo" src={src} alt={`Logo of ${name || brand.name}`} onError={() => broke(src)} />
+      ) : (
+        <span className="menu-shop-logo menu-shop-initials" aria-hidden="true">
+          {initials(brand.name)}
+        </span>
+      )}
+      <span className="menu-shop-text">
+        <span className="menu-shop-name">{brand.name}</span>
+        {role && <span className="menu-shop-role">{role}</span>}
+      </span>
+      {name && (
+        <span className="menu-shop-branch">
+          <span className="menu-shop-branch-name">{name}</span>
+          {choices > 1 && <span className="menu-shop-chevron" aria-hidden="true">{icons.chevron}</span>}
+          {choices > 1 && (
+            <select className="menu-shop-select" aria-label="Switch branch" value={branch ?? ''} onChange={(e) => onChoose(e.target.value)}>
+              {me.all_branches && <option value={ALL_BRANCHES}>All branches</option>}
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {branchLabel(b)}
+                  {b.stocks_goods === false ? ' (no stock)' : b.sells_goods === false ? ' (store)' : ''}
+                </option>
+              ))}
+            </select>
+          )}
+        </span>
+      )}
     </div>
   );
 }
