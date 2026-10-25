@@ -44,7 +44,7 @@ import tools.jackson.databind.ObjectMapper;
  * emailed, and the request may be cancelled by the Owner until the business is removed. After the cooling-off period the
  * operator removes it, with their own authenticator code and a reason: in one transaction bound to the business, the core's
  * eraser and every module's {@link PersonalDataEraser} delete or anonymise its personal data, the money records stay without
- * it until {@link #keepUntil}, and the business is closed. Every act is audited in the business's log and the platform's.
+ * it until {@link #keepUntil}, when the daily job deletes them ({@link #purgeDue}), and the business is closed. Every act is audited in the business's log and the platform's.
  */
 @Service
 class ClosureService {
@@ -54,9 +54,6 @@ class ClosureService {
 
     static final String REQUESTED = "platform.closure_requested";
     static final String CANCELLED = "platform.closure_cancelled";
-
-    /** How long money records are kept after removal: the tax law's five years after the end of the tax year (ADR-090). */
-    static final int KEEP_YEARS = 5;
 
     private final JdbcClient jdbc;
     private final TenantAdmins admins;
@@ -73,6 +70,7 @@ class ClosureService {
     private final TransactionTemplate transactions;
     private final TransactionTemplate savepoint;
     private final int coolingOffDays;
+    private final int retentionYears;
     private final ObjectMapper json;
 
     ClosureService(
@@ -90,7 +88,8 @@ class ClosureService {
             List<PersonalDataEraser> erasers,
             ObjectMapper json,
             PlatformTransactionManager transactionManager,
-            @Value("${bms.platform.closure-cooling-off-days:30}") int coolingOffDays) {
+            @Value("${bms.platform.closure-cooling-off-days:30}") int coolingOffDays,
+            @Value("${bms.platform.closed-retention-years:5}") int retentionYears) {
         this.jdbc = jdbc;
         this.admins = admins;
         this.proof = proof;
@@ -108,6 +107,10 @@ class ClosureService {
         this.savepoint = new TransactionTemplate(transactionManager);
         this.savepoint.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
         this.coolingOffDays = coolingOffDays;
+        if (retentionYears < 1) {
+            throw new IllegalStateException("BMS_CLOSED_RETENTION_YEARS must be at least 1");
+        }
+        this.retentionYears = retentionYears;
     }
 
     record Open(
@@ -338,7 +341,7 @@ class ClosureService {
                     for (PersonalDataEraser eraser : erasers) {
                         erased.merge(eraser.area(), eraser.erase(), Integer::sum);
                     }
-                    LocalDate keepUntil = keepUntil(today);
+                    LocalDate keepUntil = keepUntil(today, retentionYears);
                     jdbc.sql("SELECT platform_finish_tenant_removal(?, ?, ?::jsonb)")
                             .params(closureId, keepUntil, json.writeValueAsString(erased))
                             .query(String.class)
@@ -349,13 +352,41 @@ class ClosureService {
     }
 
     /**
-     * The day after which the kept money records of a business removed on {@code removedOn} may be deleted: five years after
-     * the end of the tax year (1 July to 30 June) in which it was removed (ADR-090).
+     * The last day the kept money records of a business removed on {@code removedOn} are kept: {@code years}
+     * ({@code BMS_CLOSED_RETENTION_YEARS}, 5 by default) after the end of the financial year (1 July to 30 June) in which it
+     * was removed (owner decision D46, ADR-090). The daily job deletes them the day after.
      */
-    static LocalDate keepUntil(LocalDate removedOn) {
+    static LocalDate keepUntil(LocalDate removedOn, int years) {
         int endYear =
                 removedOn.getMonthValue() <= Month.JUNE.getValue() ? removedOn.getYear() : removedOn.getYear() + 1;
-        return LocalDate.of(endYear + KEEP_YEARS, Month.JUNE, 30);
+        return LocalDate.of(endYear + years, Month.JUNE, 30);
+    }
+
+    /**
+     * The daily job's work (owner decision D46): every removed business whose {@code keep_until} is before {@code today} has
+     * every row it still holds deleted, money records included, each in its own transaction; one failure is logged and does
+     * not stop the others. Returns how many businesses were purged.
+     */
+    int purgeDue(LocalDate today) {
+        List<UUID> due = transactions.execute(status -> jdbc.sql("SELECT platform_closures_due_for_purge(?)")
+                .param(today)
+                .query(UUID.class)
+                .list());
+        int purged = 0;
+        for (UUID closureId : due) {
+            try {
+                Integer rows = transactions.execute(status -> jdbc.sql("SELECT platform_purge_closed_tenant(?, ?)")
+                        .params(closureId, today)
+                        .query(Integer.class)
+                        .single());
+                log.info(
+                        "closure {}: the kept records of the removed business were deleted ({} rows)", closureId, rows);
+                purged++;
+            } catch (RuntimeException e) {
+                log.error("closure {}: the kept records could not be deleted", closureId, e);
+            }
+        }
+        return purged;
     }
 
     private UUID queueExport(UUID actor) {

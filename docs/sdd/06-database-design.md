@@ -709,7 +709,7 @@ The person the reminders and receipts go to instead of the Owner; no row means t
 ### `tenant_closures` (RLS; `bms_app` SELECT, INSERT, UPDATE under a guard; `V102`, ADR-090)
 
 The Owner's request to close the business. `status text NOT NULL DEFAULT 'requested'` (`requested`, `cancelled`, `removing`,
-`removed`), `requested_by` (FK to `users`), `requested_at`, `remove_after date NOT NULL` (the first day of removal, the business's
+`removed`, then `purging` and `purged` with `purged_at` once the kept records are deleted), `requested_by` (FK to `users`), `requested_at`, `remove_after date NOT NULL` (the first day of removal, the business's
 own date plus the cooling-off), `export_run_id uuid` (the full workbook queued for the Owner), `cancelled_by`, `cancelled_at` (set
 exactly when cancelled), `removed_by_platform_user_id`, `removal_reason varchar(300)`, `removed_at` and `keep_until date` (set
 exactly when removed: the day after which the kept money records may be deleted). A partial unique index allows one open request
@@ -722,7 +722,14 @@ answers `closing` while a request is open for an active business or one whose Ow
 the transaction with `bms.erasing_tenant`), the erasers `app_erase_core_personal_data()`, `lending_erase_personal_data()` and
 `retail_erase_personal_data()` (each refuses to run outside a removal through `bms_removing_tenant()`), and
 `platform_finish_tenant_removal(closure, keep_until, summary)` (the business `closed`, the subscription ended, the sign-up
-application anonymised, `platform.tenant.removed`). The guard functions `reject_mutation`, `retail_sales_guard_update`,
+application anonymised, `platform.tenant.removed`). Owner decision D46: the daily job lists the removed requests past `keep_until`
+(`platform_closures_due_for_purge(today)`) and `platform_purge_closed_tenant(closure, today)` deletes, unbound and in passes over
+every table with a `tenant_id` read from the catalogue, every row of the business except its `tenants` row, its `users` and its
+`tenant_closures` rows, then marks the request `purged` and writes `platform.tenant.purged`; every other guard that fires on
+DELETE (`ai_calls_guard`, `bms_commission_line_guard`, `bms_owner_keeps_admin`, `bms_payment_outcome_guard`, `bms_referral_guard`,
+`lending_loan_charges_guard`, `lending_loan_collateral_guard`, `lending_loan_guarantors_guard`, `payment_callbacks_guard`,
+`retail_purchase_order_lines_guard`) returns OLD for a delete while `bms_erasing` holds, which it does for a request `removing`
+or `purging`. The guard functions `reject_mutation`, `retail_sales_guard_update`,
 `retail_quotations_guard_update`, `retail_customer_orders_guard_update`, `payment_intents_guard`, `retail_cashbook_guard_update` and
 `lending_collection_actions_guard` let a change through when `bms_erasing(to_jsonb(OLD))` holds: the caller runs as `bms_owner`,
 the transaction is marked for the row's business and its request is `removing`. The operator reads the requests through

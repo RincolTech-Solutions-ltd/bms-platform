@@ -27,7 +27,7 @@ export function whatHappens(coolingOffDays: number): string[] {
     'A full copy of your data is made for you. Save it from Download my data in Business set-up.',
     `After ${coolingOffDays} days Rincol Tech may remove the business. Until then you can cancel the closing and everything works again.`,
     'Removal deletes the names, phone numbers, ID numbers and other personal details of your staff, customers and members, and every stored file.',
-    'Money records the tax law asks for are kept for five years after the end of that tax year, without names, then deleted.',
+    'Money records (sales, payments, invoices, expenses, the journal) are kept read only, without names, for five years after the end of that financial year, then deleted.',
   ];
 }
 

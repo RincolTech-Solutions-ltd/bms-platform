@@ -24,7 +24,7 @@ export function closureLine(c: PlatformClosure): string {
 export function removeSentence(c: PlatformClosure): string {
   return (
     `Remove ${c.tenant_name ?? 'this business'} for good? Its staff can no longer sign in. Names, phone numbers, ID numbers, emails and ` +
-    'every stored file are deleted or replaced. Money records stay, without names, until five years after the end of this tax year. ' +
+    'every stored file are deleted or replaced. Money records stay, without names, until five years after the end of this financial year, then deleted. ' +
     'This cannot be undone.'
   );
 }

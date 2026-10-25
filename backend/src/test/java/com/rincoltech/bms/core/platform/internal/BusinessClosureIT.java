@@ -43,6 +43,9 @@ class BusinessClosureIT extends IntegrationTest {
     @Autowired
     TestRestTemplate http;
 
+    @Autowired
+    ClosureService closures;
+
     LocalDate today;
 
     record Business(
@@ -364,7 +367,7 @@ class BusinessClosureIT extends IntegrationTest {
         assertThat(removed.getStatusCode()).as("%s", removed.getBody()).isEqualTo(HttpStatus.OK);
         LocalDate keepUntil =
                 LocalDate.parse(removed.getBody().get("keep_until").asString());
-        assertThat(keepUntil).isEqualTo(ClosureService.keepUntil(today));
+        assertThat(keepUntil).isEqualTo(ClosureService.keepUntil(today, 5));
 
         UUID id = b.t().tenantId();
         assertThat(TestDatabase.owner()
@@ -483,9 +486,12 @@ class BusinessClosureIT extends IntegrationTest {
     /** ADR-090: money records are kept five years after the end of the tax year (1 July to 30 June) of the removal. */
     @Test
     void frTen09_moneyRecordsAreKeptFiveYearsAfterTheTaxYear() {
-        assertThat(ClosureService.keepUntil(LocalDate.of(2026, 10, 25))).isEqualTo(LocalDate.of(2032, 6, 30));
-        assertThat(ClosureService.keepUntil(LocalDate.of(2026, 6, 30))).isEqualTo(LocalDate.of(2031, 6, 30));
-        assertThat(ClosureService.keepUntil(LocalDate.of(2027, 1, 1))).isEqualTo(LocalDate.of(2032, 6, 30));
+        assertThat(ClosureService.keepUntil(LocalDate.of(2026, 10, 25), 5)).isEqualTo(LocalDate.of(2032, 6, 30));
+        assertThat(ClosureService.keepUntil(LocalDate.of(2026, 6, 30), 5)).isEqualTo(LocalDate.of(2031, 6, 30));
+        assertThat(ClosureService.keepUntil(LocalDate.of(2027, 1, 1), 5)).isEqualTo(LocalDate.of(2032, 6, 30));
+        assertThat(ClosureService.keepUntil(LocalDate.of(2026, 10, 25), 7))
+                .as("BMS_CLOSED_RETENTION_YEARS")
+                .isEqualTo(LocalDate.of(2034, 6, 30));
     }
 
     /**
@@ -533,6 +539,42 @@ class BusinessClosureIT extends IntegrationTest {
         assertThat(withPersonalData(t.tenantId()))
                 .as("tables still holding personal data")
                 .isEmpty();
+        assertThat(count("SELECT count(*) FROM retail_sales WHERE tenant_id = ?", t.tenantId()))
+                .as("the money records stay until keep_until")
+                .isPositive();
+
+        // Owner decision D46: the day after keep_until the daily job deletes everything the business still holds,
+        // except its
+        // tenants row, its anonymised users and its closure rows, which the platform's history points at.
+        assertThat(closures.purgeDue(today))
+                .as("nothing is due before keep_until")
+                .isZero();
+        assertThat(count("SELECT count(*) FROM retail_sales WHERE tenant_id = ?", t.tenantId()))
+                .isPositive();
+        TestDatabase.owner()
+                .sql("UPDATE tenant_closures SET keep_until = ? WHERE id = ?")
+                .params(today.minusDays(1), closureId)
+                .update();
+        assertThat(closures.purgeDue(today)).isGreaterThanOrEqualTo(1);
+        List<String> kept = new ArrayList<>();
+        for (String table : RlsIsolationIT.tenantOwnedTables()) {
+            if (List.of("tenants", "users", "tenant_closures").contains(table)) {
+                continue;
+            }
+            if (count("SELECT count(*) FROM " + table + " WHERE tenant_id = ?", t.tenantId()) > 0) {
+                kept.add(table);
+            }
+        }
+        assertThat(kept).as("tables still holding rows after the purge").isEmpty();
+        assertThat(count(
+                        "SELECT count(*) FROM tenant_closures WHERE id = ? AND status = 'purged' AND purged_at IS NOT NULL",
+                        closureId))
+                .isEqualTo(1);
+        assertThat(platformAudits("platform.tenant.purged", t.tenantId())).isEqualTo(1);
+        assertThat(withPersonalData(t.tenantId())).isEmpty();
+        assertThat(closures.purgeDue(today))
+                .as("a purged request is never purged again")
+                .isZero();
     }
 
     static List<String> withPersonalData(UUID tenantId) {

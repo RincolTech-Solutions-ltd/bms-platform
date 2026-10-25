@@ -40,16 +40,18 @@ SELECT bms_grant_app('billing_contacts', 'SELECT, INSERT, UPDATE, DELETE');
 -- ---------------------------------------------------------------------------------------------
 -- 2. tenant_closures: the Owner's request to close the business. requested (the business is read only, the cooling-off
 --    runs to remove_after), then cancelled by the Owner, or removing and removed by the platform operator in one
---    transaction. One open request per business. The application may insert a request and cancel it; only the definer
---    functions of section 5 (running as bms_owner) move a request to removing or removed, so no request of the business
---    itself can start a removal.
+--    transaction; once its kept money records are past keep_until, purging and purged by the daily job (owner decision D46).
+--    One open request per business. The application may insert a request and cancel it; only the definer functions of
+--    sections 5 and 8 (running as bms_owner) move a request further, so no request of the business itself can start a
+--    removal or a purge.
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE tenant_closures (
     id                         uuid         NOT NULL PRIMARY KEY,
     tenant_id                  uuid         NOT NULL REFERENCES tenants (id),
     status                     text         NOT NULL DEFAULT 'requested'
-                                            CHECK (status IN ('requested', 'cancelled', 'removing', 'removed')),
+                                            CHECK (status IN ('requested', 'cancelled', 'removing', 'removed', 'purging',
+                                                              'purged')),
     requested_by               uuid         NOT NULL,
     requested_at               timestamptz  NOT NULL DEFAULT now(),
     remove_after               date         NOT NULL,
@@ -60,12 +62,14 @@ CREATE TABLE tenant_closures (
     removal_reason             varchar(300),
     removed_at                 timestamptz,
     keep_until                 date,
+    purged_at                  timestamptz,
     UNIQUE (tenant_id, id),
     FOREIGN KEY (tenant_id, requested_by) REFERENCES users (tenant_id, id),
     FOREIGN KEY (tenant_id, cancelled_by) REFERENCES users (tenant_id, id),
     CHECK ((status = 'cancelled') = (cancelled_at IS NOT NULL)),
-    CHECK ((status = 'removed') = (removed_at IS NOT NULL AND keep_until IS NOT NULL)),
-    CHECK (status NOT IN ('removing', 'removed') OR removed_by_platform_user_id IS NOT NULL)
+    CHECK ((status IN ('removed', 'purging', 'purged')) = (removed_at IS NOT NULL AND keep_until IS NOT NULL)),
+    CHECK ((status = 'purged') = (purged_at IS NOT NULL)),
+    CHECK (status NOT IN ('removing', 'removed', 'purging', 'purged') OR removed_by_platform_user_id IS NOT NULL)
 );
 CREATE UNIQUE INDEX tenant_closures_one_open ON tenant_closures (tenant_id) WHERE status IN ('requested', 'removing');
 CREATE INDEX tenant_closures_open ON tenant_closures (remove_after) WHERE status = 'requested';
@@ -156,8 +160,9 @@ $$;
 --    failure anywhere rolls the whole removal back. bms_owner has BYPASSRLS, so every statement below names the tenant.
 -- ---------------------------------------------------------------------------------------------
 
--- True only inside a removal: the caller runs as bms_owner (a definer function of this section), the transaction was marked
--- for this business by platform_begin_tenant_removal, and the business's request is being removed. SECURITY INVOKER on
+-- True only inside a removal or a purge: the caller runs as bms_owner (a definer function of sections 5 and 8), the transaction
+-- was marked for this business by platform_begin_tenant_removal or platform_purge_closed_tenant, and the business's request is
+-- being removed or purged. SECURITY INVOKER on
 -- purpose: current_user is the caller's.
 CREATE FUNCTION bms_erasing(p_row jsonb) RETURNS boolean
 LANGUAGE plpgsql STABLE SET search_path = public, pg_temp AS $$
@@ -170,7 +175,7 @@ BEGIN
         RETURN false;
     END IF;
     RETURN EXISTS (SELECT 1 FROM tenant_closures k
-                    WHERE k.tenant_id = (p_row ->> 'tenant_id')::uuid AND k.status = 'removing');
+                    WHERE k.tenant_id = (p_row ->> 'tenant_id')::uuid AND k.status IN ('removing', 'purging'));
 END
 $$;
 REVOKE ALL ON FUNCTION bms_erasing(jsonb) FROM PUBLIC;
@@ -420,8 +425,104 @@ BEGIN
             RAISE EXCEPTION 'V102: % was not extended', v_fn;
         END IF;
     END LOOP;
+    -- The other guards that fire on DELETE let the purge of section 8 through, and only it: the first statement of their
+    -- body returns OLD for a delete inside a purge.
+    FOREACH v_fn IN ARRAY ARRAY['ai_calls_guard', 'bms_commission_line_guard', 'bms_owner_keeps_admin', 'bms_payment_outcome_guard',
+                                'bms_referral_guard', 'lending_loan_charges_guard', 'lending_loan_collateral_guard',
+                                'lending_loan_guarantors_guard', 'payment_callbacks_guard',
+                                'retail_purchase_order_lines_guard'] LOOP
+        v_def := pg_get_functiondef(v_fn::regproc);
+        IF v_def !~ E'\nBEGIN\n' THEN
+            RAISE EXCEPTION 'V102: % has no body to extend', v_fn;
+        END IF;
+        v_def := regexp_replace(v_def, E'\nBEGIN\n',
+                                E'\nBEGIN\n    IF TG_OP = ''DELETE'' AND bms_erasing(to_jsonb(OLD)) THEN\n        RETURN OLD;\n    END IF;\n');
+        EXECUTE v_def;
+        IF position('bms_erasing(to_jsonb(OLD))' IN pg_get_functiondef(v_fn::regproc)) = 0 THEN
+            RAISE EXCEPTION 'V102: % was not extended', v_fn;
+        END IF;
+    END LOOP;
 END
 $$;
+
+-- ---------------------------------------------------------------------------------------------
+-- 8. The purge (owner decision D46): once a removed business is past keep_until, the daily job deletes every row it still
+--    has, money records included, except its tenants row, its users (anonymised placeholders the request points at) and its
+--    tenant_closures rows, which the platform's own history refers to. Unbound (bms_owner bypasses row-level security, so every
+--    statement names the business). Tables are read from the catalogue and deleted in passes, a table whose rows are still
+--    referenced waiting for a later pass, so a table added later is purged without a change here. Returns the rows deleted.
+-- ---------------------------------------------------------------------------------------------
+
+CREATE FUNCTION platform_closures_due_for_purge(p_today date) RETURNS SETOF uuid
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+    IF nullif(current_setting('app.tenant_id', true), '') IS NOT NULL THEN
+        RAISE EXCEPTION 'listed by the platform job only' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN QUERY SELECT k.id FROM tenant_closures k WHERE k.status = 'removed' AND k.keep_until < p_today
+                  ORDER BY k.keep_until, k.id;
+END
+$$;
+
+CREATE FUNCTION platform_purge_closed_tenant(p_closure uuid, p_today date) RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+    v_tenant  uuid;
+    v_table   text;
+    v_total   integer := 0;
+    v_n       integer;
+    v_pass    integer := 0;
+    v_blocked integer;
+    v_moved   integer;
+BEGIN
+    IF nullif(current_setting('app.tenant_id', true), '') IS NOT NULL THEN
+        RAISE EXCEPTION 'purged by the platform job only' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    UPDATE tenant_closures k SET status = 'purging'
+     WHERE k.id = p_closure AND k.status = 'removed' AND k.keep_until < p_today
+    RETURNING k.tenant_id INTO v_tenant;
+    IF v_tenant IS NULL THEN
+        RETURN 0;
+    END IF;
+    PERFORM set_config('bms.erasing_tenant', v_tenant::text, true);
+    LOOP
+        v_pass := v_pass + 1;
+        v_blocked := 0;
+        v_moved := 0;
+        FOR v_table IN
+            SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+              JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'tenant_id' AND NOT a.attisdropped
+             WHERE n.nspname = 'public' AND c.relkind = 'r'
+               AND c.relname NOT IN ('tenants', 'users', 'tenant_closures', 'platform_audit_log')
+             ORDER BY c.relname
+        LOOP
+            BEGIN
+                EXECUTE format('DELETE FROM %I WHERE tenant_id = $1', v_table) USING v_tenant;
+                GET DIAGNOSTICS v_n = ROW_COUNT;
+                v_moved := v_moved + v_n;
+            EXCEPTION WHEN foreign_key_violation THEN
+                v_blocked := v_blocked + 1;
+            END;
+        END LOOP;
+        v_total := v_total + v_moved;
+        EXIT WHEN v_blocked = 0;
+        IF v_moved = 0 OR v_pass > 50 THEN
+            RAISE EXCEPTION 'the purge of tenant % is stuck on % table(s) still referenced', v_tenant, v_blocked;
+        END IF;
+    END LOOP;
+    UPDATE tenant_closures k SET status = 'purged', purged_at = now() WHERE k.id = p_closure;
+    INSERT INTO platform_audit_log (id, action, tenant_id, data)
+    VALUES (gen_random_uuid(), 'platform.tenant.purged', v_tenant,
+            jsonb_build_object('closure_id', p_closure, 'rows_deleted', v_total));
+    PERFORM set_config('bms.erasing_tenant', '', true);
+    RETURN v_total;
+END
+$$;
+
+REVOKE ALL ON FUNCTION platform_closures_due_for_purge(date) FROM PUBLIC;
+REVOKE ALL ON FUNCTION platform_purge_closed_tenant(uuid, date) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION platform_closures_due_for_purge(date) TO bms_app;
+GRANT EXECUTE ON FUNCTION platform_purge_closed_tenant(uuid, date) TO bms_app;
 
 -- ---------------------------------------------------------------------------------------------
 -- 7. The operator's lists: the closure requests across businesses, the business of one request, and the businesses with no

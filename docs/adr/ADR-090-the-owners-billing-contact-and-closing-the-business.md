@@ -63,13 +63,22 @@ in a migration log line. Sign-in itself is out of scope: #322 and #349 change it
    business's audit rows (who did what and when stays, the people anonymised). The append-only and guard triggers of those tables
    let a change through only inside such a removal (`bms_erasing`: a definer function running as `bms_owner`, the transaction
    marked for this business, its request `removing`); the business itself can neither start a removal nor run an eraser.
-8. **Which money records are kept, and for how long.** Kept, without the people in them: the ledger (journals and their lines),
-   sales with their lines and payments, returns and credit notes, purchases, supplier bills and payments, the cash book, stock
-   movements, loans with their schedules, transactions and repayments, savings and investments, and the subscription payments
-   and receipts. Uganda's tax law asks a business to keep its books and the records behind them for five years, so they are
-   kept until **five years after the end of the tax year (1 July to 30 June) in which the business was removed**
-   (`tenant_closures.keep_until`, shown to the operator), then deleted. The deletion of the kept records on that day is a runbook
-   step for the operator (`docs/runbooks/closing-a-business.md`); the first such day is 30 June 2031.
+8. **Which money records are kept, for how long, and who deletes them: the owner's decision D46 (Hillary, 26 Oct 2026).**
+   Kept read only, without the people in them: the money records, that is sales with their lines and payments, invoices and
+   other documents, returns and credit notes, expenses and the rest of the cash book, purchases, supplier bills and payments,
+   the journal (entries and lines), the tax figures in them, stock movements, loans with their schedules, transactions and
+   repayments, savings and investments, and the subscription payments and receipts. They are kept for
+   `BMS_CLOSED_RETENTION_YEARS` (5 by default) after the end of the financial year (1 July to 30 June) in which the business was
+   removed: `tenant_closures.keep_until` is 30 June of that year plus the setting, shown to the operator and in the removal's
+   answer. The day after it a scheduled job (`core.platform.closed-retention`, daily at 03:20 Kampala time) deletes every row the
+   business still holds through `platform_purge_closed_tenant`, except its `tenants` row, its anonymised `users` and its
+   `tenant_closures` rows, which the platform's own history points at; the request becomes `purged` and
+   `platform.tenant.purged` is written. Staff accounts, sign-in data and the personal details of customers and members are
+   removed or anonymised at once when the removal is confirmed (decision 7), not at the end of the period. The one exception
+   D46 allows is a buyer's TIN that a tax invoice must show: **no such field is stored today** (no column on customers, credit
+   buyers, sales, quotations, documents or credit notes holds a TIN, and the invoice snapshot carries the buyer's name and
+   contact only, both removed); when one is added, it is the one field the retail eraser leaves on the invoice and on its
+   snapshot, and this decision names it. The five years are the owner's decision, still to be confirmed by an accountant.
 9. **Businesses with no Owner, listed for the operator.** `GET /platform/tenants/without-owner` lists every active or suspended
    business with no Owner and its active administrators (`platform_tenants_without_owner`), and the portal page Businesses with
    no owner offers Set as the owner, which is ADR-062's existing route: the operator's code and a reason, audited in both logs.
@@ -87,9 +96,9 @@ step, the Owner's step-up, the emails and the operator's own code are the guards
 bought or borrowed. The guard trigger functions now carry one more condition, so a later migration that replaces one of them must
 keep `OR bms_erasing(to_jsonb(OLD))`, or the removal fails (loudly, and `BusinessClosureIT` fails first).
 
-**Watch for:** the retention period is the tax law's five years as the owner read it; before the first real removal, the
-owner's legal adviser should confirm it, and in particular whether the anti-money-laundering record-keeping duty applies to a
-lender, in which case borrowers' identification would have to be kept with the loans for its own period instead of being removed;
+**Watch for:** the five years of decision 8 are the owner's decision D46, still to be confirmed by an accountant (change
+`BMS_CLOSED_RETENTION_YEARS`, which applies to removals made after the change); before the first real removal, also whether the
+anti-money-laundering record-keeping duty applies to a lender, in which case borrowers' identification would have to be kept with the loans for its own period instead of being removed;
 free text a person typed into a money record's own note (a purchase note, a repayment reference) is kept as typed; the platform's
 own audit log keeps the operator's acts, which can name the Owner's email; a new tenant table with personal data needs its
 module's eraser, and `BusinessClosureIT.frTen09_theRemovalLeavesNoPersonalDataInAnyTable` fails until it has one.

@@ -27,48 +27,19 @@ people's data.
 
 What removal deletes and keeps is listed in ADR-090 decisions 7 and 8. In short: names, phone numbers, ID numbers, emails, notes
 about people and every stored file are deleted or replaced by placeholders; sign-in is gone; the money records stay, without names,
-until five years after the end of the tax year (1 July to 30 June) of the removal.
+until the set years (5 unless `BMS_CLOSED_RETENTION_YEARS` says otherwise) after the end of the financial year (1 July to 30 June) of the removal, then the daily job deletes them.
 
 If a removal fails, nothing was changed (one transaction). The error log names the business; fix the cause and remove again.
 
-## Delete the kept money records after `keep_until`
+## The kept money records are deleted after `keep_until`
 
-Nothing does this by itself. Once a year, list the removed businesses whose day has passed:
-
-```sql
-SELECT k.tenant_id, t.slug, k.keep_until FROM tenant_closures k JOIN tenants t ON t.id = k.tenant_id
- WHERE k.status = 'removed' AND k.keep_until < current_date;
-```
-
-For each, on the host, as the PostgreSQL superuser (the append-only triggers refuse everyone else), take a backup first
-(`docs/runbooks/restore-from-backup.md`), then delete every row of the business except the `tenants` row and the
-`tenant_closures` row, which the platform's own history points at:
-
-```sql
-BEGIN;
-SET LOCAL session_replication_role = replica;  -- the guard and foreign key triggers stay off for this transaction only
-DO $$
-DECLARE
-    v_tenant uuid := '<tenant id>';
-    v_table  text;
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM tenant_closures WHERE tenant_id = v_tenant AND status = 'removed'
-                    AND keep_until < current_date) THEN
-        RAISE EXCEPTION 'not a removed business past its keep_until';
-    END IF;
-    FOR v_table IN
-        SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-          JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'tenant_id' AND NOT a.attisdropped
-         WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname NOT IN ('tenant_closures', 'platform_audit_log')
-    LOOP
-        EXECUTE format('DELETE FROM %I WHERE tenant_id = $1', v_table) USING v_tenant;
-    END LOOP;
-END
-$$;
-COMMIT;
-```
-
-Write what you did in the platform's own records (the incident or support log), with the date.
+Owner decision D46: the money records a removed business kept (sales, payments, invoices, credit notes, expenses, the journal,
+tax figures) stay read only for `BMS_CLOSED_RETENTION_YEARS` (5 unless set) after the end of the financial year (1 July to 30
+June) of the removal. The day after `keep_until` the job `core.platform.closed-retention` (daily, 03:20 Kampala time) deletes
+every row the business still holds, except its `tenants` row, its anonymised users and its closure rows. The platform history
+has `platform.tenant.purged` with the number of rows. Nothing is needed from you. If the error log names a closure the job could
+not purge, the request stays `removed` and the job tries again the next night; fix the cause (usually a table added later whose
+rows something else still points at) and let it run. The job is off where `BMS_PLATFORM_CLOSED_RETENTION_JOB_ENABLED=false`.
 
 ## Give a business an Owner
 
