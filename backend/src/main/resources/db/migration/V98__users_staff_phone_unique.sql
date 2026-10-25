@@ -21,8 +21,16 @@ SET LOCAL lock_timeout = '5s';
 
 -- users has FORCE ROW LEVEL SECURITY and no app.tenant_id is bound here. bms_owner has BYPASSRLS
 -- (deploy/postgres/initdb/01-roles.sh), so the check reads every business; row_security = off makes PostgreSQL raise rather
--- than silently see no rows should a policy still apply.
+-- than silently see no rows should a policy still apply. As in V92, an owner without BYPASSRLS drops FORCE on users for this
+-- transaction only and gets it back before the commit; with BYPASSRLS nothing is altered.
 SET LOCAL row_security = off;
+DO $$
+BEGIN
+    IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
+        ALTER TABLE users NO FORCE ROW LEVEL SECURITY;
+    END IF;
+END
+$$;
 
 DO $$
 DECLARE
@@ -43,6 +51,15 @@ BEGIN
     END IF;
 END
 $$;
+
+DO $$
+BEGIN
+    IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
+        ALTER TABLE users FORCE ROW LEVEL SECURITY;
+    END IF;
+END
+$$;
+SET LOCAL row_security = on;
 
 CREATE UNIQUE INDEX users_staff_phone ON users (tenant_id, phone_e164)
     WHERE kind = 'staff' AND phone_e164 IS NOT NULL AND status IN ('invited', 'active');
