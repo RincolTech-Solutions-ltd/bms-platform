@@ -847,6 +847,8 @@ Rule based only (no AI call): each check is a sentence from the item's own recor
   Use this item (Buy stock and Count stock, which puts the existing item on the line instead), and a hint "Items like this are in Lighting,
   such as LED bulb 9W screw." with Choose Lighting, which chooses the category only when tapped (not offered when the form is inside a
   category). Not shown while an item is changed. The save-time name check of #352 below is unchanged.
+- **Tours.** The page tours of Buy stock (version 5), Move stock (version 4) and Count stock (version 5) say in their save step that an
+  unusual line is asked about first. The selling tour, which starts by itself, is left at its version so sellers are not shown it again.
 
 ## Correcting entry mistakes (#351, #352, ADR-044)
 
