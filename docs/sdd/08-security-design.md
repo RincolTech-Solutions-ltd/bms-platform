@@ -247,8 +247,8 @@ Outside the Users routes the Owner alone asks for a module, stops one, cancels t
 `ExistingLoansIT.frExl03_theGoLiveDateGuardsAgainstBackdatingNewLending`, which refuses a
 non-Owner administrator with 403 `owner_only`). Subscription reminders
 and receipts go to the Owner's own email and phone (ADR-075; `BillingAutomationIT`); there is no
-separate billing contact and no request to close the business: both not yet built (follow-ups on
-issue #325). A staff account is never deleted, the Owner's included: it is deactivated, and the
+separate billing contact and no request to close the business: both not yet built
+(#571). A staff account is never deleted, the Owner's included: it is deactivated, and the
 application role holds no `DELETE` on `users` (`TenantOwnerIT.staffAccountsAreNeverDeleted`).
 
 ### 8.3.2 Permission matrix
