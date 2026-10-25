@@ -1,4 +1,5 @@
 import createClient, { type Middleware } from 'openapi-fetch';
+import { clientBuildHeader, forceUpdate, updater } from '../app/auto-update';
 import { getAccessToken, refreshSession, tenantHeaders } from '../auth/session';
 import { APP_UPDATING, APP_UPDATING_CHECK, APP_UPDATING_MAYBE_SAVED } from './retail-errors';
 import type { components, paths } from './schema';
@@ -131,8 +132,37 @@ const deployGap: Middleware = {
   },
 };
 
+// The app's build both ways (#576, ADR-087): every request says which app sent it, every answer says which server built it, and a
+// save on its way holds back the app's own reload. A 426 app_too_old means the server no longer serves this app.
+const writes = new Set<string>();
+const settled = (id: string) => {
+  if (writes.delete(id)) updater.writeEnded();
+};
+const appBuild: Middleware = {
+  onRequest({ request, id }) {
+    const build = clientBuildHeader();
+    if (build) request.headers.set('Bms-Client-Build', build);
+    if (!['GET', 'HEAD'].includes(request.method)) {
+      writes.add(id);
+      updater.writeStarted();
+    }
+    return request;
+  },
+  onResponse({ response, id }) {
+    settled(id);
+    updater.serverBuild(response.headers.get('Bms-Build'));
+    if (response.status === 426) forceUpdate();
+    return response;
+  },
+  onError({ id }) {
+    settled(id);
+  },
+};
+
 export { APP_UPDATING, APP_UPDATING_CHECK, APP_UPDATING_MAYBE_SAVED };
 export const api = createClient<paths>({ baseUrl: '/' });
+// First, so its answer is the last to run: a retried save (deployGap) still counts as on its way.
+api.use(appBuild);
 api.use(auth);
 api.use(deployGap);
 
