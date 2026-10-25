@@ -75,13 +75,18 @@ export function useCloseMenu(): () => void {
   return useContext(CloseMenu);
 }
 
-/** One link of the side menu: its icon, its label, which is the accessible name with the count after it, and its count. */
+/** One link of the side menu: its icon, its label and its count, read out together as "Orders, 3". */
 export function MenuItemLink({ to, label, icon, tour, exact, count }: Omit<MenuLink, 'section'>) {
   return (
     <Link to={to as never} activeOptions={exact ? { exact: true } : undefined} data-tour={tour}>
       {icon}
       <span className="side-menu-label">{label}</span>
-      {count && <span className="side-menu-count">{count}</span>}
+      {count && (
+        <span className="side-menu-count">
+          <span className="visually-hidden">, </span>
+          {count}
+        </span>
+      )}
     </Link>
   );
 }

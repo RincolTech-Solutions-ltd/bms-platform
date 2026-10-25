@@ -12,9 +12,9 @@ import { StaffContext } from './context';
 import { StaffBar, StaffSideNav } from './route';
 import { MorePage } from './tab-pages';
 
-// The shop in use at the top of the side menu and, on a phone, on the More page (issues #461 and #539, ADR-068): its own logo, small and rounded, beside
-// its name; a shop without one shows the business logo, and with no business logo either, only the name. The folded sidebar keeps
-// the image with the name as its tooltip. Every name below is invented.
+// The shop in use at the top of the side menu and, on a phone, on the More page (issues #461 and #539, ADR-068): its own logo, small
+// and rounded; a shop without one shows the business logo, and with no business logo either, the menu shows the business's initials
+// (issue #564) and the More page only the name. Every name below is invented.
 
 const LOGO = '/api/v1/branches/b-two/logo?v=doc-1';
 const BUSINESS = '/api/v1/branding/logo?v=doc-9';
@@ -67,7 +67,7 @@ function show(branch: string) {
   );
 }
 
-const sidebarShop = () => document.querySelector('.side-nav .current-shop') as HTMLElement;
+const sidebarShop = () => document.querySelector('.side-nav .menu-shop') as HTMLElement;
 
 beforeEach(() => {
   brand = PLATFORM_BRAND;
@@ -80,27 +80,29 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-describe('the shop in use in the sidebar (issue #461)', () => {
+describe('the shop in use at the top of the sidebar (issues #461, #564)', () => {
   beforeEach(() => widthIs(1280));
 
-  it('shows the shop logo, rounded, beside the shop name', async () => {
+  it('shows the shop logo, rounded, with the business name and the branch at the right', async () => {
+    brand = { name: 'Test Traders', logoSrc: null, themePrimary: null, themeText: null };
     show('b-two');
     const image = (await within(sidebarShop()).findByAltText('Logo of Test Shop Two (KLA)')) as HTMLImageElement;
     expect(image.getAttribute('src')).toBe(LOGO);
-    expect(image.className).toBe('current-shop-logo');
-    expect(within(sidebarShop()).getByText('Test Shop Two (KLA)').className).toBe('current-shop-name');
+    expect(image.className).toBe('menu-shop-logo');
+    expect(within(sidebarShop()).getByText('Test Traders').className).toBe('menu-shop-name');
+    expect(sidebarShop().querySelector('.menu-shop-branch-name')?.textContent).toBe('Test Shop Two (KLA)');
   });
 
   it('holds an empty space the size of the logo while the shop logo loads, never the business logo', async () => {
     brand = { name: 'Test Traders', logoSrc: BUSINESS, themePrimary: null, themeText: null };
     show('b-two');
-    const space = sidebarShop().querySelector('.current-shop-logo') as HTMLElement;
+    const space = sidebarShop().querySelector('.menu-shop-logo') as HTMLElement;
     expect(space.tagName).toBe('SPAN');
     expect(space.getAttribute('aria-hidden')).toBe('true');
     expect(within(sidebarShop()).queryByRole('img')).toBeNull();
     const image = (await within(sidebarShop()).findByAltText('Logo of Test Shop Two (KLA)')) as HTMLImageElement;
     expect(image.getAttribute('src')).toBe(LOGO);
-    expect(sidebarShop().querySelectorAll('.current-shop-logo')).toHaveLength(1);
+    expect(sidebarShop().querySelectorAll('.menu-shop-logo')).toHaveLength(1);
   });
 
   it('falls back to the business logo for a shop without its own', async () => {
@@ -110,7 +112,7 @@ describe('the shop in use in the sidebar (issue #461)', () => {
     expect(image.getAttribute('src')).toBe(BUSINESS);
   });
 
-  it('falls back to the business logo when the shop logo fails to load, and to the name alone when that fails too', async () => {
+  it('falls back to the business logo when the shop logo fails to load, and to the initials when that fails too', async () => {
     brand = { name: 'Test Traders', logoSrc: BUSINESS, themePrimary: null, themeText: null };
     show('b-two');
     const image = (await within(sidebarShop()).findByAltText('Logo of Test Shop Two (KLA)')) as HTMLImageElement;
@@ -119,13 +121,14 @@ describe('the shop in use in the sidebar (issue #461)', () => {
     expect(within(sidebarShop()).getByAltText('Logo of Test Shop Two (KLA)').getAttribute('src')).toBe(BUSINESS);
     fireEvent.error(within(sidebarShop()).getByAltText('Logo of Test Shop Two (KLA)'));
     expect(within(sidebarShop()).queryByRole('img')).toBeNull();
-    expect(within(sidebarShop()).getByText('Test Shop Two (KLA)')).toBeTruthy();
+    expect(sidebarShop().querySelector('.menu-shop-initials')?.textContent).toBe('TT');
   });
 
-  it('shows the name with no image when neither the shop nor the business has a logo', () => {
+  it('shows the business initials when neither the shop nor the business has a logo', () => {
+    brand = { name: 'Test Traders', logoSrc: null, themePrimary: null, themeText: null };
     show('b-one');
-    expect(within(sidebarShop()).getByText('Test Shop One (HQ)')).toBeTruthy();
     expect(within(sidebarShop()).queryByRole('img')).toBeNull();
+    expect(sidebarShop().querySelector('.menu-shop-initials')?.textContent).toBe('TT');
   });
 
   it('shows All branches with the business logo', async () => {
@@ -134,12 +137,10 @@ describe('the shop in use in the sidebar (issue #461)', () => {
     expect((await within(sidebarShop()).findByAltText('Logo of All branches')).getAttribute('src')).toBe(BUSINESS);
   });
 
-  it('keeps only the image when folded, the name as its tooltip', async () => {
-    show('b-two');
-    fireEvent.click(screen.getByRole('button', { name: 'Menu labels' }));
-    await within(sidebarShop()).findByAltText('Logo of Test Shop Two (KLA)');
-    expect(sidebarShop().getAttribute('title')).toBe('Test Shop Two (KLA)');
-    expect(within(sidebarShop()).getByText('Test Shop Two (KLA)').className).toBe('visually-hidden');
+  it('switches branch from the branch at the right, with the choices of the top bar', () => {
+    show('b-one');
+    const picker = within(sidebarShop()).getByRole('combobox', { name: 'Switch branch' }) as HTMLSelectElement;
+    expect(Array.from(picker.options).map((o) => o.textContent)).toEqual(['All branches', 'Test Shop One (HQ)', 'Test Shop Two (KLA)']);
   });
 });
 
