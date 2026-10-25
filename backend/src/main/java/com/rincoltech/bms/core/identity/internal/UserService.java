@@ -40,6 +40,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -432,11 +433,15 @@ class UserService implements TenantAdmins {
         String phone = request.phone() == null ? before.phoneE164() : normalisePhone(request.phone());
         checkUnique(email, phone, userId);
         boolean contactChanged = !Objects.equals(email, before.email()) || !Objects.equals(phone, before.phoneE164());
-        jdbc.sql("""
-                        UPDATE users SET full_name = ?, email = ?, phone_e164 = ?, updated_at = now(), version = version + 1,
-                                         contact_changed_at = CASE WHEN ? THEN now() ELSE contact_changed_at END
-                         WHERE id = ?
-                        """).params(fullName, email, phone, contactChanged, userId).update();
+        try {
+            jdbc.sql("""
+                            UPDATE users SET full_name = ?, email = ?, phone_e164 = ?, updated_at = now(), version = version + 1,
+                                             contact_changed_at = CASE WHEN ? THEN now() ELSE contact_changed_at END
+                             WHERE id = ?
+                            """).params(fullName, email, phone, contactChanged, userId).update();
+        } catch (DuplicateKeyException e) {
+            throw duplicateContact(e);
+        }
         if (contactChanged && before.isOwner() && before.email() == null && before.phoneE164() != null) {
             // An Owner with no email hears of it by SMS on the old phone, where the business's SMS is on (ADR-036,
             // ADR-062).
@@ -700,10 +705,14 @@ class UserService implements TenantAdmins {
         planLimits.checkRoomFor(PlanLimits.MAX_STAFF_USERS, staff);
         checkUnique(email, phone, null);
         UUID id = UUID.randomUUID();
-        jdbc.sql("""
-                        INSERT INTO users (id, tenant_id, kind, full_name, email, phone_e164, status)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, 'staff', ?, ?, ?, 'invited')
-                        """).params(id, fullName.trim(), email, phone).update();
+        try {
+            jdbc.sql("""
+                            INSERT INTO users (id, tenant_id, kind, full_name, email, phone_e164, status)
+                            VALUES (?, current_setting('app.tenant_id')::uuid, 'staff', ?, ?, ?, 'invited')
+                            """).params(id, fullName.trim(), email, phone).update();
+        } catch (DuplicateKeyException e) {
+            throw duplicateContact(e);
+        }
         return id;
     }
 
@@ -832,6 +841,18 @@ class UserService implements TenantAdmins {
                         HttpStatus.CONFLICT, "duplicate_phone", "Duplicate phone", "A staff user has this phone.");
             }
         }
+    }
+
+    /**
+     * The unique indexes behind {@link #checkUnique} (issue #323): two requests that passed the check at the same moment
+     * reach the index, the second waits for the first to commit and is refused here with the same 409.
+     */
+    private static ApiException duplicateContact(DuplicateKeyException e) {
+        return String.valueOf(e.getMessage()).contains("users_staff_email")
+                ? new ApiException(
+                        HttpStatus.CONFLICT, "duplicate_email", "Duplicate email", "A staff user has this email.")
+                : new ApiException(
+                        HttpStatus.CONFLICT, "duplicate_phone", "Duplicate phone", "A staff user has this phone.");
     }
 
     private UserResponse lockUser(UUID userId) {
