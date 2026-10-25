@@ -36,7 +36,7 @@ import tools.jackson.databind.JsonNode;
  * Item codes made from the category (issue #493, owner decisions D14 and D16, ADR-081 as amended by issue #562): a category
  * has a code start of 2 to 4 letters, unique in the business, suggested from its name and editable; every item added gets the
  * category's next free number, PREFIX-0001, also when two people add at once; a typed code is refused on add and on edit; the
- * import gives every new row its category's next code and uses no typed one; existing codes never change, and moving an item to
+ * import (unchanged pending owner decision D45) fills blank codes from each row's category and keeps typed ones; existing codes never change, and moving an item to
  * another category keeps its code. Fabricated data.
  */
 class RetailItemCodesIT extends IntegrationTest {
@@ -223,48 +223,36 @@ class RetailItemCodesIT extends IntegrationTest {
     }
 
     @Test
-    void theImportGivesEveryNewRowItsCategorysNextCodeAndUsesNoTypedCode() {
+    void theImportFillsBlankCodesFromEachRowsCategoryAndKeepsTypedOnes() {
         UUID bulbs = api.category("Bulbs");
         codeOf(add(bulbs, null, "Test bulb 9W"));
         String csv = "code,description,category,unit,sell_price\n"
                 + ",Test bulb 12W,Bulbs,test-piece,2000\n"
-                + "BLB-0007,Test bulb 15W,Bulbs,test-piece,2500\n"
+                + "BLB-0002,Test bulb 15W,Bulbs,test-piece,2500\n"
                 + ",Test bulb 18W,bulbs,test-piece,3000\n"
                 + ",Test extension 4 way,Extensions,test-piece,9000\n"
-                + "OWN-7,Test extension 6 way,Extensions,test-piece,12000\n"
-                + "blb-0001,Test bulb 9W again,Bulbs,test-piece,1500\n";
+                + "OWN-7,Test extension 6 way,Extensions,test-piece,12000\n";
         ResponseEntity<JsonNode> dry = api.post("/products/import?dry_run=true", Map.of("csv", csv), ADMINISTRATOR);
         assertThat(dry.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(dry.getBody().get("added").asInt()).isEqualTo(5);
-        // A row whose code an item holds already is that item: skipped, as before.
-        assertThat(dry.getBody().get("skipped").asInt()).isEqualTo(1);
-        assertThat(dry.getBody().get("rows").get(5).get("message").asString()).contains("exists already");
         assertThat(dry.getBody().get("rows").get(0).get("code").asString()).isEmpty();
         assertThat(dry.getBody().get("rows").get(0).get("message").asString()).contains("next code of Bulbs");
-        assertThat(dry.getBody().get("rows").get(1).get("code").asString()).isEmpty();
-        assertThat(dry.getBody().get("rows").get(1).get("message").asString())
-                .contains("next code of Bulbs")
-                .contains("The code BLB-0007 in the file is not used");
 
         ResponseEntity<JsonNode> applied =
                 api.post("/products/import?dry_run=false", Map.of("csv", csv), ADMINISTRATOR);
         assertThat(applied.getStatusCode()).isEqualTo(HttpStatus.OK);
         List<String> reported = new ArrayList<>();
         applied.getBody().get("rows").forEach(r -> reported.add(r.get("code").asString()));
-        // Issue #562: the typed BLB-0007 and OWN-7 are not used; each row takes its category's next number in file
-        // order.
-        assertThat(reported).containsExactly("BLB-0002", "BLB-0003", "BLB-0004", "EXT-0001", "EXT-0002", "blb-0001");
+        // The typed BLB-0002 goes in first, so the blank rows of Bulbs step over it.
+        assertThat(reported).containsExactly("BLB-0003", "BLB-0002", "BLB-0004", "EXT-0001", "OWN-7");
         assertThat(codesByName())
-                .containsEntry("Test bulb 12W", "BLB-0002")
-                .containsEntry("Test bulb 15W", "BLB-0003")
+                .containsEntry("Test bulb 12W", "BLB-0003")
+                .containsEntry("Test bulb 15W", "BLB-0002")
                 .containsEntry("Test bulb 18W", "BLB-0004")
                 .containsEntry("Test extension 4 way", "EXT-0001")
-                .containsEntry("Test extension 6 way", "EXT-0002")
-                .doesNotContainKey("Test bulb 9W again")
-                .doesNotContainValue("BLB-0007")
-                .doesNotContainValue("OWN-7");
+                .containsEntry("Test extension 6 way", "OWN-7");
 
-        // A file without a code column at all is read the same way.
+        // A file without a code column at all is read as every code blank.
         ResponseEntity<JsonNode> noColumn = api.post(
                 "/products/import?dry_run=false",
                 Map.of("csv", "description,category,unit,sell_price\nTest bulb 30W,Bulbs,test-piece,4000\n"),

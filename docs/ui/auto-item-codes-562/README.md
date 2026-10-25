@@ -14,8 +14,9 @@ Every item and code is fabricated by the mock.
 | `06-edit-item-code-never-changes-412` | Change this item: "Item code: P001. It never changes." |
 | `07-buy-stock-new-item-code-412` | Buy stock, Not in the list? Add it here: the code as text above the category |
 | `08-sizes-codes-made-by-app-412` | Add an item with sizes and colours: no short code box, each size's code made by the app |
-| `09-import-help-412` | Import items: the help says the app gives each new item its code |
 
 | Add in a category | Edit | Buy stock | Sizes |
 |---|---|---|---|
 | ![Add](02-category-add-item-code-made-by-app-412.png) | ![Edit](06-edit-item-code-never-changes-412.png) | ![Buy stock](07-buy-stock-new-item-code-412.png) | ![Sizes](08-sizes-codes-made-by-app-412.png) |
+
+The import is unchanged in this pull request: what it does with a file's codes waits on owner decision D45.

@@ -60,8 +60,8 @@ The owner saw the editable Item code box of #550 and decided that **the app alwa
 types or changes it.** Supplier and maker codes go in the barcode field (ADR-070), which is unchanged.
 
 - **Decision 3 now reads: every new item gets the category's next code**, `PREFIX-0001`, from `bms_next_item_code` as above,
-  on every path: the item form opened in a category, Add an item on Items, the new item added while buying or counting stock
-  (FR-RET-71), Add an item with sizes and colours, and the import. The forms show the code that will be made as text ("Item
+  on every path that adds one item: the item form opened in a category, Add an item on Items, the new item added while buying
+  or counting stock (FR-RET-71) and Add an item with sizes and colours. The import is pending D45 (below). The forms show the code that will be made as text ("Item
   code: BLB-0007, made by the app"), never an input; the number is the category's next and the saved code is the one in the
   answer, since another add may take that number first.
 - **A typed code is refused, not ignored.** `POST /retail/products` with a `code` that is not blank answers 400
@@ -72,9 +72,10 @@ types or changes it.** Supplier and maker codes go in the barcode field (ADR-070
   request, not a rule about its value.
 - **Decision 4 now also covers edits: existing codes never change.** `PATCH /retail/products/{id}` refuses a `code` other than
   the item's own with the same 400 (its own code sent back is no change), and the edit form shows the code as text.
-- **Decision 6 now reads: the import gives every new row its category's next code**, in file order. A code typed on a new row
-  is not used and the row's report says so. A row whose code an item already holds (ignoring case) is that item and is skipped,
-  as before; the import never changes an item. Applying a file again stays idempotent through the name rule (FR-RET-44).
+- **Decision 6 is not changed yet.** What the import does with codes already in a shop's file is an open owner question
+  (D45: always make new codes, keep the file's codes behind a "Let the app make the codes" tick, or keep them only where
+  filled). Until it is answered the import works as decision 6 says, and the change stays inside `ProductImportService` so
+  the answer is one small change there.
 - **Sizes and colours (ADR-051).** A new item with sizes takes the category's next code as its base code (BLB-0007) and each
   size gets the base code with its size and colour (BLB-0007-03M-BLUE); the preview shows them, with no code box. Giving an item
   sizes and joining items kept apart keep the codes the items have; later sizes start from the first item's code.

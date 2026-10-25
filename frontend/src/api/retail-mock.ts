@@ -768,40 +768,32 @@ export function createMockRetail(): RetailApi {
         const lines = csv.split(/\r?\n/).filter((l) => l.trim() !== '');
         const sep = lines[0]?.includes('\t') ? '\t' : ',';
         const head = (lines[0] ?? '').split(sep).map((h) => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
-        for (const need of ['description', 'category', 'unit', 'sell_price']) {
+        for (const need of ['code', 'description', 'category', 'unit', 'sell_price']) {
           if (!head.includes(need)) refuse(422, 'validation_failed', `The file needs a column called ${need.replace('_', ' ')}.`);
         }
         if (head.includes('cost_price') && !profitAccess) refuse(422, 'cost_not_allowed', 'The buying price column needs permission to see buying prices. Take that column out of the file and try again.');
-        // Issue #562, as the server: a code in the file only finds an item that has it; every new row gets its category's
-        // next code on apply; the same name in the same unit is skipped, so a second apply adds nothing.
         const seen = new Set<string>();
-        const parsed = lines.slice(1).map((l, i) => {
+        const rows = lines.slice(1).map((l, i) => {
           const c = l.split(sep).map((x) => x.trim());
-          const get = (n: string) => (head.includes(n) ? c[head.indexOf(n)] ?? '' : '');
-          const typed = get('code');
-          const nameKey = `${get('description').toLowerCase()}|${get('unit').toLowerCase()}`;
-          const category = cats.find((x) => x.name.toLowerCase() === get('category').toLowerCase()) ?? cats[0];
-          const base = { line: i + 2, code: '', description: get('description') };
-          const fields = { category: category?.name ?? get('category'), unit: get('unit'), sell: Number(get('sell_price').replace(/,/g, '')) };
-          if (!/^\d+$/.test(get('sell_price').replace(/,/g, ''))) return { row: { ...base, code: typed, outcome: 'error', message: 'The selling price must be a whole number, for example 12000.' }, fields };
-          if (typed && [...products.values()].some((p) => p.code.toLowerCase() === typed.toLowerCase())) return { row: { ...base, code: typed, outcome: 'skipped', message: 'An item with this code exists already.' }, fields };
-          if (seen.has(nameKey) || [...products.values()].some((p) => `${p.description.toLowerCase()}|${p.unit.toLowerCase()}` === nameKey)) return { row: { ...base, outcome: 'skipped', message: 'An item with this name exists already.' }, fields };
-          seen.add(nameKey);
-          const notUsed = typed ? ` The code ${typed} in the file is not used.` : '';
-          return { row: { ...base, outcome: 'added', message: `${dryRun ? 'Would be added.' : 'Added.'} The app gives it the next code of ${fields.category}.${notUsed}` }, fields, category };
+          const get = (n: string) => c[head.indexOf(n)] ?? '';
+          const code = get('code');
+          const base = { line: i + 2, code, description: get('description') };
+          if (!/^\d+$/.test(get('sell_price').replace(/,/g, ''))) return { ...base, outcome: 'error', message: 'The selling price must be a whole number, for example 12000.' };
+          if ([...products.values()].some((p) => p.code.toLowerCase() === code.toLowerCase())) return { ...base, outcome: 'skipped', message: 'An item with this code exists already.' };
+          if (seen.has(code.toLowerCase())) return { ...base, outcome: 'skipped', message: 'This code is repeated in the file; the first row is used.' };
+          seen.add(code.toLowerCase());
+          return { ...base, outcome: 'added', message: dryRun ? 'Would be added.' : 'Added.' };
         });
-        const rows = parsed.map((x) => x.row);
         const count = (o: string) => rows.filter((r) => r.outcome === o).length;
         if (!dryRun && count('error') > 0) refuse(422, 'import_has_errors', `${count('error')} rows have a problem. Nothing was added. Run the check to see which rows, fix them and try again.`);
         if (!dryRun) {
-          for (const x of parsed) {
-            if (x.row.outcome !== 'added' || !x.category) continue;
-            const [code, n] = freeCode(x.category);
-            x.category.next = n + 1;
-            x.row.code = code;
+          lines.slice(1).forEach((l) => {
+            const c = l.split(sep).map((x) => x.trim());
+            const get = (n: string) => c[head.indexOf(n)] ?? '';
+            if ([...products.values()].some((p) => p.code.toLowerCase() === get('code').toLowerCase())) return;
             const id = nextId('b');
-            products.set(id, { id, code, description: x.row.description, category: x.fields.category, unit: x.fields.unit, costMinor: 0, sellMinor: x.fields.sell, active: true, version: 1 });
-          }
+            products.set(id, { id, code: get('code'), description: get('description'), category: get('category'), unit: get('unit'), costMinor: 0, sellMinor: Number(get('sell_price').replace(/,/g, '')), active: true, version: 1 });
+          });
         }
         return { dry_run: dryRun, rows_read: rows.length, added: count('added'), skipped: count('skipped'), errors: count('error'), categories_created: [], units_created: [], rows };
       }),

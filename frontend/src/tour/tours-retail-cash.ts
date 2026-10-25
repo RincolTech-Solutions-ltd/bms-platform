@@ -183,14 +183,13 @@ export const buyersPage: Tour = {
 
 export const importPage: Tour = {
   id: 'page-import',
-  // Version 3: the app always makes the item code, never typed (issue #562).
-  version: 3,
+  version: 2,
   title: 'This page: import items',
   audience: (me) => held(me, CATALOGUE) && held(me, STOCK_READ) && held(me, SETTINGS),
   autoStart: false,
   page: '/staff/retail/catalogue/import',
   steps: [
-    step({ id: 'format', target: 'import-note', title: 'Get the file ready', body: 'The first row names the columns. Then put one item on each row. The app gives each new item the next code of its category; a code typed in the file is not used. Nothing is saved until you add the items.' }),
+    step({ id: 'format', target: 'import-note', title: 'Get the file ready', body: 'The first row names the columns. Then put one item on each row. Leave a code empty and the app gives the next code of its category. Nothing is saved until you add the items.' }),
     step({ id: 'file', target: 'import-file', title: 'Choose your file', body: 'Tap here and pick a CSV file saved as UTF-8.' }),
     step({ id: 'paste', target: 'import-text', title: 'Or paste the rows', body: 'You can also paste the rows straight into this box.' }),
     step({ id: 'check', target: 'import-check', title: 'Check it first', body: 'Tap Check the file. You see what would be added and which rows have a problem. When all is well, an Add button appears.' }),

@@ -281,9 +281,7 @@ describe('importing items from a file', () => {
     expect([first.added, first.skipped]).toEqual([2, 1]);
     const again = await api.importProducts(clean, false);
     expect([again.added, again.skipped]).toEqual([0, 3]);
-    // Issue #562: the codes in the file are not used; each new item has its category's next code.
-    expect((await api.listCatalogue({ query: 'IMP-' })).items).toHaveLength(0);
-    expect(first.rows?.filter((r) => r.outcome === 'added').every((r) => /^[A-Z]{2,4}-\d{4}$/.test(r.code ?? ''))).toBe(true);
+    expect((await api.listCatalogue({ query: 'IMP-' })).items).toHaveLength(2);
     expect(renderToString(<ImportReport result={first} />)).toContain('What was done');
   });
 
