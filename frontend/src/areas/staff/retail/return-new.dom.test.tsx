@@ -175,7 +175,7 @@ describe('the settings note', () => {
   it('says so in one neutral Hint line while returns are on and no approval limit is set, and stays quiet otherwise', () => {
     const { unmount } = render(<ReturnsThresholdWarning capabilities={{ returns: true } as never} />);
     const note = screen.getByTestId('returns-no-threshold');
-    expect(note.textContent).toMatch(/^Returns need no second person yet\. /);
+    expect(note.textContent).toMatch(/^Returns need no second administrator yet\. /);
     expect(note.textContent).toMatch(/no approval limit/i);
     expect(note.getAttribute('role')).toBe('note');
     // No screen sets the limit yet, so the note offers no link that would lead nowhere.

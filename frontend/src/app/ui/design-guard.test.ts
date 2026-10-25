@@ -362,7 +362,7 @@ describe('design guard, the cross-cutting fixes of the 70-screen audit', () => {
       expect(code(`areas/staff/retail/${file}.tsx`).match(/className="[^"]*(?:(?:alert|text|note|hint)-warning|amber)[^"]*"/)?.[0] ?? null, file).toBeNull();
     }
     const note = code('areas/staff/retail/settings.tsx').match(/export function ReturnsThresholdWarning[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(note).toMatch(/<Hint>\s*Returns need no second person yet\. /);
+    expect(note).toMatch(/<Hint>\s*Returns need no second administrator yet\. /);
     expect(note).not.toMatch(/<Link\b|<a\b/);
   });
 
