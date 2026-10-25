@@ -89,6 +89,12 @@ class RetailCapabilityGroupTest {
         Map<String, Object> shop = group.normalise(Map.of("profile", "shop", "returns", true), Map.of());
         assertThat(shop.get("profile")).isEqualTo("shops");
         assertThat(group.enabledCapabilities(shop)).containsExactly("returns");
+        assertThat(group.normalise(Map.of("profile", "shop", "units", true), Map.of())
+                        .get("profile"))
+                .isEqualTo("wholesale_and_shops");
+        assertThat(group.normalise(Map.of("profile", "shop", "transfer_receipt", true), Map.of())
+                        .get("profile"))
+                .isEqualTo("stores_and_shops");
 
         Map<String, Object> storesOnly = Map.of("profile", "trade", "branch_roles", true, "transfer_receipt", true);
         assertThat(group.normalise(storesOnly, Map.of()).get("profile")).isEqualTo("stores_and_shops");

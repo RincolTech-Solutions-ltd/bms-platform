@@ -54,16 +54,16 @@ public final class BusinessTypes {
     }
 
     /**
-     * The kind a stored profile from before issue #424 reads as, judged from the switches without changing any: {@code shop} is
-     * Shops only, and {@code trade} is Wholesale and shops when a wholesale tool is on, else Stores and shops. The same rule as
-     * migration {@code V103}, for a row an older server wrote during a deploy.
+     * The kind a stored profile from before issue #424 (or one an older server wrote back during a deploy) reads as, judged from the
+     * switches without changing any: Wholesale and shops when a wholesale tool is on; otherwise {@code trade} is Stores and shops,
+     * and {@code shop} is Stores and shops when the two-step stock move is on, else Shops only. The same rule as migration
+     * {@code V103}.
      */
     public static String fromLegacy(String profile, Map<String, Object> flags) {
-        if (!"trade".equals(profile)) {
-            return SHOPS;
+        if (WHOLESALE_TOOLS.stream().anyMatch(k -> Boolean.TRUE.equals(flags.get(k)))) {
+            return WHOLESALE_AND_SHOPS;
         }
-        boolean wholesale = WHOLESALE_TOOLS.stream().anyMatch(k -> Boolean.TRUE.equals(flags.get(k)));
-        return wholesale ? WHOLESALE_AND_SHOPS : STORES_AND_SHOPS;
+        return "trade".equals(profile) || Boolean.TRUE.equals(flags.get("transfer_receipt")) ? STORES_AND_SHOPS : SHOPS;
     }
 
     /** True when choosing {@code type} switches {@code capability} off; false for a switch no kind governs. */

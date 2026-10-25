@@ -484,8 +484,9 @@ scheduled cancellation, which the billing run leaves out (ADR-075 decision 8).
 
 Reads for the operator across tenants (`V75`, definer functions owned by `bms_owner`):
 `platform_tenant_overview()` (every tenant with its plan, subscription dates, modules, the
-first tenant admin as the owner and the latest staff sign-in; since `V103` also `business_type`, the `profile` of the first
-`module_groups` entry of a module the tenant has on that stores one, ADR-092), `platform_tenant_admins(tenant)`
+first tenant admin as the owner and the latest staff sign-in; since `V103` also `profile_groups`, the `module_groups`
+entries of the modules the tenant has on that store a `profile`, which the server reads through each module's group to give
+the operator `business_type`, ADR-092), `platform_tenant_admins(tenant)`
 and `platform_tenant_outbox(tenant, limit)` (the outbox rows of one tenant, never their
 parameters).
 

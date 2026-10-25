@@ -106,8 +106,9 @@ class PlatformController {
             @Schema(
                     description =
                             "The kind of business its administrator chose (issue #424, ADR-092): the profile a module's"
-                                    + " settings group stores, for retail shops, stores_and_shops, wholesale or"
-                                    + " wholesale_and_shops; null when none was saved (a retail business is then shops)")
+                                    + " settings group stores, read through that module's group, for retail shops,"
+                                    + " stores_and_shops, wholesale or wholesale_and_shops; null when none was saved"
+                                    + " (a retail business is then shops)")
             String businessType) {}
 
     @Schema(name = "PlatformTenantList")

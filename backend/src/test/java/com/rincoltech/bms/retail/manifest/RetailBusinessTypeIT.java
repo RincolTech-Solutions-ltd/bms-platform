@@ -47,6 +47,8 @@ class RetailBusinessTypeIT extends IntegrationTest {
         TestDatabase.Fixture stores = tenant("bt-stores");
         TestDatabase.Fixture trade = tenant("bt-trade");
         TestDatabase.Fixture documentsOnly = tenant("bt-docs");
+        TestDatabase.Fixture shopWholesale = tenant("bt-shop-wh");
+        TestDatabase.Fixture shopStores = tenant("bt-shop-st");
         TestDatabase.Fixture never = tenant("bt-never");
         TestDatabase.Fixture renamed = tenant("bt-renamed");
         arrange(
@@ -61,14 +63,18 @@ class RetailBusinessTypeIT extends IntegrationTest {
                 "{\"module_groups\": {\"retail\": {\"profile\": \"trade\", \"branch_roles\": true, \"price_lists\": true,"
                         + " \"credit_sale_recognition\": \"on_sale\"}, \"sms\": {\"enabled\": false}}}");
         arrange(documentsOnly, "{\"module_groups\": {\"retail\": {\"profile\": \"trade\", \"documents\": true}}}");
+        arrange(shopWholesale, "{\"module_groups\": {\"retail\": {\"profile\": \"shop\", \"price_lists\": true}}}");
+        arrange(shopStores, "{\"module_groups\": {\"retail\": {\"profile\": \"shop\", \"transfer_receipt\": true}}}");
         arrange(never, "{\"module_groups\": {\"retail\": {\"units\": true}}}");
         arrange(renamed, "{\"module_groups\": {\"retail\": {\"profile\": \"wholesale\", \"units\": true}}}");
-        Map<TestDatabase.Fixture, JsonNode> before = Stream.of(shop, stores, trade, documentsOnly, never, renamed)
+        Map<TestDatabase.Fixture, JsonNode> before = Stream.of(
+                        shop, stores, trade, documentsOnly, shopWholesale, shopStores, never, renamed)
                 .collect(Collectors.toMap(f -> f, this::settingsOf));
-        Map<TestDatabase.Fixture, Integer> versions = Stream.of(shop, stores, trade, documentsOnly, never, renamed)
+        Map<TestDatabase.Fixture, Integer> versions = Stream.of(
+                        shop, stores, trade, documentsOnly, shopWholesale, shopStores, never, renamed)
                 .collect(Collectors.toMap(f -> f, this::versionOf));
 
-        String own = Stream.of(shop, stores, trade, documentsOnly, never, renamed)
+        String own = Stream.of(shop, stores, trade, documentsOnly, shopWholesale, shopStores, never, renamed)
                 .map(f -> "'" + f.tenantId() + "'")
                 .collect(Collectors.joining(", "));
         String scoped = rename.replace(
@@ -84,10 +90,13 @@ class RetailBusinessTypeIT extends IntegrationTest {
         assertThat(profileOf(stores)).isEqualTo("stores_and_shops");
         assertThat(profileOf(trade)).isEqualTo("wholesale_and_shops");
         assertThat(profileOf(documentsOnly)).isEqualTo("wholesale_and_shops");
+        // A shop is judged from its switches too, so a row an older server wrote back is never mislabelled.
+        assertThat(profileOf(shopWholesale)).isEqualTo("wholesale_and_shops");
+        assertThat(profileOf(shopStores)).isEqualTo("stores_and_shops");
         assertThat(settingsOf(never).get("module_groups").get("retail").has("profile"))
                 .isFalse();
         assertThat(profileOf(renamed)).isEqualTo("wholesale");
-        for (TestDatabase.Fixture f : List.of(shop, stores, trade, documentsOnly)) {
+        for (TestDatabase.Fixture f : List.of(shop, stores, trade, documentsOnly, shopWholesale, shopStores)) {
             JsonNode was = withoutProfile(before.get(f));
             assertThat(withoutProfile(settingsOf(f)))
                     .as("everything but the profile of %s", f.slug())
@@ -136,6 +145,10 @@ class RetailBusinessTypeIT extends IntegrationTest {
                 "*",
                 Map.of("If-Match", etag));
         assertThat(saved.getStatusCode()).isEqualTo(HttpStatus.OK);
+        // A row the previous release wrote back during a deploy: the operator reads it as its kind, never as a wrong
+        // default.
+        TestDatabase.Fixture legacy = tenant("bt-op-legacy");
+        arrange(legacy, "{\"module_groups\": {\"retail\": {\"profile\": \"shop\", \"units\": true}}}");
 
         Api platform = Api.platform(http);
         String email = Api.email("operator");
@@ -152,6 +165,30 @@ class RetailBusinessTypeIT extends IntegrationTest {
         JsonNode list = platform.get("/api/v1/platform/tenants?q=" + chosen.slug(), operator.accessToken())
                 .getBody();
         assertThat(list.get("items").get(0).get("business_type").asString()).isEqualTo("wholesale_and_shops");
+        // The overview's other columns survive the function V103 made again.
+        for (String column : List.of(
+                "id",
+                "slug",
+                "name",
+                "status",
+                "plan_code",
+                "plan_name",
+                "currency",
+                "timezone",
+                "created_at",
+                "address")) {
+            assertThat(page.get("tenant").path(column).isMissingNode()
+                            || page.get("tenant").get(column).isNull())
+                    .as(column)
+                    .isFalse();
+        }
+        assertThat(page.get("tenant").get("modules").get(0).asString()).isEqualTo("retail");
+        assertThat(page.get("tenant").get("pilot").isBoolean()).isTrue();
+        assertThat(platform.get("/api/v1/platform/tenants/" + legacy.tenantId(), operator.accessToken())
+                        .getBody()
+                        .get("business_type")
+                        .asString())
+                .isEqualTo("wholesale_and_shops");
         JsonNode none = platform.get("/api/v1/platform/tenants/" + untouched.tenantId(), operator.accessToken())
                 .getBody();
         assertThat(none.path("business_type").isMissingNode()

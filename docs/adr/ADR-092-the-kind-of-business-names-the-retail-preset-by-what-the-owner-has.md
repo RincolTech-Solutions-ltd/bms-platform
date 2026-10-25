@@ -32,8 +32,10 @@ choice named by what the owner has.
    editable after the choice, a switch sent in the same change wins, and the module reads the switches, never the kind
    (ADR-033 decision 2 and its watch item). The trade preset left documents and purchasing as they were; a wholesale business
    uses both, so the kind now sets them, and the review before saving lists every switch the choice changes.
-3. **Existing businesses keep every switch.** Migration `V103` renames the stored value only: `shop` becomes `shops`; `trade`
-   becomes `wholesale_and_shops` when one of the five wholesale tools is on, else `stores_and_shops`. No switch changes, the
+3. **Existing businesses keep every switch.** Migration `V103` renames the stored value only, judged from the switches:
+   either old name becomes `wholesale_and_shops` when one of the five wholesale tools is on; otherwise `trade` becomes
+   `stores_and_shops`, and `shop` becomes `stores_and_shops` with the two-step move on, else `shops`. So a row an older server
+   wrote back is never mislabelled. No switch changes, the
    settings version moves on so an open settings screen reads the change again, and a business that never saved Retail settings
    has no profile and reads as Shops only. The server reads a `shop` or `trade` row written by the previous release during the
    deploy the same way (`BusinessTypes.fromLegacy`) and refuses the old names on a write (422).
@@ -42,8 +44,10 @@ choice named by what the owner has.
    while packs are on) and Purchase orders. Each row follows its switch and its permissions as before, so the group reads the
    switches, never the kind; a business of shops only has no Wholesale group. The Retail page lists the same pages under a
    Wholesale heading. A one-time tour shows an administrator with price lists on where the pages are.
-5. **The operator sees the kind.** `platform_tenant_overview` gains `business_type`: the profile of the first settings group, of
-   a module the business has on, that stores one. The core names no vertical; only retail has a profile today. The operator's
+5. **The operator sees the kind.** `platform_tenant_overview` gains `profile_groups`: the stored settings groups, of the modules
+   the business has on, that hold a profile. The server reads each through its module's own group (`normalise`), so a legacy
+   `shop` or `trade` reads as the kind it is, and sends the first as `business_type`. The core names no vertical; only retail
+   has a profile today. The operator's
    list and Business page show it in the business's words, "Shops only (not chosen yet)" when none was saved.
 6. **Permission and audit unchanged.** `core.settings.manage` changes the kind; the change is audited as
    `retail.capabilities.changed` with old and new values, like any switch.
@@ -66,14 +70,16 @@ choice named by what the owner has.
 - The kind is a label after its preset: a business can choose Shops only and switch price lists on, and then has a Wholesale group.
 
 - During a rolling deploy (ADR-083) the previous release reads a renamed kind as unknown and writes `shop` back on its next save
-  of Retail settings; no switch changes, the kind then reads Shops only and the administrator chooses again. Accepted for the
-  minutes of the switch.
+  of Retail settings. No switch changes, and the new server judges that `shop` from the switches (decision 3), so the kind reads
+  as before unless a business of stores and shops had none of the two-step or wholesale switches on.
+- Old app copies (ADR-078 keeps their files for 14 days) update themselves since ADR-088, so no minimum build is set for this
+  change; until one does, it shows the old two choices and a save of one is refused with 422.
 
 **Watch for:**
 
 - `V103` rebuilds `platform_tenant_overview` from its V79 body. `V102` (pull request #585) does not touch that function, the
   `TenantResponse` record or `tenantRow`; a later migration that changes the function must start from the V103 body and keep
-  `business_type`.
+  `profile_groups`.
 
 - A feature that reads the kind instead of a switch; the module and the screens must read switches only.
 - A new wholesale tool must join `BusinessTypes.GOVERNED`, the presets, the Wholesale group and `WHOLESALE_SCREENS` together.

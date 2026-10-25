@@ -141,6 +141,12 @@ describe('the kind of business (issue #424)', () => {
     expect((await screen.findByTestId('business-type')).textContent).toBe('Wholesale and shops');
   });
 
+  it('shows a value it does not know as it is, never a guessed Shops only', async () => {
+    api.businessOverview.mockResolvedValue({ ...DETAIL, tenant: { ...DETAIL.tenant, business_type: 'test_kind' } });
+    shell(<BusinessScreen tenantId="t-1" />);
+    expect((await screen.findByTestId('business-type')).textContent).toBe('test_kind');
+  });
+
   it('says Shops only, not chosen yet, for a shop business that never chose, and nothing for a lending business', async () => {
     shell(<BusinessScreen tenantId="t-1" />);
     expect((await screen.findByTestId('business-type')).textContent).toBe('Shops only (not chosen yet)');

@@ -10877,7 +10877,7 @@ export interface components {
         PlatformTenant: {
             /** @description The business's own address, where its staff sign in */
             address?: string;
-            /** @description The kind of business its administrator chose (issue #424, ADR-092): the profile a module's settings group stores, for retail shops, stores_and_shops, wholesale or wholesale_and_shops; null when none was saved (a retail business is then shops) */
+            /** @description The kind of business its administrator chose (issue #424, ADR-092): the profile a module's settings group stores, read through that module's group, for retail shops, stores_and_shops, wholesale or wholesale_and_shops; null when none was saved (a retail business is then shops) */
             business_type?: string;
             /** Format: date-time */
             created_at?: string;

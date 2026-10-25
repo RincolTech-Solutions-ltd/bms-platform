@@ -1,6 +1,6 @@
 import type { Business, Plan, PlanPrice, SavePlanRequest, SubscriptionStatus } from '../../api/operator';
 import { formatMinor, parseMinor } from '../../components/money';
-import { profileName } from '../staff/retail/capabilities-state';
+import { PROFILE_NAMES, profileName, type Profile } from '../staff/retail/capabilities-state';
 
 // The rules and the plain words of the operator screens (issue #407), kept apart from the screens so they are tested without a
 // browser: what each status means, what the subscription line says, what an action will do before the operator confirms it, the
@@ -61,7 +61,9 @@ export function moduleLabel(key: string): string {
  */
 export function businessTypeLabel(b: { modules?: string[]; business_type?: string | null }): string | null {
   if (!(b.modules ?? []).includes('retail')) return null;
-  return b.business_type ? profileName(b.business_type) : `${profileName(null)} (not chosen yet)`;
+  // The server sends the kind already read through the retail group; a value it does not know is shown as it is, never guessed.
+  if (!b.business_type) return `${profileName(null)} (not chosen yet)`;
+  return PROFILE_NAMES[b.business_type as Profile] ?? b.business_type;
 }
 
 // ---- dates ------------------------------------------------------------------------------------------

@@ -73,8 +73,8 @@ health (issue #414), `slow_mover_months` (whole, 1 to 24, default 4) and `slow_m
 
 `retail.profile` in the same settings group is the kind of business (issue #424, ADR-092): `shops` (default), `stores_and_shops`,
 `wholesale` or `wholesale_and_shops`. Before issue #424 it was `shop` or `trade`; migration `V103` renamed the stored values
-without changing a flag (`shop` is `shops`; `trade` is `wholesale_and_shops` with one of the five wholesale tools on, else
-`stores_and_shops`). A kind is a **preset, not a mode**: choosing it sets the six flags it governs, after which an administrator
+without changing a flag, judged from the flags (`wholesale_and_shops` with one of the five wholesale tools on; otherwise `trade`
+is `stores_and_shops`, and `shop` is `stores_and_shops` with `transfer_receipt` on, else `shops`). A kind is a **preset, not a mode**: choosing it sets the six flags it governs, after which an administrator
 can still toggle each flag. The module reads the flags, never the profile, so there is no code path "if wholesale".
 
 | Kind | Screen name | Governed flags switched on (the others of the six off) |

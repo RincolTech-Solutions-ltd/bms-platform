@@ -633,9 +633,10 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   profile becomes "What kind of business is this?": `shops` (Shops only, the default), `stores_and_shops`, `wholesale` and
   `wholesale_and_shops`, each a preset of the six switches it governs (`BusinessTypes` in `retail.manifest`: packs, price lists,
   customer accounts, documents, purchasing, the two-step move; branch roles and returns are left as they are); the page says that
-  each branch is set as a store or a shop under Branches. `V103` renames stored profiles without changing a switch (`shop` to
-  `shops`, `trade` to `wholesale_and_shops` with a wholesale tool on, else `stores_and_shops`) and adds `business_type` to
-  `platform_tenant_overview`, shown on the operator's list and Business page. The grouped menu gains a Wholesale group between
+  each branch is set as a store or a shop under Branches. `V103` renames stored profiles without changing a switch, judged from
+  the switches (`wholesale_and_shops` with a wholesale tool on; else `trade` to `stores_and_shops`, and `shop` to
+  `stores_and_shops` with the two-step move on, else `shops`) and adds `profile_groups` to `platform_tenant_overview`, read through
+  the module's group as `business_type`, shown on the operator's list and Business page. The grouped menu gains a Wholesale group between
   Money and Lending while a wholesale tool is on (read from the switches, never the kind), the Retail page lists those tiles under
   a Wholesale heading, `page-retail-settings` v5, and the new `capability-wholesale` tour. Plans, pricing, brochure prices,
   Pesapal and choosing the kind at sign-up are not touched. Screenshots `docs/ui/business-type-424/`. Tests
