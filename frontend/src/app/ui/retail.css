@@ -1054,3 +1054,34 @@ th[scope='rowgroup'] .cat-head {
   min-height: 48px;
   min-width: 112px;
 }
+
+/* Did you mean and the category of similar items while a new item is named (issue #353): a neutral note with one row per
+   item and its 48px button, then a one-line hint with a button to choose the category. */
+.name-hints-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.name-hints-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.name-hints-list button,
+.name-hints-category button {
+  min-height: 48px;
+}
+
+.name-hints-category {
+  margin: 0 0 var(--space-4);
+}
+
+.name-hints-category .hint {
+  margin: 0 0 var(--space-2);
+}

@@ -49,9 +49,11 @@ export interface LineEntry {
 
 const VERB: Record<EntryScreen, string> = { buy: 'buy', sell: 'sell', move: 'move', count: 'count' };
 
-/** "1 roll", "200 metres", "2.5 metres". */
+const COUNT = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 3 });
+
+/** "1 roll", "200 metres", "2.5 metres", "5,000 metres". */
 export function amountOf(milli: number, unit: string): string {
-  return `${showQty(qtyString(milli))} ${milli === 1000 ? unit : plural(unit)}`;
+  return `${COUNT.format(milli / 1000)} ${milli === 1000 ? unit : plural(unit)}`;
 }
 
 /** A usual quantity for people: whole from 10 up, one decimal under 10, three under 0.1. */
