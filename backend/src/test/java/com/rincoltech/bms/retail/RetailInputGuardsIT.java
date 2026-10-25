@@ -74,6 +74,20 @@ class RetailInputGuardsIT extends IntegrationTest {
         assertThat(imported.getBody().get("skipped").asInt())
                 .as("%s", imported.getBody())
                 .isEqualTo(2);
+        // The import keeps a file's codes while the tick is off, so it is where a code with a control character or a
+        // Unicode space inside is refused now: an error row, never a code of its own.
+        String bad = "code,description,category,unit,sell price\n"
+                + "NB\u200b4,Test zero width,Test Category NB-1,u-nb-1,500\n"
+                + "NB\t5,Test tab,Test Category NB-1,u-nb-1,500\n"
+                + "NB\u00a03,Test inner space,Test Category NB-1,u-nb-1,500\n";
+        JsonNode rows = api.post("/products/import?dry_run=true", Map.of("csv", bad), ADMIN + ",core.settings.manage")
+                .getBody()
+                .get("rows");
+        assertThat(rows).hasSize(3);
+        for (JsonNode row : rows) {
+            assertThat(row.get("outcome").asString()).as("%s", row).isEqualTo("error");
+            assertThat(row.get("message").asString()).as("%s", row).contains("special character");
+        }
         UUID category = api.category("Test Category Raw");
         UUID unit = api.unit("u-raw");
         assertThatThrownBy(() -> TestDatabase.owner()

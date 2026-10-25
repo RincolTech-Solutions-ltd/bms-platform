@@ -67,9 +67,9 @@ export function ImportPage() {
   const [done, setDone] = useState<ImportResult | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const check = useMutation({
-    mutationFn: () => retail.importProducts(text, true, makeCodes),
+    mutationFn: (codes: boolean) => retail.importProducts(text, true, codes),
     onMutate: () => setDone(null),
-    onSuccess: (result) => setChecked({ text, makeCodes, result }),
+    onSuccess: (result, codes) => setChecked({ text, makeCodes: codes, result }),
   });
   const apply = useMutation({
     mutationFn: () => retail.importProducts(text, false, makeCodes),
@@ -83,6 +83,11 @@ export function ImportPage() {
   });
   const current = checked && checked.text === text && checked.makeCodes === makeCodes ? checked.result : null;
   const ready = current !== null && current.errors === 0 && (current.added ?? 0) > 0;
+  // A file already checked is checked again with the new choice, so the report always matches the tick.
+  const tick = (codes: boolean) => {
+    setMakeCodes(codes);
+    if (checked && checked.text === text) check.mutate(codes);
+  };
   const choose = (file: File | undefined) => {
     if (!file) return;
     void file.text().then((raw) => {
@@ -106,13 +111,13 @@ export function ImportPage() {
       <label htmlFor="import-text">Or paste the rows here</label>
       <textarea id="import-text" data-tour="import-text" rows={8} value={text} onChange={(e) => { setText(e.target.value); setDone(null); setWarning(null); }} spellCheck={false} />
       <label htmlFor="import-make-codes">
-        <input id="import-make-codes" type="checkbox" data-tour="import-make-codes" checked={makeCodes} onChange={(e) => setMakeCodes(e.target.checked)} /> Let the app make the codes
+        <input id="import-make-codes" type="checkbox" data-tour="import-make-codes" checked={makeCodes} onChange={(e) => tick(e.target.checked)} /> Let the app make the codes
       </label>
       <Hint full>Tick this to give every item the next code of its category and leave out the codes in your file. Without the tick, a code in your file is kept.</Hint>
       {warning && <p role="alert" className="alert alert-warning">{warning}</p>}
       <Problem error={check.error} />
       <ActionBar>
-        <BusyButton busy={check.isPending} type="button" className="rt-primary" data-tour="import-check" notReady={text.trim() === ''} onClick={() => check.mutate()}>
+        <BusyButton busy={check.isPending} type="button" className="rt-primary" data-tour="import-check" notReady={text.trim() === ''} onClick={() => check.mutate(makeCodes)}>
           Check the file
         </BusyButton>
       </ActionBar>

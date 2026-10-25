@@ -189,7 +189,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   the app"; on edit "It never changes."), never an input; the new category form shows the code start the app makes and asks
   for none (it changes on the category's page). No permission added. Tests: `RetailItemCodesIT`, `RetailVariantsIT`,
   `VariantGridTest`, `catalogue-category.dom.test.tsx`, `new-item-here.dom.test.tsx`,
-  `catalogue-variants.dom.test.tsx`, `design-guard.test.ts`.
+  `catalogue-variants.dom.test.tsx`, `catalogue-import.dom.test.tsx`, `design-guard.test.ts`.
 - **Built (a buying pack's size per delivery, issue #554, owner decision D23, ADR-082, FR-RET-72):** no migration. A restock line and a
   goods received line in a pack take `pack_size` (how many base units each pack held in this delivery, at least 1), kept in the line's existing
   `unit_factor`; stock, the cost per base unit and the branch's average (ADR-079) use it, and every later reading of the line (voids, supplier
