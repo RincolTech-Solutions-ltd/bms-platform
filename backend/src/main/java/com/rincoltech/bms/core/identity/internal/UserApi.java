@@ -206,12 +206,7 @@ final class UserApi {
             @Schema(
                     description =
                             "True when the signed-in user is the Owner of the business (ADR-062): the PWA offers the owner-only actions and the Transfer ownership action only then")
-            boolean isOwner,
-
-            @Schema(
-                    description =
-                            "The business's display name, as its branding names it (the name given at onboarding until one is saved): the top of the staff menu shows it (issue #564, ADR-086)")
-            String businessName) {}
+            boolean isOwner) {}
 
     @Schema(name = "PlatformMe")
     record PlatformMeResponse(UUID userId, String kind, String fullName, String email, List<String> permissions) {}

@@ -170,10 +170,9 @@ means tablets should have the tabs too waits for the owner's sign-off (#544), an
   figure is 0. The count is read with the row ("Orders, 3": a `visually-hidden` comma). The only shadow is the drawer's
   (`--shadow-lg`); no gradients, no coloured stripes at a side or the top, no emoji.
 - **Top and foot.** The top (`MenuShop` in `areas/staff/branch-picker.tsx`) shows the shop's logo, else the business's own logo
-  (ADR-068), else the business's initials on a tint, never the platform's logo or name. The name and the initials come from
-  `/me` (`business_name`, ADR-086 decision 8), so they show even when `/branding` is slow or fails; a profile without the name
-  shows an empty tile and a skeleton line (`.menu-shop-name-skeleton`). The image's text names the shop or the business,
-  whichever logo it is. Then the business name and the person's role (Owner for the owner, else the first role), and under them, on a full-width row of its own so nothing is cut off at 264px, the branch in
+  (ADR-068), else the business's initials on a tint, never the platform's logo or name (off a business's host, or before its
+  branding loads, a plain tile and no name); the image's text names the shop or the business, whichever logo it is. Then the
+  business name and the person's role (Owner for the owner, else the first role), and under them, on a full-width row of its own so nothing is cut off at 264px, the branch in
   use, a native select named Switch branch laid over it when there is more than one branch to choose. From 720px this is the
   only place the logo, the business and the branch show: the top bar keeps Search, the sync dot and the profile button, and the
   branch tour step (`branch-picker`, worded for both layouts) points at the sidebar's branch row, or at the whole top for a

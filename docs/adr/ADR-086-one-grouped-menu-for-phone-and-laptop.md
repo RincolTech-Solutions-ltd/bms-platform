@@ -6,7 +6,7 @@ Proposed (owner decisions D38 and D44 of 25 Oct 2026, issue #564; the owner appr
 `docs/ui/grouped-menu-564/menu.html`), accepted on merge. Amends the menu decisions of issue #455 (the side menu: the sidebar that
 folds to its icons and the retail shortcuts as a group of at most five under Retail) and issue #471 (the headed, foldable Shop and
 Lending sections, FR-UXN-04). Keeps the bottom tabs of issue #539 (FR-UXN-08) as they are, and the Home cards and More page of
-ADR-072, which still head their parts by module. No migration and no permission added; one additive API field, `business_name` on `GET /me` (decision 8).
+ADR-072, which still head their parts by module. Frontend only: no migration, no API change, no permission added.
 
 ## Context
 
@@ -51,13 +51,11 @@ shop owner thinks, the same on a phone and a laptop (D38), and approved the pict
    job; Loan reports joins Lending for a business with both modules (decision 3). These are part of this decision, not a
    departure from the picture: a session like the one drawn sees exactly the drawn rows. As the More page (#539, #544) lists the
    menu in its order, Approvals there moves from the top card to the Business card.
-8. **The business name comes from `/me`, never the platform** (owner decision on pull request #569). `GET /me` gains
-   `business_name`: the business's display name as `GET /branding` gives it (the saved one, else the name given at onboarding),
-   read through `TenantSettings.displayName()`. The top of the menu takes the name and the initials from it, and the logo from the
-   branding as before (the shop's, else the business's). Its name and initials therefore do not depend on `/branding` loading. A
-   profile without the name (one kept on the phone from before) shows an empty tile and a skeleton line, never a product name;
-   the Rincol logo shows only on the operator side and the platform's own pages. This is the PR's one API change, additive:
-   no migration and no permission.
+8. **The business name comes from the business, never the platform.** `/me` carries no business name, so the top of the menu
+   takes the business's own name and logo from its branding (`GET /branding`, `display_name`, ADR-068), the source the top bar
+   uses on a business's host. Off a business's host, or before its branding loads, the top shows a plain tile and no name, never
+   the product's name; the Rincol logo shows only on the operator side and the platform's own pages. Moving the name to `/me` is
+   an API change left to a later pull request.
 
 ## Consequences
 

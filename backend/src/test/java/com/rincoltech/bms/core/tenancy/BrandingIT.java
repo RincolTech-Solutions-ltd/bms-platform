@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
-import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.testsupport.ImageFixtures;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
@@ -43,12 +42,6 @@ class BrandingIT extends IntegrationTest {
 
     @Autowired
     TestRestTemplate http;
-
-    @Autowired
-    TenantJobs jobs;
-
-    @Autowired
-    TenantSettings settings;
 
     TestDatabase.Fixture t;
 
@@ -161,16 +154,6 @@ class BrandingIT extends IntegrationTest {
                         .get("display_name_set")
                         .asBoolean())
                 .isTrue();
-    }
-
-    /** Issue #564, ADR-086: TenantSettings gives the business's name as the branding does, the onboarding one, then a saved one. */
-    @Test
-    void theDisplayNameFollowsTheSavedName() {
-        assertThat(jobs.callAs(t.tenantId(), settings::displayName)).isEqualTo("Test Tenant " + t.slug());
-        assertThat(patch(Map.of("display_name", "Test Shop Saved")).getStatusCode())
-                .isEqualTo(HttpStatus.OK);
-        assertThat(jobs.callAs(t.tenantId(), settings::displayName)).isEqualTo("Test Shop Saved");
-        assertThat(branding(t).getBody().get("display_name").asString()).isEqualTo("Test Shop Saved");
     }
 
     /** #99: the public branding lists the enabled module keys, sorted, so the landing copy follows them. */

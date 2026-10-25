@@ -28,7 +28,6 @@ vi.mock('../../app/branding', async (original) => ({
 const me = {
   user_id: 'u-self',
   full_name: 'Test Cashier 01',
-  business_name: 'Test Traders',
   kind: 'staff',
   permissions: [],
   modules: [],
@@ -126,7 +125,7 @@ describe('the shop in use at the top of the sidebar (issues #461, #564)', () => 
     expect(sidebarShop().querySelector('.menu-shop-initials')?.textContent).toBe('TT');
   });
 
-  it('shows the business initials for an unbranded business: neither the shop nor the business has a logo', () => {
+  it('shows the business initials when neither the shop nor the business has a logo', () => {
     brand = { name: 'Test Traders', logoSrc: null, themePrimary: null, themeText: null };
     show('b-one');
     expect(within(sidebarShop()).queryByRole('img')).toBeNull();
@@ -139,30 +138,15 @@ describe('the shop in use at the top of the sidebar (issues #461, #564)', () => 
     expect((await within(sidebarShop()).findByAltText('Logo of Test Traders')).getAttribute('src')).toBe(BUSINESS);
   });
 
-  it('takes the name and the initials from /me when /branding failed, never the platform name or logo (ADR-068)', () => {
-    // brand is PLATFORM_BRAND here, as when /branding failed, has not loaded, or off a business host.
+  it('never shows the platform logo or a product name: before the business is known, a plain tile and no name (ADR-068)', () => {
+    // brand is PLATFORM_BRAND here, as off a business host or before its branding loads.
     show('b-one');
     expect(within(sidebarShop()).queryByRole('img')).toBeNull();
-    expect(sidebarShop().querySelector('.menu-shop-initials')?.textContent).toBe('TT');
-    expect(sidebarShop().querySelector('.menu-shop-name')?.textContent).toBe('Test Traders');
-    expect(sidebarShop().textContent).not.toMatch(/Rincoltech|BMS/);
-  });
-
-  it('shows an empty tile and a skeleton line while the profile has no business name yet, never a product name', () => {
-    show('b-one', { ...me, business_name: undefined } as Me);
     expect(sidebarShop().querySelector('.menu-shop-initials')?.textContent).toBe('');
     expect(sidebarShop().querySelector('.menu-shop-name')).toBeNull();
-    expect(sidebarShop().querySelector('.menu-shop-name-skeleton')?.getAttribute('aria-hidden')).toBe('true');
     expect(sidebarShop().textContent).not.toMatch(/Rincoltech|BMS/);
     // The role and the branch still show.
     expect(sidebarShop().querySelector('.menu-shop-branch-name')?.textContent).toBe('Test Shop One (HQ)');
-  });
-
-  it('uses the name from /me over a different name in the branding', () => {
-    brand = { name: 'Old Shell Name', logoSrc: null, themePrimary: null, themeText: null };
-    show('b-one');
-    expect(sidebarShop().querySelector('.menu-shop-name')?.textContent).toBe('Test Traders');
-    expect(sidebarShop().querySelector('.menu-shop-initials')?.textContent).toBe('TT');
   });
 
   it("shows the business's own logo when the shop has none, named after the business", async () => {

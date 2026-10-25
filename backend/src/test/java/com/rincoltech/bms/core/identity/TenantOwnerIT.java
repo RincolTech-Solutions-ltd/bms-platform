@@ -220,9 +220,6 @@ class TenantOwnerIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.OK);
         JsonNode me = api.get("/api/v1/me", ownerSession.accessToken()).getBody();
         assertThat(me.get("is_owner").asBoolean()).isTrue();
-        // Issue #564, ADR-086: the business's own name for the top of the staff menu, the name given at onboarding
-        // until one is saved.
-        assertThat(me.get("business_name").asString()).isEqualTo("Test Tenant " + t.slug());
         JsonNode listed = api.get("/api/v1/users?limit=200", ownerSession.accessToken())
                 .getBody()
                 .get("items");

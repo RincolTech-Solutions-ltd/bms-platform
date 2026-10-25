@@ -412,12 +412,6 @@ class SettingsService implements TenantSettings, ModuleSettings, GoLiveDate {
         return current().reportsEnabled();
     }
 
-    @Override
-    @Transactional(readOnly = true)
-    public String displayName() {
-        return current().displayName();
-    }
-
     // ---- the go-live date (ADR-071) ------------------------------------------------------------
 
     @Override

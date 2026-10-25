@@ -55,10 +55,4 @@ public interface TenantSettings {
      * listed until then.
      */
     boolean reportsEnabled();
-
-    /**
-     * The business's display name, as {@code GET /branding} gives it: the saved one, else the name given at onboarding (issue
-     * #514). The staff menu shows it (issue #564, ADR-086).
-     */
-    String displayName();
 }

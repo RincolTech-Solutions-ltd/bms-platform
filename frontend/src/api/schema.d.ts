@@ -10166,8 +10166,6 @@ export interface components {
         Me: {
             all_branches?: boolean;
             branches?: components["schemas"]["MeBranch"][];
-            /** @description The business's display name, as its branding names it (the name given at onboarding until one is saved): the top of the staff menu shows it (issue #564, ADR-086) */
-            business_name?: string;
             /** Format: uuid */
             default_branch_id?: string;
             email?: string;

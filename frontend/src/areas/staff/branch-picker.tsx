@@ -90,18 +90,17 @@ export function initials(name: string): string {
 
 /**
  * The top of the staff menu (issue #564): the shop's logo, else the business's own logo (ADR-068), else the business's initials;
- * never the platform's logo or name. The name and the initials are the business's own from `/me` (`business_name`); a profile
- * without it (one saved on the phone before it was added) shows an empty tile and a skeleton line in their place, never a
- * product name. Then the person's role, and under them, on a row of
+ * never the platform's logo or name, which the shell shows only off a business's host or before its branding loads: then a plain
+ * tile holds the logo's place and no name shows until the business's own arrives. Then the business name and the person's role,
+ * and under them, on a row of
  * its own so nothing is cut off, the branch in use, which switches branch when there is more than one to choose (a native select
  * laid over it, as in the top bar's title). From 720px the sidebar is the only place the business and the branch show; `tour` is
  * then the branch step's anchor, on the branch row, or on the whole top for a session with no branch to show.
  */
 export function MenuShop({ me, branch, role, onChoose, tour }: { me: Me; branch: string | null; role: string; onChoose: (selection: string) => void; tour?: string }) {
-  const { active, loading, src, fromShop, broke } = useShopImage(me, branch);
-  // The business's own name, from /me; never the shell brand's, which off a business's host or before its branding loads is the
-  // platform's.
-  const business = me.business_name?.trim() || null;
+  const { active, loading, src, fromShop, broke, brand } = useShopImage(me, branch);
+  // The business's own name, from its branding (`/me` carries none); null while only the platform's brand is known.
+  const business = brand === PLATFORM_BRAND ? null : brand.name;
   const branches = me.branches ?? [];
   const choices = branches.length + (me.all_branches ? 1 : 0);
   const name = active ? branchLabel(active) : branch === ALL_BRANCHES ? 'All branches' : choices > 1 ? 'Choose a branch' : '';
@@ -117,7 +116,7 @@ export function MenuShop({ me, branch, role, onChoose, tour }: { me: Me; branch:
         </span>
       )}
       <span className="menu-shop-text">
-        {business ? <span className="menu-shop-name">{business}</span> : <span className="menu-shop-name-skeleton" aria-hidden="true" />}
+        {business && <span className="menu-shop-name">{business}</span>}
         {role && <span className="menu-shop-role">{role}</span>}
       </span>
       {name && (

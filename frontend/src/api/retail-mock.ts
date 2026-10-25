@@ -68,8 +68,7 @@ export function mockMe(role: string | undefined): Me & { modules: string[] } {
     mfa_enabled: false,
     unused_recovery_codes: 8,
     modules: ['retail'],
-    // The business and the role the staff menu shows at its top (issue #564).
-    business_name: 'Test Traders',
+    // The role the staff menu shows under the person's name (issue #564).
     roles: [{ role_key: role === 'sales' ? 'sales' : role === 'cashier' ? 'cashier' : 'tenant_admin', role_name: role === 'sales' ? 'Seller' : role === 'cashier' ? 'Cashier' : 'Administrator' }],
   };
 }
