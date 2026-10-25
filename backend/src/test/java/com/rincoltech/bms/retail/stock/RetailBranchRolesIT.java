@@ -247,8 +247,10 @@ class RetailBranchRolesIT extends IntegrationTest {
         assertThat(unknown.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(code(unknown)).isEqualTo("malformed_request");
         // The names from before the kinds are refused on a write.
-        assertThat(putCapabilities(Map.of("profile", "trade"), SETTINGS).getStatusCode())
-                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        ResponseEntity<JsonNode> oldName = putCapabilities(Map.of("profile", "trade"), SETTINGS);
+        assertThat(oldName.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(oldName)).isEqualTo("validation_failed");
+        assertThat(oldName.getBody().toString()).contains("profile");
         assertThat(putCapabilities(Map.of("profile", "shop"), SETTINGS).getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
 

@@ -46,6 +46,7 @@ class RetailBusinessTypeIT extends IntegrationTest {
         TestDatabase.Fixture shop = tenant("bt-shop");
         TestDatabase.Fixture stores = tenant("bt-stores");
         TestDatabase.Fixture trade = tenant("bt-trade");
+        TestDatabase.Fixture documentsOnly = tenant("bt-docs");
         TestDatabase.Fixture never = tenant("bt-never");
         TestDatabase.Fixture renamed = tenant("bt-renamed");
         arrange(
@@ -59,14 +60,15 @@ class RetailBusinessTypeIT extends IntegrationTest {
                 trade,
                 "{\"module_groups\": {\"retail\": {\"profile\": \"trade\", \"branch_roles\": true, \"price_lists\": true,"
                         + " \"credit_sale_recognition\": \"on_sale\"}, \"sms\": {\"enabled\": false}}}");
+        arrange(documentsOnly, "{\"module_groups\": {\"retail\": {\"profile\": \"trade\", \"documents\": true}}}");
         arrange(never, "{\"module_groups\": {\"retail\": {\"units\": true}}}");
         arrange(renamed, "{\"module_groups\": {\"retail\": {\"profile\": \"wholesale\", \"units\": true}}}");
-        Map<TestDatabase.Fixture, JsonNode> before =
-                Stream.of(shop, stores, trade, never, renamed).collect(Collectors.toMap(f -> f, this::settingsOf));
-        Map<TestDatabase.Fixture, Integer> versions =
-                Stream.of(shop, stores, trade, never, renamed).collect(Collectors.toMap(f -> f, this::versionOf));
+        Map<TestDatabase.Fixture, JsonNode> before = Stream.of(shop, stores, trade, documentsOnly, never, renamed)
+                .collect(Collectors.toMap(f -> f, this::settingsOf));
+        Map<TestDatabase.Fixture, Integer> versions = Stream.of(shop, stores, trade, documentsOnly, never, renamed)
+                .collect(Collectors.toMap(f -> f, this::versionOf));
 
-        String own = Stream.of(shop, stores, trade, never, renamed)
+        String own = Stream.of(shop, stores, trade, documentsOnly, never, renamed)
                 .map(f -> "'" + f.tenantId() + "'")
                 .collect(Collectors.joining(", "));
         String scoped = rename.replace(
@@ -81,10 +83,11 @@ class RetailBusinessTypeIT extends IntegrationTest {
         assertThat(profileOf(shop)).isEqualTo("shops");
         assertThat(profileOf(stores)).isEqualTo("stores_and_shops");
         assertThat(profileOf(trade)).isEqualTo("wholesale_and_shops");
+        assertThat(profileOf(documentsOnly)).isEqualTo("wholesale_and_shops");
         assertThat(settingsOf(never).get("module_groups").get("retail").has("profile"))
                 .isFalse();
         assertThat(profileOf(renamed)).isEqualTo("wholesale");
-        for (TestDatabase.Fixture f : List.of(shop, stores, trade)) {
+        for (TestDatabase.Fixture f : List.of(shop, stores, trade, documentsOnly)) {
             JsonNode was = withoutProfile(before.get(f));
             assertThat(withoutProfile(settingsOf(f)))
                     .as("everything but the profile of %s", f.slug())

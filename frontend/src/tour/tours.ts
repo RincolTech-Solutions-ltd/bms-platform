@@ -952,7 +952,7 @@ export const retailSettingsPage: Tour = {
       id: 'profile',
       target: 'retail-profile',
       title: 'What kind of business is this?',
-      body: 'Pick Shops only, Stores and shops, Wholesale, or Wholesale and shops. Wholesale is selling in bulk to other shops. Your choice switches on the features that suit it.',
+      body: 'Pick Shops only, Stores and shops, Wholesale, or Wholesale and shops. Wholesale is selling in bulk to other shops. Your choice switches the features below on or off to suit it.',
     },
     {
       id: 'branches',

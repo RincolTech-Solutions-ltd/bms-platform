@@ -65,7 +65,15 @@ choice named by what the owner has.
 - Two names for one page: the menu row "Credit to shops" opens the page titled Customer accounts.
 - The kind is a label after its preset: a business can choose Shops only and switch price lists on, and then has a Wholesale group.
 
+- During a rolling deploy (ADR-083) the previous release reads a renamed kind as unknown and writes `shop` back on its next save
+  of Retail settings; no switch changes, the kind then reads Shops only and the administrator chooses again. Accepted for the
+  minutes of the switch.
+
 **Watch for:**
+
+- `V103` rebuilds `platform_tenant_overview` from its V79 body. `V102` (pull request #585) does not touch that function, the
+  `TenantResponse` record or `tenantRow`; a later migration that changes the function must start from the V103 body and keep
+  `business_type`.
 
 - A feature that reads the kind instead of a switch; the module and the screens must read switches only.
 - A new wholesale tool must join `BusinessTypes.GOVERNED`, the presets, the Wholesale group and `WHOLESALE_SCREENS` together.
