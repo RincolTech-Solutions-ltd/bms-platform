@@ -40,6 +40,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import org.postgresql.util.PSQLException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -848,12 +849,21 @@ class UserService implements TenantAdmins {
      * reach the index, the second waits for the first to commit and is refused here with the same 409. The exception's
      * message carries the database's detail with the full phone or email, so it is never chained as the cause or logged.
      */
-    private static ApiException duplicateContact(DuplicateKeyException e) {
-        return String.valueOf(e.getMessage()).contains("users_staff_email")
-                ? new ApiException(
-                        HttpStatus.CONFLICT, "duplicate_email", "Duplicate email", "A staff user has this email.")
-                : new ApiException(
-                        HttpStatus.CONFLICT, "duplicate_phone", "Duplicate phone", "A staff user has this phone.");
+    static RuntimeException duplicateContact(DuplicateKeyException e) {
+        String constraint = e.getMostSpecificCause() instanceof PSQLException p && p.getServerErrorMessage() != null
+                ? p.getServerErrorMessage().getConstraint()
+                : null;
+        if ("users_staff_email".equals(constraint)) {
+            return new ApiException(
+                    HttpStatus.CONFLICT, "duplicate_email", "Duplicate email", "A staff user has this email.");
+        }
+        if ("users_staff_phone".equals(constraint)) {
+            return new ApiException(
+                    HttpStatus.CONFLICT, "duplicate_phone", "Duplicate phone", "A staff user has this phone.");
+        }
+        // Any other unique key (the id, a later index) is a fault, not a taken contact: a 500 naming only the
+        // constraint.
+        return new IllegalStateException("Unexpected unique violation on users: " + constraint);
     }
 
     private UserResponse lockUser(UUID userId) {

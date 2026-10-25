@@ -15,9 +15,10 @@
 --
 -- Expand only. The SHARE lock on users is taken before the count and held to the commit, so the old release, still serving
 -- during the deploy, cannot commit a duplicate between the count and the index build (whose own error would print the phone).
--- It blocks writes to users for that moment only (staging and the pilot: tens of staff rows); reads and sign-ins go on. The
--- first statement sets lock_timeout to five seconds as V96 does, so the migration fails and is retried rather than every
--- sign-in queueing behind it.
+-- It blocks every write to users for that moment (staging and the pilot: tens of staff rows), so a sign-in, which writes
+-- last_login_at, waits; reads go on. Under an owner without BYPASSRLS the ALTER TABLE below raises it to ACCESS EXCLUSIVE,
+-- which blocks reads of users too. The first statement sets lock_timeout to five seconds as V96 does, so a write waits at most
+-- that long and the migration fails and is retried rather than every sign-in queueing behind it.
 
 SET LOCAL lock_timeout = '5s';
 LOCK TABLE users IN SHARE MODE;
@@ -25,12 +26,15 @@ LOCK TABLE users IN SHARE MODE;
 -- users has FORCE ROW LEVEL SECURITY and no app.tenant_id is bound here. bms_owner has BYPASSRLS
 -- (deploy/postgres/initdb/01-roles.sh), so the check reads every business; row_security = off makes PostgreSQL raise rather
 -- than silently see no rows should a policy still apply. As in V92, an owner without BYPASSRLS drops FORCE on users for this
--- transaction only and gets it back before the commit; with BYPASSRLS nothing is altered.
+-- transaction only, and only when users has it, and puts back exactly what it found before the commit (bms.v98_unforced
+-- records it); with BYPASSRLS nothing is altered.
 SET LOCAL row_security = off;
 DO $$
 BEGIN
-    IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
+    IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user)
+       AND (SELECT relforcerowsecurity FROM pg_class WHERE oid = 'users'::regclass) THEN
         ALTER TABLE users NO FORCE ROW LEVEL SECURITY;
+        PERFORM set_config('bms.v98_unforced', 'on', true);
     END IF;
 END
 $$;
@@ -57,7 +61,7 @@ $$;
 
 DO $$
 BEGIN
-    IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
+    IF current_setting('bms.v98_unforced', true) = 'on' THEN
         ALTER TABLE users FORCE ROW LEVEL SECURITY;
     END IF;
 END
