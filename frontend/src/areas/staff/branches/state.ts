@@ -71,11 +71,19 @@ export const KIND_FLAGS: Record<BranchKind, { sells_goods: boolean; stocks_goods
   office: { sells_goods: true, stocks_goods: false },
 };
 
-/** A typed code in the shape the server takes, or the words that say what is wrong; empty is fine, the app makes one. */
-export function codeProblem(code: string): string | null {
-  const c = code.trim();
-  if (c === '') return null;
-  return /^[A-Z0-9]{2,10}$/.test(c) ? null : 'Use 2 to 10 letters or digits, no spaces.';
+/**
+ * The code the server will make from a new branch's name (ADR-089): its letters and digits in capitals, at most six, then 2, 3 and
+ * on while the code is taken; BR when the name has fewer than two. Shown on the form only: the server makes the real one, and a
+ * branch the caller cannot see may still take a number.
+ */
+export function madeCode(name: string, taken: readonly string[]): string {
+  const letters = name.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const base = letters.length < 2 ? 'BR' : letters.slice(0, 6);
+  if (!taken.includes(base)) return base;
+  for (let n = 2; ; n++) {
+    const code = base.slice(0, 10 - String(n).length) + n;
+    if (!taken.includes(code)) return code;
+  }
 }
 
 /** The toast after a branch is added: its name and what it is, in the words of the people who run it. */

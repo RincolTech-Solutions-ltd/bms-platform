@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AdminBranch } from '../../../api/branches';
-import { KIND_FLAGS, addedWords, branchLine, canManageBranches, codeProblem, closedCount, closedOn, isClosed, keepsGoods, sellsGoods, showBranches, stockValueWords, visibleBranches } from './state';
+import { KIND_FLAGS, addedWords, branchLine, canManageBranches, madeCode, closedCount, closedOn, isClosed, keepsGoods, sellsGoods, showBranches, stockValueWords, visibleBranches } from './state';
 
 const open: AdminBranch = { id: 'a', code: 'KLA', name: 'Test Shop', status: 'active' };
 const closed: AdminBranch = { id: 'b', code: 'OLD', name: 'Test Old', status: 'inactive', closed_at: '2026-08-14T10:00:00Z' };
@@ -58,13 +58,12 @@ describe('adding a branch (#581)', () => {
     for (const flags of Object.values(KIND_FLAGS)) expect(flags.sells_goods || flags.stocks_goods).toBe(true);
   });
 
-  it('takes an empty code (the app makes one) or 2 to 10 capitals and digits', () => {
-    expect(codeProblem('')).toBeNull();
-    expect(codeProblem('  ')).toBeNull();
-    expect(codeProblem('GAYAZA2')).toBeNull();
-    expect(codeProblem('G')).toBe('Use 2 to 10 letters or digits, no spaces.');
-    expect(codeProblem('G A')).not.toBeNull();
-    expect(codeProblem('ABCDEFGHIJK')).not.toBeNull();
+  it('shows the code the server makes from the name, with a number when it is taken', () => {
+    expect(madeCode('Kasubi Store', ['HQ'])).toBe('KASUBI');
+    expect(madeCode('Kasubi Shop', ['HQ', 'KASUBI'])).toBe('KASUBI2');
+    expect(madeCode('Kasubi Shop', ['KASUBI', 'KASUBI2'])).toBe('KASUBI3');
+    expect(madeCode('No. 7 Road', [])).toBe('NO7ROA');
+    expect(madeCode('A', [])).toBe('BR');
   });
 
   it('says in the toast what was added', () => {

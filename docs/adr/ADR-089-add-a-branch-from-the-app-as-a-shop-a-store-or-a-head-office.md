@@ -15,17 +15,18 @@ that keeps no goods (ADR-041, a head office) could only be made as a shop and th
 
 ## Decision
 
-- **One form on the Branches screen**, "Add a branch", for whoever holds `core.branches.manage`: the name (needed), a code
-  (optional), What is it? as one segmented control with Shop (sells), Store (keeps stock, does not sell) and Head office (keeps
+- **One form on the Branches screen**, "Add a branch", for whoever holds `core.branches.manage`: the name (needed), What is it? as one segmented control with Shop (sells), Store (keeps stock, does not sell) and Head office (keeps
   no goods), and where it is (the existing `location`). The API takes no phone, so the form asks for none.
 - **The kind is sent as the two flags.** Shop is `sells_goods` true and `stocks_goods` true; Store is `sells_goods` false and
   `stocks_goods` true; Head office is `stocks_goods` false. `POST /branches` now takes `stocks_goods` beside `sells_goods`, both
   optional and true when omitted, and refuses both false with 422 `store_must_stock` before writing, as the PATCH does. The words
   "head office" in the form name a branch that keeps no goods; the one `is_head_office` branch of each business is unchanged.
-- **The code is made on the server when none is typed**: the letters and digits of the name in capitals, at most six, and a
+- **The code is made on the server when none is sent**: the letters and digits of the name in capitals, at most six, and a
   number after them when that code is taken in the business (Kasubi Store is KASUBI, a second Kasubi branch KASUBI2). A name with
-  fewer than two such characters starts from BR. Typing a code stays allowed, because the code is printed in document and
-  credit note numbers (`INV-HQ-000001`) and an owner may want a known one; a typed code that is taken is refused with 409
+  fewer than two such characters starts from BR. **The form asks for no code**, by the owner's rule of #562 that the app makes
+  every code and nobody types one; it shows the code it expects under the name ("Code KASUBI, made by the app from the name"),
+  worked out from the branches it lists. The API still takes a typed `code` (2 to 10 capital letters or digits), because the
+  internal `BranchProvisioning` port and existing callers send one; a typed code that is taken is refused with 409
   `duplicate_branch_code` as before. The insert uses `ON CONFLICT (tenant_id, code) DO NOTHING`, so two adds at the same moment
   that make the same code end in the same 409, never a 500.
 - **The rules apply from creation.** A Store refuses a sale with `branch_does_not_sell` and a branch that keeps no goods with
@@ -43,11 +44,13 @@ that keeps no goods (ADR-041, a head office) could only be made as a shop and th
 
 **Better:**
 - An owner adds a shop, a store or a head office in one step, with no code to invent, and the kind cannot be left half set.
+- The code printed in document and credit note numbers (`INV-HQ-000001`) reads like the branch's name.
 - A store or a head office never exists, even for a moment, as a shop that sells.
 
 **Worse:**
-- A made code can be less telling than a typed one (two branches of one town are KASUBI and KASUBI2), and the code never changes
-  after creation.
+- A made code can be less telling than a chosen one (two branches of one town are KASUBI and KASUBI2), and the code never
+  changes after creation.
+- The code shown on the form can differ from the one made when a branch the caller cannot see holds it; the list shows the real one.
 - The form's "Head office" is a branch that keeps no goods, not the one head office of the business; the list keeps the Head
   office badge for that one only.
 

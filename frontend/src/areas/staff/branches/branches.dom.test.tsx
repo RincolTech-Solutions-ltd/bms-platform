@@ -278,29 +278,31 @@ describe('adding a branch (#581)', () => {
     api.list.mockResolvedValue([HEAD, SHOP, { ...SHOP, id: 'b-new', code: 'TESTKA', name: 'Test Kasubi Shop', ...flags }]);
     fireEvent.click(screen.getByRole('button', { name: 'Add the branch' }));
     await waitFor(() => expect(api.create).toHaveBeenCalledTimes(1));
-    expect(api.create.mock.calls[0]?.[0]).toEqual({ name: 'Test Kasubi Shop', code: undefined, location: undefined, ...flags });
+    expect(api.create.mock.calls[0]?.[0]).toEqual({ name: 'Test Kasubi Shop', location: undefined, ...flags });
     const toast = await screen.findByText(words);
     expect(toast.closest('.toast')).toBeTruthy();
     expect(await screen.findByText('Test Kasubi Shop (TESTKA)')).toBeTruthy();
     expect(screen.queryByRole('form', { name: 'Add a branch' })).toBeNull();
   });
 
-  it('sends a typed code in capitals, and refuses a code of the wrong shape before sending', async () => {
+  it('asks for no code and shows the one the app makes from the name', async () => {
     api.create.mockResolvedValue(STORE);
     shell();
     await openForm();
+    expect(screen.queryByLabelText(/^Code/)).toBeNull();
+    expect(screen.getByText('The app makes the branch code from the name.')).toBeTruthy();
     type(/^Name/, 'Test Gayaza Store');
-    type(/^Code/, 'g a');
-    fireEvent.click(screen.getByRole('button', { name: 'Add the branch' }));
-    expect(await screen.findByText('Use 2 to 10 letters or digits, no spaces.')).toBeTruthy();
-    expect(api.create).not.toHaveBeenCalled();
-    // The button holds a refused press for two ticks, as a double tap does.
-    await new Promise((r) => setTimeout(r, 20));
-    type(/^Code/, 'gayaza');
+    expect(screen.getByText('Code TESTGA, made by the app from the name.')).toBeTruthy();
+    // A code already listed takes a number, as the server does.
+    type(/^Name/, 'Klaus');
+    expect(screen.getByText('Code KLAUS, made by the app from the name.')).toBeTruthy();
+    type(/^Name/, 'KLA');
+    expect(screen.getByText('Code KLA2, made by the app from the name.')).toBeTruthy();
+    type(/^Name/, 'Test Gayaza Store');
     fireEvent.click(screen.getByRole('radio', { name: 'Store (keeps stock, does not sell)' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add the branch' }));
     await waitFor(() => expect(api.create).toHaveBeenCalledTimes(1));
-    expect(api.create.mock.calls[0]?.[0]).toMatchObject({ name: 'Test Gayaza Store', code: 'GAYAZA', sells_goods: false, stocks_goods: true });
+    expect(api.create.mock.calls[0]?.[0]).toEqual({ name: 'Test Gayaza Store', location: undefined, sells_goods: false, stocks_goods: true });
     expect(await screen.findByText('Test Gayaza Store added. It is a store: it keeps stock and does not sell.')).toBeTruthy();
   });
 

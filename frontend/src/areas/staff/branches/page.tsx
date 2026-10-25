@@ -160,7 +160,7 @@ export function BranchesScreen() {
         </p>
       )}
       {canManage && adding && (
-        <AddBranchForm canOpenBilling={(me.permissions ?? []).includes('core.billing.read')} onAdded={added} onCancel={() => setAdding(false)} />
+        <AddBranchForm takenCodes={all.map((b) => b.code ?? '')} canOpenBilling={(me.permissions ?? []).includes('core.billing.read')} onAdded={added} onCancel={() => setAdding(false)} />
       )}
       {toast}
       {notice && <p role="status" className="alert alert-success">{notice}</p>}
