@@ -106,7 +106,7 @@ a no-op export.
 
 - The retail home shows one large tile per screen, with an icon, two per row on a phone. Each tile has its own icon
   (`icons[screen]`, issue #483), the same one its row shows in the staff menu; so do the catalogue tiles (`TILE_ICONS`).
-- The staff menu lists the shop's pages in groups (issue #564, ADR-085): Today (Sell, Orders with the open count),
+- The staff menu lists the shop's pages in groups (issue #564, ADR-086): Today (Sell, Orders with the open count),
   Stock (My stock with "N low", Buy stock, Count stock, Move stock, Items and categories) and Money (Cash book, Expenses,
   Customers who owe, What I owe suppliers, Savings and advances), then Reports under Business, which opens this retail
   home with the figures and every shop page. Each row shows only when the session may use its page, with no cap (the five

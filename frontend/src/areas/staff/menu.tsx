@@ -16,7 +16,7 @@ import { SCREENS, canUse, showRetail, type RetailScreen } from './retail/permiss
 import { showSms } from './sms/state';
 import { showUsers } from './users/state';
 
-// The staff menu's groups and items (issue #564, owner decisions D38 and D44, ADR-085), apart from the layout in route.tsx so a
+// The staff menu's groups and items (issue #564, owner decisions D38 and D44, ADR-086), apart from the layout in route.tsx so a
 // test reads them without loading the staff area (issue #483). One list, grouped the way a shop owner thinks: Home, then Today,
 // Stock, Money, Lending (when the business has it) and Business, each item filtered by the same permission rules as before. The
 // sidebar from 720px and the phone drawer both draw it; Notifications and Help and feedback are in the menu's footer.

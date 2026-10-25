@@ -18,7 +18,7 @@ import { staffAreas, staffMenu } from './menu';
 import { SCREENS, SCREEN_CAPABILITY, needsOf } from './retail/permissions';
 import { StaffBar, StaffSideNav } from './route';
 
-// The staff menu (issue #564, owner decisions D38 and D44, ADR-085): one grouped list, the same on a phone and a laptop. Home, then
+// The staff menu (issue #564, owner decisions D38 and D44, ADR-086): one grouped list, the same on a phone and a laptop. Home, then
 // Today, Stock, Money, Lending when the business has it, and Business, each under a small muted heading, every page the session
 // may open and nothing else, then a footer with Notifications, Help and feedback, the person and Sign out. From 720px it is a
 // fixed sidebar; below 720px the menu button at the top left of the top bar opens it as a drawer, which keeps what #455 gave it:

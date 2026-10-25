@@ -142,7 +142,7 @@ The platform host and a tenant without a colour show the Rincol blue.
 
 ## Navigation (#455, #564)
 
-One menu, grouped the way a shop owner thinks, the same on a phone and a laptop (#564, owner decisions D38 and D44, ADR-085,
+One menu, grouped the way a shop owner thinks, the same on a phone and a laptop (#564, owner decisions D38 and D44, ADR-086,
 which amends the menu decisions of #455 and #471; the approved picture is `docs/ui/grouped-menu-564/menu.html`). From 720px it
 is a fixed sidebar; below 720px the menu button at the top left of the top bar opens the same list in a drawer from the left, and
 the bottom tabs for the five daily jobs stay as they are (#539, decisions D29 and D31). Where the navigation sits changes at the
@@ -177,7 +177,7 @@ means tablets should have the tabs too waits for the owner's sign-off (#544), an
   branch tour step (`branch-picker`) points at the sidebar's branch row. On a phone the top bar keeps its title and picker.
   The foot (`StaffMenuFoot` in `areas/staff/route.tsx`) holds Notifications, Help and feedback (a button that opens the Help
   sheet, with its tours and Send feedback; in the drawer it closes the drawer first), then the person's initials, name and role,
-  and Sign out (a `BusyButton`, busy while signing out runs).
+  and Sign out on a row of its own under them, so nothing is cut off at 264px (a `BusyButton`, busy while signing out runs).
 - **From 720px, the sidebar** (`SideNav`, a `div.side-nav`): a column at the left of the page, 264px wide, that stays in view
   while the page scrolls (`position: sticky`, the height of the window, the list scrolling between the top and the foot). It
   no longer folds to its icons. The page becomes two columns (`.nav-layout`, `.nav-layout-main`): the content takes the

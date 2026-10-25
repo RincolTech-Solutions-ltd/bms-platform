@@ -602,7 +602,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   (`/platform/feedback`), the tours `page-feedback` and `page-operator-feedback`, and a Feedback step in `admin-welcome` v18,
   `retail-sales` v12 and `staff-welcome` v6. Tests: `FeedbackIT`, `RlsIsolationIT`, `ModularityTest`, `feedback-state.test.ts`,
   `feedback.dom.test.tsx`, `tours-operator.test.tsx`.
-- **Built (one grouped menu, issue #564, ADR-085, FR-UXN-04):** PWA only, no migration, no API change. `staffMenu` in
+- **Built (one grouped menu, issue #564, ADR-086, FR-UXN-04):** PWA only, no migration, no API change. `staffMenu` in
   `frontend/src/areas/staff/menu.tsx` builds the groups (Home, Today, Stock, Money, Lending, Business) with the permission checks,
   `useMenuCounts` reads the open orders and "N low" from Home's summary, and `SideNav` and `SideMenu` (`components/side-menu.tsx`)
   draw them with `MenuShop` (`branch-picker.tsx`) at the top and `StaffMenuFoot` (`route.tsx`) at the foot: a fixed 264px sidebar
@@ -998,7 +998,7 @@ Accepted (this list is the ADR index):
   are reused, no second payable system; Buy stock is paid in cash, mobile money, bank or on credit; a payment has a date, never in the future,
   and pays only what was owed that day; a supplier statement with a running balance, shared as text (proposed, #557, owner decision D15;
   FR-RET-73; amends ADR-033 as amended by #198; migration `V97`)
-- ADR-085 One grouped staff menu, the same on a phone and a laptop: Home, Today, Stock, Money, Lending (when on, after Money) and
+- ADR-086 One grouped staff menu, the same on a phone and a laptop: Home, Today, Stock, Money, Lending (when on, after Money) and
   Business, every page the session may open by the same permission rules and no cap; the shop logo or initials, business, role
   and branch picker at the top; Notifications, Help and feedback, the person and Sign out at the foot; a fixed 264px sidebar from
   720px that no longer folds and a drawer from the top left on a phone, the bottom tabs unchanged (proposed, #564, owner decisions

@@ -239,6 +239,7 @@ function StaffMenuFoot({ me, busy, onSignOut, onHelp }: { me: Me; busy: boolean;
           {role && <span className="side-menu-me-role">{role}</span>}
         </span>
         <BusyButton type="button" className="btn-ghost side-menu-sign-out" busy={busy} onClick={onSignOut}>
+          {icons.signOut}
           Sign out
         </BusyButton>
       </div>

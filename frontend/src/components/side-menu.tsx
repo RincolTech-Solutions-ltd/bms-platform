@@ -10,7 +10,7 @@ import { icons } from './icons';
 // the same list in a drawer from the left (SideMenu). Both draw MenuLinks, so the items, groups and the current one (aria-current)
 // cannot drift apart. The drawer closes on the backdrop, Escape, a left swipe or a chosen link, keeps focus inside while open and
 // gives it back to the menu button; any change of page closes it. A tour step that points at one of the data-tour anchors opens
-// the drawer for as long as the step is shown, without taking focus from the tour card. Since issue #564 (ADR-085) the links come
+// the drawer for as long as the step is shown, without taking focus from the tour card. Since issue #564 (ADR-086) the links come
 // in groups, each under a small muted heading (Today, Stock, Money, Business), never folded, and the sidebar no longer folds to
 // its icons: the menu is the same list on a phone and a laptop. `head` is drawn above the list and `foot` below it.
 

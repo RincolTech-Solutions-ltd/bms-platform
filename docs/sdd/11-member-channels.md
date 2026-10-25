@@ -127,7 +127,7 @@ dark theme follow (#429): the person picks Light, Dark or Same as my phone with 
 right of the header, or under Appearance on the Notifications and app page (#452), kept on the device; the tokens, the
 menu and the dark pairs are in `docs/ui/design-system.md`.
 
-Navigation (#455, #564): one grouped menu on every screen size (FR-UXN-04, ADR-085). The staff area
+Navigation (#455, #564): one grouped menu on every screen size (FR-UXN-04, ADR-086). The staff area
 lists its pages in groups the way a shop owner thinks: Home, Today, Stock, Money, Lending (for a
 business with lending) and Business, each under a small muted heading, every row with an inline SVG
 line icon, 48px high, the current one marked `aria-current="page"` with a tinted background and

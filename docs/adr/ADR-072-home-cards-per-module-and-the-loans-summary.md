@@ -6,7 +6,7 @@ Accepted (owner request of 22 Oct 2026, issue #471, FR-UXN-04 and FR-UXN-05, aft
 ADR-001 (core plus vertical modules), ADR-003 (row-level security), ADR-055 (sellers who see only their own figures), ADR-064
 (a loan officer sees their own portfolio) and on the side menu of issue #455. Decision 2 (the Shop card's reads) is superseded by
 ADR-076 (issue #485): the Shop card and the shop's summary cards read one Home summary. The side menu's headed Shop and Lending
-sections of issue #471 are replaced by the grouped menu of ADR-085 (issue #564); the Home cards are unchanged.
+sections of issue #471 are replaced by the grouped menu of ADR-086 (issue #564); the Home cards are unchanged.
 
 ## Context
 

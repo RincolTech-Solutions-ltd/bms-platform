@@ -161,7 +161,7 @@
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--color-border);
   font-weight: var(--weight-semibold);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .top-menu-item,
@@ -476,8 +476,7 @@ img.menu-shop-logo {
   white-space: nowrap;
 }
 
-.menu-shop-role,
-.side-menu-me-role {
+.menu-shop-role {
   overflow: hidden;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
@@ -648,9 +647,10 @@ img.menu-shop-logo {
   height: 18px;
 }
 
-/* Who is signed in: initials, name and role, and Sign out at the right. */
+/* Who is signed in: initials, name and role, and Sign out on a row of its own under them, so neither is cut off at 264px. */
 .side-menu-me {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-1) var(--space-1) 0 var(--space-3);
@@ -676,17 +676,34 @@ img.menu-shop-logo {
   line-height: var(--leading-tight);
 }
 
-.side-menu-me-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* The name and the role wrap rather than cut off, so the 264px sidebar shows them whole beside Sign out. */
+.side-menu-me-name,
+.side-menu-me-role {
+  overflow-wrap: break-word;
+}
+
+.side-menu-me-role {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
 }
 
 .side-menu-sign-out {
-  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-3);
+  flex: 1 0 100%;
   min-height: var(--tap);
+  padding: 0;
+  border: 0;
   color: var(--color-text-muted);
   font-weight: var(--weight-regular);
+  box-shadow: none;
+}
+
+.side-menu-sign-out svg {
+  width: 22px;
+  height: 22px;
 }
 
 /*
