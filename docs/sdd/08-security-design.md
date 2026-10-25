@@ -246,7 +246,7 @@ Outside the Users routes the Owner alone asks for a module, stops one, cancels t
 `SelfServePlanIT`), and moves the go-live date (ADR-071;
 `ExistingLoansIT.frExl03_theGoLiveDateGuardsAgainstBackdatingNewLending`). Subscription reminders
 and receipts go to the Owner's own email and phone (ADR-075; `BillingAutomationIT`); there is no
-separate billing contact, and no request to close the business and remove its data (both open on
+separate billing contact and no request to close the business: both not yet built (follow-ups on
 issue #325). A staff account is never deleted, the Owner's included: it is deactivated, and the
 application role holds no `DELETE` on `users` (`TenantOwnerIT.staffAccountsAreNeverDeleted`).
 
