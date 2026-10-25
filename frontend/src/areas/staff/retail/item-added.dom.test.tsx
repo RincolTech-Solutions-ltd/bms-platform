@@ -181,6 +181,8 @@ describe('#498 under reduced motion', () => {
     expect(feedback).toMatch(/\.line-added \{[^}]*animation: rt-line-added [^;]*var\(--ease-out\)/);
     expect(feedback).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.line-added \{\s*animation: rt-line-added-still [^;]*steps\(1, end\)/);
     expect(readFileSync(join(__dirname, '../../../app/theme.css'), 'utf8')).toContain('--ease-out: cubic-bezier(0.2, 0, 0, 1);');
-    expect(feedback).toMatch(/\.line-card \{\s*position: relative;/);
+    expect(feedback).toMatch(/\.line-card \{\s*position: relative;\s*isolation: isolate;/);
+    // Behind the words, so the new quantity reads at full contrast.
+    expect(feedback).toMatch(/\.line-added \{[^}]*z-index: -1;/);
   });
 });
