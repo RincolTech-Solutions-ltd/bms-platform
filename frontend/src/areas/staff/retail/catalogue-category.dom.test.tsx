@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mockMe, prefixBase } from '../../../api/retail-mock';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
+import { chooseCategory } from '../../../test-utils/category-picker';
 
 /** A button that may be pressed: not disabled, and not a primary button whose form is still not ready (issue #526). */
 const ready = (b: unknown) => !(b as HTMLButtonElement).disabled && (b as HTMLElement).getAttribute('data-not-ready') !== 'true';
@@ -136,7 +137,7 @@ describe('the category page', () => {
 describe('the item form outside a category', () => {
   it('asks for the category first, marks the needed fields and goes to the first one missing', async () => {
     screenOf(<ProductForm onSaved={() => undefined} onCancel={() => undefined} />);
-    await waitFor(() => expect(screen.getAllByRole('option').length).toBeGreaterThan(2));
+    await screen.findByRole('option', { name: 'piece' });
     expect(document.querySelector('form .fields-needed')?.textContent).toBe('Fields marked * are needed.');
     const category = screen.getByLabelText(/^Category/);
     const description = screen.getByLabelText(/^Description/);
@@ -154,15 +155,14 @@ describe('the item form outside a category', () => {
     expect(await screen.findByText('Choose a category.')).toBeTruthy();
     expect(createProduct).not.toHaveBeenCalled();
     // Once a category is chosen the line names its next code.
-    fireEvent.change(category, { target: { value: 'c2' } });
+    await chooseCategory(category, 'Lamps');
     expect(screen.getByTestId('item-code').textContent).toBe('Item code: LMP-0001, made by the app');
   });
 
   it('on an item\'s own page lets it move to another category and says it keeps its code', async () => {
     updateProduct.mockResolvedValue({ ...bulb, category_id: 'c2', category: 'Lamps', version: 2 });
     screenOf(<ProductForm product={bulb} onSaved={() => undefined} onCancel={() => undefined} />);
-    await waitFor(() => expect(screen.getAllByRole('option').length).toBeGreaterThan(2));
-    fireEvent.change(screen.getByLabelText(/^Category/), { target: { value: 'c2' } });
+    await chooseCategory(screen.getByLabelText(/^Category/), 'Lamps');
     expect(screen.getByText('Moving it from Bulbs keeps its item code.')).toBeTruthy();
     // Issue #562: the code is shown read-only and never sent.
     expect(screen.getByTestId('item-code').textContent).toBe('Item code: BLB-0001. It never changes.');

@@ -11,6 +11,7 @@ import { OptionBoxes, VariantPreview, linesOf, previewProblem, usePreview } from
 import { ItemPhoto, PhotoEditor, shownPhoto } from './item-photo';
 import { showQty } from './maths';
 import { ScreenLink } from './screen-link';
+import { CategoryPicker } from './category-picker';
 import { Gate, Problem, Success, money, useProfitAccess, useToast } from './ui';
 import { WORDS } from '../../../app/glossary';
 import { Hint } from '../../../app/ui/Hint';
@@ -205,10 +206,7 @@ function RenameFamily({ family, onDone }: { family: Family; onDone: (text: strin
     <section className="rt-card" aria-label="Change the name or category">
       <label htmlFor="family-name">Name</label>
       <input id="family-name" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} autoComplete="off" />
-      <label htmlFor="family-category">Category</label>
-      <select id="family-category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-        {(categories.data ?? []).filter((c) => c.active !== false || c.id === family.category_id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-      </select>
+      <CategoryPicker id="family-category" categories={(categories.data ?? []).filter((c) => c.active !== false || c.id === family.category_id)} value={categoryId} onChange={setCategoryId} />
       <Hint full>Every size and colour takes the new name and category. Past sales stay as they were.</Hint>
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="button" className="rt-primary" disabled={!changed} onClick={() => save.mutate()}>Save</BusyButton>

@@ -6,6 +6,7 @@ import type { Me } from '../../../api/client';
 import { type Product, type StockRow } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
+import { chooseCategory } from '../../../test-utils/category-picker';
 
 // Issue #505: under the item search on Buy stock and Count stock, "Not in the list? Add it here" opens a short form in the
 // AppSheet order and one Save makes the item and puts it on the purchase or the count. Only retail.catalogue.manage sees it;
@@ -71,9 +72,8 @@ const field = (label: RegExp) => within(form()).getByLabelText(label) as HTMLInp
 /** Opens the form and fills every field in the AppSheet order. */
 async function fill(qtyLabel: RegExp, qty: string) {
   fireEvent.click(screen.getByRole('button', { name: 'Not in the list? Add it here' }));
-  await within(form()).findByRole('option', { name: 'Bulbs' });
   await within(form()).findByRole('option', { name: 'piece' });
-  fireEvent.change(field(/^Category/), { target: { value: 'c1' } });
+  await chooseCategory(field(/^Category/), 'Bulbs');
   fireEvent.change(field(/^Description/), { target: { value: 'Test bulb 12W' } });
   fireEvent.change(field(/^Counted in/), { target: { value: 'u1' } });
   fireEvent.change(field(/^Buying price/), { target: { value: '6000' } });
@@ -87,7 +87,7 @@ describe('Buy stock: add an item that is not in the list', () => {
   it('shows the fields in the AppSheet order, the code as text made by the app and the category taking the cursor', async () => {
     open(<RestockForm />);
     fireEvent.click(screen.getByRole('button', { name: 'Not in the list? Add it here' }));
-    await within(form()).findByRole('option', { name: 'Bulbs' });
+    await within(form()).findByRole('option', { name: 'piece' });
     const labels = [...form().querySelectorAll('label')].map((l) => l.textContent?.replace(/\s*\*$/, '').trim());
     expect(labels).toEqual(['Category', 'Description', 'Counted in', 'Buying price (UGX)', 'Selling price (UGX)', expect.stringMatching(/^Quantity bought/)]);
     expect(document.activeElement).toBe(field(/^Category/));
@@ -96,7 +96,7 @@ describe('Buy stock: add an item that is not in the list', () => {
     expect(code.compareDocumentPosition(field(/^Category/)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(code.textContent).toBe('Item code: made by the app once you choose the category');
     expect(within(form()).queryByLabelText(/Item code/)).toBeNull();
-    fireEvent.change(field(/^Category/), { target: { value: 'c1' } });
+    await chooseCategory(field(/^Category/), 'Bulbs');
     expect(code.textContent).toBe('Item code: BLB-0002, made by the app');
     expect(within(form()).getAllByRole('button', { name: 'Save the item' })).toHaveLength(1);
   });
@@ -104,14 +104,14 @@ describe('Buy stock: add an item that is not in the list', () => {
   it('marks the needed fields with a red asterisk and aria-required, and a Save with gaps goes to the first', async () => {
     open(<RestockForm />);
     fireEvent.click(screen.getByRole('button', { name: 'Not in the list? Add it here' }));
-    await within(form()).findByRole('option', { name: 'Bulbs' });
+    await within(form()).findByRole('option', { name: 'piece' });
     expect(within(form()).getByText(/Fields marked/)).toBeTruthy();
     for (const label of [/^Category/, /^Description/, /^Counted in/, /^Buying price/, /^Selling price/, /^Quantity bought/]) {
       const control = field(label);
       expect(control.getAttribute('aria-required'), String(label)).toBe('true');
       expect(form().querySelector(`label[for="${control.id}"] .field-star`)?.getAttribute('aria-hidden')).toBe('true');
     }
-    fireEvent.change(field(/^Category/), { target: { value: 'c1' } });
+    await chooseCategory(field(/^Category/), 'Bulbs');
     save();
     expect(document.activeElement).toBe(field(/^Description/));
     expect(within(form()).getByText('Type what the item is.')).toBeTruthy();
@@ -220,9 +220,9 @@ describe('Buy stock: add an item that is not in the list', () => {
       </QueryClientProvider>,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Not in the list? Add it here' }));
-    await within(form()).findByRole('option', { name: 'Bulbs' });
+    await within(form()).findByRole('option', { name: 'piece' });
     expect(within(form()).queryByLabelText(/^Quantity bought/)).toBeNull();
-    fireEvent.change(field(/^Category/), { target: { value: 'c1' } });
+    await chooseCategory(field(/^Category/), 'Bulbs');
     fireEvent.change(field(/^Description/), { target: { value: 'Test bulb 12W' } });
     fireEvent.change(field(/^Counted in/), { target: { value: 'u1' } });
     fireEvent.change(field(/^Buying price/), { target: { value: '6000' } });
