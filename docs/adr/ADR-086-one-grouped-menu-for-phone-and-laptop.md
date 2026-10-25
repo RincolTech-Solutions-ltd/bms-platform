@@ -31,7 +31,8 @@ shop owner thinks, the same on a phone and a laptop (D38), and approved the pict
 3. **Reports opens the shop's Retail page** (`/staff/retail`: the owner's figures and every shop page as tiles), so every shop
    page stays one tap from the menu. A lending business without the shop keeps its Reports page there; with both, that page is
    Loan reports in the Lending group.
-4. **Top and foot.** The top shows the shop's logo, else the logo the top bar shows (ADR-068), else the business's initials, with
+4. **Top and foot.** The top shows the shop's logo, else the business's own logo (ADR-068), else the business's initials, never the
+   platform's logo or name, with
    the business name, the person's role (Owner for the owner, else the first role) and, on a full-width row under them, the branch
    picker. From 720px the top bar no longer repeats the logo, the business and the branch: it keeps Search and the profile button. The foot holds Notifications,
    Help and feedback (the Help sheet with its tours and Send feedback), then the person's initials, name and role, and Sign out.
@@ -44,6 +45,12 @@ shop owner thinks, the same on a phone and a laptop (D38), and approved the pict
    (`--color-accent-tint`) and brand-colour text, no side stripe; group headings are small muted text; counts (the open orders,
    "N low" on My stock) are muted figures on the right, read with the row, never coloured badges; the drawer's is the only shadow;
    no gradients, no emoji. Names come from the glossary (`WORDS`), so the menu, the tabs and the page titles agree.
+
+7. **Rows beyond the approved picture, on purpose.** The picture shows a shop owner without approvals, lending, payments, SMS or
+   the AI assistant. So that every page a session may open stays in the menu (decision 2), Approvals is a row of Today, and
+   Receive payments, SMS and AI assistant are rows of Business where their permission allows, as the issue asks; Loan reports
+   joins Lending for a business with both modules (decision 3). A session the picture describes sees exactly the drawn rows. As
+   the More page (#539, #544) lists the menu in its order, Approvals there moves from the top card to the Business card.
 
 ## Consequences
 

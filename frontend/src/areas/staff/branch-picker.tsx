@@ -56,13 +56,13 @@ export function ShopLogo({ url, name }: { url?: string | null; name: string }) {
  * for a moment first. In production the image loads straight from its URL, so an image that fails to load (`broke`) is passed
  * over for the next one.
  */
-function useShopImage(me: Me, branch: string | null, { platformLogo = false } = {}) {
+function useShopImage(me: Me, branch: string | null) {
   const active = (me.branches ?? []).find((b) => b.id === branch);
   const shop = useLogo(active?.logo_url ?? null);
   const brand = useShellBrand();
   const [broken, setBroken] = useState<string[]>([]);
-  const src = [shop.src, brand === PLATFORM_BRAND && !platformLogo ? null : brand.logoSrc].find((s) => s && !broken.includes(s)) ?? null;
-  return { active, loading: shop.loading, src, broke: (s: string) => setBroken((b) => [...b, s]), brand };
+  const src = [shop.src, brand === PLATFORM_BRAND ? null : brand.logoSrc].find((s) => s && !broken.includes(s)) ?? null;
+  return { active, loading: shop.loading, src, fromShop: src !== null && src === shop.src, broke: (s: string) => setBroken((b) => [...b, s]), brand };
 }
 
 /** The shop in use, its logo beside its name, on the More page (issues #461, #539). */
@@ -89,29 +89,32 @@ export function initials(name: string): string {
 }
 
 /**
- * The top of the staff menu (issue #564): the shop's logo, else the logo the top bar shows (ADR-068), else the business's
- * initials; the business name and the person's role; and under them, on a row of its own so nothing is cut off, the branch in
- * use, which switches branch when there is more than one to choose (a native select laid over it, as in the top bar's title).
- * From 720px the sidebar is the only place the business and the branch show (`tour` is then the branch step's anchor).
+ * The top of the staff menu (issue #564): the shop's logo, else the business's own logo (ADR-068), else the business's initials;
+ * never the platform's logo or name, which the shell shows only off a business's host or before its branding loads (then the
+ * business is called BMS, as the home screen calls it). Then the business name and the person's role, and under them, on a row of
+ * its own so nothing is cut off, the branch in use, which switches branch when there is more than one to choose (a native select
+ * laid over it, as in the top bar's title). From 720px the sidebar is the only place the business and the branch show; `tour` is
+ * then the branch step's anchor, on the branch row, or on the whole top for a session with no branch to show.
  */
 export function MenuShop({ me, branch, role, onChoose, tour }: { me: Me; branch: string | null; role: string; onChoose: (selection: string) => void; tour?: string }) {
-  const { active, loading, src, broke, brand } = useShopImage(me, branch, { platformLogo: true });
+  const { active, loading, src, fromShop, broke, brand } = useShopImage(me, branch);
+  const business = brand === PLATFORM_BRAND ? 'BMS' : brand.name;
   const branches = me.branches ?? [];
   const choices = branches.length + (me.all_branches ? 1 : 0);
-  const name = active ? branchLabel(active) : branch === ALL_BRANCHES ? 'All branches' : '';
+  const name = active ? branchLabel(active) : branch === ALL_BRANCHES ? 'All branches' : choices > 1 ? 'Choose a branch' : '';
   return (
-    <div className="menu-shop">
+    <div className="menu-shop" data-tour={name ? undefined : tour}>
       {loading ? (
         <span className="menu-shop-logo" aria-hidden="true" />
       ) : src ? (
-        <img className="menu-shop-logo" src={src} alt={`Logo of ${name || brand.name}`} onError={() => broke(src)} />
+        <img className="menu-shop-logo" src={src} alt={`Logo of ${fromShop && active ? branchLabel(active) : business}`} onError={() => broke(src)} />
       ) : (
         <span className="menu-shop-logo menu-shop-initials" aria-hidden="true">
-          {initials(brand.name)}
+          {initials(business)}
         </span>
       )}
       <span className="menu-shop-text">
-        <span className="menu-shop-name">{brand.name}</span>
+        <span className="menu-shop-name">{business}</span>
         {role && <span className="menu-shop-role">{role}</span>}
       </span>
       {name && (

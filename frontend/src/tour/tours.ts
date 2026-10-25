@@ -138,7 +138,7 @@ const branch: TourStep = {
   id: 'branch',
   target: 'branch-picker',
   title: 'Your branch',
-  body: 'The top of the page names your business and the branch you are working in. Tap it to switch branch. What you see and record follows this choice.',
+  body: 'On a laptop the top of the menu names your business and the branch you work in. On a phone it is the top of the page. Tap the branch to switch. What you see and record follows this choice.',
 };
 
 // A tenant admin, invited by a colleague or activated from the public sign-up (ADR-024), lands on
@@ -166,7 +166,8 @@ export const adminWelcome: Tour = {
   // Version 23 puts Help, Refresh and Light or dark in the one menu of the top bar, and the branch in its title (issue #526).
   // Version 24 words the bottom tabs step for the tabs the person has (issue #544).
   // Version 25 words the menu, Notifications and Feedback steps for the grouped menu and its footer (issue #564).
-  version: 25,
+  // Version 26 words the branch step for the menu's top on a laptop and the page's top on a phone (issue #564).
+  version: 26,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -435,7 +436,8 @@ export const retailSales: Tour = {
   // Version 20 puts Help, Refresh and Light or dark in the one menu of the top bar, and the branch in its title (issue #526).
   // Version 21 words the bottom tabs step for the tabs the person has (issue #544).
   // Version 22 words the menu, Notifications and Feedback steps for the grouped menu and its footer (issue #564).
-  version: 22,
+  // Version 23 words the branch and menu steps for the menu's top on a laptop and the drawer on a phone (issue #564).
+  version: 23,
   title: 'Selling tour',
   audience: isSeller,
   autoStart: true,
@@ -594,7 +596,7 @@ export const retailSales: Tour = {
       module: 'retail',
       optional: true,
       title: 'The menu',
-      body: 'Sell and Orders are under Today in the menu, and your stock pages under Stock. On a phone the tabs at the bottom hold Sell, My stock, Buy and Money. The menu button at the top left has the rest.',
+      body: 'Sell and Orders are under Today in the menu, and your stock pages under Stock. On a phone, the menu button at the top left opens it. The tabs at the bottom hold Sell, My stock, Buy and Money.',
     },
     search,
     notifications,
@@ -614,7 +616,8 @@ export const staffWelcome: Tour = {
   // Version 9 puts Help, Refresh and Light or dark in the one menu of the top bar, and the branch in its title (issue #526).
   // Version 10 words the bottom tabs step for the tabs the person has (issue #544).
   // Version 11 points the shop step at Today in the grouped menu and words Notifications and Feedback for its footer (issue #564).
-  version: 11,
+  // Version 12 words the branch step for the menu's top on a laptop and the page's top on a phone (issue #564).
+  version: 12,
   title: 'Welcome tour',
   audience: (me) => !isTenantAdmin(me) && !isSeller(me),
   autoStart: true,

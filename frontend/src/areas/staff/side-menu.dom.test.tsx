@@ -356,6 +356,20 @@ describe('the drawer on a phone (issues #455, #564)', () => {
     expect(button.getAttribute('aria-disabled')).toBe('true');
   });
 
+  it('shows Sign out in the top bar menu busy while signing out from 720px', async () => {
+    widthIs(false);
+    let finish = () => undefined as void;
+    show(officer, { signingOut: new Promise<void>((resolve) => (finish = resolve)) });
+    fireEvent.click(screen.getByRole('button', { name: /^Menu for / }));
+    const button = within(document.querySelector('.top-menu') as HTMLElement).getByRole('button', { name: 'Sign out' });
+    fireEvent.click(button);
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    // The sidebar's own Sign out follows the same signing out.
+    expect(within(sidebar()).getByRole('button', { name: 'Sign out' }).getAttribute('aria-busy')).toBe('true');
+    await act(async () => finish());
+    expect(button.getAttribute('aria-busy')).toBeNull();
+  });
+
   it('says Working inside the opened drawer, which hides the rest of the page, while Sign out runs', async () => {
     let finish = () => undefined as void;
     show(officer, { signingOut: new Promise<void>((resolve) => (finish = resolve)) });
@@ -528,6 +542,16 @@ describe('the drawer on a phone (issues #455, #564)', () => {
     // Today carries the shop's anchor, so the selling tour's menu step lights up Sell and Orders.
     const today = document.querySelector('[data-tour="retail-nav"]') as HTMLElement;
     expect(Array.from(today.querySelectorAll('a .side-menu-label')).map((a) => a.textContent)).toEqual(['Sell', 'Orders']);
+  });
+
+  it('puts the selling tour anchor on Today only while Today holds Sell or Orders', () => {
+    const anchor = (me: Me) => staffMenu(me, { sells: true }).find((g) => g.id === 'today')?.tour;
+    expect(anchor(admin)).toBe('retail-nav');
+    // Approvals alone in Today: the step that names Sell and Orders has no anchor there.
+    expect(anchor(officer)).toBeUndefined();
+    const approverInShop = { ...officer, permissions: ['core.approvals.read', 'retail.stock.read'], modules: ['retail'] } as unknown as Me;
+    expect(staffMenu(approverInShop, { sells: false }).find((g) => g.id === 'today')?.links.map((l) => l.label)).toEqual(['Approvals']);
+    expect(anchor(approverInShop)).toBeUndefined();
   });
 
   it.each(['nav-feedback', 'nav-notifications', 'nav-members'])('opens for a tour step that points at %s, and closes when the tour ends', async (target) => {

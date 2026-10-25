@@ -161,7 +161,7 @@
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--color-border);
   font-weight: var(--weight-semibold);
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
 }
 
 .top-menu-item,

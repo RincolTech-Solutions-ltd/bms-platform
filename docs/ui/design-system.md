@@ -169,12 +169,15 @@ means tablets should have the tabs too waits for the owner's sign-off (#544), an
   orders and My stock "N low", both from Home's own summary read (`useMenuCounts`, `homeSummaryQuery`), and nothing while the
   figure is 0. The count is read with the row ("Orders, 3": a `visually-hidden` comma). The only shadow is the drawer's
   (`--shadow-lg`); no gradients, no coloured stripes at a side or the top, no emoji.
-- **Top and foot.** The top (`MenuShop` in `areas/staff/branch-picker.tsx`) shows the shop's logo, else the logo the top bar
-  shows (the business's, ADR-068), else the business's initials on a tint, the business name and the person's role (Owner for
-  the owner, else the first role), and under them, on a full-width row of its own so nothing is cut off at 264px, the branch in
+- **Top and foot.** The top (`MenuShop` in `areas/staff/branch-picker.tsx`) shows the shop's logo, else the business's own logo
+  (ADR-068), else the business's initials on a tint, never the platform's logo or name (off a business's host, or before its
+  branding loads, the business is called BMS); the image's text names the shop or the business, whichever logo it is. Then the
+  business name and the person's role (Owner for the owner, else the first role), and under them, on a full-width row of its own so nothing is cut off at 264px, the branch in
   use, a native select named Switch branch laid over it when there is more than one branch to choose. From 720px this is the
   only place the logo, the business and the branch show: the top bar keeps Search, the sync dot and the profile button, and the
-  branch tour step (`branch-picker`) points at the sidebar's branch row. On a phone the top bar keeps its title and picker.
+  branch tour step (`branch-picker`, worded for both layouts) points at the sidebar's branch row, or at the whole top for a
+  session with no branch to show; with no branch in use but several to choose, the row says Choose a branch. On a phone the
+  top bar keeps its title and picker. Today carries the selling tour's `retail-nav` anchor only while it holds Sell or Orders.
   The foot (`StaffMenuFoot` in `areas/staff/route.tsx`) holds Notifications, Help and feedback (a button that opens the Help
   sheet, with its tours and Send feedback; in the drawer it closes the drawer first), then the person's initials, name and role,
   and Sign out on a row of its own under them, so nothing is cut off at 264px (a `BusyButton`, busy while signing out runs).

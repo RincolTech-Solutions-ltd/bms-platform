@@ -51,15 +51,15 @@ function widthIs(px: number) {
   );
 }
 
-function show(branch: string) {
+function show(branch: string | null, who: Me = me) {
   const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff'] }) });
   render(
     <RouterContextProvider router={router}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })}>
-        <StaffContext.Provider value={{ me, branch }}>
-          <TourProvider me={me} saveProgress={false}>
-            <StaffSideNav me={me} />
-            <StaffBar me={me} branch={branch} onBranch={() => undefined} onSignOut={() => undefined} />
+        <StaffContext.Provider value={{ me: who, branch }}>
+          <TourProvider me={who} saveProgress={false}>
+            <StaffSideNav me={who} />
+            <StaffBar me={who} branch={branch} onBranch={() => undefined} onSignOut={() => undefined} />
           </TourProvider>
         </StaffContext.Provider>
       </QueryClientProvider>
@@ -108,7 +108,8 @@ describe('the shop in use at the top of the sidebar (issues #461, #564)', () => 
   it('falls back to the business logo for a shop without its own', async () => {
     brand = { name: 'Test Traders', logoSrc: BUSINESS, themePrimary: null, themeText: null };
     show('b-one');
-    const image = (await within(sidebarShop()).findByAltText('Logo of Test Shop One (HQ)')) as HTMLImageElement;
+    // The image's text names whose logo it is: here the business's, not the shop's.
+    const image = (await within(sidebarShop()).findByAltText('Logo of Test Traders')) as HTMLImageElement;
     expect(image.getAttribute('src')).toBe(BUSINESS);
   });
 
@@ -118,8 +119,8 @@ describe('the shop in use at the top of the sidebar (issues #461, #564)', () => 
     const image = (await within(sidebarShop()).findByAltText('Logo of Test Shop Two (KLA)')) as HTMLImageElement;
     expect(image.getAttribute('src')).toBe(LOGO);
     fireEvent.error(image);
-    expect(within(sidebarShop()).getByAltText('Logo of Test Shop Two (KLA)').getAttribute('src')).toBe(BUSINESS);
-    fireEvent.error(within(sidebarShop()).getByAltText('Logo of Test Shop Two (KLA)'));
+    expect(within(sidebarShop()).getByAltText('Logo of Test Traders').getAttribute('src')).toBe(BUSINESS);
+    fireEvent.error(within(sidebarShop()).getByAltText('Logo of Test Traders'));
     expect(within(sidebarShop()).queryByRole('img')).toBeNull();
     expect(sidebarShop().querySelector('.menu-shop-initials')?.textContent).toBe('TT');
   });
@@ -134,13 +135,23 @@ describe('the shop in use at the top of the sidebar (issues #461, #564)', () => 
   it('shows All branches with the business logo', async () => {
     brand = { name: 'Test Traders', logoSrc: BUSINESS, themePrimary: null, themeText: null };
     show(ALL_BRANCHES);
-    expect((await within(sidebarShop()).findByAltText('Logo of All branches')).getAttribute('src')).toBe(BUSINESS);
+    expect((await within(sidebarShop()).findByAltText('Logo of Test Traders')).getAttribute('src')).toBe(BUSINESS);
   });
 
-  it('shows the logo the top bar shows when the shop has none of its own, the initials only without any logo (ADR-068)', async () => {
+  it('never shows the platform logo or name: off a business host it shows the BMS initials (ADR-068)', () => {
+    // brand is PLATFORM_BRAND here, as before a business's branding loads.
     show('b-one');
-    const image = (await within(sidebarShop()).findByAltText('Logo of Test Shop One (HQ)')) as HTMLImageElement;
-    expect(image.getAttribute('src')).toBe(PLATFORM_BRAND.logoSrc);
+    expect(within(sidebarShop()).queryByRole('img')).toBeNull();
+    expect(sidebarShop().querySelector('.menu-shop-initials')?.textContent).toBe('B');
+    expect(sidebarShop().querySelector('.menu-shop-name')?.textContent).toBe('BMS');
+    expect(sidebarShop().textContent).not.toContain('Rincoltech');
+  });
+
+  it("shows the business's own logo when the shop has none, named after the business", async () => {
+    brand = { name: 'Test Traders', logoSrc: BUSINESS, themePrimary: null, themeText: null };
+    show('b-one');
+    const image = (await within(sidebarShop()).findByAltText('Logo of Test Traders')) as HTMLImageElement;
+    expect(image.getAttribute('src')).toBe(BUSINESS);
     expect(sidebarShop().querySelector('.menu-shop-initials')).toBeNull();
   });
 
@@ -159,10 +170,21 @@ describe('the shop in use at the top of the sidebar (issues #461, #564)', () => 
     expect(within(document.querySelector('.staff-bar') as HTMLElement).getByRole('combobox', { name: 'Branch' })).toBeTruthy();
   });
 
+  it('keeps the branch step anchored with no branch in use: Choose a branch with several to choose, the whole top with none', () => {
+    show(null);
+    expect(sidebarShop().querySelector('.menu-shop-branch-name')?.textContent).toBe('Choose a branch');
+    expect(document.querySelectorAll('.side-nav [data-tour="branch-picker"]')).toHaveLength(1);
+    expect(sidebarShop().querySelector('.menu-shop-branch')?.getAttribute('data-tour')).toBe('branch-picker');
+    cleanup();
+    show(null, { ...me, all_branches: false, branches: [] } as Me);
+    expect(sidebarShop().querySelector('.menu-shop-branch')).toBeNull();
+    expect(sidebarShop().getAttribute('data-tour')).toBe('branch-picker');
+  });
+
   it('puts the branch on a row of its own under the business and the role', () => {
     show('b-one');
     const top = sidebarShop();
-    expect(Array.from(top.children).map((c) => c.className)).toEqual(['menu-shop-logo', 'menu-shop-text', 'menu-shop-branch']);
+    expect(Array.from(top.children).map((c) => c.classList[0])).toEqual(['menu-shop-logo', 'menu-shop-text', 'menu-shop-branch']);
   });
 
   it('switches branch from the branch at the right, with the choices of the top bar', () => {

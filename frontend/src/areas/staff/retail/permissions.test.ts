@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mockMe } from '../../../api/retail-mock';
 import { staffMenu } from '../menu';
-import { canOpenAccount, canSeeProfit, canUse, holdsAt, screensFor, showRetail } from './permissions';
+import { SCREENS, canOpenAccount, canSeeProfit, canUse, holdsAt, screensFor, showRetail } from './permissions';
 
 describe('retail permission gating', () => {
   const sales = mockMe('sales');
@@ -121,6 +121,20 @@ describe('the shop rows of the staff menu', () => {
       ['lending', []],
       ['business', ['Reports']],
     ]);
+  });
+
+  // Pages without a row of their own (Usage, Banking, Withdrawals, Advances, Customer accounts and the rest) stay one tap from the
+  // menu: Reports opens the Retail page, whose tiles are every shop page the session may use (ADR-086 decision 3).
+  it.each(['admin', 'cashier', 'sales'])('leaves no shop page out of reach for %s: a row of its own, or a tile behind Reports', (role) => {
+    const me = mockMe(role);
+    const rows = staffMenu(me, { sells: true }).flatMap((g) => g.links.map((l) => l.to));
+    expect(rows).toContain('/staff/retail');
+    const tiles = screensFor(me, { sells: true }).map((s) => s.path);
+    const allowed = SCREENS.filter((s) => canUse(me, s.screen));
+    for (const s of allowed) expect(rows.includes(s.path) || tiles.includes(s.path), s.screen).toBe(true);
+    for (const screen of ['usage', 'banking', 'withdrawals', 'advances', 'customerAccounts'] as const) {
+      if (canUse(me, screen)) expect(tiles, screen).toContain(SCREENS.find((s) => s.screen === screen)?.path);
+    }
   });
 
   it('gives a seller without the cash book only the rows they may open', () => {

@@ -61,7 +61,7 @@ export function staffMenu(me: Me, { sells, counts = {} }: { sells: boolean; coun
     {
       id: 'today',
       label: 'Today',
-      tour: retail ? 'retail-nav' : undefined,
+
       links: [
         sells && shopRow(me, 'Sell', 'sale', ['sale']),
         shopRow(me, 'Orders', 'orders', ['orders'], { count: count(counts.orders) }),
@@ -118,7 +118,12 @@ export function staffMenu(me: Me, { sells, counts = {} }: { sells: boolean; coun
       ],
     },
   ];
-  return groups.map((g) => ({ ...g, links: g.links.filter((l): l is MenuLink => l !== false) }));
+  return groups.map((g) => {
+    const links = g.links.filter((l): l is MenuLink => l !== false);
+    // Today carries the shop's tour anchor only while it holds a shop row (Sell or Orders), which the selling tour's step names.
+    const tour = g.id === 'today' && links.some((l) => l.section === 'shop') ? 'retail-nav' : g.tour;
+    return { ...g, tour, links };
+  });
 }
 
 /**
