@@ -240,6 +240,20 @@ owner rule (ADR-062 decision 9). A business with no Owner yet (one with no activ
 rules of before until the operator assigns one. Two-step sign-in is not forced on the Owner; the
 Users screen prompts the Owner to turn it on.
 
+**The rest of the Owner's powers (ADR-090, issue #571, migration `V102`).** Three more acts ride on `core.settings.manage` and
+are the Owner's alone (403 `owner_only` for every other administrator, and for everyone while a business has no Owner):
+naming or removing the **billing contact** (FR-SUB-13; no step-up, audited; it is never a sign-in contact, so it cannot be used to
+receive a reset link or a code), **asking to close the business** (FR-TEN-09; the owner step-up, the authenticator code else the
+password, as for the transfer) and **cancelling** that request. From the request the business is read only (423
+`business_closing`, the exports, sign-in and the cancel allowed). **Removal** is the platform operator's, after the cooling-off
+period (30 days), with the operator's own authenticator code and a reason: the Owner's request and the operator's confirmation are
+the two people. The append-only and guard triggers of the tables removal anonymises let a change through only when
+`bms_erasing` holds: the statement runs as `bms_owner` inside one of V102's definer functions, the transaction was marked for this
+business by `platform_begin_tenant_removal` and its request is `removing`; the application role can neither move a request past
+`requested` (the `tenant_closures_guard` trigger) nor run an eraser outside a removal (`bms_removing_tenant`). Because `bms_owner`
+bypasses row-level security, every statement of the erasers names the business. The operator lists the businesses with no Owner
+(`GET /platform/tenants/without-owner`) and sets one with the existing `make-owner` route.
+
 Outside the Users routes the Owner alone asks for a module, stops one, cancels the subscription
 (read only after the last day paid for, data kept) and undoes a change still to come (ADR-073,
 403 `owner_only` for any other administrator, who reads the Plan and billing page only;

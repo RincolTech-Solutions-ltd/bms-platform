@@ -699,6 +699,36 @@ ended business as well as an active one: its report runs still finish and a dead
 `app_tenants_with_due_payment_checks` (V54) now lists its businesses, so a payment made after the end still posts while a
 business the operator suspended stays left out.
 
+
+### `billing_contacts` (RLS; `bms_app` SELECT, INSERT, UPDATE, DELETE; `V102`, ADR-090)
+
+At most one row per business (`tenant_id` is the key): `full_name varchar(120) NOT NULL`, `email varchar(254) NOT NULL`,
+`phone_e164 varchar(16)` (optional, a mobile number for SMS reminders), `updated_by` (FK to `users`), `created_at`, `updated_at`.
+The person the reminders and receipts go to instead of the Owner; no row means the Owner. Never read by sign-in. FR-SUB-13.
+
+### `tenant_closures` (RLS; `bms_app` SELECT, INSERT, UPDATE under a guard; `V102`, ADR-090)
+
+The Owner's request to close the business. `status text NOT NULL DEFAULT 'requested'` (`requested`, `cancelled`, `removing`,
+`removed`), `requested_by` (FK to `users`), `requested_at`, `remove_after date NOT NULL` (the first day of removal, the business's
+own date plus the cooling-off), `export_run_id uuid` (the full workbook queued for the Owner), `cancelled_by`, `cancelled_at` (set
+exactly when cancelled), `removed_by_platform_user_id`, `removal_reason varchar(300)`, `removed_at` and `keep_until date` (set
+exactly when removed: the day after which the kept money records may be deleted). A partial unique index allows one open request
+(`requested` or `removing`) per business. The trigger `tenant_closures_guard` lets the application insert only a `requested` row,
+set its export run once and cancel it; only the definer functions running as `bms_owner` move a request to `removing` or
+`removed`. `tenants.status` gains `closed` (V102): a removed business, which the resolver never serves. `app_resolve_tenant_status`
+answers `closing` while a request is open for an active business or one whose Owner's cancellation ended it, and
+`platform_tenants_cancelling()` lists such a business so billing leaves it out. The removal runs through
+`platform_begin_tenant_removal(closure, operator, reason, today)` (bound to the business: the request open, its day come; marks
+the transaction with `bms.erasing_tenant`), the erasers `app_erase_core_personal_data()`, `lending_erase_personal_data()` and
+`retail_erase_personal_data()` (each refuses to run outside a removal through `bms_removing_tenant()`), and
+`platform_finish_tenant_removal(closure, keep_until, summary)` (the business `closed`, the subscription ended, the sign-up
+application anonymised, `platform.tenant.removed`). The guard functions `reject_mutation`, `retail_sales_guard_update`,
+`retail_quotations_guard_update`, `retail_customer_orders_guard_update`, `payment_intents_guard`, `retail_cashbook_guard_update` and
+`lending_collection_actions_guard` let a change through when `bms_erasing(to_jsonb(OLD))` holds: the caller runs as `bms_owner`,
+the transaction is marked for the row's business and its request is `removing`. The operator reads the requests through
+`platform_closures()` and the business of one through `platform_closure_tenant(id)`, and the businesses with no Owner and their
+active administrators through `platform_tenants_without_owner()`; all three refuse a tenant-bound transaction. FR-TEN-09,
+FR-IAM-18.
 ### `referral_codes` (RLS; `bms_app` SELECT only; append-only; `V88`, ADR-069)
 
 `tenant_id uuid PK` (FK `tenants`), `code varchar(10) UNIQUE` (`^[A-Z0-9]{4,10}$`, upper case), `created_at`. Written by the trigger
