@@ -47,13 +47,13 @@ export function changesOf(rules: ApprovalRule[], draft: Draft): RuleChange[] {
  * administrator only while two or more administrators count, so a business with one writes off alone (and is told).
  */
 export function zeroWords(actionType: string | undefined): string {
-  return actionType === 'retail_sale_write_off' ? '0 means a second administrator when the business has two.' : '0 means every one.';
+  return actionType === 'retail_sale_write_off' ? '0 means a second administrator when the business has two or more.' : '0 means every one.';
 }
 
 /** How a rule reads, as on or off, and from what amount. */
 export function ruleWords(rule: Pick<ApprovalRule, 'has_amount' | 'action_type'>, entry: Entry, currency: string): string {
   if (!entry.on) return 'no second person';
-  if (rule.action_type === 'retail_sale_write_off' && (entry.amount ?? 0) === 0) return 'a second administrator when the business has two';
+  if (rule.action_type === 'retail_sale_write_off' && (entry.amount ?? 0) === 0) return 'a second administrator when the business has two or more';
   if (!rule.has_amount || (entry.amount ?? 0) === 0) return 'a second person for every one';
   return `a second person from ${formatMinor(entry.amount ?? 0, currency)}`;
 }

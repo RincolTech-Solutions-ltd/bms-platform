@@ -1536,7 +1536,7 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
 
 - **Approval rules** (Business set-up, `/staff/setup/approvals`, administrators): the business's actions grouped as Shop and
   Lending, one card each. A retail action has a checkbox "Ask an administrator first" and, while on, "<action> from this amount"
-  (the one money field; 0 means every one, or for credit write-offs "a second administrator when the business has two", ADR-043's rule). A lending action reads "Always on" and shows only its amount. One Hint line per card says
+  (the one money field; 0 means every one, or for credit write-offs "a second administrator when the business has two or more", ADR-043's rule). A lending action reads "Always on" and shows only its amount. One Hint line per card says
   what happens while it waits. Below the shop list: "Selling below cost is not an approval", with a link to Staff users. Review and
   save reads each change back as "Sale voids: a second person from UGX 50,000 (was no second person).", says when the other
   administrators will be told, and asks for the administrator's own password, or the authenticator code when they have one.
