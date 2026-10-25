@@ -845,7 +845,8 @@ class UserService implements TenantAdmins {
 
     /**
      * The unique indexes behind {@link #checkUnique} (issue #323): two requests that passed the check at the same moment
-     * reach the index, the second waits for the first to commit and is refused here with the same 409.
+     * reach the index, the second waits for the first to commit and is refused here with the same 409. The exception's
+     * message carries the database's detail with the full phone or email, so it is never chained as the cause or logged.
      */
     private static ApiException duplicateContact(DuplicateKeyException e) {
         return String.valueOf(e.getMessage()).contains("users_staff_email")

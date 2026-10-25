@@ -48,4 +48,5 @@ at them. A pending invitation that is deactivated stops working.
 ## Deploy again
 
 Run the query again: it must return no rows. Then retry the deploy (`docs/runbooks/deploy.md`). V98 now builds the index and,
-from then on, a second invitation with the same phone is refused with "Someone on your staff already uses this phone number."
+from then on, a second invitation with the same phone is refused with 409 `duplicate_phone` ("A staff user has this phone."),
+which the Users screen shows as "Someone on your staff already uses this phone number."

@@ -19,6 +19,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -74,8 +75,9 @@ class StaffPhoneUniqueIT extends IntegrationTest {
     @Test
     void concurrentInvitationsWithOnePhoneMakeOneStaffUser() throws Exception {
         Queue<JsonNode> refusals = new ConcurrentLinkedQueue<>();
+        AtomicInteger task = new AtomicInteger();
         List<HttpStatusCode> statuses = Api.race(PARALLEL, () -> {
-            String spelling = Thread.currentThread().threadId() % 2 == 0 ? "0700000041" : "+256 700 000041";
+            String spelling = task.getAndIncrement() % 2 == 0 ? "0700000041" : "+256 700 000041";
             ResponseEntity<JsonNode> r = api.post("/api/v1/users", invite(spelling), adminSession.accessToken());
             if (r.getStatusCode().value() == 409) {
                 refusals.add(r.getBody());

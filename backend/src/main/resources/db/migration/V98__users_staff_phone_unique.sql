@@ -13,11 +13,14 @@
 -- how many phones are shared (never the phone itself, which is personal data and would reach the deploy log), and nothing is
 -- changed. docs/runbooks/staff-duplicate-phones.md is the manual fix; the deploy is retried once it is done.
 --
--- Expand only. CREATE UNIQUE INDEX takes a SHARE lock on users while it builds (staging and the pilot: tens of staff rows),
--- which blocks writes to users for that moment only. The first statement sets lock_timeout to five seconds as V96 does, so the
--- migration fails and is retried rather than every sign-in queueing behind it.
+-- Expand only. The SHARE lock on users is taken before the count and held to the commit, so the old release, still serving
+-- during the deploy, cannot commit a duplicate between the count and the index build (whose own error would print the phone).
+-- It blocks writes to users for that moment only (staging and the pilot: tens of staff rows); reads and sign-ins go on. The
+-- first statement sets lock_timeout to five seconds as V96 does, so the migration fails and is retried rather than every
+-- sign-in queueing behind it.
 
 SET LOCAL lock_timeout = '5s';
+LOCK TABLE users IN SHARE MODE;
 
 -- users has FORCE ROW LEVEL SECURITY and no app.tenant_id is bound here. bms_owner has BYPASSRLS
 -- (deploy/postgres/initdb/01-roles.sh), so the check reads every business; row_security = off makes PostgreSQL raise rather
