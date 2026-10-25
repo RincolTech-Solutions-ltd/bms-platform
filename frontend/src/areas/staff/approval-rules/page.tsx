@@ -7,7 +7,7 @@ import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
 import { MoneyInput } from '../../../app/ui/MoneyInput';
 import { useStaff } from '../context';
-import { type Draft, GENERIC_WAIT, MODULE_TITLES, WHILE_IT_WAITS, changesOf, draftOf, loosens, reviewLines } from './state';
+import { type Draft, GENERIC_WAIT, MODULE_TITLES, WHILE_IT_WAITS, changesOf, draftOf, loosens, reviewLines, zeroWords } from './state';
 
 // Approval rules (issue #343, ADR-091): which actions of the business need a second person before they happen, and from what amount.
 // Lending actions always ask (a licensed lender keeps the second person); retail ones are switches, off unless the business had them
@@ -43,7 +43,7 @@ function RuleCard({ rule, draft, busy, onChange }: {
           label={`${rule.label} from this amount`}
           valueMinor={entry.amount}
           onChange={(amount) => onChange(entry.on, amount)}
-          hint="0 means every one."
+          hint={zeroWords(rule.action_type)}
         />
       )}
       <Hint>{WHILE_IT_WAITS[type] ?? GENERIC_WAIT}</Hint>

@@ -57,7 +57,9 @@ expenses.
      cost): off.
    - Expenses (`retail_expense`, new, amount): off.
 
-   With a switch on, 0 means every one asks. A price below cost is **not** an approval and is not listed: the sale is made at the
+   With a switch on, 0 means every one asks, except a credit write-off: on with 0 keeps ADR-043's rule, so a second
+   administrator is needed only while two or more administrators count, and a business with one writes off alone (flagged and
+   told). The screen says so in those words, never "every one". A price below cost is **not** an approval and is not listed: the sale is made at the
    till while the customer waits, so it cannot wait for a second person, and today only a holder of `retail.price.below_cost` may
    sell at or below cost (the others are refused). The screen says so in one line and points to Roles.
 

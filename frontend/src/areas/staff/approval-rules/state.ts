@@ -16,7 +16,7 @@ export const WHILE_IT_WAITS: Record<string, string> = {
   retail_stock_correction: 'The quantity stays as it is until an administrator approves. Counted at the average cost.',
   retail_expense: 'The expense is not in the cash book until an administrator approves it.',
   retail_sale_return: 'No money or goods move until a second administrator approves. Voiding such a return asks too.',
-  retail_sale_write_off: 'With no amount, a second administrator approves when the business has two.',
+  retail_sale_write_off: 'With one administrator, a write-off goes through alone and the administrator is told.',
   retail_purchase_order: 'The order stays a draft until a second person approves. Deliveries without an order follow it.',
 };
 
@@ -42,9 +42,18 @@ export function changesOf(rules: ApprovalRule[], draft: Draft): RuleChange[] {
     });
 }
 
+/**
+ * What 0 means for an action, said under its amount. A credit write-off with no amount keeps ADR-043's rule: a second
+ * administrator only while two or more administrators count, so a business with one writes off alone (and is told).
+ */
+export function zeroWords(actionType: string | undefined): string {
+  return actionType === 'retail_sale_write_off' ? '0 means a second administrator when the business has two.' : '0 means every one.';
+}
+
 /** How a rule reads, as on or off, and from what amount. */
-export function ruleWords(rule: Pick<ApprovalRule, 'has_amount'>, entry: Entry, currency: string): string {
+export function ruleWords(rule: Pick<ApprovalRule, 'has_amount' | 'action_type'>, entry: Entry, currency: string): string {
   if (!entry.on) return 'no second person';
+  if (rule.action_type === 'retail_sale_write_off' && (entry.amount ?? 0) === 0) return 'a second administrator when the business has two';
   if (!rule.has_amount || (entry.amount ?? 0) === 0) return 'a second person for every one';
   return `a second person from ${formatMinor(entry.amount ?? 0, currency)}`;
 }

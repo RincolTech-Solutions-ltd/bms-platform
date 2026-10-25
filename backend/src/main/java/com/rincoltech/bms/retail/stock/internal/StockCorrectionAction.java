@@ -20,6 +20,8 @@ import org.springframework.stereotype.Component;
 class StockCorrectionAction implements ApprovalAction {
 
     static final String TYPE = "retail_stock_correction";
+    /** The id the correction gets when it is made, fixed when it is asked for. */
+    static final String CORRECTION_ID = "correction_id";
 
     private final StockCorrectionService corrections;
     private final RetailCatalogue catalogue;
@@ -85,6 +87,6 @@ class StockCorrectionAction implements ApprovalAction {
                 new BigDecimal((String) p.get("expected_qty")),
                 (String) p.get("reason_code"),
                 (String) p.get("note"));
-        corrections.correctApproved(e.branchId(), r, e.makerId());
+        corrections.correctApproved(UUID.fromString((String) p.get(CORRECTION_ID)), e.branchId(), r, e.makerId());
     }
 }

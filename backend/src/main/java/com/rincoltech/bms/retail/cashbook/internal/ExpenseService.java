@@ -121,7 +121,11 @@ class ExpenseService {
                     r.amountMinor(),
                     support.currency(),
                     mapper.convertValue(fixed, MAP)));
-            // The rule asked, so the approvals module stores the request and never runs it at once.
+            // Run at once when the switch went off between the module's read and the request: answer with the expense
+            // made.
+            if (o.executed()) {
+                return new ExpenseOutcome(view(repo.expense(id, false).orElseThrow()), null);
+            }
             return new ExpenseOutcome(
                     null, new ApprovalWaiting(o.approvalId(), ExpenseAction.TYPE, r.amountMinor(), support.currency()));
         }

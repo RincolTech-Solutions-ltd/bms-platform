@@ -104,8 +104,13 @@ class StockCorrectionService {
         UUID branch = branches.resolveStocking(PERMISSION, r.branchId());
         Checked c = check(branch, r);
         long value = Quantities.value(c.difference().abs(), c.cost());
+        // The correction's id is fixed now, so a request the approvals module runs at once (the switch went off
+        // meanwhile) is
+        // answered with the correction it made.
+        UUID id = UUID.randomUUID();
         if (approvals.rule(StockCorrectionAction.TYPE).asks(value)) {
             Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put(StockCorrectionAction.CORRECTION_ID, id.toString());
             payload.put("branch_id", branch.toString());
             payload.put("product_id", c.product().id().toString());
             payload.put("new_qty", Quantities.format(r.newQty()));
@@ -120,7 +125,9 @@ class StockCorrectionService {
                     value,
                     tenant.profile().currency(),
                     payload));
-            // The rule asked, so the approvals module stores the request and never runs it at once.
+            if (o.executed()) {
+                return new CorrectionOutcome(repo.correction(id).orElseThrow(), null);
+            }
             return new CorrectionOutcome(
                     null,
                     new ApprovalWaiting(
@@ -130,14 +137,14 @@ class StockCorrectionService {
                             tenant.profile().currency()));
         }
         return new CorrectionOutcome(
-                write(branch, r, c, CurrentPrincipal.require().userId()), null);
+                write(id, branch, r, c, CurrentPrincipal.require().userId()), null);
     }
 
     /**
      * On approval (ADR-091): the correction runs only if the quantity is still the one the maker saw; otherwise the request
      * becomes stale with the reason, as a direct correction would get 409 {@code stock_moved}.
      */
-    void correctApproved(UUID branch, CorrectionRequest r, UUID makerId) {
+    void correctApproved(UUID id, UUID branch, CorrectionRequest r, UUID makerId) {
         Checked c;
         try {
             c = check(branch, r);
@@ -150,7 +157,7 @@ class StockCorrectionService {
             throw new RequestSupersededException(
                     e.code(), e.title(), "The quantity changed while it waited. " + e.getMessage(), e.extensions());
         }
-        write(branch, r, c, makerId);
+        write(id, branch, r, c, makerId);
     }
 
     private static final java.util.Set<String> STALE =
@@ -200,12 +207,11 @@ class StockCorrectionService {
         return new Checked(product, old, difference, ledger.averageCost(branch, product.id()));
     }
 
-    private Correction write(UUID branch, CorrectionRequest r, Checked c, UUID by) {
+    private Correction write(UUID id, UUID branch, CorrectionRequest r, Checked c, UUID by) {
         ProductSnapshot product = c.product();
         BigDecimal old = c.old();
         BigDecimal difference = c.difference();
         long cost = c.cost();
-        UUID id = UUID.randomUUID();
         String note = r.note() == null || r.note().isBlank() ? null : r.note().trim();
         String words = ("entry_mistake".equals(r.reasonCode()) ? "Entry mistake" : "Miscount")
                 + (note == null ? "" : ": " + note);

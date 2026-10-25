@@ -821,7 +821,7 @@ The approval rules (issue #343, ADR-091, `GET` and `PUT /settings/approvals`, `c
 administrator's own code or password, audited as `core.settings.approval_rules_changed`) list the actions of the modules a business
 uses. Every lending action always asks; only its amount changes. Each retail action is a switch: customer returns and purchase
 orders ask while their amount is above 0 unless switched, a credit write-off asks by ADR-043's rule unless switched off (it is still
-flagged and told), and sale voids, stock corrections and expenses ask only when switched on. Switched on, 0 means every one asks.
+flagged and told), and sale voids, stock corrections and expenses ask only when switched on. Switched on, 0 means every one asks, except a credit write-off, whose 0 keeps ADR-043's rule (a second administrator only while two or more count).
 `Approvals.rule` is the one reading of a rule, and `Approvals.request` runs an action that is switched off at once (audited as
 `core.approval.executed_switched_off`). The checker of the three new retail actions is an administrator, so one seller never
 approves another's void or expense. A price below cost is not an approval: only a holder of `retail.price.below_cost` may sell at

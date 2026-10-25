@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ApprovalRule, ApprovalRules } from '../../../api/approval-rules';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
-import { changesOf, draftOf, loosens, reviewLines, ruleWords } from './state';
+import { changesOf, draftOf, loosens, reviewLines, ruleWords, zeroWords } from './state';
 
 // The approval rules screen (issue #343, ADR-091): lending always on, retail switches with an amount, a review in plain words, the
 // administrator's own password before saving, and the others told when a rule is loosened. Fabricated data.
@@ -68,6 +68,10 @@ describe('the approval rules state', () => {
     expect(loosens(rules, draft)).toBe(true);
     expect(ruleWords({ has_amount: true }, { on: true, amount: 0 }, 'UGX')).toBe('a second person for every one');
     expect(ruleWords({ has_amount: false }, { on: true, amount: null }, 'UGX')).toBe('a second person for every one');
+    expect(ruleWords({ has_amount: true, action_type: 'retail_sale_write_off' }, { on: true, amount: 0 }, 'UGX')).toBe('a second administrator when the business has two');
+    expect(ruleWords({ has_amount: true, action_type: 'retail_sale_write_off' }, { on: true, amount: 5000 }, 'UGX')).toBe('a second person from UGX 5,000');
+    expect(zeroWords('retail_sale_write_off')).toBe('0 means a second administrator when the business has two.');
+    expect(zeroWords('retail_expense')).toBe('0 means every one.');
   });
 });
 
@@ -110,7 +114,8 @@ describe('the approval rules screen', () => {
     fireEvent.click(await screen.findByRole('checkbox', { name: /Credit write-offs/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Review and save' }));
     const review = screen.getByRole('group', { name: 'Check before you save' });
-    expect(review.textContent).toContain('Credit write-offs: no second person (was a second person for every one).');
+    // With no amount the write-off keeps ADR-043's rule, and the screen says so rather than "every one".
+    expect(review.textContent).toContain('Credit write-offs: no second person (was a second administrator when the business has two).');
     expect(review.textContent).toContain('The other administrators will be told');
   });
 

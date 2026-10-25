@@ -290,6 +290,42 @@ class ApprovalsIT extends IntegrationTest {
         assertThat(action.executionsOf(at)).isZero();
     }
 
+    /**
+     * ADR-091: an action switched off on the approval rules runs at once through Approvals.request, whatever amount its module
+     * sent, audited as core.approval.executed_switched_off in the same transaction. This is the path a module reaches when the
+     * switch goes off between its own read of the rule and its request.
+     */
+    @Test
+    void anActionSwitchedOffRunsAtOnceAndTheAuditSaysWhy() {
+        TestDatabase.owner()
+                .sql("INSERT INTO tenant_settings (id, tenant_id) VALUES (?, ?) ON CONFLICT (tenant_id) DO NOTHING")
+                .params(UUID.randomUUID(), t.tenantId())
+                .update();
+        TestDatabase.owner().sql("""
+                        UPDATE tenant_settings SET settings = settings
+                               || '{"approval_switches": {"test_action": false}}'::jsonb WHERE tenant_id = ?
+                        """).param(t.tenantId()).update();
+        UUID subject = UUID.randomUUID();
+        ResponseEntity<JsonNode> r = request(cashier, subject, t.headOffice(), 5_000_000L);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(r.getBody().get("executed").asBoolean()).isTrue();
+        assertThat(r.getBody().get("approval_id").isNull()).isTrue();
+        assertThat(action.executionsOf(subject)).isEqualTo(1);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND entity_id = ?"
+                                + " AND action = 'core.approval.executed_switched_off'")
+                        .params(t.tenantId(), subject)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM approval_requests WHERE tenant_id = ?")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isZero();
+    }
+
     /** One pending request per action and subject. */
     @Test
     void aSecondPendingRequestForTheSameSubjectIsRefused() {
