@@ -89,6 +89,17 @@ describe('registering collateral', () => {
     expect(document.getElementById('cf-reference-no')?.getAttribute('aria-invalid')).toBe('true');
   });
 
+  it('types the value in the business currency from /me, not in shillings (issue #289)', async () => {
+    const { collateral } = mount(<CollateralForm memberId={holder.id} />, { me: { ...officer(), tenant_currency: 'KES' } });
+    await screen.findByText('Test Holder 01');
+    expect(screen.getByLabelText(/^What it is worth \(KES, your estimate\)/)).toBeTruthy();
+    type(/^Describe the item/, 'Test fridge');
+    type(/^What it is worth/, '1,500.25');
+    fireEvent.click(save());
+    await waitFor(() => expect(collateral.calls.create).toHaveLength(1));
+    expect(collateral.calls.create[0]?.body).toMatchObject({ estimated_value_minor: 150025 });
+  });
+
   it('asks where the item is kept when we hold it', () => {
     mount(<CollateralForm memberId={holder.id} />);
     type(/^Who keeps it/, 'in_custody');
