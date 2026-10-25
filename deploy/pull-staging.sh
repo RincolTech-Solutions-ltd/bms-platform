@@ -64,10 +64,11 @@ unit_drift_notices() {
         fi
         if [[ ! -e "$installed/$name" ]]; then
             # The script is the first absolute path ending in .sh after the systemd prefixes (- @ + !), so
-            # ExecStart=/bin/bash /opt/bms/x.sh names x.sh, not bash; it must appear in a cron line as a whole word.
+            # ExecStart=/bin/bash /opt/bms/x.sh names x.sh, not bash; a cron line must have it as one whole field.
+            # No service, or no .sh in its ExecStart, leaves it empty: || true, since this script runs under set -e.
             script="$(sed -n 's/^ExecStart=[-@+!]*//p' "$units/${name%.*}.service" 2>/dev/null | head -n 1 \
-                | grep -oE '(^|[[:space:]])/[^[:space:]]+\.sh([[:space:]]|$)' | head -n 1 | tr -d '[:space:]')"
-            if [[ -n "$script" ]] && grep -qE -- "(^|[[:space:]])${script//./\\.}([[:space:]]|$)" <<< "$jobs"; then
+                | grep -oE '(^|[[:space:]])/[^[:space:]]+\.sh([[:space:]]|$)' | head -n 1 | tr -d '[:space:]' || true)"
+            if [[ -n "$script" ]] && awk -v s="$script" '{ for (i = 1; i <= NF; i++) if ($i == s) found = 1 } END { exit !found }' <<< "$jobs"; then
                 continue
             fi
         fi

@@ -152,7 +152,21 @@ printf '%s\n' "30 3 * * 0 /bin/bash /opt/bms/monitor.sh" > "$WORK/crontab"
 out="$(unit_drift_notices "$units" "$installed")"
 if grep -q "systemd/bms-restore-drill.timer differs" <<< "$out"; then ok "a cron line that only shares the interpreter does not count"; else fail "no notice for the timer in: '$out'"; fi
 
-# 10. The slice cites ADR-083 as merged, so it matches the host's copy.
+# 10. pull-staging.sh runs under set -euo pipefail: a new unit with no .sh in its ExecStart, or a new slice with no service
+# beside it, is named and never ends the run (the image clean-up comes after this check).
+setup_units
+printf '[Slice]\nMemoryMax=1M\n' > "$units/bms-new.slice"
+printf '[Service]\nExecStart=/usr/bin/docker ps\n' > "$units/bms-foo.service"
+printf '[Timer]\nOnCalendar=daily\n' > "$units/bms-foo.timer"
+cp "$units/bms-foo.service" "$installed/"
+out="$(set -euo pipefail; unit_drift_notices "$units" "$installed"; echo "reached the end")"
+if [[ "$out" == *"systemd/bms-new.slice differs"* && "$out" == *"systemd/bms-foo.timer differs"* && "$out" == *"reached the end"* ]]; then
+    ok "a unit with no script to match is named and does not end the run under set -e"
+else
+    fail "under set -e: '$out'"
+fi
+
+# 11. The slice cites ADR-083 as merged, so it matches the host's copy.
 if grep -q "pending ADR-083" "$HERE/../systemd/bms.slice"; then
     fail "deploy/systemd/bms.slice still says pending ADR-083"
 else
