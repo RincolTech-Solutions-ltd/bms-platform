@@ -318,7 +318,7 @@ export function decisionProblems(d: DecisionDraft, l: Loan): FieldMessages {
     if (term === null) out.approved_term_count = 'Type a whole number, for example 6.';
     else if (term > (l.requested_term_count ?? 0)) out.approved_term_count = `You can approve at most what was asked for, ${termWords(l.requested_term_count, l.term_unit)}.`;
   }
-  if (d.decision === 'reject' && d.note.trim() === '') out.note = 'Say why the application is declined. The member may ask.';
+  if (d.decision === 'reject' && d.note.trim() === '') out.note = 'Say why the application is declined.';
   return out;
 }
 

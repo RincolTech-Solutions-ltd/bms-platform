@@ -48,6 +48,8 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
   const [addingGuarantor, setAddingGuarantor] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // The summary line shows once Send was pressed, never on a form nobody has tried to send yet.
+  const [tried, setTried] = useState(false);
   const guard = useSaveGuard<LoanListItem>();
   const today = localDate();
   const editing = base !== undefined;
@@ -81,6 +83,7 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
     e.preventDefault();
     if (busy || guard.blocked) return;
     setFailure(null);
+    setTried(true);
     if (!form.attempt(order)) return;
     setBusy(true);
     let current = base;
@@ -119,7 +122,6 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
 
   const eligible = (items.data?.items ?? []).filter((c) => pledgeable(c, currency));
   const others = (items.data?.items ?? []).length - eligible.length;
-  const pledged = new Set(draft.pledges.map((p) => p.collateralId));
   const togglePledge = (id: string, on: boolean) => {
     form.edited('collateral');
     const item = eligible.find((c) => c.id === id);
@@ -131,12 +133,13 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
         : d.pledges.filter((p) => p.collateralId !== id),
     }));
   };
+  const setPledgeAmount = (i: number, amount: string) => setDraft((d) => ({ ...d, pledges: d.pledges.map((x, j) => (j === i ? { ...x, amount } : x)) }));
   const setGuarantor = (i: number, patch: Partial<GuarantorDraft>) => setDraft((d) => ({ ...d, guarantors: d.guarantors.map((g, j) => (j === i ? { ...g, ...patch } : g)) }));
 
   return (
     <form className="mf" onSubmit={(e) => void submit(e)} noValidate aria-label={editing ? 'Change the application' : 'New loan application'} data-tour="application-form">
       <FieldsNeededNote />
-      {form.count(order) > 0 && <p role="alert" className="alert alert-danger">Some entries need a look. They are marked below.</p>}
+      {tried && form.count(order) > 0 && <p role="alert" className="alert alert-danger">Some entries need a look. They are marked below.</p>}
       <SaveGuardNotice guard={guard} what="application" found={(l) => <Link to="/staff/lending/loans/$loanId" params={{ loanId: l.id ?? '' }}>Open draft {l.loan_no}</Link>} />
       <Group title="The loan" tourId="application-loan">
         {editing ? (
@@ -209,24 +212,31 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
         <Problem error={items.error} />
         {items.data && eligible.length === 0 && draft.pledges.length === 0 && <p className="empty-state">The member has no item that can secure this loan.</p>}
         <div id={form.idOf('collateral')} tabIndex={-1} className="stack">
-          {eligible.filter((c) => !pledged.has(c.id ?? '')).map((c) => (
-            <label key={c.id} className="mf-check">
-              <input type="checkbox" checked={false} onChange={(e) => togglePledge(c.id ?? '', e.target.checked)} />
-              <span>{typeWords(c.collateral_type)}: {c.description}, worth <span className="num">{money(c.collateral_value_minor, c.currency)}</span></span>
-            </label>
-          ))}
+          {eligible.map((c) => {
+            const i = draft.pledges.findIndex((p) => p.collateralId === c.id);
+            const pledge = draft.pledges[i];
+            return (
+              <div key={c.id} className="stack">
+                <label className="mf-check">
+                  <input type="checkbox" checked={pledge !== undefined} onChange={(e) => togglePledge(c.id ?? '', e.target.checked)} />
+                  <span>{typeWords(c.collateral_type)}: {c.description}, worth <span className="num">{money(c.collateral_value_minor, c.currency)}</span></span>
+                </label>
+                {pledge && <PledgeAmount form={form} index={i} currency={currency} inputMode={inputMode} amount={pledge.amount} onChange={(v) => setPledgeAmount(i, v)} />}
+              </div>
+            );
+          })}
         </div>
+        {/* A pledge on a draft whose item can no longer secure it (given back, its value removed): shown so it can be taken off. */}
         <ul className="ln-list">
-          {draft.pledges.map((p, i) => (
+          {draft.pledges.map((p, i) => (eligible.some((c) => c.id === p.collateralId) ? null : (
             <li key={p.collateralId} className="rt-card stack">
               <p className="ln-item-head">
                 <strong>{p.label}</strong>
                 <button type="button" className="btn-sm btn-ghost" onClick={() => setDraft((d) => ({ ...d, pledges: d.pledges.filter((_, j) => j !== i) }))} aria-label={`Remove ${p.label}`}>Remove</button>
               </p>
-              <TextField name={`collateral[${i}].pledged_value_minor`} label={`Amount of the loan it secures (${currency})`} form={form} required inputMode={inputMode} value={p.amount}
-                onChange={(v) => setDraft((d) => ({ ...d, pledges: d.pledges.map((x, j) => (j === i ? { ...x, amount: v } : x)) }))} hint={`Worth ${money(p.value, currency)}.`} />
+              <PledgeAmount form={form} index={i} currency={currency} inputMode={inputMode} amount={p.amount} onChange={(v) => setPledgeAmount(i, v)} hint={`Worth ${money(p.value, currency)}.`} />
             </li>
-          ))}
+          )))}
         </ul>
         <FieldError form={form} name="collateral" />
         {others > 0 && <p className="field-hint">{others === 1 ? 'One item is' : `${others} items are`} not shown: given back, without a value, or in another currency.</p>}
@@ -238,6 +248,14 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
       <SaveBar label="Send for appraisal" busy={busy} blocked={guard.blocked ? 'Wait for the check above before sending again.' : undefined} tourId="application-send"
         cancel={editing ? <Link to="/staff/lending/loans/$loanId" params={{ loanId: base?.id ?? '' }} className="btn btn-ghost">Cancel</Link> : <Link to="/staff/lending" className="btn btn-ghost">Cancel</Link>} />
     </form>
+  );
+}
+
+function PledgeAmount({ form, index, currency, inputMode, amount, onChange, hint }: {
+  form: FormErrors; index: number; currency: string; inputMode: 'decimal' | 'numeric'; amount: string; onChange: (v: string) => void; hint?: string;
+}) {
+  return (
+    <TextField name={`collateral[${index}].pledged_value_minor`} label={`Amount of the loan it secures (${currency})`} form={form} required inputMode={inputMode} value={amount} onChange={onChange} hint={hint} />
   );
 }
 

@@ -140,6 +140,8 @@ describe('the loan application form', () => {
       expect(screen.getByLabelText(label).getAttribute('aria-required'), String(label)).toBe('true');
     }
     expect(await screen.findByRole('option', { name: 'Test monthly loan (TEST-MONTHLY)' })).toBeTruthy();
+    // Nothing is marked wrong on a form nobody has tried to send yet.
+    expect(screen.queryByText(/Some entries need a look/)).toBeNull();
   });
 
   it('names what is missing under each field on Send, and the product\'s limits once a field is left', async () => {
