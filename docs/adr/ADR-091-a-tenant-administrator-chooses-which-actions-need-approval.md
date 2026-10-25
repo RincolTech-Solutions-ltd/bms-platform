@@ -47,7 +47,8 @@ expenses.
 4. **Retail actions are switches, and their defaults are today's behaviour.** A business that never saved a switch reads exactly
    what it read yesterday:
    - Customer returns (`retail_sale_return`, amount): on when the business set a positive amount, else off.
-   - Purchase orders (`retail_purchase_order`, amount): on when the business set a positive amount, else off.
+   - Purchase orders (`retail_purchase_order`, amount): on when the business set a positive amount, else off. While on, a
+     delivery with no order is refused from the same amount (as today), so on with no amount means every delivery needs an order.
    - Credit write-offs (`retail_sale_write_off`, amount): **on**, as ADR-043 has it today. On with no amount keeps ADR-043's rule
      (a second administrator when two or more count); on with an amount asks from that amount. Switched off, a write-off never
      waits, and it is still flagged and told exactly as ADR-043 decision 10 requires, with the reason `approval_switched_off`.

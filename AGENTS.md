@@ -629,6 +629,23 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   (`/platform/feedback`), the tours `page-feedback` and `page-operator-feedback`, and a Feedback step in `admin-welcome` v18,
   `retail-sales` v12 and `staff-welcome` v6. Tests: `FeedbackIT`, `RlsIsolationIT`, `ModularityTest`, `feedback-state.test.ts`,
   `feedback.dom.test.tsx`, `tours-operator.test.tsx`.
+- **Built (approval rules, issue #343, ADR-091, FR-APR-09):** no migration, no permission: two keys of the tenant settings row
+  (`approval_switches` and the existing `approval_thresholds_minor`). `GET` and `PUT /settings/approvals` list every registered
+  `ApprovalAction` of a module the business uses (returns and purchase orders while their capability is on; a return's void follows
+  returns) with its switch and amount; saving needs `core.settings.manage` and the administrator's own code or password
+  (`PolicyChangeGuard.requireProof`), is audited as `core.settings.approval_rules_changed`, refuses switching a lending action off
+  (422 `approval_always_on`) and pushes `core.approval_policy_weakened` to the other administrators when a rule is loosened.
+  `PATCH /settings` needs the same proof to change an amount. `ApprovalAction` gains `switchable`, `onByDefault`, `listed`,
+  `offered` and `label`; `Approvals.rule` is the one reading of a rule and `Approvals.request` runs a switched-off action at once.
+  Defaults keep what every business had: lending always asks, returns and purchase orders ask while their amount is above 0,
+  write-offs ask by ADR-043's rule. Three new retail actions, off by default, with an administrator as checker: `retail_sale_void`
+  (`POST /retail/sales/{id}/void`), `retail_stock_correction` (`POST /retail/stock/corrections`, valued at the branch's average) and
+  `retail_expense` (`POST /retail/expenses`), each answering 202 `ApprovalWaiting` while it waits and running in the maker's name
+  on approval. A price below cost is not an approval. Screens: Business set-up, Approval rules (`/staff/setup/approvals`, tour
+  `page-approval-rules`), "Sent for approval" on the void, the correction and the expense, the action in words on Approvals, and
+  the returns Hint on Retail settings links to the returns row (#575). Tests: `ApprovalRulesIT`, `RetailApprovalRulesIT`,
+  `ApprovalsIT`, `RetailReturnsIT`, `RetailSaleWriteOffIT`, `RetailTradePurchasingIT`, `approval-rules.dom.test.tsx`,
+  `expenses-waiting.dom.test.tsx`, `stock-correct.dom.test.tsx`, `sale-actions.dom.test.tsx`, `return-new.dom.test.tsx`.
 - **Built (one grouped menu, issue #564, ADR-086, FR-UXN-04):** PWA only, no migration, no API change. `staffMenu` in
   `frontend/src/areas/staff/menu.tsx` builds the groups (Home, Today, Stock, Money, Lending, Business) with the permission checks,
   `useMenuCounts` reads the open orders and "N low" from Home's summary, and `SideNav` and `SideMenu` (`components/side-menu.tsx`)
