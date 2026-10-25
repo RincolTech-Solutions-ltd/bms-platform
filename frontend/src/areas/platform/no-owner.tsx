@@ -44,7 +44,7 @@ function Business({ t }: { t: TenantWithoutOwner }) {
       {admins.length === 0 ? (
         <p>No active administrator. Open the business and send its first administrator a new invitation.</p>
       ) : (
-        <ul className="stack" aria-label={`Administrators of ${t.name ?? 'the business'}`}>
+        <ul className="stack" style={{ listStyle: 'none', padding: 0 }} aria-label={`Administrators of ${t.name ?? 'the business'}`}>
           {admins.map((a) => (
             <li key={a.id}>
               <p>

@@ -6,6 +6,7 @@ import { ActionBar } from '../../../app/ui/ActionBar';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Field } from '../../../app/ui/Field';
 import { Hint } from '../../../app/ui/Hint';
+import { RowChevron } from '../../../app/ui/ListRow';
 import { Skeleton } from '../../../app/ui/Skeleton';
 import { useStaff } from '../context';
 import { dayWords } from '../plan';
@@ -93,9 +94,10 @@ export function CloseScreen() {
         <section className="rt-card stack" aria-labelledby="close-state" data-tour="close-state">
           <h2 id="close-state">Closing asked for</h2>
           <p>{requestedSentence(c)}</p>
-          <p>
-            Your copy of the data: <Link to={'/staff/setup' as never}>Download my data in Business set-up</Link>.
-          </p>
+          <Link className="link-row" to={'/staff/setup' as never}>
+            Save your copy of the data: Download my data in Business set-up
+            <RowChevron />
+          </Link>
           {cancel.isSuccess && <p role="status">The closing was cancelled. Everything works again.</p>}
           {cancel.isError && (
             <p role="alert" className="alert alert-danger">
