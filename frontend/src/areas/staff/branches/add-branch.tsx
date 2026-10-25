@@ -34,6 +34,8 @@ export function AddBranchForm({ takenCodes, canOpenBilling, onAdded, onCancel }:
   const [refusal, setRefusal] = useState<{ code?: string; text: string } | null>(null);
 
   const nameProblem = name.trim() === '' ? 'Type the branch name.' : null;
+  // An element, not a render function, so the chosen option keeps its node and its focus across renders.
+  const kindPicker = <Segmented label="What is it?" options={BRANCH_KINDS} value={kind} onChange={setKind} />;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -74,7 +76,14 @@ export function AddBranchForm({ takenCodes, canOpenBilling, onAdded, onCancel }:
         showError={sent}
         onChange={(e) => setName(e.target.value)}
       />
-      <Field label="What is it?" hint={KIND_HINT[kind]} control={() => <Segmented label="What is it?" options={BRANCH_KINDS} value={kind} onChange={setKind} />} />
+      <div className="field">
+        {/* The group is named by its aria-label; the visible words are the same, so a screen reader hears them once. */}
+        <span className="field-label" aria-hidden="true">
+          What is it?
+        </span>
+        {kindPicker}
+        <span className="field-hint">{KIND_HINT[kind]}</span>
+      </div>
       <Field label="Where is it?" hint="A street, a market or a town." value={location} maxLength={200} onChange={(e) => setLocation(e.target.value)} />
       {refusal &&
         (refusal.code === 'plan_limit_reached' ? (

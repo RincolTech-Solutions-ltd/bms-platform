@@ -306,6 +306,27 @@ describe('adding a branch (#581)', () => {
     expect(await screen.findByText('Test Gayaza Store added. It is a store: it keeps stock and does not sell.')).toBeTruthy();
   });
 
+  it('keeps the chosen kind and its focus on the same control while the person types', async () => {
+    shell();
+    await openForm();
+    const store = screen.getByRole('radio', { name: 'Store (keeps stock, does not sell)' });
+    store.focus();
+    fireEvent.click(store);
+    expect(store.getAttribute('aria-checked')).toBe('true');
+    expect(document.activeElement).toBe(store);
+    // The form renders again on every key in the name, and on a blur of it; the chosen option is still the same node, still
+    // focused when focus comes back, so a keyboard or screen reader user never loses their place.
+    const group = screen.getByRole('radiogroup', { name: 'What is it?' });
+    type(/^Name/, 'Test Kasubi Store');
+    fireEvent.blur(screen.getByLabelText(/^Name/));
+    expect(screen.getByRole('radiogroup', { name: 'What is it?' })).toBe(group);
+    expect(screen.getByRole('radio', { name: 'Store (keeps stock, does not sell)' })).toBe(store);
+    store.focus();
+    fireEvent.click(screen.getByRole('radio', { name: 'Head office (keeps no goods)' }));
+    expect(screen.getByRole('radio', { name: 'Store (keeps stock, does not sell)' })).toBe(store);
+    expect(document.activeElement).toBe(store);
+  });
+
   it('needs a name, marked with the asterisk, and sends nothing without it', async () => {
     shell();
     await openForm();

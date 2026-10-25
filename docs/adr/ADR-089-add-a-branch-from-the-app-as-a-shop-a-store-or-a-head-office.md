@@ -33,8 +33,16 @@ that keeps no goods (ADR-041, a head office) could only be made as a shop and th
   (`pg_advisory_xact_lock` on the tenant id and `core.branch.open`) before they count the open branches, so two adds or reopens
   at the same moment queue, and the second counts the first's branch once it commits (read committed: the count is its own
   statement after the lock). Two adds of one name at the same moment therefore also get two codes (KASUBI and KASUBI2), never
-  a refusal; the `ON CONFLICT` guard remains for a typed code. `AddBranchIT` sends the adds from parallel threads and fails
-  without the lock.
+  a refusal; the `ON CONFLICT` guard remains for a typed code. `AddBranchIT` sends two adds, and two reopens, from parallel
+  threads with room for one: exactly one wins and the other gets `plan_limit_reached`; both tests fail without the lock.
+  **Why an advisory lock and not `SELECT ... FROM tenants ... FOR UPDATE`:** a row lock on the tenant needs the application role
+  to hold UPDATE on `tenants` (it reads its own row under RLS and changes nothing there), and it would queue every other writer
+  of that row, such as a settings or plan change, behind a branch add. The advisory lock names only this count, is released at
+  commit or rollback, and follows the per-business keys already used for the cash day and item names
+  (`hashtextextended(current_setting('app.tenant_id') || ':...')`).
+- **`ON CONFLICT (tenant_id, code)` has its index.** `V1__foundation.sql` declares `UNIQUE (tenant_id, code)` on `branches`, a
+  plain table constraint on exactly those columns, which is the arbiter the clause names; every create in the suite goes
+  through it.
 - **The rules apply from creation.** A Store refuses a sale with `branch_does_not_sell` and a branch that keeps no goods with
   `branch_not_stocking` from the moment it exists, through the existing server checks (ADR-041, ADR-048); nothing new is
   enforced. A store becomes a shop and a store again through `PATCH /branches/{id}` as before.

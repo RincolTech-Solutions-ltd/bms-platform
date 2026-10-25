@@ -244,6 +244,55 @@ class AddBranchIT extends IntegrationTest {
         }
     }
 
+    /** Two reopens at the same moment with room for one: one branch opens, the other is refused (ADR-089). */
+    @Test
+    void twoReopensAtOnceNeverPassThePlanLimit() throws Exception {
+        planOf(3);
+        List<UUID> closed = List.of(UUID.randomUUID(), UUID.randomUUID());
+        for (int i = 0; i < closed.size(); i++) {
+            TestDatabase.owner()
+                    .sql("""
+                            INSERT INTO branches (id, tenant_id, code, name, status, closed_at)
+                            VALUES (?, ?, ?, ?, 'inactive', now())
+                            """)
+                    .params(closed.get(i), t.tenantId(), "SHUT" + i, "Test Shut Shop " + i)
+                    .update();
+        }
+        ExecutorService pool = Executors.newFixedThreadPool(closed.size());
+        List<ResponseEntity<JsonNode>> answers = new java.util.ArrayList<>();
+        try {
+            CountDownLatch go = new CountDownLatch(1);
+            List<Future<ResponseEntity<JsonNode>>> sent = closed.stream()
+                    .map(id -> pool.submit(() -> {
+                        go.await();
+                        return api.call(
+                                HttpMethod.POST,
+                                "/api/v1/branches/" + id + "/reopen",
+                                null,
+                                admin.accessToken(),
+                                Map.of("If-Match", "\"1\""));
+                    }))
+                    .toList();
+            go.countDown();
+            for (Future<ResponseEntity<JsonNode>> f : sent) answers.add(f.get());
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(answers.stream().filter(r -> r.getStatusCode() == HttpStatus.OK))
+                .as("%s", answers)
+                .hasSize(1);
+        assertThat(answers.stream()
+                        .filter(r -> r.getStatusCode() != HttpStatus.OK)
+                        .map(AddBranchIT::code))
+                .containsExactly("plan_limit_reached");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM branches WHERE tenant_id = ? AND status = 'active'")
+                        .params(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(3);
+    }
+
     /** Two adds of the same name at the same moment both succeed, with different codes made from the name. */
     @Test
     void twoAddsOfOneNameAtOnceGetTwoCodes() throws Exception {
