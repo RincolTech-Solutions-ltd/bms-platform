@@ -200,7 +200,7 @@
   }
 }
 
-/* The app is too old for the server (#576, ADR-087): a plain full screen over everything, so nothing more is typed or sent while the
+/* The app is too old for the server (#576, ADR-088): a plain full screen over everything, so nothing more is typed or sent while the
    new app loads. Words only, on the page colour; no stripe, no gradient, no picture. */
 .app-update-screen {
   position: fixed;

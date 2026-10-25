@@ -12,7 +12,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import tools.jackson.databind.json.JsonMapper;
 
-/** #576, ADR-087: every response names the server's build, and an app built before BMS_MIN_CLIENT_BUILD is told it is too old. */
+/** #576, ADR-088: every response names the server's build, and an app built before BMS_MIN_CLIENT_BUILD is told it is too old. */
 class ClientBuildFilterTest {
 
     static final String SHA = "sha-test576";

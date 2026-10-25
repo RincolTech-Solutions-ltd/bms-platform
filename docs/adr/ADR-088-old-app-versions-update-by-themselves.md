@@ -1,4 +1,4 @@
-# ADR-087: Old app versions update by themselves
+# ADR-088: Old app versions update by themselves
 
 ## Status
 

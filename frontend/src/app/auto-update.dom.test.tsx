@@ -2,7 +2,7 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// #576, ADR-087: the toast before the app reloads by itself, the full screen when the API answers 426 app_too_old, and the
+// #576, ADR-088: the toast before the app reloads by itself, the full screen when the API answers 426 app_too_old, and the
 // unsaved-work registry that a money form's draft fills. Builds are invented.
 
 function setOnline(value: boolean) {

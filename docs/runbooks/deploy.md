@@ -96,7 +96,7 @@ Caddyfiles. Lines to know:
 The CI test `deploy/tests/no-gap-test.sh` drives the same switch on both compose files under GET
 and POST traffic and fails on any answer that is not 200 within 3 seconds.
 
-## Old apps update by themselves; forcing it (ADR-087)
+## Old apps update by themselves; forcing it (ADR-088)
 
 Every API answer carries `Bms-Build` (the `git_sha` of `/version`). A phone whose app is another
 build fetches the new one in the background and reloads by itself at a safe moment, with a short

@@ -113,7 +113,7 @@ springdoc:
 bms:
   git-sha: ${BMS_GIT_SHA:}
   # The commit time (UTC YYYYMMDDHHMMSS) of the oldest web app build the API still serves; an older app gets 426 app_too_old and
-  # loads the new one (#576, ADR-087). Empty: every app is served. When to set it: docs/runbooks/deploy.md.
+  # loads the new one (#576, ADR-088). Empty: every app is served. When to set it: docs/runbooks/deploy.md.
   min-client-build: ${BMS_MIN_CLIENT_BUILD:}
   tenancy:
     # Chapter 7 section 7.2. Required outside the dev and test profiles; startup fails on a missing

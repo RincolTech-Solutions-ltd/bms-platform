@@ -294,7 +294,7 @@ save). A 409 `idempotency_in_progress` on the retry proves the first attempt arr
 same as maybe saved. A read or a sign-in saves nothing and always says nothing was saved. Offline, a
 dropped connection stays the `TypeError` the offline paths expect.
 
-The app's build (issue #576, ADR-087): every response carries `Bms-Build`, the `git_sha` of `/version`,
+The app's build (issue #576, ADR-088): every response carries `Bms-Build`, the `git_sha` of `/version`,
 and the PWA sends `Bms-Client-Build: <sha tag>; built=<commit time UTC YYYYMMDDHHMMSS>` on every
 request. When the server setting `BMS_MIN_CLIENT_BUILD` is set, a request under `/api/` whose `built`
 is before it is answered 426 `app_too_old` ("A new version of the app is ready. Load the page again to
@@ -369,7 +369,7 @@ chapter 8. Paths are relative to `/api/v1`.
 |---|---|---|
 | GET | `/healthz` | Liveness: process up. Outside `/api/v1`. Body `{"status":"UP"}` only. |
 | GET | `/readyz` | Readiness: database reachable and schema at least the image's newest migration. Outside `/api/v1`. Status only. |
-| GET | `/version` | `{"version", "git_sha"}`. Outside `/api/v1`. Every response of the API carries the same `git_sha` as `Bms-Build` (ADR-087). |
+| GET | `/version` | `{"version", "git_sha"}`. Outside `/api/v1`. Every response of the API carries the same `git_sha` as `Bms-Build` (ADR-088). |
 
 All other actuator endpoints are disabled. `health` and `info` exist only on the management
 port (8081), which is never published outside the container network.

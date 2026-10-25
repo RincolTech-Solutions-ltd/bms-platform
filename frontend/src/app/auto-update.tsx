@@ -3,7 +3,7 @@ import { Toast } from '../areas/staff/retail/toast';
 import { claimReload, loadFreshApp, OFFLINE_MESSAGE } from './stale-app';
 import { hasUnsavedWork, onUnsavedWorkChange } from './unsaved-work';
 
-// A phone on an old app updates by itself (#576, ADR-087). Android keeps the app's tab alive for days, and a new service worker
+// A phone on an old app updates by itself (#576, ADR-088). Android keeps the app's tab alive for days, and a new service worker
 // that takes over leaves the old JavaScript running until the page is loaded again, so the app:
 // 1. finds out: every API answer carries the server's build (Bms-Build), and a build other than this app's own asks the browser
 //    for the new worker; so does the tab coming back into view, the network coming back, and every 15 minutes;

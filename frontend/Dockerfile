@@ -12,7 +12,7 @@ WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .
-# The app knows its own build (#576, ADR-087): the sha tag the API reports on /version and in Bms-Build, and the commit time the
+# The app knows its own build (#576, ADR-088): the sha tag the API reports on /version and in Bms-Build, and the commit time the
 # API compares with BMS_MIN_CLIENT_BUILD. Empty in a local build, which turns both off.
 ARG GIT_SHA=
 ARG GIT_TIME=

@@ -11,7 +11,7 @@ import './app/ui/index.css';
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });
 
-// A new worker that has taken over replaces the old app at a safe moment, never by an immediate reload (#576, ADR-087): the
+// A new worker that has taken over replaces the old app at a safe moment, never by an immediate reload (#576, ADR-088): the
 // plugin's own answer to a new worker is location.reload(), which could land in the middle of a sale.
 registerSW({
   immediate: true,

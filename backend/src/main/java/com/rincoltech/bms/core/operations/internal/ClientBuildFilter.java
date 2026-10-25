@@ -17,7 +17,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * The app's build both ways (#576, ADR-087). Every response carries {@code Bms-Build}, the sha {@code /version} reports, so an app
+ * The app's build both ways (#576, ADR-088). Every response carries {@code Bms-Build}, the sha {@code /version} reports, so an app
  * on an older build knows to fetch the new one. When {@code BMS_MIN_CLIENT_BUILD} is set, an API request from an app built before
  * it ({@code Bms-Client-Build: sha-abc1234; built=YYYYMMDDHHMMSS}) is answered 426 {@code app_too_old} before anything else runs,
  * so an old screen cannot send what the new API no longer understands. A request without the build time (curl, a callback, an app

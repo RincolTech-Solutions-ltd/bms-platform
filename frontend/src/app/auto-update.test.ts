@@ -5,7 +5,7 @@ import { clientBuildHeader, createUpdater, type UpdaterDeps } from './auto-updat
 import { claimReload } from './stale-app';
 import { setUnsavedWork } from './unsaved-work';
 
-// #576, ADR-087: a phone on an old app updates by itself. It finds out from the server's build, reloads only at a safe moment
+// #576, ADR-088: a phone on an old app updates by itself. It finds out from the server's build, reloads only at a safe moment
 // (never under a cart, a typed form, a save on its way or typing), turns the next move between screens into a full load, keeps
 // #543's one reload a minute and no reload offline, and leaves the offline sales outbox alone. Builds and times are invented.
 

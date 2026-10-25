@@ -132,7 +132,7 @@ const deployGap: Middleware = {
   },
 };
 
-// The app's build both ways (#576, ADR-087): every request says which app sent it, every answer says which server built it, and a
+// The app's build both ways (#576, ADR-088): every request says which app sent it, every answer says which server built it, and a
 // save on its way holds back the app's own reload. A 426 app_too_old means the server no longer serves this app.
 const writes = new Set<string>();
 const settled = (id: string) => {
