@@ -121,8 +121,8 @@ final class CatalogueApi {
             @Schema(
                     deprecated = true,
                     description =
-                            "Leave it out: an item keeps the code the app gave it (issue #562). The item's own code is accepted"
-                                    + " as no change; any other is refused with 400 item_code_made_by_app")
+                            "Leave it out: an item keeps the code the app gave it (issue #562). A blank code, or the item's own"
+                                    + " code in any case, is no change; any other is refused with 400 item_code_made_by_app")
             String code,
 
             @Size(min = 1, max = 300) String description,

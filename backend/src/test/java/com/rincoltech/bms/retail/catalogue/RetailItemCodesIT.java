@@ -192,6 +192,11 @@ class RetailItemCodesIT extends IntegrationTest {
         assertThat(same.getStatusCode()).as("%s", same.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(same.getBody().get("code").asString()).isEqualTo("BLB-0001");
         assertThat(same.getBody().get("description").asString()).isEqualTo("Test bulb 9 W");
+        // A blank code is no code, and the item's own code in other capitals is no change either.
+        for (String own : List.of("", "  ", "blb-0001")) {
+            ResponseEntity<JsonNode> r = patch("/products/" + made, Map.of("code", own));
+            assertThat(r.getStatusCode()).as("'%s': %s", own, r.getBody()).isEqualTo(HttpStatus.OK);
+        }
         assertThat(api.get("/products/" + made, ADMIN).getBody().get("code").asString())
                 .isEqualTo("BLB-0001");
     }

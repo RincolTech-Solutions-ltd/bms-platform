@@ -71,7 +71,7 @@ types or changes it.** Supplier and maker codes go in the barcode field (ADR-070
   holds; the refusal says so at once and changes nothing. It is 400, not 422, because the field is no longer part of the
   request, not a rule about its value.
 - **Decision 4 now also covers edits: existing codes never change.** `PATCH /retail/products/{id}` refuses a `code` other than
-  the item's own with the same 400 (its own code sent back is no change), and the edit form shows the code as text.
+  the item's own with the same 400 (a blank code, or its own code sent back in any case, is no change), and the edit form shows the code as text.
 - **Decision 6 now reads: the import keeps the file's codes unless "Let the app make the codes" is ticked** (owner decision
   D45, Hillary, 25 Oct 2026, option b). Unticked, the default, works as before: a row's code is kept, uniqueness is unchanged
   and a code an item already holds is reported in the dry run and skipped; a blank code (or no code column) gets the category's

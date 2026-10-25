@@ -528,7 +528,7 @@ export function createMockRetail(): RetailApi {
       run(() => {
         const p = find(id);
         stale(p, version);
-        if (body.code !== undefined && body.code.trim() !== p.code) refuse(400, 'item_code_made_by_app', 'An item keeps the code the app gave it. The code cannot be changed.');
+        if (body.code !== undefined && body.code.trim() !== '' && body.code.trim().toLowerCase() !== p.code.toLowerCase()) refuse(400, 'item_code_made_by_app', 'An item keeps the code the app gave it. The code cannot be changed.');
         const fam = p.familyId ? families.get(p.familyId) : undefined;
         if (!fam && (body.variant_size !== undefined || body.variant_colour !== undefined)) refuse(422, 'not_a_variant', 'This item has no sizes or colours. Give it sizes and colours first, then change one of them.');
         if (fam) {

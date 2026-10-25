@@ -452,10 +452,13 @@ class CatalogueService {
                 r.unitId() == null ? before.unitId() : r.unitId(),
                 before.categoryId(),
                 before.unitId());
-        // Issue #562: an item keeps the code the app gave it; sending that same code again is not a change.
+        // Issue #562: an item keeps the code the app gave it. A blank code is no code, as on create, and the item's own
+        // code
+        // sent back, in any case as the unique index compares codes, is no change.
         if (r.code() != null
+                && !r.code().isBlank()
                 && !RetailCatalogue.normaliseCode(r.code())
-                        .map(before.code()::equals)
+                        .map(before.code()::equalsIgnoreCase)
                         .orElse(false)) {
             throw codeMadeByApp("code", CODE_KEPT);
         }
