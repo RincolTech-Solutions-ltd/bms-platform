@@ -18,10 +18,15 @@ class ClientBuildFilterTest {
     static final String SHA = "sha-test576";
 
     ClientBuildFilter filter(String min) {
+        return filter(min, "");
+    }
+
+    ClientBuildFilter filter(String min, String ownBuilt) {
         var beans = new StaticListableBeanFactory();
         var version = new VersionController(
                 beans.getBeanProvider(BuildProperties.class), beans.getBeanProvider(GitProperties.class), SHA);
-        return new ClientBuildFilter(version, min, JsonMapper.builder().build());
+        return new ClientBuildFilter(
+                version, min, ownBuilt, JsonMapper.builder().build());
     }
 
     MockHttpServletResponse send(ClientBuildFilter filter, String path, String clientBuild) throws Exception {
@@ -87,5 +92,21 @@ class ClientBuildFilterTest {
         assertThatThrownBy(() -> filter("sha-abc1234"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("BMS_MIN_CLIENT_BUILD");
+    }
+
+    @Test
+    void aMinimumLaterThanThisReleaseIsIgnoredSoARollbackServesItsOwnApps() throws Exception {
+        // R2 set the minimum to its own time; R1, rolled back to, still reads it from .env.
+        var rolledBack = filter("20261025140000", "20261024090000");
+        assertThat(send(rolledBack, "/api/v1/me", "sha-r1app01; built=20261024090000")
+                        .getStatus())
+                .isEqualTo(200);
+        var current = filter("20261025140000", "20261025140000");
+        assertThat(send(current, "/api/v1/me", "sha-r1app01; built=20261024090000")
+                        .getStatus())
+                .isEqualTo(426);
+        assertThat(send(current, "/api/v1/me", "sha-r2app01; built=20261025140000")
+                        .getStatus())
+                .isEqualTo(200);
     }
 }

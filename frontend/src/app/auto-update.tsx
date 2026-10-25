@@ -45,6 +45,10 @@ export interface UpdaterDeps {
   typing: () => boolean;
   /** Shows the toast, then runs `then` a moment later. */
   announce: (then: () => void) => void;
+  /** Takes the toast away again when the reload is called off. */
+  hide: () => void;
+  /** Runs `fn` after `ms`: a refused claim is tried again once the minute is over. */
+  later: (fn: () => void, ms: number) => void;
   now: () => number;
 }
 
@@ -63,13 +67,26 @@ export function createUpdater(deps: UpdaterDeps) {
     lastCheck = now;
     void deps.update().catch(() => undefined);
   };
+  const safe = () => writes === 0 && !hasUnsavedWork() && !deps.typing();
+  // A move between screens tolerates a money form's draft (it is kept in the tab and comes back), never a save on its way.
+  const safeToLeave = () => writes === 0 && !deps.typing();
+  /**
+   * Shows the toast and reloads a moment later. Everything is checked again when the moment comes, since the person can tap Save
+   * while the toast shows, and the reload is claimed only then; if anything says no, the toast goes and the reload waits.
+   */
   const apply = (href?: string): boolean => {
-    if (applying || !deps.online() || !deps.claim()) return false;
+    if (applying || !deps.online()) return false;
     applying = true;
-    deps.announce(() => deps.reload(href));
+    deps.announce(() => {
+      const still = href === undefined ? safe() : safeToLeave();
+      if (still && deps.online() && deps.claim()) return deps.reload(href);
+      applying = false;
+      deps.hide();
+      // Refused only by the one-reload-a-minute rule: nothing else would wake the update, so it tries again after the minute.
+      if (still && deps.online()) deps.later(trySoon, CHECK_QUIET_MS);
+    });
     return true;
   };
-  const safe = () => writes === 0 && !hasUnsavedWork() && !deps.typing();
   const trySoon = () => {
     if (ready && safe()) apply();
   };
@@ -88,7 +105,7 @@ export function createUpdater(deps: UpdaterDeps) {
     },
     /** A move between screens is about to happen; true when it becomes a full load of `href` instead. */
     beforeNavigate(href: string): boolean {
-      return ready && writes === 0 && apply(href);
+      return ready && safeToLeave() && apply(href);
     },
     writeStarted() {
       writes++;
@@ -99,6 +116,10 @@ export function createUpdater(deps: UpdaterDeps) {
     },
     get ready() {
       return ready;
+    },
+    /** Saves on their way, for tests. */
+    get writing() {
+      return writes;
     },
   };
 }
@@ -134,6 +155,8 @@ export const updater = createUpdater({
     show({ kind: 'toast' });
     setTimeout(then, TOAST_LEAD_MS);
   },
+  hide: () => shown.kind === 'toast' && show({ kind: 'none' }),
+  later: (fn, ms) => void setTimeout(fn, ms),
   now: () => Date.now(),
 });
 
@@ -151,7 +174,11 @@ export function forceUpdate(load: () => Promise<'reloaded' | 'offline'> = () => 
 
 function getNewApp(load: () => Promise<'reloaded' | 'offline'> = () => loadFreshApp()): void {
   show({ kind: 'forced', state: 'updating' });
-  void load().then((r) => r === 'offline' && show({ kind: 'forced', state: 'offline' }));
+  // A load that fails offers the button rather than leaving "Updating…" on screen for ever.
+  void load().then(
+    (r) => r === 'offline' && show({ kind: 'forced', state: 'offline' }),
+    () => show({ kind: 'forced', state: 'stuck' }),
+  );
 }
 
 /** The service worker's registration, once the browser has made it; until then a check asks nothing. */

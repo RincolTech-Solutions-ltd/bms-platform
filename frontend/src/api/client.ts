@@ -132,39 +132,40 @@ const deployGap: Middleware = {
   },
 };
 
-// The app's build both ways (#576, ADR-088): every request says which app sent it, every answer says which server built it, and a
-// save on its way holds back the app's own reload. A 426 app_too_old means the server no longer serves this app.
-const writes = new Set<string>();
-const settled = (id: string) => {
-  if (writes.delete(id)) updater.writeEnded();
-};
+// The app's build both ways (#576, ADR-088): every request says which app sent it, every answer says which server built it. A
+// 426 app_too_old means the server no longer serves this app.
 const appBuild: Middleware = {
-  onRequest({ request, id }) {
+  onRequest({ request }) {
     const build = clientBuildHeader();
     if (build) request.headers.set('Bms-Client-Build', build);
-    if (!['GET', 'HEAD'].includes(request.method)) {
-      writes.add(id);
-      updater.writeStarted();
-    }
     return request;
   },
-  onResponse({ response, id }) {
-    settled(id);
+  onResponse({ response }) {
     updater.serverBuild(response.headers.get('Bms-Build'));
     if (response.status === 426) forceUpdate();
     return response;
-  },
-  onError({ id }) {
-    settled(id);
   },
 };
 
 export { APP_UPDATING, APP_UPDATING_CHECK, APP_UPDATING_MAYBE_SAVED };
 export const api = createClient<paths>({ baseUrl: '/' });
-// First, so its answer is the last to run: a retried save (deployGap) still counts as on its way.
 api.use(appBuild);
 api.use(auth);
 api.use(deployGap);
+
+// A save on its way holds back the app's own reload (ADR-088). It is counted around the whole call, retries included, and ends
+// however the call ends: a middleware that throws (a failed refresh, the deploy-gap words) would skip the middleware hooks.
+for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {
+  const send = api[method] as (...args: unknown[]) => Promise<unknown>;
+  (api as unknown as Record<string, unknown>)[method] = async (...args: unknown[]) => {
+    updater.writeStarted();
+    try {
+      return await send(...args);
+    } finally {
+      updater.writeEnded();
+    }
+  };
+}
 
 /** The problem body of a failed call, for showing its detail (chapter 7 section 7.7). */
 export function problemOf(error: unknown): Problem {

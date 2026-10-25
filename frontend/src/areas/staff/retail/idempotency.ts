@@ -90,6 +90,7 @@ export function usePersistedDraft<T>(
     dropDraft(store, name);
   }, [store, name]);
   const discard = useCallback(() => {
+    setFinished(false);
     dropDraft(store, name);
     setSaved({ key: newIdempotencyKey(), draft: blank });
   }, [store, name, blank]);

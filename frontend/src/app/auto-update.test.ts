@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { classify } from '../offline/outbox';
 import { memoryStore } from '../offline/store';
@@ -20,6 +22,8 @@ function setUp(patch: Partial<UpdaterDeps> = {}) {
   const reloads: (string | undefined)[] = [];
   const update = vi.fn(async () => undefined);
   const state = { online: true, typing: false };
+  const hidden: number[] = [];
+  const later: { fn: () => void; ms: number }[] = [];
   const updater = createUpdater({
     build: 'sha-old0001',
     update,
@@ -28,10 +32,12 @@ function setUp(patch: Partial<UpdaterDeps> = {}) {
     online: () => state.online,
     typing: () => state.typing,
     announce: (then) => then(),
+    hide: () => void hidden.push(clock),
+    later: (fn, ms) => void later.push({ fn, ms }),
     now: () => clock,
     ...patch,
   });
-  return { updater, update, reloads, state, tick: (ms: number) => void (clock += ms) };
+  return { updater, update, reloads, state, hidden, later, tick: (ms: number) => void (clock += ms) };
 }
 
 afterEach(() => {
@@ -140,6 +146,70 @@ describe('applying it at a safe moment', () => {
   });
 });
 
+describe('the moment the toast shows (review of #579)', () => {
+  /** An announce that holds the reload until `fire` is called, as the 1.2 s toast does. */
+  const held = () => {
+    const pending: (() => void)[] = [];
+    return { announce: (then: () => void) => void pending.push(then), fire: () => pending.splice(0).forEach((f) => f()) };
+  };
+
+  it('checks again when the toast is over: a save tapped meanwhile calls the reload off, and it comes once the save is done', () => {
+    const toast = held();
+    const { updater, reloads, hidden } = setUp({ announce: toast.announce });
+    updater.workerChanged();
+    updater.writeStarted();
+    toast.fire();
+    expect(reloads).toEqual([]);
+    expect(hidden).toHaveLength(1);
+    updater.writeEnded();
+    toast.fire();
+    expect(reloads).toEqual([undefined]);
+  });
+
+  it('a cart started while the toast shows calls the reload off too', () => {
+    const toast = held();
+    const { updater, reloads } = setUp({ announce: toast.announce });
+    updater.workerChanged();
+    setUnsavedWork('cart', true);
+    toast.fire();
+    expect(reloads).toEqual([]);
+  });
+
+  it('a move between screens does not load anew when the person starts a save or types on the new screen meanwhile', () => {
+    const toast = held();
+    const { updater, reloads, state } = setUp({ announce: toast.announce });
+    setUnsavedWork('cart', true);
+    updater.workerChanged();
+    expect(updater.beforeNavigate('/staff/retail/stock')).toBe(true);
+    updater.writeStarted();
+    toast.fire();
+    expect(reloads).toEqual([]);
+    updater.writeEnded();
+    state.typing = true;
+    expect(updater.beforeNavigate('/staff/retail')).toBe(false);
+  });
+
+  it('claims the one reload of the minute only when it really reloads', () => {
+    const storage = memory();
+    const toast = held();
+    const { updater, reloads } = setUp({ announce: toast.announce, claim: () => claimReload(5_000, storage) });
+    updater.workerChanged();
+    setUnsavedWork('form', true);
+    toast.fire();
+    setUnsavedWork('form', false);
+    updater.trySoon();
+    toast.fire();
+    expect(reloads).toEqual([undefined]);
+  });
+
+  it('a reload refused by the one-a-minute rule is tried again after the minute, without waiting for another event', () => {
+    const { updater, reloads, later } = setUp({ claim: () => false });
+    updater.workerChanged();
+    expect(reloads).toEqual([]);
+    expect(later.map((l) => l.ms)).toEqual([60_000]);
+  });
+});
+
 describe('no reload loop (#543)', () => {
   it('reloads once a minute at most', () => {
     const storage = memory();
@@ -163,7 +233,7 @@ describe('no reload loop (#543)', () => {
   it('never reloads when the reloads cannot be counted', () => {
     const { updater, reloads } = setUp({ claim: () => claimReload(1_000, null) });
     updater.workerChanged();
-    expect(updater.beforeNavigate('/staff')).toBe(false);
+    updater.beforeNavigate('/staff');
     expect(reloads).toEqual([]);
   });
 });
@@ -195,5 +265,14 @@ describe('the offline sales outbox', () => {
       message: 'A new version of the app is ready.',
       answered: false,
     });
+  });
+});
+
+describe('the plugin leaves the reload to the app', () => {
+  it('vite-plugin-pwa (autoUpdate) calls onNeedReload instead of reloading when a new worker activates', () => {
+    // main.tsx passes onNeedReload; if a plugin upgrade dropped this branch, the immediate mid-sale reload would be back.
+    const register = readFileSync(fileURLToPath(new URL('../../node_modules/vite-plugin-pwa/dist/client/build/register.js', import.meta.url)), 'utf8');
+    expect(register).toMatch(/addEventListener\("activated"[\s\S]*?if \(onNeedReload\)\s*onNeedReload\(\);\s*else\s*window\.location\.reload\(\)/);
+    expect(readFileSync(fileURLToPath(new URL('../main.tsx', import.meta.url)), 'utf8')).toMatch(/onNeedReload: \(\) => updater\.workerChanged\(\)/);
   });
 });

@@ -123,3 +123,81 @@ describe('a money form holds unsaved work', () => {
     expect(hasUnsavedWork()).toBe(false);
   });
 });
+
+describe('a save on its way (review of #579)', () => {
+  /** Node's Request needs a whole address; openapi-fetch builds one from the path. */
+  function wholeAddresses() {
+    const Base = globalThis.Request;
+    vi.stubGlobal('Request', class extends Base {
+      constructor(input: RequestInfo | URL, init?: RequestInit) {
+        super(typeof input === 'string' && input.startsWith('/') ? `http://localhost${input}` : input, init);
+      }
+    });
+  }
+
+  it('is counted until the call ends, also when a middleware throws or the deploy-gap words end it', async () => {
+    wholeAddresses();
+    vi.stubGlobal('fetch', async () => new Response('bad gateway', { status: 502, headers: { 'content-type': 'text/html' } }));
+    const { api, updatingRetry } = await import('../api/client');
+    const { updater } = await import('./auto-update');
+    updatingRetry.delayMs = 0;
+    let during = -1;
+    api.use({
+      onRequest() {
+        during = updater.writing;
+        throw new Error('the session could not be refreshed');
+      },
+    });
+    await expect(api.POST('/api/v1/retail/sales', { body: {} as never })).rejects.toThrow('the session could not be refreshed');
+    expect(during).toBe(1);
+    expect(updater.writing).toBe(0);
+  });
+
+  it('a save answered by the deploy gap ends counted at zero, with its retry', async () => {
+    wholeAddresses();
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => {
+      calls++;
+      throw new TypeError('Failed to fetch');
+    });
+    const { api, updatingRetry } = await import('../api/client');
+    const { updater } = await import('./auto-update');
+    updatingRetry.delayMs = 0;
+    await expect(
+      api.POST('/api/v1/retail/sales', { body: {} as never, params: { header: { 'Idempotency-Key': 'key-test-1' } } as never }),
+    ).rejects.toBeTruthy();
+    expect(calls).toBe(2);
+    expect(updater.writing).toBe(0);
+  });
+});
+
+describe('the update screen never hangs', () => {
+  it('a load that fails offers the button', async () => {
+    const { AutoUpdateLayer, forceUpdate } = await import('./auto-update');
+    render(<AutoUpdateLayer />);
+    await act(async () => {
+      forceUpdate(() => Promise.reject(new Error('no worker')), () => true);
+      await Promise.resolve();
+    });
+    expect(screen.getByRole('button', { name: 'Load the page again' })).toBeTruthy();
+  });
+});
+
+describe('a money form after finish and discard', () => {
+  it('registers its next draft again', async () => {
+    const { usePersistedDraft } = await import('../areas/staff/retail/idempotency');
+    const { hasUnsavedWork } = await import('./unsaved-work');
+    let form: ReturnType<typeof usePersistedDraft<{ lines: string[] }>> | undefined;
+    function Cart() {
+      form = usePersistedDraft('test-cart-2', { lines: [] as string[] });
+      return null;
+    }
+    const view = render(<Cart />);
+    act(() => form?.setDraft({ lines: ['Test Item 01'] }));
+    act(() => form?.finish());
+    act(() => form?.discard());
+    act(() => form?.setDraft({ lines: ['Test Item 02'] }));
+    expect(hasUnsavedWork()).toBe(true);
+    view.unmount();
+  });
+});

@@ -121,6 +121,10 @@ an ordinary release.
    answers `426`.
 4. Leave it set. A later release does not need it changed unless it breaks old screens again; then
    raise it to that release's time. Clearing it (empty) serves every build again.
+5. **Before a rollback, clear it** (`docs/runbooks/rollback.md` step 5). A minimum later than the
+   running API's own build (`BMS_GIT_TIME` in its image) is ignored with a warning in the API log,
+   so a rollback with it left in place does not lock phones out, but the setting then means nothing
+   until it is cleared or the newer release is back.
 
 Requests without a build time (curl, payment callbacks, apps from before #576) are never refused.
 Offline sales queued on a phone stay queued through the update and are sent by the new app.

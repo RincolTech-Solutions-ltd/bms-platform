@@ -31,19 +31,24 @@ commit time as well.
    offline. A development build has no build id and compares nothing.
 2. **Apply at a safe moment.** `registerSW` gets `onNeedReload`, so the plugin no longer reloads by itself. Once the new worker
    has taken over, the app reloads:
-   - at once, when no screen holds unsaved work, no write (any request other than GET or HEAD) is on its way and no text field
-     has the focus; the check runs again when a field loses the focus, a write ends or unsaved work is cleared;
+   - at once, when no screen holds unsaved work, no write (a POST, PUT, PATCH or DELETE through the API client, counted around
+     the whole call so a call that throws still ends) is on its way and no text field has the focus; the check runs again when a
+     field loses the focus, a write ends or unsaved work is cleared;
    - otherwise at the next move between screens (the router's `onBeforeNavigate` with a new path), which becomes a full load of
      the target address, unless a write is on its way.
    Unsaved work is a small registry (`frontend/src/app/unsaved-work.ts`). Every money form's persisted draft (`usePersistedDraft`,
    which the Sell cart uses) registers itself while it differs from a blank draft, and the SMS wording editor while its text is
    changed; other forms add `useUnsavedWork(dirty)` as they need it. A dark neutral toast, "Updating the app…", shows for about a
-   second before the reload.
+   second before the reload; when the second is over everything is checked again and the reload is claimed only then, so a save
+   tapped during the toast calls it off (the toast goes, the reload waits). A reload refused by the one-a-minute rule is tried
+   again after the minute.
 3. **Force it for breaking changes.** The API reads `BMS_MIN_CLIENT_BUILD`, empty by default, the commit time (UTC
    `YYYYMMDDHHMMSS`) of the oldest web build it serves; any other value stops the API at start. The app sends
    `Bms-Client-Build: <sha tag>; built=<commit time>` on every request. A request under `/api/` whose build time is before the
    minimum is answered 426 `app_too_old` before tenant resolution and sign-in. A request with no build time (curl, a payment
-   callback, an app from before this change) is never refused. On a 426 the app covers everything with a full screen, "A new
+   callback, an app from before this change) is never refused. The API image carries its own commit time (`BMS_GIT_TIME`);
+   a minimum later than it is ignored with a warning at start, so a rollback to an older release with the setting left in
+   `.env` does not refuse every app the web container now serves. On a 426 the app covers everything with a full screen, "A new
    version of the app is ready. Updating…", so nothing more is typed or sent, and loads the new app as #543's "Load the page
    again" does: it waits up to 45 s for the new worker, then reloads. Offline it shows "You are offline. The app will update
    when you are back online." and updates when the network returns; if it already reloaded within the minute it offers the

@@ -8,6 +8,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -21,11 +23,15 @@ import tools.jackson.databind.ObjectMapper;
  * on an older build knows to fetch the new one. When {@code BMS_MIN_CLIENT_BUILD} is set, an API request from an app built before
  * it ({@code Bms-Client-Build: sha-abc1234; built=YYYYMMDDHHMMSS}) is answered 426 {@code app_too_old} before anything else runs,
  * so an old screen cannot send what the new API no longer understands. A request without the build time (curl, a callback, an app
- * from before #576) is never refused.
+ * from before #576) is never refused. A minimum later than the API's own build ({@code BMS_GIT_TIME}) is ignored with a warning:
+ * after a rollback to an older release with the setting left in place, refusing every app the web container now serves would stop
+ * every phone.
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 5)
 class ClientBuildFilter extends OncePerRequestFilter {
+
+    private static final Logger log = LoggerFactory.getLogger(ClientBuildFilter.class);
 
     static final String BUILD = "Bms-Build";
     static final String CLIENT_BUILD = "Bms-Client-Build";
@@ -37,15 +43,28 @@ class ClientBuildFilter extends OncePerRequestFilter {
     private final ObjectMapper mapper;
 
     ClientBuildFilter(
-            VersionController version, @Value("${bms.min-client-build:}") String minClientBuild, ObjectMapper mapper) {
+            VersionController version,
+            @Value("${bms.min-client-build:}") String minClientBuild,
+            @Value("${bms.git-time:}") String ownBuilt,
+            ObjectMapper mapper) {
         this.build = version.gitSha();
-        this.minBuilt = minClientBuild.strip();
         this.mapper = mapper;
-        if (!minBuilt.isEmpty() && !TIME.matcher(minBuilt).matches()) {
+        String min = minClientBuild.strip();
+        if (!min.isEmpty() && !TIME.matcher(min).matches()) {
             throw new IllegalStateException(
                     "BMS_MIN_CLIENT_BUILD is the commit time of the oldest app build the API serves, UTC YYYYMMDDHHMMSS"
                             + " (docs/runbooks/deploy.md)");
         }
+        String own = ownBuilt.strip();
+        if (!min.isEmpty() && TIME.matcher(own).matches() && min.compareTo(own) > 0) {
+            log.warn(
+                    "BMS_MIN_CLIENT_BUILD {} is later than this release ({}), as after a rollback: every app is served."
+                            + " Clear it in .env (docs/runbooks/rollback.md).",
+                    min,
+                    own);
+            min = "";
+        }
+        this.minBuilt = min;
     }
 
     @Override
