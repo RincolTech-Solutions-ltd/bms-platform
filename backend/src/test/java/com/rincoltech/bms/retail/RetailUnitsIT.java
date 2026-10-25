@@ -733,11 +733,11 @@ class RetailUnitsIT extends IntegrationTest {
         assertThat(applied.getStatusCode()).as("%s", applied.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(applied.getBody().get("added").asInt()).isEqualTo(2);
         JsonNode found =
-                api.get("/products?query=IMP-U1", ADMIN).getBody().get("items").get(0);
+                api.get("/products?query=test item one", ADMIN).getBody().get("items").get(0);
         assertThat(found.get("packs")).hasSize(1);
         assertThat(found.get("packs").get(0).get("unit").asString()).isEqualTo("carton");
         assertThat(found.get("packs").get(0).get("factor").asString()).isEqualTo("12.000");
-        assertThat(api.get("/products?query=IMP-U2", ADMIN)
+        assertThat(api.get("/products?query=test item two", ADMIN)
                         .getBody()
                         .get("items")
                         .get(0)

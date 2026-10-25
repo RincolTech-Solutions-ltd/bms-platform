@@ -8,7 +8,6 @@ import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.retail.RetailTestSupport;
 import java.util.Map;
-import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,12 +49,13 @@ class RetailProductImportConflictIT extends IntegrationTest {
     }
 
     @Test
-    void aCodeAddedAfterTheReadIsA409AndNothingIsAdded() {
+    void aNameAddedAfterTheReadIsA409AndNothingIsAdded() {
+        // Issue #562: the import uses no typed code on a new row, so the race it guards is a name, held once per unit.
         api.product("IMP-CLASH", 100, 200);
         long products = count("retail_products");
         long categories = count("retail_categories");
-        // The import reads the codes before the clashing row is committed: it sees none.
-        doReturn(Set.of()).when(repo).productCodes();
+        // The import reads the names before the clashing item is committed: it sees none.
+        doReturn(Map.of()).when(repo).productNames();
 
         ResponseEntity<JsonNode> r = api.post(
                 "/products/import?dry_run=false",
@@ -63,10 +63,10 @@ class RetailProductImportConflictIT extends IntegrationTest {
                         "csv",
                         "code,description,category,unit,sell price\n"
                                 + "IMP-NEW,Test new,Test New Category,roll,100\n"
-                                + "IMP-CLASH,Test clash,Test New Category,roll,100\n"),
+                                + ",Test Product IMP-CLASH,Test New Category,u-imp-clash,100\n"),
                 ADMINISTRATOR);
 
-        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(r.getBody().get("code").asString()).isEqualTo("import_conflict");
         assertThat(count("retail_products")).isEqualTo(products);
         assertThat(count("retail_categories")).isEqualTo(categories);
