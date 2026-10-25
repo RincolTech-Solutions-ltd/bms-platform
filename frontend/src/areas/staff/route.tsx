@@ -3,7 +3,6 @@ import { Outlet, createLazyRoute, useNavigate, useRouterState } from '@tanstack/
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { api, fetchMe, fetchSettings, type Me } from '../../api/client';
 import { loadRetailMock, retailMockEnabled } from '../../api/retail';
-import { useShellBrand } from '../../app/branding';
 import { endPendingLogout, getAccessToken, logoutPending, markLogoutPending, refreshFailedOffline, refreshSession, setAccessToken, subscribe } from '../../auth/session';
 import { OfflineProvider, lastProfile, useOfflineSupport, waitingNow } from '../../offline/offline-context';
 import { SignOutWarning } from '../../offline/sign-out-warning';
@@ -263,7 +262,7 @@ export function StaffSideNav({ me, onBranch = () => undefined, busy = false, onS
         label="Staff areas"
         tour="nav-areas"
         groups={groups}
-        head={<MenuShop me={me} branch={branch} role={roleOf(me)} onChoose={onBranch} />}
+        head={<MenuShop me={me} branch={branch} role={roleOf(me)} onChoose={onBranch} tour="branch-picker" />}
         foot={<StaffMenuFoot me={me} busy={busy} onSignOut={onSignOut} onHelp={help.open} />}
       />
       {help.sheet}
@@ -293,8 +292,8 @@ function StaffDrawer({ me, branch, onBranch, busy, onSignOut }: { me: Me; branch
 }
 
 /**
- * The one top bar of the staff area (issue #526, replacing the brand bar and the staff bar of two rows): the business and the
- * branch in use as the title, which switches branch; Search (issue #551); the Online dot only while it has something to say;
+ * The one top bar of the staff area (issue #526, replacing the brand bar and the staff bar of two rows): on a phone the business
+ * and the branch in use as the title, which switches branch (from 720px they are at the top of the sidebar only, #564); Search (issue #551); the Online dot only while it has something to say;
  * and one menu holding who is signed in, Help, Refresh, Light or dark and Sign out. Below 720px the menu button at its left opens
  * the staff menu's drawer (issue #564), Sign out moves to the drawer and the More tab's page (it stays in the top menu while
  * two-step set-up blocks the page, which has no tabs) and Sell is the first bottom tab (issue #539). With StaffSideNav and the tab
@@ -318,14 +317,13 @@ export function StaffBar({
   signOutInBar?: boolean;
 }) {
   const phone = useIsPhone();
-  const logo = useShellBrand().logoSrc;
   return (
     <>
       <header className="staff-bar">
         <div className="staff-bar-top">
           {phone && <StaffDrawer me={me} branch={branch} onBranch={onBranch} busy={busy} onSignOut={onSignOut} />}
-          {!phone && logo && <img className="top-logo" src={logo} alt="" />}
-          <BranchTitle me={me} branch={branch} onChoose={onBranch} />
+          {/* From 720px the sidebar's top holds the logo, the business and the branch picker, so the bar does not repeat them (#564). */}
+          {phone ? <BranchTitle me={me} branch={branch} onChoose={onBranch} /> : <span className="staff-bar-spacer" />}
           <SyncStatus />
           <FeatureSearch me={me} />
           <TopMenu me={me} busy={busy} onSignOut={onSignOut} signOut={!phone || signOutInBar} />

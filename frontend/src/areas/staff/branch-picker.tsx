@@ -56,12 +56,12 @@ export function ShopLogo({ url, name }: { url?: string | null; name: string }) {
  * for a moment first. In production the image loads straight from its URL, so an image that fails to load (`broke`) is passed
  * over for the next one.
  */
-function useShopImage(me: Me, branch: string | null) {
+function useShopImage(me: Me, branch: string | null, { platformLogo = false } = {}) {
   const active = (me.branches ?? []).find((b) => b.id === branch);
   const shop = useLogo(active?.logo_url ?? null);
   const brand = useShellBrand();
   const [broken, setBroken] = useState<string[]>([]);
-  const src = [shop.src, brand === PLATFORM_BRAND ? null : brand.logoSrc].find((s) => s && !broken.includes(s)) ?? null;
+  const src = [shop.src, brand === PLATFORM_BRAND && !platformLogo ? null : brand.logoSrc].find((s) => s && !broken.includes(s)) ?? null;
   return { active, loading: shop.loading, src, broke: (s: string) => setBroken((b) => [...b, s]), brand };
 }
 
@@ -89,12 +89,13 @@ export function initials(name: string): string {
 }
 
 /**
- * The top of the staff menu (issue #564): the shop's logo, or the business's initials, the business name and the person's role,
- * and on the right the branch in use, which switches branch when there is more than one to choose (a native select laid over it,
- * as in the top bar's title).
+ * The top of the staff menu (issue #564): the shop's logo, else the logo the top bar shows (ADR-068), else the business's
+ * initials; the business name and the person's role; and under them, on a row of its own so nothing is cut off, the branch in
+ * use, which switches branch when there is more than one to choose (a native select laid over it, as in the top bar's title).
+ * From 720px the sidebar is the only place the business and the branch show (`tour` is then the branch step's anchor).
  */
-export function MenuShop({ me, branch, role, onChoose }: { me: Me; branch: string | null; role: string; onChoose: (selection: string) => void }) {
-  const { active, loading, src, broke, brand } = useShopImage(me, branch);
+export function MenuShop({ me, branch, role, onChoose, tour }: { me: Me; branch: string | null; role: string; onChoose: (selection: string) => void; tour?: string }) {
+  const { active, loading, src, broke, brand } = useShopImage(me, branch, { platformLogo: true });
   const branches = me.branches ?? [];
   const choices = branches.length + (me.all_branches ? 1 : 0);
   const name = active ? branchLabel(active) : branch === ALL_BRANCHES ? 'All branches' : '';
@@ -114,7 +115,7 @@ export function MenuShop({ me, branch, role, onChoose }: { me: Me; branch: strin
         {role && <span className="menu-shop-role">{role}</span>}
       </span>
       {name && (
-        <span className="menu-shop-branch">
+        <span className="menu-shop-branch" data-tour={tour}>
           <span className="menu-shop-branch-name">{name}</span>
           {choices > 1 && <span className="menu-shop-chevron" aria-hidden="true">{icons.chevron}</span>}
           {choices > 1 && (

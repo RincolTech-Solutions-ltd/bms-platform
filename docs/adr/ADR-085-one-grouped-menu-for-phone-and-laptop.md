@@ -31,8 +31,9 @@ shop owner thinks, the same on a phone and a laptop (D38), and approved the pict
 3. **Reports opens the shop's Retail page** (`/staff/retail`: the owner's figures and every shop page as tiles), so every shop
    page stays one tap from the menu. A lending business without the shop keeps its Reports page there; with both, that page is
    Loan reports in the Lending group.
-4. **Top and foot.** The top shows the shop's logo, else the business logo, else the business's initials, with the business name,
-   the person's role (Owner for the owner, else the first role) and the branch picker on the right. The foot holds Notifications,
+4. **Top and foot.** The top shows the shop's logo, else the logo the top bar shows (ADR-068), else the business's initials, with
+   the business name, the person's role (Owner for the owner, else the first role) and, on a full-width row under them, the branch
+   picker. From 720px the top bar no longer repeats the logo, the business and the branch: it keeps Search and the profile button. The foot holds Notifications,
    Help and feedback (the Help sheet with its tours and Send feedback), then the person's initials, name and role, and Sign out.
 5. **Layout.** From 720px the menu is a fixed sidebar of 264px that no longer folds; the per-device choice `bms.sidebar` and the
    per-person folded sections `bms.menu.sections.<user>` are no longer read. Below 720px the menu button at the top left of the

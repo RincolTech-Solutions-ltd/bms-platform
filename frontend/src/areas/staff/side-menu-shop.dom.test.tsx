@@ -137,6 +137,34 @@ describe('the shop in use at the top of the sidebar (issues #461, #564)', () => 
     expect((await within(sidebarShop()).findByAltText('Logo of All branches')).getAttribute('src')).toBe(BUSINESS);
   });
 
+  it('shows the logo the top bar shows when the shop has none of its own, the initials only without any logo (ADR-068)', async () => {
+    show('b-one');
+    const image = (await within(sidebarShop()).findByAltText('Logo of Test Shop One (HQ)')) as HTMLImageElement;
+    expect(image.getAttribute('src')).toBe(PLATFORM_BRAND.logoSrc);
+    expect(sidebarShop().querySelector('.menu-shop-initials')).toBeNull();
+  });
+
+  it('is the only place the business and the branch show from 720px: the top bar keeps Search and the profile button', () => {
+    show('b-one');
+    const bar = document.querySelector('.staff-bar') as HTMLElement;
+    expect(within(bar).queryByRole('combobox')).toBeNull();
+    expect(bar.querySelector('.top-title, .top-logo, img')).toBeNull();
+    expect(within(bar).getByRole('button', { name: /^Menu for / })).toBeTruthy();
+    expect(screen.getAllByRole('combobox', { name: 'Switch branch' })).toHaveLength(1);
+    expect(sidebarShop().querySelector('.menu-shop-branch')?.getAttribute('data-tour')).toBe('branch-picker');
+    cleanup();
+    widthIs(360);
+    show('b-one');
+    // On a phone the top bar keeps its title and branch picker.
+    expect(within(document.querySelector('.staff-bar') as HTMLElement).getByRole('combobox', { name: 'Branch' })).toBeTruthy();
+  });
+
+  it('puts the branch on a row of its own under the business and the role', () => {
+    show('b-one');
+    const top = sidebarShop();
+    expect(Array.from(top.children).map((c) => c.className)).toEqual(['menu-shop-logo', 'menu-shop-text', 'menu-shop-branch']);
+  });
+
   it('switches branch from the branch at the right, with the choices of the top bar', () => {
     show('b-one');
     const picker = within(sidebarShop()).getByRole('combobox', { name: 'Switch branch' }) as HTMLSelectElement;
