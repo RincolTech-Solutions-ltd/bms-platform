@@ -442,14 +442,35 @@ class TenantOwnerIT extends IntegrationTest {
         assertThat(owners(other.tenantId())).containsExactly(otherAdmin);
     }
 
-    /** Issue #325: a member of staff, the Owner included, is deactivated and never deleted; the application role cannot. */
+    /**
+     * Issue #325: a member of staff, the Owner included, is deactivated and never deleted. No route deletes a user, even for
+     * the Owner, who holds every administrator permission; and the application role cannot, directly, through a role it is
+     * a member of or through PUBLIC.
+     */
     @Test
     void staffAccountsAreNeverDeleted() {
-        Long deletes = TestDatabase.owner().sql("""
-                        SELECT count(*) FROM information_schema.role_table_grants
-                         WHERE grantee = 'bms_app' AND table_name = 'users' AND privilege_type = 'DELETE'
-                        """).query(Long.class).single();
-        assertThat(deletes).isZero();
+        for (UUID target : List.of(cashier, adminA, owner)) {
+            ResponseEntity<JsonNode> r =
+                    api.call(HttpMethod.DELETE, "/api/v1/users/" + target, null, ownerSession.accessToken());
+            assertThat(r.getStatusCode().is4xxClientError()).isTrue();
+        }
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM users WHERE id IN (?, ?, ?)")
+                        .params(cashier, adminA, owner)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(3L);
+        // has_table_privilege fails on a role that does not exist and follows inherited roles and PUBLIC.
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT has_table_privilege('bms_app', 'public.users', 'UPDATE')")
+                        .query(Boolean.class)
+                        .single())
+                .isTrue();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT has_table_privilege('bms_app', 'public.users', 'DELETE')")
+                        .query(Boolean.class)
+                        .single())
+                .isFalse();
     }
 
     /** NFR-ISO-01: the Owner of one business cannot see, change or hand ownership to the staff of another. */

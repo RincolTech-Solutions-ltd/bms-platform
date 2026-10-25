@@ -244,7 +244,8 @@ Outside the Users routes the Owner alone asks for a module, stops one, cancels t
 (read only after the last day paid for, data kept) and undoes a change still to come (ADR-073,
 403 `owner_only` for any other administrator, who reads the Plan and billing page only;
 `SelfServePlanIT`), and moves the go-live date (ADR-071;
-`ExistingLoansIT.frExl03_theGoLiveDateGuardsAgainstBackdatingNewLending`). Subscription reminders
+`ExistingLoansIT.frExl03_theGoLiveDateGuardsAgainstBackdatingNewLending`, which refuses a
+non-Owner administrator with 403 `owner_only`). Subscription reminders
 and receipts go to the Owner's own email and phone (ADR-075; `BillingAutomationIT`); there is no
 separate billing contact and no request to close the business: both not yet built (follow-ups on
 issue #325). A staff account is never deleted, the Owner's included: it is deactivated, and the
