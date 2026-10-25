@@ -141,16 +141,17 @@ export const updater = createUpdater({
  * Step 3: the server refused this app as too old. The screen covers the app so nothing more is typed or sent, and the new app
  * loads as #543's "Load the page again" does: it waits up to 45 s for the new worker, then reloads.
  */
-export function forceUpdate(): void {
+export function forceUpdate(load: () => Promise<'reloaded' | 'offline'> = () => loadFreshApp(), claim: () => boolean = () => claimReload()): void {
   if (shown.kind === 'forced' && shown.state === 'updating') return;
   if (!isOnline()) return show({ kind: 'forced', state: 'offline' });
-  if (!claimReload()) return show({ kind: 'forced', state: 'stuck' });
-  getNewApp();
+  // Reloaded less than a minute ago and still too old: the person gets the button rather than a loop.
+  if (!claim()) return show({ kind: 'forced', state: 'stuck' });
+  getNewApp(load);
 }
 
-function getNewApp(): void {
+function getNewApp(load: () => Promise<'reloaded' | 'offline'> = () => loadFreshApp()): void {
   show({ kind: 'forced', state: 'updating' });
-  void loadFreshApp().then((r) => r === 'offline' && show({ kind: 'forced', state: 'offline' }));
+  void load().then((r) => r === 'offline' && show({ kind: 'forced', state: 'offline' }));
 }
 
 /** The service worker's registration, once the browser has made it; until then a check asks nothing. */
@@ -195,7 +196,7 @@ export function AutoUpdateLayer() {
       </p>
       {now.state === 'updating' && <p className="app-update-hint">This can take a minute on a phone.</p>}
       {now.state === 'stuck' && (
-        <button type="button" className="btn btn-primary" onClick={getNewApp}>
+        <button type="button" className="btn btn-primary" onClick={() => getNewApp()}>
           Load the page again
         </button>
       )}
