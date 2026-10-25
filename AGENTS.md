@@ -1015,6 +1015,9 @@ Accepted (this list is the ADR index):
   the second of two invitations at once with 409 `duplicate_phone`; the migration stops, changing nothing, on existing
   duplicates (manual fix in a runbook, never a deleted user); the recording notifier is dev and test only and every other
   profile keeps no message or link (proposed, #323 and #324; amends ADR-014; migration `V98`)
+- ADR-087 The Controls page counts credit write-offs (`credit_writeoffs` from `V64`: the unpaid amount at sale prices, never the
+  loss; the person whose sale it was, the approver who wrote it off; a rate per 100 sales; not in the patterns) and states its
+  query plans for a large tenant; a Controls menu entry until the grouped menu of #569 (proposed, #357; amends ADR-047; no migration)
 - ADR-046 Two-step sign-in is optional by default (migration `V67`) and a tenant policy can require it for everyone or for chosen roles after a grace
   period; one deadline, enforced-now versus due-by, the forgotten-password rules unchanged (proposed, #348; FR-IAM-06, FR-IAM-16)
 - ADR-063 Production is created by Terraform on production day (`infra/production/`, a Hetzner root and an AWS root over shared
