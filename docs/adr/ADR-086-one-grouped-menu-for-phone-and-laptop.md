@@ -45,12 +45,16 @@ shop owner thinks, the same on a phone and a laptop (D38), and approved the pict
    (`--color-accent-tint`) and brand-colour text, no side stripe; group headings are small muted text; counts (the open orders,
    "N low" on My stock) are muted figures on the right, read with the row, never coloured badges; the drawer's is the only shadow;
    no gradients, no emoji. Names come from the glossary (`WORDS`), so the menu, the tabs and the page titles agree.
-
-7. **Rows beyond the approved picture, on purpose.** The picture shows a shop owner without approvals, lending, payments, SMS or
-   the AI assistant. So that every page a session may open stays in the menu (decision 2), Approvals is a row of Today, and
-   Receive payments, SMS and AI assistant are rows of Business where their permission allows, as the issue asks; Loan reports
-   joins Lending for a business with both modules (decision 3). A session the picture describes sees exactly the drawn rows. As
-   the More page (#539, #544) lists the menu in its order, Approvals there moves from the top card to the Business card.
+7. **Rows of sessions the picture does not show, signed off by the owner (25 Oct 2026, on pull request #569).** The picture shows a
+   shop owner without approvals, lending, payments, SMS or the AI assistant. Receive payments, SMS and AI assistant are rows of
+   Business where their permission allows, as issue #564 says; Approvals is a row of Today, since pending approvals are a daily
+   job; Loan reports joins Lending for a business with both modules (decision 3). These are part of this decision, not a
+   departure from the picture: a session like the one drawn sees exactly the drawn rows. As the More page (#539, #544) lists the
+   menu in its order, Approvals there moves from the top card to the Business card.
+8. **The business name comes from the business, never the platform.** `/me` carries no business name, so the top of the menu
+   takes the business's own name and logo from its branding (`GET /branding`, `display_name`, ADR-068), the source the top bar
+   uses on a business's host. Off a business's host, or before its branding loads, the menu says BMS with its initials; the Rincol
+   logo shows only on the operator side and the platform's own pages.
 
 ## Consequences
 
