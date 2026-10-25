@@ -8,7 +8,7 @@ import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
 import { lineTotalMinor, parseQty, qtyString, showDate, showQty } from './maths';
 import { chosenUnitHint, redraftOf } from './restock-correct-state';
-import { Gate, Note, Problem, ProductPicker, money, useProfitAccess } from './ui';
+import { Gate, Money, Note, Problem, ProductPicker, money, useProfitAccess } from './ui';
 import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne, scanInto } from './barcode-state';
 import { UNITS, capabilityOn } from './permissions';
@@ -337,7 +337,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
       </fieldset>
       {supplierProblem && <p role="alert" className="rt-flag" data-testid="credit-needs-supplier">{supplierProblem}</p>}
 
-      <p className="rt-total" aria-live="polite">Total cost {money(restockTotal(lines))}</p>
+      <p className="rt-total" aria-live="polite" data-testid="restock-total">Total cost <Money minor={restockTotal(lines)} /></p>
       <Problem error={save.error} />
       <BusyButton type="submit" className="rt-primary" data-tour="restock-save" busy={save.isPending} disabled={blocked}>Save the purchase</BusyButton>
 

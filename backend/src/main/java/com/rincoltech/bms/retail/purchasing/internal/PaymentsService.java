@@ -127,10 +127,9 @@ class PaymentsService {
                     List.of(new FieldProblem("supplier_id", "unknown_supplier", "No such supplier.")));
         }
         // Issue #557: cash paid out leaves the till on the payment's day. The cash book carries unbanked cash forward,
-        // so a banking
-        // that stands on that day or any later one already counted that cash: such a day is not changed after the fact.
-        // Mobile
-        // money and bank never touch the till.
+        // so
+        // a banking that stands on that day or any later one already counted that cash: such a day is not changed after
+        // the fact. Mobile money and bank never touch the till.
         if (r.method().equals("cash") && repo.cashBankedFrom(branch, paidOn)) {
             throw ApiException.rule(
                     "cash_day_banked",

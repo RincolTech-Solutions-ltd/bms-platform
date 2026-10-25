@@ -41,7 +41,8 @@ split per branch, posting trade creditors against the method's account, with the
    oldest thing it pays, as a customer payment is dated between its sale and today. A cash payment is refused once a banking that
    stands at the paying branch is dated on that day or later (422 `cash_day_banked`): the cash book carries unbanked cash forward,
    so such a banking already counted that day's cash, and a banked day is not changed after the fact (today too, once today is
-   banked). The check runs after the supplier row lock, which does not serialise it with a banking being recorded at the same moment (a watch for below). The cash book has no other close of a day and expenses no back-date
+   banked). The check runs after the supplier row lock, which does not serialise it with a banking
+   being recorded at the same moment (a watch for below). The cash book has no other close of a day and expenses no back-date
    window, so none is copied here; the ledger refuses a date in a closed period. Mobile money and bank never touch the till. On
    the screen the date stays empty, meaning today, until the person picks one, so a form left open overnight pays the day it is
    sent. A reversal stays dated the day it is made.
@@ -67,7 +68,8 @@ purchasing on sees the same payments and adds invoices beside them.
 **Worse:** the payment and payables routes answer the same with the capability on or off, so "capability off equals today"
 (ADR-033) no longer holds for them; a cash payment dated on an earlier day that is not yet banked changes that day's cash book,
 as a back-dated expense does.
-How far back a payment may go, beyond the oldest purchase it pays and the last banking, is the owner's call if they want a window.
+There is no back-date window, as for expenses (decided in the review of #558): the oldest purchase a payment pays and the
+banked-day guard (`cash_day_banked`) are the only limits.
 
 **Watch for:** a banking and a back-dated cash payment of the same branch and day recorded at the same moment can each miss the other; a branch-day lock shared with the cash book would close it. A ledger period closed by an accountant refuses a payment dated inside it (the ledger's own rule), which the screen
 shows as the server's message. Unapplied supplier credits and a cash refund from a supplier stay deferred (issue #199). A PDF of the

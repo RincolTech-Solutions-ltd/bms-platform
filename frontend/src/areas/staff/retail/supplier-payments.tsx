@@ -12,6 +12,7 @@ import { methodWords } from './payables-state';
 import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys, useCursorList } from './purchasing-ui';
 import { showDate } from './transfers';
 import { Gate, Problem, Success, Money, useBranchName, useToast } from './ui';
+import { WORDS } from '../../../app/glossary';
 
 // Supplier payments (the purchasing capability, ADR-033, issue #198): the money paid to suppliers, newest first, and one payment with
 // what it cleared. A payment pays supplier invoices and credit restocks (stock bought on credit in Restock), oldest first or as
@@ -86,7 +87,7 @@ export function SupplierPaymentView({ payment, nameOf, payable }: { payment: Sup
           ['Supplier', <SupplierOwed key="s" id={payment.supplier_id} name={payment.supplier_name} payable={payable} />],
           ['Paid on', showDate(payment.paid_on)],
           ['Amount', <Money key="a" minor={payment.amount_minor ?? 0} />],
-          ['Paid by', methodWords(payment.method)],
+          [WORDS.paidHow, methodWords(payment.method)],
           ['From the till or bank of', nameOf(payment.branch_id)],
           ['What it paid', payment.allocation === 'manual' ? 'What was chosen' : 'The oldest first'],
           ...(payment.reference ? [['Reference', payment.reference] as [string, string]] : []),
