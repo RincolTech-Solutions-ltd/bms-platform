@@ -36,6 +36,7 @@ vi.mock('../../../api/retail', async (original) => {
 });
 
 const { CategoryPicker, matchCategories, sameName } = await import('./category-picker');
+const { ScreenToast, useToast } = await import('./toast');
 const { unwrap } = await import('../../../api/retail');
 
 const list: Category[] = [
@@ -49,13 +50,16 @@ const withoutManage = (): Me => {
   return { ...me, permissions: (me.permissions ?? []).filter((p) => p !== 'retail.catalogue.manage') };
 };
 
+/** A screen with its own toast, which the picker uses (ScreenToast) rather than drawing one of its own. */
 function Harness({ noneLabel, allowAdd }: { noneLabel?: string; allowAdd?: boolean }) {
   const [value, setValue] = useState('c1');
+  const { show, toast } = useToast();
   return (
-    <>
+    <ScreenToast.Provider value={show}>
       <CategoryPicker id="pick" categories={list} value={value} onChange={setValue} noneLabel={noneLabel} allowAdd={allowAdd} required />
       <output data-testid="value">{value}</output>
-    </>
+      {toast}
+    </ScreenToast.Provider>
   );
 }
 
@@ -175,9 +179,12 @@ describe('the category picker on a laptop', () => {
     // Only the name is sent: the code start is the app's, and the case is the owner's.
     expect(createCategory).toHaveBeenCalledTimes(1);
     expect(createCategory).toHaveBeenCalledWith('solar panels');
+    // One toast, the screen's, dark and neutral with the success check; the same words in the picker's live region.
+    expect(document.querySelectorAll('.toast')).toHaveLength(1);
     const toast = document.querySelector('.toast');
     expect(toast?.classList.contains('toast-success')).toBe(true);
     expect(toast?.textContent).toBe('Added the category solar panels. Its item codes start with SLR.');
+    expect(screen.getByTestId('pick-said').textContent).toBe('Added the category solar panels. Its item codes start with SLR.');
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 
@@ -246,7 +253,7 @@ describe('the category picker on a laptop', () => {
     expect(options()).not.toContain('Torches');
     fireEvent.click(screen.getByRole('button', { name: 'Add a new category' }));
     fireEvent.change(screen.getByLabelText(/^Name of the new category/), { target: { value: 'torches' } });
-    expect(await screen.findByText('There is already a category called Torches, switched off.')).toBeTruthy();
+    expect(await screen.findByText('There is already a category called Torches (switched off).')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Switch Torches on and choose it' }));
     await waitFor(() => expect(screen.getByTestId('value').textContent).toBe('c4'));
     expect(updateCategory).toHaveBeenCalledWith('c4', 2, { active: true });

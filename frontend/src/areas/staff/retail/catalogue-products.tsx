@@ -19,6 +19,7 @@ import { ScreenLink } from './screen-link';
 import { StockMinimumEditor } from './stock-minimum';
 import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
 import { CategoryPicker } from './category-picker';
+import { ScreenToast } from './toast';
 import { Gate, Problem, Success, money, useProfitAccess, useToast } from './ui';
 import { WORDS } from '../../../app/glossary';
 import { Hint } from '../../../app/ui/Hint';
@@ -475,8 +476,10 @@ export function ProductsPage() {
     <Gate screen="products" title="Items">
       {message && view.mode === 'list' && <Success>{message}</Success>}
       {view.mode === 'list' && <ProductList onAdd={() => { setMessage(null); setView({ mode: 'new' }); }} onEdit={(id) => { setMessage(null); setView({ mode: 'edit', id }); }} onPrice={(id) => { setMessage(null); setView({ mode: 'price', id }); }} />}
-      {view.mode === 'new' && <ProductForm onSaved={saved} onCancel={back} onOpen={open} />}
-      {(view.mode === 'edit' || view.mode === 'price') && <Editing id={view.id} mode={view.mode} onSaved={saved} onCancel={back} onOpen={open} />}
+      <ScreenToast.Provider value={show}>
+        {view.mode === 'new' && <ProductForm onSaved={saved} onCancel={back} onOpen={open} />}
+        {(view.mode === 'edit' || view.mode === 'price') && <Editing id={view.id} mode={view.mode} onSaved={saved} onCancel={back} onOpen={open} />}
+      </ScreenToast.Provider>
       {toast}
     </Gate>
   );

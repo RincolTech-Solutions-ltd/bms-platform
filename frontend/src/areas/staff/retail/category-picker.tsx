@@ -1,6 +1,6 @@
 import * as Popover from '@radix-ui/react-popover';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useId, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useContext, useEffect, useId, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Field, type FieldControlProps } from '../../../app/ui/Field';
 import { Sheet } from '../../../app/ui/Sheet';
@@ -8,7 +8,7 @@ import { retail, type Category } from '../../../api/retail';
 import { icons } from '../../../components/icons';
 import { useIsPhone } from '../../../components/side-menu';
 import { useStaff } from '../context';
-import { useToast } from './toast';
+import { ScreenToast } from './toast';
 import { Problem, requireVersion } from './ui';
 
 // The one category picker (issue #578), used wherever a category is chosen. The field is a button that names the category
@@ -18,7 +18,9 @@ import { Problem, requireVersion } from './ui';
 // Up and Down move the highlight (announced through aria-activedescendant), Enter picks it, Escape closes and the focus goes
 // back to the field. A search matches any part of the name, whatever the case; names are shown as the owner typed them.
 // "Add a new category" opens a short form in place: the name and the code start the app will make (#550, #562; the code is
-// never typed), and the new category is chosen at once, with a dark toast. A name already taken, by a switched-off category
+// never typed), and the new category is chosen at once, with the screen's own dark toast (ScreenToast: the screen shows one
+// toast, never a second one from the picker) and the same words in a live region by the field, which a screen reader hears
+// once the sheet has closed. A name already taken, by a switched-off category
 // too, is said in plain words before anything is sent, with the way to choose that category (switching it back on).
 
 const MANAGE = 'retail.catalogue.manage';
@@ -113,7 +115,7 @@ function AddCategory({ id, initial, existing, onAdded, onChoose, onCancel }: {
         <div className="cp-taken" role="status">
           <p>
             {taken.active === false
-              ? `There is already a category called ${taken.name ?? ''}, switched off.`
+              ? `There is already a category called ${taken.name ?? ''} (switched off).`
               : `There is already a category called ${taken.name ?? ''}.`}
           </p>
           {taken.active === false
@@ -257,7 +259,9 @@ export function CategoryPicker({ id, label = 'Category', categories, value, onCh
   const { me } = useStaff();
   const phone = useIsPhone();
   const queryClient = useQueryClient();
-  const { show, toast } = useToast();
+  const screenToast = useContext(ScreenToast);
+  // What the last add or switch on said, for a screen reader; the screen's toast may be silent, as its saves have a line too.
+  const [said, setSaid] = useState('');
   const [open, setOpen] = useState(false);
   const canAdd = allowAdd && (me.permissions ?? []).includes(MANAGE);
   // Every category, switched-off ones too, for the taken-name check; the catalogue's own list, so no second request.
@@ -280,7 +284,8 @@ export function CategoryPicker({ id, label = 'Category', categories, value, onCh
     }
     void queryClient.invalidateQueries({ queryKey: ['retail', 'catalogue'] });
     setKept(row);
-    show(message, 'success');
+    screenToast?.(message, 'success');
+    setSaid(message);
     pick(row.id ?? '');
   };
   const added = (row: Category) => keep(row, `Added the category ${row.name ?? ''}.${row.code_prefix ? ` Its item codes start with ${row.code_prefix}.` : ''}`);
@@ -344,7 +349,7 @@ export function CategoryPicker({ id, label = 'Category', categories, value, onCh
           </Popover.Portal>
         </Popover.Root>
       )}
-      {toast}
+      <p className="visually-hidden" role="status" aria-live="polite" data-testid={`${id}-said`}>{said}</p>
     </>
   );
 }

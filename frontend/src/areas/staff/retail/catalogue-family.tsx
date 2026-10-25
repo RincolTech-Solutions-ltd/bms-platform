@@ -12,6 +12,7 @@ import { ItemPhoto, PhotoEditor, shownPhoto } from './item-photo';
 import { showQty } from './maths';
 import { ScreenLink } from './screen-link';
 import { CategoryPicker } from './category-picker';
+import { ScreenToast } from './toast';
 import { Gate, Problem, Success, money, useProfitAccess, useToast } from './ui';
 import { WORDS } from '../../../app/glossary';
 import { Hint } from '../../../app/ui/Hint';
@@ -115,7 +116,7 @@ export function FamilyScreen({ familyId }: { familyId: string }) {
               {f && <AddVariants family={f} onDone={(text) => { setMessage(text); show(text, 'success'); }} />}
             </section>
           )}
-          {canManage && f && <RenameFamily family={f} onDone={(text) => { setMessage(text); show(text, 'success'); }} />}
+          {canManage && f && <ScreenToast.Provider value={show}><RenameFamily family={f} onDone={(text) => { setMessage(text); show(text, 'success'); }} /></ScreenToast.Provider>}
         </>
       )}
       {toast}

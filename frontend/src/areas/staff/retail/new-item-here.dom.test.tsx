@@ -105,6 +105,8 @@ describe('Buy stock: add an item that is not in the list', () => {
     await waitFor(() => expect(field(/^Category/).textContent).toBe('Rice'));
     expect(within(form()).getByTestId('restock-new-code').textContent).toBe('Item code: RCE-0001, made by the app');
     expect(createCategory).toHaveBeenCalledWith('Rice');
+    // Buy stock's own toast says it, once: the picker draws none of its own.
+    expect([...document.querySelectorAll('.toast')].map((t) => t.textContent)).toEqual(['Added the category Rice. Its item codes start with RCE.']);
     expect(createProduct).not.toHaveBeenCalled();
   });
 
