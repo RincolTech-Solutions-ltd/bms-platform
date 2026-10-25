@@ -452,7 +452,7 @@ class TenantOwnerIT extends IntegrationTest {
         for (UUID target : List.of(cashier, adminA, owner)) {
             ResponseEntity<JsonNode> r =
                     api.call(HttpMethod.DELETE, "/api/v1/users/" + target, null, ownerSession.accessToken());
-            assertThat(r.getStatusCode().is4xxClientError()).isTrue();
+            assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
         }
         assertThat(TestDatabase.owner()
                         .sql("SELECT count(*) FROM users WHERE id IN (?, ?, ?)")
@@ -466,11 +466,15 @@ class TenantOwnerIT extends IntegrationTest {
                         .query(Boolean.class)
                         .single())
                 .isTrue();
-        assertThat(TestDatabase.owner()
-                        .sql("SELECT has_table_privilege('bms_app', 'public.users', 'DELETE')")
-                        .query(Boolean.class)
-                        .single())
-                .isFalse();
+        for (String privilege : List.of("DELETE", "TRUNCATE")) {
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT has_table_privilege('bms_app', 'public.users', ?)")
+                            .param(privilege)
+                            .query(Boolean.class)
+                            .single())
+                    .as(privilege)
+                    .isFalse();
+        }
     }
 
     /** NFR-ISO-01: the Owner of one business cannot see, change or hand ownership to the staff of another. */
