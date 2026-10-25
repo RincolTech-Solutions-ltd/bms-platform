@@ -542,7 +542,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   ids, and name keys including `name=`, in linear time; PostgreSQL logs tersely; both compose files cap container logs.
   Tests: `AuthThrottleTest`, `PasswordsBoundTest`, `SignInLimitsIT`, `PasswordResetIT`, `SmtpProductionGuardTest`,
   `LogRedactionTest`, `ApiExceptionRetryAfterTest`.
-- **Built (the Owner of a business, issue #442, also delivering issue #325, FR-IAM-18, ADR-062 and its #325 note):** migration `V79`: `users.is_owner` (one per business, the
+- **Built (the Owner of a business, issue #442, FR-IAM-18, ADR-062):** migration `V79`: `users.is_owner` (one per business, the
   partial unique index `users_one_owner`; the check `users_owner_is_staff`; the triggers `users_owner_is_admin` and
   `user_role_assignments_owner_keeps_admin`), backfilled to the active administrator with the activated sign-up application's email,
   else the earliest active administrator (a business with none is left without an Owner, a WARNING in the migration log), and the

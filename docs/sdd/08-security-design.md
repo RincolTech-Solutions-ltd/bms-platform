@@ -241,13 +241,14 @@ rules of before until the operator assigns one. Two-step sign-in is not forced o
 Users screen prompts the Owner to turn it on.
 
 Outside the Users routes the Owner alone asks for a module, stops one, cancels the subscription
-(closing the business: read only after the last day paid for, data kept) and undoes a change still
-to come (ADR-073, 403 `owner_only` for any other administrator, who reads the Plan and billing page
-only), and moves the go-live date (ADR-071). Subscription reminders and receipts go to the Owner's
-own email and phone (ADR-075), which only the Owner changes, so the Owner's contact is the business's
-billing contact. A staff account is never deleted, the Owner's included: it is deactivated, and the
-application role holds no `DELETE` on `users`, so every audit row keeps naming a real person (issue
-#325, ADR-062 note).
+(read only after the last day paid for, data kept) and undoes a change still to come (ADR-073,
+403 `owner_only` for any other administrator, who reads the Plan and billing page only;
+`SelfServePlanIT`), and moves the go-live date (ADR-071;
+`ExistingLoansIT.frExl03_theGoLiveDateGuardsAgainstBackdatingNewLending`). Subscription reminders
+and receipts go to the Owner's own email and phone (ADR-075; `BillingAutomationIT`); there is no
+separate billing contact, and no request to close the business and remove its data (both open on
+issue #325). A staff account is never deleted, the Owner's included: it is deactivated, and the
+application role holds no `DELETE` on `users` (`TenantOwnerIT.staffAccountsAreNeverDeleted`).
 
 ### 8.3.2 Permission matrix
 

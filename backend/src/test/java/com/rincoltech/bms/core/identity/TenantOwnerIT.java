@@ -442,6 +442,16 @@ class TenantOwnerIT extends IntegrationTest {
         assertThat(owners(other.tenantId())).containsExactly(otherAdmin);
     }
 
+    /** Issue #325: a member of staff, the Owner included, is deactivated and never deleted; the application role cannot. */
+    @Test
+    void staffAccountsAreNeverDeleted() {
+        Long deletes = TestDatabase.owner().sql("""
+                        SELECT count(*) FROM information_schema.role_table_grants
+                         WHERE grantee = 'bms_app' AND table_name = 'users' AND privilege_type = 'DELETE'
+                        """).query(Long.class).single();
+        assertThat(deletes).isZero();
+    }
+
     /** NFR-ISO-01: the Owner of one business cannot see, change or hand ownership to the staff of another. */
     @Test
     void theOwnerRulesNeverReachAnotherBusiness() {

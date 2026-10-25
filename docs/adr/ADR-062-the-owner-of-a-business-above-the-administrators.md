@@ -99,22 +99,25 @@ makes another administrator the Owner. Each owner-only check reads the Owner onc
 **Watch for:** a business left with no Owner after V79 (the WARNING lines; the operator assigns one on the Business page); an Owner
 who never turns on two-step sign-in (the prompt is the only nudge; a policy can still require it, ADR-046); any new route that changes
 a staff user must ask whether it touches an administrator and call the same owner rule; the plan and billing contact and closing the
-business, named in #325 as the Owner's, were not part of this change and have since been built (see the note below).
+business, named in #325 as the Owner's, were not part of this change; the note below says which are now built (the plan) and
+which are not (a billing contact, a request to close the business).
 
 ## Note: what issue #325 asked for and where it is (25 Oct 2026)
 
-Issue #325 (owner request of 19 Oct 2026) sketched the Owner before this decision. Everything it asks for is now on `main`, so it
-needs no new migration and no new ADR:
+Issue #325 (owner request of 19 Oct 2026) sketched the Owner before this decision. Most of it is on `main` with tests; two asks
+are not built and one was narrowed. No new migration or ADR is added for what is built.
 
-| #325 asked for | Where it is |
-|---|---|
-| The person who signs up is the Owner, also when the operator invites the first administrator | Decision 7 (`V79`): the applicant at activation, or the first administrator the operator invites |
-| A per-business owner marker, `tenants.owner_user_id` | `users.is_owner` (decision 1): one per business by a partial unique index, so it holds the same fact with the database rules beside the user row; a second marker on `tenants` would be a second truth to keep in step |
-| The Owner holds every administrator permission | Decision 1: the Owner holds `tenant_admin`, whose assignment cannot be revoked while they are the Owner |
-| Not deactivated, demoted or have roles changed by an administrator | Decisions 2 and 3: 403 `owner_protected` |
-| Administrators manage everyone except the Owner | Narrowed by the owner decision of 22 Oct 2026 (decision 2): administrators manage every member of staff who is not an administrator; only the Owner manages the other administrators |
-| Only the Owner transfers ownership, to an active administrator, with the step-up and an audit row | Decision 4 (`core.user.ownership_transferred`), serialised by decision 9 |
-| Only the Owner manages the plan and the billing contact and asks to close the business | ADR-073: only the Owner asks for or stops a module, cancels the subscription (the business's closure: read only from the day after the last day paid for, or at once when nothing is paid ahead, data kept), the first three with the step-up, and undoes a change still to come; ADR-075: reminders and receipts go to the Owner's own email and phone, which nobody else may change (decision 3), so the Owner's contact is the billing contact; administrators read the Plan and billing page only |
-| The Users screen shows an Owner badge and hides destructive actions on the Owner | Decision 10 |
-| Staff accounts are deactivated, never deleted | No route deletes a user, and the application role holds no `DELETE` on `users` (`V1`), so the audit log always names a real person |
-| Backfill to the first active administrator by `created_at`, listed for the operator | Decision 7: the recorded sign-up email first, else the earliest active administrator; each assignment in the platform log and a business with none named in a WARNING |
+| #325 asked for | On `main` | Test |
+|---|---|---|
+| The person who signs up is the Owner, also when the operator invites the first administrator | `TenantAdmins.inviteFirstAdmin` and the activation make the first administrator the Owner (decision 7) | `TenantOwnerIT.theFirstAdministratorOfANewBusinessIsItsOwner`, `theOnlyAdministratorToJoinABusinessWithNoOwnerBecomesItsOwner` |
+| A per-business owner marker, `tenants.owner_user_id` | **Changed:** `users.is_owner` (`V79`), one per business by the index `users_one_owner`; the same fact with the database rules beside the user row, so no second marker on `tenants` | `TenantOwnerIT.theDatabaseKeepsOneOwnerWhoStaysAnAdministrator` |
+| The Owner holds every administrator permission | The Owner keeps `tenant_admin`: the trigger `user_role_assignments_owner_keeps_admin` (`V79`) | `TenantOwnerIT.theDatabaseRefusesDeletingTheOwnersAdministratorRole` |
+| Not deactivated, demoted, given other roles or a new contact by an administrator | `Owners` in `core.identity.internal`, 403 `owner_protected` | `TenantOwnerIT.anAdministratorCannotChangeTheOwnerOrAnotherAdministrator` |
+| Administrators manage everyone except the Owner | **Narrowed** by the owner decision of 22 Oct 2026 (decision 2): administrators manage every member of staff who is not an administrator; only the Owner manages the other administrators (403 `owner_only`) | `TenantOwnerIT.anAdministratorCannotChangeTheOwnerOrAnotherAdministrator`, `theOwnerManagesTheAdministratorsAndMustTransferBeforeStepping` |
+| Only the Owner transfers ownership, to an active administrator, with the step-up and an audit row | `POST /users/{user_id}/transfer-ownership`, audited `core.user.ownership_transferred`, under the per-business advisory lock | `TenantOwnerIT.theOwnerTransfersOwnershipToAnActiveAdministrator`, `anOwnerWithTwoStepSignInTransfersWithACode`, `twoTransfersAtOnceLeaveExactlyOneOwner` |
+| Only the Owner manages the plan | ADR-073: only the Owner asks for a module, stops one or cancels the subscription (each with the step-up) and undoes a change still to come (`PlanService.requireOwner`, 403 `owner_only`); administrators read the Plan and billing page only | `SelfServePlanIT` (the `owner_only` refusals and the step-up cases) |
+| Only the Owner manages the billing contact | **Not built.** There is no billing contact: reminders and receipts go to the Owner's own email and phone (ADR-075, `BillingService`), which only the Owner changes. An Owner who wants invoices at another address (an accountant) has no way to say so without changing their own sign-in contact. Left open on #325 for the owner's decision | Reminders and receipts to the Owner: `BillingAutomationIT.frSub11_aPaymentGetsANumberedReceiptEmailedToTheOwner`, `frSub08_aDeactivatedOwnerGetsNoReminderAndNoReceipt` |
+| Only the Owner asks to close the business | **Partly.** The Owner's cancellation (ADR-073) ends the subscription: the business is read only from the day after the last day paid for, data kept. There is no request to close the business and remove or hand over its data. Left open on #325 for the owner's decision | `SelfServePlanIT` (the cancellation cases) |
+| The Users screen shows an Owner badge and hides destructive actions on the Owner | `users/` screens (decision 10) | `users.dom.test.tsx` (the Owner badge test), `state.test.ts` |
+| Staff accounts are deactivated, never deleted | No route deletes a user; the application role holds no `DELETE` on `users` (`V1`) | `TenantOwnerIT.staffAccountsAreNeverDeleted` |
+| Backfill to the first active administrator by `created_at`, listed for the operator | `V79`: the recorded sign-up email first, else the earliest active administrator. **Partly listed:** each assignment is a platform log row and a business left with none is a WARNING in the migration log; the operator's Business page shows such a business with no Owner, but no screen lists them | `MigrationOrderIT.ownerMigrationGivesEveryBusinessWithAnActiveAdministratorExactlyOneOwner` |
