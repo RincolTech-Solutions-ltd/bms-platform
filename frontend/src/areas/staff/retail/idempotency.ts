@@ -81,21 +81,30 @@ export function usePersistedDraft<T>(
   useEffect(() => {
     if (!done.current) saveDraft(store, name, saved);
   }, [store, name, saved]);
+  const latest = useRef(saved.draft);
+  latest.current = saved.draft;
+  // The draft as it was finished, so a change that leaves it as it was starts nothing new.
+  const finishedAs = useRef<string | null>(null);
   const setDraft = useCallback<Dispatch<SetStateAction<T>>>((next) => {
-    // The finished record's key is spent: the next record on the same form gets its own.
-    const reopened = done.current;
-    if (reopened) {
+    if (done.current) {
+      const value = typeof next === 'function' ? (next as (d: T) => T)(latest.current) : next;
+      if (JSON.stringify(value) === finishedAs.current) return;
+      // The finished record's key is spent: the next record on the same form gets its own.
       done.current = false;
       setFinished(false);
+      setSaved({ key: newIdempotencyKey(), draft: value });
+      return;
     }
-    setSaved((s) => ({ key: reopened ? newIdempotencyKey() : s.key, draft: typeof next === 'function' ? (next as (d: T) => T)(s.draft) : next }));
+    setSaved((s) => ({ key: s.key, draft: typeof next === 'function' ? (next as (d: T) => T)(s.draft) : next }));
   }, []);
   const finish = useCallback(() => {
     done.current = true;
+    finishedAs.current = JSON.stringify(latest.current);
     setFinished(true);
     dropDraft(store, name);
   }, [store, name]);
   const discard = useCallback(() => {
+    done.current = false;
     setFinished(false);
     dropDraft(store, name);
     setSaved({ key: newIdempotencyKey(), draft: blank });

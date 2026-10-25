@@ -43,7 +43,8 @@ commit time as well.
    tapped during the toast calls it off (the toast goes, the reload waits). The toast shows only when the reload could be
    claimed (a peek at the one-a-minute rule), so a reload that cannot happen never flashes it. A reload held back by that rule is
    tried again after the minute, five times at most (a phone clock set back can keep the minute from ending), then at the next
-   view of the tab or move between screens; where reloads cannot be counted it is never tried. A second move between screens during the toast takes the full load to the latest
+   view of the tab or move between screens; where reloads cannot be counted it is never tried, and a storage that takes the
+   peek but not the claim (it forgets, or is full) shows the toast once and is then treated as one that cannot count. A second move between screens during the toast takes the full load to the latest
    screen. A money form changed after `finish` starts the next record (a fresh key, kept in the tab and unsaved work again), and
    Sell holds the reload while the receipt of the sale just made is on screen. A write that never ends stops holding the reload
    back after two minutes.
@@ -82,6 +83,8 @@ commit time as well.
 - `BMS_MIN_CLIENT_BUILD` set before the new web build is live: every app would be told to update into the same old build. The
   one-reload-a-minute rule stops a loop, but set it only once the release's web container serves (`docs/runbooks/deploy.md`).
 - A screen that keeps the focus in a text field for a long time only updates at the next move between screens.
+- A move between screens that becomes a full load is not cancelled: the person sees the new screen for the toast's second, then
+  the same screen loads in full.
 
 ## Related ADRs
 

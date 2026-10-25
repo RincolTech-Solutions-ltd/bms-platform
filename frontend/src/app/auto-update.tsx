@@ -65,6 +65,9 @@ export function createUpdater(deps: UpdaterDeps) {
   let lastCheck = Number.NEGATIVE_INFINITY;
   let writes = 0;
   let retries = 0;
+  // The claim failed although the peek allowed it (a storage that forgets, or refuses a write when full): reloads cannot be
+  // counted on this page, so it never tries again, and never shows the toast again.
+  let claimBroken = false;
   // Where the reload goes: the latest move between screens while the toast shows, or nowhere (the page itself).
   let target: string | undefined;
 
@@ -98,7 +101,7 @@ export function createUpdater(deps: UpdaterDeps) {
       if (href !== undefined) target = href;
       return true;
     }
-    if (!deps.online()) return false;
+    if (!deps.online() || claimBroken) return false;
     const state = deps.claimState();
     if (state !== 'free') {
       if (state === 'wait') retryLater();
@@ -114,8 +117,10 @@ export function createUpdater(deps: UpdaterDeps) {
       applying = false;
       target = undefined;
       deps.hide();
-      // Another reload took the minute meanwhile: try after it. A storage that forgets the claim is never tried again.
-      if (still && deps.online() && deps.claimState() === 'wait') retryLater();
+      if (!still || !deps.online()) return;
+      // Another reload took the minute meanwhile: try after it. A claim refused with the minute free cannot ever succeed here.
+      if (deps.claimState() === 'wait') retryLater();
+      else claimBroken = true;
     });
     return true;
   };

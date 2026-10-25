@@ -262,11 +262,32 @@ describe('the moment the toast shows (review of #579)', () => {
     expect(reloads).toEqual([]);
   });
 
-  it('a storage that forgets the claim shows the toast once and never again', () => {
-    const forgetful = { getItem: () => null, setItem: () => undefined } as unknown as Storage;
+  it.each([
+    ['forgets the claim', { getItem: () => null, setItem: () => undefined }],
+    [
+      'is full and refuses the claim',
+      {
+        getItem: () => null,
+        setItem: () => {
+          throw new DOMException('full', 'QuotaExceededError');
+        },
+      },
+    ],
+  ])('a storage that %s shows the toast once and never again, whatever wakes the update', (_, storage) => {
     let toasts = 0;
-    const { updater, reloads, later, hidden } = setUp({ announce: (then) => (toasts++, then()) }, forgetful);
+    const { updater, reloads, later, hidden, tick } = setUp({ announce: (then) => (toasts++, then()) }, storage as unknown as Storage);
     updater.workerChanged();
+    expect(drain(later)).toBe(0);
+    for (let i = 0; i < 3; i++) {
+      tick(120_000);
+      updater.trySoon();
+      updater.writeStarted();
+      updater.writeEnded();
+      setUnsavedWork('form', true);
+      setUnsavedWork('form', false);
+      updater.beforeNavigate('/staff/retail');
+      updater.check();
+    }
     expect(drain(later)).toBe(0);
     expect(toasts).toBe(1);
     expect(hidden).toHaveLength(1);
