@@ -82,6 +82,12 @@ describe('Paid how on Buy stock', () => {
     expect(screen.getByRole('button', { name: 'Save the purchase' }).getAttribute('data-not-ready')).toBeNull();
   });
 
+  it('draws the total cost in tabular figures', () => {
+    screenOf(<RestockForm initial={restockDraft('cash')} />);
+    const total = screen.getByTestId('restock-total');
+    expect(total.querySelector('.num')?.textContent).toBe('UGX 5,000');
+  });
+
   it('needs no supplier for cash, mobile money or bank, and sends the method as chosen', () => {
     for (const m of ['cash', 'mobile_money', 'bank'] as const) expect(creditNeedsSupplier(m, '', '')).toBeNull();
     expect(creditNeedsSupplier('credit', 's1', '')).toBeNull();

@@ -338,7 +338,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
       </fieldset>
       {supplierProblem && <p role="alert" className="rt-flag" data-testid="credit-needs-supplier">{supplierProblem}</p>}
 
-      <p className="rt-total" aria-live="polite">Total cost <Money minor={restockTotal(lines)} /></p>
+      <p className="rt-total" aria-live="polite" data-testid="restock-total">Total cost <Money minor={restockTotal(lines)} /></p>
       <Problem error={save.error} />
       <BusyButton type="submit" className="rt-primary" data-tour="restock-save" busy={save.isPending} notReady={blocked}>Save the purchase</BusyButton>
 
