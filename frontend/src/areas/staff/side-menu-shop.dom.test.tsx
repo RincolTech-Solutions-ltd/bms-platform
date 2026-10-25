@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, type Me } from '../../api/client';
-import { PLATFORM_BRAND, type ShellBrand } from '../../app/branding';
+import { BRANDING_QUERY, PLATFORM_BRAND, type ShellBrand } from '../../app/branding';
 import { router as appRouter } from '../../app/router';
 import { ALL_BRANCHES } from '../../auth/branch';
 import { TourProvider } from '../../tour/host';
@@ -53,10 +53,11 @@ function widthIs(px: number) {
 }
 
 function show(branch: string | null, who: Me = me) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff'] }) });
   render(
     <RouterContextProvider router={router}>
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })}>
+      <QueryClientProvider client={client}>
         <StaffContext.Provider value={{ me: who, branch }}>
           <TourProvider me={who} saveProgress={false}>
             <StaffSideNav me={who} />
@@ -66,6 +67,17 @@ function show(branch: string | null, who: Me = me) {
       </QueryClientProvider>
     </RouterContextProvider>,
   );
+  return client;
+}
+
+/** Waits until GET /branding has an answer (or failed), then lets the query hand it to the screen, so a test sees the settled menu. */
+async function brandingSettled(client: QueryClient) {
+  await waitFor(() => {
+    expect(client.getQueryState(BRANDING_QUERY.queryKey)?.status).toMatch(/^(success|error)$/);
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
 }
 
 /**
@@ -168,9 +180,10 @@ describe('the shop in use at the top of the sidebar (issues #461, #564)', () => 
 
   // ADR-086 decision 8: the business's name only from its loaded branding; until then, on a failure or with no name in it, a
   // plain tile and no name, never the platform's or a product name, and the role and the branch still show.
-  async function expectNoBusinessYet() {
-    // Let the branding read settle (or keep waiting) before looking.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+  async function expectNoBusinessYet(client?: QueryClient) {
+    // A test whose branding answers waits for that answer to reach the screen; a pending one looks straight away.
+    if (client) await brandingSettled(client);
+    else await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
     const top = sidebarShop();
     expect(top.querySelector('.menu-shop-name')).toBeNull();
     expect(top.querySelector('.menu-shop-blank')?.textContent).toBe('');
@@ -189,14 +202,12 @@ describe('the shop in use at the top of the sidebar (issues #461, #564)', () => 
 
   it.each(['error', 'network'] as const)('shows a plain tile and no name when GET /branding fails (%s)', async (failure) => {
     brandingIs(failure);
-    show('b-one');
-    await expectNoBusinessYet();
+    await expectNoBusinessYet(show('b-one'));
   });
 
   it.each([null, '', '   '])('shows a plain tile and no name for an unbranded business: display_name %j and no logo', async (name) => {
     brandingIs({ display_name: name, logo_url: null });
-    show('b-one');
-    await expectNoBusinessYet();
+    await expectNoBusinessYet(show('b-one'));
   });
 
   it('shows a plain tile and no name off a business host, where the shell shows the platform brand', async () => {

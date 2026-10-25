@@ -423,6 +423,7 @@ body.side-menu-open {
 
 .side-menu-close:not(:focus) {
   clip-path: inset(50%);
+  pointer-events: none; /* hidden until focused, so it must not take a tap over the logo either */
 }
 
 /*
