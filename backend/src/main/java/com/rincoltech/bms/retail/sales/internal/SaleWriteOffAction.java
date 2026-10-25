@@ -57,6 +57,21 @@ class SaleWriteOffAction implements ApprovalAction {
     }
 
     @Override
+    public boolean switchable() {
+        return true;
+    }
+
+    @Override
+    public boolean onByDefault(long thresholdMinor) {
+        return true;
+    }
+
+    @Override
+    public String label() {
+        return "Credit write-offs";
+    }
+
+    @Override
     public Optional<Integer> subjectVersion(UUID subjectId) {
         return sales.find(subjectId, false).map(h -> h.sale().version());
     }

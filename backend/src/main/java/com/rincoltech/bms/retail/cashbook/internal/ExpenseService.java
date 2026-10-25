@@ -1,5 +1,8 @@
 package com.rincoltech.bms.retail.cashbook.internal;
 
+import com.rincoltech.bms.core.approvals.ApprovalWaiting;
+import com.rincoltech.bms.core.approvals.Approvals;
+import com.rincoltech.bms.core.approvals.Approvals.ActionRequest;
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.documents.Documents;
 import com.rincoltech.bms.core.ledger.LedgerPosting.PostedEntry;
@@ -27,8 +30,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Company expenses (FR-RET-24; ADR-022 decision 5): a debit to the category's expense account
@@ -51,6 +57,10 @@ class ExpenseService {
     private final RetailBranchContext branchContext;
     private final Documents documents;
     private final AuditLog audit;
+    // Lazy: the approvals module holds the expense action, which calls back into this service on approval.
+    private final Approvals approvals;
+    private final ObjectMapper mapper;
+    private static final TypeReference<Map<String, Object>> MAP = new TypeReference<>() {};
 
     ExpenseService(
             CashbookRepository repo,
@@ -59,7 +69,11 @@ class ExpenseService {
             Idempotency idempotency,
             RetailBranchContext branchContext,
             Documents documents,
-            AuditLog audit) {
+            AuditLog audit,
+            @Lazy Approvals approvals,
+            ObjectMapper mapper) {
+        this.approvals = approvals;
+        this.mapper = mapper;
         this.repo = repo;
         this.support = support;
         this.books = books;
@@ -69,13 +83,59 @@ class ExpenseService {
         this.audit = audit;
     }
 
+    /** An expense recorded at once, or the request that now waits for an administrator (ADR-091). */
+    record ExpenseOutcome(Expense expense, ApprovalWaiting waiting) {}
+
+    /** An expense checked and ready to write, under the branch-day lock. */
+    private record Checked(
+            UUID branch, LocalDate date, CategoryRow category, ItemRow item, PartyRow party, String explanation) {}
+
     @Transactional
-    Outcome<Expense> create(String key, ExpenseRequest r) {
-        return idempotency.once(key, "POST", PATH, r, Expense.class, () -> record(r));
+    Outcome<ExpenseOutcome> create(String key, ExpenseRequest r) {
+        return idempotency.once(key, "POST", PATH, r, ExpenseOutcome.class, () -> recordOrAsk(r));
     }
 
-    private Expense record(ExpenseRequest r) {
+    /**
+     * While expenses ask for approval (ADR-091) and the amount reaches the business's amount, the expense waits for an
+     * administrator with the branch and the business date fixed, and is not in the cash book until it is approved.
+     */
+    private ExpenseOutcome recordOrAsk(ExpenseRequest r) {
         UUID branch = branchContext.resolve(CashbookSupport.EXPENSE_RECORD, r.branchId());
+        Checked c = check(branch, r);
+        if (approvals.rule(ExpenseAction.TYPE).asks(r.amountMinor())) {
+            ExpenseRequest fixed = new ExpenseRequest(
+                    branch,
+                    c.date(),
+                    r.categoryId(),
+                    r.itemId(),
+                    r.partyId(),
+                    r.amountMinor(),
+                    r.explanation(),
+                    r.receiptDocumentId());
+            UUID id = UUID.randomUUID();
+            Approvals.Outcome o = approvals.request(new ActionRequest(
+                    ExpenseAction.TYPE,
+                    branch,
+                    id,
+                    null,
+                    r.amountMinor(),
+                    support.currency(),
+                    mapper.convertValue(fixed, MAP)));
+            // The rule asked, so the approvals module stores the request and never runs it at once.
+            return new ExpenseOutcome(
+                    null, new ApprovalWaiting(o.approvalId(), ExpenseAction.TYPE, r.amountMinor(), support.currency()));
+        }
+        return new ExpenseOutcome(
+                write(UUID.randomUUID(), c, r, CurrentPrincipal.require().userId()), null);
+    }
+
+    /** On approval (ADR-091): checked again as it stands now, recorded under the request's id in the maker's name. */
+    void recordApproved(UUID id, Map<String, Object> payload, UUID makerId) {
+        ExpenseRequest r = mapper.convertValue(payload, ExpenseRequest.class);
+        write(id, check(r.branchId(), r), r, makerId);
+    }
+
+    private Checked check(UUID branch, ExpenseRequest r) {
         LocalDate date = support.businessDate(r.businessDate(), "business_date");
         // The savings cap reads the day's expenses under the same lock (ADR-080 decision 3).
         repo.lockBranchDay(branch, date);
@@ -110,8 +170,16 @@ class ExpenseService {
             throw ApiException.validation(
                     List.of(new FieldProblem("receipt_document_id", "unknown_document", "No such uploaded receipt.")));
         }
-        UUID id = UUID.randomUUID();
-        UUID by = CurrentPrincipal.require().userId();
+        return new Checked(branch, date, category, item, party, explanation);
+    }
+
+    private Expense write(UUID id, Checked c, ExpenseRequest r, UUID by) {
+        UUID branch = c.branch();
+        LocalDate date = c.date();
+        CategoryRow category = c.category();
+        ItemRow item = c.item();
+        PartyRow party = c.party();
+        String explanation = c.explanation();
         long amount = r.amountMinor();
         UUID entry = books.post(CashPostings.expense(branch, date, id, amount, category.expenseAccountId()))
                 .map(PostedEntry::entryId)

@@ -103,13 +103,17 @@ class ApprovalService implements Approvals {
         if ((request.amountMinor() == null) != (request.currency() == null)) {
             throw new IllegalArgumentException("amount and currency go together");
         }
-        if (action.thresholdApplies()
-                && request.thresholdMinor() != null
-                && request.thresholdMinor() < settings.approvalThresholdMinor(action.actionType())) {
+        // ADR-091: an action the business switched off runs at once, whatever its module decided, so no caller misses
+        // it.
+        boolean off = !rule(action).on();
+        if (off
+                || (action.thresholdApplies()
+                        && request.thresholdMinor() != null
+                        && request.thresholdMinor() < settings.approvalThresholdMinor(action.actionType()))) {
             action.execute(new ApprovalAction.Execution(
                     null, request.branchId(), request.subjectId(), request.payload(), maker.userId(), null));
             audit.record(new AuditLog.Entry(
-                    "core.approval.executed_below_threshold",
+                    off ? "core.approval.executed_switched_off" : "core.approval.executed_below_threshold",
                     action.subjectType(),
                     request.subjectId(),
                     request.branchId(),
@@ -155,14 +159,32 @@ class ApprovalService implements Approvals {
                 "core.approval_waiting",
                 id.toString(),
                 new PushNotice.Holders(action.checkerPermission(), request.branchId(), maker.userId()),
-                Map.of("action_label", label(action.actionType()), "path", "/staff/approvals")));
+                Map.of("action_label", action.label(), "path", "/staff/approvals")));
         return new Outcome(false, id);
     }
 
-    /** "retail_purchase_order" read as "Retail purchase order": the action's name as a person says it. */
-    static String label(String actionType) {
-        String words = actionType.replace('_', ' ');
-        return words.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + words.substring(1);
+    @Override
+    @Transactional(readOnly = true)
+    public Rule rule(String actionType) {
+        return rule(action(actionType));
+    }
+
+    /**
+     * ADR-091: the stored switch, else the action's default for its stored amount; an action that is not switchable always asks.
+     * The amount is the stored threshold of an action that has one, else 0.
+     */
+    Rule rule(ApprovalAction action) {
+        long threshold = action.thresholdApplies() ? settings.approvalThresholdMinor(action.actionType()) : 0;
+        if (!action.switchable()) {
+            return new Rule(true, threshold);
+        }
+        Boolean stored = settings.approvalSwitches().get(action.actionType());
+        return new Rule(stored != null ? stored : action.onByDefault(threshold), threshold);
+    }
+
+    /** The registered actions, for the approval rules (ADR-091). */
+    java.util.Collection<ApprovalAction> actions() {
+        return actions.values();
     }
 
     @Transactional

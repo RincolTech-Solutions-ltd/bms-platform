@@ -1,5 +1,9 @@
 package com.rincoltech.bms.retail.stock.internal;
 
+import com.rincoltech.bms.core.approvals.ApprovalWaiting;
+import com.rincoltech.bms.core.approvals.Approvals;
+import com.rincoltech.bms.core.approvals.Approvals.ActionRequest;
+import com.rincoltech.bms.core.approvals.RequestSupersededException;
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.ledger.LedgerPosting.PostedEntry;
 import com.rincoltech.bms.core.operations.Idempotency;
@@ -27,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,6 +59,8 @@ class StockCorrectionService {
     private final CurrentTenant tenant;
     private final BusinessClock clock;
     private final AuditLog audit;
+    // Lazy: the approvals module holds the correction action, which calls back into this service on approval.
+    private final Approvals approvals;
 
     StockCorrectionService(
             StockRepository repo,
@@ -64,7 +71,9 @@ class StockCorrectionService {
             Idempotency idempotency,
             CurrentTenant tenant,
             BusinessClock clock,
-            AuditLog audit) {
+            AuditLog audit,
+            @Lazy Approvals approvals) {
+        this.approvals = approvals;
         this.repo = repo;
         this.ledger = ledger;
         this.catalogue = catalogue;
@@ -76,13 +85,78 @@ class StockCorrectionService {
         this.audit = audit;
     }
 
+    /** A correction made at once, or the request that now waits for an administrator (ADR-091). */
+    record CorrectionOutcome(Correction correction, ApprovalWaiting waiting) {}
+
+    /** What a correction would do, measured under the balance row's lock. */
+    private record Checked(ProductSnapshot product, BigDecimal old, BigDecimal difference, long cost) {}
+
     @Transactional
-    Outcome<Correction> correct(String idempotencyKey, CorrectionRequest r) {
-        return idempotency.once(idempotencyKey, "POST", PATH, r, Correction.class, () -> correctNow(r));
+    Outcome<CorrectionOutcome> correct(String idempotencyKey, CorrectionRequest r) {
+        return idempotency.once(idempotencyKey, "POST", PATH, r, CorrectionOutcome.class, () -> correctOrAsk(r));
     }
 
-    private Correction correctNow(CorrectionRequest r) {
+    /**
+     * While stock corrections ask for approval (ADR-091) and the value of the difference at the branch's average cost reaches the
+     * amount, the correction waits for an administrator and the quantity stays as it is.
+     */
+    private CorrectionOutcome correctOrAsk(CorrectionRequest r) {
         UUID branch = branches.resolveStocking(PERMISSION, r.branchId());
+        Checked c = check(branch, r);
+        long value = Quantities.value(c.difference().abs(), c.cost());
+        if (approvals.rule(StockCorrectionAction.TYPE).asks(value)) {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("branch_id", branch.toString());
+            payload.put("product_id", c.product().id().toString());
+            payload.put("new_qty", Quantities.format(r.newQty()));
+            payload.put("expected_qty", Quantities.format(r.expectedQty()));
+            payload.put("reason_code", r.reasonCode());
+            payload.put("note", r.note());
+            Approvals.Outcome o = approvals.request(new ActionRequest(
+                    StockCorrectionAction.TYPE,
+                    branch,
+                    c.product().id(),
+                    null,
+                    value,
+                    tenant.profile().currency(),
+                    payload));
+            // The rule asked, so the approvals module stores the request and never runs it at once.
+            return new CorrectionOutcome(
+                    null,
+                    new ApprovalWaiting(
+                            o.approvalId(),
+                            StockCorrectionAction.TYPE,
+                            value,
+                            tenant.profile().currency()));
+        }
+        return new CorrectionOutcome(
+                write(branch, r, c, CurrentPrincipal.require().userId()), null);
+    }
+
+    /**
+     * On approval (ADR-091): the correction runs only if the quantity is still the one the maker saw; otherwise the request
+     * becomes stale with the reason, as a direct correction would get 409 {@code stock_moved}.
+     */
+    void correctApproved(UUID branch, CorrectionRequest r, UUID makerId) {
+        Checked c;
+        try {
+            c = check(branch, r);
+        } catch (RequestSupersededException e) {
+            throw e;
+        } catch (ApiException e) {
+            if (!STALE.contains(e.code())) {
+                throw e;
+            }
+            throw new RequestSupersededException(
+                    e.code(), e.title(), "The quantity changed while it waited. " + e.getMessage(), e.extensions());
+        }
+        write(branch, r, c, makerId);
+    }
+
+    private static final java.util.Set<String> STALE =
+            java.util.Set.of("stock_moved", "quantity_unchanged", "stocktake_in_progress");
+
+    private Checked check(UUID branch, CorrectionRequest r) {
         if (!Quantities.exact(r.newQty())) {
             throw ApiException.validation(
                     List.of(new FieldProblem("new_qty", "invalid", "At most three decimal places.")));
@@ -121,14 +195,21 @@ class StockCorrectionService {
                     "quantity_unchanged",
                     "The quantity is " + plain(old) + " " + product.unit() + " already. Type the right quantity.");
         }
+        // ADR-079: a correction moves stock at the branch's average, so the average stays as it is.
+        // It is read under the balance lock taken above (ledger.lock): no delivery can change it first.
+        return new Checked(product, old, difference, ledger.averageCost(branch, product.id()));
+    }
+
+    private Correction write(UUID branch, CorrectionRequest r, Checked c, UUID by) {
+        ProductSnapshot product = c.product();
+        BigDecimal old = c.old();
+        BigDecimal difference = c.difference();
+        long cost = c.cost();
         UUID id = UUID.randomUUID();
         String note = r.note() == null || r.note().isBlank() ? null : r.note().trim();
         String words = ("entry_mistake".equals(r.reasonCode()) ? "Entry mistake" : "Miscount")
                 + (note == null ? "" : ": " + note);
         LocalDate today = clock.today(tenant.profile().timezone());
-        // ADR-079: a correction moves stock at the branch's average, so the average stays as it is.
-        // It is read under the balance lock taken above (ledger.lock): no delivery can change it first.
-        long cost = ledger.averageCost(branch, product.id());
         UUID movementId = ledger.record(
                         today,
                         List.of(new Movement(
@@ -148,7 +229,6 @@ class StockCorrectionService {
                 difference.signum() < 0
                         ? List.of(Leg.debit("stock_shrinkage", value), Leg.credit("inventory", value))
                         : List.of(Leg.debit("inventory", value), Leg.credit("stock_shrinkage", value))));
-        UUID by = CurrentPrincipal.require().userId();
         repo.insertCorrection(
                 id,
                 branch,

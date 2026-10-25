@@ -6,7 +6,6 @@ import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.operations.Idempotency;
 import com.rincoltech.bms.core.operations.Idempotency.Outcome;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
-import com.rincoltech.bms.core.tenancy.TenantSettings;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.BusinessClock;
@@ -70,7 +69,6 @@ class OrdersService {
     private final RetailBranchContext branches;
     private final Idempotency idempotency;
     private final Approvals approvals;
-    private final TenantSettings settings;
     private final RetailCapabilities capabilities;
     private final CurrentTenant tenant;
     private final BusinessClock clock;
@@ -84,7 +82,6 @@ class OrdersService {
             RetailBranchContext branches,
             Idempotency idempotency,
             Approvals approvals,
-            TenantSettings settings,
             RetailCapabilities capabilities,
             CurrentTenant tenant,
             BusinessClock clock,
@@ -96,7 +93,6 @@ class OrdersService {
         this.branches = branches;
         this.idempotency = idempotency;
         this.approvals = approvals;
-        this.settings = settings;
         this.capabilities = capabilities;
         this.tenant = tenant;
         this.clock = clock;
@@ -206,8 +202,7 @@ class OrdersService {
                     "Order not a draft",
                     "This order has been sent or cancelled already.");
         }
-        long threshold = settings.approvalThresholdMinor(PurchaseOrderAction.TYPE);
-        if (threshold > 0 && o.totalMinor() >= threshold) {
+        if (approvals.rule(PurchaseOrderAction.TYPE).asks(o.totalMinor())) {
             Approvals.Outcome a = approvals.request(new ActionRequest(
                     PurchaseOrderAction.TYPE, o.branchId(), id, o.version(), o.totalMinor(), o.currency(), Map.of()));
             return new OrderOutcome(false, a.approvalId(), null);

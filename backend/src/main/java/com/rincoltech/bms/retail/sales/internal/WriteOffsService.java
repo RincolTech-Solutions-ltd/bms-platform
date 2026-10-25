@@ -6,7 +6,6 @@ import com.rincoltech.bms.core.notifications.Outbox;
 import com.rincoltech.bms.core.operations.Idempotency;
 import com.rincoltech.bms.core.operations.Idempotency.Outcome;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
-import com.rincoltech.bms.core.tenancy.TenantSettings;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.BusinessClock;
@@ -44,7 +43,6 @@ class WriteOffsService {
     private final WriteOffsServicer servicer;
     private final Idempotency idempotency;
     private final Approvals approvals;
-    private final TenantSettings settings;
     private final WriteOffsRepository repo;
     private final Outbox outbox;
     private final CurrentTenant tenant;
@@ -55,7 +53,6 @@ class WriteOffsService {
             WriteOffsServicer servicer,
             Idempotency idempotency,
             Approvals approvals,
-            TenantSettings settings,
             WriteOffsRepository repo,
             Outbox outbox,
             CurrentTenant tenant,
@@ -69,7 +66,6 @@ class WriteOffsService {
         this.servicer = servicer;
         this.idempotency = idempotency;
         this.approvals = approvals;
-        this.settings = settings;
     }
 
     @Transactional
@@ -86,7 +82,8 @@ class WriteOffsService {
                     "Give a reason of at least " + WriteOffsServicer.MIN_REASON + " characters.")));
         }
         Plan plan = servicer.plan(saleId);
-        long threshold = settings.approvalThresholdMinor(SaleWriteOffAction.TYPE);
+        Approvals.Rule rule = approvals.rule(SaleWriteOffAction.TYPE);
+        long threshold = rule.thresholdMinor();
         // The default rule (awaiting Hillary's confirmation): with no threshold set a write-off needs a second
         // administrator when
         // two or more count; with one it is allowed alone. A positive threshold replaces the default: only a debt at or
@@ -97,7 +94,8 @@ class WriteOffsService {
         // the
         // threshold first cannot make a write-off silent.
         List<Admin> admins = repo.recentAdmins(clock.now().minus(ADMIN_MEMORY));
-        boolean ask = threshold > 0 ? plan.unpaidMinor() >= threshold : admins.size() >= 2;
+        // ADR-091: switched off on the approval rules, a write-off never waits, and is still flagged and told below.
+        boolean ask = rule.on() && (threshold > 0 ? plan.unpaidMinor() >= threshold : admins.size() >= 2);
         if (ask) {
             Approvals.Outcome o = approvals.request(new ActionRequest(
                     SaleWriteOffAction.TYPE,
@@ -126,7 +124,9 @@ class WriteOffsService {
         List<Admin> told = !activeOthers.isEmpty()
                 ? activeOthers
                 : admins.stream().filter(a -> a.active() && a.email() != null).toList();
-        String why = threshold > 0 && admins.size() >= 2 ? "below_threshold" : "only_one_active_administrator";
+        String why = !rule.on()
+                ? "approval_switched_off"
+                : threshold > 0 && admins.size() >= 2 ? "below_threshold" : "only_one_active_administrator";
         WriteOff written = servicer.record(plan, r.reason(), maker, null, null, new Alone(why, told.size()));
         String business = tenant.profile().name();
         for (Admin a : told) {
