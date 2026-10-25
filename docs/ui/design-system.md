@@ -147,7 +147,8 @@ From 720px the staff area and the operator portal list their areas in a side men
 other apps. Below 720px the staff area has bottom tabs for the five daily jobs instead (#539, decisions D29 and D31), and the
 operator portal keeps the drawer. There is no separate retail row. Where the navigation sits changes at the design system's phone width, `(max-width: 719px)`, read in code by `useIsPhone` (`components/side-menu.tsx`;
 the retail screens re-export it) and in CSS by the `720px` media queries. CSS custom properties cannot be used in a media
-query, so the number is the token.
+query, so the number is the token. Tablets from 720 to 1023px therefore keep the sidebar and get no tabs; whether decision D29 ("side menu for laptops only")
+means tablets should have the tabs too waits for the owner's sign-off (#544), and nothing changes until then.
 
 - **One list.** Each layout builds its areas once (`staffAreas` in `areas/staff/menu.tsx`, `AREAS` in
   `areas/platform/operator-areas.ts`) with the permission checks, and both the sidebar and the drawer draw that list with the same
