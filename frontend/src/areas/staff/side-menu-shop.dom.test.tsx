@@ -138,13 +138,15 @@ describe('the shop in use at the top of the sidebar (issues #461, #564)', () => 
     expect((await within(sidebarShop()).findByAltText('Logo of Test Traders')).getAttribute('src')).toBe(BUSINESS);
   });
 
-  it('never shows the platform logo or name: off a business host it shows the BMS initials (ADR-068)', () => {
-    // brand is PLATFORM_BRAND here, as before a business's branding loads.
+  it('never shows the platform logo or a product name: before the business is known, a plain tile and no name (ADR-068)', () => {
+    // brand is PLATFORM_BRAND here, as off a business host or before its branding loads.
     show('b-one');
     expect(within(sidebarShop()).queryByRole('img')).toBeNull();
-    expect(sidebarShop().querySelector('.menu-shop-initials')?.textContent).toBe('B');
-    expect(sidebarShop().querySelector('.menu-shop-name')?.textContent).toBe('BMS');
-    expect(sidebarShop().textContent).not.toContain('Rincoltech');
+    expect(sidebarShop().querySelector('.menu-shop-initials')?.textContent).toBe('');
+    expect(sidebarShop().querySelector('.menu-shop-name')).toBeNull();
+    expect(sidebarShop().textContent).not.toMatch(/Rincoltech|BMS/);
+    // The role and the branch still show.
+    expect(sidebarShop().querySelector('.menu-shop-branch-name')?.textContent).toBe('Test Shop One (HQ)');
   });
 
   it("shows the business's own logo when the shop has none, named after the business", async () => {

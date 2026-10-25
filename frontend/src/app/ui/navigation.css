@@ -411,7 +411,8 @@ body.side-menu-open {
   font-size: var(--text-lg);
 }
 
-/* The staff drawer's close button: out of sight until the keyboard reaches it (Escape, the backdrop and a swipe close it too). */
+/* The staff drawer's close button: out of sight until it has focus, as it has when the drawer opens (Escape, the backdrop and a
+   swipe close it too). */
 .side-menu-close {
   position: absolute;
   top: calc(var(--space-2) + env(safe-area-inset-top));
@@ -420,7 +421,7 @@ body.side-menu-open {
   background: var(--color-surface);
 }
 
-.side-menu-close:not(:focus-visible) {
+.side-menu-close:not(:focus) {
   clip-path: inset(50%);
 }
 

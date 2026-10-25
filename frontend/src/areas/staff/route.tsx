@@ -251,12 +251,15 @@ function StaffMenuFoot({ me, busy, onSignOut, onHelp }: { me: Me; busy: boolean;
  * The staff menu as a fixed sidebar at the left from 720px (issues #455, #564): the business, its role and the branch at the top,
  * the groups, then the foot; nothing on a phone, where the menu button of the top bar opens the same list in a drawer.
  */
-export function StaffSideNav({ me, onBranch = () => undefined, busy = false, onSignOut = () => undefined }: { me: Me; onBranch?: (selection: string) => void; busy?: boolean; onSignOut?: () => void }) {
-  const phone = useIsPhone();
+export function StaffSideNav(props: { me: Me; onBranch?: (selection: string) => void; busy?: boolean; onSignOut?: () => void }) {
+  // The phone check comes first, so on a phone the menu's reads and the Help sheet run once, in the drawer.
+  return useIsPhone() ? null : <StaffSidebar {...props} />;
+}
+
+function StaffSidebar({ me, onBranch = () => undefined, busy = false, onSignOut = () => undefined }: { me: Me; onBranch?: (selection: string) => void; busy?: boolean; onSignOut?: () => void }) {
   const groups = useStaffGroups(me);
   const branch = useOptionalStaff()?.branch ?? null;
   const help = useHelpSheet(true);
-  if (phone) return null;
   return (
     <>
       <SideNav

@@ -139,6 +139,11 @@ const branch: TourStep = {
   target: 'branch-picker',
   title: 'Your branch',
   body: 'On a laptop the top of the menu names your business and the branch you work in. On a phone it is the top of the page. Tap the branch to switch. What you see and record follows this choice.',
+  // Tap the branch to switch only where there is more than one branch to choose (issue #564).
+  bodyFor: (me) =>
+    (me.branches?.length ?? 0) + (me.all_branches ? 1 : 0) > 1
+      ? 'On a laptop the top of the menu names your business and the branch you work in. On a phone it is the top of the page. Tap the branch to switch. What you see and record follows this choice.'
+      : 'On a laptop the top of the menu names your business and the branch you work in. On a phone it is the top of the page. What you see and record follows this branch.',
 };
 
 // A tenant admin, invited by a colleague or activated from the public sign-up (ADR-024), lands on
@@ -167,7 +172,8 @@ export const adminWelcome: Tour = {
   // Version 24 words the bottom tabs step for the tabs the person has (issue #544).
   // Version 25 words the menu, Notifications and Feedback steps for the grouped menu and its footer (issue #564).
   // Version 26 words the branch step for the menu's top on a laptop and the page's top on a phone (issue #564).
-  version: 26,
+  // Version 27 says Tap the branch to switch only to someone with more than one branch to choose (issue #564).
+  version: 27,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -447,7 +453,7 @@ export const retailSales: Tour = {
       title: 'Welcome',
       body: 'Here is how to sell, check stock and buy stock. It takes about a minute.',
     },
-    { ...branch, optional: true, body: 'Sales and stock are counted per branch. Check that this shows the shop you are in.' },
+    { ...branch, optional: true, body: 'Sales and stock are counted per branch. Check that this shows the shop you are in.', bodyFor: undefined },
     tabs,
     {
       id: 'sale',
@@ -617,7 +623,8 @@ export const staffWelcome: Tour = {
   // Version 10 words the bottom tabs step for the tabs the person has (issue #544).
   // Version 11 points the shop step at Today in the grouped menu and words Notifications and Feedback for its footer (issue #564).
   // Version 12 words the branch step for the menu's top on a laptop and the page's top on a phone (issue #564).
-  version: 12,
+  // Version 13 says Tap the branch to switch only to someone with more than one branch to choose (issue #564).
+  version: 13,
   title: 'Welcome tour',
   audience: (me) => !isTenantAdmin(me) && !isSeller(me),
   autoStart: true,

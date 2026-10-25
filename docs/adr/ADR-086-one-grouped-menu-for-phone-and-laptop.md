@@ -31,11 +31,11 @@ shop owner thinks, the same on a phone and a laptop (D38), and approved the pict
 3. **Reports opens the shop's Retail page** (`/staff/retail`: the owner's figures and every shop page as tiles), so every shop
    page stays one tap from the menu. A lending business without the shop keeps its Reports page there; with both, that page is
    Loan reports in the Lending group.
-4. **Top and foot.** The top shows the shop's logo, else the business's own logo (ADR-068), else the business's initials, never the
-   platform's logo or name, with
-   the business name, the person's role (Owner for the owner, else the first role) and, on a full-width row under them, the branch
-   picker. From 720px the top bar no longer repeats the logo, the business and the branch: it keeps Search and the profile button. The foot holds Notifications,
-   Help and feedback (the Help sheet with its tours and Send feedback), then the person's initials, name and role, and Sign out.
+4. **Top and foot.** The top shows the shop's logo, else the business's own logo (ADR-068), else the business's initials, never
+   the platform's logo or name, with the business name, the person's role (Owner for the owner, else the first role) and, on a
+   full-width row under them, the branch picker. From 720px the top bar no longer repeats the logo, the business and the branch:
+   it keeps Search and the profile button. The foot holds Notifications, Help and feedback (the Help sheet with its tours and
+   Send feedback), then the person's initials, name and role, and Sign out.
 5. **Layout.** From 720px the menu is a fixed sidebar of 264px that no longer folds; the per-device choice `bms.sidebar` and the
    per-person folded sections `bms.menu.sections.<user>` are no longer read. Below 720px the menu button at the top left of the
    top bar opens it as a drawer of at most 320px over a dimmed page, keeping everything #455 gave the drawer: it closes on a tap
@@ -53,8 +53,9 @@ shop owner thinks, the same on a phone and a laptop (D38), and approved the pict
    menu in its order, Approvals there moves from the top card to the Business card.
 8. **The business name comes from the business, never the platform.** `/me` carries no business name, so the top of the menu
    takes the business's own name and logo from its branding (`GET /branding`, `display_name`, ADR-068), the source the top bar
-   uses on a business's host. Off a business's host, or before its branding loads, the menu says BMS with its initials; the Rincol
-   logo shows only on the operator side and the platform's own pages.
+   uses on a business's host. Off a business's host, or before its branding loads, the top shows a plain tile and no name, never
+   the product's name; the Rincol logo shows only on the operator side and the platform's own pages. Moving the name to `/me` is
+   an API change left to a later pull request.
 
 ## Consequences
 

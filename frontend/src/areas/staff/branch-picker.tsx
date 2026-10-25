@@ -90,15 +90,17 @@ export function initials(name: string): string {
 
 /**
  * The top of the staff menu (issue #564): the shop's logo, else the business's own logo (ADR-068), else the business's initials;
- * never the platform's logo or name, which the shell shows only off a business's host or before its branding loads (then the
- * business is called BMS, as the home screen calls it). Then the business name and the person's role, and under them, on a row of
+ * never the platform's logo or name, which the shell shows only off a business's host or before its branding loads: then a plain
+ * tile holds the logo's place and no name shows until the business's own arrives. Then the business name and the person's role,
+ * and under them, on a row of
  * its own so nothing is cut off, the branch in use, which switches branch when there is more than one to choose (a native select
  * laid over it, as in the top bar's title). From 720px the sidebar is the only place the business and the branch show; `tour` is
  * then the branch step's anchor, on the branch row, or on the whole top for a session with no branch to show.
  */
 export function MenuShop({ me, branch, role, onChoose, tour }: { me: Me; branch: string | null; role: string; onChoose: (selection: string) => void; tour?: string }) {
   const { active, loading, src, fromShop, broke, brand } = useShopImage(me, branch);
-  const business = brand === PLATFORM_BRAND ? 'BMS' : brand.name;
+  // The business's own name, from its branding (`/me` carries none); null while only the platform's brand is known.
+  const business = brand === PLATFORM_BRAND ? null : brand.name;
   const branches = me.branches ?? [];
   const choices = branches.length + (me.all_branches ? 1 : 0);
   const name = active ? branchLabel(active) : branch === ALL_BRANCHES ? 'All branches' : choices > 1 ? 'Choose a branch' : '';
@@ -107,14 +109,14 @@ export function MenuShop({ me, branch, role, onChoose, tour }: { me: Me; branch:
       {loading ? (
         <span className="menu-shop-logo" aria-hidden="true" />
       ) : src ? (
-        <img className="menu-shop-logo" src={src} alt={`Logo of ${fromShop && active ? branchLabel(active) : business}`} onError={() => broke(src)} />
+        <img className="menu-shop-logo" src={src} alt={`Logo of ${fromShop && active ? branchLabel(active) : (business ?? 'the business')}`} onError={() => broke(src)} />
       ) : (
         <span className="menu-shop-logo menu-shop-initials" aria-hidden="true">
-          {initials(business)}
+          {business ? initials(business) : null}
         </span>
       )}
       <span className="menu-shop-text">
-        <span className="menu-shop-name">{business}</span>
+        {business && <span className="menu-shop-name">{business}</span>}
         {role && <span className="menu-shop-role">{role}</span>}
       </span>
       {name && (

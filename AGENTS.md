@@ -608,7 +608,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   draw them with `MenuShop` (`branch-picker.tsx`) at the top and `StaffMenuFoot` (`route.tsx`) at the foot: a fixed 264px sidebar
   from 720px, the drawer from the menu button at the top left of the top bar on a phone. The retail shortcuts, their cap of five,
   `RetailMenuGroup`, the folding sidebar and the foldable Shop and Lending sections are gone; `staffAreas` is the flat list the More
-  page, the feature search and the tabs read. Tours `admin-welcome` v26, `retail-sales` v23, `staff-welcome` v12,
+  page, the feature search and the tabs read. Tours `admin-welcome` v27, `retail-sales` v23, `staff-welcome` v13,
   `page-staff-home` v4. Picture `docs/ui/grouped-menu-564/menu.html`, screenshots in `docs/ui/grouped-menu-564/`. Tests:
   `side-menu.dom.test.tsx`, `side-menu-shop.dom.test.tsx`, `menu-icons.test.tsx`, `retail/permissions.test.ts`.
 - The isolation, boundary, ledger, API, actuator, route permission and contract tests run in
