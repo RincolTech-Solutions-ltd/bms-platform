@@ -16,8 +16,8 @@
 -- a second, so a plain CREATE INDEX, not CONCURRENTLY (which cannot run inside Flyway's transaction, ADR-028). SET LOCAL
 -- lock_timeout makes the file fail after 5 seconds, to be re-run, rather than queue the sales behind a long report.
 --
--- Flyway runs with outOfOrder off: main ends at V98, V99 is the placeholder that placeholder-migration-guard refuses and
--- V100 is claimed by pull request #572 (the shop Home takings index), so this is V101.
+-- Flyway runs with outOfOrder off: V98 is one staff phone per business, V99 is the placeholder that placeholder-migration-guard refuses and
+-- V100 is the shop Home takings index (pull request #572), so this is V101.
 
 SET LOCAL lock_timeout = '5s';
 
