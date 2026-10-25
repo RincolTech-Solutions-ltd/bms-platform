@@ -1,5 +1,5 @@
 import * as Popover from '@radix-ui/react-popover';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Field, type FieldControlProps } from '../../../app/ui/Field';
@@ -9,7 +9,7 @@ import { icons } from '../../../components/icons';
 import { useIsPhone } from '../../../components/side-menu';
 import { useStaff } from '../context';
 import { useToast } from './toast';
-import { Problem } from './ui';
+import { Problem, requireVersion } from './ui';
 
 // The one category picker (issue #578), used wherever a category is chosen. The field is a button that names the category
 // chosen. On a phone it opens the kit's Sheet at full height: a search box with the cursor in it, "Add a new category" for
@@ -18,10 +18,19 @@ import { Problem } from './ui';
 // Up and Down move the highlight (announced through aria-activedescendant), Enter picks it, Escape closes and the focus goes
 // back to the field. A search matches any part of the name, whatever the case; names are shown as the owner typed them.
 // "Add a new category" opens a short form in place: the name and the code start the app will make (#550, #562; the code is
-// never typed), and the new category is chosen at once, with a dark toast.
+// never typed), and the new category is chosen at once, with a dark toast. A name already taken, by a switched-off category
+// too, is said in plain words before anything is sent, with the way to choose that category (switching it back on).
 
 const MANAGE = 'retail.catalogue.manage';
 const CATEGORIES = ['retail', 'catalogue', 'categories'];
+// Every list of categories the screens keep: the catalogue's, and the Stock page's filter.
+const CATEGORY_KEYS = [CATEGORIES, ['retail', 'categories']];
+
+/** The category already called `name`, whatever the case and the spaces around it, switched off or not. */
+export function sameName(categories: Category[], name: string): Category | undefined {
+  const wanted = name.trim().toLowerCase();
+  return wanted === '' ? undefined : categories.find((c) => (c.name ?? '').trim().toLowerCase() === wanted);
+}
 
 /** The categories whose name holds the search, any part of it and whatever the case. */
 export function matchCategories(categories: Category[], text: string): Category[] {
@@ -34,7 +43,16 @@ export const noCategory = (term: string, canAdd: boolean) => `No category called
 
 const nameOf = (c: Category) => `${c.name ?? ''}${c.active === false ? ' (switched off)' : ''}`;
 
-function AddCategory({ id, initial, onAdded, onCancel }: { id: string; initial: string; onAdded: (row: Category) => void; onCancel: () => void }) {
+function AddCategory({ id, initial, existing, onAdded, onChoose, onCancel }: {
+  id: string;
+  initial: string;
+  /** Every category of the business, switched-off ones too, to say plainly when the name is taken. */
+  existing: Category[];
+  onAdded: (row: Category) => void;
+  /** Chooses a category that already exists; `on` says it was switched back on to be chosen. */
+  onChoose: (row: Category, on: boolean) => void;
+  onCancel: () => void;
+}) {
   const [name, setName] = useState(initial);
   const [suggested, setSuggested] = useState('');
   const [showErrors, setShowErrors] = useState(false);
@@ -46,14 +64,19 @@ function AddCategory({ id, initial, onAdded, onCancel }: { id: string; initial: 
     const timer = setTimeout(() => void retail.suggestCategoryPrefix(trimmed).then((p) => live && setSuggested(p), () => live && setSuggested('')), 300);
     return () => { live = false; clearTimeout(timer); };
   }, [trimmed]);
+  const taken = sameName(existing, trimmed);
   const add = useMutation({ mutationFn: () => retail.createCategory(trimmed), onSuccess: onAdded });
+  const switchOn = useMutation({
+    mutationFn: (row: Category) => retail.updateCategory(row.id ?? '', requireVersion(row.version), { active: true }),
+    onSuccess: (row) => onChoose(row, true),
+  });
   const submit = () => {
     if (trimmed === '') {
       setShowErrors(true);
       document.getElementById(`${id}-add-name`)?.focus();
       return;
     }
-    if (!add.isPending) add.mutate();
+    if (!add.isPending && !taken) add.mutate();
   };
   return (
     <div
@@ -86,9 +109,21 @@ function AddCategory({ id, initial, onAdded, onCancel }: { id: string; initial: 
           ? <>Item codes here will start with <strong>{suggested}</strong>, like {suggested}-0001, made by the app.</>
           : 'The app makes the item codes of this category from its name, like BLB-0001 for Bulbs.'}
       </p>
-      <Problem error={add.error} />
+      {taken && (
+        <div className="cp-taken" role="status">
+          <p>
+            {taken.active === false
+              ? `There is already a category called ${taken.name ?? ''}, switched off.`
+              : `There is already a category called ${taken.name ?? ''}.`}
+          </p>
+          {taken.active === false
+            ? <BusyButton busy={switchOn.isPending} type="button" onClick={() => switchOn.mutate(taken)}>Switch {taken.name} on and choose it</BusyButton>
+            : <button type="button" onClick={() => onChoose(taken, false)}>Choose {taken.name}</button>}
+        </div>
+      )}
+      <Problem error={add.error ?? switchOn.error} />
       <p className="cluster">
-        <BusyButton busy={add.isPending} type="button" className="rt-primary" onClick={submit}>Add category</BusyButton>
+        <BusyButton busy={add.isPending} type="button" className="rt-primary" disabled={taken !== undefined} onClick={submit}>Add category</BusyButton>
         <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
       </p>
     </div>
@@ -96,14 +131,16 @@ function AddCategory({ id, initial, onAdded, onCancel }: { id: string; initial: 
 }
 
 /** The search, the Add row and the list, the same in the sheet and the popover. */
-function Choices({ id, categories, value, noneLabel, canAdd, onPick, onAdded }: {
+function Choices({ id, categories, existing, value, noneLabel, canAdd, onPick, onAdded, onChoose }: {
   id: string;
   categories: Category[];
+  existing: Category[];
   value: string;
   noneLabel?: string;
   canAdd: boolean;
   onPick: (id: string) => void;
   onAdded: (row: Category) => void;
+  onChoose: (row: Category, on: boolean) => void;
 }) {
   const [text, setText] = useState('');
   const [adding, setAdding] = useState<string | null>(null);
@@ -123,7 +160,7 @@ function Choices({ id, categories, value, noneLabel, canAdd, onPick, onAdded }: 
     if (shownActive >= 0) document.getElementById(`${optionId}-${shownActive}`)?.scrollIntoView?.({ block: 'nearest' });
   }, [shownActive, optionId]);
 
-  if (adding !== null) return <AddCategory id={id} initial={adding} onAdded={onAdded} onCancel={() => setAdding(null)} />;
+  if (adding !== null) return <AddCategory id={id} initial={adding} existing={existing} onAdded={onAdded} onChoose={onChoose} onCancel={() => setAdding(null)} />;
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -223,21 +260,32 @@ export function CategoryPicker({ id, label = 'Category', categories, value, onCh
   const { show, toast } = useToast();
   const [open, setOpen] = useState(false);
   const canAdd = allowAdd && (me.permissions ?? []).includes(MANAGE);
-  const chosen = categories.find((c) => c.id === value);
+  // Every category, switched-off ones too, for the taken-name check; the catalogue's own list, so no second request.
+  const all = useQuery({ queryKey: CATEGORIES, queryFn: () => retail.listCategories(), enabled: canAdd });
+  // The category this picker added or switched on, until the screen's own list carries it: the field names it at once.
+  const [kept, setKept] = useState<Category | null>(null);
+  const choicesList = kept && !categories.some((c) => c.id === kept.id) ? [...categories, kept] : categories;
+  const chosen = choicesList.find((c) => c.id === value);
   const shown = chosen ? nameOf(chosen) : value === '' && noneLabel !== undefined ? noneLabel : placeholder;
 
   const pick = (next: string) => {
     onChange(next);
     setOpen(false);
   };
-  const added = (row: Category) => {
-    // In the list at once, before the refetch answers, so the field can name it.
-    queryClient.setQueryData<Category[]>(CATEGORIES, (was) => (was && !was.some((c) => c.id === row.id) ? [...was, row] : was));
+  /** Puts a new or changed category in every list the screens keep, before the refetch answers, and chooses it. */
+  const keep = (row: Category, message: string) => {
+    for (const key of CATEGORY_KEYS) {
+      queryClient.setQueryData<Category[]>(key, (was) => was && [...was.filter((c) => c.id !== row.id), row]);
+      void queryClient.invalidateQueries({ queryKey: key });
+    }
     void queryClient.invalidateQueries({ queryKey: ['retail', 'catalogue'] });
-    show(`Added the category ${row.name ?? ''}.${row.code_prefix ? ` Its item codes start with ${row.code_prefix}.` : ''}`, 'success');
+    setKept(row);
+    show(message, 'success');
     pick(row.id ?? '');
   };
-  const choices = <Choices id={id} categories={categories} value={value} noneLabel={noneLabel} canAdd={canAdd} onPick={pick} onAdded={added} />;
+  const added = (row: Category) => keep(row, `Added the category ${row.name ?? ''}.${row.code_prefix ? ` Its item codes start with ${row.code_prefix}.` : ''}`);
+  const chose = (row: Category, on: boolean) => (on ? keep(row, `Switched ${row.name ?? ''} on and chose it.`) : pick(row.id ?? ''));
+  const choices = <Choices id={id} categories={choicesList} existing={all.data ?? choicesList} value={value} noneLabel={noneLabel} canAdd={canAdd} onPick={pick} onAdded={added} onChoose={chose} />;
 
   // The field's blur is left out: opening the list moves the focus into it, which is not leaving the field unchosen. A Save with
   // no category still shows the error (showError).

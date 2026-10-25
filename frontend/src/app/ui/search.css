@@ -312,6 +312,7 @@
   height: 20px;
 }
 
+.cp-taken > p,
 .cp-empty > p {
   margin: var(--space-2) 0;
   color: var(--color-text-muted);

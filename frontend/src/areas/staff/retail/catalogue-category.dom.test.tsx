@@ -26,6 +26,8 @@ const createCategory = vi.fn();
 const updateProduct = vi.fn();
 const bulbs = { id: 'c1', name: 'Bulbs', active: true, product_count: 1, version: 3, code_prefix: 'BLB', next_code: 'BLB-0002' };
 const lamps = { id: 'c2', name: 'Lamps', active: true, product_count: 0, version: 1, code_prefix: 'LMP', next_code: 'LMP-0001' };
+// What the server lists; an inline add (#578) puts its category here, as the server would.
+let cats: Record<string, unknown>[] = [bulbs, lamps];
 const bulb = { id: 'p1', code: 'BLB-0001', description: 'Test bulb 9W', category_id: 'c1', category: 'Bulbs', unit_id: 'u1', unit: 'piece', sell_minor: 5000, active: true, version: 1 };
 
 vi.mock('../../../api/retail', async (original) => {
@@ -34,7 +36,7 @@ vi.mock('../../../api/retail', async (original) => {
     ...real,
     retail: {
       ...real.retail,
-      listCategories: () => Promise.resolve([bulbs, lamps]),
+      listCategories: () => Promise.resolve(cats),
       listUnits: () => Promise.resolve([{ id: 'u1', name: 'piece', active: true, product_count: 1, version: 1 }]),
       listCatalogue: (...a: unknown[]) => listCatalogue(...a),
       getProduct: () => Promise.resolve(bulb),
@@ -61,6 +63,7 @@ afterEach(() => {
   listCatalogue.mockReset();
   createCategory.mockReset();
   updateProduct.mockReset();
+  cats = [bulbs, lamps];
 });
 
 const admin = mockMe('admin');
@@ -135,6 +138,24 @@ describe('the category page', () => {
 });
 
 describe('the item form outside a category', () => {
+  it('adds a category inline from Add an item: the field names it and the code line gives its first code (#578)', async () => {
+    const rice = { id: 'c9', name: 'Rice', active: true, product_count: 0, version: 1, code_prefix: 'RCE', next_code: 'RCE-0001' };
+    createCategory.mockImplementation(async () => { cats = [...cats, rice]; return rice; });
+    screenOf(<ProductForm onSaved={() => undefined} onCancel={() => undefined} />);
+    await screen.findByRole('option', { name: 'piece' });
+    const category = screen.getByRole('combobox', { name: /^Category/ });
+    fireEvent.click(category);
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Search categories' }), { target: { value: 'Rice' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Rice' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add category' }));
+    await waitFor(() => expect(category.textContent).toBe('Rice'));
+    expect(createCategory).toHaveBeenCalledWith('Rice');
+    expect(screen.getByTestId('item-code').textContent).toBe('Item code: RCE-0001, made by the app');
+    // Still so once the list has been fetched again.
+    await waitFor(() => expect(screen.getByTestId('item-code').textContent).toBe('Item code: RCE-0001, made by the app'));
+    expect(category.textContent).toBe('Rice');
+  });
+
   it('asks for the category first, marks the needed fields and goes to the first one missing', async () => {
     screenOf(<ProductForm onSaved={() => undefined} onCancel={() => undefined} />);
     await screen.findByRole('option', { name: 'piece' });

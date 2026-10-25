@@ -16,10 +16,13 @@ import { chooseCategory } from '../../../test-utils/category-picker';
 vi.setConfig({ testTimeout: 20000 });
 
 const createProduct = vi.fn();
+const createCategory = vi.fn();
 const similarProducts = vi.fn();
 const getProduct = vi.fn();
 const listStock = vi.fn();
 const bulbs = { id: 'c1', name: 'Bulbs', active: true, product_count: 1, version: 3, code_prefix: 'BLB', next_code: 'BLB-0002' };
+// What the server lists; an inline add (#578) puts its category here, as the server would.
+let cats: Record<string, unknown>[] = [bulbs];
 const made: Product = { id: 'p9', code: 'BLB-0002', description: 'Test bulb 12W', category_id: 'c1', category: 'Bulbs', unit_id: 'u1', unit: 'piece', sell_minor: 9000, cost_minor: 6000, active: true, version: 1 };
 
 vi.mock('@tanstack/react-router', async (original) => {
@@ -33,7 +36,9 @@ vi.mock('../../../api/retail', async (original) => {
     ...real,
     retail: {
       ...real.retail,
-      listCategories: () => Promise.resolve([bulbs]),
+      listCategories: () => Promise.resolve(cats),
+      createCategory: (...a: unknown[]) => createCategory(...a),
+      suggestCategoryPrefix: () => Promise.resolve('RCE'),
       listUnits: () => Promise.resolve([{ id: 'u1', name: 'piece', active: true, product_count: 1, version: 1 }]),
       listSuppliers: () => Promise.resolve([]),
       listProducts: () => Promise.resolve([]),
@@ -52,6 +57,8 @@ afterEach(() => {
   cleanup();
   sessionStorage.clear();
   createProduct.mockReset();
+  createCategory.mockReset();
+  cats = [bulbs];
   similarProducts.mockReset();
   getProduct.mockReset();
   listStock.mockReset();
@@ -84,6 +91,23 @@ async function fill(qtyLabel: RegExp, qty: string) {
 const save = () => fireEvent.click(within(form()).getByRole('button', { name: 'Save the item' }));
 
 describe('Buy stock: add an item that is not in the list', () => {
+  it('adds a category inline: the field names it and the code line gives its first code (#578)', async () => {
+    const rice = { id: 'c9', name: 'Rice', active: true, product_count: 0, version: 1, code_prefix: 'RCE', next_code: 'RCE-0001' };
+    createCategory.mockImplementation(async () => { cats = [...cats, rice]; return rice; });
+    open(<RestockForm />);
+    fireEvent.click(screen.getByRole('button', { name: 'Not in the list? Add it here' }));
+    await within(form()).findByRole('option', { name: 'piece' });
+    fireEvent.click(field(/^Category/));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a new category' }));
+    fireEvent.change(screen.getByLabelText(/^Name of the new category/), { target: { value: 'Rice' } });
+    expect(await screen.findByText('RCE', { selector: 'strong' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Add category' }));
+    await waitFor(() => expect(field(/^Category/).textContent).toBe('Rice'));
+    expect(within(form()).getByTestId('restock-new-code').textContent).toBe('Item code: RCE-0001, made by the app');
+    expect(createCategory).toHaveBeenCalledWith('Rice');
+    expect(createProduct).not.toHaveBeenCalled();
+  });
+
   it('shows the fields in the AppSheet order, the code as text made by the app and the category taking the cursor', async () => {
     open(<RestockForm />);
     fireEvent.click(screen.getByRole('button', { name: 'Not in the list? Add it here' }));

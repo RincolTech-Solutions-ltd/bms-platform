@@ -1280,8 +1280,13 @@ and showed the sheet of their old AppSheet app: Search, New, the list and Done. 
 - **Add a new category.** Only for `retail.catalogue.manage`. A short form in place: Name of the new category (the search
   text filled in), and the line "Item codes here will start with RCE, like RCE-0001, made by the app." from the code start
   suggestion as the name is typed. No code is typed (#562). Add category creates it (`POST /retail/categories`), chooses it,
-  closes the picker and shows the dark toast "Added the category Rice. Its item codes start with RCE." A refusal (the name
-  is taken) shows in place.
+  closes the picker and shows the dark toast "Added the category Rice. Its item codes start with RCE." The new category goes
+  into every category list the screens keep (the catalogue's and the Stock filter's) before they are fetched again, so the
+  field and the item code line name it at once.
+- **A name already used.** Checked against every category, switched-off ones too, whatever the case, before anything is
+  sent: "There is already a category called Bulbs." with Choose Bulbs, or "There is already a category called Torches,
+  switched off." with Switch Torches on and choose it. A name another phone added a moment ago is refused by the server and
+  reads "A category with this name already exists." in place.
 - **Keyboard and screen reader.** The field is a combobox that opens with a press, Enter, Space or the down arrow. The search
   is a combobox over the listbox "Categories": Up, Down, Home and End move the highlight (aria-activedescendant), Enter
   chooses it (or the only match), Escape closes, and the focus goes back to the field. The number found is announced.

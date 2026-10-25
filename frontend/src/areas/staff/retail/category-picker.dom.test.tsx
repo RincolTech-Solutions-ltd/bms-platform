@@ -17,6 +17,9 @@ vi.setConfig({ testTimeout: 20000 });
 
 const createCategory = vi.fn();
 const suggestCategoryPrefix = vi.fn();
+const updateCategory = vi.fn();
+// The whole catalogue list, a switched-off category too, which the screens leave out of their choices.
+const torches: Category = { id: 'c4', name: 'Torches', active: false, version: 2, code_prefix: 'TRC' };
 
 vi.mock('../../../api/retail', async (original) => {
   const real = await original<typeof import('../../../api/retail')>();
@@ -26,11 +29,14 @@ vi.mock('../../../api/retail', async (original) => {
       ...real.retail,
       createCategory: (...a: unknown[]) => createCategory(...a),
       suggestCategoryPrefix: (...a: unknown[]) => suggestCategoryPrefix(...a),
+      updateCategory: (...a: unknown[]) => updateCategory(...a),
+      listCategories: () => Promise.resolve([...list, torches]),
     },
   };
 });
 
-const { CategoryPicker, matchCategories } = await import('./category-picker');
+const { CategoryPicker, matchCategories, sameName } = await import('./category-picker');
+const { unwrap } = await import('../../../api/retail');
 
 const list: Category[] = [
   { id: 'c1', name: 'Bulbs', active: true, version: 1, code_prefix: 'BLB' },
@@ -53,9 +59,9 @@ function Harness({ noneLabel, allowAdd }: { noneLabel?: string; allowAdd?: boole
   );
 }
 
-function open(node: JSX.Element, me: Me = mockMe('admin')) {
+function open(node: JSX.Element, me: Me = mockMe('admin'), client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <QueryClientProvider client={client}>
       <StaffContext.Provider value={{ me, branch: me.branches?.[0]?.id ?? '' }}>{node}</StaffContext.Provider>
     </QueryClientProvider>,
   );
@@ -74,6 +80,7 @@ afterEach(() => {
   cleanup();
   createCategory.mockReset();
   suggestCategoryPrefix.mockReset();
+  updateCategory.mockReset();
   vi.unstubAllGlobals();
 });
 
@@ -174,9 +181,30 @@ describe('the category picker on a laptop', () => {
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 
-  it('asks for a name before adding, and shows the server\'s refusal in place', async () => {
+  it('names the new category at once and puts it in the Stock filter\'s list too', async () => {
+    const rice: Category = { id: 'c9', name: 'Rice', active: true, version: 1, code_prefix: 'RCE', next_code: 'RCE-0001' };
+    createCategory.mockResolvedValue(rice);
+    suggestCategoryPrefix.mockResolvedValue('RCE');
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    client.setQueryData(['retail', 'catalogue', 'categories'], list);
+    client.setQueryData(['retail', 'categories'], list);
+    open(<Harness />, mockMe('admin'), client);
+    fireEvent.click(field());
+    fireEvent.change(search(), { target: { value: 'Rice' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Rice' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add category' }));
+    await waitFor(() => expect(screen.getByTestId('value').textContent).toBe('c9'));
+    // The Harness's own list is fixed, as a screen whose list has not caught up yet: the field still names it.
+    expect(field().textContent).toBe('Rice');
+    // The Stock page's list (no page reads it now) carries it, and is fetched again when that page opens.
+    expect((client.getQueryData<Category[]>(['retail', 'categories']) ?? []).map((c) => c.id)).toContain('c9');
+    expect(client.getQueryState(['retail', 'categories'])?.isInvalidated).toBe(true);
+  });
+
+  it('asks for a name before adding, and shows the server\'s refusal of a name taken meanwhile in plain words', async () => {
     suggestCategoryPrefix.mockResolvedValue('');
-    createCategory.mockRejectedValue(new Error('A category called Bulbs already exists.'));
+    // The real 409 of POST /retail/categories, through the client's own unwrap: a name another phone added a moment ago.
+    createCategory.mockImplementation(async () => unwrap({ error: { code: 'duplicate_category', status: 409, detail: 'A category with this name exists.' }, response: new Response(null, { status: 409 }) }));
     open(<Harness />);
     fireEvent.click(field());
     fireEvent.click(screen.getByRole('button', { name: 'Add a new category' }));
@@ -185,12 +213,46 @@ describe('the category picker on a laptop', () => {
     expect(createCategory).not.toHaveBeenCalled();
     const name = screen.getByLabelText(/^Name of the new category/);
     expect(document.activeElement).toBe(name);
-    fireEvent.change(name, { target: { value: 'bulbs' } });
+    fireEvent.change(name, { target: { value: 'Rice' } });
     fireEvent.keyDown(name, { key: 'Enter' });
-    expect(await screen.findByText('A category called Bulbs already exists.')).toBeTruthy();
+    expect(await screen.findByText('A category with this name already exists.')).toBeTruthy();
     expect(screen.getByTestId('value').textContent).toBe('c1');
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(options()).toEqual(['Bulbs', 'Cables and wires', 'LED strips']);
+  });
+
+  it('says plainly that a name is taken, whatever the case, and offers that category instead of sending', async () => {
+    expect(sameName([...list, torches], '  bULBS ')?.id).toBe('c1');
+    expect(sameName([...list, torches], 'Bulb')).toBeUndefined();
+    open(<Harness />);
+    fireEvent.click(field());
+    fireEvent.change(search(), { target: { value: 'LED' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add a new category' }));
+    const name = screen.getByLabelText(/^Name of the new category/);
+    fireEvent.change(name, { target: { value: 'bulbs' } });
+    expect(await screen.findByText('There is already a category called Bulbs.')).toBeTruthy();
+    fireEvent.keyDown(name, { key: 'Enter' });
+    expect(createCategory).not.toHaveBeenCalled();
+    fireEvent.change(name, { target: { value: 'led strips' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Choose LED strips' }));
+    expect(screen.getByTestId('value').textContent).toBe('c3');
+    expect(createCategory).not.toHaveBeenCalled();
+  });
+
+  it('finds a switched-off category of the same name and switches it back on to choose it', async () => {
+    updateCategory.mockResolvedValue({ ...torches, active: true, version: 3 });
+    open(<Harness />);
+    fireEvent.click(field());
+    expect(options()).not.toContain('Torches');
+    fireEvent.click(screen.getByRole('button', { name: 'Add a new category' }));
+    fireEvent.change(screen.getByLabelText(/^Name of the new category/), { target: { value: 'torches' } });
+    expect(await screen.findByText('There is already a category called Torches, switched off.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Switch Torches on and choose it' }));
+    await waitFor(() => expect(screen.getByTestId('value').textContent).toBe('c4'));
+    expect(updateCategory).toHaveBeenCalledWith('c4', 2, { active: true });
+    expect(createCategory).not.toHaveBeenCalled();
+    expect(field().textContent).toBe('Torches');
+    expect(document.querySelector('.toast')?.textContent).toBe('Switched Torches on and chose it.');
   });
 
   it('hides Add from whoever does not manage the catalogue, and on a filter', async () => {
