@@ -208,7 +208,7 @@ function render(me: Me, path: string | undefined): string {
     payments: [{ id: 'p1', amount_minor: 10000, currency: 'UGX', method: 'mtn_momo', paid_on: '2026-11-01', months: 1, period_start: '2026-11-01', period_end: '2026-11-30', receipt_no: 'RT-2026-000001' }],
   });
   // What the retail settings screens read, so their targets are in the static markup.
-  client.setQueryData(['retail', 'capabilities'], { capabilities: { profile: 'shop' }, version: 1 });
+  client.setQueryData(['retail', 'capabilities'], { capabilities: { profile: 'shops' }, version: 1 });
   client.setQueryData(['retail', 'branch-roles'], (me.branches ?? []).map((b) => ({ branch_id: b.id, code: b.code, name: b.name, role: 'both', can_sell: true })));
   const branch = path === undefined ? (me.default_branch_id ?? null) : (me.branches?.[0]?.id ?? null);
   return renderToString(
@@ -338,6 +338,7 @@ const AUDIENCE: Record<string, Me[]> = {
   'capability-transfer-receipt': [TRADER],
   'capability-units': [ADMIN],
   'capability-price-lists': [PRICER],
+  'capability-wholesale': [PRICER],
   'page-price-lists': [PRICER],
   'capability-customer-accounts': [LENDER],
   'page-accounts': [LENDER],
