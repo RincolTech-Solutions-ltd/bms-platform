@@ -510,6 +510,8 @@ class RetailCustomerOrdersIT extends IntegrationTest {
                 api.get("/orders/" + c, ORDERS).getBody().get("order_no").asString();
         assertThat(ids(api.get("/orders?query=" + number, ORDERS))).containsExactly(c);
         assertThat(ids(api.get("/orders?query=0700000022", ORDERS))).containsExactly(c);
+        // Issue #441 review: the list search is not the lookup's phone match; a bare nine digits still finds the order.
+        assertThat(ids(api.get("/orders?query=700000022", ORDERS))).containsExactly(c);
         assertThat(api.get("/orders?status=lost", ORDERS).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     }
 

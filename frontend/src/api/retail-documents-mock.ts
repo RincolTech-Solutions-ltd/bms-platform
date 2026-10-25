@@ -33,9 +33,9 @@ export type DocumentsMock = Pick<
 const DEFAULT_PREFIX: Record<DocumentType, string> = { quotation: 'QT', invoice: 'INV', delivery_note: 'DN' };
 const TYPES: DocumentType[] = ['quotation', 'invoice', 'delivery_note'];
 const PAYMENT: Record<string, string> = { cash: 'Cash', mobile_money: 'Mobile money', bank: 'Bank', credit: 'Credit' };
-/** UGX as the PDF prints it, without decimals, and a day as d MMM yyyy (16 Mar 2026). */
 // Issue #354: the server's refusal, so the mock never prints "Paid in full" for a sale nobody paid.
 const WRITTEN_OFF = 'The unpaid part of this sale was written off, so it has no receipt to share.';
+/** UGX as the PDF prints it, without decimals, and a day as d MMM yyyy (16 Mar 2026). */
 const money = (minor?: number) => (minor ?? 0).toLocaleString('en-US');
 const day = (iso?: string) => (iso ? new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '');
 

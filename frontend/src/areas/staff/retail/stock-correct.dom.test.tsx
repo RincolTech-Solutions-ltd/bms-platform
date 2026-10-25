@@ -287,6 +287,9 @@ describe('a 409 before the list is read again', () => {
   it('without the number in the refusal, never names the old quantity and keeps the notice once the list shows the new one', async () => {
     correctStock.mockRejectedValueOnce(moved());
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // As in the app: the list is read again and shows 8 before the read of it has finished.
+    let listRead: () => void = () => undefined;
+    vi.spyOn(client, 'invalidateQueries').mockReturnValue(new Promise<void>((done) => { listRead = done; }));
     const view = render(tree(client, '10.000'));
     open('The quantity is wrong');
     fireEvent.change(qty(), { target: { value: '6' } });
@@ -294,8 +297,33 @@ describe('a 409 before the list is read again', () => {
     fireEvent.click(save());
     await screen.findByRole('alert');
     expect(notice()).not.toContain('changed to 10');
+    // Until the list comes back, no quantity is shown or offered, and nothing can be saved against the old one.
+    await waitFor(() => expect(qty().value).toBe(''));
+    expect(qty().disabled).toBe(true);
+    expect(screen.queryByText(/In stock now/)).toBeNull();
+    fireEvent.click(save());
+    expect(correctStock).toHaveBeenCalledTimes(1);
     view.rerender(tree(client, '8.000'));
     await waitFor(() => expect(qty().value).toBe('8'));
+    expect(notice()).toContain('changed to 8');
+    expect(qty().disabled).toBe(false);
+    expect(screen.getByText(/In stock now/).textContent).toContain('8 roll');
+    listRead();
+    await waitFor(() => expect(notice()).toContain('changed to 8'));
+    expect(qty().value).toBe('8');
+  });
+
+  it('without the number, starts from the list once it has been read again, even when it shows the same quantity', async () => {
+    correctStock.mockRejectedValueOnce(moved());
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(tree(client, '8.000'));
+    open('The quantity is wrong');
+    fireEvent.change(qty(), { target: { value: '6' } });
+    fireEvent.change(reason(), { target: { value: 'entry_mistake' } });
+    fireEvent.click(save());
+    await screen.findByRole('alert');
+    await waitFor(() => expect(qty().value).toBe('8'));
+    expect(qty().disabled).toBe(false);
     expect(notice()).toContain('changed to 8');
   });
 });
