@@ -52,6 +52,15 @@ class ControlsRepository {
         this.jdbc = jdbc;
     }
 
+    /**
+     * Turns JIT compilation off for the rest of the caller's transaction (ADR-087). The union of the events is a large plan,
+     * and on a tenant with a million sales PostgreSQL spent about five seconds compiling it for a year's cards that ran in a
+     * fraction of that. {@code SET LOCAL} ends with the read-only transaction of {@link ControlsService}.
+     */
+    private void withoutJit() {
+        jdbc.sql("SET LOCAL jit = off").update();
+    }
+
     /** What every statement needs. {@code branchIds} null means every branch; an empty list is answered by the caller. */
     record Window(
             LocalDate from,
@@ -282,6 +291,7 @@ class ControlsRepository {
 
     /** Count and value of each metric asked for in the window (the cards). */
     List<Count> counts(List<String> metrics, Window w) {
+        withoutJit();
         Map<String, Object> params = params(w);
         String sql = "SELECT metric, count(*) FILTER (WHERE metric <> 'restock_voids')"
                 + " + count(DISTINCT sale_id) FILTER (WHERE metric = 'restock_voids') AS n,"
@@ -311,6 +321,7 @@ class ControlsRepository {
      * so the list is not a league table.
      */
     List<Cell> groups(String metric, String level, Window w, int offset, int limit) {
+        withoutJit();
         Map<String, Object> params = params(w);
         String key = switch (level) {
             case "branch" -> "coalesce(CAST(ev.branch_id AS text), '')";
@@ -403,6 +414,7 @@ class ControlsRepository {
             long valueMinor) {}
 
     List<Event> events(String metric, Window w, int offset, int limit) {
+        withoutJit();
         Map<String, Object> params = params(w);
         String sql = "SELECT ev.sale_id, ev.sale_no, ev.ref, ev.at, ev.branch_id, b.name AS branch_name, ev.user_id,"
                 + " u.full_name, u.status, ev.approver_id, ua.full_name AS approver_name, ua.status AS approver_status,"
@@ -451,6 +463,7 @@ class ControlsRepository {
      * cancelled or took it back.
      */
     List<PersonCell> personCells(List<String> metrics, Window w) {
+        withoutJit();
         Map<String, Object> params = params(w);
         StringBuilder sales =
                 new StringBuilder("SELECT s.branch_id, s.created_by AS user_id, count(*) AS n FROM retail_sales s"
@@ -505,6 +518,7 @@ class ControlsRepository {
      * so that the count and the lines sold are the same population.
      */
     List<ItemCell> itemCells(boolean cost, Window w) {
+        withoutJit();
         Map<String, Object> params = params(w);
         StringBuilder where =
                 new StringBuilder(" WHERE NOT s.historical AND s.sale_date >= :from AND s.sale_date <= :to");
