@@ -602,12 +602,15 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         UUID id = dispatched("4");
 
         ResponseEntity<JsonNode> flag = putCapabilities(Map.of("transfer_receipt", false));
-        ResponseEntity<JsonNode> profile = putCapabilities(Map.of("profile", "shop"));
+        ResponseEntity<JsonNode> profile = putCapabilities(Map.of("profile", "shops"));
+        // Wholesale has no two-step move, so choosing it would switch the capability off too (issue #424).
+        ResponseEntity<JsonNode> wholesale = putCapabilities(Map.of("profile", "wholesale"));
 
         assertThat(flag.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(flag)).isEqualTo("transfers_in_transit");
         assertThat(profile.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(profile)).isEqualTo("transfers_in_transit");
+        assertThat(code(wholesale)).isEqualTo("transfers_in_transit");
         assertThat(api.get("/settings/capabilities", SETTINGS)
                         .getBody()
                         .get("transfer_receipt")

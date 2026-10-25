@@ -557,7 +557,8 @@ class PlatformService implements TenantProvisioning {
                 instant(rs.getTimestamp("last_sign_in_at")),
                 hosts.tenantOrigin(slug),
                 rs.getString("suspended_from"),
-                rs.getBoolean("is_pilot"));
+                rs.getBoolean("is_pilot"),
+                rs.getString("business_type"));
     }
 
     static Instant instant(Timestamp t) {
