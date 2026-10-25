@@ -3,8 +3,8 @@
 -- platform operator after a cooling-off period, cancellable until then), the removal itself (personal data deleted or
 -- anonymised, money records kept anonymised until a date), and the operator's list of businesses with no Owner.
 --
--- V102 is the next free number at the time of writing: main ends at V100 (V99 stays unused, placeholder-migration-guard),
--- and V101 is held by the open pull request #577 (AGENTS.md, the migration ledger). Flyway runs with outOfOrder off, so this
+-- V102 is the next number after V101 (the Controls indexes, #577, merged; V99 stays unused, placeholder-migration-guard;
+-- AGENTS.md, the migration ledger). Flyway runs with outOfOrder off, so this
 -- file is renamed at merge if the order changes.
 --
 -- Expand only, safe on a populated database: two new tenant tables, one widened check on tenants.status (a new value,
