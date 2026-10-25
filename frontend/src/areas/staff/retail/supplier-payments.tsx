@@ -11,7 +11,10 @@ import { PAYABLE_MANAGE, canUse, holdsAt } from './permissions';
 import { methodWords } from './payables-state';
 import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys, useCursorList } from './purchasing-ui';
 import { showDate } from './transfers';
+import { WORDS } from '../../../app/glossary';
 import { Gate, Problem, Success, Money, useBranchName, useToast } from './ui';
+import { NoAccess } from '../../../app/ui/EmptyState';
+import { Hint } from '../../../app/ui/Hint';
 
 // Supplier payments (the purchasing capability, ADR-033, issue #198): the money paid to suppliers, newest first, and one payment with
 // what it cleared. A payment pays supplier invoices and credit restocks (stock bought on credit in Restock), oldest first or as
@@ -45,9 +48,9 @@ export function SupplierPaymentsPage() {
   const list = useCursorList(['retail', 'supplier-payments', query, status], (cursor, signal) => retail.listSupplierPayments({ query, status, cursor, signal }));
   return (
     <Gate screen="supplierPayments" title="Supplier payments">
-      <p className="hint" data-tour="payments-help">
+      <Hint tour="payments-help">
         Money paid to suppliers. A payment clears the oldest supplier invoices and stock bought on credit first, unless you choose what it pays.
-      </p>
+      </Hint>
       <p className="cluster">
         <Link className="btn rt-primary" to="/staff/retail/supplier-payments/new" data-tour="payments-new">Pay a supplier</Link>
         <Link className="btn-sm" to="/staff/retail/supplier-payables">What you owe suppliers</Link>
@@ -86,7 +89,7 @@ export function SupplierPaymentView({ payment, nameOf, payable }: { payment: Sup
           ['Supplier', <SupplierOwed key="s" id={payment.supplier_id} name={payment.supplier_name} payable={payable} />],
           ['Paid on', showDate(payment.paid_on)],
           ['Amount', <Money key="a" minor={payment.amount_minor ?? 0} />],
-          ['Paid by', methodWords(payment.method)],
+          [WORDS.paidHow, methodWords(payment.method)],
           ['From the till or bank of', nameOf(payment.branch_id)],
           ['What it paid', payment.allocation === 'manual' ? 'What was chosen' : 'The oldest first'],
           ...(payment.reference ? [['Reference', payment.reference] as [string, string]] : []),
@@ -147,7 +150,7 @@ export function SupplierPaymentPage() {
     return (
       <main className="rt">
         <h1>Supplier payment</h1>
-        <p className="empty-state">You do not have access to this page.</p>
+        <NoAccess />
       </main>
     );
   }
@@ -155,7 +158,6 @@ export function SupplierPaymentPage() {
   return (
     <main className="rt rt-wide">
       <h1>{p?.payment_no ?? 'Supplier payment'}</h1>
-      <p><Link to="/staff/retail/supplier-payments">Back to supplier payments</Link></p>
       {payment.isPending && <SkeletonList label="Loading the payment" />}
       <Problem error={payment.error} />
       {message && <Success>{message}</Success>}

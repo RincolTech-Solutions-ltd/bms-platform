@@ -63,7 +63,8 @@ totals shown while typing are a preview; the server's response is the receipt.
 
 ## Branches, dates and the walk-through fixes (#103, #105, #112)
 
-- **Starting branch (#103).** The staff bar's picker (`areas/staff/branch-picker.tsx`) starts on the last
+- **Starting branch (#103).** The branch in use (`useActiveBranch` in `areas/staff/branch-picker.tsx`, switched from the title of
+  the top bar since #526) starts on the last
   branch this user chose in this browser, kept in `localStorage` per tenant (the host) and user, read and
   written inside try/catch. Without one it starts on the user's only branch, else the default branch when it
   holds stock, else the first branch that holds stock, and never on a head office without stock while other
@@ -639,7 +640,7 @@ need `core.settings.manage`. Each page has a breadcrumb and a live search where 
   checked against the payment before saving). **A payment** (`/supplier-payments/$paymentId`) lists what it paid and reverses with a reason.
   **What you owe suppliers** (`/supplier-payables`) is the report: per supplier what is owed by days past due, the total, and the goods received
   and not yet invoiced beside it; a row starts a payment for that supplier.
-- **Buy on credit and pay suppliers without purchasing** (issue #557, owner decision D15, ADR-083). Buy stock asks **Paid how** (required): Cash,
+- **Buy on credit and pay suppliers without purchasing** (issue #557, owner decision D15, ADR-084). Buy stock asks **Paid how** (required): Cash,
   Mobile money, Bank or On credit (owed to the supplier); On credit marks the supplier required and says "On credit needs a supplier" until one
   is chosen or typed. **What I owe suppliers** (`/supplier-payables`, under the Money tab, no capability) starts with "You owe suppliers UGX X in
   all." and lists each supplier owed something with the balance and two 48 px buttons, Pay and Statement; with the purchasing capability the
@@ -1362,8 +1363,8 @@ profile, refreshed when the app comes online, at sign-in and every 15 minutes (`
   new one.
 - A sale a manager **discarded** shows in the sheet as "Discarded by a manager. It is not recorded and is not sent again." for a
   day, and on its receipt.
-- **The dot** in the staff bar: green online, grey offline, amber sending, always with the word **Online**, **Offline** or
-  **Syncing** beside it, and "3 waiting to sync" ("3 waiting" at 480 px and below); the button's name says it all. Its sheet lists the waiting and
+- **The dot** in the top bar, drawn only while offline, sending, or with sales waiting or failed, and always for a manager (#526): green online, grey
+  offline, amber sending, always with the word **Online**, **Offline** or **Syncing** beside it, and "3 waiting to sync" ("3 waiting" at 480 px and below); the button's name says it all. Its sheet lists the waiting and
   failed sales, **Sync now** and, for a failed one, **Send again**. A manager (`retail.offline.resolve`: administrators and
   Supervisors) also sees the sales other phones could not record, with **Send it again** and **Discard** (a reason of at least 5
   characters, never recorded, audited), and the open clashes with **Mark resolved** and a note.

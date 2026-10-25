@@ -25,7 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The supplier balance and ageing report (ADR-033, issue #198; trade-capabilities.md section 8; open without the purchasing
- * capability since issue #557, ADR-083, as What I owe suppliers under the Money tab):
+ * capability since issue #557, ADR-084, as What I owe suppliers under the Money tab):
  * per supplier, what is owed on invoices that stand and credit restocks, by days past the due date as of today in the tenant's
  * business time zone (the buckets of the customer ageing), and the goods received and not yet invoiced beside it. Read only,
  * in the caller's branch scope: an invoice counts for its branch, a restock for the branches its stock went into and

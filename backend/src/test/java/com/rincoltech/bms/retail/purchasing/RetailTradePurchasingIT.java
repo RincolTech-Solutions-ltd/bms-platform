@@ -366,7 +366,7 @@ class RetailTradePurchasingIT extends IntegrationTest {
     @Test
     void withTheCapabilityOffEveryRouteIsNotFoundAndTheRestockIsUnchanged() {
         capability("purchasing", false);
-        // Supplier payments, what is owed and the payables report stay open (issue #557, ADR-083): RetailBuyOnCreditIT.
+        // Supplier payments, what is owed and the payables report stay open (issue #557, ADR-084): RetailBuyOnCreditIT.
         for (String path : List.of(
                 "/purchase-orders",
                 "/goods-receipts",

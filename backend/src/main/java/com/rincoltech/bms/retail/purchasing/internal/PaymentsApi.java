@@ -16,7 +16,7 @@ import java.util.UUID;
 
 /**
  * Bodies of the supplier payment, payables and statement routes (ADR-033, issue #198; open without the purchasing
- * capability since issue #557, ADR-083; docs/specs/trade-capabilities.md sections 7.1 and 8). Amounts are integer minor
+ * capability since issue #557, ADR-084; docs/specs/trade-capabilities.md sections 7.1 and 8). Amounts are integer minor
  * units.
  */
 final class PaymentsApi {

@@ -1,4 +1,4 @@
-# ADR-083: Buy stock on credit and pay suppliers without the purchasing capability, on the purchasing payables
+# ADR-084: Buy stock on credit and pay suppliers without the purchasing capability, on the purchasing payables
 
 ## Status
 
@@ -67,7 +67,8 @@ purchasing on sees the same payments and adds invoices beside them.
 **Worse:** the payment and payables routes answer the same with the capability on or off, so "capability off equals today"
 (ADR-033) no longer holds for them; a cash payment dated on an earlier day that is not yet banked changes that day's cash book,
 as a back-dated expense does.
-How far back a payment may go, beyond the oldest purchase it pays and the last banking, is the owner's call if they want a window.
+There is no back-date window, as for expenses (`CashbookSupport.businessDate` refuses only a future date): the banked-day guard
+(`cash_day_banked`) and the oldest purchase paid are the only limits on how far back a payment may go.
 
 **Watch for:** a banking and a back-dated cash payment of the same branch and day recorded at the same moment can each miss the other; a branch-day lock shared with the cash book would close it. A ledger period closed by an accountant refuses a payment dated inside it (the ledger's own rule), which the screen
 shows as the server's message. Unapplied supplier credits and a cash refund from a supplier stay deferred (issue #199). A PDF of the

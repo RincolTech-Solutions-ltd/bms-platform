@@ -8,8 +8,9 @@ import { canUse, capabilityOn } from './permissions';
 import { AGEING_COLUMNS } from './payables-state';
 import { showDate } from './transfers';
 import { Gate, Problem, Money, useIsPhone } from './ui';
+import { Hint } from '../../../app/ui/Hint';
 
-// What I owe suppliers (ADR-033, issue #198; under the Money tab without any capability since issue #557, ADR-083): one balance per
+// What I owe suppliers (ADR-033, issue #198; under the Money tab without any capability since issue #557, ADR-084): one balance per
 // supplier, from what was bought on credit in Buy stock (and, with the purchasing capability, supplier invoices) less what was
 // paid, with the total. Each supplier has Pay and Statement. With the purchasing capability the page also splits what is owed by
 // how late it is (not yet due, 1 to 30, 31 to 60, 61 to 90 and over 90 days past the due date) and shows the goods received and
@@ -128,11 +129,11 @@ export function SupplierPayablesPage() {
   const report = useQuery({ queryKey: ['retail', 'supplier-payables'], queryFn: () => retail.supplierPayables(), enabled: canUse(me, 'supplierPayables') });
   return (
     <Gate screen="supplierPayables" title={WORDS.whatIOweSuppliers} wide={purchasing}>
-      <p className="hint" data-tour="payables-help">
+      <Hint tour="payables-help">
         {purchasing
           ? `Everything you owe suppliers, by how late it is. It counts supplier invoices and stock bought ${WORDS.onCredit.toLowerCase()} in ${WORDS.buyStock}.`
           : `What each supplier is owed for stock bought ${WORDS.onCredit.toLowerCase()} in ${WORDS.buyStock}, less what you paid them.`}
-      </p>
+      </Hint>
       <p className="cluster" data-tour="payables-links">
         <Link className="btn btn-sm" to="/staff/retail/supplier-payments/new">{WORDS.payASupplier}</Link>
         <Link className="btn btn-sm" to="/staff/retail/supplier-payments">Supplier payments</Link>

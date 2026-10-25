@@ -45,7 +45,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Supplier payments (ADR-033, issue #198; docs/specs/trade-capabilities.md section 7.1). Since issue #557 (ADR-083) they need no
+ * Supplier payments (ADR-033, issue #198; docs/specs/trade-capabilities.md section 7.1). Since issue #557 (ADR-084) they need no
  * capability: a shop that buys on credit in Buy stock pays here, and the invoices of the purchasing capability are simply
  * more open items when it is on. A payment is dated the day it was paid, today or before, never in the future, and pays
  * only what was owed on that day; it posts on that day and a cash one leaves that day's till. A payment of

@@ -19,7 +19,7 @@ const returner = (me: Me) => held(me, SALE_RETURN) && held(me, SALE_READ) && cap
 const accountant = (me: Me) => held(me, SALE_READ) && capable(me, 'customer_accounts');
 const purchaser = (me: Me) => held(me, PURCHASE_CREATE) && capable(me, 'purchasing');
 const payer = (me: Me) => held(me, PAYABLE_MANAGE) && capable(me, 'purchasing');
-/** Paying suppliers, what is owed and the statement need no capability (issue #557, ADR-083). */
+/** Paying suppliers, what is owed and the statement need no capability (issue #557, ADR-084). */
 const owner = (me: Me) => held(me, PAYABLE_MANAGE);
 
 const step = (id: string, target: string, title: string, body: string, more: Partial<TourStep> = {}): TourStep => ({ id, target, module: 'retail', title, body, ...more });

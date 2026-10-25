@@ -74,7 +74,7 @@ export function PaymentFormView({ form, suppliers, branches, items, owed, loadin
         <input id="pay-amount" inputMode="numeric" aria-required value={form.amount} onChange={(e) => onChange({ ...form, amount: e.target.value })} />
         <label htmlFor="pay-date">Date paid<Star /></label>
         <input id="pay-date" type="date" aria-required max={businessToday()} value={paidOnOf(form)} onChange={(e) => onChange({ ...form, paidOn: e.target.value === businessToday() ? '' : e.target.value, amounts: {} })} />
-        <p className="hint">Today or an earlier day. It pays only what was owed on that day.</p>
+        <p className="hint">Today or an earlier day; it pays what was owed that day.</p>
       </div>
       <label htmlFor="pay-ref">Reference, such as a bank or mobile money number (optional)</label>
       <input id="pay-ref" value={form.reference} maxLength={60} onChange={(e) => onChange({ ...form, reference: e.target.value })} />
@@ -114,7 +114,7 @@ export function PaymentFormView({ form, suppliers, branches, items, owed, loadin
       )}
       {problem && (form.amount.trim() !== '' || form.supplierId !== '') && <p role="alert" className="rt-flag num">{problem}</p>}
       <Problem error={error} />
-      <BusyButton type="submit" className="rt-primary" busy={busy === true} disabled={problem !== null} data-tour="payment-save">Save payment</BusyButton>
+      <BusyButton type="submit" className="rt-primary" busy={busy === true} notReady={problem !== null} data-tour="payment-save">Save payment</BusyButton>
 
     </form>
   );

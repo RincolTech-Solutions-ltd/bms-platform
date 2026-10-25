@@ -36,7 +36,7 @@ import tools.jackson.databind.JsonNode;
 
 /**
  * Buy stock on credit, see what is owed and pay suppliers without the purchasing capability (issue #557, owner decision
- * D15, ADR-083): a credit purchase raises the supplier's balance, a payment lowers it, the statement keeps a running
+ * D15, ADR-084): a credit purchase raises the supplier's balance, a payment lowers it, the statement keeps a running
  * balance, the journal and the cash book are right, the permissions hold, a payment is never dated in the future, and two
  * payments to one supplier cannot spend the same balance. The capability stays off in every test. Every name and amount
  * is fabricated. The clock is pinned at 22:30 UTC, 01:30 the next day in Africa/Kampala.

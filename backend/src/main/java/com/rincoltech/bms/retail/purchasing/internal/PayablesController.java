@@ -40,7 +40,7 @@ import org.springframework.web.bind.annotation.RestController;
  * The supplier side of purchasing (purchasing capability; ADR-033, issue #198; chapter 7 section 7.11.20): supplier
  * invoices, supplier payments, what a supplier is owed, the payables report, the supplier statement and the two tolerances.
  * The invoice and tolerance routes answer 404 {@code capability_not_enabled} while the capability is off; the payments,
- * what is owed, the payables report and the statement do not (issue #557, ADR-083), since a shop pays what it bought on
+ * what is owed, the payables report and the statement do not (issue #557, ADR-084), since a shop pays what it bought on
  * credit in Buy stock without the capability. Invoices, payments and the reports are
  * {@code retail.payable.manage}, the administrator's; the tolerances are {@code core.settings.manage}.
  */

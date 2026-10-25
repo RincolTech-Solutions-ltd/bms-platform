@@ -9,7 +9,7 @@ import { WORDS, offendingWords } from '../../../app/glossary';
 import { StaffContext } from '../context';
 
 // Buy stock on credit, see what you owe suppliers, pay a supplier and read the supplier statement (issue #557, owner decision
-// D15, ADR-083), with the purchasing capability off: Paid how on Buy stock (On credit needs a supplier), the list of what each
+// D15, ADR-084), with the purchasing capability off: Paid how on Buy stock (On credit needs a supplier), the list of what each
 // supplier is owed with the total, the payment's date (never in the future), and the statement with its running balance and the
 // text that is shared. Names and amounts are fabricated.
 
@@ -65,6 +65,8 @@ describe('Paid how on Buy stock', () => {
     expect(paid.querySelector('legend .field-star')?.textContent?.trim()).toBe('*');
     expect(within(paid).getAllByRole('radio')).toHaveLength(4);
     expect((within(paid).getByLabelText('Mobile money') as HTMLInputElement).checked).toBe(false);
+    // The total cost goes through the one money formatter, in tabular figures.
+    expect(document.querySelector('.rt-total .num')?.textContent).toMatch(/^UGX /);
   });
 
   it('asks for a supplier when it is on credit, and marks the supplier needed', () => {
@@ -72,12 +74,12 @@ describe('Paid how on Buy stock', () => {
     expect(screen.getByTestId('credit-needs-supplier').textContent).toBe('On credit needs a supplier. Choose one above, or add a new one.');
     expect(document.querySelector('label[for="supplier"] .field-star')).toBeTruthy();
     expect(screen.getByLabelText(/^Supplier/).getAttribute('aria-required')).toBe('true');
-    expect((screen.getByRole('button', { name: 'Save the purchase' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'Save the purchase' }).getAttribute('data-not-ready')).toBe('true');
     expect(screen.getByText(/Pay them later from Money, What I owe suppliers\./)).toBeTruthy();
     // A new supplier typed is enough.
     fireEvent.change(screen.getByLabelText('Or add a new supplier'), { target: { value: 'Test Supplier 09' } });
     expect(screen.queryByTestId('credit-needs-supplier')).toBeNull();
-    expect((screen.getByRole('button', { name: 'Save the purchase' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole('button', { name: 'Save the purchase' }).getAttribute('data-not-ready')).toBeNull();
   });
 
   it('needs no supplier for cash, mobile money or bank, and sends the method as chosen', () => {

@@ -20,7 +20,7 @@ export type RetailScreen =
   // The trade screens of ADR-033: offered only while their capability is on (SCREEN_CAPABILITY below).
   | 'stockByLocation' | 'inTransit' | 'priceLists' | 'customerGroups' | 'customerAccounts' | 'customerAgeing' | 'documents' | 'quotations' | 'returns'
   // Optional purchasing (ADR-033, issue #198): orders and goods received, then supplier invoices, payments and what is owed. Payments
-  // and what is owed need no capability since issue #557 (ADR-083): they pay what Buy stock bought on credit.
+  // and what is owed need no capability since issue #557 (ADR-084): they pay what Buy stock bought on credit.
   | 'purchaseOrders' | 'goodsReceived' | 'supplierBills' | 'supplierPayments' | 'supplierPayables'
   // Landed costs and supplier credit notes (issue #199), also under the purchasing capability.
   | 'landedCosts' | 'supplierCredits'
