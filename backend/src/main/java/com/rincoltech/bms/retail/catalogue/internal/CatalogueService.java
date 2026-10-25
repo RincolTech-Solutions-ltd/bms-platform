@@ -454,7 +454,9 @@ class CatalogueService {
                 before.unitId());
         // Issue #562: an item keeps the code the app gave it; sending that same code again is not a change.
         if (r.code() != null
-                && !RetailCatalogue.normaliseCode(r.code()).map(before.code()::equals).orElse(false)) {
+                && !RetailCatalogue.normaliseCode(r.code())
+                        .map(before.code()::equals)
+                        .orElse(false)) {
             throw codeMadeByApp("code", CODE_KEPT);
         }
         Product after = new Product(

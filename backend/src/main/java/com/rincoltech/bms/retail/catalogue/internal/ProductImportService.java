@@ -366,7 +366,8 @@ class ProductImportService {
             audit.record(AuditLog.Entry.created("retail.unit.created", "retail.unit", id, null, Map.of("name", name)));
         }
         String currency = tenant.profile().currency();
-        // Issue #493: the categories that make codes are locked in a fixed order first, so two imports at once queue rather
+        // Issue #493: the categories that make codes are locked in a fixed order first, so two imports at once queue
+        // rather
         // than deadlock. Issue #562: every row gets its category's next code.
         pending.stream()
                 .map(p -> categoryIds.get(p.category().toLowerCase(Locale.ROOT)))

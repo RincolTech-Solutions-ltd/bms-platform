@@ -499,8 +499,7 @@ class RetailVariantsIT extends IntegrationTest {
                 .isEqualTo("variant_follows_item");
 
         // Issue #562: a size keeps the code the app gave it.
-        ResponseEntity<JsonNode> recoded =
-                patchProduct(small, Map.of("variant_colour", "Navy", "code", "ROMP-S-NAVY"));
+        ResponseEntity<JsonNode> recoded = patchProduct(small, Map.of("variant_colour", "Navy", "code", "ROMP-S-NAVY"));
         assertThat(recoded.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(recoded.getBody().get("code").asString()).isEqualTo("item_code_made_by_app");
         ResponseEntity<JsonNode> corrected = patchProduct(small, Map.of("variant_colour", "Navy"));

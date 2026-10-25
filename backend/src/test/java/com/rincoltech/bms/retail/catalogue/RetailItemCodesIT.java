@@ -160,7 +160,8 @@ class RetailItemCodesIT extends IntegrationTest {
             ResponseEntity<JsonNode> refused = add(bulbs, typed, "Test bulb 15W");
             assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
             assertThat(refused.getBody().get("code").asString()).isEqualTo("item_code_made_by_app");
-            assertThat(refused.getBody().get("errors").get(0).get("field").asString()).isEqualTo("code");
+            assertThat(refused.getBody().get("errors").get(0).get("field").asString())
+                    .isEqualTo("code");
         }
         assertThat(codesByName()).hasSize(2);
         assertThat(category(bulbs).get("next_code").asString()).isEqualTo("BLB-0003");
@@ -250,7 +251,8 @@ class RetailItemCodesIT extends IntegrationTest {
         assertThat(applied.getStatusCode()).isEqualTo(HttpStatus.OK);
         List<String> reported = new ArrayList<>();
         applied.getBody().get("rows").forEach(r -> reported.add(r.get("code").asString()));
-        // Issue #562: the typed BLB-0007 and OWN-7 are not used; each row takes its category's next number in file order.
+        // Issue #562: the typed BLB-0007 and OWN-7 are not used; each row takes its category's next number in file
+        // order.
         assertThat(reported).containsExactly("BLB-0002", "BLB-0003", "BLB-0004", "EXT-0001", "EXT-0002", "blb-0001");
         assertThat(codesByName())
                 .containsEntry("Test bulb 12W", "BLB-0002")

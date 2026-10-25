@@ -62,7 +62,8 @@ class RetailProductImportIT extends IntegrationTest {
         assertThat(dry.getStatusCode()).isEqualTo(HttpStatus.OK);
         JsonNode body = dry.getBody();
         assertThat(body.get("dry_run").asBoolean()).isTrue();
-        // Issue #562: a code in the file only finds an item that has it (imp-old, skipped); the repeated IMP-1 is not used,
+        // Issue #562: a code in the file only finds an item that has it (imp-old, skipped); the repeated IMP-1 is not
+        // used,
         // so its row, another name, is added with a code of its own.
         assertThat(body.get("added").asInt()).isEqualTo(3);
         assertThat(body.get("skipped").asInt()).isEqualTo(1);
@@ -96,7 +97,12 @@ class RetailProductImportIT extends IntegrationTest {
         assertThat(first.getBody().get("added").asInt()).isEqualTo(2);
         assertThat(first.getBody().get("categories_created")).hasSize(2);
         // Issue #562: the codes in the file are not used; each item has its category's first code.
-        assertThat(api.get("/products?query=test cable", ADMIN).getBody().get("items").get(0).get("code").asString())
+        assertThat(api.get("/products?query=test cable", ADMIN)
+                        .getBody()
+                        .get("items")
+                        .get(0)
+                        .get("code")
+                        .asString())
                 .endsWith("-0001");
         assertThat(api.get("/products?query=test bulb", ADMIN).getBody().get("items"))
                 .hasSize(1);
@@ -149,8 +155,10 @@ class RetailProductImportIT extends IntegrationTest {
         assertThat(run(csv.replace("IMP-1", "IMP-2").replace("Test cable", "Test cable two"), false, ADMINISTRATOR)
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
-        JsonNode item =
-                api.get("/products?query=cable two", ADMIN).getBody().get("items").get(0);
+        JsonNode item = api.get("/products?query=cable two", ADMIN)
+                .getBody()
+                .get("items")
+                .get(0);
         assertThat(item.get("cost_minor").asLong()).isEqualTo(700);
         JsonNode plain = api.get("/products?query=cable two", "retail.stock.read")
                 .getBody()
@@ -171,8 +179,10 @@ class RetailProductImportIT extends IntegrationTest {
         // #494: the import help names the columns buying price and selling price, in that order.
         String csv = "code,description,category,unit,buying price,selling price\nIMP-9,Test lamp,Bulbs,pc,700,1000\n";
         assertThat(run(csv, false, ADMINISTRATOR).getStatusCode()).isEqualTo(HttpStatus.OK);
-        JsonNode item =
-                api.get("/products?query=test lamp", ADMIN).getBody().get("items").get(0);
+        JsonNode item = api.get("/products?query=test lamp", ADMIN)
+                .getBody()
+                .get("items")
+                .get(0);
         assertThat(item.get("cost_minor").asLong()).isEqualTo(700);
         assertThat(item.get("sell_minor").asLong()).isEqualTo(1000);
         ResponseEntity<JsonNode> missing =

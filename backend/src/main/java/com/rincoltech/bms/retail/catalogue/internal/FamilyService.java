@@ -9,7 +9,6 @@ import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.Versions;
-import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.RetailPricing;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.AddVariantsRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.BranchStock;
@@ -289,11 +288,13 @@ class FamilyService {
             }
             name = r.name().trim();
             catalogue.requireCategoryAndUnit(categoryId, unitId, null, null);
-            // Issue #562: later sizes take the first item's code, the one the app gave it; a typed base code is refused.
+            // Issue #562: later sizes take the first item's code, the one the app gave it; a typed base code is
+            // refused.
             if (r.baseCode() != null && !r.baseCode().isBlank()) {
                 throw CatalogueService.codeMadeByApp("base_code", CatalogueService.MADE_BY_APP);
             }
-            String base = first.code().length() > 24 ? first.code().substring(0, 24).strip() : first.code();
+            String base =
+                    first.code().length() > 24 ? first.code().substring(0, 24).strip() : first.code();
             duplicateReason = catalogue.acceptItemName(name, unitId, null, Set.copyOf(ids), r.duplicateReason());
             id = UUID.randomUUID();
             repo.insertFamily(id, name, base, categoryId, unitId, by, duplicateReason);

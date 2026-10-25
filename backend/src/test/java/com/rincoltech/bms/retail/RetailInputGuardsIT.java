@@ -68,10 +68,12 @@ class RetailInputGuardsIT extends IntegrationTest {
         String csv = "code,description,category,unit,sell price\n"
                 + "NB-1\u00a0,Test twin,Test Category NB-1,u-nb-1,500\n"
                 + "\uff2e\uff22-1,Test wide twin,Test Category NB-1,u-nb-1,500\n";
-        ResponseEntity<JsonNode> imported = api.post(
-                "/products/import?dry_run=true", Map.of("csv", csv), ADMIN + ",core.settings.manage");
+        ResponseEntity<JsonNode> imported =
+                api.post("/products/import?dry_run=true", Map.of("csv", csv), ADMIN + ",core.settings.manage");
         assertThat(imported.getStatusCode()).as("%s", imported.getBody()).isEqualTo(HttpStatus.OK);
-        assertThat(imported.getBody().get("skipped").asInt()).as("%s", imported.getBody()).isEqualTo(2);
+        assertThat(imported.getBody().get("skipped").asInt())
+                .as("%s", imported.getBody())
+                .isEqualTo(2);
         UUID category = api.category("Test Category Raw");
         UUID unit = api.unit("u-raw");
         assertThatThrownBy(() -> TestDatabase.owner()

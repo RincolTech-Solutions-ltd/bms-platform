@@ -428,7 +428,8 @@ class RetailDashboardRangeIT extends IntegrationTest {
         }
         JsonNode best = range("period=today", ADMIN).get("range").get("best_seller");
         assertThat(best.get("id").asString()).isEqualTo(family);
-        assertThat(best.get("code").asString()).isEqualTo(made.getBody().get("base_code").asString());
+        assertThat(best.get("code").asString())
+                .isEqualTo(made.getBody().get("base_code").asString());
         assertThat(best.get("label").asString()).isEqualTo("Test Sized Shirt");
         assertThat(best.get("sales_minor").asLong()).isEqualTo(4_000);
         assertThat(best.get("sale_count").asLong()).isEqualTo(2);
