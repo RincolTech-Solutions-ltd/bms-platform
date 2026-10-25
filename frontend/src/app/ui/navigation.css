@@ -464,9 +464,13 @@ body.side-menu-open {
   white-space: nowrap;
 }
 
-.menu-shop-role {
+.menu-shop-role,
+.side-menu-me-role {
+  overflow: hidden;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .menu-shop-branch {
@@ -474,8 +478,9 @@ body.side-menu-open {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  flex: none;
-  max-width: 45%;
+  flex: 0 1 auto;
+  max-width: 40%;
+  min-width: 0;
   min-height: var(--tap);
   border-radius: var(--radius);
   color: var(--color-link);
@@ -562,6 +567,7 @@ body.side-menu-open {
   text-align: left;
   text-decoration: none;
   cursor: pointer;
+  box-shadow: none;
 }
 
 .side-menu-links a svg,
@@ -663,11 +669,6 @@ body.side-menu-open {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.side-menu-me-role {
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
 }
 
 .side-menu-sign-out {
