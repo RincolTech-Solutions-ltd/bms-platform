@@ -37954,6 +37954,15 @@
             "default" : true,
             "type" : "boolean"
           }
+        }, {
+          "description" : "Let the app make the codes (owner decision D45, issue #562): every row gets its category's next code and the file's code column is not read. Off by default: a row's code is kept and a blank one is made",
+          "in" : "query",
+          "name" : "make_codes",
+          "required" : false,
+          "schema" : {
+            "default" : false,
+            "type" : "boolean"
+          }
         } ],
         "requestBody" : {
           "content" : {

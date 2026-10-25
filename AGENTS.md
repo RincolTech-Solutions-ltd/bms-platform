@@ -182,8 +182,8 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
 - **Built (the app always makes a new item's code, issue #562, owner decision of 25 Oct 2026, ADR-081 as amended, FR-RET-70):** no
   migration. Every new item gets its category's next code from `bms_next_item_code`: the item form in a category, Add an item on
   Items, the new item on Buy stock and Count stock, and Add an item with sizes and colours (the base code is the category's next
-  code, each size `BLB-0007-03M-BLUE`). The CSV import is unchanged (blank codes made, typed codes kept) until owner decision
-  D45 says what it does with a file's codes. A typed code is refused with 400 `item_code_made_by_app` (field problem `not_allowed`): `code` on
+  code, each size `BLB-0007-03M-BLUE`). The CSV import keeps a file's codes (blank ones made) unless Let the app make the
+  codes is ticked (`make_codes=true`, owner decision D45, unticked by default), when every row's code is made. A typed code is refused with 400 `item_code_made_by_app` (field problem `not_allowed`): `code` on
   `POST /retail/products`, `base_code` on the family create and joins, a size line's `code`, and on `PATCH /retail/products/{id}` a
   `code` other than the item's own. Existing codes never change. Screens show the code as text ("Item code: BLB-0007, made by
   the app"; on edit "It never changes."), never an input; the new category form shows the code start the app makes and asks
@@ -986,7 +986,7 @@ Accepted (this list is the ADR index):
   code, the import fills blank codes; items are added inside a category, whose form has no category dropdown; the field is Item code
   (proposed, #493, owner decisions D14 and D16; FR-RET-70; migration `V96`, the next number after `V95`). Amended 25 Oct 2026
   (#562): the app always makes a new item's code, everywhere; a typed code is refused with 400 `item_code_made_by_app` (the import
-  waits on owner decision D45), existing codes never change, and the new category form shows the code start without asking
+  keeps a file's codes unless Let the app make the codes is ticked, D45), existing codes never change, and the new category form shows the code start without asking
 - ADR-082 A buying pack's size is kept per delivery: a restock or goods received line in a pack says how many pieces each pack held,
   kept in its `unit_factor` and used for stock and the average; "use from now on" (with `retail.catalogue.manage`) changes the usual size;
   selling packs keep their size; an order counts packs whatever each held (proposed, #554, owner decision D23; FR-RET-72; no migration)

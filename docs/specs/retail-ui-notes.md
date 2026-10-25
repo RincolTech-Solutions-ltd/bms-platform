@@ -35,7 +35,7 @@ draft: names are snake_case and the client is typed by the generated `src/api/sc
 | `/staff/retail/catalogue/categories/$categoryId` | One category (issue #493, ADR-081): how its item codes are made, its items, Add an item with the category fixed (no dropdown; the Item code is shown as text, the next code such as BLB-0001, made by the app and never typed, issue #562), Change the code start (items made before keep their codes) | `retail.catalogue.manage` and `retail.stock.read` |
 | `/staff/retail/catalogue/suppliers` | Add, edit, switch off or on | `retail.catalogue.manage` and `retail.purchase.create` |
 | `/staff/retail/catalogue/buyers` | Credit buyers with what each owes; add, edit name and contact | `retail.customer.manage` and `retail.sale.read` |
-| `/staff/retail/catalogue/import` | Import items from a CSV file or pasted rows: check first, then add (#146) | `retail.catalogue.manage`, `retail.stock.read` and `core.settings.manage` (administrators) |
+| `/staff/retail/catalogue/import` | Import items from a CSV file or pasted rows: check first, then add (#146); the tick Let the app make the codes, unticked by default, makes every item's code and leaves out the file's (owner decision D45, issue #562) | `retail.catalogue.manage`, `retail.stock.read` and `core.settings.manage` (administrators) |
 
 Sale, usage, stock, stock-take, Move stock, valuation and profit work on the branch chosen in the staff header;
 with "All branches" they ask for one branch. Restock takes a quantity per branch the user can see. Stock moves

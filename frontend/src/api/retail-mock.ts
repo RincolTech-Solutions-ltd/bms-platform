@@ -763,12 +763,12 @@ export function createMockRetail(): RetailApi {
         }),
       ),
 
-    importProducts: (csv, dryRun) =>
+    importProducts: (csv, dryRun, makeCodes = false) =>
       run(() => {
         const lines = csv.split(/\r?\n/).filter((l) => l.trim() !== '');
         const sep = lines[0]?.includes('\t') ? '\t' : ',';
         const head = (lines[0] ?? '').split(sep).map((h) => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
-        for (const need of ['code', 'description', 'category', 'unit', 'sell_price']) {
+        for (const need of [...(makeCodes ? [] : ['code']), 'description', 'category', 'unit', 'sell_price']) {
           if (!head.includes(need)) refuse(422, 'validation_failed', `The file needs a column called ${need.replace('_', ' ')}.`);
         }
         if (head.includes('cost_price') && !profitAccess) refuse(422, 'cost_not_allowed', 'The buying price column needs permission to see buying prices. Take that column out of the file and try again.');
@@ -776,9 +776,14 @@ export function createMockRetail(): RetailApi {
         const rows = lines.slice(1).map((l, i) => {
           const c = l.split(sep).map((x) => x.trim());
           const get = (n: string) => c[head.indexOf(n)] ?? '';
-          const code = get('code');
+          // Owner decision D45 (issue #562): with Let the app make the codes, the file's codes are not read.
+          const code = makeCodes ? '' : get('code');
           const base = { line: i + 2, code, description: get('description') };
           if (!/^\d+$/.test(get('sell_price').replace(/,/g, ''))) return { ...base, outcome: 'error', message: 'The selling price must be a whole number, for example 12000.' };
+          if (makeCodes) {
+            const typed = head.includes('code') ? get('code') : '';
+            return { ...base, outcome: 'added', message: `${dryRun ? 'Would be added.' : 'Added.'} The app gives it the next code of ${get('category')}.${typed ? ` The code ${typed} in the file is not used.` : ''}` };
+          }
           if ([...products.values()].some((p) => p.code.toLowerCase() === code.toLowerCase())) return { ...base, outcome: 'skipped', message: 'An item with this code exists already.' };
           if (seen.has(code.toLowerCase())) return { ...base, outcome: 'skipped', message: 'This code is repeated in the file; the first row is used.' };
           seen.add(code.toLowerCase());
@@ -787,12 +792,21 @@ export function createMockRetail(): RetailApi {
         const count = (o: string) => rows.filter((r) => r.outcome === o).length;
         if (!dryRun && count('error') > 0) refuse(422, 'import_has_errors', `${count('error')} rows have a problem. Nothing was added. Run the check to see which rows, fix them and try again.`);
         if (!dryRun) {
-          lines.slice(1).forEach((l) => {
+          lines.slice(1).forEach((l, i) => {
             const c = l.split(sep).map((x) => x.trim());
             const get = (n: string) => c[head.indexOf(n)] ?? '';
-            if ([...products.values()].some((p) => p.code.toLowerCase() === get('code').toLowerCase())) return;
+            if (!makeCodes && [...products.values()].some((p) => p.code.toLowerCase() === get('code').toLowerCase())) return;
+            const category = cats.find((x) => x.name.toLowerCase() === get('category').toLowerCase()) ?? cats[0];
+            let code = get('code');
+            if (makeCodes && category) {
+              const [made, n] = freeCode(category);
+              category.next = n + 1;
+              code = made;
+              const row = rows[i];
+              if (row) row.code = made;
+            }
             const id = nextId('b');
-            products.set(id, { id, code: get('code'), description: get('description'), category: get('category'), unit: get('unit'), costMinor: 0, sellMinor: Number(get('sell_price').replace(/,/g, '')), active: true, version: 1 });
+            products.set(id, { id, code, description: get('description'), category: get('category'), unit: get('unit'), costMinor: 0, sellMinor: Number(get('sell_price').replace(/,/g, '')), active: true, version: 1 });
           });
         }
         return { dry_run: dryRun, rows_read: rows.length, added: count('added'), skipped: count('skipped'), errors: count('error'), categories_created: [], units_created: [], rows };

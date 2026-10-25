@@ -183,7 +183,8 @@ export const buyersPage: Tour = {
 
 export const importPage: Tour = {
   id: 'page-import',
-  version: 2,
+  // Version 3 shows Let the app make the codes (owner decision D45, issue #562).
+  version: 3,
   title: 'This page: import items',
   audience: (me) => held(me, CATALOGUE) && held(me, STOCK_READ) && held(me, SETTINGS),
   autoStart: false,
@@ -192,6 +193,7 @@ export const importPage: Tour = {
     step({ id: 'format', target: 'import-note', title: 'Get the file ready', body: 'The first row names the columns. Then put one item on each row. Leave a code empty and the app gives the next code of its category. Nothing is saved until you add the items.' }),
     step({ id: 'file', target: 'import-file', title: 'Choose your file', body: 'Tap here and pick a CSV file saved as UTF-8.' }),
     step({ id: 'paste', target: 'import-text', title: 'Or paste the rows', body: 'You can also paste the rows straight into this box.' }),
+    step({ id: 'make-codes', target: 'import-make-codes', title: 'Let the app make the codes', body: 'Tick this to give every item the next code of its category. Without the tick, the codes in your file are kept.' }),
     step({ id: 'check', target: 'import-check', title: 'Check it first', body: 'Tap Check the file. You see what would be added and which rows have a problem. When all is well, an Add button appears.' }),
   ],
 };

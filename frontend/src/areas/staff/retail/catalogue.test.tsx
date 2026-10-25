@@ -6,7 +6,7 @@ import type { Category, Customer, PriceChange, Product } from '../../../api/reta
 import { createMockRetail, mockMe, setMockProfitAccess } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 import { catalogueLinksFor } from './catalogue';
-import { ImportReport, NOT_UTF8, readCsvText } from './catalogue-import';
+import { ImportPage, ImportReport, NOT_UTF8, readCsvText } from './catalogue-import';
 import { NamedRow, usedText } from './catalogue-lists';
 import { PersonRow } from './catalogue-people';
 import { countableStock } from './stocktake';
@@ -283,6 +283,19 @@ describe('importing items from a file', () => {
     expect([again.added, again.skipped]).toEqual([0, 3]);
     expect((await api.listCatalogue({ query: 'IMP-' })).items).toHaveLength(2);
     expect(renderToString(<ImportReport result={first} />)).toContain('What was done');
+  });
+
+  it('keeps the file\'s codes by default, and makes every code with Let the app make the codes (owner decision D45)', async () => {
+    setMockProfitAccess(true);
+    const clean = csv.replace('abc', '900');
+    const kept = await createMockRetail().importProducts(clean, false);
+    expect(kept.rows?.filter((r) => r.outcome === 'added').map((r) => r.code)).toEqual(['IMP-1', 'IMP-2']);
+    const made = await createMockRetail().importProducts(clean, true, true);
+    expect(made.added).toBe(3);
+    expect(made.rows?.[1]?.message).toContain('The code P003 in the file is not used.');
+    const html = page('admin', <ImportPage />, [...(mockMe('admin').permissions ?? []), 'core.settings.manage']);
+    expect(html).toMatch(/<input id="import-make-codes" type="checkbox"(?![^>]*checked)[^>]*\/> Let the app make the codes/);
+    expect(html).toContain('Without the tick, a code in your file is kept.');
   });
 
   it('strips a byte order mark, accepts CRLF and warns when the file is not UTF-8', async () => {

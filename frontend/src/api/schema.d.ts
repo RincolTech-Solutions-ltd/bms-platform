@@ -28517,6 +28517,8 @@ export interface operations {
         parameters: {
             query?: {
                 dry_run?: boolean;
+                /** @description Let the app make the codes (owner decision D45, issue #562): every row gets its category's next code and the file's code column is not read. Off by default: a row's code is kept and a blank one is made */
+                make_codes?: boolean;
             };
             header?: never;
             path?: never;
