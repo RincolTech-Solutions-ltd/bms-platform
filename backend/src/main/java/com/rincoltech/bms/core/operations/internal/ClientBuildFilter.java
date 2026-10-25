@@ -63,6 +63,11 @@ class ClientBuildFilter extends OncePerRequestFilter {
                     min,
                     own);
             min = "";
+        } else if (!min.isEmpty() && !TIME.matcher(own).matches()) {
+            log.warn(
+                    "BMS_MIN_CLIENT_BUILD {} is enforced, but this image does not know its own build time (BMS_GIT_TIME),"
+                            + " so a rollback with it set would refuse every app. Build images with GIT_TIME.",
+                    min);
         }
         this.minBuilt = min;
     }

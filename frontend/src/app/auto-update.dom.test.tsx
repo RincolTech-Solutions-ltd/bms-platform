@@ -201,3 +201,23 @@ describe('a money form after finish and discard', () => {
     view.unmount();
   });
 });
+
+describe('a money form kept on screen after finish (second review of #579)', () => {
+  it('registers the next change as unsaved work without a discard', async () => {
+    const { usePersistedDraft } = await import('../areas/staff/retail/idempotency');
+    const { hasUnsavedWork } = await import('./unsaved-work');
+    let form: ReturnType<typeof usePersistedDraft<{ lines: string[] }>> | undefined;
+    function Cart() {
+      form = usePersistedDraft('test-cart-3', { lines: [] as string[] });
+      return null;
+    }
+    const view = render(<Cart />);
+    act(() => form?.setDraft({ lines: ['Test Item 01'] }));
+    act(() => form?.finish());
+    expect(hasUnsavedWork()).toBe(false);
+    act(() => form?.setDraft({ lines: ['Test Item 01', 'Test Item 02'] }));
+    expect(hasUnsavedWork()).toBe(true);
+    view.unmount();
+    expect(hasUnsavedWork()).toBe(false);
+  });
+});

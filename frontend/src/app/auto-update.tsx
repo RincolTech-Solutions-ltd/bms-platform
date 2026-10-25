@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { Toast } from '../areas/staff/retail/toast';
-import { claimReload, loadFreshApp, OFFLINE_MESSAGE } from './stale-app';
+import { claimReload, loadFreshApp, OFFLINE_MESSAGE, reloadClaimState } from './stale-app';
 import { hasUnsavedWork, onUnsavedWorkChange } from './unsaved-work';
 
 // A phone on an old app updates by itself (#576, ADR-088). Android keeps the app's tab alive for days, and a new service worker
@@ -27,6 +27,8 @@ export function clientBuildHeader(build = CLIENT_BUILD, built = CLIENT_BUILT): s
 export const CHECK_EVERY_MS = 15 * 60_000;
 /** Asking for a new worker more often than this, because many answers in a row name another build, only repeats the question. */
 const CHECK_QUIET_MS = 60_000;
+/** How many times a reload held back by the one-a-minute rule is tried again by itself. */
+const MAX_RETRIES = 5;
 /** How long the "Updating the app…" toast shows before the page reloads. */
 export const TOAST_LEAD_MS = 1_200;
 export const UPDATING_TOAST = 'Updating the app…';
@@ -40,6 +42,8 @@ export interface UpdaterDeps {
   reload: (href?: string) => void;
   /** The #543 one-reload-a-minute claim. */
   claim: () => boolean;
+  /** Whether the claim would succeed now, without claiming: 'free', 'wait' (a reload this minute) or 'never' (cannot count). */
+  claimState: () => 'free' | 'wait' | 'never';
   online: () => boolean;
   /** Whether a text field has the focus. */
   typing: () => boolean;
@@ -60,6 +64,9 @@ export function createUpdater(deps: UpdaterDeps) {
   let applying = false;
   let lastCheck = Number.NEGATIVE_INFINITY;
   let writes = 0;
+  let retries = 0;
+  // Where the reload goes: the latest move between screens while the toast shows, or nowhere (the page itself).
+  let target: string | undefined;
 
   const check = () => {
     const now = deps.now();
@@ -71,19 +78,42 @@ export function createUpdater(deps: UpdaterDeps) {
   // A move between screens tolerates a money form's draft (it is kept in the tab and comes back), never a save on its way.
   const safeToLeave = () => writes === 0 && !deps.typing();
   /**
-   * Shows the toast and reloads a moment later. Everything is checked again when the moment comes, since the person can tap Save
-   * while the toast shows, and the reload is claimed only then; if anything says no, the toast goes and the reload waits.
+   * A reload held back by the one-reload-a-minute rule tries again after the minute, since nothing else would wake it; a few times
+   * at most, because a phone clock set back keeps that minute from ending for hours.
+   */
+  const retryLater = () => {
+    if (retries >= MAX_RETRIES) return;
+    retries++;
+    deps.later(trySoon, CHECK_QUIET_MS);
+  };
+  /**
+   * Shows the toast and reloads a moment later. The toast shows only when the reload could be claimed (a peek, so a refused reload
+   * never flashes it), and everything is checked again when the moment comes, since the person can tap Save while the toast shows;
+   * the reload is claimed only then. If anything says no, the toast goes and the reload waits.
    */
   const apply = (href?: string): boolean => {
-    if (applying || !deps.online()) return false;
+    if (applying) {
+      // A second move while the toast shows: the full load goes where the person went last, not back to the first screen.
+      if (href !== undefined) target = href;
+      return true;
+    }
+    if (!deps.online()) return false;
+    const state = deps.claimState();
+    if (state !== 'free') {
+      if (state === 'wait') retryLater();
+      return false;
+    }
     applying = true;
+    target = href;
     deps.announce(() => {
-      const still = href === undefined ? safe() : safeToLeave();
-      if (still && deps.online() && deps.claim()) return deps.reload(href);
+      const to = target;
+      const still = to === undefined ? safe() : safeToLeave();
+      if (still && deps.online() && deps.claim()) return deps.reload(to);
       applying = false;
+      target = undefined;
       deps.hide();
-      // Refused only by the one-reload-a-minute rule: nothing else would wake the update, so it tries again after the minute.
-      if (still && deps.online()) deps.later(trySoon, CHECK_QUIET_MS);
+      // Another reload took the minute meanwhile: try after it. A storage that forgets the claim is never tried again.
+      if (still && deps.online() && deps.claimState() === 'wait') retryLater();
     });
     return true;
   };
@@ -149,6 +179,7 @@ export const updater = createUpdater({
   update: async () => registration?.update(),
   reload: (href) => (href ? location.assign(href) : location.reload()),
   claim: () => claimReload(),
+  claimState: () => reloadClaimState(),
   online: isOnline,
   typing: isTyping,
   announce: (then) => {

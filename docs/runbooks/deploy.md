@@ -126,6 +126,12 @@ an ordinary release.
    so a rollback with it left in place does not lock phones out, but the setting then means nothing
    until it is cleared or the newer release is back.
 
+The guard compares the minimum with the **API's** build time, which is the web app's too only
+because `api` and `web` always deploy from the same tag (ADR-006: build once, one tag for every
+image). Never run an api and a web of different releases with `BMS_MIN_CLIENT_BUILD` set. An image
+built without `GIT_TIME` (a manual build) cannot guard a rollback, and the API says so with a warning
+in its log at start.
+
 Requests without a build time (curl, payment callbacks, apps from before #576) are never refused.
 Offline sales queued on a phone stay queued through the update and are sent by the new app.
 

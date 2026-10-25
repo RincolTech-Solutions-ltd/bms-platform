@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { classify } from '../offline/outbox';
 import { memoryStore } from '../offline/store';
 import { clientBuildHeader, createUpdater, type UpdaterDeps } from './auto-update';
-import { claimReload } from './stale-app';
+import { claimReload, reloadClaimState } from './stale-app';
 import { setUnsavedWork } from './unsaved-work';
 
 // #576, ADR-088: a phone on an old app updates by itself. It finds out from the server's build, reloads only at a safe moment
@@ -16,8 +16,7 @@ const memory = () => {
   return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) } as unknown as Storage;
 };
 
-function setUp(patch: Partial<UpdaterDeps> = {}) {
-  const storage = memory();
+function setUp(patch: Partial<UpdaterDeps> = {}, storage: Storage | null = memory()) {
   let clock = 1_000_000;
   const reloads: (string | undefined)[] = [];
   const update = vi.fn(async () => undefined);
@@ -29,6 +28,7 @@ function setUp(patch: Partial<UpdaterDeps> = {}) {
     update,
     reload: (href) => void reloads.push(href),
     claim: () => claimReload(clock, storage),
+    claimState: () => reloadClaimState(clock, storage),
     online: () => state.online,
     typing: () => state.typing,
     announce: (then) => then(),
@@ -192,7 +192,7 @@ describe('the moment the toast shows (review of #579)', () => {
   it('claims the one reload of the minute only when it really reloads', () => {
     const storage = memory();
     const toast = held();
-    const { updater, reloads } = setUp({ announce: toast.announce, claim: () => claimReload(5_000, storage) });
+    const { updater, reloads } = setUp({ announce: toast.announce }, storage);
     updater.workerChanged();
     setUnsavedWork('form', true);
     toast.fire();
@@ -202,11 +202,70 @@ describe('the moment the toast shows (review of #579)', () => {
     expect(reloads).toEqual([undefined]);
   });
 
-  it('a reload refused by the one-a-minute rule is tried again after the minute, without waiting for another event', () => {
-    const { updater, reloads, later } = setUp({ claim: () => false });
+  it('a reload held back by the one-a-minute rule is tried again after the minute, without waiting for another event', () => {
+    const storage = memory();
+    claimReload(1_000_000 - 10_000, storage);
+    const { updater, reloads, later, tick } = setUp({}, storage);
     updater.workerChanged();
     expect(reloads).toEqual([]);
     expect(later.map((l) => l.ms)).toEqual([60_000]);
+    tick(60_000);
+    later.shift()?.fn();
+    expect(reloads).toEqual([undefined]);
+  });
+
+  /** Runs every retry the updater schedules, as the timers would, until none is left (or a bound is hit). */
+  const drain = (later: { fn: () => void }[]) => {
+    let runs = 0;
+    while (later.length > 0 && runs < 100) {
+      later.shift()?.fn();
+      runs++;
+    }
+    return runs;
+  };
+
+  it('never flashes the toast while the minute is not over, and stops trying after a few times (a clock set back)', () => {
+    const storage = memory();
+    // The last reload is in the future for this clock, as after the phone set its clock back: the minute does not end.
+    claimReload(1_000_000 + 3_600_000, storage);
+    let toasts = 0;
+    const { updater, reloads, later } = setUp({ announce: (then) => (toasts++, then()) }, storage);
+    updater.workerChanged();
+    expect(drain(later)).toBe(5);
+    expect(toasts).toBe(0);
+    expect(reloads).toEqual([]);
+  });
+
+  it('when the reloads cannot be counted: no toast, no retry, however long it runs', () => {
+    let toasts = 0;
+    const { updater, reloads, later } = setUp({ announce: (then) => (toasts++, then()) }, null);
+    updater.workerChanged();
+    updater.beforeNavigate('/staff');
+    expect(drain(later)).toBe(0);
+    expect(toasts).toBe(0);
+    expect(reloads).toEqual([]);
+  });
+
+  it('a storage that forgets the claim shows the toast once and never again', () => {
+    const forgetful = { getItem: () => null, setItem: () => undefined } as unknown as Storage;
+    let toasts = 0;
+    const { updater, reloads, later, hidden } = setUp({ announce: (then) => (toasts++, then()) }, forgetful);
+    updater.workerChanged();
+    expect(drain(later)).toBe(0);
+    expect(toasts).toBe(1);
+    expect(hidden).toHaveLength(1);
+    expect(reloads).toEqual([]);
+  });
+
+  it('a second move while the toast shows takes the full load to where the person went last', () => {
+    const toast = held();
+    const { updater, reloads } = setUp({ announce: toast.announce });
+    setUnsavedWork('cart', true);
+    updater.workerChanged();
+    updater.beforeNavigate('/staff/retail/stock');
+    updater.beforeNavigate('/staff/retail/sales');
+    toast.fire();
+    expect(reloads).toEqual(['/staff/retail/sales']);
   });
 });
 
@@ -214,9 +273,9 @@ describe('no reload loop (#543)', () => {
   it('reloads once a minute at most', () => {
     const storage = memory();
     const reloads: unknown[] = [];
-    const deps = { reload: () => void reloads.push(1), claim: () => claimReload(5_000, storage) };
-    setUp(deps).updater.workerChanged();
-    setUp(deps).updater.workerChanged();
+    const deps = { reload: () => void reloads.push(1) };
+    setUp(deps, storage).updater.workerChanged();
+    setUp(deps, storage).updater.workerChanged();
     expect(reloads).toHaveLength(1);
   });
 
@@ -231,7 +290,7 @@ describe('no reload loop (#543)', () => {
   });
 
   it('never reloads when the reloads cannot be counted', () => {
-    const { updater, reloads } = setUp({ claim: () => claimReload(1_000, null) });
+    const { updater, reloads } = setUp({}, null);
     updater.workerChanged();
     updater.beforeNavigate('/staff');
     expect(reloads).toEqual([]);
