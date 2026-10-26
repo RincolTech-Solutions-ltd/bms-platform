@@ -55,7 +55,8 @@ export function NewBadge({ feature }: { feature: string }) {
   if (!fresh) return null;
   return (
     <span className={className}>
-      <span className="visually-hidden">, </span>New
+      <span className="visually-hidden">, New</span>
+      <span aria-hidden="true">New</span>
     </span>
   );
 }
