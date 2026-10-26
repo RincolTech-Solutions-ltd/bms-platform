@@ -90,7 +90,7 @@ export function WaiveItemSheet({ loan, row, memberName, onClose }: {
           <KeyFigureRow label="Still due now" value={money(step.dueMinor, c)} />
           <KeyFigureRow label="Still due after" value={money(step.dueMinor - (step.amountMinor ?? 0), c)} />
         </KeyFigure>
-        <dl className="ln-facts" aria-label="The waiver">
+        <dl className="ln-facts ln-review" aria-label="The waiver">
           <dt>Borrower</dt>
           <dd>{borrower}</dd>
           <dt>Loan</dt>

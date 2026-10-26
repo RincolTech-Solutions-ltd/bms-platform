@@ -424,6 +424,10 @@
   white-space: nowrap;
 }
 
+.ln-facts.ln-review {
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+
 .ln-facts dd.ln-reason {
   text-align: left;
   white-space: pre-wrap;

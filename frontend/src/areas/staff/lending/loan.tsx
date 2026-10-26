@@ -120,7 +120,7 @@ export function ScheduleTable({ schedule, currency, onWaive }: { schedule: LoanS
           <tr>
             <th className="num">No</th>
             <th>Due date</th>
-            {onWaive && <th>Waive</th>}
+            {onWaive && <th>Waive fee or interest</th>}
             <th className="num">Principal</th>
             <th className="num">Interest</th>
             <th className="num">Fees</th>
@@ -139,7 +139,7 @@ export function ScheduleTable({ schedule, currency, onWaive }: { schedule: LoanS
                 <td>
                   {waivable(r) && (
                     <button type="button" className="ln-row-action" onClick={() => onWaive(r)} aria-label={`Waive fee or interest on item ${r.no ?? ''}`}>
-                      Waive fee or interest
+                      Waive
                     </button>
                   )}
                 </td>
