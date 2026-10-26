@@ -2,8 +2,8 @@
 
 ## Status
 
-Built (2026-10-25, issue #343, pull request #588, go-live priority; the owner asked for it to be built in the best order without
-waiting on him). The approval rules are in force once #588 is merged; the record becomes Accepted when the owner accepts it.
+Accepted (2026-10-26, by the owner on #588), built in pull request #588 (issue #343, go-live priority; the owner asked for it to be
+built in the best order without waiting on him).
 Builds on ADR-015 (actions registered by the modules that own them), ADR-043 (the write-off of a credit sale), ADR-046 (the
 step-up of an administrator who loosens a safeguard) and ADR-050 (push notices). No migration: the choices are two keys of the
 tenant settings row. The number follows ADR-088 (#579), ADR-089 (#583) and ADR-090 (#571, merged with #585); ADR-092 (#589) came after it.
