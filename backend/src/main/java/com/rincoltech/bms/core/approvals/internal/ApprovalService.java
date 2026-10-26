@@ -319,6 +319,14 @@ class ApprovalService implements Approvals {
         } catch (RequestSupersededException e) {
             throw e;
         } catch (ApiException e) {
+            // ADR-091: one stale policy for the actions the approval rules govern. What was asked no longer passes as
+            // it
+            // stands (a 4xx refusal), so the request goes stale with the reason and the maker asks again, rather than
+            // failing
+            // on every approval until it expires. The lending actions keep FR-APR-06: pending, with the error shown.
+            if (action.switchable() && e.status().is4xxClientError()) {
+                throw new RequestSupersededException(e.code(), e.title(), e.getMessage(), e.extensions());
+            }
             throw new ExecutionFailed(e.code() + ": " + e.getMessage(), e);
         } catch (RuntimeException e) {
             log.error("approval {} execution failed", approvalId, e);

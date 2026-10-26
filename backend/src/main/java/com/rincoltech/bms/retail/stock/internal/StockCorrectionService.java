@@ -35,6 +35,11 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JsonParser;
+import tools.jackson.databind.DeserializationContext;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ValueDeserializer;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 /**
  * Correct the quantity on the stock list (issue #351, ADR-044): the administrator types the right quantity and a reason (an
@@ -85,8 +90,33 @@ class StockCorrectionService {
         this.audit = audit;
     }
 
-    /** A correction made at once, or the request that now waits for an administrator (ADR-091). */
-    record CorrectionOutcome(Correction correction, ApprovalWaiting waiting) {}
+    /**
+     * A correction made at once, or the request that now waits for an administrator (ADR-091). Stored as the idempotent answer; an
+     * answer stored before ADR-091 was the bare correction, which still replays as this.
+     */
+    @JsonDeserialize(using = CorrectionOutcome.Reader.class)
+    record CorrectionOutcome(Correction correction, ApprovalWaiting waiting) {
+
+        /** Reads both shapes: {@code {correction, waiting}}, or the old flat correction (an object with {@code id}). */
+        static final class Reader extends ValueDeserializer<CorrectionOutcome> {
+            @Override
+            public CorrectionOutcome deserialize(JsonParser p, DeserializationContext ctxt) {
+                JsonNode n = ctxt.readTree(p);
+                if (n.has("id")) {
+                    return new CorrectionOutcome(ctxt.readTreeAsValue(n, Correction.class), null);
+                }
+                JsonNode correction = n.get("correction");
+                JsonNode waiting = n.get("waiting");
+                return new CorrectionOutcome(
+                        correction == null || correction.isNull()
+                                ? null
+                                : ctxt.readTreeAsValue(correction, Correction.class),
+                        waiting == null || waiting.isNull()
+                                ? null
+                                : ctxt.readTreeAsValue(waiting, ApprovalWaiting.class));
+            }
+        }
+    }
 
     /** What a correction would do, measured under the balance row's lock. */
     private record Checked(ProductSnapshot product, BigDecimal old, BigDecimal difference, long cost) {}
@@ -154,17 +184,19 @@ class StockCorrectionService {
         } catch (RequestSupersededException e) {
             throw e;
         } catch (ApiException e) {
-            if (!STALE.contains(e.code())) {
+            // The one stale policy (ADR-091): any refusal (the quantity moved, the branch no longer stocks) goes stale
+            // with it.
+            if (!e.status().is4xxClientError()) {
                 throw e;
             }
             throw new RequestSupersededException(
-                    e.code(), e.title(), "The quantity changed while it waited. " + e.getMessage(), e.extensions());
+                    e.code(),
+                    e.title(),
+                    "The correction can no longer be made as it was asked for: " + e.getMessage(),
+                    e.extensions());
         }
         write(id, branch, r, c, makerId);
     }
-
-    private static final java.util.Set<String> STALE =
-            java.util.Set.of("stock_moved", "quantity_unchanged", "stocktake_in_progress");
 
     private Checked check(UUID branch, CorrectionRequest r) {
         if (!Quantities.exact(r.newQty())) {

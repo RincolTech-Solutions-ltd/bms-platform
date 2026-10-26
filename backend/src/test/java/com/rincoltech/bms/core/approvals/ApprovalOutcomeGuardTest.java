@@ -29,8 +29,11 @@ import org.junit.jupiter.api.Test;
 class ApprovalOutcomeGuardTest {
 
     private static final Path MAIN = Path.of("src/main/java");
-    private static final Pattern CALL = Pattern.compile("approvals\\.request\\(");
-    private static final Pattern KEPT = Pattern.compile("(\\w+)\\s*=\\s*approvals\\.request\\($");
+    /** A call of request: on the field {@code approvals}, or on any field when it is handed a new ActionRequest. */
+    private static final Pattern CALL =
+            Pattern.compile("\\b\\w+\\.request\\((?=\\s*new ActionRequest)|\\bapprovals\\.request\\(");
+
+    private static final Pattern KEPT = Pattern.compile("(\\w+)\\s*=\\s*\\w+\\.request\\($");
 
     /**
      * Call sites that answer with the same record either way, each named by the action it asks for, and why. Only a call whose
@@ -89,12 +92,8 @@ class ApprovalOutcomeGuardTest {
                     }
                     String var = kept.group(1);
                     String method = restOfMethod(code, m.end());
-                    // Read for executed() in this method, or handed to a helper here that reads it.
-                    boolean read = method.contains(var + ".executed()")
-                            || (Pattern.compile("\\(\\s*\\w+\\s*,\\s*" + var + "\\b")
-                                            .matcher(method)
-                                            .find()
-                                    && code.contains(".executed()"));
+                    // Read for executed() in this method, or handed to a named helper whose own body reads it.
+                    boolean read = method.contains(var + ".executed()") || helperReads(code, method, var);
                     if (!read) {
                         problems.add(name + ": " + var + ".executed() is not read in the calling method");
                     }
@@ -103,6 +102,22 @@ class ApprovalOutcomeGuardTest {
         }
         assertThat(calls).as("the guard found the callers").isGreaterThan(15);
         assertThat(problems).isEmpty();
+    }
+
+    /** Whether the outcome is handed to a helper, {@code name(x, var)} or {@code name(var)}, declared in the file and reading it. */
+    static boolean helperReads(String code, String method, String var) {
+        Matcher call = Pattern.compile("\\b(\\w+)\\((?:\\s*\\w+\\s*,)*\\s*" + var + "\\s*[,)]")
+                .matcher(method);
+        while (call.find()) {
+            Matcher declared = Pattern.compile("\\b[\\w<>.]+\\s+" + Pattern.quote(call.group(1)) + "\\([^)]*\\)\\s*\\{")
+                    .matcher(code);
+            while (declared.find()) {
+                if (restOfMethod(code, declared.end()).contains(".executed()")) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** The number of top-level arguments of the call whose opening parenthesis ends at {@code open}. */
@@ -139,5 +154,18 @@ class ApprovalOutcomeGuardTest {
         assertThat(arguments(two, two.indexOf('(') + 1)).isEqualTo(2);
         String code = "    void a() {\n        o = x;\n    }\n    void b() {\n        o.executed();\n    }\n";
         assertThat(restOfMethod(code, code.indexOf("o = x"))).doesNotContain("executed");
+        // A helper counts only when its own body reads executed(); an unrelated executed() elsewhere does not.
+        String helped = "    X a() {\n        return outcome(id, o);\n    }\n    X outcome(UUID id, Outcome o) {\n"
+                + "        return o.executed() ? x : y;\n    }\n";
+        assertThat(helperReads(helped, restOfMethod(helped, helped.indexOf("return outcome")), "o"))
+                .isTrue();
+        String unrelated =
+                "    X a() {\n        return log(id, o);\n    }\n    X log(UUID id, Outcome o) {\n        return x;\n    }\n"
+                        + "    void b() {\n        p.executed();\n    }\n";
+        assertThat(helperReads(unrelated, restOfMethod(unrelated, unrelated.indexOf("return log")), "o"))
+                .isFalse();
+        // A caller whose field has another name is still found.
+        assertThat(CALL.matcher("approver.request(new ActionRequest(a), rule)").find())
+                .isTrue();
     }
 }

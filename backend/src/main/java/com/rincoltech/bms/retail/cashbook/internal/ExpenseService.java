@@ -3,7 +3,6 @@ package com.rincoltech.bms.retail.cashbook.internal;
 import com.rincoltech.bms.core.approvals.ApprovalWaiting;
 import com.rincoltech.bms.core.approvals.Approvals;
 import com.rincoltech.bms.core.approvals.Approvals.ActionRequest;
-import com.rincoltech.bms.core.approvals.RequestSupersededException;
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.documents.Documents;
 import com.rincoltech.bms.core.ledger.LedgerPosting.PostedEntry;
@@ -34,8 +33,13 @@ import java.util.UUID;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JsonParser;
 import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.DeserializationContext;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ValueDeserializer;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 /**
  * Company expenses (FR-RET-24; ADR-022 decision 5): a debit to the category's expense account
@@ -84,8 +88,31 @@ class ExpenseService {
         this.audit = audit;
     }
 
-    /** An expense recorded at once, or the request that now waits for an administrator (ADR-091). */
-    record ExpenseOutcome(Expense expense, ApprovalWaiting waiting) {}
+    /**
+     * An expense recorded at once, or the request that now waits for an administrator (ADR-091). Stored as the idempotent answer;
+     * an answer stored before ADR-091 was the bare expense, which still replays as this.
+     */
+    @JsonDeserialize(using = ExpenseOutcome.Reader.class)
+    record ExpenseOutcome(Expense expense, ApprovalWaiting waiting) {
+
+        /** Reads both shapes: {@code {expense, waiting}}, or the old flat expense (an object with {@code id}). */
+        static final class Reader extends ValueDeserializer<ExpenseOutcome> {
+            @Override
+            public ExpenseOutcome deserialize(JsonParser p, DeserializationContext ctxt) {
+                JsonNode n = ctxt.readTree(p);
+                if (n.has("id")) {
+                    return new ExpenseOutcome(ctxt.readTreeAsValue(n, Expense.class), null);
+                }
+                JsonNode expense = n.get("expense");
+                JsonNode waiting = n.get("waiting");
+                return new ExpenseOutcome(
+                        expense == null || expense.isNull() ? null : ctxt.readTreeAsValue(expense, Expense.class),
+                        waiting == null || waiting.isNull()
+                                ? null
+                                : ctxt.readTreeAsValue(waiting, ApprovalWaiting.class));
+            }
+        }
+    }
 
     /** An expense checked and ready to write, under the branch-day lock. */
     private record Checked(
@@ -140,27 +167,8 @@ class ExpenseService {
     /** On approval (ADR-091): checked again as it stands now, recorded under the request's id in the maker's name. */
     void recordApproved(UUID id, Map<String, Object> payload, UUID makerId) {
         ExpenseRequest r = mapper.convertValue(payload, ExpenseRequest.class);
-        Checked c;
-        try {
-            c = check(r.branchId(), r);
-        } catch (RequestSupersededException e) {
-            throw e;
-        } catch (ApiException e) {
-            if (!e.status().is4xxClientError()) {
-                throw e;
-            }
-            // What was asked can no longer be recorded as it stands (its business date, category or item no longer
-            // passes):
-            // the request goes stale with the reason, as a correction does, rather than failing every time it is
-            // approved.
-            throw new RequestSupersededException(
-                    e.code(),
-                    e.title(),
-                    "The expense can no longer be recorded as it was asked for: " + e.getMessage()
-                            + " Record it again.",
-                    e.extensions());
-        }
-        write(id, c, r, makerId);
+        // A refusal here makes the request stale with its reason: the approvals module's one stale policy (ADR-091).
+        write(id, check(r.branchId(), r), r, makerId);
     }
 
     private Checked check(UUID branch, ExpenseRequest r) {

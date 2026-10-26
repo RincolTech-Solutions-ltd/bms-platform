@@ -290,6 +290,60 @@ class RetailApprovalRulesIT extends IntegrationTest {
                 .isZero();
     }
 
+    // ---- answers stored before ADR-091 still replay ----------------------------------------------
+
+    /** Rewrites the stored answer of a key into the shape it had before ADR-091: the bare record, not {record, waiting}. */
+    void storedTheOldWay(String key, String field) {
+        int rows = TestDatabase.owner()
+                .sql("UPDATE idempotency_keys SET response_body = response_body -> ? WHERE tenant_id = ? AND key = ?")
+                .params(field, t.tenantId(), key)
+                .update();
+        assertThat(rows).isEqualTo(1);
+    }
+
+    /** Review of #588: an expense recorded before the deploy, whose answer was lost, replays after it as the same expense. */
+    @Test
+    void anExpenseAnswerStoredBeforeTheApprovalRulesStillReplays() {
+        UUID[] ci = cb.categoryWithItem("Transport", "Boda fare", false);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("category_id", ci[0]);
+        body.put("item_id", ci[1]);
+        body.put("amount_minor", 5_000);
+        String key = UUID.randomUUID().toString();
+        ResponseEntity<JsonNode> made = api.postKeyed("/expenses", body, CashbookTestSupport.ALL, "*", key);
+        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
+        storedTheOldWay(key, "expense");
+        ResponseEntity<JsonNode> replay = api.postKeyed("/expenses", body, CashbookTestSupport.ALL, "*", key);
+        assertThat(replay.getStatusCode()).as("%s", replay.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(replay.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
+        assertThat(replay.getBody().get("id").asString())
+                .isEqualTo(made.getBody().get("id").asString());
+        assertThat(count("SELECT count(*) FROM retail_expenses WHERE tenant_id = ?", t.tenantId()))
+                .isEqualTo(1);
+    }
+
+    /** The same for a stock correction. */
+    @Test
+    void aCorrectionAnswerStoredBeforeTheApprovalRulesStillReplays() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("product_id", product);
+        body.put("new_qty", "18");
+        body.put("expected_qty", stock().toPlainString());
+        body.put("reason_code", "miscount");
+        String key = UUID.randomUUID().toString();
+        ResponseEntity<JsonNode> made = api.postKeyed("/stock/corrections", body, MAKER, "*", key);
+        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
+        storedTheOldWay(key, "correction");
+        ResponseEntity<JsonNode> replay = api.postKeyed("/stock/corrections", body, MAKER, "*", key);
+        assertThat(replay.getStatusCode()).as("%s", replay.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(replay.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
+        assertThat(replay.getBody().get("id").asString())
+                .isEqualTo(made.getBody().get("id").asString());
+        assertThat(stock()).isEqualByComparingTo("18");
+    }
+
     @Test
     void switchedOffAgainAnAmountSetBeforeAsksNothing() {
         rule("retail_expense", false, 1);

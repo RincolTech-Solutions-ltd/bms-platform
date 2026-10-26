@@ -5,7 +5,7 @@
 Proposed (2026-10-25, issue #343, go-live priority; the owner asked for it to be built in the best order without waiting on him).
 Builds on ADR-015 (actions registered by the modules that own them), ADR-043 (the write-off of a credit sale), ADR-046 (the
 step-up of an administrator who loosens a safeguard) and ADR-050 (push notices). No migration: the choices are two keys of the
-tenant settings row. The number follows ADR-088 (#579), pending ADR-089 (#583) and pending ADR-090 (left for #571).
+tenant settings row. The number follows ADR-088 (#579), ADR-089 (#583) and ADR-090 (#571, merged with #585); ADR-092 (#589) came after it.
 
 ## Context
 
@@ -111,6 +111,16 @@ expenses.
     grouped by module, each with a switch (or "Always on"), its amount where it has one, and one line on what happens; a review
     in plain words before saving; the proof; the saved message. Retail settings' returns Hint (#575) links to the returns row.
 
+11. **One stale policy for every action the approval rules govern.** When an approved action no longer passes as it was asked for
+    (a 4xx refusal on approval: the sale changed, the quantity moved, the category was switched off, the branch no longer stocks),
+    the request goes stale with that refusal as its reason and the maker asks again; it never fails on every approval until it
+    expires. `ApprovalService` applies this to every switchable action in one place, and a module may word the reason (a stock
+    correction says it can no longer be made as it was asked for). The lending actions keep FR-APR-06: a failed execution leaves the
+    request pending with the error shown.
+12. **Answers stored before this change still replay.** The idempotent answer of an expense and of a stock correction is now
+    `{record, waiting}`; one stored before the deploy (the bare record, an object with `id`) still replays as the record, so a
+    retry after the deploy gets the expense or correction it made and never makes it twice.
+
 ## Consequences
 
 **Better:**
@@ -131,3 +141,10 @@ expenses.
 
 - A price below cost that waits for an administrator (a held sale) is a follow-up if the owner asks for it.
 - An approval rule per branch is not built: the rule is the business's.
+- `SaleWriteOffAction` takes a write-off run with no checker (`approvalId` null) as one the switch let through and flags it
+  `approval_switched_off`. Every write-off caller today passes its rule, so that path is reached only with the switch off; a future
+  caller that runs a write-off below its amount through `Approvals.request` would be flagged the same, and should pass the reason
+  in the execution instead.
+- Lowering the credit write-off amount to 0 falls back to ADR-043's rule (a second administrator only while two or more count), so a
+  business with one administrator then writes off alone. Neither the approval rules nor `PATCH /settings` tells the others of that
+  change today; a follow-up should count it as a loosening when fewer than two administrators count.
