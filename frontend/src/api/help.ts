@@ -1,7 +1,7 @@
 import { api, problemOf } from './client';
 import type { components } from './schema';
 
-// Ask BMS (issue #20, ADR-096; chapter 7 section 7.11.26): whether it is on for the business, and a question answered from the
+// Ask BMS (issue #20, ADR-096; chapter 7 section 7.11.28): whether it is on for the business, and a question answered from the
 // help articles. The generated schema marks every field optional; these are the shapes the server always sends
 // (core/help/internal/AskApi.java).
 

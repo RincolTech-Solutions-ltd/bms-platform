@@ -5,7 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.util.List;
 
-/** Bodies of {@code /api/v1/help/ask} (chapter 7 section 7.11.26, ADR-096). Field names are snake_case on the wire. */
+/** Bodies of {@code /api/v1/help/ask} (chapter 7 section 7.11.28, ADR-096). Field names are snake_case on the wire. */
 final class AskApi {
 
     private AskApi() {}

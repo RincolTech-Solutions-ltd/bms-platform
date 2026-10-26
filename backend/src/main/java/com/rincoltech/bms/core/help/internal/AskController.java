@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * {@code /api/v1/help/ask} (chapter 7 section 7.11.26, issue #20, ADR-096): any signed-in member of staff asks how to do
+ * {@code /api/v1/help/ask} (chapter 7 section 7.11.28, issue #20, ADR-096): any signed-in member of staff asks how to do
  * something, like reading How do I...?, so no matrix permission; what the answer may draw on is filtered to the asker's
  * own permissions. Not transactional: a question may wait on a provider, and no connection is held meanwhile.
  */

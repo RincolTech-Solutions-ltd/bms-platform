@@ -7,6 +7,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Picks the articles that answer a question with PostgreSQL full-text search (ADR-096 decision 2; no embeddings at this
@@ -35,9 +37,12 @@ class AskRetrieval {
     }
 
     private final JdbcClient jdbc;
+    private final TransactionTemplate reads;
 
-    AskRetrieval(JdbcClient jdbc) {
+    AskRetrieval(JdbcClient jdbc, PlatformTransactionManager transactions) {
         this.jdbc = jdbc;
+        this.reads = new TransactionTemplate(transactions);
+        this.reads.setReadOnly(true);
     }
 
     /** The best articles among {@code candidates}, best first; empty when no word of the question is in any. */
@@ -46,7 +51,7 @@ class AskRetrieval {
             return List.of();
         }
         Map<String, Article> byId = candidates.stream().collect(Collectors.toMap(Article::id, Function.identity()));
-        return jdbc.sql("""
+        return reads.execute(tx -> jdbc.sql("""
                         WITH q AS (
                             SELECT array_agg(DISTINCT l) AS lexemes
                               FROM unnest(tsvector_to_array(to_tsvector(CAST(:cfg AS regconfig), :question))) AS l
@@ -87,6 +92,6 @@ class AskRetrieval {
                 .param("limit", LIMIT)
                 .query((rs, n) -> new Hit(
                         byId.get(rs.getString("id")), rs.getInt("matched"), rs.getInt("asked"), rs.getDouble("rank")))
-                .list();
+                .list());
     }
 }
