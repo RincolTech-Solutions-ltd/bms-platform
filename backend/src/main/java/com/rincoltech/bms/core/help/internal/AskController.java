@@ -44,7 +44,8 @@ class AskController {
     @Operation(
             summary =
                     "Ask how to do something: an answer phrased from the help articles the caller may read, citing one,"
-                            + " or the matching articles; 403 ask_bms_off while it is off for the business",
+                            + " or the matching articles; 403 ask_bms_off while it is off for the business; 429 ask_rate_limited past"
+                            + " the person's questions an hour",
             operationId = "askBms")
     AskAnswer ask(@Valid @RequestBody AskRequest request) {
         return service.ask(request);

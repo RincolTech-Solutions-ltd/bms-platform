@@ -62,6 +62,10 @@ class AskService {
             or any other personal detail. Reply with one JSON object only: \
             {"answer": "<the answer, or empty>", "article": "<the id of the one article the answer comes from>"}""";
 
+    /** What no article holds, so an answer carrying it was not taken from them: a link, an email, a run of six digits. */
+    private static final java.util.regex.Pattern NOT_FROM_ARTICLES =
+            java.util.regex.Pattern.compile("(?i)https?://|www\\.|@|\\d(?:[\\s.\\-]?\\d){5,}");
+
     private static final java.util.regex.Pattern PLACEHOLDER =
             java.util.regex.Pattern.compile("\\[(?:name|phone|id|email|number)\\]");
 
@@ -120,6 +124,16 @@ class AskService {
         }
         Principal principal = CurrentPrincipal.require();
         Instant start = clock.now();
+        // Every question takes a ticket first, whatever path it takes after, so no one person can flood the business.
+        if (!store.ticket(
+                "ask", principal.userId(), start, start.minus(Duration.ofHours(1)), properties.userHourlyQuestions())) {
+            throw new ApiException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "ask_rate_limited",
+                    "Too many questions",
+                    "You have asked " + properties.userHourlyQuestions()
+                            + " questions in the last hour. How do I...? still answers; try Ask BMS again later.");
+        }
         String locale = localeOf(request.locale());
         String scrubbed = scrubber.scrub(request.question());
         String normalised = QuestionScrubber.normalised(scrubbed);
@@ -186,7 +200,7 @@ class AskService {
         Instant dayStart = LocalDate.ofInstant(start, tenant.profile().timezone())
                 .atStartOfDay(tenant.profile().timezone())
                 .toInstant();
-        if (store.countedSince(dayStart) >= properties.dailyQuestions()) {
+        if (!store.ticket("provider", principal.userId(), start, dayStart, properties.dailyQuestions())) {
             store.log(outcome.articles("daily_cap", null, false));
             return answer("articles", null, null, readable);
         }
@@ -197,15 +211,28 @@ class AskService {
                         new LlmClient.Message("user", userPrompt(grounding, scrubbed))),
                 properties.maxTokens(),
                 true);
+        long estimatedInput = Math.max(1, (prompt.characters() + 2L) / 3);
         for (AskProviders.Provider provider : providers.chain()) {
-            if ("deepseek".equals(provider.name()) && overMonthlySpend()) {
-                outcome.failures.add("deepseek:spend_cap");
+            // The most this call can cost is reserved before it is made; a paid provider's reservation is checked
+            // against its
+            // monthly cap for every business together, under one lock, so questions at once cannot all pass it.
+            Optional<UUID> spend = store.reserve(
+                    provider.name(),
+                    provider.client().model(),
+                    clock.now(),
+                    provider.config().costMicro(estimatedInput, prompt.maxTokens()),
+                    properties.costCurrency(),
+                    "deepseek".equals(provider.name()) ? properties.deepseekMonthlyCostMicro() : null,
+                    monthStart());
+            if (spend.isEmpty()) {
+                outcome.failures.add(provider.name() + ":spend_cap");
                 continue;
             }
             LlmClient.Result result;
             try {
                 result = provider.client().complete(prompt);
             } catch (LlmException e) {
+                settleFailure(spend.get(), provider, e);
                 outcome.failures.add(provider.name() + ":" + e.kind().reason());
                 log.info(
                         "ask bms provider failed provider={} reason={}",
@@ -221,7 +248,13 @@ class AskService {
                         e.getClass().getSimpleName());
                 continue;
             }
-            outcome.billed(provider, result);
+            long cost = outcome.billed(provider, result);
+            store.settle(
+                    spend.get(),
+                    clock.now(),
+                    Math.max(0, result.inputTokens()),
+                    Math.max(0, result.outputTokens()),
+                    cost);
             Optional<Parsed> parsed = parse(result.text(), grounding);
             if (parsed.isEmpty()) {
                 outcome.failures.add(provider.name() + ":bad_answer");
@@ -269,12 +302,31 @@ class AskService {
                 .collect(Collectors.toCollection(TreeSet::new));
     }
 
-    private boolean overMonthlySpend() {
-        Instant monthStart = YearMonth.from(clock.now().atZone(ZoneOffset.UTC))
+    private Instant monthStart() {
+        return YearMonth.from(clock.now().atZone(ZoneOffset.UTC))
                 .atDay(1)
                 .atStartOfDay(ZoneOffset.UTC)
                 .toInstant();
-        return store.platformSpend("deepseek", monthStart) >= properties.deepseekMonthlyCostMicro();
+    }
+
+    /**
+     * A failed call: what the provider reported is what it billed; a refusal before any work (a rate limit, a rejected key,
+     * a bad request) billed nothing; anything else may have been billed, so its reservation stays.
+     */
+    private void settleFailure(UUID spend, AskProviders.Provider provider, LlmException e) {
+        if (e.reportedInputTokens() >= 0 && e.reportedOutputTokens() >= 0) {
+            store.settle(
+                    spend,
+                    clock.now(),
+                    e.reportedInputTokens(),
+                    e.reportedOutputTokens(),
+                    provider.config().costMicro(e.reportedInputTokens(), e.reportedOutputTokens()));
+        } else if (switch (e.kind()) {
+            case RATE_LIMITED, AUTH, BAD_REQUEST, UNAVAILABLE -> true;
+            default -> false;
+        }) {
+            store.settle(spend, clock.now(), 0, 0, 0);
+        }
     }
 
     static String userPrompt(List<Article> grounding, String scrubbedQuestion) {
@@ -310,7 +362,9 @@ class AskService {
             if (answer.isEmpty()) {
                 return Optional.of(new Parsed("", null));
             }
-            if (answer.length() > MAX_ANSWER_CHARS) {
+            if (answer.length() > MAX_ANSWER_CHARS
+                    || NOT_FROM_ARTICLES.matcher(answer).find()) {
+                // Longer than any article, or a link, an email or a long number, none of which the articles hold.
                 return Optional.empty();
             }
             return grounding.stream().filter(a -> a.id().equals(id)).findFirst().map(a -> new Parsed(answer, a));
@@ -353,12 +407,14 @@ class AskService {
         }
 
         /** Every answer a provider gave is billed, used or not. */
-        void billed(AskProviders.Provider provider, LlmClient.Result result) {
+        long billed(AskProviders.Provider provider, LlmClient.Result result) {
             int in = Math.max(0, result.inputTokens());
             int out = Math.max(0, result.outputTokens());
+            long cost = provider.config().costMicro(in, out);
             inputTokens += in;
             outputTokens += out;
-            costMicro += provider.config().costMicro(in, out);
+            costMicro += cost;
+            return cost;
         }
 
         AskStore.Asked plain(String kind) {

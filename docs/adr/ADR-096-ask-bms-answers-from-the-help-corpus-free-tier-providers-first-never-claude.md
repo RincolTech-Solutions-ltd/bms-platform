@@ -43,10 +43,12 @@ can replace the retrieval step later without changing the rest.
    All three go through the gateway's one OpenAI-compatible adapter (`core.ai.LlmClientFactory`): https only, no redirects,
    retries on 429 and 5xx inside a budget (10 seconds per provider by default), temperature 0, JSON answers, and no provider
    text kept. Claude is excluded three ways: only the names `gemini`, `groq` and `deepseek` exist (the code, and a CHECK in
-   `V108`); a provider is used only while the allow-list in `application.yml` (`name=host`, not an environment value) names it
-   and its base URL is on that host; and anything naming Anthropic or Claude in the allow-list, a base URL or a model stops
-   startup. `NeverClaudeTest` proves all three and scans this feature's code, configuration, dependencies and the app's files
-   for an Anthropic endpoint, SDK or model id.
+   `V108`); each may call one host only, from an allow-list that is a constant in the code (`AskProviders.ALLOWED`), so no
+   property or environment value can point a provider at another host (a proxy included), and a base URL off that host
+   stops startup; and anything naming Anthropic or Claude in a base URL or a model stops startup too. `NeverClaudeTest`
+   proves all three, that an allow-list given as a property is ignored, and that no Anthropic endpoint, SDK or model id is
+   anywhere in the repository. Model text is kept only when it cites a given article and holds no link, email or long
+   number, none of which the articles hold.
 5. **Grounded answers only.** The model is told to answer from the given articles only, in at most five short sentences, and
    to reply `{"answer", "article"}`. An answer that is not that JSON, is too long, or cites an article it was not given is
    refused and the next provider is tried. An empty answer (the articles do not answer it) shows the matching articles and
@@ -62,12 +64,19 @@ can replace the retrieval step later without changing the rest.
    names the demo businesses first, D52); for every other business the box is not drawn and the endpoint answers 403
    `ask_bms_off`. Keys are environment values only (`BMS_HELP_ASK_GEMINI_API_KEY`, `..._GROQ_...`, `..._DEEPSEEK_...`,
    `docs/runbooks/ask-bms.md`); a provider without a key is skipped.
-8. **Caps and the spend log.** Each business may send `BMS_HELP_ASK_DAILY_QUESTIONS` (100) questions a day to the providers;
-   past it, and with no provider configured or all failing, the best matching articles are shown, so help never stops. A
-   cached answer or a deterministic one does not count. DeepSeek is skipped once every business together has spent
-   `BMS_HELP_ASK_DEEPSEEK_MONTHLY_COST_MICRO` this calendar month (a SECURITY DEFINER sum, `help_ask_platform_spend`). Every
-   question is a row of `help_ask_questions`: who asked, when, the hash, the outcome, the provider and model, the providers
-   that failed before it as `name:reason`, tokens and the estimated cost. Never the text.
+8. **Caps and the spend log, recorded before the work.** Each person may ask `BMS_HELP_ASK_USER_HOURLY_QUESTIONS` (30)
+   questions an hour on every path (429 `ask_rate_limited`), and each business may send `BMS_HELP_ASK_DAILY_QUESTIONS` (100)
+   a day to the providers; past the daily cap, and with no provider configured or all failing, the best matching articles
+   are shown, so help never stops. Both are tickets (`help_ask_tickets`) taken under the business's advisory lock before the
+   work they count, so questions sent at once are counted one after the other and cannot all pass. Every provider call
+   reserves the most it can cost in `help_ask_spend` before it is made and settles with what the provider reported after;
+   the spend belongs to the provider called, whatever the question's outcome, so a paid answer that is refused still
+   counts. DeepSeek's reservation is taken under one platform-wide lock and refused once every business together would pass
+   `BMS_HELP_ASK_DEEPSEEK_MONTHLY_COST_MICRO` this calendar month (a SECURITY DEFINER sum, `help_ask_platform_spend`), and
+   DeepSeek is skipped altogether until both of its prices are set, since with a price of 0 no cap could hold. Every question
+   is a row of `help_ask_questions`: who asked, when, the hash, the outcome, the provider and model, the providers that
+   failed before it as `name:reason`, tokens and the estimated cost. Never the text. The four tables hold no personal data,
+   so removing a closed business erases nothing there and its purge deletes the rows (ADR-090).
 
 ## Consequences
 
@@ -83,7 +92,8 @@ can replace the retrieval step later without changing the rest.
 - The image build needs a second build context (`help`), so building the API image by hand needs
   `--build-context help=frontend/src/help/articles` (the Makefile and compose do it).
 - Free tiers rate-limit and may change terms; the chain falls through to DeepSeek, which costs money (capped).
-- The name scrub is a heuristic. It is backed by never storing the text, but a lower case name can still reach a provider.
+- The name scrub is a heuristic. It is backed by never storing the text, but a lower case name, or a name that is also a
+  word of the articles ("Grace", as in a grace period), can still reach a provider.
 - The thumbs up and down feedback and the "show me" tour launch of #20's first sketch are not built here.
 
 **Watch for:**

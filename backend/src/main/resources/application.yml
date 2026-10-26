@@ -233,13 +233,14 @@ bms:
     enabled-tenants: ${BMS_AI_ENABLED_TENANTS:}
   # Ask BMS (issue #20, ADR-096, docs/runbooks/ask-bms.md): answers phrased from the help articles by a small model, providers
   # tried cheapest first. Off for every business until BMS_HELP_ASK_TENANTS names it; with no key at all the matching
-  # articles are shown. Keys come from the host environment only. The allow-list is configuration, not an environment
-  # value, and names three providers; Claude is never used (startup refuses anything naming Anthropic or Claude).
+  # articles are shown. Keys come from the host environment only. The provider allow-list (one host each for gemini, groq
+  # and deepseek) is a constant in AskProviders, not configuration; Claude is never used (startup refuses anything naming
+  # Anthropic or Claude). DeepSeek is skipped until both of its prices are set.
   help:
     ask:
       enabled-tenants: ${BMS_HELP_ASK_TENANTS:}
-      allowed-providers: gemini=generativelanguage.googleapis.com,groq=api.groq.com,deepseek=api.deepseek.com
       daily-questions: ${BMS_HELP_ASK_DAILY_QUESTIONS:100}
+      user-hourly-questions: ${BMS_HELP_ASK_USER_HOURLY_QUESTIONS:30}
       budget-seconds: ${BMS_HELP_ASK_BUDGET_SECONDS:10}
       max-tokens: ${BMS_HELP_ASK_MAX_TOKENS:400}
       cache-days: ${BMS_HELP_ASK_CACHE_DAYS:30}

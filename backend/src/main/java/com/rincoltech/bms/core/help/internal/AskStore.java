@@ -16,10 +16,10 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * The tables of Ask BMS (migration V108): the answer cache, the spend log the daily cap counts, and the two reads of the
- * cache key that come from the database (the asker's roles and the permission matrix version). Each method runs in a
- * short transaction of its own, so the tenant is bound and no connection is held while a provider is asked; the writes
- * commit whatever the caller does next.
+ * The tables of Ask BMS (migration V108): the answer cache, the question log, the tickets the limits count, the spend of
+ * each provider call, and the two reads of the cache key that come from the database (the asker's roles and the permission
+ * matrix version). Each method runs in a short transaction of its own, so the tenant is bound and no connection is held
+ * while a provider is asked; the writes commit whatever the caller does next.
  */
 @Component
 class AskStore {
@@ -116,20 +116,90 @@ class AskStore {
                 .update());
     }
 
-    /** The questions of the bound business that went to the providers since {@code from}. */
-    long countedSince(Instant from) {
-        return reads.execute(tx -> jdbc.sql("SELECT count(*) FROM help_ask_questions WHERE counted AND asked_at >= ?")
-                .param(Timestamp.from(from))
-                .query(Long.class)
-                .single());
+    /** One lock for the reservation of every business's paid calls: the monthly cap is a sum across businesses. */
+    private static final long SPEND_LOCK = 7_220_000_020L;
+
+    /**
+     * Takes a ticket of {@code kind} for the user when fewer than {@code limit} tickets of that kind were taken since
+     * {@code from} (by the user for {@code ask}, by the business for {@code provider}), and records it before the work it
+     * counts, under the business's advisory lock: questions sent at once are counted one after the other, so none passes a
+     * check another has not yet recorded. False when the limit is reached; nothing is written then.
+     */
+    boolean ticket(String kind, UUID userId, Instant now, Instant from, long limit) {
+        Boolean taken = writes.execute(tx -> {
+            jdbc.sql(
+                            "SELECT pg_advisory_xact_lock(hashtextextended('help_ask:' || current_setting('app.tenant_id'), 0))")
+                    .query()
+                    .listOfRows();
+            long used = "ask".equals(kind)
+                    ? jdbc.sql("SELECT count(*) FROM help_ask_tickets WHERE kind = 'ask' AND user_id = ? AND at >= ?")
+                            .params(userId, Timestamp.from(from))
+                            .query(Long.class)
+                            .single()
+                    : jdbc.sql("SELECT count(*) FROM help_ask_tickets WHERE kind = 'provider' AND at >= ?")
+                            .param(Timestamp.from(from))
+                            .query(Long.class)
+                            .single();
+            if (used >= limit) {
+                return false;
+            }
+            jdbc.sql("""
+                            INSERT INTO help_ask_tickets (id, tenant_id, user_id, at, kind)
+                            VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?)
+                            """)
+                    .params(UUID.randomUUID(), userId, Timestamp.from(now), kind)
+                    .update();
+            return true;
+        });
+        return Boolean.TRUE.equals(taken);
     }
 
-    /** The estimated spend on one provider by every business since {@code from} (V108, a sum only). */
-    long platformSpend(String provider, Instant from) {
-        return reads.execute(tx -> jdbc.sql("SELECT help_ask_platform_spend(?, ?)")
-                .params(provider, Timestamp.from(from))
-                .query(Long.class)
-                .single());
+    /**
+     * Reserves the most a provider call can cost before it is made. With a {@code monthlyCap}, under one platform-wide lock,
+     * the reservation is refused (empty) when the provider's spend by every business since {@code monthStart}, reservations
+     * of calls in flight included, plus this one would pass it.
+     */
+    Optional<UUID> reserve(
+            String provider,
+            String model,
+            Instant now,
+            long reserveMicro,
+            String currency,
+            Long monthlyCap,
+            Instant monthStart) {
+        return writes.execute(tx -> {
+            if (monthlyCap != null) {
+                jdbc.sql("SELECT pg_advisory_xact_lock(?)")
+                        .param(SPEND_LOCK)
+                        .query()
+                        .listOfRows();
+                long spent = jdbc.sql("SELECT help_ask_platform_spend(?, ?)")
+                        .params(provider, Timestamp.from(monthStart))
+                        .query(Long.class)
+                        .single();
+                if (monthlyCap <= 0 || spent + reserveMicro > monthlyCap) {
+                    return Optional.<UUID>empty();
+                }
+            }
+            UUID id = UUID.randomUUID();
+            jdbc.sql("""
+                            INSERT INTO help_ask_spend (id, tenant_id, provider, model, reserved_at, cost_micro, cost_currency)
+                            VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
+                            """)
+                    .params(id, provider, model, Timestamp.from(now), reserveMicro, currency)
+                    .update();
+            return Optional.of(id);
+        });
+    }
+
+    /** Settles a reservation with what the provider reported; a call that may have been billed but reported nothing keeps it. */
+    void settle(UUID id, Instant now, int inputTokens, int outputTokens, long costMicro) {
+        writes.executeWithoutResult(tx -> jdbc.sql("""
+                        UPDATE help_ask_spend SET settled_at = ?, input_tokens = ?, output_tokens = ?, cost_micro = ?
+                         WHERE id = ? AND settled_at IS NULL
+                        """)
+                .params(Timestamp.from(now), inputTokens, outputTokens, costMicro, id)
+                .update());
     }
 
     void log(Asked a) {

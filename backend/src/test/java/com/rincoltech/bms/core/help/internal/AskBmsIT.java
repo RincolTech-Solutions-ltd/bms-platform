@@ -16,6 +16,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -44,7 +48,12 @@ import tools.jackson.databind.JsonNode;
  */
 @Import(AskBmsIT.Fakes.class)
 // A context of its own (the fakes and the tenant list): keep its pool small, as every cached context holds one open.
-@TestPropertySource(properties = {"spring.datasource.hikari.maximum-pool-size=3", "bms.help.ask.daily-questions=6"})
+@TestPropertySource(
+        properties = {
+            "spring.datasource.hikari.maximum-pool-size=3",
+            "bms.help.ask.daily-questions=6",
+            "bms.help.ask.user-hourly-questions=9"
+        })
 class AskBmsIT extends IntegrationTest {
 
     static final RecordingLlmClient GEMINI = new RecordingLlmClient("gemini-test-model");
@@ -296,7 +305,7 @@ class AskBmsIT extends IntegrationTest {
     @Test
     void phonesIdsAndNamesNeverLeaveTheServerAndNoTextIsStored() {
         GEMINI.thenAnswer(answer(INVITE, "invite-someone"));
-        okAsk(admin, "How do I invite Akello Testperson on 0772 123 456, ID CM90010000000X, test.person@example.test?");
+        okAsk(admin, "How do I invite Zorvex Testperson on 0772 123 456, ID CM90010000000X, test.person@example.test?");
         String sent = String.join(
                 "\n",
                 GEMINI.requests().getFirst().messages().stream()
@@ -304,7 +313,7 @@ class AskBmsIT extends IntegrationTest {
                         .toList());
         assertThat(sent)
                 .contains("[name]", "[phone]", "[id]", "[email]")
-                .doesNotContain("Akello", "Testperson", "0772", "123 456", "CM900", "example.test");
+                .doesNotContain("Zorvex", "Testperson", "0772", "123 456", "CM900", "example.test");
         String stored = TestDatabase.owner()
                         .sql("""
                         SELECT coalesce(string_agg(row_to_json(q)::text, ' '), '') FROM help_ask_questions q
@@ -321,7 +330,7 @@ class AskBmsIT extends IntegrationTest {
                         .param(t.tenantId())
                         .query(String.class)
                         .single();
-        assertThat(stored).doesNotContain("Akello", "0772", "CM900", "example.test", "How do I invite");
+        assertThat(stored).doesNotContain("Zorvex", "0772", "CM900", "example.test", "How do I invite");
     }
 
     @Test
@@ -350,7 +359,8 @@ class AskBmsIT extends IntegrationTest {
 
         GEMINI.thenFail(new LlmException(Kind.PROVIDER_ERROR, 503, 3));
         GROQ.thenFail(new LlmException(Kind.NETWORK, 0, 3));
-        DEEPSEEK.thenFail(new LlmException(Kind.BAD_RESPONSE, 200, 1));
+        // DeepSeek answers, is paid, and the answer is refused: its cost still counts against DeepSeek's month.
+        DEEPSEEK.thenAnswer(new LlmClient.Result("Sure, here is how.", 120, 40, "stop"));
         JsonNode fallback = okAsk(admin, "How do I invite a storekeeper?");
         assertThat(fallback.get("source").asString()).isEqualTo("articles");
         assertThat(fallback.get("answer").isNull()).isTrue();
@@ -358,7 +368,22 @@ class AskBmsIT extends IntegrationTest {
         row = lastLog();
         assertThat(row.get("outcome")).isEqualTo("articles");
         assertThat(row.get("fallback_reason")).isEqualTo("all_failed");
+        assertThat(row.get("failures")).isEqualTo("gemini:provider_error,groq:network,deepseek:bad_answer");
         assertThat(row.get("counted")).isEqualTo(true);
+        // Every call left a spend row, settled with what it billed: two DeepSeek answers of 160 each, the rest nothing.
+        Map<String, Object> spend =
+                TestDatabase.owner().sql("""
+                        SELECT count(*) FILTER (WHERE settled_at IS NULL) AS open,
+                               coalesce(sum(cost_micro) FILTER (WHERE provider = 'deepseek'), 0)::bigint AS deepseek,
+                               coalesce(sum(cost_micro) FILTER (WHERE provider <> 'deepseek'), 0)::bigint AS free
+                          FROM help_ask_spend WHERE tenant_id = ?
+                        """).param(t.tenantId()).query().singleRow();
+        assertThat(spend.get("deepseek")).isEqualTo(320L);
+        assertThat(spend.get("free")).isEqualTo(0L);
+        // The timeout, the 503 and the broken connection may have been billed, so they keep their reservation (0 on a
+        // free
+        // tier); the rate limit and the rejected key billed nothing and are settled.
+        assertThat(spend.get("open")).isEqualTo(3L);
     }
 
     @Test
@@ -413,19 +438,15 @@ class AskBmsIT extends IntegrationTest {
     }
 
     @Test
-    void deepSeekIsSkippedOnceTheMonthsSpendIsReached() {
+    void deepSeekIsSkippedOnceEveryBusinessesSpendThisMonthReachesTheCap() {
+        // The month's spend is another business's: the cap is for every business together.
+        TestDatabase.Fixture other = TestDatabase.tenant("ask-spend", false);
         UUID spent = UUID.randomUUID();
-        UUID user = TestDatabase.owner()
-                .sql("SELECT id FROM users WHERE tenant_id = ? LIMIT 1")
-                .param(t.tenantId())
-                .query(UUID.class)
-                .single();
         TestDatabase.owner().sql("""
-                        INSERT INTO help_ask_questions (id, tenant_id, user_id, asked_at, question_hash, locale, outcome,
-                                                        provider, model, counted, cited_article, cost_micro, cost_currency)
-                        VALUES (?, ?, ?, now(), repeat('d', 64), 'en', 'model', 'deepseek', 'deepseek-test-model', true,
-                                'invite-someone', 50000000, 'USD')
-                        """).params(spent, t.tenantId(), user).update();
+                        INSERT INTO help_ask_spend (id, tenant_id, provider, model, reserved_at, settled_at, input_tokens,
+                                                    output_tokens, cost_micro, cost_currency)
+                        VALUES (?, ?, 'deepseek', 'deepseek-test-model', now(), now(), 1000, 100, 50000000, 'USD')
+                        """).params(spent, other.tenantId()).update();
         try {
             GEMINI.thenFail(new LlmException(Kind.RATE_LIMITED, 429, 3));
             GROQ.thenFail(new LlmException(Kind.RATE_LIMITED, 429, 3));
@@ -435,9 +456,53 @@ class AskBmsIT extends IntegrationTest {
             assertThat(DEEPSEEK.requests()).isEmpty();
         } finally {
             TestDatabase.owner()
-                    .sql("DELETE FROM help_ask_questions WHERE id = ?")
+                    .sql("DELETE FROM help_ask_spend WHERE id = ?")
                     .param(spent)
                     .update();
         }
+    }
+
+    /** Questions sent at once are counted one after the other: no more reach the providers than the day allows. */
+    @Test
+    void questionsSentAtOnceCannotPassTheDailyCapTogether() throws Exception {
+        String second = signIn(t, api, "ask-admin-2", new Api.Role("tenant_admin", null));
+        ExecutorService pool = Executors.newFixedThreadPool(12);
+        try {
+            List<Future<ResponseEntity<JsonNode>>> sent = new ArrayList<>();
+            for (int i = 0; i < 12; i++) {
+                String token = i % 2 == 0 ? admin : second;
+                // The stub's default answer is not an answer, so nothing is cached and every question goes out.
+                sent.add(pool.submit(() -> ask(token, "How do I invite a cashier?")));
+            }
+            for (Future<ResponseEntity<JsonNode>> f : sent) {
+                ResponseEntity<JsonNode> r = f.get(60, TimeUnit.SECONDS);
+                assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+                assertThat(r.getBody().get("source").asString()).isEqualTo("articles");
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(GEMINI.requests()).hasSize(6);
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM help_ask_questions WHERE tenant_id = ? AND fallback_reason = 'daily_cap'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(6L);
+    }
+
+    /** Every question, whatever path it takes, counts against the person's hour. */
+    @Test
+    void onePersonIsLimitedToTheirHourlyQuestionsOnEveryPath() {
+        String seller = signIn(t, api, "ask-limited", new Api.Role("retail_sales", t.headOffice()));
+        for (int i = 0; i < 9; i++) {
+            assertThat(okAsk(seller, "zzqx wvvy").get("source").asString()).isEqualTo("no_match");
+        }
+        ResponseEntity<JsonNode> limited = ask(seller, "zzqx wvvy");
+        assertThat(limited.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        assertThat(limited.getBody().get("code").asString()).isEqualTo("ask_rate_limited");
+        // Another person of the same business is not limited by it.
+        assertThat(okAsk(admin, "zzqx wvvy").get("source").asString()).isEqualTo("no_match");
     }
 }

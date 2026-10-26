@@ -684,7 +684,7 @@ export interface paths {
         /** Whether Ask BMS is on for this business, and the corpus revision */
         get: operations["getAskStatus"];
         put?: never;
-        /** Ask how to do something: an answer phrased from the help articles the caller may read, citing one, or the matching articles; 403 ask_bms_off while it is off for the business */
+        /** Ask how to do something: an answer phrased from the help articles the caller may read, citing one, or the matching articles; 403 ask_bms_off while it is off for the business; 429 ask_rate_limited past the person's questions an hour */
         post: operations["askBms"];
         delete?: never;
         options?: never;

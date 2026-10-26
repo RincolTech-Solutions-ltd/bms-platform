@@ -17,9 +17,11 @@ import org.slf4j.LoggerFactory;
 /**
  * The provider chain of Ask BMS, cheapest first (ADR-096, the owner's rule on #20): Gemini Flash or Flash-Lite on its free
  * tier, then a small Groq model on its free tier, then DeepSeek's cheapest chat model, paid, as the last resort. Claude is
- * never used: only the three names above exist, a provider is used only while the configuration allow-list names it with
- * its host and its base URL is on that host, and anything that names Anthropic or Claude (a host, a base URL, a model)
- * fails startup. {@code NeverClaudeTest} proves all three and that no Anthropic SDK or endpoint is in this module.
+ * never used: only the three names above exist, each with the one host it may call ({@link #ALLOWED}, a constant, so no
+ * property or environment value can change it), a base URL off that host stops startup, and anything that names Anthropic
+ * or Claude (a base URL, a model) stops it too. DeepSeek is skipped while either of its prices is 0, since a paid provider
+ * with no price has no spend cap. {@code NeverClaudeTest} proves all of it and that no Anthropic SDK, endpoint or model id
+ * is anywhere in the repository.
  */
 class AskProviders {
 
@@ -27,6 +29,12 @@ class AskProviders {
 
     /** The only providers, in the order they are tried. */
     static final List<String> ORDER = List.of("gemini", "groq", "deepseek");
+
+    /** The allow-list: the one host each provider may be called on. A constant on purpose (ADR-096 decision 4). */
+    static final Map<String, String> ALLOWED = Map.of(
+            "gemini", "generativelanguage.googleapis.com",
+            "groq", "api.groq.com",
+            "deepseek", "api.deepseek.com");
 
     private static final Pattern NEVER = Pattern.compile("anthropic|claude", Pattern.CASE_INSENSITIVE);
 
@@ -61,18 +69,10 @@ class AskProviders {
 
     /**
      * Builds the chain from the configuration. A provider with no key, base URL or model is skipped quietly (that is how
-     * the operator leaves one out); one the allow-list does not name is skipped with a warning; anything naming Anthropic
-     * or Claude, or a base URL off the allowed host, stops startup.
+     * the operator leaves one out), and DeepSeek without both prices with a warning; anything naming Anthropic or Claude,
+     * or a base URL off the provider's allowed host, stops startup.
      */
     static AskProviders from(AskProperties properties, LlmClientFactory factory) {
-        Map<String, String> allowed = properties.allowList();
-        allowed.forEach((name, host) -> {
-            refuseClaude("the allow-list", name + "=" + host);
-            if (!ORDER.contains(name)) {
-                throw new IllegalStateException(
-                        "bms.help.ask.allowed-providers may name gemini, groq and deepseek only");
-            }
-        });
         Duration budget = Duration.ofSeconds(properties.budgetSeconds());
         List<Provider> chain = new ArrayList<>();
         for (String name : ORDER) {
@@ -82,14 +82,15 @@ class AskProviders {
             if (blank(config.apiKey()) || blank(config.baseUrl()) || blank(config.model())) {
                 continue;
             }
-            String host = allowed.get(name);
-            if (host == null) {
-                log.warn("Ask BMS provider {} has a key but is not on the allow-list: skipped", name);
-                continue;
-            }
+            String host = ALLOWED.get(name);
             if (!host.equals(hostOf(config.baseUrl()))) {
                 throw new IllegalStateException(
                         "BMS_HELP_ASK_" + name.toUpperCase(Locale.ROOT) + "_BASE_URL must be on " + host);
+            }
+            if ("deepseek".equals(name)
+                    && (config.priceInputMicroPerMillion() == 0 || config.priceOutputMicroPerMillion() == 0)) {
+                log.warn("Ask BMS provider deepseek has a key but no price, so no spend cap could hold: skipped");
+                continue;
             }
             Optional<LlmClient> client =
                     factory.openAiCompatible(config.baseUrl(), config.apiKey(), config.model(), budget);

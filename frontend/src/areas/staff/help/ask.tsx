@@ -33,9 +33,16 @@ function Answer({ result }: { result: AskAnswer }) {
   }
   if (result.source === 'other_role' && result.answer) {
     return (
-      <p role="note" className="alert alert-info">
-        {result.answer}
-      </p>
+      <>
+        <p role="note" className="alert alert-info">
+          {result.answer}
+        </p>
+        {result.articles.length > 0 && (
+          <Card title="Articles for what you can do">
+            <RowList label="Articles for what you can do">{result.articles.map(row)}</RowList>
+          </Card>
+        )}
+      </>
     );
   }
   if (result.articles.length > 0) {

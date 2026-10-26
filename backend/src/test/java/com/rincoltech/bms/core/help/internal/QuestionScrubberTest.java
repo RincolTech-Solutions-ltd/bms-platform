@@ -33,10 +33,10 @@ class QuestionScrubberTest {
 
     @Test
     void namesAreReplacedWhereverTheyStand() {
-        assertThat(scrubber.scrub("How do I invite Akello Grace as a cashier?"))
+        assertThat(scrubber.scrub("How do I invite Zorvex Quillam as a cashier?"))
                 .isEqualTo("How do I invite [name] as a cashier?");
-        assertThat(scrubber.scrub("Okello wants to record a sale")).isEqualTo("[name] wants to record a sale");
-        assertThat(scrubber.scrub("why can't Nambi Test-Person approve?")).isEqualTo("why can't [name] approve?");
+        assertThat(scrubber.scrub("Brontu wants to record a sale")).isEqualTo("[name] wants to record a sale");
+        assertThat(scrubber.scrub("why can't Flimzy Test-Person approve?")).isEqualTo("why can't [name] approve?");
     }
 
     @Test

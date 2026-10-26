@@ -71,7 +71,7 @@ export function HowDoIPage() {
           </div>
         )}
       </SearchResults>
-      <AskUs text={asked || search.text} />
+      <AskUs text={search.text.trim() ? search.text : asked} />
     </main>
   );
 }

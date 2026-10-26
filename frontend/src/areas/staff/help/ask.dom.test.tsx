@@ -85,14 +85,27 @@ describe('Ask BMS', () => {
     expect(from.getAttribute('href')).toBe('/staff/help/invite-someone');
     const askUs = screen.getByRole('link', { name: 'Ask us' });
     expect(new URL(askUs.getAttribute('href') ?? '', 'http://localhost').searchParams.get('ask')).toBe('How do I invite a cashier?');
+    // A new search afterwards is what Ask us carries, not the older question.
+    fireEvent.change(screen.getByLabelText('What do you want to do?'), { target: { value: 'count stock' } });
+    await waitFor(() =>
+      expect(new URL(screen.getByRole('link', { name: 'Ask us' }).getAttribute('href') ?? '', 'http://localhost').searchParams.get('ask')).toBe('count stock'),
+    );
   });
 
   it('says when the job is another role\'s, lists the articles when no answer was written, and says when none matches', async () => {
     ask.status.mockResolvedValue({ enabled: true, revision: 'r' });
-    ask.ask.mockResolvedValueOnce(reply({ source: 'other_role', answer: '"How do I invite someone to use BMS?" is a job for another role. Ask your business administrator to do it, or to give you that permission.' }));
+    ask.ask.mockResolvedValueOnce(
+      reply({
+        source: 'other_role',
+        answer: '"How do I invite someone to use BMS?" is a job for another role. Ask your business administrator to do it, or to give you that permission.',
+        articles: [{ id: 'switch-branch', title: 'How do I switch branch?' }],
+      }),
+    );
     show(<HowDoIPage />);
     await askQuestion('How do I invite a cashier?');
     expect((await screen.findByRole('note')).textContent).toContain('a job for another role');
+    const mine = screen.getByRole('list', { name: 'Articles for what you can do' });
+    expect(within(mine).getByRole('link').getAttribute('href')).toBe('/staff/help/switch-branch');
 
     ask.ask.mockResolvedValueOnce(reply({ source: 'articles', articles: [{ id: 'count-stock', title: 'How do I count my stock?' }] }));
     await askQuestion('count the shelves');

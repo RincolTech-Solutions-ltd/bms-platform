@@ -1,9 +1,7 @@
 package com.rincoltech.bms.core.help.internal;
 
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -16,10 +14,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * @param enabledTenants {@code BMS_HELP_ASK_TENANTS}: comma separated tenant ids (never slugs) for which Ask BMS is on;
  *     empty means off everywhere (the default). Demo businesses are named first (owner decision D52).
- * @param allowedProviders the provider allow-list, {@code name=host} pairs, in {@code application.yml} and not taken from
- *     an environment value: a provider is used only when its name is listed and its base URL's host is the listed one
  * @param dailyQuestions {@code BMS_HELP_ASK_DAILY_QUESTIONS}: the questions one business may send to the providers per day
  *     (0 stops them; the articles are still shown)
+ * @param userHourlyQuestions {@code BMS_HELP_ASK_USER_HOURLY_QUESTIONS}: the questions one person may ask in any hour, on
+ *     every path (429 {@code ask_rate_limited} past it)
  * @param budgetSeconds the time one provider may take with its retries, at most 15, before the next is tried
  * @param maxTokens the most output tokens one answer may take
  * @param cacheDays how long a cached answer may be served; a safety net, since a new revision is a new key
@@ -29,8 +27,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties("bms.help.ask")
 record AskProperties(
         String enabledTenants,
-        String allowedProviders,
         Integer dailyQuestions,
+        Integer userHourlyQuestions,
         Integer budgetSeconds,
         Integer maxTokens,
         Integer cacheDays,
@@ -74,8 +72,8 @@ record AskProperties(
 
     AskProperties {
         enabledTenants = enabledTenants == null ? "" : enabledTenants;
-        allowedProviders = allowedProviders == null ? "" : allowedProviders;
         dailyQuestions = dailyQuestions == null ? 100 : (int) notNegative(dailyQuestions);
+        userHourlyQuestions = userHourlyQuestions == null ? 30 : (int) notNegative(userHourlyQuestions);
         budgetSeconds = budgetSeconds == null ? 10 : Math.clamp(budgetSeconds, 1, MAX_BUDGET_SECONDS);
         maxTokens = maxTokens == null ? 400 : Math.clamp(maxTokens, 50, 1000);
         cacheDays = cacheDays == null ? 30 : Math.clamp(cacheDays, 1, 365);
@@ -106,20 +104,6 @@ record AskProperties(
                 .filter(e -> e.matches("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
                 .map(UUID::fromString)
                 .collect(Collectors.toUnmodifiableSet());
-    }
-
-    /** The allow-list as name to host, in the order written. */
-    Map<String, String> allowList() {
-        Map<String, String> out = new LinkedHashMap<>();
-        for (String pair : allowedProviders.split(",")) {
-            int at = pair.indexOf('=');
-            if (at > 0) {
-                out.put(
-                        pair.substring(0, at).strip().toLowerCase(Locale.ROOT),
-                        pair.substring(at + 1).strip().toLowerCase(Locale.ROOT));
-            }
-        }
-        return out;
     }
 
     Provider provider(String name) {

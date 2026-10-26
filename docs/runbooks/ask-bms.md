@@ -11,9 +11,11 @@ a placeholder.**
 |---|---|---|
 | The business is named | `BMS_HELP_ASK_TENANTS`: tenant **ids** (UUIDs, never slugs), comma separated; an entry that is not a UUID names nobody | The Ask BMS box is not drawn and `POST /help/ask` answers 403 `ask_bms_off`. How do I...? works as before |
 | A provider has a key | `BMS_HELP_ASK_GEMINI_API_KEY`, `BMS_HELP_ASK_GROQ_API_KEY`, `BMS_HELP_ASK_DEEPSEEK_API_KEY` | That provider is skipped. With none at all every question is answered with the matching articles (`fallback_reason` `no_provider`) |
-| The provider is on the allow-list | `bms.help.ask.allowed-providers` in `application.yml` (`gemini`, `groq`, `deepseek` and their hosts); not an environment value | A key for a provider not listed is skipped with a warning. A base URL off the listed host, or anything naming Anthropic or Claude, stops startup |
+| The base URL is on the provider's host | A constant in the code (`AskProviders.ALLOWED`: `generativelanguage.googleapis.com`, `api.groq.com`, `api.deepseek.com`); no setting changes it | A base URL on any other host (a proxy too), or anything naming Anthropic or Claude, stops startup |
+| DeepSeek has both prices | `BMS_HELP_ASK_DEEPSEEK_PRICE_INPUT_MICRO_PER_MILLION` and `..._OUTPUT_...` above 0 | DeepSeek is skipped with a warning at start: a paid provider with no price has no spend cap |
+| The person's hour is not spent | `BMS_HELP_ASK_USER_HOURLY_QUESTIONS` (default 30), every question counted | 429 `ask_rate_limited`; How do I...? still answers |
 | The business's daily cap is not spent | `BMS_HELP_ASK_DAILY_QUESTIONS` (default 100; 0 stops the providers) | The matching articles are shown (`daily_cap`). Cached answers still answer |
-| DeepSeek's monthly spend is not spent | `BMS_HELP_ASK_DEEPSEEK_MONTHLY_COST_MICRO` (default 5000000 micro-units of the cost currency, every business together, per calendar month in UTC) | DeepSeek is skipped (`deepseek:spend_cap` in `failures`) |
+| DeepSeek's monthly spend is not spent | `BMS_HELP_ASK_DEEPSEEK_MONTHLY_COST_MICRO` (default 5000000 micro-units of the cost currency, every business together, per calendar month in UTC; calls in flight count at their reservation) | DeepSeek is skipped (`deepseek:spend_cap` in `failures`) |
 
 **Claude is never used.** There is no setting that adds a provider: the three names are in the code and in a CHECK of the
 database, and `NeverClaudeTest` fails the build if an Anthropic endpoint, SDK or model id appears in this feature.
@@ -29,13 +31,14 @@ database, and `NeverClaudeTest` fails the build if an Anthropic endpoint, SDK or
 | `BMS_HELP_ASK_GROQ_MODEL` | `llama-3.1-8b-instant` | A small free-tier model |
 | `BMS_HELP_ASK_DEEPSEEK_API_KEY` | empty | Paid, last resort. Secret |
 | `BMS_HELP_ASK_DEEPSEEK_MODEL` | `deepseek-chat` | The cheapest chat model |
-| `BMS_HELP_ASK_DEEPSEEK_PRICE_INPUT_MICRO_PER_MILLION`, `..._OUTPUT_...` | 0 | Micro-units per million tokens, from the provider's price page; with 0 the spend log shows no cost and the monthly cap never bites |
+| `BMS_HELP_ASK_DEEPSEEK_PRICE_INPUT_MICRO_PER_MILLION`, `..._OUTPUT_...` | 0 | Micro-units per million tokens, from the provider's price page. Both are needed: while either is 0 DeepSeek is skipped |
 | `BMS_HELP_ASK_GEMINI_PRICE_...`, `BMS_HELP_ASK_GROQ_PRICE_...` | 0 | Only if a free tier ends |
 | `BMS_HELP_ASK_DAILY_QUESTIONS` | 100 | Questions a business may send to the providers a day, in its own time zone |
+| `BMS_HELP_ASK_USER_HOURLY_QUESTIONS` | 30 | Questions one person may ask in any hour, on every path |
 | `BMS_HELP_ASK_DEEPSEEK_MONTHLY_COST_MICRO` | 5000000 | Every business together |
 | `BMS_HELP_ASK_BUDGET_SECONDS` | 10 | One provider's time with its retries, at most 15, before the next is tried |
 | `BMS_HELP_ASK_MAX_TOKENS`, `BMS_HELP_ASK_CACHE_DAYS`, `BMS_HELP_ASK_COST_CURRENCY` | 400, 30, `USD` | Rarely changed |
-| `BMS_HELP_ASK_GEMINI_BASE_URL`, `..._GROQ_...`, `..._DEEPSEEK_...` | the providers' OpenAI-compatible endpoints | Must stay on the allow-listed host |
+| `BMS_HELP_ASK_GEMINI_BASE_URL`, `..._GROQ_...`, `..._DEEPSEEK_...` | the providers' OpenAI-compatible endpoints | Must stay on the provider's host (startup refuses another); not in the compose files on purpose |
 
 Keys live in `/opt/bms/.env` (mode 600) and nowhere else: not in the repository, a fixture, a log or an error. The compose files
 pass them to the API container only. After a change, restart the API (`docs/runbooks/deploy.md`); values are read at start.
@@ -52,13 +55,19 @@ pass them to the API container only. After a change, restart the API (`docs/runb
 
 ## 4. Watch it
 
-The spend log is `help_ask_questions` (one row a question; never its text). On the database host, as `bms_owner`:
+The question log is `help_ask_questions` (one row a question; never its text) and the spend is `help_ask_spend` (one row a
+provider call, reserved before it and settled after). On the database host, as `bms_owner`:
 
 ```sql
 -- Today's questions by outcome and provider, every business.
 SELECT outcome, fallback_reason, provider, count(*), sum(cost_micro) AS cost_micro
   FROM help_ask_questions WHERE asked_at >= date_trunc('day', now())
  GROUP BY 1, 2, 3 ORDER BY 4 DESC;
+
+-- This month's spend by provider, every business (calls in flight at their reservation).
+SELECT provider, count(*), sum(cost_micro) AS cost_micro, count(*) FILTER (WHERE settled_at IS NULL) AS unsettled
+  FROM help_ask_spend WHERE reserved_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+ GROUP BY 1;
 
 -- Which providers failed and why, this week.
 SELECT f AS failure, count(*) FROM help_ask_questions, unnest(failures) AS f

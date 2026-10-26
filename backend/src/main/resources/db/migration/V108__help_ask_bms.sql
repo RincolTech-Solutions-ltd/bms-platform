@@ -1,17 +1,26 @@
 -- V108: Ask BMS (issue #20, owner decision D52, ADR-096), directly after V107 (#597). Expand only, safe on a populated
--- database: two new tenant tables and one SECURITY DEFINER function. No existing table, column, constraint or function is
+-- database: four new tenant tables and one SECURITY DEFINER function. No existing table, column, constraint or function is
 -- touched and no permission is added (asking is open to every signed-in member of staff, like How do I...?).
 --
--- 1. `help_ask_questions`: one row per question asked, the spend log and what the daily question cap counts. It holds the
---    SHA-256 of the scrubbed question and never its text, which provider answered (or none), the providers that failed
---    before it as closed words, token counts and the estimated cost. Append-only for the application role.
--- 2. `help_ask_answers`: the answer cache. One row per cache key, the SHA-256 of everything that produced the answer (the
+-- 1. `help_ask_questions`: one row per question asked, the log of what happened. It holds the SHA-256 of the scrubbed
+--    question and never its text, the outcome, which provider answered (or none), the providers that failed before it as
+--    closed words, token counts and the estimated cost. Append-only for the application role.
+-- 2. `help_ask_tickets`: the limits, written BEFORE the work they count, under a per-business advisory lock, so parallel
+--    questions cannot all pass a check that none has recorded yet: `ask` for every question (the per-person hourly limit)
+--    and `provider` for every question that goes on to the providers (the daily question cap of the business).
+-- 3. `help_ask_spend`: one row per provider call, written before the call with the most it can cost (a reservation, under one
+--    platform-wide advisory lock for a paid provider) and settled after it with what the provider reported. The spend is
+--    attributed to the provider called, whatever the question's outcome, so a paid answer that is refused still counts.
+-- 4. `help_ask_answers`: the answer cache. One row per cache key, the SHA-256 of everything that produced the answer (the
 --    normalised scrubbed question, the asker's roles and permission set, the modules, the locale, the corpus revision, the
 --    permission matrix version, the prompt version and the provider and model chain). A new revision or matrix version is
 --    a new key, so an old row is never read again; `expires_at` is a safety net only. The answer text comes from the help
 --    articles alone (ADR-096), so it holds no business data.
--- 3. `help_ask_platform_spend`: the estimated cost of one provider across every business since a moment, for the monthly
---    DeepSeek cap. A sum only, so a business learns nothing about another.
+-- 5. `help_ask_platform_spend`: the reserved and settled cost of one provider across every business since a moment, for the
+--    monthly DeepSeek cap. A sum only, so a business learns nothing about another. bms_owner has BYPASSRLS.
+--
+-- None of the four holds personal data (a user id, hashes, counts, article text), so the removal of a closed business has
+-- nothing to erase here, and its purge deletes the rows like any tenant table (ADR-090).
 --
 -- Locks, said plainly. The tables are created empty; the only lock cost is SHARE ROW EXCLUSIVE on `tenants` and `users`
 -- (the foreign keys) until the commit, milliseconds, reads go on. lock_timeout is five seconds as in V26 and V107.
@@ -36,8 +45,8 @@ CREATE TABLE help_ask_questions (
     model           varchar(100),
     -- The providers tried before the one that answered, as `name:reason` (for example `gemini:rate_limited`).
     failures        text[]      NOT NULL DEFAULT '{}',
-    -- Whether it counts against the daily question cap: it went to the providers (an answer from the cache, a deterministic
-    -- answer and a question stopped by the cap do not).
+    -- Whether it went to the providers (an answer from the cache, a deterministic answer and a question stopped by the cap
+    -- did not); the cap itself counts `help_ask_tickets`.
     counted         boolean     NOT NULL,
     cited_article   varchar(80),
     input_tokens    integer     NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
@@ -50,12 +59,42 @@ CREATE TABLE help_ask_questions (
     CHECK ((outcome = 'articles') = (fallback_reason IS NOT NULL)),
     FOREIGN KEY (tenant_id, user_id) REFERENCES users (tenant_id, id)
 );
--- The daily cap: the questions of one business since the start of its day.
-CREATE INDEX help_ask_questions_by_day ON help_ask_questions (tenant_id, asked_at) WHERE counted;
--- The monthly provider spend across businesses.
-CREATE INDEX help_ask_questions_by_provider ON help_ask_questions (provider, asked_at) WHERE cost_micro > 0;
+-- The newest questions of a business.
+CREATE INDEX help_ask_questions_by_time ON help_ask_questions (tenant_id, asked_at);
 SELECT bms_apply_tenant_rls('help_ask_questions');
 SELECT bms_grant_app('help_ask_questions', 'SELECT, INSERT');
+
+CREATE TABLE help_ask_tickets (
+    id        uuid        NOT NULL PRIMARY KEY,
+    tenant_id uuid        NOT NULL REFERENCES tenants (id),
+    user_id   uuid        NOT NULL,
+    at        timestamptz NOT NULL,
+    kind      text        NOT NULL CHECK (kind IN ('ask', 'provider')),
+    FOREIGN KEY (tenant_id, user_id) REFERENCES users (tenant_id, id)
+);
+-- The person's hour and the business's day.
+CREATE INDEX help_ask_tickets_by_user ON help_ask_tickets (tenant_id, user_id, at) WHERE kind = 'ask';
+CREATE INDEX help_ask_tickets_by_day ON help_ask_tickets (tenant_id, at) WHERE kind = 'provider';
+SELECT bms_apply_tenant_rls('help_ask_tickets');
+SELECT bms_grant_app('help_ask_tickets', 'SELECT, INSERT');
+
+CREATE TABLE help_ask_spend (
+    id            uuid         NOT NULL PRIMARY KEY,
+    tenant_id     uuid         NOT NULL REFERENCES tenants (id),
+    provider      text         NOT NULL CHECK (provider IN ('gemini', 'groq', 'deepseek')),
+    model         varchar(100) NOT NULL,
+    reserved_at   timestamptz  NOT NULL,
+    -- Null while the call is in flight: the row then holds its reservation, the most the call can cost.
+    settled_at    timestamptz,
+    input_tokens  integer      NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
+    output_tokens integer      NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
+    cost_micro    bigint       NOT NULL CHECK (cost_micro >= 0),
+    cost_currency char(3)      NOT NULL
+);
+CREATE INDEX help_ask_spend_by_provider ON help_ask_spend (provider, reserved_at);
+SELECT bms_apply_tenant_rls('help_ask_spend');
+-- UPDATE only to settle a reservation with what the provider reported.
+SELECT bms_grant_app('help_ask_spend', 'SELECT, INSERT, UPDATE');
 
 CREATE TABLE help_ask_answers (
     tenant_id     uuid         NOT NULL REFERENCES tenants (id),
@@ -76,9 +115,9 @@ SELECT bms_grant_app('help_ask_answers', 'SELECT, INSERT, UPDATE');
 CREATE FUNCTION help_ask_platform_spend(p_provider text, p_from timestamptz)
 RETURNS bigint
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
-    SELECT coalesce(sum(q.cost_micro), 0)::bigint
-      FROM help_ask_questions q
-     WHERE q.provider = p_provider AND q.asked_at >= p_from AND q.cost_micro > 0
+    SELECT coalesce(sum(s.cost_micro), 0)::bigint
+      FROM help_ask_spend s
+     WHERE s.provider = p_provider AND s.reserved_at >= p_from
 $$;
 REVOKE ALL ON FUNCTION help_ask_platform_spend(text, timestamptz) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION help_ask_platform_spend(text, timestamptz) TO bms_app;

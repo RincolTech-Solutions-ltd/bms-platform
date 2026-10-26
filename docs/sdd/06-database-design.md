@@ -674,17 +674,33 @@ The status and the reply change only through `platform_feedback_set_status`, the
 
 ### `help_ask_questions` (RLS)
 
-(ADR-096; migration `V108`, issue #20) The Ask BMS spend log: one row per question, and what the daily question cap counts.
+(ADR-096; migration `V108`, issue #20) The Ask BMS question log: one row per question.
 `id uuid` PK, `tenant_id`, `user_id uuid NOT NULL` (FK `(tenant_id, user_id)` to `users`), `asked_at timestamptz NOT NULL`,
 `question_hash char(64)` (SHA-256 hex of the scrubbed, normalised question; **never the text**), `locale varchar(10)`, `outcome`
 (`model`, `cache`, `articles`, `other_role`, `no_match`), `fallback_reason` (`no_provider`, `all_failed`, `daily_cap`,
 `not_in_articles`; set exactly for `articles`), `provider` (`gemini`, `groq`, `deepseek`; the one that answered and billed, set for
 `model`, possible for `articles`, null otherwise: there is no other name, so no Anthropic one), `model varchar(100)`, `failures
 text[]` (the providers tried before, as `name:reason`), `counted boolean` (it went to the providers), `cited_article
-varchar(80)`, `input_tokens`, `output_tokens`, `cost_micro bigint` (estimated, from the operator's prices), `cost_currency
-char(3)`, `latency_ms`. Partial indexes `(tenant_id, asked_at) WHERE counted` (the day's count) and `(provider, asked_at) WHERE
-cost_micro > 0` (the month's spend). Grants `SELECT, INSERT` only. The `SECURITY DEFINER` function `help_ask_platform_spend(provider,
-from)` returns the estimated spend of one provider by every business since a moment, one number and no row (DeepSeek's monthly cap).
+varchar(80)`, `input_tokens`, `output_tokens`, `cost_micro bigint` (estimated, from the operator's prices, every call of the
+question), `cost_currency char(3)`, `latency_ms`. Index `(tenant_id, asked_at)`. Grants `SELECT, INSERT` only. The limits count
+`help_ask_tickets` and the monthly cap sums `help_ask_spend`.
+
+### `help_ask_tickets` (RLS)
+
+(ADR-096; migration `V108`, issue #20) The Ask BMS limits, written before the work they count, under the business's
+transaction advisory lock: `kind` `ask` for every question (the per-person hourly limit) and `provider` for every question
+that goes on to the providers (the business's daily cap). `id`, `tenant_id`, `user_id` (FK `(tenant_id, user_id)` to `users`),
+`at`. Partial indexes `(tenant_id, user_id, at) WHERE kind = 'ask'` and `(tenant_id, at) WHERE kind = 'provider'`. Grants
+`SELECT, INSERT`.
+
+### `help_ask_spend` (RLS)
+
+(ADR-096; migration `V108`, issue #20) One row per provider call: `provider`, `model`, `reserved_at`, `settled_at` (null while
+the call is in flight: the row then holds its reservation, the most the call can cost), `input_tokens`, `output_tokens`,
+`cost_micro`, `cost_currency`. Written before the call (a paid provider's reservation under one platform-wide advisory lock,
+refused past the monthly cap) and settled after it with what the provider reported; a call that may have been billed but
+reported nothing keeps its reservation. Index `(provider, reserved_at)`. Grants `SELECT, INSERT, UPDATE` (the settlement). The
+`SECURITY DEFINER` function `help_ask_platform_spend(provider, from)` sums it across every business, one number and no row.
 
 ### `help_ask_answers` (RLS)
 
