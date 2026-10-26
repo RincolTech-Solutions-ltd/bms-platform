@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createLazyRoute } from '@tanstack/react-router';
+import { createLazyRoute, useRouterState } from '@tanstack/react-router';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import {
   type FeedbackItem,
@@ -26,10 +26,15 @@ function When({ iso }: { iso?: string | null }) {
   return <>{Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}</>;
 }
 
-export function FeedbackForm({ send = sendFeedback, from = pageBeforeFeedback }: { send?: (body: FeedbackSend) => Promise<FeedbackItem>; from?: () => string | null }) {
+export function FeedbackForm({ send = sendFeedback, from = pageBeforeFeedback, ask }: {
+  send?: (body: FeedbackSend) => Promise<FeedbackItem>;
+  from?: () => string | null;
+  /** What the person searched for on How do I...? before tapping Ask us (issue #598): the form starts as a question with it typed. */
+  ask?: string;
+}) {
   const queryClient = useQueryClient();
-  const [kind, setKind] = useState<FeedbackKind | null>(null);
-  const [message, setMessage] = useState('');
+  const [kind, setKind] = useState<FeedbackKind | null>(ask ? 'question' : null);
+  const [message, setMessage] = useState(ask ?? '');
   const [screenshot, setScreenshot] = useState<File | null>(null);
   const [tried, setTried] = useState(false);
   const [sent, setSent] = useState(false);
@@ -191,11 +196,13 @@ export function FeedbackHistory({ load = myFeedback }: { load?: () => Promise<Fe
 }
 
 export function FeedbackPage() {
+  const asked: unknown = useRouterState({ select: (s) => (s.location.search as Record<string, unknown>).ask });
+  const ask = typeof asked === 'string' ? asked : undefined;
   return (
     <main className="rt ln">
       <h1>Feedback</h1>
       <p>Tell the BMS team what would help, what went wrong or what you want to ask. Everyone who uses BMS can send it.</p>
-      <FeedbackForm />
+      <FeedbackForm ask={ask?.slice(0, MESSAGE_MAX)} />
       <FeedbackHistory />
     </main>
   );
