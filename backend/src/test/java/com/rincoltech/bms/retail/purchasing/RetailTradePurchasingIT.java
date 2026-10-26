@@ -1954,11 +1954,19 @@ class RetailTradePurchasingIT extends IntegrationTest {
 
     /** Marks a product inactive, as the Items screen does (issue #342). */
     void switchOff(UUID id) {
+        setActive(id, false);
+    }
+
+    void switchOn(UUID id) {
+        setActive(id, true);
+    }
+
+    void setActive(UUID id, boolean active) {
         String etag = api.get("/products/" + id, ADMIN).getHeaders().getETag();
         assertThat(api.call(
                                 HttpMethod.PATCH,
                                 "/products/" + id,
-                                Map.of("active", false),
+                                Map.of("active", active),
                                 ADMIN,
                                 "*",
                                 Map.of("If-Match", etag))
@@ -1978,5 +1986,29 @@ class RetailTradePurchasingIT extends IntegrationTest {
                 null, hq, List.of(Map.<String, Object>of("product_id", product, "qty", "1", "cost_minor", 100)));
         assertThat(blind.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(blind.getBody().toString()).contains("product_inactive");
+    }
+
+    /** ADR-094 (issue #376): a draft holding an item switched off since is not sent, nor sent later by its approval. */
+    @Test
+    void aDraftWithAnItemSwitchedOffSinceIsNotSentNorSentByItsApproval() {
+        UUID id = uuid(draft(hq, orderLine(product, "1", 100)), "id");
+        switchOff(product);
+        ResponseEntity<JsonNode> refused = sendRaw(id);
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(refused)).isEqualTo("product_inactive");
+        assertThat(order(id).get("status").asString()).isEqualTo("draft");
+        switchOn(product);
+
+        threshold(1_000);
+        UUID big = uuid(draft(hq, orderLine(product, "10", 100)), "id");
+        ResponseEntity<JsonNode> asked = sendRaw(big);
+        assertThat(asked.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        switchOff(product);
+        RetailTestSupport checker = new RetailTestSupport(http, t);
+        ResponseEntity<JsonNode> decided =
+                decide(asked.getBody().get("approval_id").asString(), checker, BUYER + ",core.approvals.read");
+        assertThat(decided.getStatusCode().is2xxSuccessful()).isFalse();
+        assertThat(decided.getBody().toString()).contains("product_inactive");
+        assertThat(order(big).get("status").asString()).isEqualTo("draft");
     }
 }

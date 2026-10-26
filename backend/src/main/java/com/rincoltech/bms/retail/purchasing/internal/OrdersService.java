@@ -206,6 +206,7 @@ class OrdersService {
                     "Order not a draft",
                     "This order has been sent or cancelled already.");
         }
+        sending.requireActiveItems(o);
         long threshold = settings.approvalThresholdMinor(PurchaseOrderAction.TYPE);
         if (threshold > 0 && o.totalMinor() >= threshold) {
             Approvals.Outcome a = approvals.request(new ActionRequest(
