@@ -9,7 +9,7 @@ words: warning, is that right, unusual, confirm, change, usually, mistake, typo,
 ---
 BMS compares what you type with the item's own history. When a number looks unusual, a note asks you to check it before saving. It never stops you.
 
-1. The note says what is usual, such as "You usually buy about 24 of this at a time; you entered 240. Is that right?".
+1. The note says what is usual, such as "You usually buy about 24 pieces of this at a time; you entered 240 pieces. Is that right?".
    ![A note asks Is that right?](entry-warnings-1.webp)
 2. If the number is right, tap **Confirm** and it is saved. If it is a mistake, tap **Change**: you go back to the number to fix it.
    ![Confirm or Change](entry-warnings-2.webp)

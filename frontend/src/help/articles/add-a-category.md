@@ -11,7 +11,7 @@ A category groups your items, such as Bulbs or Cables. Its letters start the cod
 
 1. Open **Items and categories** under Stock, then **Categories**.
    ![Open Categories](add-a-category-1.webp)
-2. Tap **Add a category** and type a name, such as Bulbs. The app makes the code start from the name, such as BLB, and shows it.
+2. Tap **Add a category** and type a name, such as Bulbs. The app makes the code start from the name, such as BLB, and shows it. Tap **Add category**.
    ![Type the name of the category](add-a-category-2.webp)
 3. Tap **Open** on a category to see its items and add new ones there.
    ![Open the category](add-a-category-3.webp)

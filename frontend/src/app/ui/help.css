@@ -3,10 +3,27 @@
  * list; each picture is a phone screenshot with its caption drawn on it, shown no wider than a phone so the step and its picture
  * read together. No stripe, no gradient, no shadow: a hairline edge like every card. The link and Ask us are 48px targets.
  */
-.how-do-i {
+/* The breadcrumbs and the How do I? link share one row under the staff bar; the link keeps to the right. */
+.crumb-row {
   display: flex;
-  justify-content: flex-end;
-  margin: calc(-1 * var(--space-2)) 0 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-3);
+  margin: calc(-1 * var(--space-2)) 0 var(--space-3);
+}
+
+.crumb-row:empty {
+  display: none;
+}
+
+.crumb-row .breadcrumbs {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.how-do-i {
+  margin: 0 0 0 auto;
   font-size: var(--text-sm);
 }
 

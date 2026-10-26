@@ -178,8 +178,10 @@ function StaffLayout() {
               <TwoStepNotices me={profile} pathname={pathname} />
               {!mock && <BillingBanner canOpenBilling={(profile.permissions ?? []).includes('core.billing.read')} />}
               {!mock && <PlanNotice />}
-              <StaffBreadcrumbs />
-              {!mustSetUp(profile) && <HowDoILink pathname={pathname} me={profile} />}
+              <div className="crumb-row">
+                <StaffBreadcrumbs />
+                {!mustSetUp(profile) && <HowDoILink pathname={pathname} me={profile} />}
+              </div>
               {mustSetUp(profile) ? <OwnTwoStep blocking /> : <Outlet />}
               <SignOutWarning ask={askSignOut} onSignOut={() => void signOut(true)} />
             </div>

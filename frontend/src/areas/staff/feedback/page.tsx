@@ -197,7 +197,8 @@ export function FeedbackHistory({ load = myFeedback }: { load?: () => Promise<Fe
 
 export function FeedbackPage() {
   const asked: unknown = useRouterState({ select: (s) => (s.location.search as Record<string, unknown>).ask });
-  const ask = typeof asked === 'string' ? asked : undefined;
+  // The router reads a search value that looks like a number as a number.
+  const ask = typeof asked === 'string' || typeof asked === 'number' ? String(asked) : undefined;
   return (
     <main className="rt ln">
       <h1>Feedback</h1>

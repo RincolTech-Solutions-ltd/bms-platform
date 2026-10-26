@@ -3,14 +3,16 @@ title: What is the difference between a store and a shop?
 job: branches
 order: 10
 module: retail
-screens: /staff/retail/stock-by-location
+screens: /staff/retail/stock-by-location, /staff/retail/branch-roles
 words: store, shop, warehouse, branch, sell, keeps stock, difference
 ---
 A **store** keeps stock and does not sell. A **shop** keeps stock and sells to customers. Both take purchases and stock moves.
 
-1. A store takes goods you buy and goods moved in. To sell them, move them to a shop with **Move stock**.
+1. An administrator marks a branch as a store under **Business set-up**, **Branches**. Its card then says **Store (does not sell)**.
    ![A store in the branch list](store-or-shop-1.webp)
-2. To see what each store and shop holds, open **Stores and shops** from Reports. Stores come first, then shops.
-   ![Stock in each store and shop](store-or-shop-2.webp)
+2. A store takes the goods you buy and the goods moved in. To sell them, move them to a shop with **Move stock**.
+   ![Move the goods from the store to a shop](store-or-shop-2.webp)
+3. At a store the sale screen says so, and offers the shops you can sell at.
+   ![The sale screen at a store](store-or-shop-3.webp)
 
-> An administrator says which branches are stores under **Business set-up**, **Branches**: tap **Mark as a store (does not sell)** or **Sells again (make it a shop)**.
+> To make a store sell, an administrator taps **Sells again (make it a shop)** on its card under Branches.
