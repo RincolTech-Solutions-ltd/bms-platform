@@ -43,6 +43,14 @@ public interface ApprovalAction {
         return true;
     }
 
+    /**
+     * ADR-091: whether the approval rules govern the action, so a refusal on approval makes the request stale with its reason
+     * (decision 11). Every switchable action, and one that follows another's switch (the void of a return).
+     */
+    default boolean governedByRules() {
+        return switchable();
+    }
+
     /** ADR-091: whether the action is its own row of the approval rules; false for one that follows another's rule. */
     default boolean listed() {
         return true;

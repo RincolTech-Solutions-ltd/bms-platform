@@ -324,7 +324,7 @@ class ApprovalService implements Approvals {
             // stands (a 4xx refusal), so the request goes stale with the reason and the maker asks again, rather than
             // failing
             // on every approval until it expires. The lending actions keep FR-APR-06: pending, with the error shown.
-            if (action.switchable() && e.status().is4xxClientError()) {
+            if (action.governedByRules() && e.status().is4xxClientError() && !transientRefusal(e)) {
                 throw new RequestSupersededException(e.code(), e.title(), e.getMessage(), e.extensions());
             }
             throw new ExecutionFailed(e.code() + ": " + e.getMessage(), e);
@@ -595,6 +595,14 @@ class ApprovalService implements Approvals {
         }
         return action;
     }
+
+    /** A refusal worth trying again (a concurrent write, a lock, too many requests): it leaves the request pending. */
+    private static boolean transientRefusal(ApiException e) {
+        return e.status() == HttpStatus.TOO_MANY_REQUESTS || TRANSIENT.contains(e.code());
+    }
+
+    private static final java.util.Set<String> TRANSIENT =
+            java.util.Set.of("version_conflict", "idempotency_in_progress", "lock_timeout");
 
     private static ApiException notPending(String status) {
         return new ApiException(

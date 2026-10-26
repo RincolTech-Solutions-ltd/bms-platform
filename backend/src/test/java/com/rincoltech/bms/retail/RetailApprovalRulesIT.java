@@ -290,6 +290,65 @@ class RetailApprovalRulesIT extends IntegrationTest {
                 .isZero();
     }
 
+    /**
+     * Review of #588, ADR-091 decisions 6 and 11: the void of a return follows the returns rule, so a refusal on approval makes it
+     * stale with the reason (here the goods it put back were sold meanwhile), rather than failing on every approval.
+     */
+    @Test
+    void aReturnVoidThatNoLongerPassesWhenApprovedGoesStaleWithTheReason() {
+        String settings = "core.settings.manage";
+        String etag = api.get("/settings/capabilities", settings).getHeaders().getETag();
+        assertThat(api.call(
+                                HttpMethod.PUT,
+                                "/settings/capabilities",
+                                Map.of("returns", true),
+                                settings,
+                                "*",
+                                etag == null ? Map.of() : Map.of("If-Match", etag))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        String returner = MAKER + ",retail.sale.return";
+        UUID s = sale("1");
+        String line = api.get("/sales/" + s, ADMIN)
+                .getBody()
+                .get("lines")
+                .get(0)
+                .get("id")
+                .asString();
+        Map<String, Object> l = new LinkedHashMap<>();
+        l.put("sale_line_id", line);
+        l.put("qty", "1");
+        l.put("reason", "defective");
+        l.put("disposition", "restock");
+        ResponseEntity<JsonNode> back = api.postKeyed(
+                "/sales/" + s + "/returns",
+                Map.of("lines", java.util.List.of(l), "refund_method", "cash"),
+                returner,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(back.getStatusCode()).as("%s", back.getBody()).isEqualTo(HttpStatus.CREATED);
+        String id = back.getBody().get("sale_return").get("id").asString();
+        rule("retail_sale_return", true, 0);
+        ResponseEntity<JsonNode> asked = api.postKeyed(
+                "/returns/" + id + "/void",
+                Map.of("reason", "Entered twice"),
+                returner,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(asked.getStatusCode()).as("%s", asked.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        String approvalId = asked.getBody().get("approval_id").asString();
+        // Every piece on the shelf is sold, the one the return put back included.
+        sale(stock().toPlainString());
+        ResponseEntity<JsonNode> late =
+                approve(approvalId, new RetailTestSupport(http, t), CHECKER + ",retail.sale.return");
+        assertThat(late.getStatusCode()).as("%s", late.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(late.getBody().get("code").asString()).isEqualTo("return_stock_moved");
+        assertThat(approval(approvalId, api, returner).getBody().get("status").asString())
+                .isEqualTo("stale");
+        assertThat(api.get("/returns/" + id, returner).getBody().get("status").asString())
+                .isEqualTo("completed");
+    }
+
     // ---- answers stored before ADR-091 still replay ----------------------------------------------
 
     /** Rewrites the stored answer of a key into the shape it had before ADR-091: the bare record, not {record, waiting}. */

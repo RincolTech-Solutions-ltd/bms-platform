@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed (2026-10-25, issue #343, go-live priority; the owner asked for it to be built in the best order without waiting on him).
+Built (2026-10-25, issue #343, pull request #588, go-live priority; the owner asked for it to be built in the best order without
+waiting on him). The approval rules are in force once #588 is merged; the record becomes Accepted when the owner accepts it.
 Builds on ADR-015 (actions registered by the modules that own them), ADR-043 (the write-off of a credit sale), ADR-046 (the
 step-up of an administrator who loosens a safeguard) and ADR-050 (push notices). No migration: the choices are two keys of the
 tenant settings row. The number follows ADR-088 (#579), ADR-089 (#583) and ADR-090 (#571, merged with #585); ADR-092 (#589) came after it.
@@ -65,7 +66,7 @@ expenses.
    administrator is needed only while two or more administrators count, and a business with one writes off alone (flagged and
    told). The screen says so in those words, never "every one". A price below cost is **not** an approval and is not listed: the sale is made at the
    till while the customer waits, so it cannot wait for a second person, and today only a holder of `retail.price.below_cost` may
-   sell at or below cost (the others are refused). The screen says so in one line and points to Roles.
+   sell at or below cost (the others are refused). The screen says so in one line and links to Staff users, where roles are given.
 
 5. **The new retail approvals.** Each is a bean in the module that owns the action, wired in its service, with the maker's own
    permission and an administrator (`core.settings.manage` in the branch) as the checker, so a seller never approves another
@@ -75,7 +76,7 @@ expenses.
      runs with the maker as the person who voided it, and is stale when the sale changed (its version) meanwhile.
    - `retail_stock_correction`: `POST /retail/stock/corrections` checks as today, then asks for the value of the difference. The
      correction runs on approval only if the quantity is still the one the maker saw; otherwise the request becomes stale with
-     the quantity now ("The quantity changed while it waited"), like the 409 `stock_moved` of a direct correction. One correction
+     the reason ("The correction can no longer be made as it was asked for: ..."), like the 409 `stock_moved` of a direct correction. One correction
      per item waits at a time (`approval_already_pending`).
    - `retail_expense`: `POST /retail/expenses` checks as today, then asks for the amount. The expense is not in the cash book
      until it is approved; it is then recorded with the maker as the person who recorded it, on the business date the maker gave.
@@ -114,9 +115,11 @@ expenses.
 11. **One stale policy for every action the approval rules govern.** When an approved action no longer passes as it was asked for
     (a 4xx refusal on approval: the sale changed, the quantity moved, the category was switched off, the branch no longer stocks),
     the request goes stale with that refusal as its reason and the maker asks again; it never fails on every approval until it
-    expires. `ApprovalService` applies this to every switchable action in one place, and a module may word the reason (a stock
-    correction says it can no longer be made as it was asked for). The lending actions keep FR-APR-06: a failed execution leaves the
-    request pending with the error shown.
+    expires. `ApprovalService` applies this in one place to every action the rules govern (`ApprovalAction.governedByRules()`:
+    every switchable action, and the void of a return, which follows the returns rule), and a module may word the reason (a stock
+    correction says it can no longer be made as it was asked for). A refusal worth trying again (a concurrent write,
+    `version_conflict`, a lock, `idempotency_in_progress` or `lock_timeout`, or 429) leaves the request pending. The lending actions
+    keep FR-APR-06: a failed execution leaves the request pending with the error shown.
 12. **Answers stored before this change still replay.** The idempotent answer of an expense and of a stock correction is now
     `{record, waiting}`; one stored before the deploy (the bare record, an object with `id`) still replays as the record, so a
     retry after the deploy gets the expense or correction it made and never makes it twice.

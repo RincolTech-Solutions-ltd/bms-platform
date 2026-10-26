@@ -33,6 +33,10 @@ class ApprovalOutcomeGuardTest {
     private static final Pattern CALL =
             Pattern.compile("\\b\\w+\\.request\\((?=\\s*new ActionRequest)|\\bapprovals\\.request\\(");
 
+    /** A read of the rule: on the field {@code approvals}, or on any field when it names an action type. */
+    private static final Pattern READS_RULE =
+            Pattern.compile("\\bapprovals\\.rule\\(|\\b\\w+\\.rule\\(\\s*\\w+Action\\.TYPE");
+
     private static final Pattern KEPT = Pattern.compile("(\\w+)\\s*=\\s*\\w+\\.request\\($");
 
     /**
@@ -69,7 +73,7 @@ class ApprovalOutcomeGuardTest {
                     continue;
                 }
                 String code = Files.readString(file);
-                boolean readsRule = code.contains("approvals.rule(");
+                boolean readsRule = READS_RULE.matcher(code).find();
                 Map<String, String> exempt = SAME_ANSWER.getOrDefault(name, Map.of());
                 Matcher m = CALL.matcher(code);
                 while (m.find()) {
@@ -104,15 +108,26 @@ class ApprovalOutcomeGuardTest {
         assertThat(problems).isEmpty();
     }
 
-    /** Whether the outcome is handed to a helper, {@code name(x, var)} or {@code name(var)}, declared in the file and reading it. */
+    /**
+     * Whether the outcome is handed to a helper declared in the file, {@code name(x, var)} or {@code name(var)}, whose own body
+     * reads {@code executed()} on the parameter that received it.
+     */
     static boolean helperReads(String code, String method, String var) {
-        Matcher call = Pattern.compile("\\b(\\w+)\\((?:\\s*\\w+\\s*,)*\\s*" + var + "\\s*[,)]")
+        Matcher call = Pattern.compile("\\b(\\w+)\\(((?:\\s*\\w+\\s*,)*)\\s*" + var + "\\s*[,)]")
                 .matcher(method);
         while (call.find()) {
-            Matcher declared = Pattern.compile("\\b[\\w<>.]+\\s+" + Pattern.quote(call.group(1)) + "\\([^)]*\\)\\s*\\{")
+            int position = call.group(2).isEmpty() ? 0 : call.group(2).split(",").length;
+            Matcher declared = Pattern.compile(
+                            "\\b[\\w<>.]+\\s+" + Pattern.quote(call.group(1)) + "\\(([^)]*)\\)\\s*\\{")
                     .matcher(code);
             while (declared.find()) {
-                if (restOfMethod(code, declared.end()).contains(".executed()")) {
+                String[] params = declared.group(1).split(",");
+                if (position >= params.length) {
+                    continue;
+                }
+                String[] words = params[position].trim().split("\\s+");
+                String param = words[words.length - 1];
+                if (restOfMethod(code, declared.end()).contains(param + ".executed()")) {
                     return true;
                 }
             }
@@ -163,6 +178,17 @@ class ApprovalOutcomeGuardTest {
                 "    X a() {\n        return log(id, o);\n    }\n    X log(UUID id, Outcome o) {\n        return x;\n    }\n"
                         + "    void b() {\n        p.executed();\n    }\n";
         assertThat(helperReads(unrelated, restOfMethod(unrelated, unrelated.indexOf("return log")), "o"))
+                .isFalse();
+        // The helper must read executed() on the parameter that received the outcome, not on another one.
+        String other = "    X a() {\n        return handle(id, o);\n    }\n    X handle(UUID id, Outcome o) {\n"
+                + "        return other.executed() ? x : y;\n    }\n";
+        assertThat(helperReads(other, restOfMethod(other, other.indexOf("return handle")), "o"))
+                .isFalse();
+        assertThat(READS_RULE
+                        .matcher("Rule r = approver.rule(SaleVoidAction.TYPE);")
+                        .find())
+                .isTrue();
+        assertThat(READS_RULE.matcher("throw ApiException.rule(\"x\", \"y\");").find())
                 .isFalse();
         // A caller whose field has another name is still found.
         assertThat(CALL.matcher("approver.request(new ActionRequest(a), rule)").find())
