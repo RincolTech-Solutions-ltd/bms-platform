@@ -86,7 +86,7 @@ describe('the help corpus', () => {
     for (const a of ARTICLES) {
       const text = articleText(a);
       expect(offendingWords(text), a.id).toEqual([]);
-      expect(text, a.id).not.toMatch(/[–—]/);
+      expect(text, a.id).not.toMatch(/[\u2013\u2014]/);
     }
   });
 
