@@ -65,8 +65,10 @@ back to what opened it.
     blinks by opacity for at most five seconds per page load (the clock starts with the first badge drawn; a badge drawn again
     later, as when the drawer opens again, blinks only for what is left), then stands still until the person opens the
     feature, and it never blinks under reduced motion. Five seconds keeps it inside WCAG 2.2.2, which asks for a way to pause
-    only a blink that runs longer. The design guard holds the list, resolves every way an animation can be written as CSS
-    does, pins every `.new-blink` rule to five runs of `rt-new-blink`, and fails a component that animates from code.
+    only a blink that runs longer. The design guard holds this with a plain token ban: `infinite` (shorthand, longhand or
+    `-webkit-`) and any `var()` but the motion tokens in an animation value fail outside the named work-in-progress loops
+    (spinners, the skeleton shimmer, the loading mark, the sync dot while sending); every `.new-blink` rule must run
+    `rt-new-blink` five times; and code may not set an animation or loop one with `Infinity`.
 
 ## Feedback
 
