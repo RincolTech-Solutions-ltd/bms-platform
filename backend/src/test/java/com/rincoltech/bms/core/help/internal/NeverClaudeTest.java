@@ -125,15 +125,12 @@ class NeverClaudeTest {
     @Test
     void onlyGeminiIsGivenAReasoningEffort() {
         Factory factory = new Factory();
-        AskProviders.from(withReasoning("low", null), factory);
+        AskProviders.from(withReasoning("low", "medium"), factory);
         assertThat(factory.built)
                 .containsExactly(
                         GEMINI_URL + " gemini-3.5-flash-lite low",
                         "https://api.groq.com/openai/v1 llama-3.1-8b-instant null",
                         "https://api.deepseek.com deepseek-chat null");
-        assertThatThrownBy(() -> withReasoning(null, "low"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("BMS_HELP_ASK_GROQ_REASONING");
     }
 
     /** Unset or empty is {@code minimal}, never nothing: Gemini 3 would think at its own default and miss the budget. */

@@ -178,6 +178,7 @@ class OpenAiCompatibleClientTest {
     @Test
     void aReasoningEffortIsSentOnlyWhenGiven() throws Exception {
         script.add(new Reply(200, OK_BODY));
+        script.add(new Reply(200, OK_BODY));
         LlmClient gemini = OpenAiCompatibleFactory.build(
                         baseUrl(), KEY, "gemini-3.5-flash-lite", Duration.ofSeconds(30), " minimal ", true, MAPPER)
                 .orElseThrow();
