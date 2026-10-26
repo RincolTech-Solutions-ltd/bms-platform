@@ -3337,14 +3337,17 @@ class LoanServicingIT extends LoanFixtures {
      */
     @Test
     void frArr04_aPayoffAfterAWaiverRebatesOnlyWhatIsLeftAndItsReversalKeepsTheWaiver() throws Exception {
-        String loan = approved(product("ITEMPAYOFF", Map.of("flat_early_settlement_rebate", true), List.of()), 1_200_000, 3, 75);
+        String loan = approved(
+                product("ITEMPAYOFF", Map.of("flat_early_settlement_rebate", true), List.of()), 1_200_000, 3, 75);
         disburse(loan, today.minusDays(3));
         itemWaived(loan, 1, "interest", 40_000);
         itemWaived(loan, 3, "interest", 30_000);
 
         JsonNode quote = get(loan, "/payoff-quote");
         assertThat(quote.get("principal_minor").asLong()).isEqualTo(1_200_000);
-        assertThat(quote.get("interest_minor").asLong()).as("item 1 is charged, less its waiver").isEqualTo(80_000);
+        assertThat(quote.get("interest_minor").asLong())
+                .as("item 1 is charged, less its waiver")
+                .isEqualTo(80_000);
         assertThat(quote.get("rebate_minor").asLong())
                 .as("items 2 and 3 are rebated, item 3 net of its waiver")
                 .isEqualTo(120_000 + 90_000);
@@ -3359,8 +3362,8 @@ class LoanServicingIT extends LoanFixtures {
                 .as("the waiver and the rebate together are the item's interest, never more")
                 .isEqualTo(120_000);
 
-        ResponseEntity<JsonNode> d = decide(
-                requestReversal(loan, paid.get("transaction").get("id").asString()), manager, managerPerms);
+        ResponseEntity<JsonNode> d =
+                decide(requestReversal(loan, paid.get("transaction").get("id").asString()), manager, managerPerms);
         assertThat(d.getStatusCode()).as("%s", d.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(loan(loan).get("status").asString()).isEqualTo("active");
         assertThat(item(loan, 0).get("interest_outstanding_minor").asLong()).isEqualTo(80_000);
@@ -3370,7 +3373,9 @@ class LoanServicingIT extends LoanFixtures {
                 .isEqualTo(90_000);
         JsonNode b = loan(loan).get("balances");
         assertThat(b.get("interest_outstanding_minor").asLong()).isEqualTo(290_000);
-        assertReconciles(render(loan, "loan_statement").getBody(), b.get("total_outstanding_minor").asLong());
+        assertReconciles(
+                render(loan, "loan_statement").getBody(),
+                b.get("total_outstanding_minor").asLong());
         booksAgree();
     }
 

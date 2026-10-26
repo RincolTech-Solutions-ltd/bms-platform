@@ -69,7 +69,8 @@ class ItemWaiverService {
                     payload.put(WaiverAction.REASON, r.reason().trim());
                     Approvals.Rule rule = approvals.rule(WaiverAction.TYPE);
                     if (!principal.may(WaiverAction.FEE_INTEREST, loan.branchId())) {
-                        // From 0, every amount asks: the approvals module runs at once only below the threshold (an amount
+                        // From 0, every amount asks: the approvals module runs at once only below the threshold (an
+                        // amount
                         // under it), so a maker who is not the accountant always waits for one.
                         rule = new Approvals.Rule(true, 0);
                     }
