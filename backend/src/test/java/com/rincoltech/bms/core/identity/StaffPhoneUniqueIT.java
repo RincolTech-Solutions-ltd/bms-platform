@@ -3,6 +3,7 @@ package com.rincoltech.bms.core.identity;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.rincoltech.bms.DatabaseMigrator;
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.testsupport.Api;
@@ -21,7 +22,6 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
-import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -160,13 +160,8 @@ class StaffPhoneUniqueIT extends IntegrationTest {
         try {
             String url = TestDatabase.scratchDatabase(database);
             DataSource ownerAtV97 = new DriverManagerDataSource(url, "bms_owner", TestDatabase.OWNER_PASSWORD);
-            assertThat(Flyway.configure()
-                            .dataSource(ownerAtV97)
-                            .locations("classpath:db/migration")
-                            // The options of DatabaseMigrator, the one-shot migrate container's, which sets no
-                            // placeholders and no init SQL; V1's pg_trgm is created by the database owner.
-                            .validateMigrationNaming(true)
-                            .cleanDisabled(true)
+            // The migrate container's own configuration (DatabaseMigrator), with only the target added.
+            assertThat(DatabaseMigrator.configure(url, "bms_owner", TestDatabase.OWNER_PASSWORD)
                             .target("97")
                             .load()
                             .migrate()

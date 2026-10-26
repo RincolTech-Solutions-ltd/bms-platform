@@ -2057,10 +2057,9 @@ class RetailTradePurchasingIT extends IntegrationTest {
                         .single())
                 .isEqualTo("stale");
         switchOn(product);
-        assertThat(decide(approval, checker, BUYER + ",core.approvals.read")
-                        .getStatusCode()
-                        .is2xxSuccessful())
-                .isFalse();
+        ResponseEntity<JsonNode> redecided = decide(approval, checker, BUYER + ",core.approvals.read");
+        assertThat(redecided.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(code(redecided)).isEqualTo("invalid_status_transition");
         assertThat(order(big).get("status").asString()).isEqualTo("draft");
         ResponseEntity<JsonNode> again = sendRaw(big);
         assertThat(again.getStatusCode()).as("%s", again.getBody()).isEqualTo(HttpStatus.ACCEPTED);
