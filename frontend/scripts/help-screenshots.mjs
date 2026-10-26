@@ -238,6 +238,14 @@ const SHOTS = {
       await tour(page, 'restock-past').click();
       await page.waitForLoadState('networkidle');
       await shoot(page, 'fix-a-purchase-2.webp', page.getByRole('button', { name: /^Correct purchase/ }).first());
+      await spa(page, '/staff/retail/restock');
+      await page.getByLabel('Find an item by name, code or category').first().fill('socket');
+      await page.getByRole('option', { name: /Double socket/ }).first().click();
+      await page.waitForTimeout(3500);
+      await page.getByLabel(/^Cost each/).first().fill('8000');
+      await page.getByLabel('Test Shop Ntinda (NTD)', { exact: true }).fill('12');
+      await page.keyboard.press('Tab');
+      await shoot(page, 'fix-a-purchase-3.webp', page.locator('.line-card').first());
     },
   },
   'move-stock-store-to-shop': {
@@ -347,6 +355,12 @@ const SHOTS = {
       await shoot(page, 'switch-branch-1.webp', button(page, 'Menu'));
       await openMenu(page);
       await shoot(page, 'switch-branch-2.webp', page.locator('.menu-shop-branch').first());
+      await page.getByRole('combobox', { name: 'Switch branch' }).selectOption({ label: 'Test Store Kireka (KRK) (store)' });
+      await page.waitForTimeout(600);
+      await page.getByRole('button', { name: 'Close menu' }).first().click();
+      await page.waitForTimeout(800);
+      await shoot(page, 'switch-branch-3.webp', page.locator('.top-title, .staff-bar-top').getByText('Test Store Kireka (KRK)').first());
+      await chooseBranch(page, 'Test Shop Ntinda (NTD)');
     },
   },
   'add-a-branch': {
@@ -382,6 +396,20 @@ const SHOTS = {
       await shoot(page, 'invite-someone-3.webp', page.getByRole('link', { name: 'Send on WhatsApp' }));
     },
   },
+  'change-roles': {
+    async real(page) {
+      await go(page, REAL, '/staff/users');
+      const card = page.locator('li').filter({ hasText: 'Test Officer 01' }).first();
+      await shoot(page, 'change-roles-1.webp', card.getByRole('button', { name: 'Change roles' }));
+      await card.getByRole('button', { name: 'Change roles' }).click();
+      await page.waitForTimeout(600);
+      const form = page.getByRole('form', { name: /^Change the roles of/ });
+      await form.getByRole('checkbox', { name: /^Test Store Kireka/ }).check();
+      await shoot(page, 'change-roles-2.webp', form.locator('fieldset').first());
+      await shoot(page, 'change-roles-3.webp', form.getByRole('button', { name: 'Save the roles' }));
+      await form.getByRole('button', { name: 'Cancel' }).click();
+    },
+  },
   'invitation-link-used-or-replaced': {
     async real(page) {
       const fresh = await browser.newPage(phone);
@@ -395,6 +423,9 @@ const SHOTS = {
       await go(page, REAL, '/staff/users');
       const card = page.locator('li').filter({ hasText: 'Test Cashier 02' }).first();
       await shoot(page, 'invitation-link-used-or-replaced-2.webp', card.getByRole('button', { name: 'Send a new link' }));
+      await card.getByRole('button', { name: 'Send a new link' }).click();
+      await page.waitForTimeout(1500);
+      await shoot(page, 'invitation-link-used-or-replaced-3.webp', tour(page, 'staff-link'));
     },
   },
   'approve-a-request': {

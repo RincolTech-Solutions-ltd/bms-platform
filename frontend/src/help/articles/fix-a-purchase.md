@@ -14,5 +14,6 @@ A purchase is never deleted. You correct it, and then enter it again with the ri
 2. Find the purchase by its days, tap **Correct this purchase** and give the reason. The stock, the books and the prices go back. The purchase stays in the list as voided.
    ![Tap Correct this purchase](fix-a-purchase-2.webp)
 3. Enter the purchase again on **Buy stock** with the right quantity, unit or price.
+   ![Enter it again with the right figures](fix-a-purchase-3.webp)
 
 > If less than its quantity is left on the shelf, use **Correct** on the Stock page instead.

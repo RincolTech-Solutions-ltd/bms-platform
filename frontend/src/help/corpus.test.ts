@@ -50,12 +50,12 @@ describe('the help corpus', () => {
     for (const job of JOBS) expect(ARTICLES.some((a) => a.job === job.id), job.label).toBe(true);
   });
 
-  it('gives every article a title, an introduction and at least two steps, each with a captioned picture', () => {
+  it('gives every article a title, an introduction and at least two steps, every step with a captioned picture', () => {
     for (const a of ARTICLES) {
       expect(a.title, a.id).toMatch(/^(How do I|What|Why) .+\?$/);
       expect(a.intro.length, a.id).toBeGreaterThan(0);
       expect(a.steps.length, a.id).toBeGreaterThanOrEqual(2);
-      expect(a.steps.filter((s) => s.picture).length, a.id).toBeGreaterThanOrEqual(2);
+      expect(a.steps.every((s) => s.picture?.caption), a.id).toBe(true);
       for (const s of a.steps) if (s.picture) expect(s.picture.file, a.id).toMatch(new RegExp(`^${a.id}-\\d+\\.webp$`));
     }
   });
@@ -69,7 +69,11 @@ describe('the help corpus', () => {
 
   it('has as its revision the first 16 hex digits of the SHA-256 of each file name and its bytes, in name order (ADR-095)', () => {
     const hash = createHash('sha256');
-    for (const name of readdirSync(ARTICLE_DIR).filter((n) => n.endsWith('.md')).sort()) hash.update(`${name}\0${readFileSync(new URL(name, ARTICLE_DIR), 'utf8')}\0`);
+    for (const name of readdirSync(ARTICLE_DIR).filter((n) => n.endsWith('.md')).sort()) {
+      hash.update(`${name}\0`);
+      hash.update(readFileSync(new URL(name, ARTICLE_DIR)));
+      hash.update('\0');
+    }
     expect(REVISION).toBe(hash.digest('hex').slice(0, 16));
   });
 
@@ -112,6 +116,8 @@ describe('searching the help', () => {
     expect(first('how do I move stock from the store to the shop')).toBe('move-stock-store-to-shop');
     expect(first('transfer')).toBe('move-stock-store-to-shop');
     expect(first('invite a cashier')).toBe('invite-someone');
+    expect(first('change role')).toBe('change-roles');
+    expect(first('give access to a branch')).toBe('change-roles');
     expect(first('link used or replaced')).toBe('invitation-link-used-or-replaced');
     expect(first('switch branch')).toBe('switch-branch');
     expect(first('what is the difference between a store and a shop')).toBe('store-or-shop');

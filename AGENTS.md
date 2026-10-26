@@ -713,7 +713,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `page-staff-home` v4. Picture `docs/ui/grouped-menu-564/menu.html`, screenshots in `docs/ui/grouped-menu-564/`. Tests:
   `side-menu.dom.test.tsx`, `side-menu-shop.dom.test.tsx`, `menu-icons.test.tsx`, `retail/permissions.test.ts`.
 - **Built (How do I...?, issue #598, owner decision D51, ADR-095, FR-HLP-01 to FR-HLP-05):** PWA only, no migration, no API
-  change, no permission, no AI call. The help corpus is `frontend/src/help/articles/*.md` (19 articles from the questions pilots
+  change, no permission, no AI call. The help corpus is `frontend/src/help/articles/*.md` (20 articles from the questions pilots
   asked, by job: Sell, Buy stock, Move stock, Count stock, Items and categories, Branches and stores, Users and invitations,
   Money, Loans), bundled through the `bms-help-corpus` Vite plugin as `virtual:help-corpus` with its content-hash `REVISION`
   (`frontend/src/help/corpus.ts`: parsing, `articlesFor` by the tour step rules, `searchArticles`, `articleForScreen`). Each step

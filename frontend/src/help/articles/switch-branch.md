@@ -12,5 +12,6 @@ Sales and stock are counted per branch. The branch you are working in shows at t
 2. Tap the branch name under your role, at the top of the menu. This is **Switch branch**. Choose the branch you want.
    ![Choose the branch in Switch branch](switch-branch-2.webp)
 3. The screens now show that branch. Nothing is signed out, and you stay on the same page.
+   ![The screens show the branch you chose](switch-branch-3.webp)
 
-> You see only the branches you work in. If one is missing, ask your administrator to add it to your role on the Staff page.
+> You see only the branches you work in. If one is missing, ask your administrator to tap **Change roles** on your card on the Staff page, tick the branch and tap **Save the roles**.

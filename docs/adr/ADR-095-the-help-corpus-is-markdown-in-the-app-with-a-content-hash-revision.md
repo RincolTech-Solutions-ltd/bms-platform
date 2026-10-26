@@ -20,7 +20,7 @@ of the same tasks to ground its answers, and a way to know when that corpus chan
    Move stock, Count stock, Items and categories, Branches and stores, Users and invitations, Money, Loans), `order` within the
    job, `module` (`retail` or `lending`, optional), `needs` (every permission is needed) and `needs_any` (one is enough), `screens`
    (route paths whose How do I? link opens it, a `$name` segment matching any one segment) and `words` (what a person may search
-   with). The body is an introduction, a numbered list of steps in plain words, each with one picture written
+   with). The body is an introduction, a numbered list of steps in plain words, every step with one picture written
    `![caption](<id>-<n>.webp)`, and notes as `>` lines. `**bold**` is the only inline mark. No HTML: the app renders the parsed
    article as React elements (the CSP and the design guard forbid inline HTML).
 2. **Who sees an article** is decided by `stepVisible` of the tours (ADR-025): the same `/me` permissions, modules and rules as a
@@ -30,7 +30,8 @@ of the same tasks to ground its answers, and a way to know when that corpus chan
    caption drawn on the picture and the thing to tap ringed. The caption is the picture's alt text in the Markdown, so the two
    never differ. WebP, about 25 KB each, in `frontend/public/help/`.
 4. **The revision is a content hash.** The first 16 hex digits of the SHA-256 of, for each article file in name order, its file
-   name, a NUL, its bytes and a NUL. Pictures are not in it: they show what the text says. Any edit, addition or removal of an
+   name, a NUL, its raw bytes and a NUL; `.gitattributes` keeps the articles LF on every checkout, so a Windows clone and the
+   server compute the same value. Pictures are not in it: they show what the text says. Any edit, addition or removal of an
    article changes it. The Vite plugin `bms-help-corpus` (`frontend/vite.config.ts`) reads the folder at build time and hands the
    app `virtual:help-corpus` (the sources and the revision); `corpus.test.ts` recomputes it the same way, and #20 computes it from
    the same files, with no list to keep in step by hand.
@@ -39,7 +40,7 @@ of the same tasks to ground its answers, and a way to know when that corpus chan
    or the text (1), a word of 3 letters or more also matching the start of a longer one, best score first. No PostgreSQL search
    until #20 needs one on the server.
 6. **Offline.** The articles are in the precached JavaScript; the service worker also precaches `help/*.webp` (`includeAssets`),
-   so How do I...? and its pictures work offline once the app is installed. The precache grows by about 1.4 MB.
+   so How do I...? and its pictures work offline once the app is installed. The precache grows by about 1.5 MB.
 7. **Where it shows.** How do I...? on the Help sheet that Help and feedback opens (staff area), the pages `/staff/help` (search
    and the groups) and `/staff/help/$articleId` (one answer), each with a page tour, and a small How do I? link beside the
    breadcrumbs of every screen an article names, for someone who may read it. "Not answered? Ask us" opens Feedback

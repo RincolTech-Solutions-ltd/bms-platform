@@ -13,4 +13,4 @@ Some actions need a second person to agree, such as cancelling a sale or paying 
 2. Tap **Approve** and the action happens at once. To reject, type a note first, then tap **Reject**.
    ![Approve, or type a note and Reject](approve-a-request-2.webp)
 
-> You cannot approve your own request. Someone else must. You can cancel your own with **Cancel my request**.
+> Approve and Reject show only on the requests you may decide. You cannot approve your own request. Someone else must. You can cancel your own with **Cancel my request**.

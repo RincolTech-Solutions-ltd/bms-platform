@@ -12,5 +12,6 @@ An invitation link works once. It stops working when it was already used, after 
 2. An administrator opens **Staff**, finds the person marked **Invited** and taps **Send a new link**.
    ![Tap Send a new link](invitation-link-used-or-replaced-2.webp)
 3. Send the new link and ask the person to open only the newest one. Every older link has stopped working.
+   ![Send the newest link](invitation-link-used-or-replaced-3.webp)
 
 > If the person already chose a password, the link is used: they sign in with their phone and password instead.

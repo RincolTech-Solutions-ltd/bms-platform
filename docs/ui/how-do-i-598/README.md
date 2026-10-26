@@ -1,6 +1,6 @@
 # How do I...? pictures (issue #598, ADR-095)
 
-The 54 pictures of the help articles live in `frontend/public/help/` (412x900 WebP, the caption drawn on each and the thing to
+The 60 pictures of the help articles live in `frontend/public/help/` (412x900 WebP, the caption drawn on each and the thing to
 tap ringed). They were taken on 2026-10-26 by `frontend/scripts/help-screenshots.mjs` in headless Chromium at 412x900, 2x, with
 touch and reduced motion, and only fabricated data:
 

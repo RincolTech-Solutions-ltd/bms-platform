@@ -197,13 +197,14 @@ export function FeedbackHistory({ load = myFeedback }: { load?: () => Promise<Fe
 
 export function FeedbackPage() {
   const asked: unknown = useRouterState({ select: (s) => (s.location.search as Record<string, unknown>).ask });
-  // The router reads a search value that looks like a number as a number.
-  const ask = typeof asked === 'string' || typeof asked === 'number' ? String(asked) : undefined;
+  // The router reads a search value that looks like JSON (a number, true, [1]) as that value; it is still what was typed.
+  const ask = asked === undefined || asked === '' ? undefined : typeof asked === 'string' ? asked : JSON.stringify(asked);
   return (
     <main className="rt ln">
       <h1>Feedback</h1>
       <p>Tell the BMS team what would help, what went wrong or what you want to ask. Everyone who uses BMS can send it.</p>
-      <FeedbackForm ask={ask?.slice(0, MESSAGE_MAX)} />
+      {/* Keyed on the question, so a second Ask us while Feedback is open fills the form again. */}
+      <FeedbackForm key={ask ?? ''} ask={ask?.slice(0, MESSAGE_MAX)} />
       <FeedbackHistory />
     </main>
   );
