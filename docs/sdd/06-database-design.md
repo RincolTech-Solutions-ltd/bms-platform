@@ -672,6 +672,29 @@ one item, so the operator's screenshot read can bind it) and `platform_feedback_
 The status and the reply change only through `platform_feedback_set_status`, the linked issue only through
 `platform_feedback_set_linked_issue`.
 
+### `help_ask_questions` (RLS)
+
+(ADR-096; migration `V108`, issue #20) The Ask BMS spend log: one row per question, and what the daily question cap counts.
+`id uuid` PK, `tenant_id`, `user_id uuid NOT NULL` (FK `(tenant_id, user_id)` to `users`), `asked_at timestamptz NOT NULL`,
+`question_hash char(64)` (SHA-256 hex of the scrubbed, normalised question; **never the text**), `locale varchar(10)`, `outcome`
+(`model`, `cache`, `articles`, `other_role`, `no_match`), `fallback_reason` (`no_provider`, `all_failed`, `daily_cap`,
+`not_in_articles`; set exactly for `articles`), `provider` (`gemini`, `groq`, `deepseek`; the one that answered and billed, set for
+`model`, possible for `articles`, null otherwise: there is no other name, so no Anthropic one), `model varchar(100)`, `failures
+text[]` (the providers tried before, as `name:reason`), `counted boolean` (it went to the providers), `cited_article
+varchar(80)`, `input_tokens`, `output_tokens`, `cost_micro bigint` (estimated, from the operator's prices), `cost_currency
+char(3)`, `latency_ms`. Partial indexes `(tenant_id, asked_at) WHERE counted` (the day's count) and `(provider, asked_at) WHERE
+cost_micro > 0` (the month's spend). Grants `SELECT, INSERT` only. The `SECURITY DEFINER` function `help_ask_platform_spend(provider,
+from)` returns the estimated spend of one provider by every business since a moment, one number and no row (DeepSeek's monthly cap).
+
+### `help_ask_answers` (RLS)
+
+(ADR-096; migration `V108`, issue #20) The Ask BMS answer cache. PK `(tenant_id, cache_key)`; `cache_key char(64)` (SHA-256 hex of
+the prompt version, the provider and model chain, the corpus revision, the permission matrix version, the locale, the asker's
+roles, permission set and modules and the normalised question), `answer text` (1 to 2000 characters, phrased from the help
+articles only), `cited_article varchar(80)`, `provider`, `model`, `revision varchar(16)`, `created_at`, `expires_at` (after
+`created_at`; 30 days by default, a safety net, since any change is a new key). Grants `SELECT, INSERT, UPDATE`: the update
+replaces only a row past its expiry under the same key (`ON CONFLICT ... WHERE expires_at <= the new created_at`).
+
 ### `subscription_module_requests` (RLS)
 
 (ADR-073; migration `V90`, issue #472) One row per module the Owner asked for. `module_key text NOT NULL` (`^[a-z]{2,30}$`),
