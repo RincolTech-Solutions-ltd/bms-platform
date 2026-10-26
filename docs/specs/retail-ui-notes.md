@@ -840,7 +840,8 @@ Rule based only (no AI call): each check is a sentence from the item's own recor
   pieces here; you counted 1,000 pieces. Is that right?" (Count stock; where the records hold nothing, against the usual purchase), and on
   Sell, for a price the seller typed, "You last sold this at UGX 6,000 a piece; you entered UGX 60,000. Is that right?". Confirm checks
   the screen as it is now (a line edited since loses its warning, a new one shows) and, once none is open, saves what the screen shows;
-  the confirmations are recorded (`POST /retail/entry-warnings/confirmations`) once that save succeeds; Change takes the warning away and puts the
+  the confirmations are recorded (`POST /retail/entry-warnings/confirmations`) once that save succeeds (Count stock: once the
+  count is committed), and the next entry is asked about afresh; Change takes the warning away and puts the
   cursor in the field; nothing is saved. The save button is never disabled by a warning. With no history (under 3 lines), offline, or
   while the norms are still loading, nothing is asked. The price floor stays a refusal, as before.
 - **While naming a new item** (Add an item, the item form in a category, and Not in the list? Add it here on Buy stock and Count stock):

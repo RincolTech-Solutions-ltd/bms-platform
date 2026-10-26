@@ -405,6 +405,10 @@ class EntryChecksIT extends IntegrationTest {
         assertThat(descriptions(hints("Singel Cable 2.5 mm"))).containsExactly("Single Cable 2.5 mm");
         assertThat(descriptions(hints("led bulb"))).containsExactly("LED bulb 9W screw");
         assertThat(hints("le").get("did_you_mean")).isEmpty();
+        // Only the first 200 characters are read: what follows them changes nothing.
+        String first200 = "LED bulb" + " ".repeat(192);
+        assertThat(first200).hasSize(200);
+        assertThat(descriptions(hints(first200 + "z".repeat(100)))).containsExactly("LED bulb 9W screw");
         assertThat(hints("  ").get("did_you_mean")).isEmpty();
         JsonNode first = hints("SINGLECABLE").get("did_you_mean").get(0);
         assertThat(first.get("category").asString()).isEqualTo("Cables and wires");
@@ -511,6 +515,29 @@ class EntryChecksIT extends IntegrationTest {
                     .doesNotContain("Seq Scan on " + read.get(1));
         }
 
+        // The last price: for everyone, the newest line; for a seller who sees only their own figures, the newest 200
+        // lines of
+        // the item, of which only those few are sorted. Each is a walk of the item's index under an inner Limit, and
+        // any Sort is
+        // above that Limit, never over the item's whole history.
+        for (Map<String, String> who : List.of(
+                Map.of("window", "1", "seller", "NULL"), Map.of("window", "200", "seller", "'" + api.userId() + "'"))) {
+            String plan = plan(EntryChecksRepository.LAST_SALE, who);
+            List<String> lines = List.of(plan.split("\n"));
+            List<Integer> limits = new ArrayList<>();
+            for (int i = 0; i < lines.size(); i++) {
+                if (lines.get(i).contains("Limit")) {
+                    limits.add(i);
+                }
+            }
+            assertThat(limits).as(plan).hasSize(2);
+            assertThat(String.join("\n", lines.subList(limits.get(1), lines.size())))
+                    .as(plan)
+                    .contains("retail_sale_lines_product_recent")
+                    .doesNotContain("Sort")
+                    .doesNotContain("Seq Scan on retail_sale_lines");
+        }
+
         // And the answer is still the item's own newest 20 lines.
         JsonNode n = norms(ADMIN);
         assertThat(n.get("buy").get("lines_read").asInt()).isEqualTo(20);
@@ -523,7 +550,15 @@ class EntryChecksIT extends IntegrationTest {
 
     /** The plan of one statement for the cable, limit 20, as {@code bms_app} bound to the tenant. */
     String plan(String sql) throws Exception {
+        return plan(sql, Map.of());
+    }
+
+    /** As {@link #plan(String)}, with other parameters written in as literals. */
+    String plan(String sql, Map<String, String> more) throws Exception {
         String bound = sql.replace(":p", "'" + cable + "'::uuid").replace(":limit", "20");
+        for (Map.Entry<String, String> e : more.entrySet()) {
+            bound = bound.replace(":" + e.getKey(), e.getValue());
+        }
         try (Connection c = TestDatabase.appDataSource().getConnection()) {
             c.setAutoCommit(false);
             try (PreparedStatement ps = c.prepareStatement("SELECT set_config('app.tenant_id', ?, true)")) {

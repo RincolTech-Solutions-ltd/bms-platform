@@ -30,7 +30,7 @@ the one category picker (#584) and item codes made by the app (#568, #562).
    gets the last price of their own sales among the item's newest 200 sale lines, never another seller's. History is a sale
    whose status is `completed` (a sale is `completed` or `voided`; a credit sale written off, an imported one and one recorded
    offline are `completed`, so they count; a return does not take a line out), a purchase with no void, and a move that is
-   neither voided nor cancelled. Quantities are base units: a line sold or bought in a pack keeps `qty` as the packs times
+   neither voided nor cancelled (a move on its way, `in_transit`, counts: the quantity was moved). Quantities are base units: a line sold or bought in a pack keeps `qty` as the packs times
    the factor (V39), and its pack is its unit. The thresholds are sent with the norms (`quantity_factor` 10, `price_factor` 2,
    `min_lines` 3) so the screens never hold their own copy. A screen reads an item's norms once and keeps them five minutes;
    a read that fails or has not answered yet means no warning, never a wait.
@@ -38,7 +38,8 @@ the one category picker (#584) and item codes made by the app (#568, #562).
    `(tenant_id, product_id, created_at DESC, id DESC)`, the order the reads ask for, on `retail_sale_lines`,
    `retail_purchase_lines` (neither had an index on the product) and `retail_transfer_lines` (whose `(tenant_id, product_id)`
    index has no order, so a move read would have taken and sorted every move the item ever had). `EntryChecksIT` checks the
-   plans at the size of a busy shop: each is a Limit over that index, with no sort and no scan of the line table. `V104` is indexes only, built in Flyway's transaction behind a five second `lock_timeout`,
+   plans at the size of a busy shop: each is a Limit over that index, with no sort and no scan of the line table; the last
+   price read sorts at most the few lines under its inner Limit (1, or 200 for a seller's own). `V104` is indexes only, built in Flyway's transaction behind a five second `lock_timeout`,
    as `V101`.
 4. **The checks.** On Buy stock and Sell, where a unit is chosen, a line in another unit than the usual one says so: "You
    usually buy this in rolls; you entered 200 metres. Is that right?". Otherwise a quantity ten times the median or more, or a
@@ -56,12 +57,14 @@ the one category picker (#584) and item codes made by the app (#568, #562).
    the cursor in the field and saves nothing. The save button is never disabled by a warning, and the server never refuses a
    line for being unusual. A confirmed warning stays confirmed while the line says the same; a changed line is checked again.
    Offline, or for a sale whose request was already sent, nothing is read or asked.
-6. **Recorded when confirmed and saved.** Once the save a confirmation went with has succeeded, the screen sends each confirmed
+6. **Recorded when confirmed and saved.** Once the save a confirmation went with has succeeded (on Count stock, once the count
+   is committed: the review is not the save), the screen sends each confirmed
    warning of that save to `POST /retail/entry-warnings/confirmations` (`retail.stock.read`, 204), which writes one audit row,
    `retail.entry_warning.confirmed`, on the item, with the screen, the kind (the warning's code) and its numbers only: the
    quantity entered (digits only), the pack unit's id, the median or records compared with and, for a price, both prices. No
    text from the client is stored; the branch is kept only when the caller works there. A warning
-   confirmed beside one that was changed, or a save the server refused, records nothing. No table is
+   confirmed beside one that was changed, or a save the server refused, records nothing. A confirmation answers that one save
+   only: the next entry, even of the same item and quantity, is asked about again. No table is
    added: the audit log is where the owner already reviews what staff did. A failed record never stops the save.
 7. **Naming a new item.** While a new item's name is typed (Add an item, the item form in a category, and the new item on Buy
    stock and Count stock), `GET /retail/products/name-hints` (`retail.catalogue.manage`) gives "Did you mean": at most 5 active

@@ -30,7 +30,10 @@ export function useEntryNorms(productIds: readonly (string | undefined)[]): (id:
 export interface EntryChecks {
   /** Saves at once when every warning is confirmed; otherwise shows the open ones, and the last Confirm saves. */
   check: () => void;
-  /** Called by the screen once its save has succeeded: records the confirmations of the warnings it was saved with. */
+  /**
+   * Called by the screen once its save has succeeded (Count stock: once the count is committed): records the confirmations of
+   * the warnings it was saved with, and forgets them, so the next entry is asked about afresh.
+   */
   saved: () => void;
   /** The warnings showing for one line, as notes with Confirm and Change. */
   notes: (lineKey: string) => ReactElement | null;
@@ -97,6 +100,8 @@ export function useEntryChecks(screen: EntryScreen, branchId: string | undefined
   const saved = () => {
     const sent = sentWith.current;
     sentWith.current = [];
+    // A confirmation answers one save: the next entry, even of the same item and quantity, is asked about again.
+    confirmed.current = new Set();
     // Recorded for the owner's review; a failed record changes nothing.
     for (const w of sent) {
       void retail.confirmEntryWarning({ ...w.confirmation, screen, ...(branchId ? { branch_id: branchId } : {}) }).catch(() => undefined);

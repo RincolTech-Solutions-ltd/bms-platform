@@ -52,6 +52,22 @@ class EntryChecksRepository {
              LIMIT :limit
             """;
 
+    /**
+     * The item's last completed sale (the newest of the item's newest {@code :window} lines, of {@code :seller} when given): an
+     * index walk of at most {@code :window} entries, then a sort of those few only.
+     */
+    static final String LAST_SALE = """
+            SELECT r.line_total_minor, r.qty, r.sale_date
+              FROM (SELECT l.line_total_minor, l.qty, s.sale_date, s.created_by, l.created_at, l.id
+                      FROM retail_sale_lines l JOIN retail_sales s ON s.id = l.sale_id
+                     WHERE l.product_id = :p AND s.status = 'completed'
+                     ORDER BY l.created_at DESC, l.id DESC
+                     LIMIT :window) r
+             WHERE CAST(:seller AS uuid) IS NULL OR r.created_by = CAST(:seller AS uuid)
+             ORDER BY r.created_at DESC, r.id DESC
+             LIMIT 1
+            """;
+
     /** How many of the item's newest sale lines a seller's own last price is looked for in. */
     static final int OWN_SALE_WINDOW = 200;
 
@@ -107,17 +123,7 @@ class EntryChecksRepository {
      * {@link #OWN_SALE_WINDOW} lines (ADR-055: a seller who sees only their own figures), so the read stays bounded.
      */
     LastSale lastSale(UUID productId, UUID sellerId) {
-        return jdbc.sql("""
-                        SELECT r.line_total_minor, r.qty, r.sale_date
-                          FROM (SELECT l.line_total_minor, l.qty, s.sale_date, s.created_by, l.created_at, l.id
-                                  FROM retail_sale_lines l JOIN retail_sales s ON s.id = l.sale_id
-                                 WHERE l.product_id = :p AND s.status = 'completed'
-                                 ORDER BY l.created_at DESC, l.id DESC
-                                 LIMIT :window) r
-                         WHERE CAST(:seller AS uuid) IS NULL OR r.created_by = CAST(:seller AS uuid)
-                         ORDER BY r.created_at DESC, r.id DESC
-                         LIMIT 1
-                        """)
+        return jdbc.sql(LAST_SALE)
                 .param("p", productId)
                 .param("seller", sellerId)
                 .param("window", sellerId == null ? 1 : OWN_SALE_WINDOW)

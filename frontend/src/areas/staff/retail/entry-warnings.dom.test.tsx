@@ -262,6 +262,27 @@ describe('Confirm checks the screen as it is now (review of #590)', () => {
   });
 });
 
+describe('a confirmation answers one save (review of #590)', () => {
+  it('asks again about the same item and quantity on the next sale, and records only what was confirmed', async () => {
+    const saved = vi.fn();
+    open(<SaleForm branchId={BRANCH} onSaved={saved} />);
+    for (const round of [1, 2]) {
+      await pickItem(NAME);
+      type('qty-0', '10');
+      await normsRead();
+      await settle();
+      fireEvent.click(screen.getByRole('button', { name: /Record sale/ }));
+      await screen.findByTestId('entry-warning-quantity');
+      press('Confirm');
+      await waitFor(() => expect(saved).toHaveBeenCalledTimes(round));
+      await waitFor(() => expect(mockEntryConfirmations).toHaveLength(round));
+      // Stock for the second sale: the lamp's shelf of 10 was sold by the first.
+      if (round === 1) await retail.createPurchase({ purchased_on: new Date().toISOString().slice(0, 10), payment_method: 'cash', lines: [{ product_id: LAMP, cost_minor: 3500, sell_minor: 6000, qty_by_branch: [{ branch_id: BRANCH, qty: '10' }] }] }, 'k-restock-1');
+    }
+    expect(mockEntryConfirmations.map((c) => `${c.screen} ${c.kind} ${c.entered_qty}`)).toEqual(['sell quantity 10', 'sell quantity 10']);
+  });
+});
+
 describe('Move stock', () => {
   it('warns about 8 when about 100 are moved; Change keeps the move, Confirm records it and saves', async () => {
     const saved = vi.fn();
@@ -313,7 +334,11 @@ describe('Count stock', () => {
     await screen.findByTestId('entry-warning-quantity');
     press('Confirm');
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
-    // Recorded once the review is made.
+    // The review is not the save: nothing is recorded until the count is committed.
+    await screen.findByRole('button', { name: 'Commit the count' });
+    await settle();
+    expect(mockEntryConfirmations).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
     await waitFor(() => expect(mockEntryConfirmations).toHaveLength(1));
     expect(mockEntryConfirmations).toEqual([expect.objectContaining({ screen: 'count', kind: 'quantity', product_id: LAMP, entered_qty: '1000', median_qty: '10' })]);
   });

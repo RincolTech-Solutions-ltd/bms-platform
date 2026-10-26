@@ -153,10 +153,7 @@ function CountSheet({ branchId }: { branchId: string }) {
   const bad = entered.some(([, v]) => parseCount(v) === null);
   const review = useMutation({
     mutationFn: () => retail.createStocktake({ branch_id: branchId, lines: entered.map(([productId, countedQty]) => ({ product_id: productId, counted_qty: countedQty.trim() })) }),
-    onSuccess: (st) => {
-      entry.saved();
-      setDraft(st);
-    },
+    onSuccess: setDraft,
   });
   // Issue #353: each count against what the records hold here, or, where they hold nothing, against the item's usual purchase;
   // said before the review, never blocking. Only the counts whose records hold nothing read the item's history.
@@ -176,6 +173,8 @@ function CountSheet({ branchId }: { branchId: string }) {
   const commit = useMutation({
     mutationFn: () => retail.commitStocktake(draft?.id ?? ''),
     onSuccess: (st) => {
+      // Issue #353: a count is saved when it is committed, so that is when its confirmed warnings are recorded.
+      entry.saved();
       setDraft(st);
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
