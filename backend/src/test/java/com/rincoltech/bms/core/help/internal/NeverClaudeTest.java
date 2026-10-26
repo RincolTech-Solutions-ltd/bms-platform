@@ -24,6 +24,10 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.io.ClassPathResource;
 
 /**
  * Claude is never used by Ask BMS (the owner's rule on #20, ADR-096 decision 4). Fails if an Anthropic endpoint, SDK or
@@ -95,13 +99,8 @@ class NeverClaudeTest {
                 .containsValues("generativelanguage.googleapis.com", "api.groq.com", "api.deepseek.com");
     }
 
-    /** Only Gemini is sent a reasoning effort (#601); Groq and DeepSeek requests are unchanged. */
-    @Test
-    void onlyGeminiIsGivenAReasoningEffort() {
-        Factory factory = new Factory();
-        AskProperties.Provider groqWithOne = new AskProperties.Provider(
-                "https://api.groq.com/openai/v1", "test-key-not-real", "llama-3.1-8b-instant", null, null, "low");
-        AskProperties props = new AskProperties(
+    static AskProperties withReasoning(String gemini, String groq) {
+        return new AskProperties(
                 "",
                 null,
                 null,
@@ -110,29 +109,76 @@ class NeverClaudeTest {
                 null,
                 null,
                 null,
-                gemini(GEMINI_URL, "gemini-3.5-flash-lite"),
-                groqWithOne,
+                new AskProperties.Provider(
+                        GEMINI_URL, "test-key-not-real", "gemini-3.5-flash-lite", null, null, gemini),
+                new AskProperties.Provider(
+                        "https://api.groq.com/openai/v1",
+                        "test-key-not-real",
+                        "llama-3.1-8b-instant",
+                        null,
+                        null,
+                        groq),
                 deepseek(270_000L));
-        AskProviders.from(props, factory);
+    }
+
+    /** Only Gemini is sent a reasoning effort (#601); Groq and DeepSeek requests are unchanged. */
+    @Test
+    void onlyGeminiIsGivenAReasoningEffort() {
+        Factory factory = new Factory();
+        AskProviders.from(withReasoning("low", null), factory);
         assertThat(factory.built)
                 .containsExactly(
-                        GEMINI_URL + " gemini-3.5-flash-lite minimal",
+                        GEMINI_URL + " gemini-3.5-flash-lite low",
                         "https://api.groq.com/openai/v1 llama-3.1-8b-instant null",
                         "https://api.deepseek.com deepseek-chat null");
+        assertThatThrownBy(() -> withReasoning(null, "low"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("BMS_HELP_ASK_GROQ_REASONING");
+    }
+
+    /** Unset or empty is {@code minimal}, never nothing: Gemini 3 would think at its own default and miss the budget. */
+    @Test
+    void anUnsetOrEmptyReasoningEffortIsMinimal() {
+        assertThat(withReasoning(null, null).gemini().reasoning()).isEqualTo("minimal");
+        assertThat(withReasoning(" ", null).gemini().reasoning()).isEqualTo("minimal");
+        assertThat(withReasoning(" Low ", null).gemini().reasoning()).isEqualTo("low");
+        assertThat(new AskProperties("", null, null, null, null, null, null, null, null, null, null)
+                        .gemini()
+                        .reasoning())
+                .isEqualTo("minimal");
+    }
+
+    /**
+     * The shipped {@code application.yml} binds {@code minimal} whether {@code BMS_HELP_ASK_GEMINI_REASONING} is absent or
+     * set but empty (a placeholder default covers only the absent case).
+     */
+    @Test
+    void theShippedConfigurationSendsMinimalWhenTheVariableIsAbsentOrEmpty() throws IOException {
+        for (Map<String, Object> env :
+                List.<Map<String, Object>>of(Map.of(), Map.of("BMS_HELP_ASK_GEMINI_REASONING", ""))) {
+            StandardEnvironment environment = new StandardEnvironment();
+            environment.getPropertySources().addFirst(new MapPropertySource("env", env));
+            new YamlPropertySourceLoader()
+                    .load("application.yml", new ClassPathResource("application.yml")).stream()
+                            .findFirst()
+                            .ifPresent(environment.getPropertySources()::addLast);
+            AskProperties bound = Binder.get(environment)
+                    .bind("bms.help.ask", AskProperties.class)
+                    .get();
+            assertThat(bound.gemini().reasoning()).isEqualTo("minimal");
+            assertThat(bound.gemini().model()).isEqualTo("gemini-3.5-flash-lite");
+            assertThat(bound.groq().reasoning()).isNull();
+        }
     }
 
     /** Gemini 3 cannot turn thinking off, so {@code none} (refused by Google with 400) or a typo stops startup. */
     @Test
     void anUnknownReasoningEffortStopsStartup() {
         for (String bad : List.of("none", "off", "0")) {
-            assertThatThrownBy(() -> new AskProperties.Provider(GEMINI_URL, "k", "m", null, null, bad))
+            assertThatThrownBy(() -> withReasoning(bad, null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("BMS_HELP_ASK_GEMINI_REASONING");
         }
-        assertThat(new AskProperties.Provider(GEMINI_URL, "k", "m", null, null, " Low ").reasoning())
-                .isEqualTo("low");
-        assertThat(new AskProperties.Provider(GEMINI_URL, "k", "m", null, null, " ").reasoning())
-                .isNull();
     }
 
     @Test
