@@ -62,6 +62,9 @@ and not automatic suspension, an emailed receipt, and a Plan and billing page fo
    today; only the page of a business paid ahead changes, and only when a new price starts in between. No price is changed.
 6. **A receipt for every payment.** When the operator records a payment, the same transaction numbers its receipt
    (`subscription_receipts`, `RT-<year>-<six digits>` from one sequence across the platform) and queues the email to the Owner. The
+   number never resets: the year is the day the receipt is issued, and the digits run on from one year to the next
+   (`RT-2026-000412` may be followed by `RT-2027-000413`, never by `RT-2027-000001`), so a number is unique without its year
+   and a gap is only a rolled back payment (issue #502). The
    receipt row keeps the business's and the plan's names as they were, so the PDF is the same whenever it is rendered (ADR-034).
    The PDF is in the house letterhead of Rincol Tech (the issuer, not the business's own): business, plan, period covered, amount
    in figures and words, method, reference, number and date. The issuer's address, contact and tax number are environment values
