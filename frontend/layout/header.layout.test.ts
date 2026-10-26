@@ -14,7 +14,8 @@ let browser: Browser;
 let base = '';
 
 beforeAll(async () => {
-  server = await createServer({ configFile: false, root: process.cwd(), plugins: [react(), helpCorpus()], logLevel: 'error', server: { port: 0, host: '127.0.0.1' } });
+  // Its own dependency cache, so it never races tabs.layout.test.ts's server, which vitest starts at the same time.
+  server = await createServer({ configFile: false, root: process.cwd(), cacheDir: 'node_modules/.vite-layout-header', plugins: [react(), helpCorpus()], logLevel: 'error', server: { port: 0, host: '127.0.0.1' } });
   await server.listen();
   base = server.resolvedUrls?.local[0] ?? '';
   browser = await chromium.launch();
