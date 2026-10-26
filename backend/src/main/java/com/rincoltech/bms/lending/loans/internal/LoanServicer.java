@@ -1006,9 +1006,7 @@ class LoanServicer implements LoanServicing {
         String what = component.equals("fee") ? "fees" : "interest";
         String is = component.equals("fee") ? " are" : " is";
         if (due <= 0) {
-            throw ApiException.rule(
-                    "nothing_to_waive",
-                    "No " + what + is + " still due on item " + itemNo + ".");
+            throw ApiException.rule("nothing_to_waive", "No " + what + is + " still due on item " + itemNo + ".");
         }
         if (amountMinor <= 0 || amountMinor > due) {
             throw ApiException.rule(
