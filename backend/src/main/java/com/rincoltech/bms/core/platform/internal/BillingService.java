@@ -221,6 +221,16 @@ class BillingService {
         return due != null && !today.isAfter(due.plusDays(graceDays)) ? "in_grace" : "overdue";
     }
 
+    /**
+     * The one day every billing price is read on (issue #502, ADR-075 decision 5): the first day the next payment would cover,
+     * that is the later of today and the day after the last day paid for, as {@code platform_record_subscription_payment}
+     * (V75) starts a paid period. A reminder (before its due date) reads the day after, an overdue business (the list, the
+     * page while late) today; today when there is no last day.
+     */
+    static LocalDate priceDate(LocalDate due, LocalDate today) {
+        return due != null && due.plusDays(1).isAfter(today) ? due.plusDays(1) : today;
+    }
+
     /** The reminder due on {@code today}, or null: 7 days before, 1 day before and on the day. */
     static String reminderKind(boolean trial, long daysLeft) {
         String prefix = trial ? "trial_" : "due_";
@@ -288,7 +298,7 @@ class BillingService {
                 if (kind == null || now.atZone(zone).toLocalTime().isBefore(REMINDERS_FROM)) {
                     continue;
                 }
-                if (remind(tenant, kind, due, settings)) {
+                if (remind(tenant, kind, due, today, settings)) {
                     queued++;
                 }
             } catch (RuntimeException e) {
@@ -366,9 +376,9 @@ class BillingService {
      * billing SMS is switched on ({@code bms.platform.billing.sms-enabled}) and the Owner has a phone. A business with no
      * Owner gets the row with no channel, so the operator sees in its outbox that nothing went.
      */
-    private boolean remind(TenantResponse tenant, String kind, LocalDate due, Settings settings) {
+    private boolean remind(TenantResponse tenant, String kind, LocalDate due, LocalDate today, Settings settings) {
         PriceBookController.PlanPriceResponse price = priceBook
-                .priceOn(tenant.planCode(), tenant.currency(), due.plusDays(1))
+                .priceOn(tenant.planCode(), tenant.currency(), priceDate(due, today))
                 .orElse(null);
         Long amount = price == null ? null : price.monthlyMinor();
         String amountLine = price == null
@@ -595,8 +605,9 @@ class BillingService {
         LocalDate due = dueOn(tenant.subscriptionStatus(), tenant.trialEndsOn(), tenant.paidUntil());
         String state = state(tenant.subscriptionStatus(), tenant.pilot(), due, today, settings.graceDays());
         boolean late = state.equals("in_grace") || state.equals("overdue");
-        PriceBookController.PlanPriceResponse price =
-                priceBook.priceOn(tenant.planCode(), tenant.currency(), today).orElse(null);
+        PriceBookController.PlanPriceResponse price = priceBook
+                .priceOn(tenant.planCode(), tenant.currency(), priceDate(due, today))
+                .orElse(null);
         List<BillingPayment> payments = jdbc.sql("""
                         SELECT sp.id, sp.amount_minor, sp.currency, sp.method, sp.reference, sp.paid_on, sp.months,
                                sp.period_start, sp.period_end, r.receipt_no
@@ -776,7 +787,7 @@ class BillingService {
                 continue;
             }
             PriceBookController.PlanPriceResponse price = priceBook
-                    .priceOn(tenant.planCode(), tenant.currency(), today)
+                    .priceOn(tenant.planCode(), tenant.currency(), priceDate(due, today))
                     .orElse(null);
             items.add(new BillingAdminController.DueItem(
                     tenant.id(),

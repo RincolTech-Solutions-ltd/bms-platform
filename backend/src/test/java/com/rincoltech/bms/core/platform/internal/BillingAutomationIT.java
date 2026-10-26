@@ -798,6 +798,44 @@ class BillingAutomationIT extends IntegrationTest {
                 .doesNotContain(cancelling.id().toString(), closing.id().toString());
     }
 
+    /**
+     * Issue #502 item 4: one price date for the reminders, the Owner's page and the list: the first day the next payment would
+     * cover. With a new price from the day after the last day paid for, the reminder and the page both say the new one.
+     * JUSTIFICATION-A3: a new test case for the review follow-up; the anchor is only the insertion point.
+     */
+    @Test
+    void frSub12_theRemindersAndThePagePriceTheSameDay() {
+        Business b = business("active", null, LocalDate.of(2026, 11, 10), false);
+        ResponseEntity<JsonNode> later = platform.post(
+                "/api/v1/platform/plans/" + plan + "/prices",
+                Map.of(
+                        "monthly_minor",
+                        12000,
+                        "annual_months",
+                        11,
+                        "effective_from",
+                        "2026-11-11",
+                        "reason",
+                        "Test price"),
+                operator.accessToken());
+        assertThat(later.getStatusCode()).as("%s", later.getBody()).isEqualTo(HttpStatus.OK);
+
+        clock.set(Instant.parse("2026-11-03T06:00:00Z"));
+        assertThat(run(b).remindersQueued()).isEqualTo(1);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT amount_minor FROM subscription_reminders WHERE tenant_id = ?")
+                        .param(b.id())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(12000);
+        JsonNode page = Api.tenant(http, b.fixture().slug())
+                .get("/api/v1/billing", token(b))
+                .getBody();
+        assertThat(page.get("monthly_minor").asLong())
+                .as("the price of the next month, not today's")
+                .isEqualTo(12000);
+    }
+
     /** FR-SUB-11: a payment gets a numbered receipt in its own transaction, emailed to the Owner with the PDF attached. */
     @Test
     void frSub11_aPaymentGetsANumberedReceiptEmailedToTheOwner() {

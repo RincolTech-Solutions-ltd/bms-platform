@@ -54,7 +54,12 @@ and not automatic suspension, an emailed receipt, and a Plan and billing page fo
    suspension is opt-in and guarded") is narrowed to never, until a later decision says otherwise.
 5. **What is owed.** A late payment's paid period starts on the day it is recorded (`platform_record_subscription_payment`, V75),
    so the late days are not charged and what is due is the price of the next month. The list, the reminders and the page say that
-   amount; they never add the late days.
+   amount; they never add the late days. **One price date (issue #502):** every one of them reads the plan's price in force on the
+   first day the next payment would cover, the later of today and the day after the last day paid for (the same start as V75
+   gives the payment; `BillingService.priceDate`). A reminder, sent on or before the last day, so prices the day after it; the
+   list, and the page of a business that is overdue, price today; the page of a business paid ahead prices the day after its
+   last day, so it says what the Owner will pay next, the same amount as its reminders. Before #502 the page and the list read
+   today; only the page of a business paid ahead changes, and only when a new price starts in between. No price is changed.
 6. **A receipt for every payment.** When the operator records a payment, the same transaction numbers its receipt
    (`subscription_receipts`, `RT-<year>-<six digits>` from one sequence across the platform) and queues the email to the Owner. The
    receipt row keeps the business's and the plan's names as they were, so the PDF is the same whenever it is rendered (ADR-034).
