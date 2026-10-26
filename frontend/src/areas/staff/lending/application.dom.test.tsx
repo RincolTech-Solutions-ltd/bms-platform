@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -14,9 +16,9 @@ import { createCollateralMock, createMembersMock } from '../../../api/members-mo
 import type { MemberRecord } from '../../../api/members';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
-import { ApplicationForm } from './application-form';
-import { AppraiseForm } from './appraise';
-import { DecisionForm } from './decide';
+import { ApplicationForm, EditApplicationBody } from './application-form';
+import { AppraiseBody, AppraiseForm } from './appraise';
+import { DecideBody, DecisionForm } from './decide';
 import { LoanView } from './loan';
 import { Loans } from './loans';
 
@@ -69,7 +71,7 @@ const appraisal: LoanAppraisal = {
 };
 
 /** An in-memory application client that records each call, the server's version rule included. */
-function createApplicationsMock(start?: Loan) {
+function createApplicationsMock(start?: Loan, tightened = false) {
   let current: Loan | undefined = start;
   const calls: { name: string; version?: number; body?: unknown }[] = [];
   let failOnce: { name: string; error: FormError } | null = null;
@@ -86,7 +88,12 @@ function createApplicationsMock(start?: Loan) {
     return { ...current };
   };
   const api: ApplicationsApi = {
-    async products() { return [product, strict]; },
+    async products() { return tightened ? [{ ...product, current_version: { ...product.current_version, id: 'v2', max_principal_minor: 500_000 } }, strict] : [product, strict]; },
+    // The product was tightened after the draft: v2 lends at most 500,000; the draft was made on v1, which lends up to 5,000,000.
+    async product(id) {
+      const v1 = { ...product.current_version, id: 'v1' };
+      return { ...(id === 'p2' ? strict : product), current_version: { ...v1, id: 'v2', max_principal_minor: 500_000 }, versions: [{ ...v1, id: 'v2', max_principal_minor: 500_000 }, v1] };
+    },
     async get() { if (!current) throw new FormError('Not found.', 404, 'not_found'); return { ...current }; },
     async drafts() { return []; },
     async history() { return []; },
@@ -109,8 +116,8 @@ function createApplicationsMock(start?: Loan) {
   return { api, calls, failNext: (name: string, error: FormError) => { failOnce = { name, error }; } };
 }
 
-function mount(node: ReactElement, opts: { me?: Me; loan?: Loan; items?: CollateralItem[] } = {}) {
-  const applications = createApplicationsMock(opts.loan);
+function mount(node: ReactElement, opts: { me?: Me; loan?: Loan; items?: CollateralItem[]; tightened?: boolean } = {}) {
+  const applications = createApplicationsMock(opts.loan, opts.tightened);
   const members = createMembersMock([borrower, guarantor]);
   const collateral = createCollateralMock(opts.items ?? [plot, unvalued]);
   render(
@@ -233,6 +240,57 @@ describe('the loan application form', () => {
   });
 });
 
+describe('changing a draft', () => {
+  it('checks the draft against the product version it was made on, as the server does, not a newer one', async () => {
+    // The product's current version (in the list and on the detail) now lends at most 500,000.
+    const api = mount(<ApplicationForm loan={loan('draft', { product_version_id: 'v1' })} />, { loan: loan('draft', { product_version_id: 'v1' }), tightened: true });
+    expect(await screen.findByText('UGX 100,000 to UGX 5,000,000')).toBeTruthy();
+    type(/^Amount asked for/, '2,000,000');
+    fireEvent.blur(screen.getByLabelText(/^Amount asked for/));
+    expect(errorOf('af-requested-principal-minor')).toBe('');
+    send();
+    await waitFor(() => expect(api.calls.map((c) => c.name)).toEqual(['update', 'submit']));
+    expect(api.calls[0]).toMatchObject({ version: 3, body: { requested_principal_minor: 2_000_000 } });
+  });
+});
+
+describe('the route gates (applicationSteps on the loaded loan)', () => {
+  const scoped = (permission: string) => staff([permission], { [permission]: { all_branches: false, branch_ids: [OTHER] }, 'lending.loans.read': { all_branches: true } });
+  const gate = async (node: ReactElement, opts: { me: Me; loan: Loan }, form: string) => {
+    mount(node, opts);
+    await screen.findByText(/You do not have access/);
+    expect(screen.queryByRole('form', { name: form })).toBeNull();
+    cleanup();
+  };
+
+  it('opens Change the application only to a creator in the loan\'s branch, on a draft', async () => {
+    mount(<EditApplicationBody loanId="l1" />, { loan: loan('draft') });
+    expect(await screen.findByRole('form', { name: 'Change the application' })).toBeTruthy();
+    cleanup();
+    await gate(<EditApplicationBody loanId="l1" />, { me: APPRAISER, loan: loan('draft') }, 'Change the application');
+    await gate(<EditApplicationBody loanId="l1" />, { me: scoped('lending.loans.create'), loan: loan('draft') }, 'Change the application');
+    await gate(<EditApplicationBody loanId="l1" />, { me: OFFICER, loan: loan('submitted') }, 'Change the application');
+  });
+
+  it('opens Appraise only to an appraiser in the loan\'s branch, on a submitted or appraised loan', async () => {
+    mount(<AppraiseBody loanId="l1" />, { me: APPRAISER, loan: loan('submitted') });
+    expect(await screen.findByRole('form', { name: 'Appraise the application' })).toBeTruthy();
+    cleanup();
+    await gate(<AppraiseBody loanId="l1" />, { me: MANAGER, loan: loan('submitted') }, 'Appraise the application');
+    await gate(<AppraiseBody loanId="l1" />, { me: scoped('lending.loans.appraise'), loan: loan('submitted') }, 'Appraise the application');
+    await gate(<AppraiseBody loanId="l1" />, { me: APPRAISER, loan: loan('draft') }, 'Appraise the application');
+  });
+
+  it('opens the decision only to an approver in the loan\'s branch, on an appraised loan', async () => {
+    mount(<DecideBody loanId="l1" />, { me: MANAGER, loan: loan('appraised') });
+    expect(await screen.findByRole('form', { name: 'Decide on the application' })).toBeTruthy();
+    cleanup();
+    await gate(<DecideBody loanId="l1" />, { me: APPRAISER, loan: loan('appraised') }, 'Decide on the application');
+    await gate(<DecideBody loanId="l1" />, { me: scoped('lending.loans.approve'), loan: loan('appraised') }, 'Decide on the application');
+    await gate(<DecideBody loanId="l1" />, { me: MANAGER, loan: loan('submitted') }, 'Decide on the application');
+  });
+});
+
 describe('the application on the loan page', () => {
   it('offers Send for appraisal, as the one primary action, only to who may create', () => {
     mount(<LoanView loan={loan('draft')} />);
@@ -245,6 +303,13 @@ describe('the application on the loan page', () => {
     expect(screen.queryByRole('button', { name: 'Send for appraisal' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Change the application' })).toBeNull();
     expect(screen.getByText('Draft: not sent for appraisal yet.')).toBeTruthy();
+  });
+
+  it('shows an approved loan\'s payments once, with Disburse as its action', async () => {
+    mount(<LoanView loan={loan('approved', { approved_principal_minor: 1_000_000, approved_term_count: 6 })} />, { me: staff(['lending.disbursements.request']) });
+    expect(screen.getByRole('button', { name: 'Disburse' })).toBeTruthy();
+    expect(screen.getAllByRole('table')).toHaveLength(1);
+    expect(screen.getByText(/Until then, see Payments it would mean above\./)).toBeTruthy();
   });
 
   it('sends a draft for appraisal with its version', async () => {
@@ -358,5 +423,22 @@ describe('deciding', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Approve' }));
     fireEvent.click(screen.getByRole('button', { name: 'Approve the loan' }));
     expect(await screen.findByText(/covers less of the loan than this product needs/)).toBeTruthy();
+  });
+});
+
+describe('tap targets', () => {
+  const buttons = readFileSync(join(process.cwd(), 'src/app/ui/buttons.css'), 'utf8');
+  const lending = readFileSync(join(process.cwd(), 'src/app/ui/lending.css'), 'utf8');
+  const block = (css: string, selector: string) => new RegExp(`(?:^|\\n)${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? '';
+
+  it('keeps every Remove button (.btn-sm) and every choice row at the 48px target', () => {
+    mount(<ApplicationForm loan={loan('draft', { guarantors: [{ member_id: guarantor.id, member_no: 'M000202', guaranteed_amount_minor: 100_000 }] })} />);
+    const remove = screen.getByRole('button', { name: /^Remove/ });
+    expect(remove.tagName).toBe('BUTTON');
+    // Every button takes min-height: var(--tap), 48px; .btn-sm changes only its padding and type size.
+    expect(block(buttons, 'button,\n.btn')).toMatch(/min-height:\s*var\(--tap\)/);
+    expect(block(buttons, '.btn-sm')).toMatch(/padding/);
+    expect(block(buttons, '.btn-sm')).not.toMatch(/height/);
+    expect(block(lending, '.mf-check')).toMatch(/min-height:\s*var\(--tap\)/);
   });
 });

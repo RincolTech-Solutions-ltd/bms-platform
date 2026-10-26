@@ -18,6 +18,7 @@ for the capture. No page scrolled sideways (scroll width 412 on every capture).
 | `09-decide-approve-412` | Decide: Approve chosen, a smaller amount than asked, Approve the loan |
 | `10-decide-maker-checker-and-reason-412` | The appraiser cannot approve (FR-APR-03): Approve off with the reason; Decline needs a reason, said under the field |
 | `11-collateral-value-in-business-currency-kes-412` | Issue #289: a business in KES types a new item's value in KES, not UGX |
+| `12-approved-loan-schedule-once-full-412` | An approved loan, the whole page: Disburse at the top, the application with its approved terms, the appraisal, and the payments it would mean shown once; the Schedule section only points to them (the bar in the middle is the fixed tab bar, drawn once by the full-page capture) |
 
 | Form | Product limits | Draft | Appraised | Maker-checker |
 |---|---|---|---|---|

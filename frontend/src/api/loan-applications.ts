@@ -23,6 +23,8 @@ export type LoanStatusChange = S['LoanStatusChange'];
 export interface ApplicationsApi {
   /** The loan products that take new applications. */
   products(): Promise<LoanProduct[]>;
+  /** One product with every version, newest first (an archived one too): a draft is checked against the version it was made on. */
+  product(id: string): Promise<LoanProduct>;
   get(id: string): Promise<Loan>;
   /** The member's drafts: what the screen looks at after a create whose answer was lost. */
   drafts(memberId: string): Promise<LoanListItem[]>;
@@ -48,6 +50,10 @@ const loan = (id: string, version: number) => ({ path: { loan_id: id }, header: 
 const rawApplications: ApplicationsApi = {
   async products() {
     return (unwrapForm(await api.GET('/api/v1/lending/loan-products')).items ?? []).filter((p) => p.status === 'active');
+  },
+
+  async product(id) {
+    return unwrapForm(await api.GET('/api/v1/lending/loan-products/{product_id}', { params: { path: { product_id: id } } }));
   },
 
   async get(id) {

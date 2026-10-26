@@ -55,7 +55,11 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
   const editing = base !== undefined;
 
   const products = useQuery({ queryKey: ['lending', 'loan-products', 'active'], queryFn: () => api.products() });
-  const product = products.data?.find((p) => p.id === draft.productId);
+  // A draft keeps the product version it was made on, and the server checks a change against that version (LoanService.update,
+  // versionOf), so the form does too, even when the product has a newer version or takes no new applications.
+  const made = useQuery({ queryKey: ['lending', 'loan-product', base?.product_id], queryFn: () => api.product(base?.product_id ?? ''), enabled: !!base?.product_id });
+  const lockedVersion = made.data?.versions?.find((v) => v.id === base?.product_version_id);
+  const product = base ? (lockedVersion ? { ...made.data, current_version: lockedVersion } : undefined) : products.data?.find((p) => p.id === draft.productId);
   const terms = termsOf(product);
   // Money is typed in the product's currency once one is chosen, the loan's on a draft, else the business's (issue #289).
   const currency = currencyOf(base?.currency ?? terms?.currency ?? tenantCurrency(me));
@@ -286,6 +290,11 @@ const editRoute = getRouteApi('/staff/lending/loans/$loanId/edit');
 
 function EditApplication() {
   const { loanId } = editRoute.useParams();
+  return <EditApplicationBody loanId={loanId} />;
+}
+
+/** The page body for a loan, with its gate: the step must be offered to this session for this loan (applicationSteps). */
+export function EditApplicationBody({ loanId }: { loanId: string }) {
   const { me } = useStaff();
   const api = useApplicationsApi();
   const loan = useQuery({ queryKey: ['lending', 'loan', loanId], queryFn: () => api.get(loanId) });

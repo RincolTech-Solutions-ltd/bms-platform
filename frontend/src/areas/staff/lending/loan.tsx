@@ -260,7 +260,8 @@ function ServicingView({ loan, memberName }: { loan: Loan; memberName?: string }
       <BalancesCard loan={loan} />
       <h2 id="ln-schedule" data-tour="loan-schedule">Schedule</h2>
       {loan.status === 'approved' ? (
-        <p className="empty-state">The schedule is set when the loan is disbursed.</p>
+        // The application panel above shows the payments it would mean, once; this says where the real schedule comes from.
+        <p className="empty-state">The schedule is set when the loan is disbursed. Until then, see Payments it would mean above.</p>
       ) : (
         <>
           {schedule.isPending && <p className="loading">Loading the schedule</p>}

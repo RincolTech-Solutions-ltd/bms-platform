@@ -109,6 +109,11 @@ const route = getRouteApi('/staff/lending/loans/$loanId/decide');
 
 function DecidePage() {
   const { loanId } = route.useParams();
+  return <DecideBody loanId={loanId} />;
+}
+
+/** The page body for a loan, with its gate: the step must be offered to this session for this loan (applicationSteps). */
+export function DecideBody({ loanId }: { loanId: string }) {
   const { me } = useStaff();
   const api = useApplicationsApi();
   const loan = useQuery({ queryKey: ['lending', 'loan', loanId], queryFn: () => api.get(loanId) });

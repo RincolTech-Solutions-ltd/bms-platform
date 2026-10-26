@@ -111,6 +111,16 @@ describe('registering collateral', () => {
   });
 });
 
+describe('valuing an item in its own currency (issue #289)', () => {
+  it('labels the values in the item\'s currency and gives a KES item the decimal keypad', () => {
+    const kes: CollateralItem = { id: 'c9', branch_id: BRANCH, member_id: holder.id, collateral_type: 'vehicle', description: 'Test van', reference_no: 'KXX 001X', custody_status: 'pledged', currency: 'KES', version: 1 };
+    mount(<CollateralView detail={{ item: kes, valuations: [], events: [] }} collateralId="c9" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add a valuation' }));
+    expect(screen.getByLabelText(/^Market value \(KES\)/).getAttribute('inputmode')).toBe('decimal');
+    expect(screen.getByLabelText(/^Value in a quick sale \(KES, if known\)/).getAttribute('inputmode')).toBe('decimal');
+  });
+});
+
 describe('the collateral item page', () => {
   const item: CollateralItem = { id: 'c1', branch_id: BRANCH, member_id: holder.id, collateral_type: 'vehicle', description: 'Test motorcycle', reference_no: 'UXX 001X', custody_status: 'pledged', currency: 'UGX', estimated_value_minor: 4_000_000, collateral_value_minor: 3_500_000, version: 2 };
   const detail = { item, valuations: [], events: [] };
