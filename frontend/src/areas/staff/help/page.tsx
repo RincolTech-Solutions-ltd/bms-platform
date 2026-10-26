@@ -1,5 +1,5 @@
-import { Link, createLazyRoute } from '@tanstack/react-router';
-import { useEffect, useMemo, useState } from 'react';
+import { Link, createLazyRoute, useRouterState } from '@tanstack/react-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, ListRow, RowList } from '../../../app/ui/ListRow';
 import { markFeatureSeen } from '../../../app/ui/NewBadge';
 import { SearchBox, SearchResults } from '../../../app/ui/SearchBox';
@@ -8,13 +8,14 @@ import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { JOBS, articleById, articleVisible, articlesFor, searchArticles, type Article, type Inline } from '../../../help/corpus';
 import { useStaff } from '../context';
 import { HELP_FEATURE } from '../menu';
-import { AskBms, useAskEnabled } from './ask';
+import { AskBms, useAskEnabled, useAskStatus } from './ask';
 
 // How do I...? (issue #598, ADR-095): short articles with pictures for the jobs a person does in BMS, under Help and feedback.
 // The articles ship with the app (src/help), so the page and its pictures work offline once the app is installed, and nothing is
 // sent anywhere while a person searches. A person sees only the articles their permissions allow. "Not answered? Ask us" opens
 // Feedback with what they searched for already typed. While the platform has Ask BMS on for the business (issue #20, ADR-096),
-// an Ask BMS box above the search answers a question from these articles and links the one it comes from.
+// an Ask BMS box above the search, and at the top of each article (issue #603), answers a question from these articles and
+// links the one it comes from.
 
 function Words({ runs }: { runs: Inline }) {
   return <>{runs.map((r, i) => (r.strong ? <strong key={i}>{r.text}</strong> : <span key={i}>{r.text}</span>))}</>;
@@ -42,8 +43,17 @@ export function HowDoIPage() {
   const mine = useMemo(() => articlesFor(me), [me]);
   const search = useLiveSearch({ urlParam: 'q' });
   const found = useMemo(() => searchArticles(mine, search.term), [mine, search.term]);
-  const askEnabled = useAskEnabled();
+  const { enabled: askEnabled, known } = useAskStatus();
   const [asked, setAsked] = useState('');
+  // The top bar's Ask button opens /staff/help#ask (issue #603): once the server has said whether Ask BMS is on, the cursor goes
+  // to the question box, or to the article search while it is off. Only once per arrival.
+  const hash = useRouterState({ select: (state) => state.location.hash });
+  const focused = useRef(false);
+  useEffect(() => {
+    if (hash !== 'ask' || !known || focused.current) return;
+    focused.current = true;
+    document.querySelector<HTMLElement>(askEnabled ? '.help-ask-bms input' : '#help-q')?.focus();
+  }, [hash, known, askEnabled]);
   return (
     <main className="rt ln stack help-page">
       <h1>How do I...?</h1>
@@ -85,6 +95,7 @@ export function ArticleView({ articleId }: { articleId: string }) {
   const { me } = useStaff();
   const article = articleById(articleId);
   const allowed = article !== undefined && articleVisible(article, me);
+  const askEnabled = useAskEnabled();
   useCrumbLabel(allowed ? article.title : undefined);
   if (!article || !allowed) {
     return (
@@ -100,6 +111,8 @@ export function ArticleView({ articleId }: { articleId: string }) {
   return (
     <main className="rt ln stack help-page">
       <h1>{article.title}</h1>
+      {/* A person the article did not answer asks straight away (issue #603). */}
+      {askEnabled && <AskBms />}
       {article.intro.map((runs, i) => (
         <p key={i} data-tour={i === 0 ? 'help-article-intro' : undefined}>
           <Words runs={runs} />

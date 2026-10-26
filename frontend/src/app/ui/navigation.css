@@ -125,6 +125,21 @@
   flex: none;
 }
 
+/* The Ask button (issue #603): the ask icon and its word next to Search, a 48px target, the New dot at its top right. */
+.ask-open {
+  position: relative;
+  flex: none;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  gap: var(--space-1);
+}
+
+@media (max-width: 379px) {
+  .ask-open-word {
+    display: none;
+  }
+}
+
 /* The one menu: a panel under its button, the items full width and left aligned, closed with the hidden attribute. */
 .top-menu {
   position: relative;

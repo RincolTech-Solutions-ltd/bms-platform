@@ -14,6 +14,8 @@ import { StaffContext } from '../context';
 // The help page's entry (issue #603): Help, or Ask BMS while the business has it on, just after Home on the More page, in the
 // side menu and in feature search, with a New pill on the entry and a dot on the More tab. Both blink until the person opens
 // /staff/help once, then stay gone on this device; under reduced motion they stand still, and blocked storage breaks nothing.
+// Round 2: an Ask button in the top bar of every staff screen opens /staff/help with the cursor in the question box, and each
+// article carries the Ask BMS box at its top.
 // The server is a mock and every person is fabricated.
 
 const ask = vi.hoisted(() => ({ status: vi.fn(), ask: vi.fn() }));
@@ -23,10 +25,11 @@ vi.mock('../../../api/help', async (original) => {
   return { ...real, askBms: ask };
 });
 
-const { HowDoIPage } = await import('./page');
+const { ArticleView, HowDoIPage } = await import('./page');
 const { MorePage } = await import('../tab-pages');
 const { TabBar } = await import('../tabs');
-const { StaffSideNav } = await import('../route');
+const { StaffBar, StaffSideNav } = await import('../route');
+const { articlesFor } = await import('../../../help/corpus');
 
 const TOURS_OFF = { 'tours-off': { status: 'dismissed', version: 1 } };
 const admin = { ...mockMe('admin'), tours: TOURS_OFF } as unknown as Me;
@@ -44,10 +47,10 @@ function screenIs(px: number, still = false) {
   );
 }
 
-function show(children: ReactNode) {
-  const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/more'] }) });
+function show(children: ReactNode, path = '/staff/more') {
+  const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: [path] }) });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
-  return render(
+  return { router, ...render(
     <RouterContextProvider router={router}>
       <QueryClientProvider client={client}>
         <StaffContext.Provider value={{ me: admin, branch: admin.branches?.[0]?.id ?? null, signOut: () => undefined }}>
@@ -57,8 +60,10 @@ function show(children: ReactNode) {
         </StaffContext.Provider>
       </QueryClientProvider>
     </RouterContextProvider>,
-  );
+  ) };
 }
+
+const bar = (props: { showAsk?: boolean } = {}) => <StaffBar me={admin} branch={null} onBranch={() => undefined} onSignOut={() => undefined} {...props} />;
 
 const moreList = () => document.querySelector('[data-tour="more-list"] .row-list') as HTMLElement;
 const rowNames = () => within(moreList()).getAllByRole('link').map((a) => a.querySelector('.list-row-title')?.firstChild?.textContent);
@@ -180,5 +185,79 @@ describe('the help entry (issue #603)', () => {
     expect(await screen.findByRole('heading', { name: 'How do I...?' })).toBeTruthy();
     expect(pill()).not.toBeNull();
     expect(dot()).not.toBeNull();
+  });
+});
+
+describe('the Ask button of the top bar (issue #603, round 2)', () => {
+  it.each([
+    ['Sell', '/staff/retail/sale'],
+    ['My stock', '/staff/retail/stock'],
+    ['Loans', '/staff/lending'],
+  ])('shows on %s as Ask BMS next to Search, opening /staff/help at the question box, with the New dot', async (_screen, path) => {
+    ask.status.mockResolvedValue({ enabled: true, revision: 'r' });
+    show(bar(), path);
+    const button = await screen.findByRole('link', { name: 'Ask BMS' });
+    expect(button.getAttribute('href')).toBe('/staff/help#ask');
+    expect(button.textContent).toBe('Ask');
+    expect(button.previousElementSibling?.textContent).toBe('Search');
+    expect(within(button).getByTestId('new-dot').className).toBe('new-dot new-blink');
+  });
+
+  it('says Help while Ask BMS is off for the business', async () => {
+    show(bar(), '/staff/retail/sale');
+    await waitFor(() => expect(ask.status).toHaveBeenCalled());
+    const button = screen.getByRole('link', { name: 'Help' });
+    expect(button.textContent).toBe('Help');
+    expect(screen.queryByRole('link', { name: 'Ask BMS' })).toBeNull();
+  });
+
+  it('is not drawn on /staff/help itself, nor while two-step set-up keeps the header minimal', async () => {
+    show(bar(), '/staff/help');
+    await waitFor(() => expect(ask.status).toHaveBeenCalled());
+    expect(screen.queryByRole('link', { name: /^(Ask BMS|Help)$/ })).toBeNull();
+    cleanup();
+    show(bar({ showAsk: false }), '/staff/retail/sale');
+    expect(screen.queryByRole('link', { name: /^(Ask BMS|Help)$/ })).toBeNull();
+  });
+
+  it('opens /staff/help#ask, where the cursor lands in the Ask BMS question box', async () => {
+    ask.status.mockResolvedValue({ enabled: true, revision: 'r' });
+    const { router } = show(bar(), '/staff/retail/sale');
+    fireEvent.click(await screen.findByRole('link', { name: 'Ask BMS' }));
+    await waitFor(() => expect(router.history.location.pathname).toBe('/staff/help'));
+    expect(router.history.location.hash).toBe('#ask');
+    cleanup();
+    show(<HowDoIPage />, '/staff/help#ask');
+    const box = await screen.findByLabelText(/Your question/);
+    await waitFor(() => expect(document.activeElement).toBe(box));
+  });
+
+  it('puts the cursor in the article search when Ask BMS is off', async () => {
+    show(<HowDoIPage />, '/staff/help#ask');
+    await waitFor(() => expect(document.activeElement?.id).toBe('help-q'));
+    expect(screen.queryByLabelText(/Your question/)).toBeNull();
+  });
+
+  it('loses its dot once the person has opened /staff/help', async () => {
+    show(bar(), '/staff/retail/stock');
+    const button = await screen.findByRole('link', { name: 'Help' });
+    expect(within(button).queryByTestId('new-dot')).not.toBeNull();
+    show(<HowDoIPage />, '/staff/help');
+    await waitFor(() => expect(within(button).queryByTestId('new-dot')).toBeNull());
+  });
+
+  it('shows the Ask BMS box at the top of an article while Ask BMS is on, and not while it is off', async () => {
+    const [article] = articlesFor(admin);
+    ask.status.mockResolvedValue({ enabled: true, revision: 'r' });
+    show(<ArticleView articleId={article!.id} />, `/staff/help/${article!.id}`);
+    const box = await screen.findByRole('form', { name: 'Ask BMS' });
+    expect(box.compareDocumentPosition(screen.getByRole('heading', { level: 1 })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    cleanup();
+    ask.status.mockClear();
+    ask.status.mockResolvedValue({ enabled: false, revision: 'r' });
+    show(<ArticleView articleId={article!.id} />, `/staff/help/${article!.id}`);
+    await waitFor(() => expect(ask.status).toHaveBeenCalled());
+    await screen.findByRole('heading', { level: 1 });
+    expect(screen.queryByRole('form', { name: 'Ask BMS' })).toBeNull();
   });
 });
