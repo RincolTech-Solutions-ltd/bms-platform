@@ -67,7 +67,7 @@ class AskBmsIT extends IntegrationTest {
     static final AtomicInteger NEXT = new AtomicInteger();
 
     static {
-        for (int i = 0; i < 20; i++) {
+        for (int i = 0; i < 22; i++) {
             ON.add(TestDatabase.tenant("ask-on", true, true));
         }
     }
@@ -619,5 +619,27 @@ class AskBmsIT extends IntegrationTest {
                     .param(seeded)
                     .update();
         }
+    }
+
+    /** A call that fails on our side may have been sent and billed: it keeps its reservation and the log counts it. */
+    @Test
+    void aCallThatFailsOnOurSideKeepsItsReservationInTheSpendAndTheLog() {
+        GEMINI.thenFail(new LlmException(Kind.RATE_LIMITED, 429, 1));
+        GROQ.thenFail(new LlmException(Kind.RATE_LIMITED, 429, 1));
+        DEEPSEEK.onEachCall(() -> {
+            throw new IllegalStateException("fabricated adapter bug");
+        });
+        assertThat(okAsk(admin, "How do I invite a cashier?").get("source").asString())
+                .isEqualTo("articles");
+        Map<String, Object> spend = TestDatabase.owner()
+                .sql("SELECT settled_at, cost_micro FROM help_ask_spend WHERE tenant_id = ? AND provider = 'deepseek'")
+                .param(t.tenantId())
+                .query()
+                .singleRow();
+        assertThat(spend.get("settled_at")).isNull();
+        assertThat((Long) spend.get("cost_micro")).isPositive();
+        Map<String, Object> row = lastLog();
+        assertThat(row.get("failures")).isEqualTo("gemini:rate_limited,groq:rate_limited,deepseek:internal_error");
+        assertThat(row.get("cost_micro")).isEqualTo(spend.get("cost_micro"));
     }
 }

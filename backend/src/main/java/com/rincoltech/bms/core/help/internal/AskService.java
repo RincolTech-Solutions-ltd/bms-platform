@@ -241,7 +241,10 @@ class AskService {
                         e.kind().reason());
                 continue;
             } catch (RuntimeException e) {
-                // A bug of ours in the adapter; the type only, since a message can quote data.
+                // A bug of ours in the adapter; the type only, since a message can quote data. The request may have
+                // been
+                // sent and billed, so its reservation stays unsettled and the question's log counts it too.
+                outcome.billedUnknown(reserved);
                 outcome.failures.add(provider.name() + ":internal_error");
                 log.error(
                         "ask bms provider failed provider={} error={}",
