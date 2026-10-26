@@ -78,6 +78,12 @@ Many `gemini:rate_limited` rows mean the free tier's limit is reached: the chain
 money. Many `auth_error` rows mean a key is wrong or revoked. Many `articles` / `all_failed` rows mean every provider is down;
 people still get the articles.
 
+An `unsettled` spend row is a call still in flight, or one that may have been billed but reported nothing (a timeout, a 5xx,
+a broken connection, a retried call, a failure of ours after sending, or a process that stopped mid-call). It counts against
+DeepSeek's month at its reservation, the most the call could have cost, and stays so: nothing settles it later. That is the
+safe side; compare with the provider's own usage page when the month's sum looks high, and a high count of unsettled rows
+with no matching provider usage means calls that never reached it.
+
 ## 5. Stop it
 
 - One business: remove its id from `BMS_HELP_ASK_TENANTS` and restart. The box disappears on the next page load.

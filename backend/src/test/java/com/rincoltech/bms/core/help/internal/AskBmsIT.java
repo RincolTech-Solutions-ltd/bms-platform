@@ -524,9 +524,11 @@ class AskBmsIT extends IntegrationTest {
                             base, "test-key-not-real", name + "-test-model", java.time.Duration.ofSeconds(5))
                     .orElseThrow();
             assertThat(client.getClass().getSimpleName()).isEqualTo("OpenAiCompatibleClient");
-            assertThat(client.toString())
-                    .contains("endpoint=" + base + "/chat/completions")
-                    .doesNotContain("test-key-not-real");
+            assertThat(client.toString()).doesNotContain("test-key-not-real");
+            Matcher endpoint = Pattern.compile("endpoint=([^,\\]]+)").matcher(client.toString());
+            assertThat(endpoint.find()).isTrue();
+            assertThat(endpoint.group(1)).isEqualTo(base + "/chat/completions");
+            assertThat(java.net.URI.create(endpoint.group(1)).getHost()).isEqualTo(AskProviders.ALLOWED.get(name));
             assertThat(client.model()).isEqualTo(name + "-test-model");
         });
     }
@@ -573,6 +575,8 @@ class AskBmsIT extends IntegrationTest {
                         + " date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')")
                 .query(Long.class)
                 .single();
+        // The month's other DeepSeek spend in this database is small, so the room below is exactly what the test sets.
+        assertThat(spent).isLessThan(5_000_000L - 2 * reservation);
         // Another business has spent all but one and a half reservations of the default cap (5000000).
         TestDatabase.Fixture other = TestDatabase.tenant("ask-month", false);
         UUID seeded = UUID.randomUUID();

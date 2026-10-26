@@ -233,7 +233,7 @@ class AskService {
             try {
                 result = provider.client().complete(prompt);
             } catch (LlmException e) {
-                outcome.billedUnknown(settleFailure(spend.get(), provider, e, reserved));
+                outcome.billedUnknown(settleFailure(spend.get(), provider, e, reserved, outcome));
                 outcome.failures.add(provider.name() + ":" + e.kind().reason());
                 log.info(
                         "ask bms provider failed provider={} reason={}",
@@ -321,10 +321,12 @@ class AskService {
      * billed 5xx), may have been billed, so its reservation stays. Returns what the call holds against the spend, for the
      * question's log.
      */
-    private long settleFailure(UUID spend, AskProviders.Provider provider, LlmException e, long reserved) {
+    private long settleFailure(
+            UUID spend, AskProviders.Provider provider, LlmException e, long reserved, Outcome outcome) {
         if (e.reportedInputTokens() >= 0 && e.reportedOutputTokens() >= 0) {
             long cost = provider.config().costMicro(e.reportedInputTokens(), e.reportedOutputTokens());
             store.settle(spend, clock.now(), e.reportedInputTokens(), e.reportedOutputTokens(), cost);
+            outcome.tokens(e.reportedInputTokens(), e.reportedOutputTokens());
             return cost;
         }
         boolean refusedOutright = e.attempts() <= 1
@@ -417,6 +419,12 @@ class AskService {
         }
 
         /** Every answer a provider gave is billed, used or not. */
+        /** Tokens a failed call reported; its cost comes through {@link #billedUnknown}. */
+        void tokens(int in, int out) {
+            inputTokens += in;
+            outputTokens += out;
+        }
+
         void billedUnknown(long reservedMicro) {
             costMicro += reservedMicro;
         }
