@@ -147,8 +147,14 @@ describe('who sees which article', () => {
 
   it('shows a loan officer the loan answers and none of the shop ones', () => {
     const mine = ids(articlesFor(officer));
-    expect(mine).toEqual(expect.arrayContaining(['loan-application', 'decide-a-loan-application', 'approve-a-request', 'switch-branch']));
+    expect(mine).toEqual(expect.arrayContaining(['loan-application', 'decide-a-loan-application', 'switch-branch']));
     expect(mine.some((id) => ['record-a-sale', 'store-or-shop', 'move-stock-store-to-shop'].includes(id))).toBe(false);
+  });
+
+  it('shows how to approve only to someone who may decide a request, not to someone who may only read them', () => {
+    expect(ids(articlesFor(officer))).not.toContain('approve-a-request');
+    const checker = { ...officer, permissions: [...(officer.permissions ?? []), 'lending.disbursements.authorise'] } as Me;
+    expect(ids(articlesFor(checker))).toContain('approve-a-request');
   });
 
   it('opens the matching article from a screen, and nothing from a screen with none or for someone it is not for', () => {
@@ -156,6 +162,8 @@ describe('who sees which article', () => {
     expect(articleForScreen('/staff/retail/catalogue/categories/00000000-0000-4000-8000-000000000001', owner)?.id).toBe('add-an-item');
     expect(articleForScreen('/staff/lending/applications/new', officer)?.id).toBe('loan-application');
     expect(articleForScreen('/staff/retail/transfer', seller)).toBeUndefined();
+    expect(articleForScreen('/staff/users', owner)?.id).toBe('change-roles');
+    expect(articleForScreen('/staff/users/new', owner)?.id).toBe('invite-someone');
     expect(articleForScreen('/staff/notifications', owner)).toBeUndefined();
   });
 });

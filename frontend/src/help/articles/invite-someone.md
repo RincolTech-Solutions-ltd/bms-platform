@@ -3,7 +3,7 @@ title: How do I invite someone to use BMS?
 job: users
 order: 10
 needs: core.users.manage
-screens: /staff/users, /staff/users/new
+screens: /staff/users/new
 words: invite, staff, add a person, new user, worker, cashier, seller, storekeeper, role, link, whatsapp
 ---
 You invite a person with their phone number. BMS gives you a link to send them; they open it once to choose their password.
