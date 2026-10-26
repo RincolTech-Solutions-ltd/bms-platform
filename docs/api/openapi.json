@@ -11373,7 +11373,7 @@
             "type" : "integer"
           },
           "received_minor" : {
-            "description" : "Present only with on_payment: the money recorded as collected on the day it was entered, by any method (cash, mobile money, bank) (Received): sales paid at the sale and every payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales included; less payments reversed (on the day of the reversal) and money paid back on returns (on the day of the return, at the refund branch; given back on the day a return is voided). A payment dated earlier than it was entered counts on the day it was entered. Sales paid at the sale count on the day they were entered; cancelling a cash sale removes it from its own day. Not a profit basis",
+            "description" : "Present only with on_payment: the money recorded as collected on the day it was entered, by any method (cash, mobile money, bank) (Received): sales paid at the sale and every payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales included; less payments reversed (on the day of the reversal) and money paid back on returns (on the day of the return, at the refund branch; given back on the day a return is voided). A payment dated earlier than it was entered counts on the day it was entered. Sales paid at the sale count on the day they were entered; cancelling a cash sale removes it from the day it was entered. Not a profit basis",
             "format" : "int64",
             "type" : "integer"
           },
@@ -11440,7 +11440,7 @@
             "type" : "integer"
           },
           "received_minor" : {
-            "description" : "Present only with on_payment: the money recorded as collected on the day it was entered, by any method (cash, mobile money, bank) (Received): sales paid at the sale and every payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales included; less payments reversed (on the day of the reversal) and money paid back on returns (on the day of the return, at the refund branch; given back on the day a return is voided). A payment dated earlier than it was entered counts on the day it was entered. Sales paid at the sale count on the day they were entered; cancelling a cash sale removes it from its own day. Not a profit basis",
+            "description" : "Present only with on_payment: the money recorded as collected on the day it was entered, by any method (cash, mobile money, bank) (Received): sales paid at the sale and every payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales included; less payments reversed (on the day of the reversal) and money paid back on returns (on the day of the return, at the refund branch; given back on the day a return is voided). A payment dated earlier than it was entered counts on the day it was entered. Sales paid at the sale count on the day they were entered; cancelling a cash sale removes it from the day it was entered. Not a profit basis",
             "format" : "int64",
             "type" : "integer"
           },
@@ -24275,7 +24275,7 @@
             "type" : "integer"
           },
           "password" : {
-            "description" : "Needed to turn two-step sign-in off or narrow it, or to change an approval amount, from an administrator with no authenticator: their own current password (ADR-046, ADR-091). Never stored or logged",
+            "description" : "Needed to turn two-step sign-in off, narrow it or put its date back (a later date, or a date for people required at once), or to change an approval amount, from an administrator with no authenticator: their own current password (ADR-046, ADR-091). Never stored or logged",
             "maxLength" : 200,
             "minLength" : 0,
             "type" : "string"
@@ -24310,7 +24310,7 @@
             "type" : "string"
           },
           "totp_code" : {
-            "description" : "Needed to turn two-step sign-in off or narrow it, or to change an approval amount, from an administrator who has an authenticator: its current code (ADR-046, ADR-091). Never stored or logged",
+            "description" : "Needed to turn two-step sign-in off, narrow it or put its date back (a later date, or a date for people required at once), or to change an approval amount, from an administrator who has an authenticator: its current code (ADR-046, ADR-091). Never stored or logged",
             "maxLength" : 20,
             "minLength" : 0,
             "type" : "string"

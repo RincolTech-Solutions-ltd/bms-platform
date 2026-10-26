@@ -12929,7 +12929,7 @@ export interface components {
             profit_minor?: number;
             /**
              * Format: int64
-             * @description Present only with on_payment: the money recorded as collected on the day it was entered, by any method (cash, mobile money, bank) (Received): sales paid at the sale and every payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales included; less payments reversed (on the day of the reversal) and money paid back on returns (on the day of the return, at the refund branch; given back on the day a return is voided). A payment dated earlier than it was entered counts on the day it was entered. Sales paid at the sale count on the day they were entered; cancelling a cash sale removes it from its own day. Not a profit basis
+             * @description Present only with on_payment: the money recorded as collected on the day it was entered, by any method (cash, mobile money, bank) (Received): sales paid at the sale and every payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales included; less payments reversed (on the day of the reversal) and money paid back on returns (on the day of the return, at the refund branch; given back on the day a return is voided). A payment dated earlier than it was entered counts on the day it was entered. Sales paid at the sale count on the day they were entered; cancelling a cash sale removes it from the day it was entered. Not a profit basis
              */
             received_minor?: number;
             rows?: components["schemas"]["RetailDailyProfitRow"][];
@@ -12973,7 +12973,7 @@ export interface components {
             profit_minor?: number;
             /**
              * Format: int64
-             * @description Present only with on_payment: the money recorded as collected on the day it was entered, by any method (cash, mobile money, bank) (Received): sales paid at the sale and every payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales included; less payments reversed (on the day of the reversal) and money paid back on returns (on the day of the return, at the refund branch; given back on the day a return is voided). A payment dated earlier than it was entered counts on the day it was entered. Sales paid at the sale count on the day they were entered; cancelling a cash sale removes it from its own day. Not a profit basis
+             * @description Present only with on_payment: the money recorded as collected on the day it was entered, by any method (cash, mobile money, bank) (Received): sales paid at the sale and every payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales included; less payments reversed (on the day of the reversal) and money paid back on returns (on the day of the return, at the refund branch; given back on the day a return is voided). A payment dated earlier than it was entered counts on the day it was entered. Sales paid at the sale count on the day they were entered; cancelling a cash sale removes it from the day it was entered. Not a profit basis
              */
             received_minor?: number;
             /** Format: int64 */
@@ -19519,7 +19519,7 @@ export interface components {
              * @description Days a covered user without a second factor may keep signing in before it is required; 0 means at once. Sending it moves the deadline to now plus these days (ADR-046)
              */
             mfa_grace_days?: number;
-            /** @description Needed to turn two-step sign-in off or narrow it, or to change an approval amount, from an administrator with no authenticator: their own current password (ADR-046, ADR-091). Never stored or logged */
+            /** @description Needed to turn two-step sign-in off, narrow it or put its date back (a later date, or a date for people required at once), or to change an approval amount, from an administrator with no authenticator: their own current password (ADR-046, ADR-091). Never stored or logged */
             password?: string;
             receipt_footer?: string;
             reports_enabled?: boolean;
@@ -19530,7 +19530,7 @@ export interface components {
             setup_dismissed?: boolean;
             /** @description #RRGGBB, or an empty string to clear it; white or near-black text on it must reach contrast 4.5 (FR-TEN-08) */
             theme_primary?: string;
-            /** @description Needed to turn two-step sign-in off or narrow it, or to change an approval amount, from an administrator who has an authenticator: its current code (ADR-046, ADR-091). Never stored or logged */
+            /** @description Needed to turn two-step sign-in off, narrow it or put its date back (a later date, or a date for people required at once), or to change an approval amount, from an administrator who has an authenticator: its current code (ADR-046, ADR-091). Never stored or logged */
             totp_code?: string;
         };
         UpdateTenantSmsControlsRequest: {
