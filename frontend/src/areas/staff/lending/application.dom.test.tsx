@@ -75,6 +75,8 @@ function createApplicationsMock(start?: Loan, tightened = false) {
   let current: Loan | undefined = start;
   const calls: { name: string; version?: number; body?: unknown }[] = [];
   let failOnce: { name: string; error: FormError } | null = null;
+  // The call goes through on the server but its answer never arrives.
+  let loseOnce: string | null = null;
   const step = (name: string, version: number | undefined, body: unknown, apply: (l: Loan) => Loan): Loan => {
     calls.push({ name, version, body });
     if (failOnce?.name === name) {
@@ -85,6 +87,10 @@ function createApplicationsMock(start?: Loan, tightened = false) {
     if (!current) throw new FormError('Not found.', 404, 'not_found');
     if (version !== current.version) throw new FormError('Changed.', 409, 'version_conflict');
     current = apply({ ...current, version: (current.version ?? 0) + 1 });
+    if (loseOnce === name) {
+      loseOnce = null;
+      throw new FormError('The connection dropped before an answer came back.', 0, 'network');
+    }
     return { ...current };
   };
   const api: ApplicationsApi = {
@@ -113,7 +119,7 @@ function createApplicationsMock(start?: Loan, tightened = false) {
     async sendBack(_id, version, note) { return step('send_back', version, note, (l) => ({ ...l, status: 'draft' })); },
     async cancel(_id, version, note) { return step('cancel', version, note, (l) => ({ ...l, status: 'cancelled' })); },
   };
-  return { api, calls, failNext: (name: string, error: FormError) => { failOnce = { name, error }; } };
+  return { api, calls, failNext: (name: string, error: FormError) => { failOnce = { name, error }; }, loseNext: (name: string) => { loseOnce = name; } };
 }
 
 function mount(node: ReactElement, opts: { me?: Me; loan?: Loan; items?: CollateralItem[]; tightened?: boolean } = {}) {
@@ -224,6 +230,15 @@ describe('the loan application form', () => {
     expect(api.calls.filter((c) => c.name === 'create')).toHaveLength(1);
   });
 
+  it('opens the loan when a submit went through but its answer was lost, and sends nothing twice (review of #591)', async () => {
+    await router.navigate({ to: '/staff/lending' });
+    const api = mount(<ApplicationForm loan={loan('draft')} />, { loan: loan('draft') });
+    api.loseNext('submit');
+    send();
+    await waitFor(() => expect(router.state.location.pathname).toBe('/staff/lending/loans/l1'));
+    expect(api.calls.map((c) => c.name)).toEqual(['submit']);
+  });
+
   it('adds a guarantor found by searching, and refuses the borrower as their own guarantor', async () => {
     const api = mount(<ApplicationForm memberId={borrower.id} />);
     await screen.findByRole('option', { name: /Test monthly loan/ });
@@ -330,6 +345,16 @@ describe('the application on the loan page', () => {
     expect(screen.queryByRole('link', { name: /Appraise/ })).toBeNull();
     expect(await screen.findByText('68 of 100')).toBeTruthy();
     expect(screen.getByText('The member joined less than 30 days ago.')).toBeTruthy();
+  });
+
+  it('keeps the appraisal on a cancelled application, and marks an appraisal earlier once the application was sent back and sent again', async () => {
+    mount(<LoanView loan={loan('cancelled', { cancelled_reason: 'Member withdrew.' })} />, { me: MANAGER });
+    expect(await screen.findByText('68 of 100')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Appraisal' })).toBeTruthy();
+    cleanup();
+    mount(<LoanView loan={loan('submitted')} />, { me: APPRAISER });
+    expect(await screen.findByRole('heading', { name: 'Earlier appraisal' })).toBeTruthy();
+    expect(screen.getByText(/It no longer stands/)).toBeTruthy();
   });
 
   it('follows the branch scope of the permission, as the server does', () => {

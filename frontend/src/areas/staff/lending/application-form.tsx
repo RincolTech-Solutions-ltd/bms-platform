@@ -75,7 +75,7 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
   const set = <K extends keyof ApplicationDraft>(key: K, value: ApplicationDraft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const inputMode = exponentOf(currency) ? 'decimal' : 'numeric';
 
-  /** A draft of this member with the same amount and term, made in the last ten minutes. Rejects when the look itself fails. */
+  /** A draft of this member with the same amount, made in the last ten minutes. Rejects when the look itself fails. */
   const lookUp = async (): Promise<LoanListItem | null> => {
     const body = createBody(draft, currency);
     const since = Date.now() - 10 * 60_000;

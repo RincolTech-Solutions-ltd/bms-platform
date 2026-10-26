@@ -115,11 +115,13 @@ function Parties({ loan: l }: { loan: Loan }) {
 }
 
 /** The latest appraisal: the score and band, what the score recommends, the warnings, the parts of the score and other loans. */
-export function AppraisalCard({ appraisal: a, currency }: { appraisal: LoanAppraisal; currency: string | undefined }) {
+/** `earlier`: the application was sent back and sent again since, so this one no longer stands and is kept only for reference. */
+export function AppraisalCard({ appraisal: a, currency, earlier = false }: { appraisal: LoanAppraisal; currency: string | undefined; earlier?: boolean }) {
   const parts = scoreParts(a);
   return (
     <section className="rt-card stack" aria-labelledby="ap-appraisal" data-tour="application-appraisal">
-      <h2 id="ap-appraisal">Appraisal</h2>
+      <h2 id="ap-appraisal">{earlier ? 'Earlier appraisal' : 'Appraisal'}</h2>
+      {earlier && <p className="alert alert-info" role="note">From before the application was sent back. It no longer stands: the application is waiting to be appraised again.</p>}
       <p className="ln-item-head">
         <span className="ap-score">{a.score} of 100</span>
         <span className="badge">Band {a.band}</span>
@@ -307,7 +309,7 @@ export function ApplicationPanel({ loan: l }: { loan: Loan }) {
       )}
       <Problem error={failure ? new Error(failure) : null} />
       <Problem error={appraisals.error} />
-      {appraisals.data?.[0] && <AppraisalCard appraisal={appraisals.data[0]} currency={l.currency} />}
+      {appraisals.data?.[0] && <AppraisalCard appraisal={appraisals.data[0]} currency={l.currency} earlier={l.status === 'submitted'} />}
       <Parties loan={l} />
       <ProvisionalSchedule loan={l} />
       {primary && (
