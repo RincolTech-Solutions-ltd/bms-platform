@@ -1,5 +1,5 @@
 -- V108: Ask BMS (issue #20, owner decision D52, ADR-096), directly after V107 (#597). Expand only, safe on a populated
--- database: four new tenant tables and one SECURITY DEFINER function. No existing table, column, constraint or function is
+-- database: four new tenant tables and two SECURITY DEFINER functions. No existing table, column, constraint or function is
 -- touched and no permission is added (asking is open to every signed-in member of staff, like How do I...?).
 --
 -- 1. `help_ask_questions`: one row per question asked, the log of what happened. It holds the SHA-256 of the scrubbed
@@ -19,8 +19,8 @@
 -- 5. `help_ask_platform_spend`: the reserved and settled cost of one provider across every business since a moment, for the
 --    monthly DeepSeek cap. A sum only, so a business learns nothing about another. bms_owner has BYPASSRLS.
 --
--- None of the four holds personal data (a user id, hashes, counts, article text), so the removal of a closed business has
--- nothing to erase here, and its purge deletes the rows like any tenant table (ADR-090).
+-- 6. `help_erase_personal_data`: the removal of a closed business (ADR-090) deletes its cached answers and limit tickets;
+--    the question log and the spend rows hold a user id, hashes and counts only, and the purge deletes them.
 --
 -- Locks, said plainly. The tables are created empty; the only lock cost is SHARE ROW EXCLUSIVE on `tenants` and `users`
 -- (the foreign keys) until the commit, milliseconds, reads go on. lock_timeout is five seconds as in V26 and V107.
@@ -121,3 +121,22 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 $$;
 REVOKE ALL ON FUNCTION help_ask_platform_spend(text, timestamptz) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION help_ask_platform_spend(text, timestamptz) TO bms_app;
+
+-- The Ask BMS part of removing a closed business (ADR-090), called by the help module's PersonalDataEraser in the removal's
+-- transaction: the cached answers and the limit tickets (which name the person who asked) are deleted. The question log and
+-- the spend rows hold a user id, hashes and counts only, the user is anonymised by the core, and the purge deletes them with
+-- the business's other rows.
+CREATE FUNCTION help_erase_personal_data() RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+    v_tenant uuid := bms_removing_tenant();
+    v_rows   integer := 0;
+    v_n      integer;
+BEGIN
+    DELETE FROM help_ask_answers WHERE tenant_id = v_tenant; GET DIAGNOSTICS v_n = ROW_COUNT; v_rows := v_rows + v_n;
+    DELETE FROM help_ask_tickets WHERE tenant_id = v_tenant; GET DIAGNOSTICS v_n = ROW_COUNT; v_rows := v_rows + v_n;
+    RETURN v_rows;
+END
+$$;
+REVOKE ALL ON FUNCTION help_erase_personal_data() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION help_erase_personal_data() TO bms_app;

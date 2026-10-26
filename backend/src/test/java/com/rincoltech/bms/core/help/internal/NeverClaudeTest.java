@@ -1,22 +1,25 @@
 package com.rincoltech.bms.core.help.internal;
 
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.rincoltech.bms.core.ai.LlmClient;
 import com.rincoltech.bms.core.ai.LlmClientFactory;
 import com.rincoltech.bms.core.ai.RecordingLlmClient;
+import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.importer.ClassFileImporter;
+import com.tngtech.archunit.core.importer.ImportOption;
 import java.io.IOException;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Binder;
@@ -24,8 +27,9 @@ import org.springframework.boot.context.properties.source.MapConfigurationProper
 
 /**
  * Claude is never used by Ask BMS (the owner's rule on #20, ADR-096 decision 4). Fails if an Anthropic endpoint, SDK or
- * model id appears anywhere in the repository, if a configuration naming one could start, or if the provider allow-list
- * could be changed by a property or an environment value.
+ * model id appears in anything Ask BMS reaches, if Ask BMS depends on anything of {@code core.ai} but its neutral port, if
+ * a configuration naming Anthropic or Claude could start, or if the provider allow-list could be changed by a property or
+ * an environment value.
  * The adapter factory here builds no client: nothing in this test can reach a network.
  */
 class NeverClaudeTest {
@@ -160,38 +164,80 @@ class NeverClaudeTest {
                 .hasMessageContaining("must be on generativelanguage.googleapis.com");
     }
 
-    /** Every text file of the repository but this test: code of any module, configuration, lockfiles, scripts, deploy. */
+    /**
+     * Everything Ask BMS can reach: its module, its block of {@code application.yml}, its screens, client and articles, and
+     * its lines of the deploy environment. {@code core.ai} is not scanned: it holds the advisor's own provider switch, and
+     * {@link #coreHelpUsesOnlyTheNeutralPortOfCoreAi} keeps Ask BMS away from anything there but the neutral port.
+     */
     @Test
-    void noAnthropicEndpointSdkOrModelIsAnywhereInTheRepository() throws IOException {
-        Path root = Path.of("..").toAbsolutePath().normalize();
-        Set<String> skipped = Set.of("node_modules", "target", ".git", "build", "dist", "public");
-        List<String> found = new ArrayList<>();
-        Files.walkFileTree(root, new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                return skipped.contains(dir.getFileName().toString()) && !dir.equals(root)
-                        ? FileVisitResult.SKIP_SUBTREE
-                        : FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                String name = file.getFileName().toString();
-                if (!name.equals("NeverClaudeTest.java") && attrs.size() < 20_000_000 && !binary(name)) {
-                    String text = new String(Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
-                    if (ANTHROPIC.matcher(text).find()) {
-                        found.add(root.relativize(file).toString());
-                    }
+    void noAnthropicEndpointSdkOrModelIsInAnythingAskBmsReaches() throws IOException {
+        Path repo = Path.of("..").toAbsolutePath().normalize();
+        Map<String, String> texts = new java.util.LinkedHashMap<>();
+        for (String folder : List.of(
+                "backend/src/main/java/com/rincoltech/bms/core/help",
+                "frontend/src/areas/staff/help",
+                "frontend/src/help")) {
+            try (java.util.stream.Stream<Path> files = Files.walk(repo.resolve(folder))) {
+                for (Path f : files.filter(Files::isRegularFile).toList()) {
+                    texts.put(repo.relativize(f).toString(), Files.readString(f));
                 }
-                return FileVisitResult.CONTINUE;
             }
-        });
-        assertThat(found).as("files naming an Anthropic endpoint, SDK or model").isEmpty();
-        // No Anthropic SDK class on the classpath at all.
-        assertThat(getClass().getClassLoader().getResource("com/anthropic")).isNull();
+        }
+        texts.put("frontend/src/api/help.ts", Files.readString(repo.resolve("frontend/src/api/help.ts")));
+        texts.put(
+                "backend/src/main/resources/db/migration/V108__help_ask_bms.sql",
+                Files.readString(repo.resolve("backend/src/main/resources/db/migration/V108__help_ask_bms.sql")));
+        String yml = Files.readString(repo.resolve("backend/src/main/resources/application.yml"));
+        int from = yml.indexOf("\n  help:\n");
+        assertThat(from).as("the help block of application.yml").isPositive();
+        int to = yml.indexOf("\n  # ", from + 1);
+        texts.put("application.yml (help)", yml.substring(from, to < 0 ? yml.length() : to));
+        for (String env : List.of("deploy/compose.yml", "deploy/compose.pi-staging.yml", ".env.example")) {
+            texts.put(
+                    env + " (BMS_HELP_ASK_)",
+                    String.join(
+                            "\n",
+                            Files.readAllLines(repo.resolve(env)).stream()
+                                    .filter(l -> l.contains("BMS_HELP_ASK_"))
+                                    .toList()));
+        }
+        assertThat(texts.get("application.yml (help)")).contains("BMS_HELP_ASK_GEMINI_API_KEY");
+        for (Map.Entry<String, String> e : texts.entrySet()) {
+            assertThat(ANTHROPIC.matcher(e.getValue()).find())
+                    .as("%s names an Anthropic endpoint, SDK or model", e.getKey())
+                    .isFalse();
+        }
     }
 
-    static boolean binary(String name) {
-        return name.matches("(?i).*\\.(png|jpe?g|webp|gif|ico|pdf|ttf|otf|woff2?|jar|zip|gz|xlsx|docx|pptx)$");
+    /**
+     * Ask BMS reaches a provider only through the neutral port of {@code core.ai} (the chat request, the error and the
+     * OpenAI-compatible factory), never through an Anthropic or Claude client, in {@code core.ai} or anywhere else.
+     */
+    @Test
+    void coreHelpUsesOnlyTheNeutralPortOfCoreAi() {
+        JavaClasses help = new ClassFileImporter()
+                .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
+                .importPackages("com.rincoltech.bms.core.help");
+        classes()
+                .that()
+                .resideInAPackage("com.rincoltech.bms.core.help..")
+                .should()
+                .onlyDependOnClassesThat(
+                        DescribedPredicate.describe(
+                                "outside core.ai, or LlmClient, LlmClientFactory or LlmException of core.ai",
+                                (JavaClass c) -> !c.getPackageName().startsWith("com.rincoltech.bms.core.ai")
+                                        || c.getName()
+                                                .matches(
+                                                        "com\\.rincoltech\\.bms\\.core\\.ai\\.(LlmClient|LlmClientFactory|LlmException)(\\$.*)?")))
+                .check(help);
+        noClasses()
+                .that()
+                .resideInAPackage("com.rincoltech.bms.core.help..")
+                .should()
+                .dependOnClassesThat(DescribedPredicate.describe(
+                        "name Anthropic or Claude", (JavaClass c) -> c.getName().matches("(?i).*(anthropic|claude).*")))
+                .check(help);
+        // And no Anthropic SDK on the classpath for it to reach.
+        assertThat(getClass().getClassLoader().getResource("com/anthropic")).isNull();
     }
 }

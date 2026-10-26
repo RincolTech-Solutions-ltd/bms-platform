@@ -701,6 +701,9 @@ the call is in flight: the row then holds its reservation, the most the call can
 refused past the monthly cap) and settled after it with what the provider reported; a call that may have been billed but
 reported nothing keeps its reservation. Index `(provider, reserved_at)`. Grants `SELECT, INSERT, UPDATE` (the settlement). The
 `SECURITY DEFINER` function `help_ask_platform_spend(provider, from)` sums it across every business, one number and no row.
+The removal of a closed business (ADR-090) calls `help_erase_personal_data()` (SECURITY DEFINER, only inside a confirmed
+removal, through `bms_removing_tenant`), which deletes the business's `help_ask_answers` and `help_ask_tickets`; the question
+log and the spend rows go with the purge.
 
 ### `help_ask_answers` (RLS)
 

@@ -735,7 +735,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   temperature 0 as JSON citing one of the articles it was given, tried Gemini, then Groq, then DeepSeek (paid, last resort,
   monthly cap, skipped until both its prices are set) through `core.ai.LlmClientFactory` (the gateway's adapter). Claude is
   never used: three provider names only, one host each in a constant allow-list (`AskProviders.ALLOWED`), and startup refused
-  for anything naming Anthropic or Claude (`NeverClaudeTest`, which also scans the whole repository). The cache
+  for anything naming Anthropic or Claude (`NeverClaudeTest`, which also scans what Ask BMS reaches and holds `core.help` to the neutral port of `core.ai`). Removing a closed business deletes its cached answers and tickets (`HelpErasure`). The cache
   key is the prompt version, the provider chain, the corpus revision, the permission matrix version, the locale, the roles, the
   permission set, the modules and the normalised question; only a confident model answer is kept. Off unless the business's id
   is in `BMS_HELP_ASK_TENANTS` (demo businesses first); keys are environment values only (`docs/runbooks/ask-bms.md`); with no

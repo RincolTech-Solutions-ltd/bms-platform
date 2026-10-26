@@ -46,8 +46,11 @@ can replace the retrieval step later without changing the rest.
    `V108`); each may call one host only, from an allow-list that is a constant in the code (`AskProviders.ALLOWED`), so no
    property or environment value can point a provider at another host (a proxy included), and a base URL off that host
    stops startup; and anything naming Anthropic or Claude in a base URL or a model stops startup too. `NeverClaudeTest`
-   proves all three, that an allow-list given as a property is ignored, and that no Anthropic endpoint, SDK or model id is
-   anywhere in the repository. Model text is kept only when it cites a given article and holds no link, email or long
+   proves all three, that an allow-list given as a property is ignored, that no Anthropic endpoint, SDK or model id is in
+   anything Ask BMS reaches (its module, configuration block, screens, client, articles and deploy environment), and that
+   `core.help` depends on nothing of `core.ai` but its neutral port (`LlmClient`, `LlmClientFactory`, `LlmException`) and on
+   no class naming Anthropic or Claude; `core.ai` itself is not scanned, since it holds the advisor's own provider switch
+   (ADR-037). Model text is kept only when it cites a given article and holds no link, email or long
    number, none of which the articles hold.
 5. **Grounded answers only.** The model is told to answer from the given articles only, in at most five short sentences, and
    to reply `{"answer", "article"}`. An answer that is not that JSON, is too long, or cites an article it was not given is
@@ -75,8 +78,9 @@ can replace the retrieval step later without changing the rest.
    `BMS_HELP_ASK_DEEPSEEK_MONTHLY_COST_MICRO` this calendar month (a SECURITY DEFINER sum, `help_ask_platform_spend`), and
    DeepSeek is skipped altogether until both of its prices are set, since with a price of 0 no cap could hold. Every question
    is a row of `help_ask_questions`: who asked, when, the hash, the outcome, the provider and model, the providers that
-   failed before it as `name:reason`, tokens and the estimated cost. Never the text. The four tables hold no personal data,
-   so removing a closed business erases nothing there and its purge deletes the rows (ADR-090).
+   failed before it as `name:reason`, tokens and the estimated cost. Never the text. Removing a closed business (ADR-090) deletes its
+   cached answers and limit tickets through the module's `PersonalDataEraser` (`help_erase_personal_data`); the question log
+   and the spend rows hold a user id, hashes and counts only, and its purge deletes them.
 
 ## Consequences
 

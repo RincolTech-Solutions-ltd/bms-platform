@@ -20,8 +20,8 @@ import org.slf4j.LoggerFactory;
  * never used: only the three names above exist, each with the one host it may call ({@link #ALLOWED}, a constant, so no
  * property or environment value can change it), a base URL off that host stops startup, and anything that names Anthropic
  * or Claude (a base URL, a model) stops it too. DeepSeek is skipped while either of its prices is 0, since a paid provider
- * with no price has no spend cap. {@code NeverClaudeTest} proves all of it and that no Anthropic SDK, endpoint or model id
- * is anywhere in the repository.
+ * with no price has no spend cap. {@code NeverClaudeTest} proves all of it, that nothing Ask BMS reaches names an Anthropic
+ * SDK, endpoint or model id, and that this module uses nothing of {@code core.ai} but its neutral port.
  */
 class AskProviders {
 
