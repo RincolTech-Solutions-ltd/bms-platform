@@ -62,8 +62,9 @@ back to what opened it.
     block stops it; the kit's own Skeleton is still grey rows. `frontend/src/app/ui/kit.css` also stops each of its
     animations under reduced motion. No dot or badge pulses or blinks to catch the eye; a loop that fades may only show work in
     progress. The one exception, which the owner asked for (issue #603), is the New badge of a new feature (`.new-blink`): it
-    blinks by opacity until the person opens the feature once, and stands still under reduced motion. The design guard holds
-    the list.
+    blinks by opacity five times (five seconds) each time it appears, then stands still until the person opens the feature,
+    and it stands still under reduced motion. Five seconds keeps it inside WCAG 2.2.2, which asks for a way to pause only a
+    blink that runs longer. The design guard holds the list and reads every way an animation can be written.
 
 ## Feedback
 
