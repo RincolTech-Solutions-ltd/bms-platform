@@ -72,7 +72,10 @@ and not automatic suspension, an emailed receipt, and a Plan and billing page fo
    merged first, so this change is the second and adds the skip: a subscription with a row in `subscription_scheduled_changes`
    of kind `cancel` and status `scheduled` is left out of the run's candidates (`platform_tenants_cancelling`), is checked
    again in the reminder's own transaction, and is refused by `platform_mark_subscription_overdue` under the subscription's
-   row lock. It gets no reminder and is never made `past_due`; a cancellation the Owner undid counts for nothing. Done.
+   row lock. The Owner's cancel takes that same row lock (`app_lock_subscription`, V90) before it inserts its row, so a cancel
+   committing at the tick after midnight is seen by the overdue move, which waits for it (issue #502, confirmed by
+   `BillingAutomationIT.frSub09_aCancelCommittingAtTheTickIsNeverMadeOverdue`). It gets no reminder and is never made
+   `past_due`; a cancellation the Owner undid counts for nothing. Done.
 
 ## Consequences
 

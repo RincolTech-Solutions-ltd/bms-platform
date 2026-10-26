@@ -588,6 +588,75 @@ class BillingAutomationIT extends IntegrationTest {
         assertThat(audits("platform.tenant.subscription_overdue", closing.id())).isZero();
     }
 
+    /**
+     * Issue #502 item 2: the Owner's cancel (V90, ADR-073) takes the subscription's row lock before it inserts, so a cancel
+     * committing at the tick after midnight is never made past_due. The test runs the cancel's own statements as
+     * {@code PlanService.schedule} does ({@code app_lock_subscription}, then the insert) in a transaction held open, starts
+     * the run, sees the overdue move wait on that transaction, then commits: the move sees the cancel and changes nothing.
+     * JUSTIFICATION-A3: a new test case for the review follow-up; the anchor is only the insertion point.
+     */
+    @Test
+    void frSub09_aCancelCommittingAtTheTickIsNeverMadeOverdue() throws Exception {
+        Business b = business("active", null, LocalDate.of(2026, 11, 8), false);
+        clock.set(Instant.parse("2026-11-08T21:10:00Z"));
+        java.util.concurrent.CompletableFuture<BillingService.RunResult> tick;
+        try (Connection c = TestDatabase.appDataSource().getConnection()) {
+            c.setAutoCommit(false);
+            try (PreparedStatement bind = c.prepareStatement("SELECT set_config('app.tenant_id', ?, true)")) {
+                bind.setString(1, b.id().toString());
+                bind.execute();
+            }
+            try (PreparedStatement lock = c.prepareStatement("SELECT app_lock_subscription(?)")) {
+                lock.setObject(1, b.id());
+                lock.execute();
+            }
+            try (PreparedStatement cancel = c.prepareStatement("""
+                    INSERT INTO subscription_scheduled_changes (id, tenant_id, kind, module_key, effective_on, requested_by)
+                    VALUES (?, ?, 'cancel', NULL, ?, ?)
+                    """)) {
+                cancel.setObject(1, UUID.randomUUID());
+                cancel.setObject(2, b.id());
+                cancel.setObject(3, LocalDate.of(2026, 11, 9));
+                cancel.setObject(4, b.ownerId());
+                cancel.executeUpdate();
+            }
+            String txid;
+            try (PreparedStatement id = c.prepareStatement("SELECT pg_current_xact_id()::text");
+                    var rs = id.executeQuery()) {
+                rs.next();
+                txid = rs.getString(1);
+            }
+            tick = java.util.concurrent.CompletableFuture.supplyAsync(() -> run(b));
+            assertThat(waitersOn(txid))
+                    .as("the overdue move waits on the cancel's row lock")
+                    .isEqualTo(1);
+            c.commit();
+        }
+        BillingService.RunResult result = tick.get(30, java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(result.failures()).isZero();
+        assertThat(result.markedOverdue()).isZero();
+        assertThat(status(b)).isEqualTo("active");
+        assertThat(audits("platform.tenant.subscription_overdue", b.id())).isZero();
+    }
+
+    /** How many backends wait for the transaction with this id, polled for up to 30 seconds until one does. */
+    static long waitersOn(String txid) throws InterruptedException {
+        long until = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+        long waiting = 0;
+        while (System.nanoTime() < until && waiting == 0) {
+            waiting = TestDatabase.owner()
+                    .sql("SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype = 'transactionid'"
+                            + " AND transactionid::text = ?")
+                    .param(txid)
+                    .query(Long.class)
+                    .single();
+            if (waiting == 0) {
+                Thread.sleep(50);
+            }
+        }
+        return waiting;
+    }
+
     List<String> listed() {
         ResponseEntity<JsonNode> list =
                 platform.get("/api/v1/platform/billing/due-for-suspension", operator.accessToken());
