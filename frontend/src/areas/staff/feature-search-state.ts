@@ -1,6 +1,7 @@
 import type { Me } from '../../api/client';
 import { foldText } from '../../app/ui/fold';
 import { mayCreateMember } from './lending/member-permissions';
+import { mayApply } from './lending/permissions';
 import { staffAreas } from './menu';
 import { CATALOGUE_LINKS, canUse, screensFor, showRetail } from './retail/permissions';
 import { moneyLinks } from './tabs';
@@ -27,6 +28,7 @@ export interface Feature {
 export const SYNONYMS: Record<string, readonly string[]> = {
   '/staff': ['home', 'dashboard', 'start', 'today'],
   '/staff/approvals': ['approve', 'approval', 'inbox', 'pending', 'second person'],
+  '/staff/setup/approvals': ['approval rules', 'approval limit', 'second person', 'maker checker', 'threshold'],
   '/staff/lending': ['loan', 'borrow', 'borrower', 'application', 'repayment', 'disburse'],
   '/staff/lending/members': ['member', 'client', 'borrower', 'register'],
   '/staff/lending/collateral': ['collateral', 'security', 'pledge'],
@@ -111,6 +113,7 @@ export const ACTIONS: { to: string; label: string; hint: string; may: (me: Me) =
   },
   { to: '/staff/users/new', label: 'Invite someone', hint: 'Add a member of staff', may: canManageUsers, synonyms: ['invite', 'add staff', 'new user', 'add user', 'abakozi'] },
   { to: '/staff/lending/members/new', label: 'Add a member', hint: 'Register a new member', may: (me) => mayCreateMember(me), synonyms: ['new member', 'register', 'join'] },
+  { to: '/staff/lending/applications/new', label: 'New loan application', hint: 'Start a loan for a member', may: (me) => mayApply(me), synonyms: ['apply', 'new loan', 'loan application', 'borrow'] },
 ];
 
 /**

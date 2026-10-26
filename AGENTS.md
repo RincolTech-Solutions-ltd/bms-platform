@@ -359,7 +359,8 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   dismissible recommendation for administrators while it is off (`frontend/src/areas/staff/two-step/`), and `/staff/two-step` to turn on your own from inside the
   app. The welcome tour is version 14 with a Two-step sign-in step and the page tour is `page-two-step`. The admin reset of a sign-in keeps its step-up (the
   authenticator code, else the admin's own password).
-- **Built (lending staff screens 1 and 2, issue #280):** PWA only, no migration: Members (list with live search, add, change, the member's page with the check of the details, next of kin, ID photos, relationships, loans) and the collateral register (register, change, valuations, custody changes, photos, the release request), phone-first, with a tour each (`docs/specs/lending-ui-notes.md`, section "Members and collateral"). Loan application, appraisal and decision are slices 3 and 4.
+- **Built (lending staff screens 1 and 2, issue #280):** PWA only, no migration: Members (list with live search, add, change, the member's page with the check of the details, next of kin, ID photos, relationships, loans) and the collateral register (register, change, valuations, custody changes, photos, the release request), phone-first, with a tour each (`docs/specs/lending-ui-notes.md`, section "Members and collateral").
+- **Built (lending staff screens 3 and 4, issue #280; tenant currency, issue #289):** no migration. The loan application (`/staff/lending/applications/new`, `?memberId=` from the member's page; a draft changes at `/staff/lending/loans/$loanId/edit`): member, product with its limits, amount, term, purpose, date, guarantors found by searching and the member's held, valued items pledged, saved in steps with If-Match and then sent for appraisal; appraisal (`/loans/$loanId/appraise`: income, other payments, visit notes) and the decision (`/loans/$loanId/decide`: approve at or below the request, or decline with a reason; Approve is off for whoever sent or appraised it, FR-APR-03). The loan page shows an application's status, facts, guarantors, collateral, latest appraisal (score, band, warnings, other loans) and provisional schedule, with the next step in the sticky bar, and Send back and Cancel. Steps follow `permission_scopes` in the loan's branch (`lending/permissions.ts`, `applicationSteps`). `GET /me` carries `tenant_currency`, and the member, collateral and valuation forms type money in it (or the record's own currency) instead of UGX. Client `src/api/loan-applications.ts`; tours `page-application-new`, `page-application-edit`, `page-loan-appraise`, `page-loan-decide`, `page-loans` v2, `page-loan` v2 (`src/tour/tours-applications.ts`); tests `application.dom.test.tsx`, `application-state.test.ts`, `tours-applications.test.tsx`, `TwoStepPolicyIT#meNamesTheBusinessCurrency` (`docs/specs/lending-ui-notes.md`, section "Loan applications").
 - **Built (increment 9, savings, issue #151, ADR-032):** migration `V30` (savings products,
   accounts, transactions, end-of-day balances, interest postings; the outbox accepts `sms`);
   products with interest rules, minimum and opening balances, withdrawal fee and limits, dormancy;
@@ -645,6 +646,26 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   (`/platform/feedback`), the tours `page-feedback` and `page-operator-feedback`, and a Feedback step in `admin-welcome` v18,
   `retail-sales` v12 and `staff-welcome` v6. Tests: `FeedbackIT`, `RlsIsolationIT`, `ModularityTest`, `feedback-state.test.ts`,
   `feedback.dom.test.tsx`, `tours-operator.test.tsx`.
+- **Built (approval rules, issue #343, ADR-091, FR-APR-09):** no migration, no permission: two keys of the tenant settings row
+  (`approval_switches` and the existing `approval_thresholds_minor`). `GET` and `PUT /settings/approvals` list every registered
+  `ApprovalAction` of a module the business uses (returns and purchase orders while their capability is on; a return's void follows
+  returns) with its switch and amount; saving needs `core.settings.manage` and the administrator's own code or password
+  (`PolicyChangeGuard.requireProof`), is audited as `core.settings.approval_rules_changed`, refuses switching a lending action off
+  (422 `approval_always_on`) and pushes `core.approval_policy_weakened` to the other administrators when a rule is loosened.
+  `PATCH /settings` needs the same proof to change an amount. `ApprovalAction` gains `switchable`, `onByDefault`, `listed`,
+  `offered` and `label`; `Approvals.rule` is the one reading of a rule; the retail modules pass the rule they read to `Approvals.request(request, rule)`
+  so it is read once (`RetailApprovalRaceIT`, every retail kind), a caller that read none has a switched-off action run at once
+  (a write-off still flagged and told), every caller answers by `executed()` (`ApprovalOutcomeGuardTest`), and a `PATCH /settings`
+  amount that loosens a rule, 0 switching one off included, is told (`ApprovalAmountsChanged`, `PushPublishersIT`).
+  Defaults keep what every business had: lending always asks, returns and purchase orders ask while their amount is above 0,
+  write-offs ask by ADR-043's rule. Three new retail actions, off by default, with an administrator as checker: `retail_sale_void`
+  (`POST /retail/sales/{id}/void`), `retail_stock_correction` (`POST /retail/stock/corrections`, valued at the branch's average) and
+  `retail_expense` (`POST /retail/expenses`), each answering 202 `ApprovalWaiting` while it waits and running in the maker's name
+  on approval. A price below cost is not an approval. Screens: Business set-up, Approval rules (`/staff/setup/approvals`, tour
+  `page-approval-rules`), "Sent for approval" on the void, the correction and the expense, the action in words on Approvals, and
+  the returns Hint on Retail settings links to the returns row (#575). Tests: `ApprovalRulesIT`, `RetailApprovalRulesIT`,
+  `ApprovalsIT`, `RetailReturnsIT`, `RetailSaleWriteOffIT`, `RetailTradePurchasingIT`, `approval-rules.dom.test.tsx`,
+  `expenses-waiting.dom.test.tsx`, `stock-correct.dom.test.tsx`, `sale-actions.dom.test.tsx`, `return-new.dom.test.tsx`.
 - **Built (the kind of business, issue #424, ADR-092, FR-RET-33):** migration `V103`, no new permission. The Retail settings
   profile becomes "What kind of business is this?": `shops` (Shops only, the default), `stores_and_shops`, `wholesale` and
   `wholesale_and_shops`, each a preset of the six switches it governs (`BusinessTypes` in `retail.manifest`: packs, price lists,

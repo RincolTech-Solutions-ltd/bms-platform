@@ -88,6 +88,10 @@ const staffBranchesRoute = createRoute({ getParentRoute: () => staffRoute, path:
 const staffTwoStepPolicyRoute = createRoute({ getParentRoute: () => staffRoute, path: '/setup/two-step', staticData: { crumb: 'Two-step sign-in' } }).lazy(() =>
   import('../areas/staff/two-step/page').then((m) => m.Route),
 );
+// Approval rules (issue #343, ADR-091): which actions need an administrator first, and from what amount. Under Business set-up.
+const staffApprovalRulesRoute = createRoute({ getParentRoute: () => staffRoute, path: '/setup/approvals', staticData: { crumb: 'Approval rules' } }).lazy(() =>
+  import('../areas/staff/approval-rules/page').then((m) => m.Route),
+);
 // What the business sends by push and when the daily summary goes (issue #412). Under Business set-up in the trail.
 const staffBusinessNotificationsRoute = createRoute({ getParentRoute: () => staffRoute, path: '/setup/notifications', staticData: { crumb: 'Notifications for the business' } }).lazy(() =>
   import('../areas/staff/notifications/business').then((m) => m.Route),
@@ -266,6 +270,16 @@ const lendingLoanRoute = createRoute({ getParentRoute: () => staffLendingRoute, 
   import('../areas/staff/lending/loan').then((m) => m.Route),
 );
 const lendingScreen = <P extends string>(path: P, crumb: string) => createRoute({ getParentRoute: () => staffLendingRoute, path, staticData: { crumb } });
+const applicationNewRoute = createRoute({
+  getParentRoute: () => staffLendingRoute,
+  path: '/applications/new',
+  staticData: { crumb: 'New application' },
+  // The member to start from, as an id (never a phone or an ID number).
+  validateSearch: (s: Record<string, unknown>): { memberId?: string } => ({ memberId: typeof s.memberId === 'string' ? s.memberId : undefined }),
+}).lazy(() => import('../areas/staff/lending/application-form').then((m) => m.NewRoute));
+const applicationEditRoute = lendingScreen('/loans/$loanId/edit', 'Change application').lazy(() => import('../areas/staff/lending/application-form').then((m) => m.EditRoute));
+const appraiseRoute = lendingScreen('/loans/$loanId/appraise', 'Appraise').lazy(() => import('../areas/staff/lending/appraise').then((m) => m.Route));
+const decideRoute = lendingScreen('/loans/$loanId/decide', 'Decision').lazy(() => import('../areas/staff/lending/decide').then((m) => m.Route));
 const savingsRoute = lendingScreen('/savings', 'Savings').lazy(() => import('../areas/staff/lending/savings').then((m) => m.Route));
 const savingsProductsRoute = lendingScreen('/savings/products', 'Savings products').lazy(() => import('../areas/staff/lending/savings-products').then((m) => m.Route));
 const savingsAccountRoute = lendingScreen('/savings/accounts/$accountId', 'Account').lazy(() => import('../areas/staff/lending/savings-account').then((m) => m.Route));
@@ -374,7 +388,7 @@ export const router = createRouter({
     forgotPasswordRoute,
     resetPasswordRoute,
     acceptInvitationRoute,
-    staffRoute.addChildren([staffHomeRoute, staffMoneyRoute, staffMoreRoute, staffKitRoute, staffApprovalsRoute, staffSetupRoute, staffBranchesRoute, staffTwoStepPolicyRoute, staffBusinessNotificationsRoute, staffBillingRoute, staffCloseRoute, staffReferralsRoute, staffOwnTwoStepRoute, staffRetailRoute.addChildren([
+    staffRoute.addChildren([staffHomeRoute, staffMoneyRoute, staffMoreRoute, staffKitRoute, staffApprovalsRoute, staffSetupRoute, staffBranchesRoute, staffTwoStepPolicyRoute, staffApprovalRulesRoute, staffBusinessNotificationsRoute, staffBillingRoute, staffCloseRoute, staffReferralsRoute, staffOwnTwoStepRoute, staffRetailRoute.addChildren([
         retailHomeRoute,
         retailSaleRoute,
         retailCreditSalesRoute,
@@ -457,6 +471,10 @@ export const router = createRouter({
       ]), staffLendingRoute.addChildren([
         lendingLoansRoute,
         lendingLoanRoute,
+        applicationNewRoute,
+        applicationEditRoute,
+        appraiseRoute,
+        decideRoute,
         savingsRoute,
         savingsProductsRoute,
         savingsAccountRoute,
