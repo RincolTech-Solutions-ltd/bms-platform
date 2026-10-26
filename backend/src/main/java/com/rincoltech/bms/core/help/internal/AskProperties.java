@@ -43,15 +43,29 @@ record AskProperties(
     /**
      * @param apiKey from {@code BMS_HELP_ASK_<NAME>_API_KEY}
      * @param priceInputMicroPerMillion micro-units of the cost currency per million input tokens (0 on a free tier)
+     * @param reasoning {@code BMS_HELP_ASK_GEMINI_REASONING}, Gemini only: the {@code reasoning_effort} sent, one of
+     *     {@link #REASONING}; blank sends none. {@code minimal} by default, since Gemini 3 cannot turn thinking off and
+     *     refuses {@code none} with 400 (#601)
      */
     record Provider(
             String baseUrl,
             String apiKey,
             String model,
             Long priceInputMicroPerMillion,
-            Long priceOutputMicroPerMillion) {
+            Long priceOutputMicroPerMillion,
+            String reasoning) {
+
+        /** The values Google's OpenAI-compatible endpoint maps to a Gemini 3 thinking level. */
+        static final Set<String> REASONING = Set.of("minimal", "low", "medium", "high");
 
         Provider {
+            reasoning = reasoning == null || reasoning.isBlank()
+                    ? null
+                    : reasoning.strip().toLowerCase(Locale.ROOT);
+            if (reasoning != null && !REASONING.contains(reasoning)) {
+                throw new IllegalArgumentException(
+                        "BMS_HELP_ASK_GEMINI_REASONING must be minimal, low, medium, high or empty");
+            }
             priceInputMicroPerMillion = priceInputMicroPerMillion == null ? 0L : notNegative(priceInputMicroPerMillion);
             priceOutputMicroPerMillion =
                     priceOutputMicroPerMillion == null ? 0L : notNegative(priceOutputMicroPerMillion);
@@ -85,9 +99,9 @@ record AskProperties(
         }
         deepseekMonthlyCostMicro =
                 deepseekMonthlyCostMicro == null ? 5_000_000L : notNegative(deepseekMonthlyCostMicro);
-        gemini = gemini == null ? new Provider(null, null, null, null, null) : gemini;
-        groq = groq == null ? new Provider(null, null, null, null, null) : groq;
-        deepseek = deepseek == null ? new Provider(null, null, null, null, null) : deepseek;
+        gemini = gemini == null ? new Provider(null, null, null, null, null, null) : gemini;
+        groq = groq == null ? new Provider(null, null, null, null, null, null) : groq;
+        deepseek = deepseek == null ? new Provider(null, null, null, null, null, null) : deepseek;
     }
 
     private static long notNegative(long value) {
