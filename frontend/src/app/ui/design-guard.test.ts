@@ -168,16 +168,17 @@ describe('design guard', () => {
 
   // Rule 13: no pulsing or blinking dot or badge to catch the eye. A pulse is an animation that fades (opacity) or scales and
   // runs more than once, however it is written: the shorthand with its name anywhere, every item of a comma list, the
-  // longhands, a name hidden in a var(), and a style set from a component. One that loops may only show work in progress and
-  // stops when the work does. The one attention blink is the new-feature badge's .new-blink (issue #603): the owner asked for
-  // it, it blinks five times (five seconds, WCAG 2.2.2) each time it appears, it ends once the person has opened the feature,
+  // longhands over the shorthand, a count list repeated to the names, a name or a count hidden in a var(), the -webkit- forms,
+  // and a component that animates from code. One that loops may only show work in progress and stops when the work does. The
+  // one attention blink is the new-feature badge's .new-blink (issue #603): the owner asked for it, it blinks for at most five
+  // seconds per page load (WCAG 2.2.2; NewBadge.tsx takes the class off after that), it ends once the person has opened the feature,
   // and it stands still under reduced motion. Anything else that pulses fails here; the fixtures below prove each way is caught.
   // JUSTIFICATION-A3: #603 asks for the pulse ban to be held by the guard with one named exception; no existing test checks loops.
   const PULSES: Record<string, string> = {
     '.busy-spinner': 'the busy button under reduced motion, while it writes',
     '.brand-loader-core': 'the loading mark, while a page loads',
     '.sync-dot-syncing': 'the sync dot, while sales are being sent',
-    '.new-blink': 'the New badge of a new feature, five blinks each time it appears, until it is opened once (owner, issue #603)',
+    '.new-blink': 'the New badge of a new feature, five seconds per page load at most, until it is opened once (owner, issue #603)',
   };
   it('pulses nothing but work in progress and the one New badge, pinned to five runs wherever it is named', () => {
     const css = allStylesheets.map((f) => code(relative(SRC, f))).join('\n');

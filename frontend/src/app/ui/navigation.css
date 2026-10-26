@@ -1135,9 +1135,10 @@ img.menu-shop-logo {
 /*
  * The new-feature badge (issue #603, src/app/ui/NewBadge.tsx): a small New pill after a menu entry's name, and a dot on the
  * More tab and the top bar's Ask button, in the brand fill, until the person opens the feature once. .new-blink fades them by
- * opacity only, 1 to 0.35 and back each second on the ease-out curve, five times each time they appear, then they stand still
- * (five seconds, so WCAG 2.2.2 needs no pause control): the one blink the design guard allows (the owner asked for it, 27 Oct
- * 2026). Under reduced motion the component leaves .new-blink off, and the rule below stops it as well.
+ * opacity only, 1 to 0.35 and back each second on the ease-out curve, five times at most, and the component takes .new-blink
+ * off once the page load's five seconds are up, so a badge drawn again later stands still (WCAG 2.2.2 needs no pause control):
+ * the one blink the design guard allows (the owner asked for it, 27 Oct 2026). Under reduced motion the component leaves
+ * .new-blink off, and the rule below stops it as well.
  */
 .new-badge {
   flex: none;

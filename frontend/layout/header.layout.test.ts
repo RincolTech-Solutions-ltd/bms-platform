@@ -39,6 +39,8 @@ describe.each([360, 390, 412])('the top bar at %ipx wide', (width) => {
       const button = page.locator('.staff-bar-top .ask-open');
       await button.waitFor();
       expect(await button.getAttribute('aria-label')).toBe(ask === '1' ? 'Ask BMS, New' : 'How do I?, New');
+      // Its word stays inside the button, whatever the width and the font size.
+      expect(await button.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
       const controls = await Promise.all(
         (await page.locator('.staff-bar-top > *').all()).map(async (c) => ({ cls: (await c.getAttribute('class')) ?? '', box: (await c.boundingBox()) as Box | null })),
       );
