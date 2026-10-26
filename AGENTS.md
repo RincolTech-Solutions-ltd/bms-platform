@@ -241,7 +241,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   Deferred: waivers, collections and the reminder SMS (increment 6, pull requests #271, #272 and #290; the arrears job
   and penalties are #270, migration `V81`), import (7), reports and the
   receipt, voucher and statement PDFs (8 and a documents follow-up).
-- **Built (fee and interest waivers, issue #265, the second half of FR-ARR-04; built on the reopening of #265 under D47, the owner's confirmation on #265 still to come):** migration `V107` (directly after `V106`, #596; it adds the unique key `(tenant_id, loan_id, id)` on `lending_schedule_items` for the waiver's composite foreign key):
+- **Built (fee and interest waivers, issue #265, the second half of FR-ARR-04; the owner's decision D50 of 26 Oct 2026, https://github.com/RincolTech-Solutions-ltd/bms-platform/issues/265#issuecomment-6410874637):** migration `V107` (directly after `V106`, #596; it adds the unique key `(tenant_id, loan_id, id)` on `lending_schedule_items` for the waiver's composite foreign key):
   `lending_item_waivers` (tenant-owned, forced RLS, append-only: one dated row per waiver of all or part of a schedule item's
   `fee` or `interest`, with the reason, the approval request, the maker and the checker as composite foreign keys) and the
   permission `lending.charges.waive_fee_interest` (the accountant and the tenant admin). `POST
