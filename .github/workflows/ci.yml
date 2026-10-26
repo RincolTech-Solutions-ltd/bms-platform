@@ -144,7 +144,7 @@ jobs:
         working-directory: .
         run: python3 .github/scripts/prose_only.py
       - name: The prose-only switch behaves as documented
-        if: steps.scope.outputs.run == 'true'
+        # Never guarded: a broken switch that calls every change prose must still turn this check red.
         run: python3 .github/scripts/test_prose_only.py
       - name: Assert the Docker daemon is rootless
         if: steps.scope.outputs.run == 'true'
