@@ -1597,7 +1597,7 @@ NULL` (`> 0`), `business_date date NOT NULL` (when the waiver took effect), `rea
 waiver of all or part of a schedule item's fees or interest (FR-ARR-04, #265); the item's
 `fees_waived_minor` or `interest_waived_minor` carries it (the interest column also holds the payoff
 rebate, which a replay recomputes, while it keeps these rows). The statement dates a waiver by its row
-(ADR-034) and a reversal's replay keeps it (ADR-026). Nothing is posted. Built in V106 (#265), with
+(ADR-034) and a reversal's replay keeps it (ADR-026). Nothing is posted. Built in V107 (#265), with
 the maker and checker as composite foreign keys to `users`, forced RLS and the append-only trigger.
 
 ### `lending_loan_transactions` (append-only)

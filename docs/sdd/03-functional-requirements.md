@@ -742,7 +742,7 @@ while the threshold weighs the loan's running total; the loan's own officer may 
 (`approver_conflict`); and one waiver at a time waits on a loan: a second request while one is pending
 is refused as `approval_already_pending` (409), the checker decides the first.
 
-Built for fees and interest (#265, the owner's decision of 26 Oct 2026, migration V106): a user with
+Built for fees and interest (#265, the owner's decision of 26 Oct 2026, migration V107): a user with
 `lending.charges.waive_request` requests a waiver of all or part of one schedule item's fees or interest
 with a reason (`POST /lending/loans/{loan_id}/schedule/{item_no}/waive`, `{component, amount_minor,
 reason}`). It is the same `charge_waiver` approval, and its checker also holds the accountant's

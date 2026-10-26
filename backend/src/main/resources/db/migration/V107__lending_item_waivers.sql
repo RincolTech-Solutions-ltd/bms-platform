@@ -1,4 +1,4 @@
--- V106: fee and interest waivers on a loan's schedule (FR-ARR-04, second half; issue #265), directly after V105.
+-- V107: fee and interest waivers on a loan's schedule (FR-ARR-04, second half; issue #265), directly after V106 (#596).
 -- Additive only.
 --
 -- 1. `lending.charges.waive_fee_interest`: the accountant's permission. A fee or interest waiver is the `charge_waiver`
