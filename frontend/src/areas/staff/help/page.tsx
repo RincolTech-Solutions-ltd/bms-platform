@@ -1,11 +1,13 @@
 import { Link, createLazyRoute } from '@tanstack/react-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { markFeatureSeen } from '../../../app/ui/NewBadge';
 import { Card, ListRow, RowList } from '../../../app/ui/ListRow';
 import { SearchBox, SearchResults } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { JOBS, articleById, articleVisible, articlesFor, searchArticles, type Article, type Inline } from '../../../help/corpus';
 import { useStaff } from '../context';
+import { HELP_FEATURE } from '../menu';
 import { AskBms, useAskEnabled } from './ask';
 
 // How do I...? (issue #598, ADR-095): short articles with pictures for the jobs a person does in BMS, under Help and feedback.
@@ -35,6 +37,8 @@ const row = (a: Article) => <ListRow key={a.id} title={a.title} to={`/staff/help
 
 export function HowDoIPage() {
   const { me } = useStaff();
+  // Opening the page once retires its New badge on this device (issue #603).
+  useEffect(() => markFeatureSeen(HELP_FEATURE), []);
   const mine = useMemo(() => articlesFor(me), [me]);
   const search = useLiveSearch({ urlParam: 'q' });
   const found = useMemo(() => searchArticles(mine, search.term), [mine, search.term]);

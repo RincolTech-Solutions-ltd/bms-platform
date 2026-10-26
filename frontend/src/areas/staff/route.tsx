@@ -29,6 +29,7 @@ import { useSells } from './retail/nav';
 import { StaffTabBar } from './tabs';
 import { canSeeProfit } from './retail/permissions';
 import { rememberPage } from './feedback/feedback-state';
+import { useAskEnabled } from './help/ask';
 import { HowDoILink } from './help/how-do-i';
 import { TwoStepNotices } from './two-step/notices';
 import { OwnTwoStep } from './two-step/own';
@@ -202,7 +203,8 @@ const FOOT_TOURS = ['nav-notifications', 'nav-feedback'];
 function useStaffGroups(me: Me) {
   const sells = useSells(me);
   const counts = useMenuCounts(me);
-  return staffMenu(me, { sells, counts });
+  const ask = useAskEnabled();
+  return staffMenu(me, { sells, counts, ask });
 }
 
 /**
