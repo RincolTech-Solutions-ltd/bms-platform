@@ -18,7 +18,7 @@ import { showSms } from './sms/state';
 import { showUsers } from './users/state';
 
 // The staff menu's groups and items (issue #564, owner decisions D38 and D44, ADR-086), apart from the layout in route.tsx so a
-// test reads them without loading the staff area (issue #483). One list, grouped the way a shop owner thinks: Home and Help, then Today,
+// test reads them without loading the staff area (issue #483). One list, grouped the way a shop owner thinks: Home and How do I? (Ask BMS), then Today,
 // Stock, Money, Wholesale (when a wholesale tool is on), Lending (when the business has it) and Business, each item filtered by
 // the same permission rules as before. The sidebar from 720px and the phone drawer both draw it; Notifications and Help and
 // feedback are in the menu's footer.
@@ -51,10 +51,11 @@ export const HELP_FEATURE = 'ask-bms';
 
 /**
  * The help page's entry, just after Home (issue #603): Ask BMS while the business has it on (useAskEnabled, as the page decides
- * whether to draw the Ask box), else Help. Every person may open it; the page lists only the articles their permissions allow.
+ * whether to draw the Ask box), else How do I?, never Help, which names the tours sheet of the top menu and the menu's foot
+ * (WCAG 3.2.4). Every person may open it; the page lists only the articles their permissions allow.
  */
 export function helpLink(ask: boolean): MenuLink {
-  return { to: '/staff/help', label: ask ? 'Ask BMS' : 'Help', icon: icons.ask, badge: <NewBadge feature={HELP_FEATURE} /> };
+  return { to: '/staff/help', label: ask ? 'Ask BMS' : 'How do I?', icon: icons.ask, badge: <NewBadge feature={HELP_FEATURE} /> };
 }
 
 const count = (n: number | undefined, words = '') => (n && n > 0 ? `${n > 99 ? '99+' : n}${words}` : undefined);

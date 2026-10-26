@@ -43,35 +43,62 @@ function transitioned(value: string): string[] {
   return value.split(/,(?![^(]*\))/).map((item) => item.trim().split(/\s+(?![^(]*\))/).find((word) => !NOT_A_PROPERTY.test(word)) ?? 'all');
 }
 
-// The words of an animation item that are not its name: times, counts, curves, directions, fill and play states.
-const NOT_A_NAME = /^(?:-?[\d.]+m?s|[\d.]+|infinite|linear|ease(?:-in|-out|-in-out)?|step-start|step-end|(?:steps|cubic-bezier|linear)\([^)]*\)|normal|reverse|alternate(?:-reverse)?|none|forwards|backwards|both|running|paused|var\(--[\w-]+\))$/;
-const items = (value: string) => value.replace(/!important/g, '').split(/,(?![^(]*\))/).map((item) => item.trim().split(/\s+(?![^(]*\))/));
-const repeats = (count: string | undefined) => count === 'infinite' || Number(count) > 1;
+// The words of an animation item that are not its name or its count: times, curves, directions, fill and play states, and the
+// motion tokens (var(--motion...), var(--ease...)). Any other var() may hold a name or a count, so the guard counts it as both.
+const NOT_A_NAME = /^(?:-?[\d.]+m?s|linear|ease(?:-in|-out|-in-out)?|step-start|step-end|(?:steps|cubic-bezier|linear)\([^)]*\)|normal|reverse|alternate(?:-reverse)?|none|forwards|backwards|both|running|paused|var\(--(?:motion|ease)[\w-]*\))$/;
+const UNKNOWN = '?';
+const listOf = (value: string) => value.replace(/!important/g, '').split(/,(?![^(]*\))/).map((item) => item.trim().split(/\s+(?![^(]*\))/));
+const isCount = (word: string) => word === 'infinite' || /^[\d.]+$/.test(word);
+// A var() the guard cannot read may repeat, as may a name it cannot read.
+const repeats = (count: string | undefined) => count === 'infinite' || count === UNKNOWN || Number(count) > 1;
+
+/** The last value of `prop` (or its -webkit- form) in a rule's declarations. */
+function declared(body: string, prop: string): string | undefined {
+  return [...body.matchAll(new RegExp(`(?<![\\w-])(?:-webkit-)?${prop}\\s*:\\s*([^;]+)`, 'g'))].pop()?.[1]?.trim();
+}
 
 /**
- * The selectors in `css` that pulse: an animation of a keyframes that fades or scales, run more than once, read from the
- * shorthand (every item, the name wherever it stands) and the longhands; a name only a var() gives counts as a pulse.
+ * The animations one rule sets, each a name and a count, as CSS resolves them: the shorthand's items (the name wherever it
+ * stands), then the animation-name and animation-iteration-count longhands over them, a list of counts repeated to the names.
+ * A name or count a var() gives is UNKNOWN; a count set with no name names UNKNOWN, as another rule may name the animation.
  */
-function pulsesIn(css: string): string[] {
-  const pulsing = new Set([...css.matchAll(/@keyframes\s+([\w-]+)\s*\{((?:[^{}]*\{[^{}]*\})*\s*)\}/g)].filter(([, , frames]) => /\bopacity\s*:|scale/.test(frames as string)).map(([, name]) => name));
-  const found: string[] = [];
-  for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    const decl = (prop: string) => (body as string).match(new RegExp(`(?<![\\w-])${prop}\\s*:\\s*([^;]+)`))?.[1];
-    const runs: { name: string | undefined; count: string | undefined }[] = [];
-    const shorthand = decl('animation');
-    if (shorthand) for (const words of items(shorthand)) runs.push({ name: words.find((w) => !NOT_A_NAME.test(w)) ?? (words.some((w) => w.startsWith('var(')) ? undefined : 'none'), count: words.find((w) => w === 'infinite' || /^[\d.]+$/.test(w)) });
-    const names = decl('animation-name');
-    const counts = decl('animation-iteration-count');
-    if (names) items(names).forEach(([name], i, all) => runs.push({ name, count: counts ? items(counts)[i % all.length]?.[0] : undefined }));
-    else if (counts && !shorthand) runs.push({ name: undefined, count: items(counts)[0]?.[0] });
-    // A name only a var() gives may be anything; a count set on its own repeats whatever another rule names.
-    const pulses = (r: (typeof runs)[number]) => (r.name === undefined ? !counts || repeats(r.count) || !!shorthand : repeats(r.count) && pulsing.has(r.name));
-    if (runs.some(pulses)) {
-      found.push(...(selector as string).split(',').map((s) => s.trim()));
-    }
+function animationsOf(body: string): { name: string; count: string | undefined }[] {
+  const shorthand = declared(body, 'animation');
+  const longNames = declared(body, 'animation-name');
+  const longCounts = declared(body, 'animation-iteration-count');
+  const items = shorthand ? listOf(shorthand) : [];
+  let names = items.map((words) => {
+    const rest = words.filter((w) => !NOT_A_NAME.test(w) && !isCount(w));
+    return rest.find((w) => !w.startsWith('var(')) ?? (rest.length > 0 ? UNKNOWN : 'none');
+  });
+  let counts = items.map((words) => words.find(isCount) ?? (words.some((w) => w.startsWith('var(') && !NOT_A_NAME.test(w)) ? UNKNOWN : undefined));
+  if (longNames) names = listOf(longNames).map(([name = 'none']) => (name.startsWith('var(') ? UNKNOWN : name));
+  if (longCounts) {
+    const given = listOf(longCounts).map(([count]) => (count?.startsWith('var(') ? UNKNOWN : count));
+    if (names.length === 0) names = [UNKNOWN];
+    counts = names.map((_, i) => given[i % given.length]);
   }
-  return found;
+  return names.map((name, i) => ({ name, count: counts[i % Math.max(counts.length, 1)] }));
 }
+
+/** The keyframes in `css` that fade (opacity), scale or switch visibility: a pulse when they run more than once. */
+const pulsingFrames = (css: string) =>
+  new Set([...css.matchAll(/@keyframes\s+([\w-]+)\s*\{((?:[^{}]*\{[^{}]*\})*\s*)\}/g)].filter(([, , frames]) => /\bopacity\s*:|scale|\bvisibility\s*:/.test(frames as string)).map(([, name]) => name));
+
+/** Each rule of `css`: its selectors and its declarations. */
+const rulesOf = (css: string) => [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => ({ selectors: (selector as string).split(',').map((s) => s.trim()), body: body as string }));
+
+/** The selectors in `css` that pulse: an animation of fading or scaling keyframes, or of a name it cannot read, run more than once. */
+function pulsesIn(css: string): string[] {
+  const pulsing = pulsingFrames(css);
+  return rulesOf(css).flatMap(({ selectors, body }) =>
+    animationsOf(body).some((a) => repeats(a.count) && (a.name === UNKNOWN || pulsing.has(a.name))) ? selectors : [],
+  );
+}
+
+/** True when a component sets an animation from code: a style key, a style property or setProperty, or the Web Animations API. */
+const animatesInline = (source: string) =>
+  /(?<![\w-])(?:Webkit|Moz|ms)?[Aa]nimation[A-Za-z]*['"]?\s*:|['"](?:-webkit-)?animation[\w-]*['"]\s*[:,]|\.style\.(?:webkit)?[Aa]nimation|\.animate\(/.test(source);
 
 /** The source with its comments blanked: comments cite issues (#95) and name what was removed. */
 function code(file: string): string {
@@ -152,14 +179,20 @@ describe('design guard', () => {
     '.sync-dot-syncing': 'the sync dot, while sales are being sent',
     '.new-blink': 'the New badge of a new feature, five blinks each time it appears, until it is opened once (owner, issue #603)',
   };
-  it('pulses nothing but work in progress and the one New badge', () => {
-    expect(new Set(pulsesIn(allStylesheets.map((f) => code(relative(SRC, f))).join('\n')))).toEqual(new Set(Object.keys(PULSES)));
-    for (const file of components.map((f) => relative(SRC, f))) expect(code(file).match(/\banimation[A-Za-z]*\s*:/)?.[0] ?? null, file).toBeNull();
-    const nav = code('app/ui/navigation.css');
-    expect(nav).toMatch(/\.new-blink \{\s*animation: rt-new-blink 1s var\(--ease-out\) 5;/);
-    expect(nav).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.new-blink \{\s*animation: none;/);
+  it('pulses nothing but work in progress and the one New badge, pinned to five runs wherever it is named', () => {
+    const css = allStylesheets.map((f) => code(relative(SRC, f))).join('\n');
+    expect(new Set(pulsesIn(css))).toEqual(new Set(Object.keys(PULSES)));
+    for (const file of components.map((f) => relative(SRC, f))) expect(animatesInline(code(file)) ? file : null).toBeNull();
+    // Every rule that names .new-blink, in any stylesheet, runs rt-new-blink five times, or nothing (reduced motion).
+    const blinks = rulesOf(css).filter((r) => r.selectors.some((s) => /\.new-blink(?![\w-])/.test(s)));
+    expect(blinks.length).toBeGreaterThanOrEqual(2);
+    for (const { body } of blinks) {
+      for (const a of animationsOf(body)) expect(a.name === 'none' || (a.name === 'rt-new-blink' && a.count === '5') ? null : a).toBeNull();
+    }
+    expect(code('app/ui/navigation.css')).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.new-blink \{\s*animation: none;/);
   });
 
+  const FRAMES = '@keyframes pulse { 50% { opacity: 0.4; } }\n@keyframes grow { 50% { transform: scale(1.2); } }\n@keyframes spin { to { transform: rotate(360deg); } }';
   it.each([
     ['the name after the duration', '.x { animation: 2s pulse infinite; }'],
     ['the longhands', '.x { animation-name: pulse; animation-iteration-count: infinite; }'],
@@ -168,14 +201,33 @@ describe('design guard', () => {
     ['a count above one', '.x { animation: pulse 1s 3; }'],
     ['a scale', '.x { animation: grow 1s infinite; }'],
     ['an important shorthand', '.x { animation: pulse 1s infinite !important; }'],
+    ['a longhand count over a shorthand with none', '.x { animation: pulse 1s; animation-iteration-count: infinite; }'],
+    ['one count repeated to two names', '.x { animation-name: spin, pulse; animation-iteration-count: infinite; }'],
+    ['a longhand name in a var()', '.x { animation-name: var(--n); animation-iteration-count: infinite; }'],
+    ['a count in a var()', '.x { animation: pulse 1s var(--forever); }'],
+    ['the -webkit- prefix', '.x { -webkit-animation: pulse 1s infinite; }'],
+    ['a count set on its own', '.x { animation-iteration-count: infinite; }'],
   ])('catches a pulse written with %s', (_way, rule) => {
-    const frames = '@keyframes pulse { 50% { opacity: 0.4; } }\n@keyframes grow { 50% { transform: scale(1.2); } }\n@keyframes spin { to { transform: rotate(360deg); } }';
-    expect(pulsesIn(`${frames}\n${rule}`)).toEqual(['.x']);
+    expect(pulsesIn(`${FRAMES}\n${rule}`)).toEqual(['.x']);
   });
 
-  it('lets a spinner, a fade that runs once and no animation pass', () => {
-    const frames = '@keyframes pulse { 50% { opacity: 0.4; } }\n@keyframes spin { to { transform: rotate(360deg); } }';
-    expect(pulsesIn(`${frames}\n.a { animation: spin 1s linear infinite; }\n.b { animation: pulse 200ms var(--ease-out); }\n.c { animation: none; }`)).toEqual([]);
+  it('lets a spinner, a fade that runs once on the motion tokens and no animation pass', () => {
+    expect(pulsesIn(`${FRAMES}\n.a { animation: spin 1s linear infinite; }\n.b { animation: pulse var(--motion) var(--ease-out); }\n.c { animation: none; }\n.d { animation-iteration-count: 1; }`)).toEqual([]);
+  });
+
+  it.each([
+    ['a style key', '<span style={{ animation: "pulse 1s infinite" }} />'],
+    ['a quoted style key', "<span style={{ 'animation': 'pulse 1s infinite' }} />"],
+    ['a prefixed style key', '<span style={{ WebkitAnimation: "pulse 1s infinite" }} />'],
+    ['a style property', "el.style.animation = 'pulse 1s infinite';"],
+    ['setProperty', "el.style.setProperty('animation', 'pulse 1s infinite');"],
+    ['the Web Animations API', 'el.animate([{ opacity: 1 }, { opacity: 0.3 }], { iterations: Infinity });'],
+  ])('catches a component that animates with %s', (_way, source) => {
+    expect(animatesInline(source)).toBe(true);
+  });
+
+  it('lets a component that only names a class pass', () => {
+    expect(animatesInline('<span className="new-badge new-blink" />')).toBe(false);
   });
 
   it('reads the property out of each transition item, and an item without one as all', () => {

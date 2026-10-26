@@ -1,3 +1,4 @@
+import { onlineManager } from '@tanstack/react-query';
 import { Link, createLazyRoute, useRouterState } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, ListRow, RowList } from '../../../app/ui/ListRow';
@@ -46,13 +47,14 @@ export function HowDoIPage() {
   const { enabled: askEnabled, known } = useAskStatus();
   const [asked, setAsked] = useState('');
   // The top bar's Ask button opens /staff/help#ask (issue #603): once the server has said whether Ask BMS is on, the cursor goes
-  // to the question box, or to the article search while it is off. Only once per arrival.
+  // to the question box, or to the article search while it is off or the phone is offline (a remembered "on" cannot be asked
+  // then). Only once per arrival.
   const hash = useRouterState({ select: (state) => state.location.hash });
   const focused = useRef(false);
   useEffect(() => {
     if (hash !== 'ask' || !known || focused.current) return;
     focused.current = true;
-    document.querySelector<HTMLElement>(askEnabled ? '.help-ask-bms input' : '#help-q')?.focus();
+    document.querySelector<HTMLElement>(askEnabled && onlineManager.isOnline() ? '.help-ask-bms input' : '#help-q')?.focus();
   }, [hash, known, askEnabled]);
   return (
     <main className="rt ln stack help-page">
@@ -96,8 +98,10 @@ export function ArticleView({ articleId }: { articleId: string }) {
   const article = articleById(articleId);
   const allowed = article !== undefined && articleVisible(article, me);
   const askEnabled = useAskEnabled();
-  // An article is part of /staff/help: reading one retires the New badge too (issue #603).
-  useEffect(() => markFeatureSeen(HELP_FEATURE), []);
+  // An article is part of /staff/help: reading one retires the New badge too (issue #603); one not found or for another role is not read.
+  useEffect(() => {
+    if (allowed) markFeatureSeen(HELP_FEATURE);
+  }, [allowed]);
   useCrumbLabel(allowed ? article.title : undefined);
   if (!article || !allowed) {
     return (

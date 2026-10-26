@@ -429,7 +429,7 @@ describe('the tabs and their pages, read from /me (issue #539)', () => {
     // since it sits in Today after the shop's rows.
     const lists = screen.getAllByRole('list').map((l) => l.getAttribute('aria-label'));
     expect(lists.slice(0, 4)).toEqual(['Start', 'Shop', 'Lending', 'Business']);
-    expect(within(screen.getByRole('list', { name: 'Start' })).getAllByRole('link').map((a) => a.querySelector('.list-row-title')?.firstChild?.textContent)).toEqual(['Home', 'Help']);
+    expect(within(screen.getByRole('list', { name: 'Start' })).getAllByRole('link').map((a) => a.querySelector('.list-row-title')?.firstChild?.textContent)).toEqual(['Home', 'How do I?']);
     expect(within(screen.getByRole('list', { name: 'Business' })).getByRole('link', { name: 'Approvals' })).toBeTruthy();
     expect(within(screen.getByRole('list', { name: 'Business' })).queryByRole('link', { name: 'Home' })).toBeNull();
     expect(within(screen.getByRole('list', { name: 'Lending' })).getByRole('link', { name: 'Loans' })).toBeTruthy();

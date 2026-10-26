@@ -1,10 +1,12 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useMedia } from '../../components/side-menu';
 
 // The new-feature badge (issue #603): a small New pill beside a menu entry, and a dot on the tab that leads to it, until this
 // person opens the feature once. Then this device remembers it in localStorage and both are gone for good. Every read and write
 // of storage is in try/catch: where storage is blocked the badge keeps showing and nothing breaks. Both blink by opacity only,
-// the one looping blink the design guard allows, which the owner asked for; under reduced motion they stand still.
+// the one blink the design guard allows, which the owner asked for, for at most five seconds per page load (WCAG 2.2.2): the
+// clock starts with the first badge drawn, and a badge drawn or redrawn later (the drawer opened again, More visited again)
+// blinks only for what is left of it, then stands still until the feature is opened. Under reduced motion they never blink.
 
 const keyOf = (feature: string) => `bms.new.${feature}.seen`;
 const listeners = new Set<() => void>();
@@ -43,9 +45,32 @@ export function useIsNew(feature: string): boolean {
   return useSyncExternalStore(subscribe, () => !seen(feature), () => false);
 }
 
-/** The badge's classes: the blink only while the person has not asked for reduced motion. */
+const BLINK_MS = 5000;
+let blinkStart: number | undefined;
+
+/** How long the badges of this page load may still blink, in ms; the first call starts the clock. */
+function blinkLeft(): number {
+  const now = performance.now();
+  blinkStart ??= now;
+  return Math.max(0, blinkStart + BLINK_MS - now);
+}
+
+/** Starts the five seconds again, as a new page load does; for tests. */
+export function restartBlinkClock() {
+  blinkStart = undefined;
+}
+
+/** The badge's classes: the blink only within the page load's five seconds, and never under reduced motion. */
 function useBlink(base: string): string {
-  return useMedia('(prefers-reduced-motion: reduce)') ? base : `${base} new-blink`;
+  const still = useMedia('(prefers-reduced-motion: reduce)');
+  const [left] = useState(blinkLeft);
+  const [blinking, setBlinking] = useState(left > 0);
+  useEffect(() => {
+    if (!blinking) return;
+    const timer = window.setTimeout(() => setBlinking(false), left);
+    return () => window.clearTimeout(timer);
+  }, [blinking, left]);
+  return still || !blinking ? base : `${base} new-blink`;
 }
 
 /** The New pill, read out as ", New" after the entry's name. */

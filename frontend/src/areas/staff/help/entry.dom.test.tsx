@@ -8,10 +8,11 @@ import type { Me } from '../../../api/client';
 import { retailAnalytics } from '../../../api/retail-analytics';
 import { mockMe } from '../../../api/retail-mock';
 import { router as appRouter } from '../../../app/router';
+import { NewBadge, restartBlinkClock } from '../../../app/ui/NewBadge';
 import { TourProvider } from '../../../tour/host';
 import { StaffContext } from '../context';
 
-// The help page's entry (issue #603): Help, or Ask BMS while the business has it on, just after Home on the More page, in the
+// The help page's entry (issue #603): How do I?, or Ask BMS while the business has it on, just after Home on the More page, in the
 // side menu and in feature search, with a New pill on the entry and a dot on the More tab. Both blink until the person opens
 // /staff/help once, then stay gone on this device; under reduced motion they stand still, and blocked storage breaks nothing.
 // Round 2: an Ask button in the top bar of every staff screen opens /staff/help with the cursor in the question box, and each
@@ -75,6 +76,7 @@ beforeEach(() => {
   screenIs(390);
   localStorage.clear();
   ask.status.mockClear();
+  restartBlinkClock();
   ask.status.mockResolvedValue({ enabled: false, revision: 'r' });
   vi.spyOn(retailAnalytics, 'home').mockResolvedValue({ low_stock: 0 } as never);
 });
@@ -86,7 +88,7 @@ afterEach(() => {
 });
 
 describe('the help entry (issue #603)', () => {
-  it('is Help just after Home on More while Ask BMS is off, with a blinking New pill, and a New dot on the More tab', async () => {
+  it('is How do I? just after Home on More while Ask BMS is off, with a blinking New pill, and a New dot on the More tab', async () => {
     show(
       <>
         <MorePage />
@@ -94,8 +96,8 @@ describe('the help entry (issue #603)', () => {
       </>,
     );
     await waitFor(() => expect(ask.status).toHaveBeenCalled());
-    expect(rowNames().slice(0, 2)).toEqual(['Home', 'Help']);
-    expect(screen.getByRole('link', { name: 'Help, New' }).getAttribute('href')).toBe('/staff/help');
+    expect(rowNames().slice(0, 2)).toEqual(['Home', 'How do I?']);
+    expect(screen.getByRole('link', { name: 'How do I?, New' }).getAttribute('href')).toBe('/staff/help');
     expect(pill()?.className).toBe('new-badge new-blink');
     expect(dot()?.className).toBe('new-dot new-blink');
     expect(screen.getByRole('link', { name: 'More, New' })).toBeTruthy();
@@ -118,8 +120,8 @@ describe('the help entry (issue #603)', () => {
   });
 
   it.each([
-    [false, 'help', 'Help'],
-    [false, 'ask', 'Help'],
+    [false, 'help', 'How do I?'],
+    [false, 'ask', 'How do I?'],
     [true, 'help', 'Ask BMS'],
     [true, 'ask', 'Ask BMS'],
   ])('is found in feature search (Ask BMS on: %s) by typing %s', async (on, word, label) => {
@@ -151,7 +153,7 @@ describe('the help entry (issue #603)', () => {
     more.unmount();
     cleanup();
     show(<MorePage />);
-    await waitFor(() => expect(rowNames()[1]).toBe('Help'));
+    await waitFor(() => expect(rowNames()[1]).toBe('How do I?'));
     expect(pill()).toBeNull();
   });
 
@@ -284,5 +286,72 @@ describe('the Ask button of the top bar (issue #603, round 2)', () => {
     await waitFor(() => expect(ask.status).toHaveBeenCalled());
     await screen.findByRole('heading', { level: 1 });
     expect(screen.queryByRole('form', { name: 'Ask BMS' })).toBeNull();
+  });
+});
+
+describe('the blink and the Ask focus at their edges (issue #603, round 4)', () => {
+  it('blinks at most five seconds per page load: a badge drawn again after that stands still', async () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
+    const first = show(<NewBadge feature="ask-bms" />);
+    expect(pill()?.className).toBe('new-badge new-blink');
+    first.unmount();
+    now.mockReturnValue(4000);
+    const again = show(<NewBadge feature="ask-bms" />);
+    expect(pill()?.className).toBe('new-badge new-blink');
+    again.unmount();
+    now.mockReturnValue(6001);
+    show(<NewBadge feature="ask-bms" />);
+    expect(pill()?.className).toBe('new-badge');
+  });
+
+  it('stops a badge already drawn when the page load\'s five seconds are up', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(performance, 'now').mockReturnValue(1000);
+      show(<NewBadge feature="ask-bms" />);
+      expect(pill()?.className).toBe('new-badge new-blink');
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(pill()?.className).toBe('new-badge');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('puts the cursor in the article search when the Ask BMS status cannot be read', async () => {
+    ask.status.mockRejectedValue(new Error('server down'));
+    show(<HowDoIPage />, '/staff/help#ask');
+    await waitFor(() => expect(document.activeElement?.id).toBe('help-q'));
+    expect(ask.status).toHaveBeenCalled();
+  });
+
+  it('puts the cursor in the article search offline, even with Ask BMS remembered as on', async () => {
+    ask.status.mockResolvedValue({ enabled: true, revision: 'r' });
+    show(<HowDoIPage />, '/staff/help');
+    await screen.findByLabelText(/Your question/);
+    cleanup();
+    onlineManager.setOnline(false);
+    try {
+      const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/help#ask'] }) });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+      client.setQueryData(['help', 'ask', 'status'], { enabled: true, revision: 'r' });
+      render(
+        <RouterContextProvider router={router}>
+          <QueryClientProvider client={client}>
+            <StaffContext.Provider value={{ me: admin, branch: null }}>
+              <HowDoIPage />
+            </StaffContext.Provider>
+          </QueryClientProvider>
+        </RouterContextProvider>,
+      );
+      await waitFor(() => expect(document.activeElement?.id).toBe('help-q'));
+    } finally {
+      onlineManager.setOnline(true);
+    }
+  });
+
+  it('keeps the badge for an article that is not found or is for another role', async () => {
+    show(<ArticleView articleId="no-such-article" />, '/staff/help/no-such-article');
+    await screen.findByText('This article could not be found.');
+    expect(localStorage.getItem('bms.new.ask-bms.seen')).toBeNull();
   });
 });
