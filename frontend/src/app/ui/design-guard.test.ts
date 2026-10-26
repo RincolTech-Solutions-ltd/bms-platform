@@ -109,6 +109,30 @@ describe('design guard', () => {
     }
   });
 
+  // Rule 13: no pulsing or blinking dot or badge to catch the eye. A loop that fades by opacity may only show work in progress
+  // (a busy button under reduced motion, a sync while it sends) and stops when the work does. The one
+  // attention blink is the new-feature badge's .new-blink (issue #603): the owner asked for it, it ends once the person has
+  // opened the feature, and it stands still under reduced motion. Anything else that pulses fails here.
+  // JUSTIFICATION-A3: #603 asks for the pulse ban to be held by the guard with one named exception; no existing test checks loops.
+  const PULSES: Record<string, string> = {
+    '.busy-spinner': 'the busy button under reduced motion, while it writes',
+    '.sync-dot-syncing': 'the sync dot, while sales are being sent',
+    '.new-blink': 'the New badge of a new feature, until it is opened once (owner, issue #603)',
+  };
+  it('pulses nothing but work in progress and the one New badge', () => {
+    const pulsing: string[] = [];
+    for (const file of allStylesheets.map((f) => relative(SRC, f))) {
+      const css = code(file);
+      const fades = new Set([...css.matchAll(/@keyframes\s+([\w-]+)\s*\{((?:[^{}]*\{[^{}]*\})*\s*)\}/g)].filter(([, , frames]) => /\bopacity\s*:/.test(frames as string)).map(([, name]) => name));
+      for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const looped = (body as string).match(/(?<![\w-])animation\s*:\s*([\w-]+)[^;]*\binfinite\b/);
+        if (looped && fades.has(looped[1])) pulsing.push(...(selector as string).split(',').map((s) => s.trim()));
+      }
+    }
+    expect(new Set(pulsing)).toEqual(new Set(Object.keys(PULSES)));
+    expect(code('app/ui/navigation.css')).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.new-blink \{\s*animation: none;/);
+  });
+
   it('reads the property out of each transition item, and an item without one as all', () => {
     expect(transitioned('transform var(--motion) var(--ease-out)')).toEqual(['transform']);
     expect(transitioned('background var(--transition), border-color 120ms cubic-bezier(0.2, 0, 0, 1)')).toEqual(['background', 'border-color']);
