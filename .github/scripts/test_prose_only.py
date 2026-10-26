@@ -76,6 +76,18 @@ class ProseOnlyTest(unittest.TestCase):
                 self.merge_pr(path)
                 self.assertEqual(self.run_script("pull_request"), "run=true")
 
+    def test_code_moved_into_a_prose_folder_runs(self) -> None:
+        self.write("backend/X.java", "class X {}\n" * 20)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "code")
+        self.git("checkout", "-q", "-b", "pr")
+        (self.repo / "docs/specs").mkdir(parents=True)
+        self.git("mv", "backend/X.java", "docs/specs/X.java")
+        self.git("commit", "-q", "-m", "move")
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--no-ff", "-m", "merge", "pr")
+        self.assertEqual(self.run_script("pull_request"), "run=true")
+
     def test_a_push_to_main_always_runs(self) -> None:
         self.merge_pr("docs/specs/a.md")
         self.assertEqual(self.run_script("push"), "run=true")

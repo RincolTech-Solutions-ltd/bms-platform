@@ -21,8 +21,12 @@ def prose_only(files: list[str]) -> bool:
 def main() -> None:
     run = True
     if os.environ.get("GITHUB_EVENT_NAME") == "pull_request":
+        # --no-renames lists both sides of a move, so code moved into a prose folder still runs the job.
         changed = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD^1", "HEAD"], check=True, capture_output=True, text=True
+            ["git", "-c", "diff.renames=false", "diff", "--no-renames", "--name-only", "HEAD^1", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
         ).stdout.splitlines()
         if prose_only(changed):
             run = False
