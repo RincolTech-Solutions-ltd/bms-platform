@@ -43,6 +43,36 @@ function transitioned(value: string): string[] {
   return value.split(/,(?![^(]*\))/).map((item) => item.trim().split(/\s+(?![^(]*\))/).find((word) => !NOT_A_PROPERTY.test(word)) ?? 'all');
 }
 
+// The words of an animation item that are not its name: times, counts, curves, directions, fill and play states.
+const NOT_A_NAME = /^(?:-?[\d.]+m?s|[\d.]+|infinite|linear|ease(?:-in|-out|-in-out)?|step-start|step-end|(?:steps|cubic-bezier|linear)\([^)]*\)|normal|reverse|alternate(?:-reverse)?|none|forwards|backwards|both|running|paused|var\(--[\w-]+\))$/;
+const items = (value: string) => value.replace(/!important/g, '').split(/,(?![^(]*\))/).map((item) => item.trim().split(/\s+(?![^(]*\))/));
+const repeats = (count: string | undefined) => count === 'infinite' || Number(count) > 1;
+
+/**
+ * The selectors in `css` that pulse: an animation of a keyframes that fades or scales, run more than once, read from the
+ * shorthand (every item, the name wherever it stands) and the longhands; a name only a var() gives counts as a pulse.
+ */
+function pulsesIn(css: string): string[] {
+  const pulsing = new Set([...css.matchAll(/@keyframes\s+([\w-]+)\s*\{((?:[^{}]*\{[^{}]*\})*\s*)\}/g)].filter(([, , frames]) => /\bopacity\s*:|scale/.test(frames as string)).map(([, name]) => name));
+  const found: string[] = [];
+  for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const decl = (prop: string) => (body as string).match(new RegExp(`(?<![\\w-])${prop}\\s*:\\s*([^;]+)`))?.[1];
+    const runs: { name: string | undefined; count: string | undefined }[] = [];
+    const shorthand = decl('animation');
+    if (shorthand) for (const words of items(shorthand)) runs.push({ name: words.find((w) => !NOT_A_NAME.test(w)) ?? (words.some((w) => w.startsWith('var(')) ? undefined : 'none'), count: words.find((w) => w === 'infinite' || /^[\d.]+$/.test(w)) });
+    const names = decl('animation-name');
+    const counts = decl('animation-iteration-count');
+    if (names) items(names).forEach(([name], i, all) => runs.push({ name, count: counts ? items(counts)[i % all.length]?.[0] : undefined }));
+    else if (counts && !shorthand) runs.push({ name: undefined, count: items(counts)[0]?.[0] });
+    // A name only a var() gives may be anything; a count set on its own repeats whatever another rule names.
+    const pulses = (r: (typeof runs)[number]) => (r.name === undefined ? !counts || repeats(r.count) || !!shorthand : repeats(r.count) && pulsing.has(r.name));
+    if (runs.some(pulses)) {
+      found.push(...(selector as string).split(',').map((s) => s.trim()));
+    }
+  }
+  return found;
+}
+
 /** The source with its comments blanked: comments cite issues (#95) and name what was removed. */
 function code(file: string): string {
   return readFileSync(join(SRC, file), 'utf8')
@@ -109,28 +139,43 @@ describe('design guard', () => {
     }
   });
 
-  // Rule 13: no pulsing or blinking dot or badge to catch the eye. A loop that fades by opacity may only show work in progress
-  // (a busy button under reduced motion, a sync while it sends) and stops when the work does. The one
-  // attention blink is the new-feature badge's .new-blink (issue #603): the owner asked for it, it ends once the person has
-  // opened the feature, and it stands still under reduced motion. Anything else that pulses fails here.
+  // Rule 13: no pulsing or blinking dot or badge to catch the eye. A pulse is an animation that fades (opacity) or scales and
+  // runs more than once, however it is written: the shorthand with its name anywhere, every item of a comma list, the
+  // longhands, a name hidden in a var(), and a style set from a component. One that loops may only show work in progress and
+  // stops when the work does. The one attention blink is the new-feature badge's .new-blink (issue #603): the owner asked for
+  // it, it blinks five times (five seconds, WCAG 2.2.2) each time it appears, it ends once the person has opened the feature,
+  // and it stands still under reduced motion. Anything else that pulses fails here; the fixtures below prove each way is caught.
   // JUSTIFICATION-A3: #603 asks for the pulse ban to be held by the guard with one named exception; no existing test checks loops.
   const PULSES: Record<string, string> = {
     '.busy-spinner': 'the busy button under reduced motion, while it writes',
+    '.brand-loader-core': 'the loading mark, while a page loads',
     '.sync-dot-syncing': 'the sync dot, while sales are being sent',
-    '.new-blink': 'the New badge of a new feature, until it is opened once (owner, issue #603)',
+    '.new-blink': 'the New badge of a new feature, five blinks each time it appears, until it is opened once (owner, issue #603)',
   };
   it('pulses nothing but work in progress and the one New badge', () => {
-    const pulsing: string[] = [];
-    for (const file of allStylesheets.map((f) => relative(SRC, f))) {
-      const css = code(file);
-      const fades = new Set([...css.matchAll(/@keyframes\s+([\w-]+)\s*\{((?:[^{}]*\{[^{}]*\})*\s*)\}/g)].filter(([, , frames]) => /\bopacity\s*:/.test(frames as string)).map(([, name]) => name));
-      for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-        const looped = (body as string).match(/(?<![\w-])animation\s*:\s*([\w-]+)[^;]*\binfinite\b/);
-        if (looped && fades.has(looped[1])) pulsing.push(...(selector as string).split(',').map((s) => s.trim()));
-      }
-    }
-    expect(new Set(pulsing)).toEqual(new Set(Object.keys(PULSES)));
-    expect(code('app/ui/navigation.css')).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.new-blink \{\s*animation: none;/);
+    expect(new Set(pulsesIn(allStylesheets.map((f) => code(relative(SRC, f))).join('\n')))).toEqual(new Set(Object.keys(PULSES)));
+    for (const file of components.map((f) => relative(SRC, f))) expect(code(file).match(/\banimation[A-Za-z]*\s*:/)?.[0] ?? null, file).toBeNull();
+    const nav = code('app/ui/navigation.css');
+    expect(nav).toMatch(/\.new-blink \{\s*animation: rt-new-blink 1s var\(--ease-out\) 5;/);
+    expect(nav).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.new-blink \{\s*animation: none;/);
+  });
+
+  it.each([
+    ['the name after the duration', '.x { animation: 2s pulse infinite; }'],
+    ['the longhands', '.x { animation-name: pulse; animation-iteration-count: infinite; }'],
+    ['a name in a var()', '.x { animation: var(--pulse); }'],
+    ['the second item of a list', '.x { animation: spin 1s linear, pulse 2s infinite; }'],
+    ['a count above one', '.x { animation: pulse 1s 3; }'],
+    ['a scale', '.x { animation: grow 1s infinite; }'],
+    ['an important shorthand', '.x { animation: pulse 1s infinite !important; }'],
+  ])('catches a pulse written with %s', (_way, rule) => {
+    const frames = '@keyframes pulse { 50% { opacity: 0.4; } }\n@keyframes grow { 50% { transform: scale(1.2); } }\n@keyframes spin { to { transform: rotate(360deg); } }';
+    expect(pulsesIn(`${frames}\n${rule}`)).toEqual(['.x']);
+  });
+
+  it('lets a spinner, a fade that runs once and no animation pass', () => {
+    const frames = '@keyframes pulse { 50% { opacity: 0.4; } }\n@keyframes spin { to { transform: rotate(360deg); } }';
+    expect(pulsesIn(`${frames}\n.a { animation: spin 1s linear infinite; }\n.b { animation: pulse 200ms var(--ease-out); }\n.c { animation: none; }`)).toEqual([]);
   });
 
   it('reads the property out of each transition item, and an item without one as all', () => {
