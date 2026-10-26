@@ -942,7 +942,8 @@ export const retailSettingsPage: Tour = {
   // Version 2 adds the credit sale step (issue #340, ADR-043).
   // Version 3 says in that step that the credit rule is one way: once it has started it is not switched off here.
   // Version 4 adds the slow movers step (issue #414).
-  version: 4,
+  // Version 5 names the kinds of business by what the owner has, and says where each branch is set as a store or a shop (issue #424).
+  version: 5,
   title: 'This page: retail settings',
   audience: isTenantAdmin,
   autoStart: false,
@@ -951,8 +952,14 @@ export const retailSettingsPage: Tour = {
     {
       id: 'profile',
       target: 'retail-profile',
-      title: 'Shop or trade',
-      body: 'Pick Shop for a plain shop. Pick Trade if stores feed a shop and you sell in bulk. It switches on a set of features for you.',
+      title: 'What kind of business is this?',
+      body: 'Pick Shops only, Stores and shops, Wholesale, or Wholesale and shops. Wholesale is selling in bulk to other shops. Your choice switches the features below on or off to suit it.',
+    },
+    {
+      id: 'branches',
+      target: 'retail-profile-branches',
+      title: 'Stores and shops are set per branch',
+      body: 'Any number of stores and shops. Under Branches, set each branch as a store or a shop. A store keeps stock and does not sell.',
     },
     {
       id: 'features',
@@ -1299,7 +1306,7 @@ export const businessNotificationsPage: Tour = {
 // Business set-up > Plan and billing (issue #480, ADR-075): the plan, what is paid, how to pay and the receipts.
 export const billingPage: Tour = {
   id: 'page-billing',
-  version: 1,
+  version: 2,
   title: 'This page: plan and billing',
   audience: (me) => held(me, 'core.billing.read'),
   autoStart: false,
@@ -1318,10 +1325,40 @@ export const billingPage: Tour = {
       body: 'How to pay Rincol Tech. When a payment is recorded you get a receipt by email.',
     },
     {
+      id: 'contact',
+      target: 'billing-contact',
+      title: 'Who gets the bills',
+      body: 'The owner can send the reminders and receipts to someone else, such as an accountant. Sign-in stays as it is.',
+    },
+    {
       id: 'payments',
       target: 'billing-payments',
       title: 'Payments and receipts',
       body: 'Every payment recorded for your business. Tap a receipt to save it as a PDF.',
+    },
+  ],
+};
+
+// Business set-up > Close the business (issue #571, ADR-090): what closing means, then a review step and the owner's own proof.
+export const closePage: Tour = {
+  id: 'page-close',
+  version: 1,
+  title: 'This page: close the business',
+  audience: (me) => held(me, 'core.settings.manage'),
+  autoStart: false,
+  page: '/staff/setup/close',
+  steps: [
+    {
+      id: 'about',
+      target: 'close-about',
+      title: 'Only for stopping for good',
+      body: 'Closing removes the business and its personal data after a waiting period. To stop paying and keep everything, cancel the subscription instead.',
+    },
+    {
+      id: 'review',
+      target: 'close-continue',
+      title: 'Check first',
+      body: 'The next step lists exactly what happens and asks for your own password or code. Until the removal, the owner can cancel.',
     },
   ],
 };
@@ -1355,6 +1392,41 @@ export const branchRolesCapability: Tour = {
       module: 'retail',
       title: 'Pick a role for each branch',
       body: 'Until you pick, every branch works as before. A store cannot record a sale.',
+    },
+  ],
+};
+
+// The Wholesale group of the menu (issue #424, ADR-092): it starts once for the administrator of a business with price lists on,
+// the first of the wholesale tools, so a wholesaler who had them before the group existed is shown where they are now.
+export const wholesaleGroup: Tour = {
+  id: 'capability-wholesale',
+  version: 1,
+  title: 'New: your wholesale pages together',
+  audience: (me) => held(me, 'core.settings.manage'),
+  autoStart: true,
+  capability: { module: 'retail', key: 'price_lists' },
+  steps: [
+    {
+      id: 'intro',
+      title: 'Wholesale is in the menu',
+      body: 'Price lists, credit to shops, quotations, invoices and delivery notes, packs and purchase orders are now together under Wholesale.',
+    },
+    {
+      id: 'menu',
+      target: 'nav-wholesale',
+      module: 'retail',
+      optional: true,
+      title: 'Your wholesale pages',
+      body: 'Open the menu and look under Wholesale. Each page shows while its feature is on in Retail settings.',
+    },
+    {
+      id: 'tiles',
+      route: '/staff/retail',
+      target: 'retail-wholesale-tiles',
+      module: 'retail',
+      optional: true,
+      title: 'On the Retail page too',
+      body: 'The same pages are under the Wholesale heading on the Retail page.',
     },
   ],
 };
@@ -1906,9 +1978,9 @@ export const referralsPage: Tour = {
 /** The tours whose screens tours.test.tsx maps one by one; the slices below carry their own test files (test-kit.tsx). */
 export const CORE_TOURS: readonly Tour[] = [
   adminWelcome, retailSales, staffWelcome, salePage, stockPage, restocksPage, salesPage, creditSalesPage, setupPage, loansPage, loanPage, cataloguePage, stocktakePage,
-  retailSettingsPage, branchRolesCapability, stockByLocationPage, inTransitPage, transferReceiptCapability, unitsCapability,
+  retailSettingsPage, branchRolesCapability, wholesaleGroup, stockByLocationPage, inTransitPage, transferReceiptCapability, unitsCapability,
   priceListsCapability, priceListsPage, customerAccountsCapability, accountsPage, returnsCapability, returnsPage, documentsCapability, documentsPage, quotationsPage,
-  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, controlsPage, twoStepPage, businessNotificationsPage, billingPage, notificationsPage, feedbackPage, moneyPage, morePage, referralsPage, ...CUSTOMER_TOURS,
+  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, controlsPage, twoStepPage, businessNotificationsPage, billingPage, closePage, notificationsPage, feedbackPage, moneyPage, morePage, referralsPage, ...CUSTOMER_TOURS,
 ];
 
 const dynamicSegments = (tour: Tour) => (tour.page ?? '').split('/').filter((part) => part.startsWith('$')).length;

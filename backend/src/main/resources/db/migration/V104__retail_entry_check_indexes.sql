@@ -15,7 +15,7 @@
 -- CREATE INDEX, not CONCURRENTLY, which cannot run inside Flyway's transaction (ADR-028); a database of millions of lines
 -- on a slow host needs a deploy window, as V101 says.
 --
--- Flyway runs with outOfOrder off: V102 is claimed by pull request #585 and V103 by pull request #589, so this is V104.
+-- Flyway runs with outOfOrder off: V102 (pull request #585) and V103 (pull request #589) are merged, so this is V104.
 
 SET LOCAL lock_timeout = '5s';
 
