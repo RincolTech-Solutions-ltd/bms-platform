@@ -21,7 +21,7 @@ import org.slf4j.LoggerFactory;
  * its host and its base URL is on that host, and anything that names Anthropic or Claude (a host, a base URL, a model)
  * fails startup. {@code NeverClaudeTest} proves all three and that no Anthropic SDK or endpoint is in this module.
  */
-final class AskProviders {
+class AskProviders {
 
     private static final Logger log = LoggerFactory.getLogger(AskProviders.class);
 
@@ -56,7 +56,7 @@ final class AskProviders {
 
     /** The names and models, for the cache key: a provider or model change is a new key. */
     String version() {
-        return chain.stream().map(p -> p.name() + "/" + p.client().model()).collect(Collectors.joining(","));
+        return chain().stream().map(p -> p.name() + "/" + p.client().model()).collect(Collectors.joining(","));
     }
 
     /**
