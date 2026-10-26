@@ -505,4 +505,49 @@ class AskBmsIT extends IntegrationTest {
         // Another person of the same business is not limited by it.
         assertThat(okAsk(admin, "zzqx wvvy").get("source").asString()).isEqualTo("no_match");
     }
+
+    @Autowired
+    com.rincoltech.bms.core.ai.LlmClientFactory factory;
+
+    /**
+     * The real factory bean Ask BMS builds its providers with returns the gateway's OpenAI-compatible client, calling the base
+     * URL it was given and nothing else; nothing here sends a request.
+     */
+    @Test
+    void theFactoryBuildsTheOpenAiCompatibleClientForTheGivenHostOnly() {
+        Map<String, String> bases = Map.of(
+                "gemini", "https://generativelanguage.googleapis.com/v1beta/openai",
+                "groq", "https://api.groq.com/openai/v1",
+                "deepseek", "https://api.deepseek.com");
+        bases.forEach((name, base) -> {
+            assertThat(java.net.URI.create(base).getHost()).isEqualTo(AskProviders.ALLOWED.get(name));
+            LlmClient client = factory.openAiCompatible(
+                            base, "test-key-not-real", name + "-test-model", java.time.Duration.ofSeconds(5))
+                    .orElseThrow();
+            assertThat(client.getClass().getSimpleName()).isEqualTo("OpenAiCompatibleClient");
+            assertThat(client.toString())
+                    .contains("endpoint=" + base + "/chat/completions")
+                    .doesNotContain("test-key-not-real");
+            assertThat(client.model()).isEqualTo(name + "-test-model");
+        });
+    }
+
+    /** A paid answer that reports no usage keeps its reservation as its cost: the monthly cap still moves. */
+    @Test
+    void aPaidAnswerWithNoUsageKeepsItsReservation() {
+        GEMINI.thenFail(new LlmException(Kind.RATE_LIMITED, 429, 3));
+        GROQ.thenFail(new LlmException(Kind.RATE_LIMITED, 429, 3));
+        DEEPSEEK.thenAnswer(new LlmClient.Result("not an answer", -1, -1, "stop"));
+        assertThat(okAsk(admin, "How do I invite a cashier?").get("source").asString())
+                .isEqualTo("articles");
+        Map<String, Object> spend = TestDatabase.owner()
+                .sql("SELECT settled_at, cost_micro FROM help_ask_spend WHERE tenant_id = ? AND provider = 'deepseek'")
+                .param(t.tenantId())
+                .query()
+                .singleRow();
+        assertThat(spend.get("settled_at")).isNull();
+        // The reservation: the estimated input and the 400 output tokens, one micro-unit each.
+        assertThat((Long) spend.get("cost_micro")).isGreaterThan(400L);
+        assertThat((Long) lastLog().get("cost_micro")).isEqualTo((Long) spend.get("cost_micro"));
+    }
 }

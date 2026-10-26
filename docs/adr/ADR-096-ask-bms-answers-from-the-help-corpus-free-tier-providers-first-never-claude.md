@@ -50,7 +50,9 @@ can replace the retrieval step later without changing the rest.
    anything Ask BMS reaches (its module, configuration block, screens, client, articles and deploy environment), and that
    `core.help` depends on nothing of `core.ai` but its neutral port (`LlmClient`, `LlmClientFactory`, `LlmException`) and on
    no class naming Anthropic or Claude; `core.ai` itself is not scanned, since it holds the advisor's own provider switch
-   (ADR-037). Model text is kept only when it cites a given article and holds no link, email or long
+   (ADR-037), except the two files that make Ask BMS's calls (`OpenAiCompatibleFactory`, the `LlmClientFactory` bean, and
+   `OpenAiCompatibleClient`), and an integration test asserts the real bean returns that client calling the base URL it was
+   given. A paid answer that reports no usage keeps its reservation as its cost. Model text is kept only when it cites a given article and holds no link, email or long
    number, none of which the articles hold.
 5. **Grounded answers only.** The model is told to answer from the given articles only, in at most five short sentences, and
    to reply `{"answer", "article"}`. An answer that is not that JSON, is too long, or cites an article it was not given is

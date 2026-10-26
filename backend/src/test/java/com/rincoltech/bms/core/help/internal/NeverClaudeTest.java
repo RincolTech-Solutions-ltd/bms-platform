@@ -184,6 +184,13 @@ class NeverClaudeTest {
             }
         }
         texts.put("frontend/src/api/help.ts", Files.readString(repo.resolve("frontend/src/api/help.ts")));
+        // The code that makes Ask BMS's calls: the factory bean and the one client it builds (AskBmsIT asserts the bean
+        // returns that client, calling the base URL it was given).
+        for (String code : List.of("OpenAiCompatibleFactory.java", "OpenAiCompatibleClient.java")) {
+            Path file = repo.resolve("backend/src/main/java/com/rincoltech/bms/core/ai/internal")
+                    .resolve(code);
+            texts.put(repo.relativize(file).toString(), Files.readString(file));
+        }
         texts.put(
                 "backend/src/main/resources/db/migration/V108__help_ask_bms.sql",
                 Files.readString(repo.resolve("backend/src/main/resources/db/migration/V108__help_ask_bms.sql")));

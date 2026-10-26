@@ -216,11 +216,12 @@ class AskService {
             // The most this call can cost is reserved before it is made; a paid provider's reservation is checked
             // against its
             // monthly cap for every business together, under one lock, so questions at once cannot all pass it.
+            long reserved = provider.config().costMicro(estimatedInput, prompt.maxTokens());
             Optional<UUID> spend = store.reserve(
                     provider.name(),
                     provider.client().model(),
                     clock.now(),
-                    provider.config().costMicro(estimatedInput, prompt.maxTokens()),
+                    reserved,
                     properties.costCurrency(),
                     "deepseek".equals(provider.name()) ? properties.deepseekMonthlyCostMicro() : null,
                     monthStart());
@@ -248,13 +249,14 @@ class AskService {
                         e.getClass().getSimpleName());
                 continue;
             }
-            long cost = outcome.billed(provider, result);
-            store.settle(
-                    spend.get(),
-                    clock.now(),
-                    Math.max(0, result.inputTokens()),
-                    Math.max(0, result.outputTokens()),
-                    cost);
+            if (result.inputTokens() < 0 || result.outputTokens() < 0) {
+                // An answer with no usage was billed all the same, for an amount we cannot know: the reservation stays,
+                // unsettled, as the most it can have cost, and the question's log counts it too.
+                outcome.billedUnknown(reserved);
+            } else {
+                long cost = outcome.billed(provider, result);
+                store.settle(spend.get(), clock.now(), result.inputTokens(), result.outputTokens(), cost);
+            }
             Optional<Parsed> parsed = parse(result.text(), grounding);
             if (parsed.isEmpty()) {
                 outcome.failures.add(provider.name() + ":bad_answer");
@@ -407,6 +409,10 @@ class AskService {
         }
 
         /** Every answer a provider gave is billed, used or not. */
+        void billedUnknown(long reservedMicro) {
+            costMicro += reservedMicro;
+        }
+
         long billed(AskProviders.Provider provider, LlmClient.Result result) {
             int in = Math.max(0, result.inputTokens());
             int out = Math.max(0, result.outputTokens());
