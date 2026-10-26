@@ -34,7 +34,9 @@ and not automatic suspension, an emailed receipt, and a Plan and billing page fo
    switched off by `bms.platform.billing-job-enabled=false`) moves a business in its free month or paid, not a pilot, whose last
    day is before its own today in its own time zone, to `past_due` (shown as overdue), at the first tick after its midnight.
    `platform_mark_subscription_overdue` checks the status and the date again under the row lock, so a payment that lands meanwhile
-   wins, and writes `platform.tenant.subscription_overdue` to the platform audit log with no operator. `past_due` changes nothing
+   wins, and writes `platform.tenant.subscription_overdue` to the platform audit log with no operator. The function trusts the
+   day the job passes (the application's clock, in the business's time zone), so since `V105` (issue #502) it refuses any caller
+   bound to a business (`app.tenant_id` set): only the unbound platform job calls it. `past_due` changes nothing
    the business can do. A free month that ends unpaid becomes overdue the same way. A subscription with a status change the
    operator scheduled (`next_status_change_on`, for example an end chosen for the end of the period) is never moved, its
    date is never touched, it gets no reminder and it is never listed for suspension: a business that is leaving is not

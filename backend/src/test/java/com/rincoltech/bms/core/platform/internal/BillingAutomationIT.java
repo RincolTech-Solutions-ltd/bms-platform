@@ -10,6 +10,9 @@ import com.rincoltech.bms.testsupport.Api.Session;
 import com.rincoltech.bms.testsupport.MovableClock;
 import com.rincoltech.bms.testsupport.MovableClockConfig;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -515,6 +518,74 @@ class BillingAutomationIT extends IntegrationTest {
         assertThat(run(b).markedOverdue()).isEqualTo(1);
         assertThat(status(b)).isEqualTo("past_due");
         assertThat(audits("platform.tenant.subscription_overdue", b.id())).isEqualTo(1);
+    }
+
+    /** Runs one statement as bms_app with the business bound, rolled back; returns the SQLSTATE of a refusal, null when it ran. */
+    static String asApp(UUID tenantId, String sql, Object... params) {
+        try (Connection c = TestDatabase.appDataSource().getConnection()) {
+            c.setAutoCommit(false);
+            try (PreparedStatement bind = c.prepareStatement("SELECT set_config('app.tenant_id', ?, true)")) {
+                bind.setString(1, tenantId.toString());
+                bind.execute();
+            }
+            try (PreparedStatement s = c.prepareStatement(sql)) {
+                for (int i = 0; i < params.length; i++) {
+                    s.setObject(i + 1, params[i]);
+                }
+                s.execute();
+            } finally {
+                c.rollback();
+            }
+            return null;
+        } catch (SQLException e) {
+            return e.getSQLState();
+        }
+    }
+
+    /** An open request to close the business (V102, ADR-090), as the Owner's own request leaves it. */
+    static void closing(Business b) {
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO tenant_closures (id, tenant_id, requested_by, remove_after)
+                        VALUES (?, ?, ?, ?)
+                        """)
+                .params(UUID.randomUUID(), b.id(), b.ownerId(), LocalDate.of(2026, 12, 31))
+                .update();
+    }
+
+    /**
+     * Issue #502 item 1: only the platform job, which runs unbound, makes a business overdue. A caller bound to a business
+     * (any request of its staff) is refused whatever day it passes, and a business that asked to close is refused too.
+     * JUSTIFICATION-A3: a new test case for the review follow-up; the anchor is only the insertion point.
+     */
+    @Test
+    void frSub09_onlyThePlatformJobMakesABusinessOverdue() {
+        Business b = business("active", null, LocalDate.of(2026, 11, 8), false);
+        Business closing = business("active", null, LocalDate.of(2026, 11, 8), false);
+        closing(closing);
+
+        assertThat(asApp(
+                        b.id(),
+                        "SELECT platform_mark_subscription_overdue(?, ?, ?)",
+                        b.id(),
+                        LocalDate.of(2026, 11, 8),
+                        LocalDate.of(2026, 11, 10)))
+                .as("bound to the business, refused")
+                .isEqualTo("42501");
+        assertThat(status(b)).isEqualTo("active");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT platform_mark_subscription_overdue(?, ?, ?)")
+                        .params(closing.id(), LocalDate.of(2026, 11, 8), LocalDate.of(2026, 11, 10))
+                        .query(Boolean.class)
+                        .single())
+                .as("a business that asked to close is never made overdue, whoever calls")
+                .isFalse();
+
+        clock.set(Instant.parse("2026-11-10T06:00:00Z"));
+        assertThat(run(b, closing).markedOverdue()).as("the job, unbound").isEqualTo(1);
+        assertThat(status(b)).isEqualTo("past_due");
+        assertThat(status(closing)).isEqualTo("active");
+        assertThat(audits("platform.tenant.subscription_overdue", closing.id())).isZero();
     }
 
     List<String> listed() {
