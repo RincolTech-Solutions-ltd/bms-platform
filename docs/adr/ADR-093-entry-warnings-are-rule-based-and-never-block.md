@@ -51,7 +51,8 @@ the one category picker (#584) and item codes made by the app (#568, #562).
    or less, says the last price in the unit sold; a price the app filled (the item's, a price list's) is the owner's own and is not
    questioned. The price floor stays the server's refusal, unchanged.
 5. **Never a block.** The warnings show only when the person saves, each next to its field as a tinted note with Confirm and
-   Change. Any change to a line takes the warnings showing and the save waiting on them away, so Save asks again about the
+   Change. Any change to a line, a reset of the form included, takes the warnings showing, the save waiting on
+   them and what was confirmed away, so Save asks again about the
    form as it is. Confirm checks the screen as it is at that moment: a warning whose line was edited since is gone, a new one shows,
    and only when none is open does the save go on, with the values the screen shows then (never a request built earlier); Change takes the warning away, puts
    the cursor in the field and saves nothing. The save button is never disabled by a warning, and the server never refuses a

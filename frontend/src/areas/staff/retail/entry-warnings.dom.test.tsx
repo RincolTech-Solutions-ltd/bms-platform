@@ -254,7 +254,10 @@ describe('Confirm checks the screen as it is now (review of #590)', () => {
     // A price at or below cost is refused by the server: the confirmation of the quantity is not recorded.
     vi.spyOn(retail, 'createSale').mockRejectedValueOnce(new Error('refused'));
     type('price-0', '6000');
+    // The edit forgot the earlier confirmation: the quantity is asked about again and confirmed for this save.
     fireEvent.click(screen.getByRole('button', { name: /Record sale/ }));
+    await screen.findByTestId('entry-warning-quantity');
+    press('Confirm');
     await waitFor(() => expect(retail.createSale).toHaveBeenCalled());
     await settle();
     expect(saved).not.toHaveBeenCalled();
@@ -280,6 +283,31 @@ describe('a confirmation answers one save (review of #590)', () => {
       if (round === 1) await retail.createPurchase({ purchased_on: new Date().toISOString().slice(0, 10), payment_method: 'cash', lines: [{ product_id: LAMP, cost_minor: 3500, sell_minor: 6000, qty_by_branch: [{ branch_id: BRANCH, qty: '10' }] }] }, 'k-restock-1');
     }
     expect(mockEntryConfirmations.map((c) => `${c.screen} ${c.kind} ${c.entered_qty}`)).toEqual(['sell quantity 10', 'sell quantity 10']);
+  });
+});
+
+describe('a change to the form forgets what was confirmed (review of #590)', () => {
+  it('asks again about a confirmed warning once the line was edited, even back to the same value', async () => {
+    const create = vi.spyOn(retail, 'createSale');
+    open(<SaleForm branchId={BRANCH} />);
+    await pickItem(NAME);
+    type('qty-0', '10');
+    type('price-0', '60000');
+    await normsRead();
+    fireEvent.click(screen.getByRole('button', { name: /Record sale/ }));
+    await screen.findByTestId('entry-warning-price');
+    // The quantity is confirmed; the price is still open, so nothing is sent.
+    fireEvent.click(warning()?.querySelector('button') as HTMLElement);
+    expect(create).not.toHaveBeenCalled();
+    // An edit and back: the confirmation is gone with the edit.
+    type('qty-0', '9');
+    type('qty-0', '10');
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: /Record sale/ }));
+    await screen.findByTestId('entry-warning-quantity');
+    expect(warning('price')).toBeTruthy();
+    expect(create).not.toHaveBeenCalled();
+    expect(mockEntryConfirmations).toEqual([]);
   });
 });
 

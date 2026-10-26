@@ -55,12 +55,14 @@ export function useEntryChecks(screen: EntryScreen, branchId: string | undefined
   // The confirmations of the warnings the last save was sent with, recorded once it succeeds.
   const sentWith = useRef<EntryWarning[]>([]);
   const first = useRef<HTMLDivElement | null>(null);
-  // Any change to the lines (`form`) takes the warnings and the waiting save away: Save asks again about the form as it is.
+  // Any change to the lines (`form`), a reset included, takes the warnings, the waiting save and what was confirmed away: Save
+  // asks again about the form as it is.
   const formKey = JSON.stringify(form);
   const formWas = useRef(formKey);
   if (formWas.current !== formKey) {
     formWas.current = formKey;
     pending.current = false;
+    confirmed.current = new Set();
     if (shownKeys.size > 0) setShownKeys(new Set());
   }
   // Only warnings the screen still raises show: editing a line takes its stale warning away.
