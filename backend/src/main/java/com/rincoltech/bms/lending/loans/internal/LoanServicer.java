@@ -1004,13 +1004,16 @@ class LoanServicer implements LoanServicing {
         Item item = items.stream().filter(i -> i.no == itemNo).findFirst().orElseThrow(ApiException::notFound);
         long due = item.unpaid(component);
         String what = component.equals("fee") ? "fees" : "interest";
+        String is = component.equals("fee") ? " are" : " is";
         if (due <= 0) {
-            throw ApiException.rule("nothing_to_waive", "No " + what + " is still due on item " + itemNo + ".");
+            throw ApiException.rule(
+                    "nothing_to_waive",
+                    "No " + what + is + " still due on item " + itemNo + ".");
         }
         if (amountMinor <= 0 || amountMinor > due) {
             throw ApiException.rule(
                     "waiver_exceeds_due",
-                    "At most " + due + " of the " + what + " is still due on item " + itemNo + ".");
+                    "At most " + due + " of the " + what + is + " still due on item " + itemNo + ".");
         }
         return item;
     }
