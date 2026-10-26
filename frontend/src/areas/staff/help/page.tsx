@@ -96,6 +96,8 @@ export function ArticleView({ articleId }: { articleId: string }) {
   const article = articleById(articleId);
   const allowed = article !== undefined && articleVisible(article, me);
   const askEnabled = useAskEnabled();
+  // An article is part of /staff/help: reading one retires the New badge too (issue #603).
+  useEffect(() => markFeatureSeen(HELP_FEATURE), []);
   useCrumbLabel(allowed ? article.title : undefined);
   if (!article || !allowed) {
     return (

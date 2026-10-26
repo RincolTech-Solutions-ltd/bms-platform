@@ -161,7 +161,7 @@ function StaffLayout() {
           <div className="nav-layout">
             <StaffSideNav me={profile} onBranch={choose} busy={signingOut} onSignOut={() => void signOut()} />
             <div className="nav-layout-main">
-              <StaffBar me={profile} branch={branch} onBranch={choose} busy={signingOut} onSignOut={() => void signOut()} signOutInBar={mustSetUp(profile)} showAsk={!mustSetUp(profile)} />
+              <StaffBar me={profile} branch={branch} onBranch={choose} busy={signingOut} onSignOut={() => void signOut()} signOutInBar={mustSetUp(profile)} />
               <InstallPrompt />
               <OthersWaitingNote />
               {!mock && <NewLogoCard />}
@@ -316,7 +316,6 @@ export function StaffBar({
   onSignOut,
   busy = false,
   signOutInBar = false,
-  showAsk = true,
 }: {
   me: Me;
   branch: string | null;
@@ -326,8 +325,6 @@ export function StaffBar({
   busy?: boolean;
   /** Sign out in the menu on a phone too: while two-step set-up blocks the page there are no tabs and no More page to reach it. */
   signOutInBar?: boolean;
-  /** The Ask button (issue #603); off while two-step set-up blocks the page, whose header is kept minimal. */
-  showAsk?: boolean;
 }) {
   const phone = useIsPhone();
   return (
@@ -339,7 +336,8 @@ export function StaffBar({
           {phone ? <BranchTitle me={me} branch={branch} onChoose={onBranch} /> : <span className="staff-bar-spacer" />}
           <SyncStatus />
           <FeatureSearch me={me} />
-          {showAsk && <AskButton />}
+          {/* The Ask button (issue #603); none while two-step set-up blocks the page, whose header is kept minimal. */}
+          {!mustSetUp(me) && <AskButton />}
           <TopMenu me={me} busy={busy} onSignOut={onSignOut} signOut={!phone || signOutInBar} />
         </div>
       </header>

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -63,7 +63,8 @@ function show(children: ReactNode, path = '/staff/more') {
   ) };
 }
 
-const bar = (props: { showAsk?: boolean } = {}) => <StaffBar me={admin} branch={null} onBranch={() => undefined} onSignOut={() => undefined} {...props} />;
+const bar = (me: Me = admin) => <StaffBar me={me} branch={null} onBranch={() => undefined} onSignOut={() => undefined} />;
+const askOrHowDoI = /^(Ask BMS|How do I\?)(, New)?$/;
 
 const moreList = () => document.querySelector('[data-tour="more-list"] .row-list') as HTMLElement;
 const rowNames = () => within(moreList()).getAllByRole('link').map((a) => a.querySelector('.list-row-title')?.firstChild?.textContent);
@@ -73,6 +74,7 @@ const dot = () => screen.queryByTestId('new-dot');
 beforeEach(() => {
   screenIs(390);
   localStorage.clear();
+  ask.status.mockClear();
   ask.status.mockResolvedValue({ enabled: false, revision: 'r' });
   vi.spyOn(retailAnalytics, 'home').mockResolvedValue({ low_stock: 0 } as never);
 });
@@ -196,34 +198,37 @@ describe('the Ask button of the top bar (issue #603, round 2)', () => {
   ])('shows on %s as Ask BMS next to Search, opening /staff/help at the question box, with the New dot', async (_screen, path) => {
     ask.status.mockResolvedValue({ enabled: true, revision: 'r' });
     show(bar(), path);
-    const button = await screen.findByRole('link', { name: 'Ask BMS' });
+    const button = await screen.findByRole('link', { name: 'Ask BMS, New' });
     expect(button.getAttribute('href')).toBe('/staff/help#ask');
     expect(button.textContent).toBe('Ask');
     expect(button.previousElementSibling?.textContent).toBe('Search');
     expect(within(button).getByTestId('new-dot').className).toBe('new-dot new-blink');
   });
 
-  it('says Help while Ask BMS is off for the business', async () => {
+  it('says How do I? while Ask BMS is off for the business, never Help, which names the top menu tours sheet', async () => {
     show(bar(), '/staff/retail/sale');
     await waitFor(() => expect(ask.status).toHaveBeenCalled());
-    const button = screen.getByRole('link', { name: 'Help' });
-    expect(button.textContent).toBe('Help');
-    expect(screen.queryByRole('link', { name: 'Ask BMS' })).toBeNull();
+    const button = screen.getByRole('link', { name: 'How do I?, New' });
+    expect(button.textContent).toBe('How do I?');
+    expect(screen.queryByRole('link', { name: /Ask BMS/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /^Help/ })).toBeNull();
   });
 
   it('is not drawn on /staff/help itself, nor while two-step set-up keeps the header minimal', async () => {
     show(bar(), '/staff/help');
     await waitFor(() => expect(ask.status).toHaveBeenCalled());
-    expect(screen.queryByRole('link', { name: /^(Ask BMS|Help)$/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: askOrHowDoI })).toBeNull();
     cleanup();
-    show(bar({ showAsk: false }), '/staff/retail/sale');
-    expect(screen.queryByRole('link', { name: /^(Ask BMS|Help)$/ })).toBeNull();
+    // The layout hands StaffBar the profile; a person whose two-step set-up blocks the page gets the minimal header.
+    show(bar({ ...admin, mfa_required: true, mfa_enabled: false } as Me), '/staff/retail/sale');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Search' })).toBeTruthy());
+    expect(screen.queryByRole('link', { name: askOrHowDoI })).toBeNull();
   });
 
   it('opens /staff/help#ask, where the cursor lands in the Ask BMS question box', async () => {
     ask.status.mockResolvedValue({ enabled: true, revision: 'r' });
     const { router } = show(bar(), '/staff/retail/sale');
-    fireEvent.click(await screen.findByRole('link', { name: 'Ask BMS' }));
+    fireEvent.click(await screen.findByRole('link', { name: 'Ask BMS, New' }));
     await waitFor(() => expect(router.history.location.pathname).toBe('/staff/help'));
     expect(router.history.location.hash).toBe('#ask');
     cleanup();
@@ -238,11 +243,31 @@ describe('the Ask button of the top bar (issue #603, round 2)', () => {
     expect(screen.queryByLabelText(/Your question/)).toBeNull();
   });
 
-  it('loses its dot once the person has opened /staff/help', async () => {
+  it('puts the cursor in the article search when the phone is offline and Ask BMS cannot be asked', async () => {
+    onlineManager.setOnline(false);
+    try {
+      show(<HowDoIPage />, '/staff/help#ask');
+      await waitFor(() => expect(document.activeElement?.id).toBe('help-q'));
+      expect(ask.status).not.toHaveBeenCalled();
+    } finally {
+      onlineManager.setOnline(true);
+    }
+  });
+
+  it('loses its dot and the New in its name once the person has opened /staff/help', async () => {
     show(bar(), '/staff/retail/stock');
-    const button = await screen.findByRole('link', { name: 'Help' });
+    const button = await screen.findByRole('link', { name: 'How do I?, New' });
     expect(within(button).queryByTestId('new-dot')).not.toBeNull();
     show(<HowDoIPage />, '/staff/help');
+    await waitFor(() => expect(within(button).queryByTestId('new-dot')).toBeNull());
+    expect(button.getAttribute('aria-label')).toBe('How do I?');
+  });
+
+  it('loses its dot when the person reads an article, which is part of /staff/help', async () => {
+    const [article] = articlesFor(admin);
+    show(bar(), '/staff/retail/stock');
+    const button = await screen.findByRole('link', { name: 'How do I?, New' });
+    show(<ArticleView articleId={article!.id} />, `/staff/help/${article!.id}`);
     await waitFor(() => expect(within(button).queryByTestId('new-dot')).toBeNull());
   });
 
