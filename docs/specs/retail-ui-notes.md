@@ -1517,8 +1517,8 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
 
 - **Where.** The staff Home (`/staff`), after the Shop card and before the Lending card. Every shop figure on Home, the Shop card's
   included, comes from one read, `GET /retail/reports/home`, under the branch chosen in the header (All branches sends none).
-- **Takings today.** A line each for Cash and Mobile money, then Bank or any other way only when it moved money today, and the
-  Total. Read as the cash book reads a day, so it agrees with the cash summary: sales paid at the sale, payments on credit sales and
+- **Takings today.** A line each for Cash and Mobile money, then Bank or any other way only when it moved money today (a way the
+  PWA does not name yet reads Other, never its key; #489), and the Total. Read as the cash book reads a day, so it agrees with the cash summary: sales paid at the sale, payments on credit sales and
   delivery fees in; cancelled sales, reversed payments on account and refunds on goods taken back (yesterday's sale refunded today
   included) out. Nothing taken: "No money taken yet today." Link: Open the cash summary. The card is drawn
   only for a session that may read the cash summary (`retail.cashbook.read` in the branches covered and `retail.till.close`,
@@ -1532,7 +1532,7 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
   sold nothing. Only with All branches chosen, for a session that sees every seller's sales in more than one branch; the server
   leaves the lines out over fewer than two shops. Link: Open the shop dashboard.
 - **Who sees what.** The four cards and Sales today are money: they need `retail.sale.all_sellers` in the branches covered
-  (ADR-055); Takings today needs besides what the cash summary needs (`retail.cashbook.read` there and `retail.till.close`), so a
+  (ADR-055); Takings today needs besides what the cash summary needs (`retail.cashbook.read` in every branch the money covers, as the server checks, and `retail.till.close`; #489), so a
   Supervisor without the till sees no Takings card; a seller sees no money card, and now sees Low on stock (with `retail.stock.read`) and the open orders (with
   `retail.order.manage`) on the Shop card. A session with the orders permission and no sales read still reads the orders board.
 - **States.** "Loading" while the read is on its way, "Could not load" in each card when it fails, the other cards unchanged. A
