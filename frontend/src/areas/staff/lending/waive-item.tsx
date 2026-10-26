@@ -10,7 +10,7 @@ import { Sheet } from '../../../app/ui/Sheet';
 import { useStaff } from '../context';
 import { usePersistedDraft } from '../retail/idempotency';
 import { Problem } from '../retail/ui';
-import { money } from './loan-state';
+import { currencyOf, money } from './loan-state';
 import { waiveStep, type WaiveComponent, type WaiveDraft } from './waive-state';
 import { mayApproveFeeInterest } from './permissions';
 
@@ -148,7 +148,7 @@ export function WaiveItemSheet({ loan, row, memberName, onClose }: {
           ]}
         />
         <Field
-          label={`Amount to waive (${c ?? 'UGX'})`}
+          label={`Amount to waive (${currencyOf(c ?? me.tenant_currency)})`}
           required
           inputMode={step.decimals ? 'decimal' : 'numeric'}
           autoComplete="off"

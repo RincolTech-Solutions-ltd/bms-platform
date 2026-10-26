@@ -425,7 +425,9 @@ cumulative waived total (a manager's request under it still waits, the accountan
 until the total reaches it, and the checker sees the request's own amount); refuses principal, an
 unknown component, more than is due, nothing due and an unknown item, and makes a request stale when
 its amount is no longer due on approval; and reverses a payment made after a fee and an interest
-waiver without undoing them. `RlsIsolationIT` has a factory row for `lending_item_waivers`;
+waiver without undoing them; with the early settlement rebate, a payoff after two interest waivers charges only
+the interest left, rebates only what is unpaid and unwaived (waiver and rebate never pass the interest due), and its
+reversal drops the rebate and keeps both waivers. `RlsIsolationIT` has a factory row for `lending_item_waivers`;
 `PermissionMatrixIT` reads the new permission's row. `waive-state.test.ts` checks the form's cap,
 reason and currencies; `waive-item.dom.test.tsx` shows the action only to whoever may ask and only on
 a row with something due, refuses more than is due before sending, reviews borrower, loan, item, amount,

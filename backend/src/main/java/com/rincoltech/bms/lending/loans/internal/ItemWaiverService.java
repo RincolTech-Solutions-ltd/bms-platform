@@ -58,7 +58,7 @@ class ItemWaiverService {
                     Loan loan = loans.lock(id)
                             .filter(l -> principal.may("lending.charges.waive_request", l.branchId()))
                             .orElseThrow(ApiException::notFound);
-                    String component = r.component().trim();
+                    String component = r.component().trim().toLowerCase(java.util.Locale.ROOT);
                     long amount = r.amountMinor();
                     servicer.checkItemWaiver(loan, repo.items(loan.id()), itemNo, component, amount);
                     long cumulative = Math.addExact(repo.waivedOnLoan(loan.id()), amount);
@@ -69,6 +69,8 @@ class ItemWaiverService {
                     payload.put(WaiverAction.REASON, r.reason().trim());
                     Approvals.Rule rule = approvals.rule(WaiverAction.TYPE);
                     if (!principal.may(WaiverAction.FEE_INTEREST, loan.branchId())) {
+                        // From 0, every amount asks: the approvals module runs at once only below the threshold (an amount
+                        // under it), so a maker who is not the accountant always waits for one.
                         rule = new Approvals.Rule(true, 0);
                     }
                     Approvals.Outcome o = approvals.request(

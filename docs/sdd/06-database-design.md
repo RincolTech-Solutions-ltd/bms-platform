@@ -1598,7 +1598,7 @@ waiver of all or part of a schedule item's fees or interest (FR-ARR-04, #265); t
 `fees_waived_minor` or `interest_waived_minor` carries it (the interest column also holds the payoff
 rebate, which a replay recomputes, while it keeps these rows). The statement dates a waiver by its row
 (ADR-034) and a reversal's replay keeps it (ADR-026). Nothing is posted. Built in V107 (#265), with
-the maker and checker as composite foreign keys to `users`, forced RLS and the append-only trigger.
+the item keyed by `(tenant_id, loan_id, schedule_item_id)` so it is always the loan's own, the maker and checker as composite foreign keys to `users`, forced RLS and the append-only trigger.
 
 ### `lending_loan_transactions` (append-only)
 

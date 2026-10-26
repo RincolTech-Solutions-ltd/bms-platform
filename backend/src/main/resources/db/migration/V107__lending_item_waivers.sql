@@ -13,6 +13,9 @@
 
 SET LOCAL lock_timeout = '5s';
 
+-- The key a waiver row names its item by, so the item is always the loan's own (the review of #597).
+CREATE UNIQUE INDEX lending_schedule_items_tenant_loan_id ON lending_schedule_items (tenant_id, loan_id, id);
+
 INSERT INTO permissions (key, module, description, is_money_moving) VALUES
     ('lending.charges.waive_fee_interest', 'lending', 'Charges: approve a fee or interest waiver (the accountant)', true);
 
@@ -36,7 +39,7 @@ CREATE TABLE lending_item_waivers (
     approved_by         uuid,
     UNIQUE (tenant_id, id),
     FOREIGN KEY (tenant_id, loan_id) REFERENCES lending_loans (tenant_id, id),
-    FOREIGN KEY (tenant_id, schedule_item_id) REFERENCES lending_schedule_items (tenant_id, id),
+    FOREIGN KEY (tenant_id, loan_id, schedule_item_id) REFERENCES lending_schedule_items (tenant_id, loan_id, id),
     FOREIGN KEY (tenant_id, approval_request_id) REFERENCES approval_requests (tenant_id, id),
     FOREIGN KEY (tenant_id, requested_by) REFERENCES users (tenant_id, id),
     FOREIGN KEY (tenant_id, approved_by) REFERENCES users (tenant_id, id)
