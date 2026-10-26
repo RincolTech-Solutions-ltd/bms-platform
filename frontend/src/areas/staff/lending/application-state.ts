@@ -1,7 +1,7 @@
 import type { CollateralItem } from '../../../api/collateral';
 import type { FieldMessages } from '../../../api/lending-forms';
 import type { Loan } from '../../../api/lending';
-import type { CreateLoanBody, GuarantorInput, LoanAppraisal, LoanProduct, PledgeInput, UpdateLoanBody } from '../../../api/loan-applications';
+import type { CreateLoanBody, DecisionBody, GuarantorInput, LoanAppraisal, LoanProduct, PledgeInput, UpdateLoanBody } from '../../../api/loan-applications';
 import { parseMinor } from '../../../components/money';
 import { amountRule, amountText, currencyOf, money, words } from './loan-state';
 
@@ -122,11 +122,15 @@ export function applicationOrder(d: ApplicationDraft): string[] {
   ];
 }
 
-/** Per field, in plain words; empty when the application can be sent. `today` is the local date (YYYY-MM-DD). */
-export function applicationProblems(d: ApplicationDraft, product: LoanProduct | undefined, today: string): FieldMessages {
+/**
+ * Per field, in plain words; empty when the application can be sent. `today` is the local date (YYYY-MM-DD). `currency` is the
+ * one the form labels and sends (the loan's on a draft, else the product's, else the business's), so the checks never disagree
+ * with the label.
+ */
+export function applicationProblems(d: ApplicationDraft, product: LoanProduct | undefined, today: string, currency: string): FieldMessages {
   const out: FieldMessages = {};
   const t = termsOf(product);
-  const c = currencyOf(t?.currency);
+  const c = currencyOf(currency);
   if (d.memberId === '') out.member_id = 'Choose the member who is asking for the loan.';
   if (d.productId === '') out.product_id = 'Choose the loan product.';
   const amount = minor(d.amount, c);
@@ -322,7 +326,7 @@ export function decisionProblems(d: DecisionDraft, l: Loan): FieldMessages {
   return out;
 }
 
-export function decisionBody(d: DecisionDraft, l: Loan) {
+export function decisionBody(d: DecisionDraft, l: Loan): DecisionBody {
   const c = currencyOf(l.currency);
   if (d.decision === 'reject') return { decision: 'reject', note: d.note.trim() };
   const amount = minor(d.amount, c) ?? undefined;

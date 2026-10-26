@@ -17,6 +17,7 @@ import { PhotoQueueControl, usePhotoQueue, type Sender } from './photo-queue';
 import { SaveGuardNotice, useSaveGuard } from './save-guard';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { currencyOf, tenantCurrency } from './loan-state';
+import { exponentOf } from '../../../components/money';
 
 // Register or change a collateral item (issue #280, FR-COL-01, FR-COL-05): the member it belongs to (found by searching), the
 // kind, a description, the title, logbook or plate number, who owns it, what it is worth, whether the owner keeps it or we
@@ -129,7 +130,7 @@ export function CollateralForm({ item: loaded, memberId }: { item?: CollateralIt
       <Group title="Who owns it and what it is worth" tourId="collateral-owner">
         <SelectField name="owner_relationship" label="Who owns it" form={form} value={draft.ownerRelationship} onChange={(v) => setDraft((d) => ({ ...d, ownerRelationship: v, ownerName: v === 'self' ? '' : d.ownerName }))} options={OWNERS} />
         {owned && <TextField name="owner_name" label="Owner's name" form={form} required={draft.ownerRelationship === 'other'} value={draft.ownerName} onChange={(v) => set('ownerName', v)} maxLength={200} />}
-        <TextField name="estimated_value_minor" label={`What it is worth (${currency}, your estimate)`} form={form} inputMode="numeric" value={draft.value} onChange={(v) => set('value', v)}
+        <TextField name="estimated_value_minor" label={`What it is worth (${currency}, your estimate)`} form={form} inputMode={exponentOf(currency) ? 'decimal' : 'numeric'} value={draft.value} onChange={(v) => set('value', v)}
           hint="A valuation can be added later. Until then the loan cover uses this estimate." />
       </Group>
       {!editing && (

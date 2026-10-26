@@ -14,6 +14,7 @@ import {
 import { Group, SaveBar, SelectField, TextField, useFormErrors } from './form-fields';
 import { FieldsNeededNote } from '../../../app/ui/Field';
 import { currencyOf, localDate, money } from './loan-state';
+import { exponentOf } from '../../../components/money';
 import { mayManageCollateral, mayReleaseCollateral } from './member-permissions';
 import { CollateralGate } from './member-ui';
 import { PhotoQueueControl, usePhotoQueue, type Sender } from './photo-queue';
@@ -144,8 +145,8 @@ function Valuations({ id, currency, valuations, canAdd }: { id: string; currency
           <Group title="Add a valuation">
             <TextField name="valued_on" label="Date of the valuation" form={form} required type="date" value={d.valuedOn} onChange={(v) => setD((x) => ({ ...x, valuedOn: v }))} max={today} />
             <TextField name="valuer" label="Who valued it" form={form} value={d.valuer} onChange={(v) => setD((x) => ({ ...x, valuer: v }))} maxLength={200} />
-            <TextField name="market_value_minor" label={`Market value (${unit})`} form={form} required inputMode="numeric" value={d.market} onChange={(v) => setD((x) => ({ ...x, market: v }))} />
-            <TextField name="forced_sale_value_minor" label={`Value in a quick sale (${unit}, if known)`} form={form} inputMode="numeric" value={d.forcedSale} onChange={(v) => setD((x) => ({ ...x, forcedSale: v }))}
+            <TextField name="market_value_minor" label={`Market value (${unit})`} form={form} required inputMode={exponentOf(unit) ? 'decimal' : 'numeric'} value={d.market} onChange={(v) => setD((x) => ({ ...x, market: v }))} />
+            <TextField name="forced_sale_value_minor" label={`Value in a quick sale (${unit}, if known)`} form={form} inputMode={exponentOf(unit) ? 'decimal' : 'numeric'} value={d.forcedSale} onChange={(v) => setD((x) => ({ ...x, forcedSale: v }))}
               hint="When given, this is the value used for loan cover." />
             <TextField name="note" label="Note" form={form} type="textarea" value={d.note} onChange={(v) => setD((x) => ({ ...x, note: v }))} maxLength={1000} />
           </Group>

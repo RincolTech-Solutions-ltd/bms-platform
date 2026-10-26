@@ -165,6 +165,15 @@ describe('the loan application form', () => {
     expect(errorOf('af-requested-term-count')).toBe('This product allows from 1 month to 12 months.');
   });
 
+  it('in a KES business, types and checks the amount in KES before a product is chosen (review of #591)', async () => {
+    mount(<ApplicationForm />, { me: { ...OFFICER, tenant_currency: 'KES' } });
+    const amount = screen.getByLabelText(/^Amount asked for \(KES\)/);
+    expect(amount.getAttribute('inputmode')).toBe('decimal');
+    type(/^Amount asked for/, '1,500.50');
+    fireEvent.blur(amount);
+    expect(errorOf('af-requested-principal-minor')).toBe('');
+  });
+
   it('asks for a guarantor and collateral when the product needs them', async () => {
     mount(<ApplicationForm memberId={borrower.id} />);
     await screen.findByRole('option', { name: /Test secured loan/ });

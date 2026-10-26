@@ -18,10 +18,18 @@ const loan: Loan = {
 describe('application rules', () => {
   it('types money in the product currency: two decimals for KES, and the limits in its words', () => {
     const d = { ...blankApplication('m1'), productId: 'p1', amount: '50.005', purpose: 'business' };
-    expect(applicationProblems(d, product, '2026-10-25').requested_principal_minor).toMatch(/in KES, with no letters and at most 2 digits after the point/);
-    expect(applicationProblems({ ...d, amount: '20,000.00' }, product, '2026-10-25').requested_principal_minor).toBe('This product lends from KES 100.00 to KES 10,000.00.');
-    expect(applicationProblems({ ...d, amount: '500', term: '9' }, product, '2026-10-25')).toEqual({ requested_term_count: 'This product allows from 2 weeks to 8 weeks.' });
-    expect(applicationProblems({ ...d, amount: '500', date: '2026-10-24' }, product, '2026-10-25').proposed_disbursement_date).toMatch(/today or a later day/);
+    expect(applicationProblems(d, product, '2026-10-25', 'KES').requested_principal_minor).toMatch(/in KES, with no letters and at most 2 digits after the point/);
+    expect(applicationProblems({ ...d, amount: '20,000.00' }, product, '2026-10-25', 'KES').requested_principal_minor).toBe('This product lends from KES 100.00 to KES 10,000.00.');
+    expect(applicationProblems({ ...d, amount: '500', term: '9' }, product, '2026-10-25', 'KES')).toEqual({ requested_term_count: 'This product allows from 2 weeks to 8 weeks.' });
+    expect(applicationProblems({ ...d, amount: '500', date: '2026-10-24' }, product, '2026-10-25', 'KES').proposed_disbursement_date).toMatch(/today or a later day/);
+  });
+
+  it('checks a draft in the currency it is labelled and sent in, even when its product no longer takes applications (review of #591)', () => {
+    const d = draftOf(loan);
+    // An archived product is not in the active list, so there are no product terms: the KES draft still checks in KES.
+    expect(applicationProblems(d, undefined, '2026-10-25', 'KES').requested_principal_minor).toBeUndefined();
+    expect(applicationProblems({ ...blankApplication('m1'), amount: '1,500.50', purpose: 'business' }, undefined, '2026-10-25', 'KES').requested_principal_minor).toBeUndefined();
+    expect(applicationProblems({ ...blankApplication('m1'), amount: '1,500.50', purpose: 'business' }, undefined, '2026-10-25', 'UGX').requested_principal_minor).toMatch(/in shillings/);
   });
 
   it('reads a draft back as typed and sends only what changed', () => {

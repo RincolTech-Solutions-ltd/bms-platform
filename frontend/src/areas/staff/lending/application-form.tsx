@@ -60,7 +60,7 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
   // Money is typed in the product's currency once one is chosen, the loan's on a draft, else the business's (issue #289).
   const currency = currencyOf(base?.currency ?? terms?.currency ?? tenantCurrency(me));
   const order = applicationOrder(draft);
-  const form = useFormErrors(applicationProblems(draft, product, today), 'af');
+  const form = useFormErrors(applicationProblems(draft, product, today, currency), 'af');
   const given = useQuery({ queryKey: ['members', 'one', memberId], queryFn: () => members.get(memberId ?? ''), enabled: !!memberId && !editing });
   const shown = chosen ?? (given.data && draft.memberId === given.data.id ? { id: given.data.id ?? '', name: given.data.full_name ?? '', no: given.data.member_no ?? '' } : null);
   const items = useQuery({
@@ -113,7 +113,12 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
       if (!saved && unknownOutcome(error)) await guard.check(lookUp);
       // The draft may have moved on (a lost answer, someone else's change): read it again so the next press sends its version.
       else if (saved && (unknownOutcome(error) || error.code === 'version_conflict')) {
-        await api.get(saved.id ?? '').then(setBase).catch(() => undefined);
+        const fresh = await api.get(saved.id ?? '').catch(() => undefined);
+        if (fresh && fresh.status !== 'draft') {
+          // The lost answer was a submit that went through: the application is no longer a draft, so open it.
+          void queryClient.invalidateQueries({ queryKey: ['lending'] });
+          void navigate({ to: '/staff/lending/loans/$loanId', params: { loanId: fresh.id ?? '' } });
+        } else if (fresh) setBase(fresh);
       }
     } finally {
       setBusy(false);

@@ -92,7 +92,8 @@ describe('registering collateral', () => {
   it('types the value in the business currency from /me, not in shillings (issue #289)', async () => {
     const { collateral } = mount(<CollateralForm memberId={holder.id} />, { me: { ...officer(), tenant_currency: 'KES' } });
     await screen.findByText('Test Holder 01');
-    expect(screen.getByLabelText(/^What it is worth \(KES, your estimate\)/)).toBeTruthy();
+    // A currency with cents gets the keypad that has a decimal point.
+    expect(screen.getByLabelText(/^What it is worth \(KES, your estimate\)/).getAttribute('inputmode')).toBe('decimal');
     type(/^Describe the item/, 'Test fridge');
     type(/^What it is worth/, '1,500.25');
     fireEvent.click(save());

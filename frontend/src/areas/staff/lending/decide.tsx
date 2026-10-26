@@ -4,7 +4,7 @@ import { useState, type FormEvent } from 'react';
 import type { Loan } from '../../../api/lending';
 import { asFormError } from '../../../api/lending-forms';
 import { useApplicationsApi } from '../../../api/lending-context';
-import type { DecisionBody, LoanAppraisal } from '../../../api/loan-applications';
+import type { LoanAppraisal } from '../../../api/loan-applications';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { FieldsNeededNote } from '../../../app/ui/Field';
@@ -45,7 +45,7 @@ export function DecisionForm({ loan, appraisal }: { loan: Loan; appraisal?: Loan
     setBusy(true);
     setFailure(null);
     try {
-      await api.decide(loan.id ?? '', loan.version ?? 0, decisionBody(draft, loan) as DecisionBody);
+      await api.decide(loan.id ?? '', loan.version ?? 0, decisionBody(draft, loan));
       void queryClient.invalidateQueries({ queryKey: ['lending'] });
       void navigate({ to: '/staff/lending/loans/$loanId', params: { loanId: loan.id ?? '' } });
     } catch (raw) {

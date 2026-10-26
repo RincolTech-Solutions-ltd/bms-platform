@@ -250,7 +250,8 @@ export function ApplicationPanel({ loan: l }: { loan: Loan }) {
   const [open, setOpen] = useState<'send_back' | 'cancel' | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const appraised = ['appraised', 'approved', 'rejected', 'submitted'].includes(l.status ?? '');
+  // A cancelled application keeps the appraisal that informed the cancel; a draft never had one that still stands.
+  const appraised = ['appraised', 'approved', 'rejected', 'submitted', 'cancelled'].includes(l.status ?? '');
   const appraisals = useQuery({ queryKey: ['lending', 'loan', id, 'appraisals'], queryFn: () => api.appraisals(id), enabled: appraised });
   const history = useQuery({ queryKey: ['lending', 'loan', id, 'history'], queryFn: () => api.history(id), enabled: l.status === 'draft' });
   const last = history.data?.at(-1);
