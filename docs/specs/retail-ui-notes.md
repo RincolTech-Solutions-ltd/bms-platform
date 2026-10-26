@@ -979,8 +979,8 @@ restock opened for correction and closed finds the same groups open. Nothing is 
   server sent it, and at the item level the quantity bought with its unit. The restocks of the last opened group, and "Show the
   restocks here" on a day, on any level of a chain with no day and above a last item level, are the screen's own cards, so **Correct
   this restock** and its void work inside the groups. Under a shop, a category or an item the cards are whole restocks that include
-  it (their totals can be more than the line above); under a shop the note also says each card shows every shop's quantities and
-  its full total (#372). The From, To and Show filters of the page apply to the groups and the cards.
+  it (their totals can be more than the line above); under a shop the note also says each card shows the quantities and the total for
+  every shop the person can see (#372). The From, To and Show filters of the page apply to the groups and the cards.
   Restocks with no supplier are one group, "No supplier".
 - Components: `list-chain.tsx` (the view switch, Group by, the tree), `list-chain-state.ts` (levels, remembered choice, selection),
   `stock-grouped.tsx`, `restocks-grouped.tsx`. The tours `page-stock` (version 3) and `page-restocks` (version 2) have a Grouped step

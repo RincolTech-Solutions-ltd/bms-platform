@@ -526,9 +526,7 @@ class RetailHomeSummaryIT extends IntegrationTest {
      */
     @Test
     void aCreditSalePaidInCashTodayCannotBeVoidedAndItsCashStaysAsTheCashSummarySays() {
-        long before = method(home("", TILL, "*").get("takings"), "cash")
-                .get("amount_minor")
-                .asLong();
+        JsonNode before = method(home("", TILL, "*").get("takings"), "cash");
         UUID sale = d.sell(t.headOffice(), "credit", d.p2, "2", 0);
         pay(sale, 200, "cash");
         ResponseEntity<JsonNode> voided =
@@ -537,9 +535,12 @@ class RetailHomeSummaryIT extends IntegrationTest {
         assertThat(voided.getBody().get("code").asString()).isEqualTo("sale_has_payments");
         JsonNode takings = home("", TILL, "*").get("takings");
         JsonNode cash = method(takings, "cash");
-        assertThat(cash.get("amount_minor").asLong()).isEqualTo(before + 200);
-        assertThat(cash.get("payments_minor").asLong()).isEqualTo(200 + 200);
-        assertThat(cash.get("out_minor").asLong()).isEqualTo(1_500);
+        assertThat(cash.get("amount_minor").asLong())
+                .isEqualTo(before.get("amount_minor").asLong() + 200);
+        assertThat(cash.get("payments_minor").asLong())
+                .isEqualTo(before.get("payments_minor").asLong() + 200);
+        assertThat(cash.get("out_minor").asLong())
+                .isEqualTo(before.get("out_minor").asLong());
         assertCashIsTheCashSummarys(takings);
     }
 

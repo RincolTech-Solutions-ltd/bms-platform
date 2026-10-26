@@ -47,6 +47,7 @@ export function homeParts(me: Me, branch: string | null = null) {
   const summary = retail && canUse(me, 'salesHistory');
   const sales = summary && (one ? holdsAt(me, ALL_SELLERS, one) : holds(me, ALL_SELLERS));
   const lendingOn = !me.modules || me.modules.includes('lending');
+  const money = moneyBranches(me, one);
   return {
     summary,
     sales,
@@ -56,7 +57,7 @@ export function homeParts(me: Me, branch: string | null = null) {
     branches: sales && !one && branchesWhere(me, ALL_SELLERS).length > 1,
     // The takings are the cash summary's figures, so they also need its permissions (ADR-076 decision 3): the cash book read in
     // every branch the money covers, as the server checks, over All branches those where every seller's sales are read (#489).
-    takings: sales && canUse(me, 'cashSummary') && moneyBranches(me, one).every((b) => holdsAt(me, 'retail.cashbook.read', b)),
+    takings: sales && canUse(me, 'cashSummary') && money.length > 0 && money.every((b) => holdsAt(me, 'retail.cashbook.read', b)),
     loans: showLending(me),
     approvals: lendingOn && permissions.includes('core.approvals.read'),
   };

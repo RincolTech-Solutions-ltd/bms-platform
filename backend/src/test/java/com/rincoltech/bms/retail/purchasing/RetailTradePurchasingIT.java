@@ -2043,10 +2043,31 @@ class RetailTradePurchasingIT extends IntegrationTest {
         assertThat(asked.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         switchOff(product);
         RetailTestSupport checker = new RetailTestSupport(http, t);
-        ResponseEntity<JsonNode> decided =
-                decide(asked.getBody().get("approval_id").asString(), checker, BUYER + ",core.approvals.read");
-        assertThat(decided.getStatusCode().is2xxSuccessful()).isFalse();
-        assertThat(decided.getBody().toString()).contains("product_inactive");
+        String approval = asked.getBody().get("approval_id").asString();
+        ResponseEntity<JsonNode> decided = decide(approval, checker, BUYER + ",core.approvals.read");
+        assertThat(decided.getStatusCode()).as("%s", decided.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(code(decided)).isEqualTo("product_inactive");
         assertThat(order(big).get("status").asString()).isEqualTo("draft");
+        // ADR-091: a refusal ends the request as stale with the reason, so it is never approved later as it stood; once
+        // the item is switched on again the maker sends the order again and a new request is asked.
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT status FROM approval_requests WHERE id = ?::uuid")
+                        .param(approval)
+                        .query(String.class)
+                        .single())
+                .isEqualTo("stale");
+        switchOn(product);
+        assertThat(decide(approval, checker, BUYER + ",core.approvals.read")
+                        .getStatusCode()
+                        .is2xxSuccessful())
+                .isFalse();
+        assertThat(order(big).get("status").asString()).isEqualTo("draft");
+        ResponseEntity<JsonNode> again = sendRaw(big);
+        assertThat(again.getStatusCode()).as("%s", again.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(again.getBody().get("approval_id").asString()).isNotEqualTo(approval);
+        ResponseEntity<JsonNode> approved =
+                decide(again.getBody().get("approval_id").asString(), checker, BUYER + ",core.approvals.read");
+        assertThat(approved.getStatusCode()).as("%s", approved.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(order(big).get("status").asString()).isEqualTo("sent");
     }
 }

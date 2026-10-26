@@ -20,9 +20,11 @@ request stale.
 1. **Sending is the moment the order becomes a commitment to the supplier, so it is checked like a new order line.** `POST
    /retail/purchase-orders/{id}/send` refuses a draft holding an inactive item with 422 `product_inactive`, naming the item's code
    and the two ways out: switch it on again on the Items screen, or take it off the order. The order stays a draft.
-2. **The approval path checks again.** Above the tenant's threshold the check runs before a checker is asked, and again when the
-   approval sends the order (`OrderSending.markSent`), so an item switched off while the request waited is refused at that point
-   and the approval does not execute.
+2. **The approval path checks again.** When the approval rules ask a checker (ADR-091), the check runs before the request is
+   made, and again when the approval sends the order (`OrderSending.markSent`). An item switched off while the request waited
+   is refused at that point: the approve call answers 409 `product_inactive`, the order is not sent and, as for every action the
+   approval rules govern (ADR-091), the request ends `stale` with the reason. It is never approved later as it stood; once the
+   item is switched on again (or taken off the draft) the maker sends the order again and a new request is asked.
 3. **Unchanged:** goods received against an order already sent are still received whatever the item's state (ADR-045 decision
    2); a cancel, a receipt's void and the rest of ADR-045's corrections are not checked.
 
@@ -32,7 +34,9 @@ request stale.
 new order now follow one rule.
 
 **Worse:** a draft written before an item was switched off has to be edited, or the item switched on again, before it can be
-sent; a waiting approval for such an order fails and has to be asked again after the fix.
+sent; a waiting request for such an order ends `stale` and the maker asks again after the fix.
 
-**Watch for:** a new way to send or re-send an order must call `OrderSending.requireActiveItems`. Tests:
+**Watch for:** a new way to send or re-send an order must call `OrderSending.requireActiveItems`. The check reads the items
+without locking them, as the sale, restock and order-line checks of ADR-045 do: an item switched off in the same instant as
+the send can still go out once, which the receipt then accepts (ADR-045 decision 2). Tests:
 `RetailTradePurchasingIT.aDraftWithAnItemSwitchedOffSinceIsNotSentNorSentByItsApproval`.

@@ -334,6 +334,8 @@ describe('the shop summary cards (issue #485)', () => {
     expect(homeParts(scoped([a as string, b as string]), null).takings).toBe(true);
     const noTill = { ...one, permissions: ['retail.sale.read', 'retail.sale.all_sellers', 'retail.cashbook.read'] } as unknown as Me;
     expect(homeParts(noTill, a as string).takings).toBe(false);
+    // No branch in view at all: nothing to be covered, so no Takings card.
+    expect(homeParts({ ...scoped([a as string, b as string]), branches: [] } as unknown as Me, null).takings).toBe(false);
   });
 
   it('shows what customers owe, how many, and the oldest due date, linking to credit control', async () => {

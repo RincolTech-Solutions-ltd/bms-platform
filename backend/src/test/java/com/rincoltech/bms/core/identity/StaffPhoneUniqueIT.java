@@ -157,12 +157,16 @@ class StaffPhoneUniqueIT extends IntegrationTest {
         String migration = new ClassPathResource("db/migration/V98__users_staff_phone_unique.sql")
                 .getContentAsString(StandardCharsets.UTF_8);
         String database = "v98_replay_" + UUID.randomUUID().toString().replace("-", "");
-        String url = TestDatabase.scratchDatabase(database);
         try {
+            String url = TestDatabase.scratchDatabase(database);
             DataSource ownerAtV97 = new DriverManagerDataSource(url, "bms_owner", TestDatabase.OWNER_PASSWORD);
             assertThat(Flyway.configure()
                             .dataSource(ownerAtV97)
                             .locations("classpath:db/migration")
+                            // The options of DatabaseMigrator, the one-shot migrate container's, which sets no
+                            // placeholders and no init SQL; V1's pg_trgm is created by the database owner.
+                            .validateMigrationNaming(true)
+                            .cleanDisabled(true)
                             .target("97")
                             .load()
                             .migrate()

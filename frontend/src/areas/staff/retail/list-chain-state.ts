@@ -157,14 +157,14 @@ export type { OpenGroups };
 
 /**
  * The words under a restock group that is a shop, a category or an item: whole restocks, so their totals can be more than
- * the line above. Under a shop each restock still shows every shop's quantities and its full total (#372).
+ * the line above. Under a shop each restock still shows every shop the caller can see and their full total (#372).
  */
 export function wholeRestocksNote(sel: ListSelection): string | null {
   const whole = sel.itemId ? 'Whole purchases that include this item.'
     : sel.categoryId ? 'Whole purchases that include this category.'
       : sel.branchId ? 'Whole purchases that include this shop.' : null;
   if (!whole) return null;
-  return sel.branchId ? `${whole} Each shows every shop's quantities and its full total.` : whole;
+  return sel.branchId ? `${whole} Each shows the quantities and the total for every shop you can see.` : whole;
 }
 
 /** "3 purchases" or "1 purchase". */
