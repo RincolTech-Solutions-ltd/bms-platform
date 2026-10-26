@@ -16,8 +16,8 @@
 --    permission matrix version, the prompt version and the provider and model chain). A new revision or matrix version is
 --    a new key, so an old row is never read again; `expires_at` is a safety net only. The answer text comes from the help
 --    articles alone (ADR-096), so it holds no business data.
--- 5. `help_ask_platform_spend`: the reserved and settled cost of one provider across every business since a moment, for the
---    monthly DeepSeek cap. A sum only, so a business learns nothing about another. bms_owner has BYPASSRLS.
+-- 5. `help_ask_platform_spend`: the reserved and settled cost of one provider in one currency across every business since a
+--    moment, for the monthly DeepSeek cap. A sum only, so a business learns nothing about another. bms_owner has BYPASSRLS.
 --
 -- 6. `help_erase_personal_data`: the removal of a closed business (ADR-090) deletes its cached answers and limit tickets;
 --    the question log and the spend rows hold a user id, hashes and counts only, and the purge deletes them.
@@ -112,15 +112,16 @@ SELECT bms_apply_tenant_rls('help_ask_answers');
 -- UPDATE only to replace a row past its expiry under the same key.
 SELECT bms_grant_app('help_ask_answers', 'SELECT, INSERT, UPDATE');
 
-CREATE FUNCTION help_ask_platform_spend(p_provider text, p_from timestamptz)
+-- In one currency only, the one the cap is in: a change of BMS_HELP_ASK_COST_CURRENCY mid-month never adds two units.
+CREATE FUNCTION help_ask_platform_spend(p_provider text, p_currency char(3), p_from timestamptz)
 RETURNS bigint
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
     SELECT coalesce(sum(s.cost_micro), 0)::bigint
       FROM help_ask_spend s
-     WHERE s.provider = p_provider AND s.reserved_at >= p_from
+     WHERE s.provider = p_provider AND s.cost_currency = p_currency AND s.reserved_at >= p_from
 $$;
-REVOKE ALL ON FUNCTION help_ask_platform_spend(text, timestamptz) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION help_ask_platform_spend(text, timestamptz) TO bms_app;
+REVOKE ALL ON FUNCTION help_ask_platform_spend(text, char, timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION help_ask_platform_spend(text, char, timestamptz) TO bms_app;
 
 -- The Ask BMS part of removing a closed business (ADR-090), called by the help module's PersonalDataEraser in the removal's
 -- transaction: the cached answers and the limit tickets (which name the person who asked) are deleted. The question log and

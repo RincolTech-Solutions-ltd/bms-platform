@@ -233,7 +233,7 @@ class AskService {
             try {
                 result = provider.client().complete(prompt);
             } catch (LlmException e) {
-                settleFailure(spend.get(), provider, e);
+                outcome.billedUnknown(settleFailure(spend.get(), provider, e, reserved));
                 outcome.failures.add(provider.name() + ":" + e.kind().reason());
                 log.info(
                         "ask bms provider failed provider={} reason={}",
@@ -250,8 +250,9 @@ class AskService {
                 continue;
             }
             if (result.inputTokens() < 0 || result.outputTokens() < 0) {
-                // An answer with no usage was billed all the same, for an amount we cannot know: the reservation stays,
-                // unsettled, as the most it can have cost, and the question's log counts it too.
+                // An answer with no usage was billed all the same, for an amount we cannot know: it is settled at its
+                // reservation, the most it can have cost, and the question's log counts the same.
+                store.settle(spend.get(), clock.now(), 0, 0, reserved);
                 outcome.billedUnknown(reserved);
             } else {
                 long cost = outcome.billed(provider, result);
@@ -312,23 +313,27 @@ class AskService {
     }
 
     /**
-     * A failed call: what the provider reported is what it billed; a refusal before any work (a rate limit, a rejected key,
-     * a bad request) billed nothing; anything else may have been billed, so its reservation stays.
+     * A failed call: what the provider reported is what it billed; a refusal at the first and only attempt (a rate limit, a
+     * rejected key, a bad request) billed nothing; anything else, a retry included (an earlier attempt may have been a
+     * billed 5xx), may have been billed, so its reservation stays. Returns what the call holds against the spend, for the
+     * question's log.
      */
-    private void settleFailure(UUID spend, AskProviders.Provider provider, LlmException e) {
+    private long settleFailure(UUID spend, AskProviders.Provider provider, LlmException e, long reserved) {
         if (e.reportedInputTokens() >= 0 && e.reportedOutputTokens() >= 0) {
-            store.settle(
-                    spend,
-                    clock.now(),
-                    e.reportedInputTokens(),
-                    e.reportedOutputTokens(),
-                    provider.config().costMicro(e.reportedInputTokens(), e.reportedOutputTokens()));
-        } else if (switch (e.kind()) {
-            case RATE_LIMITED, AUTH, BAD_REQUEST, UNAVAILABLE -> true;
-            default -> false;
-        }) {
-            store.settle(spend, clock.now(), 0, 0, 0);
+            long cost = provider.config().costMicro(e.reportedInputTokens(), e.reportedOutputTokens());
+            store.settle(spend, clock.now(), e.reportedInputTokens(), e.reportedOutputTokens(), cost);
+            return cost;
         }
+        boolean refusedOutright = e.attempts() <= 1
+                && switch (e.kind()) {
+                    case RATE_LIMITED, AUTH, BAD_REQUEST, UNAVAILABLE -> true;
+                    default -> false;
+                };
+        if (refusedOutright) {
+            store.settle(spend, clock.now(), 0, 0, 0);
+            return 0;
+        }
+        return reserved;
     }
 
     static String userPrompt(List<Article> grounding, String scrubbedQuestion) {

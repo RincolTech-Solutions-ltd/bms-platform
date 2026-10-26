@@ -156,8 +156,8 @@ class AskStore {
 
     /**
      * Reserves the most a provider call can cost before it is made. With a {@code monthlyCap}, under one platform-wide lock,
-     * the reservation is refused (empty) when the provider's spend by every business since {@code monthStart}, reservations
-     * of calls in flight included, plus this one would pass it.
+     * the reservation is refused (empty) when the provider's spend in {@code currency} by every business since
+     * {@code monthStart}, reservations of calls in flight included, plus this one would pass it.
      */
     Optional<UUID> reserve(
             String provider,
@@ -173,8 +173,8 @@ class AskStore {
                         .param(SPEND_LOCK)
                         .query()
                         .listOfRows();
-                long spent = jdbc.sql("SELECT help_ask_platform_spend(?, ?)")
-                        .params(provider, Timestamp.from(monthStart))
+                long spent = jdbc.sql("SELECT help_ask_platform_spend(?, ?, ?)")
+                        .params(provider, currency, Timestamp.from(monthStart))
                         .query(Long.class)
                         .single();
                 if (monthlyCap <= 0 || spent + reserveMicro > monthlyCap) {

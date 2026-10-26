@@ -700,7 +700,8 @@ the call is in flight: the row then holds its reservation, the most the call can
 `cost_micro`, `cost_currency`. Written before the call (a paid provider's reservation under one platform-wide advisory lock,
 refused past the monthly cap) and settled after it with what the provider reported; a call that may have been billed but
 reported nothing keeps its reservation. Index `(provider, reserved_at)`. Grants `SELECT, INSERT, UPDATE` (the settlement). The
-`SECURITY DEFINER` function `help_ask_platform_spend(provider, from)` sums it across every business, one number and no row.
+`SECURITY DEFINER` function `help_ask_platform_spend(provider, currency, from)` sums it across every business in the cap's
+currency, one number and no row. An answer with no usage is settled at its reservation.
 The removal of a closed business (ADR-090) calls `help_erase_personal_data()` (SECURITY DEFINER, only inside a confirmed
 removal, through `bms_removing_tenant`), which deletes the business's `help_ask_answers` and `help_ask_tickets`; the question
 log and the spend rows go with the purge.

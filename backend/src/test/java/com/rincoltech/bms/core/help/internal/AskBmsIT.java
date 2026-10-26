@@ -67,7 +67,7 @@ class AskBmsIT extends IntegrationTest {
     static final AtomicInteger NEXT = new AtomicInteger();
 
     static {
-        for (int i = 0; i < 14; i++) {
+        for (int i = 0; i < 20; i++) {
             ON.add(TestDatabase.tenant("ask-on", true, true));
         }
     }
@@ -380,10 +380,9 @@ class AskBmsIT extends IntegrationTest {
                         """).param(t.tenantId()).query().singleRow();
         assertThat(spend.get("deepseek")).isEqualTo(320L);
         assertThat(spend.get("free")).isEqualTo(0L);
-        // The timeout, the 503 and the broken connection may have been billed, so they keep their reservation (0 on a
-        // free
-        // tier); the rate limit and the rejected key billed nothing and are settled.
-        assertThat(spend.get("open")).isEqualTo(3L);
+        // What may have been billed keeps its reservation (0 on a free tier): the rate limit after three attempts, the
+        // timeout, the 503 and the broken connection. The key rejected at its only attempt billed nothing.
+        assertThat(spend.get("open")).isEqualTo(4L);
     }
 
     @Test
@@ -532,7 +531,7 @@ class AskBmsIT extends IntegrationTest {
         });
     }
 
-    /** A paid answer that reports no usage keeps its reservation as its cost: the monthly cap still moves. */
+    /** A paid answer that reports no usage is settled at its reservation: the monthly cap still moves. */
     @Test
     void aPaidAnswerWithNoUsageKeepsItsReservation() {
         GEMINI.thenFail(new LlmException(Kind.RATE_LIMITED, 429, 3));
@@ -545,9 +544,80 @@ class AskBmsIT extends IntegrationTest {
                 .param(t.tenantId())
                 .query()
                 .singleRow();
-        assertThat(spend.get("settled_at")).isNull();
+        assertThat(spend.get("settled_at")).isNotNull();
         // The reservation: the estimated input and the 400 output tokens, one micro-unit each.
         assertThat((Long) spend.get("cost_micro")).isGreaterThan(400L);
         assertThat((Long) lastLog().get("cost_micro")).isEqualTo((Long) spend.get("cost_micro"));
+    }
+
+    /**
+     * DeepSeek's monthly cap holds for questions sent at once: with room for one reservation left this month, five
+     * questions that all fall through to DeepSeek call it once. Gemini and Groq refuse, DeepSeek answers with no usage
+     * (settled at its reservation), so the room never comes back during the test.
+     */
+    @Test
+    void questionsSentAtOnceCannotPassDeepSeeksMonthlyCapTogether() throws Exception {
+        // One question first, to learn what a reservation for this prompt is.
+        GEMINI.thenFail(new LlmException(Kind.RATE_LIMITED, 429, 1));
+        GROQ.thenFail(new LlmException(Kind.RATE_LIMITED, 429, 1));
+        DEEPSEEK.thenAnswer(new LlmClient.Result("not an answer", -1, -1, "stop"));
+        okAsk(admin, "How do I invite a cashier?");
+        long reservation = TestDatabase.owner()
+                .sql("SELECT cost_micro FROM help_ask_spend WHERE tenant_id = ? AND provider = 'deepseek'")
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
+        assertThat(reservation).isPositive();
+        long spent = TestDatabase.owner()
+                .sql("SELECT help_ask_platform_spend('deepseek', 'USD',"
+                        + " date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')")
+                .query(Long.class)
+                .single();
+        // Another business has spent all but one and a half reservations of the default cap (5000000).
+        TestDatabase.Fixture other = TestDatabase.tenant("ask-month", false);
+        UUID seeded = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO help_ask_spend (id, tenant_id, provider, model, reserved_at, settled_at, cost_micro,
+                                                    cost_currency)
+                        VALUES (?, ?, 'deepseek', 'deepseek-test-model', now(), now(), ?, 'USD')
+                        """)
+                .params(seeded, other.tenantId(), 5_000_000L - spent - reservation - reservation / 2)
+                .update();
+        GEMINI.reset();
+        GROQ.reset();
+        DEEPSEEK.reset();
+        for (int i = 0; i < 5; i++) {
+            GEMINI.thenFail(new LlmException(Kind.RATE_LIMITED, 429, 1));
+            GROQ.thenFail(new LlmException(Kind.RATE_LIMITED, 429, 1));
+            DEEPSEEK.thenAnswer(new LlmClient.Result("not an answer", -1, -1, "stop"));
+        }
+        String second = signIn(t, api, "ask-admin-month", new Api.Role("tenant_admin", null));
+        ExecutorService pool = Executors.newFixedThreadPool(5);
+        try {
+            List<Future<ResponseEntity<JsonNode>>> sent = new ArrayList<>();
+            for (int i = 0; i < 5; i++) {
+                String token = i % 2 == 0 ? admin : second;
+                sent.add(pool.submit(() -> ask(token, "How do I invite a cashier?")));
+            }
+            for (Future<ResponseEntity<JsonNode>> f : sent) {
+                ResponseEntity<JsonNode> r = f.get(60, TimeUnit.SECONDS);
+                assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+            }
+            assertThat(DEEPSEEK.requests()).hasSize(1);
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT count(*) FROM help_ask_questions WHERE tenant_id = ?"
+                                    + " AND 'deepseek:spend_cap' = ANY (failures)")
+                            .param(t.tenantId())
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(4L);
+        } finally {
+            pool.shutdownNow();
+            TestDatabase.owner()
+                    .sql("DELETE FROM help_ask_spend WHERE id = ?")
+                    .param(seeded)
+                    .update();
+        }
     }
 }

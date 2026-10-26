@@ -52,7 +52,7 @@ can replace the retrieval step later without changing the rest.
    no class naming Anthropic or Claude; `core.ai` itself is not scanned, since it holds the advisor's own provider switch
    (ADR-037), except the two files that make Ask BMS's calls (`OpenAiCompatibleFactory`, the `LlmClientFactory` bean, and
    `OpenAiCompatibleClient`), and an integration test asserts the real bean returns that client calling the base URL it was
-   given. A paid answer that reports no usage keeps its reservation as its cost. Model text is kept only when it cites a given article and holds no link, email or long
+   given. Model text is kept only when it cites a given article and holds no link, email or long
    number, none of which the articles hold.
 5. **Grounded answers only.** The model is told to answer from the given articles only, in at most five short sentences, and
    to reply `{"answer", "article"}`. An answer that is not that JSON, is too long, or cites an article it was not given is
@@ -76,8 +76,11 @@ can replace the retrieval step later without changing the rest.
    work they count, so questions sent at once are counted one after the other and cannot all pass. Every provider call
    reserves the most it can cost in `help_ask_spend` before it is made and settles with what the provider reported after;
    the spend belongs to the provider called, whatever the question's outcome, so a paid answer that is refused still
-   counts. DeepSeek's reservation is taken under one platform-wide lock and refused once every business together would pass
-   `BMS_HELP_ASK_DEEPSEEK_MONTHLY_COST_MICRO` this calendar month (a SECURITY DEFINER sum, `help_ask_platform_spend`), and
+   counts. An answer that reports no usage is settled at its reservation, and a failed call keeps its reservation unless
+   it was refused outright at its only attempt (a rate limit, a rejected key, a bad request); the question's log counts
+   the same amounts. DeepSeek's reservation is taken under one platform-wide lock and refused once every business together would pass
+   `BMS_HELP_ASK_DEEPSEEK_MONTHLY_COST_MICRO` this calendar month (a SECURITY DEFINER sum, `help_ask_platform_spend`, in the
+   cap's currency only, so a change of `BMS_HELP_ASK_COST_CURRENCY` never adds two units), and
    DeepSeek is skipped altogether until both of its prices are set, since with a price of 0 no cap could hold. Every question
    is a row of `help_ask_questions`: who asked, when, the hash, the outcome, the provider and model, the providers that
    failed before it as `name:reason`, tokens and the estimated cost. Never the text. Removing a closed business (ADR-090) deletes its
@@ -103,6 +106,9 @@ can replace the retrieval step later without changing the rest.
 - The thumbs up and down feedback and the "show me" tour launch of #20's first sketch are not built here.
 
 **Watch for:**
+
+- Follow-up: `help_ask_tickets` has no retention yet and grows by one or two rows a question; a nightly job should delete
+  rows older than a day (the limits read the last hour and the current day only).
 
 - A provider's terms for free-tier data use: the operator checks them before naming a business.
 - A new locale: a folder of articles in that language, its full-text configuration, and the locale already in the key.
