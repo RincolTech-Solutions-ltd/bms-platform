@@ -16,7 +16,7 @@ by hand (issue #480, ADR-075). Payments are still recorded by the operator on th
 
 **Who gets them (ADR-090).** When the Owner named a billing contact on Plan and billing (an accountant, say), the reminders and
 receipts go to that person instead of the Owner. It never changes anyone's sign-in. A business that asked to close gets no
-reminder and is never made overdue (`docs/runbooks/closing-a-business.md`).
+reminder, is never made overdue and is never listed in Due for suspension (`docs/runbooks/closing-a-business.md`).
 
 **Nothing is ever suspended by itself.** A pilot (complimentary) business, a suspended or cancelled business and one already overdue
 get no reminder. A business with no Owner gets no email: give it an Owner first (Business page, the owner rescue). The

@@ -772,6 +772,32 @@ class BillingAutomationIT extends IntegrationTest {
         }
     }
 
+    /**
+     * Issue #502 item 3: a business whose Owner cancelled (ADR-073) or that asked to close (ADR-090) is never listed for
+     * suspension, as the runbook says, even when it is already overdue and past the grace period.
+     * JUSTIFICATION-A3: a new test case for the review follow-up; the anchor is only the insertion point.
+     */
+    @Test
+    void frSub10_aCancellingOrClosingBusinessIsNeverListed() {
+        clock.set(Instant.parse("2026-11-20T06:00:00Z"));
+        Business past = business("past_due", null, LocalDate.of(2026, 11, 1), false);
+        Business cancelling = business("past_due", null, LocalDate.of(2026, 11, 1), false);
+        Business closing = business("past_due", null, LocalDate.of(2026, 11, 1), false);
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO subscription_scheduled_changes (id, tenant_id, kind, effective_on, requested_by)
+                        VALUES (?, ?, 'cancel', ?, ?)
+                        """)
+                .params(UUID.randomUUID(), cancelling.id(), LocalDate.of(2026, 11, 2), cancelling.ownerId())
+                .update();
+        closing(closing);
+        signInOperator();
+
+        assertThat(listed())
+                .contains(past.id().toString())
+                .doesNotContain(cancelling.id().toString(), closing.id().toString());
+    }
+
     /** FR-SUB-11: a payment gets a numbered receipt in its own transaction, emailed to the Owner with the PDF attached. */
     @Test
     void frSub11_aPaymentGetsANumberedReceiptEmailedToTheOwner() {

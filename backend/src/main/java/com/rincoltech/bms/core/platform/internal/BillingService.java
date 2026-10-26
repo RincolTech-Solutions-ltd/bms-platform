@@ -261,10 +261,7 @@ class BillingService {
         int queued = 0;
         int overdue = 0;
         int failures = 0;
-        java.util.Set<UUID> cancelling =
-                java.util.Set.copyOf(jdbc.sql("SELECT tenant_id FROM platform_tenants_cancelling()")
-                        .query(UUID.class)
-                        .list());
+        java.util.Set<UUID> cancelling = cancelling();
         for (TenantResponse tenant : platform.tenants(null, List.of("trial", "active"), null)) {
             if (tenant.pilot()
                     || !"active".equals(tenant.status())
@@ -300,6 +297,16 @@ class BillingService {
             }
         }
         return new RunResult(queued, overdue, failures);
+    }
+
+    /**
+     * The businesses whose Owner scheduled a cancellation (ADR-073) or asked to close (ADR-090): never reminded, made overdue
+     * or listed for suspension. Read unbound, by the platform only.
+     */
+    private java.util.Set<UUID> cancelling() {
+        return java.util.Set.copyOf(jdbc.sql("SELECT tenant_id FROM platform_tenants_cancelling()")
+                .query(UUID.class)
+                .list());
     }
 
     private boolean markOverdue(UUID tenantId, LocalDate due, LocalDate today) {
@@ -747,14 +754,20 @@ class BillingService {
 
     /**
      * Every overdue business past its grace period, not a pilot, still active (a business suspended or closed at the tenant
-     * level is left off) and with no status change scheduled by the operator, with how many days it is overdue and the price
-     * of its next month; the most overdue first. The operator suspends from the Business page, by hand.
+     * level is left off), with no status change scheduled by the operator, and neither cancelling (the Owner's cancellation,
+     * ADR-073) nor closing (ADR-090), as the run leaves them out ({@code platform_tenants_cancelling}, issue #502); with how
+     * many days it is overdue and the price of its next month; the most overdue first. The operator suspends from the
+     * Business page, by hand.
      */
     DueForSuspension dueForSuspension() {
         Settings settings = settings();
+        java.util.Set<UUID> cancelling = cancelling();
         List<BillingAdminController.DueItem> items = new ArrayList<>();
         for (TenantResponse tenant : platform.tenants(null, List.of("past_due"), null)) {
-            if (tenant.pilot() || !"active".equals(tenant.status()) || tenant.nextStatusChangeOn() != null) {
+            if (tenant.pilot()
+                    || !"active".equals(tenant.status())
+                    || tenant.nextStatusChangeOn() != null
+                    || cancelling.contains(tenant.id())) {
                 continue;
             }
             LocalDate today = clock.today(ZoneId.of(tenant.timezone()));

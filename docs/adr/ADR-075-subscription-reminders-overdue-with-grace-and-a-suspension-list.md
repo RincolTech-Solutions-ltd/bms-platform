@@ -47,7 +47,9 @@ and not automatic suspension, an emailed receipt, and a Plan and billing page fo
    every signed-in member of its staff sees the banner "Your subscription is overdue since <day>; pay by <day> to keep using the
    app"; the last day of the grace period is the last day paid for plus the grace days.
 4. **A list, not a suspension.** `GET /platform/billing/due-for-suspension` lists every overdue business past the grace period,
-   not a pilot, most overdue first, with the days overdue and the plan's monthly price. The operator suspends from the Business page
+   not a pilot, most overdue first, with the days overdue and the plan's monthly price. A business whose Owner cancelled (ADR-073)
+   or that asked to close (ADR-090) is never listed, as the run leaves it out (`platform_tenants_cancelling`, issue #502). The
+   operator suspends from the Business page
    with the existing route and a reason. No job, function or route added here suspends anything; ADR-024 decision 6 ("automatic
    suspension is opt-in and guarded") is narrowed to never, until a later decision says otherwise.
 5. **What is owed.** A late payment's paid period starts on the day it is recorded (`platform_record_subscription_payment`, V75),
