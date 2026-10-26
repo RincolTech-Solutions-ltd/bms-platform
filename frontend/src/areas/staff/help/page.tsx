@@ -1,7 +1,7 @@
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
-import { markFeatureSeen } from '../../../app/ui/NewBadge';
 import { Card, ListRow, RowList } from '../../../app/ui/ListRow';
+import { markFeatureSeen } from '../../../app/ui/NewBadge';
 import { SearchBox, SearchResults } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
