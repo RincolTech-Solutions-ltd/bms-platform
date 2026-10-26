@@ -77,6 +77,7 @@ The platform host and a tenant without a colour show the Rincol blue.
 | Primary button | `.btn-primary` (retail: `.rt-primary`; #87: `.btn-brand`) | One per view, the main action, at the bottom of a form |
 | Danger, ghost | `.btn-danger`, `.btn-ghost` | Reject or destroy; quiet actions such as Remove and Sign out |
 | Busy button | `<BusyButton busy={save.isPending} className="btn-primary">Save</BusyButton>` (`app/ui/BusyButton.tsx`, `.busy-button`, `.busy-spinner`; #456) | Every button that writes (POST, PUT, PATCH, DELETE: a sale, a payment, an invitation, a setting, a sign-in, an approval). While busy it keeps its label (never swap it for Saving or Sending: the spinner shows the work), shows a small spinner placed absolutely in its end padding (the width does not jump; while busy the end padding is at least 1.1em, so the spinner never covers the label; `.btn-sm`, tighter than that, has the same 1.1em end padding when idle too, so it keeps its width as well), and is `aria-busy="true"` and `aria-disabled="true"` rather than `disabled`, so it keeps keyboard focus while its own press guard drops every press. It has no live region of its own: the one `BusyAnnouncer` the app shell mounts says Working once while any button is busy (twenty rows sharing one flag are announced once) and clears when the last is done. An `aria-modal` dialog hides the shell's announcer, so the phone menu drawer mounts its own `<BusyAnnouncer modal />` inside itself while the person has it open, and Sign out there is heard; while it is mounted the shell's announcer renders nothing, so there is only one Working live region at a time. A press holds it until busy shows, or until an `onClick` that awaits has settled (released in a `finally`, so a throw cannot stick it) and two tasks have passed, and for at most 10 seconds when busy never shows, so a double click sends once; a submit of its form that gets through (from code or another submit button) holds it the same way, so two submits in one task send once, and while busy its form drops an Enter re-submit. Under reduced motion the spinner is a pulsing dot. Takes every `<button>` prop |
+| New badge (#603) | `<NewBadge feature="ask-bms" />` on a menu entry (`MenuLink.badge`), `<NewDot feature="ask-bms" />` on a tab, `markFeatureSeen('ask-bms')` on the feature's page (`app/ui/NewBadge.tsx`, `.new-badge`, `.new-dot`, `.new-blink` in `navigation.css`) | A small New pill in the brand fill after the entry's name (read as ", New") and a dot on the More tab (the tab is named "More, New"). Both blink, opacity 1 to 0.35 and back each second on `--ease-out`, until the person opens the feature once; then this device remembers it (`localStorage` key `bms.new.<feature>.seen`, every read and write in try/catch, so blocked storage leaves the badge showing) and every badge of the feature goes at once. Under reduced motion they show without the blink. The blink is the one attention loop the design guard allows (the owner asked for it); any other pulse that is not work in progress fails it |
 | Link as button | `<Link className="btn btn-primary">` | Sizes `.btn-lg`, `.btn-sm` (still 48px tall), `.btn-block` |
 | Field | `<label>Text<input/></label>` or `<label htmlFor>` then the input | Label above, `.field-hint` and `.field-error` under it; `aria-invalid="true"` turns the edge red; a focused field shows the focus edge and halo however it got focus, and a wrapping label turns the link colour |
 | Choice row | `<label><input type="radio"/>Text</label>` | The whole row is the tap target; the chosen row is tinted |
@@ -154,7 +155,8 @@ means tablets should have the tabs too waits for the owner's sign-off (#544), an
 
 - **One list, in groups.** `staffMenu` (`areas/staff/menu.tsx`) builds the groups once with the permission checks, and both the
   sidebar and the drawer draw them with the same component (`MenuLinks`, one `MenuItemLink` per row), so the rows, icons and the
-  current row cannot drift apart. In order: **Home**; **Today**: Sell (for `useSells`), Orders, Approvals; **Stock**: My stock,
+  current row cannot drift apart. In order: **Home** and the help page (#603: Ask BMS while the business has it on, else Help, with
+  a New pill until the person first opens it); **Today**: Sell (for `useSells`), Orders, Approvals; **Stock**: My stock,
   Buy stock, Count stock, Move stock, Items and categories; **Money**: Cash book (the cash summary, else banking or cash
   withdrawals), Expenses, Customers who owe (credit sales, else customer accounts), What I owe suppliers, Savings and advances
   (savings, else advances); **Lending**, only for a business with lending: Loans, Members (or Collateral), Savings, Investments,
@@ -168,7 +170,8 @@ means tablets should have the tabs too waits for the owner's sign-off (#544), an
   (`aria-current="page"`) has a tinted background (`--color-accent-tint`) and brand-colour text (`--color-link`), with no side
   stripe; a count is a muted number at the right of its row (`.side-menu-count`), never a coloured badge: Orders shows the open
   orders and My stock "N low", both from Home's own summary read (`useMenuCounts`, `homeSummaryQuery`), and nothing while the
-  figure is 0. The count is read with the row ("Orders, 3": a `visually-hidden` comma). The only shadow is the drawer's
+  figure is 0. The count is read with the row ("Orders, 3": a `visually-hidden` comma). The one coloured mark is the New pill of a
+  new feature (`NewBadge`, below), read as "Ask BMS, New". The only shadow is the drawer's
   (`--shadow-lg`); no gradients, no coloured stripes at a side or the top, no emoji.
 - **Top and foot.** The top (`MenuShop` in `areas/staff/branch-picker.tsx`) shows the shop's logo, else the business's own logo
   (ADR-068), else the business's initials on a tint, never the platform's logo or name: the name is the loaded branding's
@@ -368,7 +371,8 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
   Since #520 it also fails an emoji or a dash in any source, a gradient, glow or glass outside the two named stylesheets, a
   `.cluster.filters` row in place of Segmented, and, in `ui/kit.css`, a third radius or shadow, a target under 48px, an
   amount without tabular figures, a motion off the tokens or in a loop (bar the 400ms check), and a kit animation that still
-  moves under reduced motion;
+  moves under reduced motion; since #603 it fails any looping opacity pulse in any stylesheet but work in progress (the busy
+  button under reduced motion, the sync dot while sending) and the New badge's `.new-blink`;
   `src/app/theme-mode.dom.test.tsx` covers the three choices, persistence, following the system, the pre-paint script and the
   theme colour.
 - `/style` in `npm run dev` shows every component at the width of the window.

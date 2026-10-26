@@ -77,7 +77,7 @@ function sideMenu(me: Me) {
 }
 
 const AREA_LABELS = [
-  'Home',
+  'Home', 'Help',
   'Sell', 'Orders', 'Approvals',
   'My stock', 'Buy stock', 'Count stock', 'Move stock', 'Items and categories',
   'Cash book', 'Expenses', 'Customers who owe', 'What I owe suppliers', 'Savings and advances',

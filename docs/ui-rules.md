@@ -60,7 +60,10 @@ back to what opened it.
     The one longer motion is the sale-complete check, drawn in 400ms (issue #520), still by `transform` only. A skeleton may
     shimmer for 1.2s as the existing one in `feedback.css` does (accepted, 24 Oct 2026), since the global reduced-motion
     block stops it; the kit's own Skeleton is still grey rows. `frontend/src/app/ui/kit.css` also stops each of its
-    animations under reduced motion.
+    animations under reduced motion. No dot or badge pulses or blinks to catch the eye; a loop that fades may only show work in
+    progress. The one exception, which the owner asked for (issue #603), is the New badge of a new feature (`.new-blink`): it
+    blinks by opacity until the person opens the feature once, and stands still under reduced motion. The design guard holds
+    the list.
 
 ## Feedback
 
