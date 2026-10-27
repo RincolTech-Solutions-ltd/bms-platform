@@ -159,7 +159,7 @@ function CountSheet({ branchId }: { branchId: string }) {
   // The lines whose count is entered, in the order they were done; and the question asked before a count with lines left.
   const [done, setDone] = useState<string[]>([]);
   // The question answers the counts it was asked about: it shows only while the counts are those it was asked on, so any
-  // change to a count withdraws it in the same render and Finish anyway never sends counts it was not asked about (#535).
+  // change to a count withdraws it in the same render and Review the difference anyway never sends counts it was not asked about (#535).
   const [askedOn, setAskedOn] = useState<Record<string, string> | null>(null);
   const confirming = askedOn !== null && askedOn === counts;
   const setConfirming = (on: boolean) => setAskedOn(on ? counts : null);
@@ -334,10 +334,10 @@ function CountSheet({ branchId }: { branchId: string }) {
       <Problem error={review.error} />
       {confirming && uncounted > 0 && (
         <div role="alert" className="alert alert-warning" data-testid="count-not-done">
-          <p>{`${uncounted} ${uncounted === 1 ? 'item' : 'items'} not counted. Finish anyway?`}</p>
+          <p>{`${uncounted} ${uncounted === 1 ? 'item' : 'items'} not counted. Review the difference anyway?`}</p>
           <p className="cluster">
             <button type="button" className="btn-sm" onClick={() => setConfirming(false)}>Keep counting</button>
-            <BusyButton type="button" className="btn-sm" busy={review.isPending} disabled={entered.length === 0 || bad} onClick={finish}>Finish anyway</BusyButton>
+            <BusyButton type="button" className="btn-sm" busy={review.isPending} disabled={entered.length === 0 || bad} onClick={finish}>Review the difference anyway</BusyButton>
           </p>
         </div>
       )}

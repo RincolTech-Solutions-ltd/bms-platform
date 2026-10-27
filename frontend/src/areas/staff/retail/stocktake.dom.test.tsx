@@ -134,9 +134,9 @@ describe('counting the sheet', () => {
     await screen.findByText(EMPTY);
     fireEvent.click(screen.getByRole('button', { name: 'Count 0 of Test Lamp Inactive Held' }));
     fireEvent.click(screen.getByRole('button', { name: 'Review the difference (1 counted)' }));
-    expect(screen.getByTestId('count-not-done').textContent).toContain('1 item not counted. Finish anyway?');
+    expect(screen.getByTestId('count-not-done').textContent).toContain('1 item not counted. Review the difference anyway?');
     expect(createStocktake).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Finish anyway' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review the difference anyway' }));
     await waitFor(() => expect(createStocktake).toHaveBeenCalledTimes(1));
     expect(createStocktake.mock.calls[0]?.[0]).toEqual({ branch_id: expect.any(String), lines: [{ product_id: 'I-1', counted_qty: '0' }] });
   });
@@ -155,8 +155,8 @@ describe('counting the sheet', () => {
     expect(inside(/^Counted items/, (order[0] ?? '').replace('count-', ''))).toBe(true);
   });
 
-  // Review of #535: the question answers the counts it was asked about, and Finish anyway keeps the Review button's guards.
-  it('withdraws the question when a count changes, so Finish anyway never sends an invalid or empty count', async () => {
+  // Review of #535: the question answers the counts it was asked about, and Review the difference anyway keeps the Review button's guards.
+  it('withdraws the question when a count changes, so Review the difference anyway never sends an invalid or empty count', async () => {
     listStock.mockResolvedValue([...active, inactiveHeld]);
     open();
     await screen.findByText(EMPTY);
@@ -166,18 +166,18 @@ describe('counting the sheet', () => {
     expect(screen.getByTestId('count-not-done')).toBeTruthy();
     fireEvent.change(document.getElementById('count-I-1') as HTMLInputElement, { target: { value: '4x' } });
     expect(screen.queryByTestId('count-not-done')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Finish anyway' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Review the difference anyway' })).toBeNull();
     expect(createStocktake).not.toHaveBeenCalled();
   });
 
-  it('keeps Finish anyway to one request however often it is tapped', async () => {
+  it('keeps Review the difference anyway to one request however often it is tapped', async () => {
     listStock.mockResolvedValue([...active, inactiveHeld]);
     createStocktake.mockImplementation(() => new Promise(() => {}));
     open();
     await screen.findByText(EMPTY);
     fireEvent.click(screen.getByRole('button', { name: 'Count 0 of Test Lamp Inactive Held' }));
     fireEvent.click(screen.getByRole('button', { name: 'Review the difference (1 counted)' }));
-    const go = screen.getByRole('button', { name: 'Finish anyway' });
+    const go = screen.getByRole('button', { name: 'Review the difference anyway' });
     fireEvent.click(go);
     fireEvent.click(go);
     await waitFor(() => expect(createStocktake).toHaveBeenCalledTimes(1));
@@ -194,6 +194,21 @@ describe('counting the sheet', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Keep counting' }));
     expect(screen.queryByTestId('count-not-done')).toBeNull();
     expect(createStocktake).not.toHaveBeenCalled();
+  });
+
+  // Issue #629: the question names the button it leads to, and nothing on the count page says Finish.
+  it('asks in the words of Review the difference, and never says Finish', async () => {
+    listStock.mockResolvedValue([...active, inactiveHeld]);
+    open();
+    await screen.findByText(EMPTY);
+    fireEvent.click(screen.getByRole('button', { name: 'Count 0 of Test Lamp Inactive Held' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review the difference (1 counted)' }));
+    const question = screen.getByTestId('count-not-done');
+    expect(question.querySelector('p')?.textContent).toBe('1 item not counted. Review the difference anyway?');
+    expect(screen.getByRole('button', { name: 'Review the difference anyway' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Keep counting' })).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/finish/i);
+    expect([...document.querySelectorAll('[aria-label]')].map((e) => e.getAttribute('aria-label')).join(' ')).not.toMatch(/finish/i);
   });
 
   it('finishes at once when every line is counted', async () => {
@@ -302,7 +317,7 @@ describe('an item left empty', () => {
     fireEvent.change(document.getElementById('count-A-2') as HTMLInputElement, { target: { value: '' } });
     fireEvent.change(document.getElementById('count-A-3') as HTMLInputElement, { target: { value: '   ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Review the difference (1 counted)' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Finish anyway' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review the difference anyway' }));
     await waitFor(() => expect(createStocktake).toHaveBeenCalledTimes(1));
     expect(createStocktake.mock.calls[0]?.[0]).toEqual({ branch_id: expect.any(String), lines: [{ product_id: 'A-1', counted_qty: '7' }] });
   });
