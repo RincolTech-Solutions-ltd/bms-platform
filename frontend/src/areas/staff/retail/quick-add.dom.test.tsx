@@ -317,6 +317,17 @@ describe('quick add', () => {
   });
 });
 
+describe('on a phone', () => {
+  // Chromium measures it at 360, 390 and 412px in layout/quick-add.layout.test.ts; jsdom can only check the rule it rests on.
+  it('lays its fields out in stacks whose one column never grows past the form (issue #642)', () => {
+    open(owner);
+    expect(screen.getByTestId('qa-fields').closest('form')?.classList.contains('stack')).toBe(true);
+    expect(document.querySelectorAll('[data-testid="qa-fields"] .stack').length).toBe(2);
+    const css = readFileSync(`${process.cwd()}/src/app/ui/layout.css`, 'utf8');
+    expect(css).toMatch(/\.stack \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
+  });
+});
+
 describe('the words and defaults', () => {
   it('names the same idempotency codes as the server', () => {
     const java = readFileSync(`${process.cwd()}/../backend/src/main/java/com/rincoltech/bms/core/operations/Idempotency.java`, 'utf8');
