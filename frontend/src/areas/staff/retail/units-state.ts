@@ -21,6 +21,24 @@ export function activePacks(product: Product): Pack[] {
   return (product.packs ?? []).filter((k) => k.active && k.unit_id);
 }
 
+/** Issue #624: the packs a sale, a scan at the till, a quotation or an order may use: active and not for buying only. */
+export function sellingPacks(product: Product): Pack[] {
+  return activePacks(product).filter((k) => k.purpose !== 'buy');
+}
+
+/** Issue #624: the packs Buy stock, a purchase order or goods received may use: active and not for selling only. */
+export function buyingPacks(product: Product): Pack[] {
+  return activePacks(product).filter((k) => k.purpose !== 'sell');
+}
+
+/**
+ * Issue #624 (ADR-099): the price of one pack for a walk-in sale, as the server takes it: the pack's own price, else the piece
+ * price times the size, rounded half up once. A price list still wins over it.
+ */
+export function packWalkInPrice(pieceMinor: number, pack: Pack): number {
+  return pack.sell_minor ?? packPriceMinor(pieceMinor, pack.factor);
+}
+
 /** The chosen pack of a line, or undefined for the base unit (no unit chosen, or one that is no longer a pack). */
 export function chosenPack(product: Product, unitId: string | undefined): Pack | undefined {
   return unitId ? activePacks(product).find((k) => k.unit_id === unitId) : undefined;

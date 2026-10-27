@@ -13,7 +13,7 @@ import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne, scanInto, touchedLine } from './barcode-state';
 import { ScreenToast, useItemAdded } from './toast';
 import { UNITS, capabilityOn } from './permissions';
-import { activePacks, baseCostMinor, baseQtyMilli, chosenPack, deliveredFactor, packPriceMinor, sameFactor } from './units-state';
+import { baseCostMinor, baseQtyMilli, buyingPacks, chosenPack, deliveredFactor, packPriceMinor, sameFactor } from './units-state';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Field, FieldsNeededNote } from '../../../app/ui/Field';
 import { WORDS, howManyInEach, plural, useFromNowOn } from '../../../app/glossary';
@@ -214,14 +214,14 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
     if (index >= 0) added(String(index), p.description, here ? next[index]?.qtyByBranch[here] : undefined);
   };
   const add = (p: Product) => {
-    if (current.current.some((l) => l.product.id === p.id) && !(unitsOn && activePacks(p).length > 0)) {
+    if (current.current.some((l) => l.product.id === p.id) && !(unitsOn && buyingPacks(p).length > 0)) {
       already(`${p.description} is already on the purchase. Change its quantity below.`);
       return;
     }
     land(p, [...current.current, lineOf(p, '')]);
   };
   const scanAdd = (p: Product, unitId?: string) => {
-    const unit = unitsOn && activePacks(p).some((k) => k.unit_id === unitId) ? unitId : undefined;
+    const unit = unitsOn && buyingPacks(p).some((k) => k.unit_id === unitId) ? unitId : undefined;
     if (unitId && !unit) return PACK_UNUSABLE;
     // Without a stocking branch chosen at the top, the scanned quantity would go nowhere.
     if (!here) return 'Choose the branch at the top of the page first, so the scanned item is counted there.';
@@ -252,7 +252,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
     const first = branches.find((b) => (branchQty(l.qtyByBranch[b.id ?? '']) ?? 0) > 0);
     return entryWarnings(norms(l.product.id), {
       screen: 'buy', product: l.product, lineKey: `${l.product.id}-${i}`, qtyMilli: total > 0 ? total : null, qtyFieldId: `q-${i}-${first?.id ?? ''}`,
-      unitChoosable: unitsOn && activePacks(l.product).length > 0, unitFieldId: `unit-${i}`,
+      unitChoosable: unitsOn && buyingPacks(l.product).length > 0, unitFieldId: `unit-${i}`,
       ...(pack ? { unitId: pack.unit_id, unitName: pack.unit, factor: lineFactor(l) ?? undefined } : {}),
     });
   });
@@ -306,7 +306,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
       {lines.map((l, i) => {
         const newSell = parseMinor(l.sell, RETAIL_CURRENCY);
         const enteredCost = parseMinor(l.cost, RETAIL_CURRENCY);
-        const packs = unitsOn ? activePacks(l.product) : [];
+        const packs = unitsOn ? buyingPacks(l.product) : [];
         const pack = unitsOn ? chosenPack(l.product, l.unitId) : undefined;
         // The product's cost is per base unit: a pack cost is divided by this delivery's size, rounded half up, as the server does.
         const factor = lineFactor(l);

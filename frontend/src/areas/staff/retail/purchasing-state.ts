@@ -5,7 +5,7 @@ import {
 import { parseMinor } from '../../../components/money';
 import { plural } from '../../../app/glossary';
 import { lineTotalMinor, milliOf, parseQty, qtyString, showQty } from './maths';
-import { activePacks, baseQtyMilli, deliveredFactor, factorMilli, packPriceMinor, sameFactor } from './units-state';
+import { baseQtyMilli, buyingPacks, deliveredFactor, factorMilli, packPriceMinor, sameFactor } from './units-state';
 
 // Optional purchasing (the purchasing capability, ADR-033, issue #198): the pure rules of the purchase order form and the
 // goods received form. The server decides every rule again (totals, stock, the over-receipt allowance, the numbers); these are
@@ -53,7 +53,7 @@ export function orderLineFor(product: Product, unitsOn: boolean): OrderLineForm 
     description: product.description ?? '',
     unitLabel: product.unit ?? '',
     baseUnit: product.unit ?? '',
-    packs: unitsOn ? activePacks(product) : [],
+    packs: unitsOn ? buyingPacks(product) : [],
     qty: '',
     cost: product.cost_minor !== undefined ? String(product.cost_minor) : '',
     ...(product.cost_minor !== undefined ? { baseCostMinor: product.cost_minor } : {}),
@@ -275,7 +275,7 @@ export function blindLineFor(product: Product, unitsOn: boolean, key: string): R
     description: product.description ?? '',
     unitLabel: product.unit ?? '',
     baseUnit: product.unit ?? '',
-    packs: unitsOn ? activePacks(product) : [],
+    packs: unitsOn ? buyingPacks(product) : [],
     qty: '',
     cost: product.cost_minor !== undefined ? String(product.cost_minor) : '',
     sell: '',
