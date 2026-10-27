@@ -223,9 +223,17 @@ class RetailSellingPacksIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.OK);
         ResponseEntity<JsonNode> resized = change(carton, Map.of("factor", "48"), CATALOGUE_ONLY);
         assertThat(resized.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
-        assertThat(resized.getBody().toString()).contains("its own selling price");
-        assertThat(change(carton, Map.of("purpose", "buy"), CATALOGUE_ONLY).getStatusCode())
-                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(resized.getBody().toString())
+                .contains("This pack has its own price. Ask someone who may change prices.");
+        // The purpose round trip (buy only, which drops the price, then both again) is refused at its first step, so
+        // the
+        // owner's pack price can never be lost that way.
+        ResponseEntity<JsonNode> toBuy = change(carton, Map.of("purpose", "buy"), CATALOGUE_ONLY);
+        assertThat(toBuy.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(toBuy.getBody().toString())
+                .contains("This pack has its own price. Ask someone who may change prices.");
+        assertThat(change(carton, Map.of("purpose", "both"), CATALOGUE_ONLY).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
         JsonNode kept = packOf(carton, ADMIN);
         assertThat(kept.get("factor").asString()).isEqualTo("24.000");
         assertThat(kept.get("purpose").asString()).isEqualTo("both");

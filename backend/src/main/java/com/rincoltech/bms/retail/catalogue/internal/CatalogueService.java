@@ -846,8 +846,7 @@ class CatalogueService {
                                 || purpose.equals("buy") && !before.purpose().equals("buy"))) {
             requirePriceEdit(
                     priced && r.sellMinor() == null && !clear
-                            ? "This pack has its own selling price, so changing its size or making it only for buying changes what"
-                                    + " it sells for. Ask someone who may change prices."
+                            ? "This pack has its own price. Ask someone who may change prices."
                             : "You may not change selling prices, so you cannot set a pack's price. Ask someone who may.");
         }
         if (r.sellMinor() != null && clear) {
