@@ -255,24 +255,24 @@ class RetailSellingPacksIT extends IntegrationTest {
 
     /**
      * Review of #624: "Use 30 from now on" on Buy stock (ADR-082) changes a pack's usual size, so on a pack with its own price
-     * it needs retail.price.edit too, and a refusal writes nothing.
+     * it needs retail.price.edit too; without it the delivery still saves at its own size and the usual size stays.
      */
     @Test
     void useFromNowOnOnAPricedPackNeedsThePermissionToChangePrices() {
         pack(carton, "24", null, 2_200L);
-        ResponseEntity<JsonNode> refused = delivered(30, CATALOGUE_ONLY);
-        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
-        assertThat(refused.getBody().toString())
-                .contains("This pack has its own price. Ask someone who may change prices.");
+        // Someone who may not change prices: the delivery saves at its own size, only "from now on" is left out.
+        ResponseEntity<JsonNode> kept = delivered(30, CATALOGUE_ONLY);
+        assertThat(kept.getStatusCode()).as("%s", kept.getBody()).isEqualTo(HttpStatus.CREATED);
         assertThat(packOf(carton, ADMIN).get("factor").asString()).isEqualTo("24.000");
-        assertThat(stock()).isEqualTo("1000.000");
+        assertThat(packOf(carton, ADMIN).get("sell_minor").asLong()).isEqualTo(2_200);
+        assertThat(stock()).isEqualTo("1030.000");
 
         ResponseEntity<JsonNode> allowed = delivered(30, ADMIN);
         assertThat(allowed.getStatusCode()).as("%s", allowed.getBody()).isEqualTo(HttpStatus.CREATED);
         JsonNode resized = packOf(carton, ADMIN);
         assertThat(resized.get("factor").asString()).isEqualTo("30.000");
         assertThat(resized.get("sell_minor").asLong()).isEqualTo(2_200);
-        assertThat(stock()).isEqualTo("1030.000");
+        assertThat(stock()).isEqualTo("1060.000");
 
         // A pack without its own price still takes the delivery's size from someone who manages the catalogue.
         pack(box, "10", null, null);

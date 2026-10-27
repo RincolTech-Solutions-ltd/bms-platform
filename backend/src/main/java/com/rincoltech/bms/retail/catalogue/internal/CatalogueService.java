@@ -885,11 +885,11 @@ class CatalogueService {
         if (before.factor().equals(size)) {
             return;
         }
-        // Review of #624: a pack with its own price sells at it whatever its size, so a new usual size is a price
-        // change,
-        // as on Edit item. The refusal rolls the whole delivery back, so nothing is written.
-        if (before.sellMinor() != null) {
-            requirePriceEdit("This pack has its own price. Ask someone who may change prices.");
+        // Review of #624: a pack with its own price sells at it whatever its size, so a new usual size is a
+        // price change, as on Edit item. Without retail.price.edit the delivery still saves at its own size and
+        // only "from now on" is left out; the screens say so before sending.
+        if (before.sellMinor() != null && !CurrentPrincipal.require().hasPermission(PRICE_EDIT)) {
+            return;
         }
         repo.updatePack(before.id(), factor, before.active(), before.version());
         Map<String, Object> was = new LinkedHashMap<>();

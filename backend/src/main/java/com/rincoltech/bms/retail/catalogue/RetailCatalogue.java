@@ -105,7 +105,8 @@ public interface RetailCatalogue {
      * product's pack in {@code unitId}, in the caller's transaction, with an audit row naming the delivery. The caller
      * holds the product's row lock (ADR-079: product rows before balance rows), which a pack edit also takes, so the two
      * never interleave. Lines already made keep the size they used. Nothing is written when the size is already the usual
-     * one.
+     * one, nor (issue #624) when the pack has its own selling price and the caller may not change prices: the delivery
+     * keeps its own size and the pack's usual size stays.
      */
     void useBuyingSize(UUID productId, UUID unitId, BigDecimal factor, String sourceType, UUID sourceId);
 

@@ -39,6 +39,14 @@ export function packWalkInPrice(pieceMinor: number, pack: Pack): number {
   return pack.sell_minor ?? packPriceMinor(pieceMinor, pack.factor);
 }
 
+/** Issue #624 review: why "Use 30 from now on" is not offered on a pack with its own price to someone who may not change prices. */
+export const OWN_PRICE_KEEPS_SIZE = 'This pack has its own price. Ask someone who may change prices.';
+
+/** Issue #624 review: whether this person may make a delivery's size the pack's usual one (ADR-082, ADR-099). */
+export function mayKeepSize(pack: Pack | undefined, mayManageItems: boolean, mayChangePrices: boolean): boolean {
+  return mayManageItems && (pack?.sell_minor === undefined || mayChangePrices);
+}
+
 /** The chosen pack of a line, or undefined for the base unit (no unit chosen, or one that is no longer a pack). */
 export function chosenPack(product: Product, unitId: string | undefined): Pack | undefined {
   return unitId ? activePacks(product).find((k) => k.unit_id === unitId) : undefined;

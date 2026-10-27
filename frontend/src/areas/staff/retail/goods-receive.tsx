@@ -20,6 +20,7 @@ import { showQty } from './maths';
 import { Gate, Problem, ProductPicker, money } from './ui';
 import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne } from './barcode-state';
+import { OWN_PRICE_KEEPS_SIZE, mayKeepSize } from './units-state';
 import { Hint } from '../../../app/ui/Hint';
 
 // Goods received (the purchasing capability, ADR-033, issue #198): what arrived from a supplier, against an order or with none (a
@@ -42,6 +43,8 @@ function LineCard({ line, index, order, onChange, onRemove }: {
   const canPrice = !staff || (staff.me.permissions ?? []).includes('retail.price.edit');
   // D23 (#554): changing how many usually come in a pack changes the item, so it is offered only to someone who manages items.
   const canManageItems = !staff || (staff.me.permissions ?? []).includes('retail.catalogue.manage');
+  const canChangePrices = !staff || (staff.me.permissions ?? []).includes('retail.price.edit');
+  const keeps = mayKeepSize(line.packs.find((k) => k.unit_id === line.unitId), canManageItems, canChangePrices);
   const factor = receiveFactor(line);
   const differs = sizeDiffers(line);
   return (
@@ -66,7 +69,8 @@ function LineCard({ line, index, order, onChange, onRemove }: {
             hint={`${line.orderLineId ? 'Ordered at' : 'Usually'} ${showQty(line.usualSize ?? '')}. Change it when this delivery's ${line.unitLabel} held a different number.`}
             error={factor === null ? 'Enter 1 or more, with at most three decimals.' : null}
             value={line.packSize ?? showQty(line.usualSize ?? '')} onChange={(e) => onChange({ ...line, packSize: e.target.value })} />
-          {differs && canManageItems && (
+          {differs && canManageItems && !keeps && <p className="hint">{OWN_PRICE_KEEPS_SIZE}</p>}
+          {differs && keeps && (
             <label>
               <input type="checkbox" checked={line.fromNowOn === true} onChange={(e) => onChange({ ...line, fromNowOn: e.target.checked })} />
               <span>{useFromNowOn(showQty(factor ?? ''))}</span>
@@ -74,7 +78,7 @@ function LineCard({ line, index, order, onChange, onRemove }: {
           )}
           {differs && (
             <p className="hint" data-testid={`receive-size-note-${index}`}>
-              {line.fromNowOn && canManageItems
+              {line.fromNowOn && keeps
                 ? `Every ${line.unitLabel} bought or sold after this one counts as ${showQty(factor ?? '')}.`
                 : `Only this delivery counts as ${showQty(factor ?? '')} in each ${line.unitLabel}.`}
             </p>

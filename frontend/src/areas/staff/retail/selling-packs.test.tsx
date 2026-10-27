@@ -9,7 +9,7 @@ import { PackEditor, packBelowCostHint, packChange, shownPackPrice, suggestedHin
 import { SaleLineCard } from './sale';
 import { newLine } from './sale-state';
 import { defaultPrice } from './sale-state';
-import { buyingPacks, packWalkInPrice, sellingPacks } from './units-state';
+import { buyingPacks, mayKeepSize, packWalkInPrice, sellingPacks } from './units-state';
 
 // Selling packs with their own prices (issue #624, ADR-099): a walk-in sale takes a pack's own price, else the piece price
 // times the size; a pack is offered only where it is used; Edit item shows the packs in a small table. Names and amounts are
@@ -75,6 +75,15 @@ describe('the sale line, which quotations and orders draw too', () => {
     expect(html).toContain('>dozen (12 piece)<');
     expect(html).not.toContain('>box (10 piece)<');
     expect(html).toContain('value="20000"');
+  });
+});
+
+describe('use from now on on a pack with its own price', () => {
+  it('is offered only to someone who may change prices, or on a pack without its own price', () => {
+    expect(mayKeepSize(carton, true, true)).toBe(true);
+    expect(mayKeepSize(carton, true, false)).toBe(false);
+    expect(mayKeepSize(dozen, true, false)).toBe(true);
+    expect(mayKeepSize(dozen, false, true)).toBe(false);
   });
 });
 

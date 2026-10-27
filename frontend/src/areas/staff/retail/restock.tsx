@@ -13,7 +13,7 @@ import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne, scanInto, touchedLine } from './barcode-state';
 import { ScreenToast, useItemAdded } from './toast';
 import { UNITS, capabilityOn } from './permissions';
-import { baseCostMinor, baseQtyMilli, buyingPacks, chosenPack, deliveredFactor, packPriceMinor, sameFactor } from './units-state';
+import { OWN_PRICE_KEEPS_SIZE, baseCostMinor, baseQtyMilli, buyingPacks, chosenPack, deliveredFactor, mayKeepSize, packPriceMinor, sameFactor } from './units-state';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Field, FieldsNeededNote } from '../../../app/ui/Field';
 import { WORDS, howManyInEach, plural, useFromNowOn } from '../../../app/glossary';
@@ -158,6 +158,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
   const canPrice = (me.permissions ?? []).includes('retail.price.edit');
   // Changing how many usually come in a pack changes the item, so only someone who manages items is offered it (D23).
   const canManageItems = (me.permissions ?? []).includes('retail.catalogue.manage');
+  const canChangePrices = (me.permissions ?? []).includes('retail.price.edit');
   const queryClient = useQueryClient();
   const branches = (me.branches ?? []).filter((b) => b.id && b.stocks_goods !== false);
   // A restock entered again after a void (issue #351) has a draft of its own, so a restock in progress is never overwritten.
@@ -333,7 +334,8 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
                   hint={`Usually ${showQty(pack.factor ?? '')}. Change it when this delivery's ${pack.unit} held a different number.`}
                   error={factor === null ? 'Enter 1 or more, with at most three decimals.' : null}
                   value={l.packSize ?? showQty(pack.factor ?? '')} onChange={(e) => patch(i, { packSize: e.target.value })} />
-                {sizeDiffers && canManageItems && (
+                {sizeDiffers && canManageItems && !mayKeepSize(pack, canManageItems, canChangePrices) && <p className="hint">{OWN_PRICE_KEEPS_SIZE}</p>}
+                {sizeDiffers && mayKeepSize(pack, canManageItems, canChangePrices) && (
                   <label>
                     <input type="checkbox" checked={l.fromNowOn === true} onChange={(e) => patch(i, { fromNowOn: e.target.checked })} />
                     <span>{useFromNowOn(showQty(factor ?? ''))}</span>
@@ -341,7 +343,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
                 )}
                 {sizeDiffers && (
                   <p className="hint" data-testid={`pack-size-note-${i}`}>
-                    {l.fromNowOn && canManageItems
+                    {l.fromNowOn && mayKeepSize(pack, canManageItems, canChangePrices)
                       ? `Every ${pack.unit} bought or sold after this one counts as ${showQty(factor ?? '')}.`
                       : `Only this delivery counts as ${showQty(factor ?? '')} in each ${pack.unit}. A ${pack.unit} sold is still ${showQty(pack.factor ?? '')}.`}
                   </p>

@@ -44,7 +44,8 @@ never sells whole) and packs that are only sold (a half carton nobody delivers).
 5. **A pack's price is a price.** Setting or dropping a pack's own price needs `retail.price.edit` as well as the route's
    `retail.catalogue.manage` (403 `permission_denied`). So does any change that moves what a pack with its own price sells for: a
    new size (the same price for more or fewer pieces), on Edit item or by ticking Use 30 from now on on Buy stock or goods
-   received (ADR-082 decision 2; the refusal rolls the delivery back), or making it only for buying (which drops the price). The size of a pack
+   received (ADR-082 decision 2: without the permission the delivery still saves at its own size and only "from now on" is left
+   out, which the screens say before sending), or making it only for buying (which drops the price). The size of a pack
    without its own price, making a pack only for selling, and switching it off or on need only `retail.catalogue.manage`. Every change is audited as
    `retail.product_unit.created` or `.updated` with the old and new `purpose` and `sell_minor`. No new permission.
 6. **Profit stays per piece.** A sale line keeps what was charged and, as before, the average cost per piece at the moment of sale;
