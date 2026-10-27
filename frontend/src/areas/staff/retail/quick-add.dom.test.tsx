@@ -91,7 +91,7 @@ describe('quick add', () => {
   it('counts at the branch or store chosen in Where, and Add another keeps the category and where', async () => {
     quickAdd.mockResolvedValue({ product_id: 'p2', code: 'BLB-0001', description: 'Test Tube', unit: 'pc', item_made: true, category_made: false, unit_made: false, branch_id: other?.id, qty: '3' });
     open(owner);
-    fireEvent.change(screen.getByLabelText('Where'), { target: { value: other?.id } });
+    fireEvent.change(screen.getByLabelText(/^Where/), { target: { value: other?.id } });
     type(/^Name/, 'Test Tube');
     type(/^Selling price/, '1000');
     type(/How many do you have here now/, '3');
@@ -100,7 +100,7 @@ describe('quick add', () => {
     expect((quickAdd.mock.calls[0] as [Record<string, unknown>])[0]).toMatchObject({ branch_id: other?.id, qty: '3.000' });
     fireEvent.click(screen.getByRole('button', { name: 'Add another' }));
     expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe('');
-    expect((screen.getByLabelText('Where') as HTMLSelectElement).value).toBe(other?.id);
+    expect((screen.getByLabelText(/^Where/) as HTMLSelectElement).value).toBe(other?.id);
   });
 
   it('leaves the category out, so the server files the item under General', async () => {
@@ -151,6 +151,40 @@ describe('quick add', () => {
     expect(body).not.toHaveProperty('qty');
     expect(body).not.toHaveProperty('branch_id');
     expect(screen.queryByRole('button', { name: 'Sell it' })).toBeNull();
+  });
+
+  it('asks for a unit when the shop switched Piece off, and never sends without one', async () => {
+    units = [{ id: 'u7', name: 'Piece', active: false, product_count: 0, version: 1 }, { id: 'u8', name: 'Box', active: true, product_count: 0, version: 1 }];
+    open(owner);
+    type(/^Name/, 'Test Glue');
+    type(/^Selling price/, '1500');
+    type(/How many do you have here now/, '4');
+    // The units are read: Box is offered, and no line says Piece will be made.
+    await screen.findByRole('option', { name: 'Box' });
+    expect(screen.queryByTestId('qa-piece-made')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(await screen.findByText('The Piece unit is switched off. Choose a unit.')).toBeTruthy();
+    expect(quickAdd).not.toHaveBeenCalled();
+  });
+
+  it('marks Where as needed', () => {
+    open(owner);
+    expect(screen.getByLabelText(/^Where/).getAttribute('aria-required')).toBe('true');
+  });
+
+  it('keeps the existing item for someone who may not count, and clears the name so Add never loops', async () => {
+    quickAdd.mockRejectedValueOnce(new RetailError('This product already exists: Test Pen (GNR-0002).', 422, 'duplicate_product_name', {
+      existing_id: 'p8', existing_code: 'GNR-0002', existing_name: 'Test Pen', may_add_anyway: false,
+    }));
+    open(catalogueOnly());
+    type(/^Name/, 'Test Pen');
+    type(/^Selling price/, '500');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    const panel = await screen.findByTestId('name-exists');
+    fireEvent.click(within(panel).getByRole('button', { name: 'Keep the existing one' }));
+    expect(screen.getByTestId('qa-kept').textContent).toBe('Test Pen is already in your items. Nothing new was added.');
+    expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe('');
+    expect(quickAdd).toHaveBeenCalledTimes(1);
   });
 
   it('asks for the name, the price and the count before sending anything', async () => {

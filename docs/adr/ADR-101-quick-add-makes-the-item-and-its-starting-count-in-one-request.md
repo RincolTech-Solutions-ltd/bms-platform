@@ -28,7 +28,9 @@ and says so. The item needs a category and a unit; a new shop may have neither.
    made. Without a quantity the item is made with no stock, so a catalogue manager who may not count can still add it.
 3. A left out category files the item under General and a left out unit counts it in the shop's piece unit (Piece, else pc or
    pcs). Either is made when the business has none of that name (an insert that does nothing when the name is taken, so two
-   adds at once make it once), audited as `retail.category.created` or `retail.unit.created` with source `quick_add`.
+   adds at once make it once), audited as `retail.category.created` or `retail.unit.created` with source `quick_add`. Only a
+   switched-on piece unit is used: a switched-off pc or pcs is passed over. A General or a Piece the owner switched off is never
+   switched back on: the request is refused naming `category_id` or `unit_id`, and the form asks the person to choose one.
 4. With `product_id` (an item already in the list, chosen when the name is refused as a repeat) only the count is recorded; the
    item's prices stay. The number typed is how many it has there now, as on Count stock.
 5. Nothing is kept for later offline: the offline outbox holds sales only (ADR-067), so the form says it needs the internet.

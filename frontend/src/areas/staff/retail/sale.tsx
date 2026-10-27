@@ -766,7 +766,7 @@ function NewSale({ sale, onNew }: { sale: Sale; onNew: () => void }) {
   );
 }
 
-export function RecordSale({ startItem, onStarted }: { startItem?: string; onStarted?: () => void } = {}) {
+export function RecordSale({ startItem, startBranch, onStarted }: { startItem?: string; startBranch?: string; onStarted?: () => void } = {}) {
   const { me } = useStaff();
   const roles = useBranchRoles(me);
   const { branchId, branchName } = useStockingBranch();
@@ -809,7 +809,9 @@ export function RecordSale({ startItem, onStarted }: { startItem?: string; onSta
           <FirstItemsCard />
           {!noItems && <NoStockHere branchId={branchId} />}
           <SaleForm key={`${branchId}-${round}`} branchId={branchId} branchName={branchName} onSaved={(s, r) => { setSale(s); setReceived(r); }} onQueued={setQueued}
-            startItem={round === 0 ? startItem : undefined} onStarted={onStarted} />
+            // Sell it names the branch it counted at: the item waits until that branch is the one in use, so it is never looked
+            // up (and the address cleared) at the branch the sale opened with before the switch landed.
+            startItem={round === 0 && (!startBranch || startBranch === branchId) ? startItem : undefined} onStarted={onStarted} />
         </>
       )}
     </Gate>
@@ -818,9 +820,9 @@ export function RecordSale({ startItem, onStarted }: { startItem?: string; onSta
 
 /** The route's screen: the sale starts with the item of `?item=` (Quick add's Sell it), and the address forgets it once added. */
 function RecordSaleRoute() {
-  const { item } = useSearch({ strict: false }) as { item?: string };
+  const { item, branch } = useSearch({ strict: false }) as { item?: string; branch?: string };
   const navigate = useNavigate();
-  return <RecordSale startItem={item} onStarted={() => void navigate({ to: '/staff/retail/sale', search: {} as never, replace: true })} />;
+  return <RecordSale startItem={item} startBranch={branch} onStarted={() => void navigate({ to: '/staff/retail/sale', search: {} as never, replace: true })} />;
 }
 
 export const Route = createLazyRoute('/staff/retail/sale')({ component: RecordSaleRoute });

@@ -84,6 +84,11 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const key = useRef(newIdempotencyKey());
   const form = useRef<HTMLFormElement>(null);
   const piece = pieceUnit(units.data ?? []);
+  // A Piece or a General the owner switched off is never switched back on by the server: the person chooses one instead.
+  const pieceOff = piece === undefined && (units.data ?? []).some((u) => u.active === false && (u.name ?? '').trim().toLowerCase() === 'piece');
+  const generalOff = (categories.data ?? []).some((c) => c.active === false && (c.name ?? '').trim().toLowerCase() === 'general');
+  // What was said when the person kept an item already in the list instead of a duplicate (someone who may not count).
+  const [kept, setKept] = useState<string | null>(null);
   // The piece unit is chosen once the units are read, unless the person has chosen another.
   useEffect(() => {
     if (unitId === '' && piece?.id) setUnitId(piece.id);
@@ -93,7 +98,8 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const sellMinor = parseMinor(sell, RETAIL_CURRENCY);
   const costMinor = cost.trim() === '' ? 0 : parseMinor(cost, RETAIL_CURRENCY);
   const counted = mayCount ? parseCount(qty) : null;
-  const complete = name.trim() !== '' && sellMinor !== null && costMinor !== null && (!mayCount || (counted !== null && where !== ''));
+  const complete = name.trim() !== '' && sellMinor !== null && costMinor !== null && (!mayCount || (counted !== null && where !== ''))
+    && (!pieceOff || unitId !== '') && (!generalOff || categoryId !== '');
   const canAddAnyway = (me.permissions ?? []).includes('core.settings.manage');
   const whereName = branchLabel((me.branches ?? []).find((b) => b.id === where));
 
@@ -140,6 +146,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
     if (add.isPending || exists !== null) return;
+    setKept(null);
     if (!complete) {
       setShowErrors(true);
       if (form.current) focusFirstMissing(form.current);
@@ -231,15 +238,22 @@ export function QuickAddForm({ initialName = '', onSell }: {
             onChange={(e) => setQty(e.target.value)}
             autoComplete="off"
           />
-          {/* empty: the Where list is drawn only while mayCount, so it holds at least one branch. */}
-          <div className="field">
-            <label htmlFor="qa-where">Where</label>
-            <select id="qa-where" value={where} onChange={(e) => setWhere(e.target.value)}>
-              {places.map((b) => (
-                <option key={b.id} value={b.id}>{branchLabel(b)}{b.sells_goods === false ? ' (store)' : ''}</option>
-              ))}
-            </select>
-          </div>
+          {/* empty: the Where list is drawn only while mayCount, which is true only when it holds at least one branch; someone
+              with no branch to count at reads NO_COUNT_HERE instead, and the item is added with no stock. */}
+          <Field
+            id="qa-where"
+            label="Where"
+            required
+            error={where === '' ? 'Choose where the stock is.' : null}
+            showError={showErrors}
+            control={(props) => (
+              <select {...props} value={where} onChange={(e) => setWhere(e.target.value)}>
+                {places.map((b) => (
+                  <option key={b.id} value={b.id}>{branchLabel(b)}{b.sells_goods === false ? ' (store)' : ''}</option>
+                ))}
+              </select>
+            )}
+          />
         </>
       ) : (
         <p className="hint" data-testid="qa-no-count">{NO_COUNT_HERE}</p>
@@ -248,12 +262,13 @@ export function QuickAddForm({ initialName = '', onSell }: {
       <div className="stack" data-tour="quick-add-more">
       <CategoryPicker
         id="qa-category"
-        label={<>Category <span className="field-optional">(optional)</span></>}
+        label={generalOff ? 'Category' : <>Category <span className="field-optional">(optional)</span></>}
         categories={(categories.data ?? []).filter((c) => c.active !== false)}
         value={categoryId}
         onChange={setCategoryId}
-        noneLabel="General"
-        hint="Leave it to put the item under General."
+        {...(generalOff
+          ? { required: true, error: categoryId === '' ? 'The General category is switched off. Choose a category.' : null, showError: showErrors }
+          : { noneLabel: 'General', hint: 'Leave it to put the item under General.' })}
       />
       <UnitPicker
         id="qa-unit"
@@ -262,11 +277,11 @@ export function QuickAddForm({ initialName = '', onSell }: {
         load={units}
         value={unitId}
         onChange={(next) => { setUnitId(next); setExists(null); }}
-        required={false}
-        error={null}
-        showError={false}
+        required={pieceOff}
+        error={pieceOff && unitId === '' ? 'The Piece unit is switched off. Choose a unit.' : null}
+        showError={showErrors}
       />
-      {units.data !== undefined && piece === undefined && unitId === '' && (
+      {units.data !== undefined && piece === undefined && !pieceOff && unitId === '' && (
         <p className="hint" data-testid="qa-piece-made">Left empty, the item is counted in Piece, made for you.</p>
       )}
       <PhotoChoice id="qa-photo" file={photo} onChange={setPhoto} />
@@ -276,12 +291,25 @@ export function QuickAddForm({ initialName = '', onSell }: {
           item={exists}
           canAddAnyway={exists.mayAddAnyway}
           busy={add.isPending}
-          openLabel={mayCount ? 'Use the existing one and just add stock' : 'Use the existing one'}
-          onOpen={(id) => (mayCount ? add.mutate({ productId: id }) : setExists(null))}
+          openLabel={mayCount ? 'Use the existing one and just add stock' : 'Keep the existing one'}
+          onOpen={(id) => {
+            if (mayCount) return add.mutate({ productId: id });
+            // Nothing to add for someone who may not count: the existing item stays as it is and the form is cleared, so Add
+            // never sends the same name again.
+            setKept(`${exists.name} is already in your items. Nothing new was added.`);
+            setExists(null);
+            setName('');
+            setSell('');
+            setCost('');
+            setPhoto(null);
+            setShowErrors(false);
+            setTimeout(() => document.getElementById('qa-name')?.focus());
+          }}
           onAddAnyway={(reason) => add.mutate({ duplicateReason: reason })}
           onChangeName={() => { setExists(null); setTimeout(() => document.getElementById('qa-name')?.focus()); }}
         />
       )}
+      {kept && <p role="status" className="hint" data-testid="qa-kept">{kept}</p>}
       {offline ? <p role="alert" className="alert alert-warning" data-testid="qa-offline">{QUICK_ADD_OFFLINE}</p> : !exists && <Problem error={add.error} />}
       <p className="cluster" data-tour="quick-add-go">
         <BusyButton busy={add.isPending} type="submit" className="rt-primary" disabled={exists !== null}>Add</BusyButton>
@@ -301,7 +329,7 @@ function QuickAddScreen() {
         initialName={name}
         onSell={(productId, branchId) => {
           chooseBranch?.(branchId);
-          void navigate({ to: '/staff/retail/sale', search: { item: productId } as never });
+          void navigate({ to: '/staff/retail/sale', search: { item: productId, branch: branchId } as never });
         }}
       />
     </Gate>

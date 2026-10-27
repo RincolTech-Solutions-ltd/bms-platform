@@ -433,7 +433,7 @@ describe('adding an item quickly (issue #632)', () => {
   });
 
   it('is found by the words a shop owner types, and only by whoever may add items', () => {
-    for (const typed of ['quick add', 'add stock', 'how many I have', 'add an item and its stock', 'quick']) {
+    for (const typed of ['quick add', 'add item', 'add stock', 'how many I have', 'add an item and its stock', 'quick']) {
       expect(searchArticles(articlesFor(owner), typed)[0]?.id, typed).toBe(QUICK);
     }
     expect(articleForScreen('/staff/retail/quick-add', owner)?.id).toBe(QUICK);
