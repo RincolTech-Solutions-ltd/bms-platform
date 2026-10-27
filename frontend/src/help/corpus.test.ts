@@ -353,7 +353,7 @@ describe('setting up a shop quickly (issue #625)', () => {
     parts.forEach((labels, i) => {
       const code = source(PARTS[i]!);
       expect(labels.length, `part ${i + 1}`).toBeGreaterThan(0);
-      for (const label of labels) expect(code, `part ${i + 1}: ${label}`).toMatch(new RegExp(`(^|[>'"])\\s*${escape(label)}\\s*($|[<'"(])`, 'm'));
+      for (const label of labels) expect(code, `part ${i + 1}: ${label}`).toMatch(new RegExp(`(^|[>'"])\\s*${escape(label)}\\s*($|[<'"])`, 'm'));
     });
   });
 
