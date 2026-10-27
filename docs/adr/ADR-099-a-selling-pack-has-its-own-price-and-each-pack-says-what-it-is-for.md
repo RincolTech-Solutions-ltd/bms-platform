@@ -41,7 +41,9 @@ never sells whole) and packs that are only sold (a half carton nobody delivers).
    averages weighted by what each holds, or the last paid cost while no branch holds any. The flag goes only to a caller holding
    `retail.profit.read`; saving such a price is allowed, since the owner decides, and selling at it needs `retail.price.below_cost`.
 5. **A pack's price is a price.** Setting or dropping a pack's own price needs `retail.price.edit` as well as the route's
-   `retail.catalogue.manage` (403 `permission_denied`); the size and the purpose need only the latter. Every change is audited as
+   `retail.catalogue.manage` (403 `permission_denied`). So does any change that moves what a pack with its own price sells for: a
+   new size (the same price for more or fewer pieces) or making it only for buying (which drops the price). The size of a pack
+   without its own price, making a pack only for selling, and switching it off or on need only `retail.catalogue.manage`. Every change is audited as
    `retail.product_unit.created` or `.updated` with the old and new `purpose` and `sell_minor`. No new permission.
 6. **Profit stays per piece.** A sale line keeps what was charged and, as before, the average cost per piece at the moment of sale;
    `qty` and `unit_price_minor` stay per piece. Every report adds lines up, so their meaning does not change.
@@ -56,6 +58,9 @@ box that is never sold whole no longer appears on Sell; Edit item shows every pa
 **Worse:** a pack's price does not follow the piece price: after a piece price rise the owner must raise the pack prices too (the
 table shows the suggestion and Below cost helps). A pack price has no dated history of its own, only the audit log, so an offline
 sale charged at a pack price that changed while the phone was away is read as a typed price, not as the price the phone had saved.
+
+A new index, `retail_stock_balances_product_held` on `(tenant_id, product_id) WHERE qty > 0`, serves the item's average for
+the Below cost mark; its build in `V110` blocks stock writes for its short duration.
 
 **Watch for:** anything new that prices a pack line must use `walkInPrice` after the price list, never `sell x factor`; anything
 new that offers packs must offer only the ones whose purpose fits.

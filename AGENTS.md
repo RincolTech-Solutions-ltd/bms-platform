@@ -212,7 +212,8 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   (`SalesService.walkInPrice`); price lists still win. The sale's below-cost check is unchanged (the line against its pieces times the
   branch's average, ADR-079); the pack responses add `suggested_sell_minor` and, for `retail.profit.read`, `below_cost` against the item's
   average. A pack only for buying is refused on a sale (`unknown_pack_unit`, a clash offline) and a pack only for selling on Buy stock, a
-  purchase order and goods received. Setting a pack's price needs `retail.price.edit`. Edit item shows the packs in one table (pack, size,
+  purchase order and goods received. Setting a pack's price, or changing the size of a pack that has its own price or making it buy only,
+  needs `retail.price.edit`; `V110` also adds the index `retail_stock_balances_product_held` for the item's average. Edit item shows the packs in one table (pack, size,
   selling price, the piece first) with Change opening a sheet (size, Used for, Selling price of one pack with the suggestion). Help: How do I
   sell in a box and in pieces at different prices?. Tests: `RetailSellingPacksIT`, `selling-packs.test.tsx`, `corpus.test.ts`.
 - **Built (buy on credit, what I owe suppliers, pay a supplier, issue #557, owner decision D15, ADR-084, FR-RET-73):** migration `V97` (the next

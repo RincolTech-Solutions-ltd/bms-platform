@@ -5,7 +5,9 @@ import { describe, expect, it } from 'vitest';
 import type { Pack, Product } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
-import { PackEditor, packChange, shownPackPrice, suggestedHint } from './catalogue-packs';
+import { PackEditor, packBelowCostHint, packChange, shownPackPrice, suggestedHint } from './catalogue-packs';
+import { SaleLineCard } from './sale';
+import { newLine } from './sale-state';
 import { defaultPrice } from './sale-state';
 import { buyingPacks, packWalkInPrice, sellingPacks } from './units-state';
 
@@ -46,6 +48,33 @@ describe('the walk-in price of a pack', () => {
     expect(shownPackPrice(bulb, box)).toBeNull();
     expect(suggestedHint(bulb, '12')).toContain('Suggested UGX 12,000');
     expect(suggestedHint(bulb, '0')).toBeNull();
+  });
+});
+
+describe('the below-cost hint while a price is typed', () => {
+  it('warns when the pack price is not above its size times the last price paid, only with the cost', () => {
+    // 24 x 750 = 18,000.
+    expect(packBelowCostHint(bulb, '24', 18_000)).toContain('not above what 24 piece cost at the last price paid, UGX 18,000');
+    expect(packBelowCostHint(bulb, '24', 18_001)).toBeNull();
+    // An empty price is the suggested one, 24,000: above.
+    expect(packBelowCostHint(bulb, '24', null)).toBeNull();
+    const noCost: Product = { ...bulb, cost_minor: undefined };
+    expect(packBelowCostHint(noCost, '24', 1)).toBeNull();
+  });
+});
+
+describe('the sale line, which quotations and orders draw too', () => {
+  it('offers the selling packs only, and prices a pack at its own price', () => {
+    const me = { ...mockMe('admin'), module_capabilities: { retail: ['units'] } };
+    const html = render(
+      <StaffContext.Provider value={{ me, branch: me.branches?.[0]?.id ?? '' }}>
+        <SaleLineCard line={{ ...newLine(bulb), unitId: 'u-carton', price: String(defaultPrice(bulb, 'u-carton')) }} index={0} unitsOn onQty={() => undefined} onPrice={() => undefined} onUnit={() => undefined} onRemove={() => undefined} />
+      </StaffContext.Provider>,
+    ).replaceAll('<!-- -->', '');
+    expect(html).toContain('>carton (24 piece)<');
+    expect(html).toContain('>dozen (12 piece)<');
+    expect(html).not.toContain('>box (10 piece)<');
+    expect(html).toContain('value="20000"');
   });
 });
 

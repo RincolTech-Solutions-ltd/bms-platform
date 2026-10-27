@@ -53,6 +53,20 @@ export function suggestedHint(product: Product, factor: string): string | null {
 }
 
 /**
+ * The warning while a price is typed (review of #624), only when the caller can see cost: the pack's price (the typed one, else
+ * the suggested one) is not above its size times the last price paid per piece. The saved pack's Below cost is judged on the
+ * server against the average cost per piece (ADR-079); a sale below cost is refused unless the seller may sell below cost.
+ */
+export function packBelowCostHint(product: Product, factor: string, priceMinor: number | null): string | null {
+  const cost = product.cost_minor;
+  if (cost === undefined || cost <= 0 || factorProblem(factor) !== null) return null;
+  const packCost = packPriceMinor(cost, factor);
+  const price = priceMinor ?? packPriceMinor(product.sell_minor ?? 0, factor);
+  if (price > packCost) return null;
+  return `This price is not above what ${showQty(factor)} ${product.unit ?? ''} cost at the last price paid, ${money(packCost)}. A sale at it is refused unless the seller may sell below cost.`;
+}
+
+/**
  * The request that saves a pack's sheet: only what changed. An emptied price drops the pack's own price, so it sells at the
  * suggested one again; a pack made for buying only loses its price on the server, so none is sent.
  */
@@ -81,6 +95,7 @@ function PackSheet({ product, pack, mayPrice, onClose }: { product: Product; pac
   });
   const problem = factorProblem(factor);
   const body = packChange(pack, { factor, purpose, priceMinor }, mayPrice);
+  const low = purpose === 'buy' ? null : packBelowCostHint(product, factor, mayPrice ? priceMinor : (pack.sell_minor ?? null));
   const id = pack.unit_id ?? '';
   return (
     <Sheet
@@ -116,8 +131,13 @@ function PackSheet({ product, pack, mayPrice, onClose }: { product: Product; pac
       ) : mayPrice ? (
         <MoneyInput id={`pack-price-${id}`} label={`Selling price of one ${pack.unit}`} valueMinor={priceMinor} onChange={setPriceMinor} hint={suggestedHint(product, factor) ?? undefined} />
       ) : (
-        <Hint>Only someone who may change prices sets a pack&apos;s selling price.</Hint>
+        <Hint full>
+          {pack.sell_minor !== undefined
+            ? 'This pack has its own price, so only someone who may change prices changes its size or makes it only for buying.'
+            : 'Only someone who may change prices sets a pack\'s selling price.'}
+        </Hint>
       )}
+      {low !== null && <p className="rt-flag">{low}</p>}
       {pack.below_cost === true && purpose !== 'buy' && (
         <p role="note" className="alert alert-warning">
           {`This price is not above what ${showQty(pack.factor ?? '')} ${product.unit ?? ''} cost you on average. A sale at it needs permission to sell below cost.`}
@@ -164,6 +184,7 @@ export function PackEditor({ product }: { product: Product }) {
   const choices = (units.data ?? []).filter((u) => u.active !== false && u.id !== product.unit_id && !used.has(u.id));
   const problem = factorProblem(factor);
   const open = rows.find((k) => k.unit_id === editing);
+  const low = purpose === 'buy' ? null : packBelowCostHint(product, factor, mayPrice ? priceMinor : null);
   return (
     <fieldset data-testid="pack-editor" onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}>
       <legend>{WORDS.packs}</legend>
@@ -258,6 +279,8 @@ export function PackEditor({ product }: { product: Product }) {
       {mayPrice && purpose !== 'buy' && (
         <MoneyInput id="pack-price" label="Selling price of one pack" valueMinor={priceMinor} onChange={setPriceMinor} hint={suggestedHint(product, factor) ?? 'Leave it empty to sell at the piece price times the size.'} />
       )}
+      {!mayPrice && purpose !== 'buy' && <Hint>Only someone who may change prices sets a pack&apos;s price; until then it sells at the piece price times the size.</Hint>}
+      {low !== null && <p className="rt-flag">{low}</p>}
       <Problem error={add.error} />
       <BusyButton busy={add.isPending} type="button" disabled={unitId === '' || problem !== null} onClick={() => add.mutate()}>
         Add pack
