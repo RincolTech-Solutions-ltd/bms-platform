@@ -141,10 +141,17 @@ class CatalogueRepository {
                 .single();
     }
 
-    /** Issue #625, ADR-100: the usual size of a pack and what it is for; the V111 check keeps all three or none. */
+    /**
+     * Issue #625, ADR-100: the usual size of a pack and what it is for; the V111 check keeps all three or none. A null
+     * {@code pack} clears it (issue #637).
+     */
     void setUsualPack(UUID id, UsualPackRequest pack) {
         jdbc.sql("UPDATE retail_units SET pack_size = ?, pack_of_unit_id = ?, pack_purpose = ? WHERE id = ?")
-                .params(pack.size(), pack.ofUnitId(), pack.purpose(), id)
+                .params(
+                        pack == null ? null : pack.size(),
+                        pack == null ? null : pack.ofUnitId(),
+                        pack == null ? null : pack.purpose(),
+                        id)
                 .update();
     }
 
@@ -184,6 +191,18 @@ class CatalogueRepository {
                         INSERT INTO retail_units (id, tenant_id, name, created_by)
                         VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?)
                         """).params(id, name, createdBy).update();
+    }
+
+    /**
+     * Issue #632: adds the category or unit unless the business has one of that name in any case (the unique name index), so
+     * two quick adds at once make it once. True when this call made it.
+     */
+    boolean insertIfMissing(String table, UUID id, String name, UUID createdBy) {
+        return jdbc.sql("INSERT INTO " + table + " (id, tenant_id, name, created_by)"
+                                + " VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?) ON CONFLICT DO NOTHING")
+                        .params(id, name, createdBy)
+                        .update()
+                == 1;
     }
 
     /** Lower-cased name to id, for the import's lookups. */
@@ -735,6 +754,15 @@ class CatalogueRepository {
                         SELECT EXISTS (SELECT 1 FROM retail_stock_movements WHERE product_id = ?)
                             OR EXISTS (SELECT 1 FROM retail_stock_balances WHERE product_id = ? AND qty <> 0)
                         """).params(productId, productId).query(Boolean.class).single();
+    }
+
+    /** Issue #637: the name of a unit whose usual pack counts this one, or null. */
+    String unitCountedByUsualPack(UUID unitId) {
+        return jdbc.sql("SELECT name FROM retail_units WHERE pack_of_unit_id = ? ORDER BY name LIMIT 1")
+                .param(unitId)
+                .query(String.class)
+                .optional()
+                .orElse(null);
     }
 
     boolean unitHasPacks(UUID unitId) {

@@ -773,6 +773,13 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `DefaultUnits` in `retail.catalogue` through the existing unit insert, skipping a name the business has in any case, each unit audited
   `retail.unit.created` by the system. No API, permission or screen change (the inline Add a new unit is #616). Tests:
   `RetailDefaultUnitsIT`, `MigrationOrderIT.defaultUnitsMigrationFillsOnlyRetailBusinessesWithNoUnit`.
+- **Built (Quick add, issue #632, ADR-101, FR-RET-79):** no migration. `POST /api/v1/retail/quick-add` (`retail.stock`, permission
+  `retail.catalogue.manage`, `Idempotency-Key`) makes the item through `RetailCatalogue.createItem` (the catalogue's own create; General and
+  Piece made when left out and missing) and, with `qty`, adds exactly that quantity at the branch as one `opening` movement of source
+  `retail.quick_add` posted to inventory against opening balance equity (`retail.stocktake.commit` there, checked first), all in one
+  transaction; with `product_id` only the quantity is added. The Quick add screen (`/staff/retail/quick-add`): the Stock menu
+  row and More, the first-run card's first action, the catalogue home, the Items page and Sell's not-found line; Add another and Sell it
+  (`/staff/retail/sale?item=`). Help: How do I add an item quickly?. Tests: `RetailQuickAddIT`, `quick-add.dom.test.tsx`.
 - **Built (Set up your shop, issue #625, ADR-100, FR-RET-01, units spec section 9 step 5):** migration `V111` (directly after
   `V110`, #624, PR #627): `retail_units` gains `pack_size`, `pack_of_unit_id` and `pack_purpose`, the usual size of a
   unit that is a pack in a smaller unit and what it is for (`buy`, `sell` or `both`, the values and Used for words of a pack's
@@ -781,9 +788,20 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   from the first-run card (#615) and the Catalogue home, asks "What kind of shop is it?" from eight bundled starting sets
   (`shop-starters.ts`), lists their categories, units and packs ticked, and adds what stays ticked through the existing create
   routes (`shop-setup-state.ts`); a name the shop has is skipped, a unit with no usual size gets one, and a second run adds
-  nothing. The pack form of an item fills in the unit's usual size and its Used for (`purposeForUnit`), and a pack added to an item with no `purpose` takes the unit's usual one (a buy-only one sent with a price is added for `both`): one pack idea, one `Purpose` type and one `PURPOSES` list (`catalogue-packs.tsx`). Help articles `set-up-your-shop` and `add-a-unit` (How do I add a unit?, which a tester asked for), page tour `page-shop-setup`.
-  Tests: `RetailCatalogueManagementIT.aUnitKeepsItsUsualPackSizeAndUse`, `RetailSellingPacksIT.aPackWithNoPurposeTakesItsUnitsUsualPurpose`, `MigrationOrderIT`, `shop-setup-state.test.ts`,
+  nothing. The pack form of an item fills in the unit's usual size and its Used for (`purposeForUnit`), while a pack added through the API with no `purpose` is for `both`, as #627 set (issue #637): one pack idea, one `Purpose` type and one `PURPOSES` list (`catalogue-packs.tsx`). Help articles `set-up-your-shop` and `add-a-unit` (How do I add a unit?, which a tester asked for), page tour `page-shop-setup`.
+  Tests: `RetailCatalogueManagementIT.aUnitKeepsItsUsualPackSizeAndUse`, `MigrationOrderIT`, `shop-setup-state.test.ts`,
   `shop-setup.dom.test.tsx`, the help corpus test.
+- **Built (packs follow-ups of the #628 review, issue #637, ADR-100 note):** no migration. A pack added through the API with no
+  `purpose` is for `both` again, as #627 set; the pack form sends the unit's usual Used for itself, and the CSV import makes its packs
+  through the same `CatalogueService.createPack` (same checks, same audit). `PATCH /retail/units/{id}` takes `clear_usual_pack`, and the Units page has **Usual pack** on a unit's row: a sheet
+  (`unit-usual-pack.tsx`) to change what it holds, the number and Used for, or Remove usual pack; items keep their packs. A usual
+  pack is one level only (422 `unit_is_a_pack`, `unit_counted_by_pack`), so Roll of Metre and Metre of Roll can never both be kept.
+  Set up your shop reads the units back after a `duplicate_unit`, so a unit another phone added meanwhile is not called missing,
+  and leaves out a pack of a unit that is a pack itself. `PURPOSES` is the one list of purpose values, labels and words
+  (`asPurpose`). Help `add-a-unit` step 6. Tests: `RetailSellingPacksIT.aPackAddedWithNoPurposeIsForBothWhateverItsUnitsUsualPurpose`,
+  `RetailSellingPacksIT.theImportAddsAPackByTheSameRulesAsAddingOne`,
+  `RetailCatalogueManagementIT.aUsualPackIsChangedOrClearedAndIsOneLevelOnly`, `usual-pack.dom.test.tsx`,
+  `shop-setup-state.test.ts`, the help corpus test.
 
 ## Reading order
 
@@ -1221,6 +1239,10 @@ Accepted (this list is the ADR index):
   cloud-init and Cloudflare modules, nothing applied before): the VM, its firewall, DNS, the R2 buckets with the ADR-058 lock and
   lifecycle rules and host tokens (the backup one cannot delete a locked backup; the DNS-01 one reaches the whole zone, an accepted risk); later updated by a signed pointer the owner moves with
   a local promote command, no deploy SSH key and no hosted job (proposed, #300, #301; provider, region and the promote command pending)
+- ADR-101 Quick add makes the item and its starting stock in one request: `POST /retail/quick-add` in `retail.stock`, the catalogue's
+  own create then the quantity added as opening stock against opening balance equity, never set and never a count, General and Piece
+  made when missing, the stock gated by `retail.stocktake.commit`
+  (#632, owner decision D67; no migration)
 
 Pending (cite only as "pending ADR-NNN"):
 
