@@ -13,14 +13,15 @@
 
 SET LOCAL lock_timeout = '5s';
 
--- retail_units and tenant_modules have FORCE ROW LEVEL SECURITY and no app.tenant_id is bound here: as in V96, bms_owner has
--- BYPASSRLS, and when the migrating owner cannot bypass row security the two tables drop FORCE for this transaction only.
+-- retail_units, tenant_modules and tenants have FORCE ROW LEVEL SECURITY and no app.tenant_id is bound here: as in V96, bms_owner
+-- has BYPASSRLS, and when the migrating owner cannot bypass row security the three tables drop FORCE for this transaction only.
 SET LOCAL row_security = off;
 DO $$
 BEGIN
     IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
         ALTER TABLE retail_units NO FORCE ROW LEVEL SECURITY;
         ALTER TABLE tenant_modules NO FORCE ROW LEVEL SECURITY;
+        ALTER TABLE tenants NO FORCE ROW LEVEL SECURITY;
     END IF;
 END
 $$;
@@ -40,6 +41,7 @@ BEGIN
     IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
         ALTER TABLE retail_units FORCE ROW LEVEL SECURITY;
         ALTER TABLE tenant_modules FORCE ROW LEVEL SECURITY;
+        ALTER TABLE tenants FORCE ROW LEVEL SECURITY;
     END IF;
 END
 $$;
