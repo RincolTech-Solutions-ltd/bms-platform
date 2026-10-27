@@ -7,7 +7,6 @@ import type { Product } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 import { PICKER_LABEL } from '../../../test-utils/item-picker';
-import { chooseCategory } from '../../../test-utils/category-picker';
 
 // Issue #615: a new shop with no items opened Sell, searched, found nothing and had to ask how to add items. Now Sell and Home
 // start with a card that leads to adding them (or says to ask the owner), and a Sell search that finds nothing offers Add it
