@@ -12,6 +12,7 @@ import { NameHintsPanel, useNameHints } from './name-hints';
 import { parseCount, parseQty } from './maths';
 import { CategoryPicker } from './category-picker';
 import { PhotoChoice, sendNewPhoto } from './item-photo';
+import { UnitPicker } from './unit-picker';
 import { ScreenToast } from './toast';
 import { Problem, money } from './ui';
 
@@ -253,18 +254,14 @@ function NewItemForm({ id, qtyLabel, qtyError, counting, askCost, initial = '', 
         <NameHintsPanel id={`${id}-name`} hints={hints} categoryId={categoryId} choosable={(c) => activeCategories.some((x) => x.id === c)}
           openLabel="Use this item" onOpen={chooseExisting} onUseCategory={setCategoryId} />
       )}
-      <Field
+      <UnitPicker
         id={`${id}-unit`}
-        label={WORDS.countedIn}
-        required
+        units={(units.data ?? []).filter((u) => u.active !== false)}
+        loading={units.isPending}
+        value={unitId}
+        onChange={(next) => { setUnitId(next); forget(); }}
         error={unitId === '' ? 'Choose a unit.' : null}
         showError={showErrors}
-        control={(props) => (
-          <select {...props} value={unitId} onChange={(e) => { setUnitId(e.target.value); forget(); }}>
-            <option value="">Choose a unit</option>
-            {(units.data ?? []).filter((u) => u.active !== false).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
-        )}
       />
       {askCost && (
         <Field
