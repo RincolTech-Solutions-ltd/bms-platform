@@ -181,6 +181,20 @@ describe('who sees which article', () => {
 
 describe('the getting-started articles (issue #609)', () => {
   const START = { 'start-using-bms': ['/sign-up', '/sign-up/verify', '/application'], 'open-my-invitation': ['/accept-invitation'], 'sign-in': ['/sign-in', '/forgot-password', '/reset-password', '/find-sign-in'], 'install-bms': ['/staff/notifications'] };
+  // The code of the screens each article describes: every word an article puts in bold must be a label in it.
+  const SOURCES: Record<string, string[]> = {
+    'start-using-bms': ['app/landing.tsx', 'areas/onboarding/sign-up.tsx', 'areas/onboarding/forms.ts', 'areas/onboarding/applicant.tsx'],
+    'open-my-invitation': ['areas/auth/accept-invitation.tsx', 'areas/auth/steps.tsx'],
+    'sign-in': ['app/landing.tsx', 'areas/auth/sign-in.tsx', 'areas/auth/forgot-password.tsx', 'areas/auth/reset-password.tsx', 'areas/onboarding/find-sign-in.tsx'],
+    'install-bms': ['install/InstallPrompt.tsx', 'areas/staff/menu.tsx', 'areas/staff/notifications/page.tsx'],
+  };
+  const source = (files: string[]) => files.map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')).join('\n');
+  const text = (id: string) => articleText(articleById(id)!);
+  const bold = (id: string) => {
+    const a = articleById(id)!;
+    return [...new Set([...a.intro, ...a.steps.map((s) => s.text), ...a.notes].flat().filter((r) => r.strong).map((r) => r.text))];
+  };
+  const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   it('come first, under Getting started, for everyone whatever their role or module', () => {
     expect(JOBS[0]).toEqual({ id: 'start', label: 'Getting started' });
@@ -188,32 +202,56 @@ describe('the getting-started articles (issue #609)', () => {
     for (const people of [seller, owner, officer]) expect(ids(articlesFor(people))).toEqual(expect.arrayContaining(Object.keys(START)));
   });
 
-  it('are linked from the screens they describe, and only those', () => {
+  it('name the screens they describe; a staff screen among them opens its article from How do I?', () => {
     for (const [id, screens] of Object.entries(START)) {
       expect(articleById(id)?.screens, id).toEqual(screens);
       for (const screen of screens) expect(articleForScreen(screen, seller)?.id, screen).toBe(id);
     }
   });
 
-  it('name the buttons the screens show and use no dashes', () => {
-    const text = (id: string) => articleText(articleById(id)!);
-    expect(text('start-using-bms')).toContain('Apply to start');
-    expect(text('start-using-bms')).toContain('Send application');
-    expect(text('start-using-bms')).toContain('Confirm my email');
-    expect(text('open-my-invitation')).toContain('Save and continue');
-    expect(text('open-my-invitation')).toContain('Skip for now');
-    expect(text('sign-in')).toContain('Forgot password?');
-    expect(text('sign-in')).toContain('Find your sign-in page');
-    expect(text('install-bms')).toContain('Add to Home Screen');
+  it('put in bold only labels the screens really show, each a whole label in their code', () => {
+    for (const [id, files] of Object.entries(SOURCES)) {
+      const code = source(files);
+      const labels = bold(id);
+      expect(labels.length, id).toBeGreaterThan(5);
+      // A label is the whole of a JSX text, a string or an element's text: "Add" must not pass by being part of "Address".
+      for (const label of labels) expect(code, `${id}: ${label}`).toMatch(new RegExp(`(^|[>'"]|\\s)${escape(label)}($|[<'"]|\\s)`, 'm'));
+    }
+  });
+
+  it('give the numbers and promises the screens and the server give', () => {
+    const codes = readFileSync(new URL('../auth/codes.ts', import.meta.url), 'utf8');
+    const users = readFileSync(new URL('../../../backend/src/main/java/com/rincoltech/bms/core/identity/internal/UserService.java', import.meta.url), 'utf8');
+    const signIn = source(SOURCES['sign-in']!);
+    const signUp = source(SOURCES['start-using-bms']!);
+    expect(text('open-my-invitation')).toContain('at least 10 characters');
+    expect(codes).toContain("'At least 10 characters', ok: password.length >= 10");
+    expect(text('open-my-invitation')).toContain('after 3 days');
+    expect(users).toContain('INVITATION_TTL = Duration.ofHours(72)');
+    expect(text('sign-in')).toContain('works once and for one hour');
+    expect(signIn).toContain('The link works once and for one hour');
+    expect(text('sign-in')).toContain('ask your administrator, who can give you a link');
+    expect(signIn).toContain('ask your administrator, who can give you');
+    expect(text('sign-in')).toContain('wait 15 minutes first');
+    expect(signIn).toContain('wait 15 minutes first');
+    expect(text('start-using-bms')).toContain('apply again with the same email to get a new link');
+    expect(signUp).toContain('apply again with the same email to get a new link');
+  });
+
+  it('use no dashes', () => {
     for (const id of Object.keys(START)) expect(text(id), id).not.toMatch(/[\u2013\u2014]| - /);
   });
 
   it('answer a first-time question, and Ask BMS lists only articles that share a real word with it', () => {
     const question = 'How do I sign up to this app first time';
     expect(searchArticles(ARTICLES, question)[0]?.id).toBe('start-using-bms');
-    const listed = ['add-an-item', 'approve-a-request', 'add-a-branch', 'start-using-bms', 'why-no-sale-at-a-store', 'choose-what-needs-approval'].map((id) => ({ id }));
+    const listed = ['add-an-item', 'approve-a-request', 'add-a-branch', 'start-using-bms', 'why-no-sale-at-a-store', 'choose-what-needs-approval'].map((id) => ({ id, title: articleById(id)!.title }));
     expect(ids(relatedArticles(question, listed))).toEqual(['start-using-bms']);
     expect(relatedArticles('how do I do this in the app', listed)).toEqual([]);
-    expect(ids(relatedArticles('move stock', [{ id: 'move-stock-store-to-shop' }, { id: 'unknown-article' }]))).toEqual(['move-stock-store-to-shop']);
+    // "add" is a whole word of an article about adding, never the start of "address" in the sign-in article's words.
+    const signIn = { id: 'sign-in', title: articleById('sign-in')!.title };
+    expect(ids(relatedArticles('how do I add a product', [signIn, ...listed]))).toEqual(['add-an-item', 'add-a-branch']);
+    // An article a newer server has and this app does not yet is judged by the title the server sent.
+    expect(ids(relatedArticles('move stock', [{ id: 'move-stock-store-to-shop', title: 'x' }, { id: 'not-here-yet', title: 'How do I move stock back?' }, { id: 'other', title: 'How do I fly?' }]))).toEqual(['move-stock-store-to-shop', 'not-here-yet']);
   });
 });

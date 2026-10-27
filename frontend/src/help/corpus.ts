@@ -165,17 +165,17 @@ const VAGUE = new Set([...STOP, 'app', 'bms', 'up', 'first', 'time', 'use', 'get
 
 /**
  * The articles Ask BMS listed that are really about the question (issue #609): those whose title or search words share a word
- * of it that is not VAGUE, in the order given. A word only in an article's text is not enough, so a question
- * no article answers lists none rather than unrelated ones.
+ * of it that is not VAGUE, in the order given; a word of four letters or more also matches the start of a longer one ("sign"
+ * finds "signup", but "add" never finds "address"). A word only in an article's text is not enough, so a question no article
+ * answers lists none rather than unrelated ones. An article this app does not have yet (a newer server) is judged by its title.
  */
-export function relatedArticles<T extends { id: string }>(question: string, listed: readonly T[], articles: readonly Article[] = ARTICLES): T[] {
+export function relatedArticles<T extends { id: string; title: string }>(question: string, listed: readonly T[], articles: readonly Article[] = ARTICLES): T[] {
   const wanted = words(question, VAGUE);
   if (wanted.length === 0) return [];
   return listed.filter((item) => {
     const article = articleById(item.id, articles);
-    if (!article) return false;
-    const pool = words([article.title, ...article.words].join(' '));
-    return wanted.some((w) => pool.some((p) => p === w || (w.length >= 3 && p.startsWith(w))));
+    const pool = words(article ? [article.title, ...article.words].join(' ') : item.title);
+    return wanted.some((w) => pool.some((p) => p === w || (w.length >= 4 && p.startsWith(w))));
   });
 }
 
