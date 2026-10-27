@@ -49,7 +49,7 @@ const refresh: TourStep = {
   id: 'refresh',
   target: 'refresh',
   title: 'Get the latest figures',
-  body: 'Tap the round arrow at the top, beside Search, to load the latest figures on this page. The installed app has no reload button.',
+  body: 'Tap the round arrow at the top, just before Search, to load the latest figures on this page. The installed app has no reload button.',
 };
 
 // The Notifications and app page (ADR-050): install BMS as an app and turn on notifications on this device. Everyone signed in has it.

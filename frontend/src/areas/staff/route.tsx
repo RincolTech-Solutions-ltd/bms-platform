@@ -336,9 +336,10 @@ export function StaffBar({
           {/* From 720px the sidebar's top holds the logo, the business and the branch picker, so the bar does not repeat them (#564). */}
           {phone ? <BranchTitle me={me} branch={branch} onChoose={onBranch} /> : <span className="staff-bar-spacer" />}
           <SyncStatus />
-          <FeatureSearch me={me} />
-          {/* Refresh beside Search on every staff screen (issue #631): its icon alone below 720px, a 48px target named Refresh. */}
+          {/* Refresh beside Search on every staff screen (issue #631): its icon alone below 720px, a 48px target named Refresh. Ask
+              keeps its place on Search's other side (issue #603). */}
           <RefreshButton />
+          <FeatureSearch me={me} />
           {/* The Ask button (issue #603); none while two-step set-up blocks the page, whose header is kept minimal. */}
           {!mustSetUp(me) && <AskButton />}
           <TopMenu me={me} busy={busy} onSignOut={onSignOut} signOut={!phone || signOutInBar} />
