@@ -3,9 +3,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
-import type { Category, Unit } from '../../../api/retail';
+import { RetailError, type Category, type Unit } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
+import { shopTypeById } from './shop-starters';
 
 // Set up your shop (issue #625): the owner picks a kind of shop, sees its categories, units and packs ticked, unticks what they
 // do not sell, changes a pack's size or what it is used for, and taps Add these. Names the shop has are shown as already there and not sent.
@@ -127,6 +128,34 @@ describe('Set up your shop (issue #625)', () => {
     fireEvent.click(screen.getByLabelText(/Supermarket and general/));
     fireEvent.click(await screen.findByLabelText('Bottle'));
     expect(within(screen.getByTestId('setup-pack-crate')).getByText(/Tick Bottle too, or this pack is left out\./)).toBeTruthy();
+  });
+
+  it('says a pack whose smaller unit is switched off is left out until it is switched on', async () => {
+    units = [{ id: 'u1', name: 'Piece', active: true, version: 1 }, { id: 'u9', name: 'Metre', active: false, version: 4 }];
+    draw();
+    fireEvent.click(screen.getByLabelText(/Hardware and building/));
+    const roll = within(await screen.findByTestId('setup-pack-roll'));
+    expect(roll.getByText('Metre is switched off. Switch it on in Units, or this pack is left out.')).toBeTruthy();
+    expect(roll.queryByLabelText('Metre in one Roll')).toBeNull();
+  });
+
+  it('shows what was left out and why, rather than saying the shop has everything', async () => {
+    const hardware = shopTypeById('hardware')!;
+    const pack = { size: '1.000', of_unit_id: 'u-Piece', of_unit: 'Piece', purpose: 'both' as const };
+    cats = hardware.categories.map((name, i) => ({ id: `c${i}`, name, active: true, version: 1 }));
+    units = [
+      ...hardware.units.map((name) => ({ id: `u-${name}`, name, active: true, version: 1 })),
+      ...hardware.packs.filter((p) => p.name !== 'Roll').map((p) => ({ id: `u-${p.name}`, name: p.name, active: true, version: 1, usual_pack: pack })),
+    ];
+    // Another phone added Roll after this one read the list.
+    createUnit.mockRejectedValue(new RetailError('exists', 409, 'duplicate_unit'));
+    draw();
+    fireEvent.click(screen.getByLabelText(/Hardware and building/));
+    await screen.findByTestId('setup-pack-roll');
+    fireEvent.click(screen.getByRole('button', { name: /^Add these/ }));
+    expect(await screen.findByText('Nothing new was added')).toBeTruthy();
+    expect(screen.getByText('One was left out. See why below.')).toBeTruthy();
+    expect(screen.getByText('Your shop has it already.')).toBeTruthy();
   });
 
   it('shows a wrong size once its field is left, and Add these sends nothing until it is right', async () => {

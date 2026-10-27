@@ -29,6 +29,13 @@ export const OFFLINE_ADD = 'You are offline. Connect to the internet to add thes
 /** What one pack row may change before it is added: its usual size and what it is for. */
 type PackEdit = { size: string; purpose: Purpose };
 
+/** What the success screen says under its title: what was added, else that some were left out, else that nothing was new. */
+export function doneText(result: SetupResult): string {
+  if (result.added.length > 0) return addedText(result);
+  const n = result.skipped.length;
+  return n === 0 ? NOTHING_NEW : `${n === 1 ? 'One was' : `${n} were`} left out. See why below.`;
+}
+
 export function addedText(result: SetupResult): string {
   const count = (kind: string) => result.added.filter((a) => a.kind === kind).length;
   const part = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -113,13 +120,20 @@ export function ShopSetupPage() {
         <SuccessScreen
           level={2}
           title={result.added.length > 0 ? 'Your shop is set up' : 'Nothing new was added'}
-          detail={result.added.length > 0 ? addedText(result) : NOTHING_NEW}
+          detail={doneText(result)}
           actions={[{ label: 'Add your first items', to: '/staff/retail/catalogue/products' }, { label: 'Done', to: '/staff/retail/catalogue' }]}
         />
         {result.added.length > 0 && (
           <Card title="What was added">
             <RowList label="What was added">
               {result.added.map((a) => <ListRow key={`${a.kind}-${a.name}`} title={a.name} meta={a.detail ?? (a.kind === 'unit' ? 'Unit' : 'Category')} />)}
+            </RowList>
+          </Card>
+        )}
+        {result.skipped.length > 0 && (
+          <Card title="What was left out">
+            <RowList label="What was left out">
+              {result.skipped.map((s) => <ListRow key={s.name} title={s.name} meta={s.why} />)}
             </RowList>
           </Card>
         )}
@@ -168,7 +182,7 @@ export function ShopSetupPage() {
                     const problem = left.has(k) ? factorProblem(e.size) : null;
                     return (
                       <div key={i.name} className="stack" data-testid={`setup-pack-${slug}`}>
-                        <Choice item={i} ticked={on} onTick={(v) => tick(i, v)} meta={needs ? `Tick ${needs} too, or this pack is left out.` : packText(e.size, i.of ?? '', e.purpose)} />
+                        <Choice item={i} ticked={on} onTick={(v) => tick(i, v)} meta={needs ?? packText(e.size, i.of ?? '', e.purpose)} />
                         {on && !needs && (
                           <>
                             <label htmlFor={`setup-size-${slug}`}>{`${i.of} in one ${i.name}`}</label>

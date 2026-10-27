@@ -141,13 +141,24 @@ describe('Set up your shop', () => {
     ticked.delete(key('category', 'Paint'));
     ticked.delete(key('unit', 'Metre'));
     const roll = plan.find((i) => i.name === 'Roll')!;
-    expect(packNeeds(roll, ticked, [])).toBe('Metre');
+    expect(packNeeds(roll, ticked, [])).toBe('Tick Metre too, or this pack is left out.');
     const result = await applySetup(shop.api, plan, ticked, []);
     expect(shop.categories.map((c) => c.name)).not.toContain('Paint');
     expect(shop.units.map((u) => u.name)).not.toContain('Metre');
     expect(shop.units.map((u) => u.name)).not.toContain('Roll');
-    expect(result.skipped).toContain('Roll');
+    expect(result.skipped).toContainEqual({ name: 'Roll', why: 'Metre is not in your shop, so this pack was left out.' });
     expect(shop.units.find((u) => u.name === 'Box')?.usual_pack?.of_unit).toBe('Piece');
+  });
+
+  it('says a pack whose smaller unit is switched off is left out, and why, rather than asking to tick a unit already there', async () => {
+    const shop = fakeShop();
+    shop.units.find((u) => u.name === 'Metre')!.active = false;
+    const { plan, result } = await run(shop, 'hardware');
+    const roll = plan.find((i) => i.name === 'Roll')!;
+    expect(plan.find((i) => i.kind === 'unit' && i.name === 'Metre')?.status).toBe('there');
+    expect(packNeeds(roll, allTicked(plan), shop.units)).toBe('Metre is switched off. Switch it on in Units, or this pack is left out.');
+    expect(result.skipped).toEqual([{ name: 'Roll', why: 'Metre is switched off. Switch it on in Units, or this pack is left out.' }]);
+    expect(shop.units.map((u) => u.name)).not.toContain('Roll');
   });
 
   it('takes a changed size and purpose, and never sends a price', async () => {
@@ -166,7 +177,7 @@ describe('Set up your shop', () => {
     await shop.api.createCategory('Chargers');
     const failing = { ...shop.api, createCategory: (name: string) => (name === 'Phone covers' ? Promise.reject(new Error('offline')) : shop.api.createCategory(name)) };
     const result = await applySetup(failing, plan, allTicked(plan), [...shop.units]);
-    expect(result.skipped).toContain('Chargers');
+    expect(result.skipped).toContainEqual({ name: 'Chargers', why: 'Your shop has it already.' });
     expect(result.added.map((a) => a.name)).toEqual(['Phones', 'Earphones']);
     expect(result.error).toBeInstanceOf(Error);
     const again = await run(shop, 'phones');

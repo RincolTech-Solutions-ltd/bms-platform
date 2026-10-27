@@ -48,22 +48,29 @@ export function packText(size: number | string, of: string, purpose: Purpose | s
   return `${Number(size)} ${of}, ${what}`;
 }
 
+/** Why a pack whose smaller unit the shop has switched off is left out; it is not tickable, since the shop has it. */
+export const switchedOffText = (of: string) => `${of} is switched off. Switch it on in Units, or this pack is left out.`;
+
 /**
- * A pack that cannot be added as ticked: its smaller unit is neither in the shop nor ticked. The screen says so on the pack's
- * row and Add these passes it over, so the owner ticks the unit or leaves the pack.
+ * Why a pack cannot be added as ticked, or null when it can: its smaller unit is switched off in the shop (review of #628: it
+ * shows as already there, so ticking it is no way out), or it is neither in the shop nor ticked. The screen says so on the
+ * pack's row and Add these passes it over, so the owner ticks the unit, switches it on, or leaves the pack.
  */
 export function packNeeds(item: SetupItem, ticked: Set<string>, units: Unit[]): string | null {
   if (item.kind !== 'pack' || !item.of) return null;
-  if (units.some((u) => same(u.name, item.of!) && u.active !== false)) return null;
-  return ticked.has(key('unit', item.of)) ? null : item.of;
+  const had = units.find((u) => same(u.name, item.of!));
+  if (had) return had.active === false ? switchedOffText(item.of) : null;
+  return ticked.has(key('unit', item.of)) ? null : `Tick ${item.of} too, or this pack is left out.`;
 }
 
 export interface SetupResult {
   added: { kind: ItemKind; name: string; detail?: string }[];
-  /** Ticked, but already there when added (another phone added it first) or its smaller unit was missing. */
-  skipped: string[];
+  /** Ticked but not added, with why: already there when added (another phone added it first), or its smaller unit was missing. */
+  skipped: { name: string; why: string }[];
   error: unknown;
 }
+
+export const ADDED_MEANWHILE = 'Your shop has it already.';
 
 /**
  * Adds what is ticked, one at a time: categories, then units, then packs, so a pack finds the unit it counts. It stops at the first
@@ -87,9 +94,9 @@ export async function applySetup(api: Pick<RetailApi, 'createCategory' | 'create
         result.added.push({ kind: 'unit', name: item.name });
         continue;
       }
-      const of = known.find((u) => same(u.name, item.of ?? '') && u.active !== false);
-      if (!of?.id) {
-        result.skipped.push(item.name);
+      const of = known.find((u) => same(u.name, item.of ?? ''));
+      if (!of?.id || of.active === false) {
+        result.skipped.push({ name: item.name, why: of ? switchedOffText(item.of ?? '') : `${item.of} is not in your shop, so this pack was left out.` });
         continue;
       }
       const pack = { size: String(item.size), of_unit_id: of.id, purpose: item.purpose ?? 'both' };
@@ -100,7 +107,7 @@ export async function applySetup(api: Pick<RetailApi, 'createCategory' | 'create
     } catch (error) {
       // Added meanwhile, on another phone: it is there, which is what was asked.
       if (error instanceof RetailError && (error.code === 'duplicate_category' || error.code === 'duplicate_unit')) {
-        result.skipped.push(item.name);
+        result.skipped.push({ name: item.name, why: ADDED_MEANWHILE });
         continue;
       }
       result.error = error;
