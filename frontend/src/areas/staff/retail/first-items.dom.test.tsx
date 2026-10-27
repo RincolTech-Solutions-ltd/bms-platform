@@ -243,6 +243,19 @@ describe('a Sell search that finds nothing', () => {
     expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
   });
 
+  it('keeps an open Add it here with what was typed when a later search finds something (review of #616)', async () => {
+    cats = [duvets];
+    listProducts.mockImplementation(({ query }: { query?: string }) => Promise.resolve(query === 'Test duvet' ? [{ ...made, qty: '2.000' }] : []));
+    open(<RecordSale />, owner);
+    await search('Test duvet cover');
+    fireEvent.click(await screen.findByRole('button', { name: 'Not in the list? Add it here' }));
+    fireEvent.change(within(form()).getByLabelText(/^Selling price/), { target: { value: '45000' } });
+    await search('Test duvet');
+    expect(await screen.findByRole('option', { name: /Test duvet cover/ })).toBeTruthy();
+    expect((within(form()).getByLabelText(/^Selling price/) as HTMLInputElement).value).toBe('45000');
+    expect((within(form()).getByLabelText(/^Description/) as HTMLInputElement).value).toBe('Test duvet cover');
+  });
+
   it('tells someone who cannot add items to ask the owner', async () => {
     catalogue = [];
     open(<RecordSale />, seller);

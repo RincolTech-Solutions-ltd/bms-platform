@@ -466,10 +466,10 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
             branchId={branchId}
             showPrice
             onAdd={add}
-            notFound={(term, clear) => (
+            notFound={(term, clear, hold) => (
               <ScreenToast.Provider value={show}>
                 <NewItemHere id="sale-new" description={term} ask={ASK_OWNER_ITEM} askCost={profit} qtyLabel={mayCount ? 'How many you have here' : undefined}
-                  qtyError="Type how many you have here, more than 0." onAdded={(added) => addNew(added, clear)} />
+                  qtyError="Type how many you have here, more than 0." onOpenChange={hold} onAdded={(added) => addNew(added, clear)} />
               </ScreenToast.Provider>
             )}
           />

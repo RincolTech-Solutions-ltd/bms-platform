@@ -58,7 +58,7 @@ export function ItemCodeLine({ id, category }: { id: string; category: Category 
   );
 }
 
-export function NewItemHere({ id, qtyLabel, qtyError, counting = false, askCost, description, ask = ASK_MANAGER, onAdded }: {
+export function NewItemHere({ id, qtyLabel, qtyError, counting = false, askCost, description, ask = ASK_MANAGER, onOpenChange, onAdded }: {
   id: string;
   /** What a missing or wrong quantity says, when the screen's words differ from buying or counting (Sell, issue #615). */
   qtyError?: string;
@@ -72,6 +72,8 @@ export function NewItemHere({ id, qtyLabel, qtyError, counting = false, askCost,
   counting?: boolean;
   /** The buying price is asked for: always on Buy stock; on Count stock only for someone who may see it. */
   askCost: boolean;
+  /** Told when the form opens and closes, so the screen keeps it drawn while it is open. */
+  onOpenChange?: (open: boolean) => void;
   /** Puts the item on the screen's line; a returned text says why it could not, and shows under the button. */
   onAdded: (added: AddedItem) => string | void | Promise<string | void>;
 }) {
@@ -84,7 +86,7 @@ export function NewItemHere({ id, qtyLabel, qtyError, counting = false, askCost,
   if (!open) {
     return (
       <>
-        <button type="button" id={`${id}-open`} className="btn-ghost" aria-expanded={false} onClick={() => { setNote(null); setOpen(true); }}>
+        <button type="button" id={`${id}-open`} className="btn-ghost" aria-expanded={false} onClick={() => { setNote(null); setOpen(true); onOpenChange?.(true); }}>
           Not in the list? Add it here
         </button>
         {note && <p role="alert" className="alert alert-warning" data-testid={`${id}-note`}>{note}</p>}
@@ -95,6 +97,7 @@ export function NewItemHere({ id, qtyLabel, qtyError, counting = false, askCost,
   const close = (refused?: string | void) => {
     setNote(refused || null);
     setOpen(false);
+    onOpenChange?.(false);
     setTimeout(() => document.getElementById(`${id}-open`)?.focus());
   };
   return <NewItemForm id={id} qtyLabel={qtyLabel} qtyError={qtyError} counting={counting} askCost={askCost} initial={description} onAdded={onAdded} onClose={close} />;

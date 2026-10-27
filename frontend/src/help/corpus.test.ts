@@ -355,6 +355,10 @@ describe('a photo while adding an item (issue #617)', () => {
       expect(labels.length, `part ${i + 1}`).toBeGreaterThan(0);
       for (const label of labels) expect(code, `part ${i + 1}: ${label}`).toMatch(whole(label));
     });
+    // The introduction says the photo shows when the item is picked in a sale: the Sell search, ProductPicker, draws it.
+    expect(articleText(photo)).toContain('when you pick the item in a sale');
+    expect(source(['areas/staff/retail/ui.tsx'])).toMatch(/export function ProductPicker[\s\S]*?<ItemPhoto photoId=\{shownPhoto\(p\)\}/);
+    expect(source(['areas/staff/retail/sale.tsx'])).toMatch(/<ProductPicker\n\s*id="sale-search"/);
     const step = boldIn([articleById('add-an-item')!.steps[1]!.text]).filter((l) => /photo|picture/.test(l));
     expect(step).toEqual(['Take a picture', 'Choose a photo']);
     for (const label of step) expect(source(['areas/staff/retail/item-photo.tsx'])).toMatch(whole(label));
