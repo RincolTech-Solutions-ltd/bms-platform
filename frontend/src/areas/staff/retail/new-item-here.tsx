@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useContext, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { RETAIL_CURRENCY, RetailError, retail, type Category, type Product, type SimilarProduct } from '../../../api/retail';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Field, FieldsNeededNote, focusFirstMissing } from '../../../app/ui/Field';
@@ -11,6 +11,8 @@ import { ExistsPanel, SimilarPanel, existingOf, type ExistingItem } from './cata
 import { NameHintsPanel, useNameHints } from './name-hints';
 import { parseCount, parseQty } from './maths';
 import { CategoryPicker } from './category-picker';
+import { PhotoChoice, sendNewPhoto } from './item-photo';
+import { ScreenToast } from './toast';
 import { Problem, money } from './ui';
 
 // Add an item while buying or counting stock (issue #505): under the item search, "Not in the list? Add it here" opens a
@@ -118,6 +120,9 @@ function NewItemForm({ id, qtyLabel, qtyError, counting, askCost, initial = '', 
   const [cost, setCost] = useState(counting ? '0' : '');
   const [sell, setSell] = useState('');
   const [qty, setQty] = useState('');
+  // Issue #617: the optional photo, sent right after the item is made; a failed upload leaves the item and says so.
+  const [photo, setPhoto] = useState<File | null>(null);
+  const screenToast = useContext(ScreenToast);
   const [showErrors, setShowErrors] = useState(false);
   const [offline, setOffline] = useState(false);
   const [similar, setSimilar] = useState<SimilarProduct[] | null>(null);
@@ -149,8 +154,11 @@ function NewItemForm({ id, qtyLabel, qtyError, counting, askCost, initial = '', 
         cost_minor: costMinor ?? 0,
         ...(duplicateReason ? { duplicate_reason: duplicateReason } : {}),
       });
+      const photoNote = await sendNewPhoto(product.id ?? '', photo);
       void queryClient.invalidateQueries({ queryKey: ['retail', 'catalogue'] });
       await added(product, true);
+      // Said after the screen's own word about the line, so it is the toast that stays.
+      if (photoNote) screenToast?.(`${product.description ?? 'The item'} is saved. ${photoNote}`, 'info');
     },
     onError: (error) => {
       const found = existingOf(error);
@@ -297,6 +305,7 @@ function NewItemForm({ id, qtyLabel, qtyError, counting, askCost, initial = '', 
           autoComplete="off"
         />
       )}
+      <PhotoChoice id={`${id}-photo`} file={photo} onChange={setPhoto} />
       {exists && (
         <ExistsPanel
           item={exists}
