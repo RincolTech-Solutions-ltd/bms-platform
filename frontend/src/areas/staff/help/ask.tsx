@@ -1,14 +1,19 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { askBms, type AskAnswer } from '../../../api/help';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Field } from '../../../app/ui/Field';
 import { Card, ListRow, RowList } from '../../../app/ui/ListRow';
+import { relatedArticles } from '../../../help/corpus';
 
 // Ask BMS (issue #20, ADR-096): a question in the person's own words, answered from the How do I...? articles only, with the
 // article it comes from linked. Shown only while the server says it is on for the business; offline or off, the page is as
-// before. The server scrubs the question and never reads the business's records; when no answer is written the matching
-// articles are listed instead. "Not answered? Ask us" stays under it on the page.
+// before. The server scrubs the question and never reads the business's records. When no answer is written (issue #609) it
+// says so in one line with Ask us right under it, then lists only the articles that share a real word with the question.
+// "Not answered? Ask us" stays under it on the page.
+
+export const NOT_FOUND = 'I could not find this in the help yet. Tap Ask us and it comes to the team.';
 
 export const ASK_STATUS_KEY = ['help', 'ask', 'status'] as const;
 
@@ -27,7 +32,7 @@ export function useAskEnabled(): boolean {
 
 const row = (a: { id: string; title: string }) => <ListRow key={a.id} title={a.title} to={`/staff/help/${a.id}`} />;
 
-function Answer({ result }: { result: AskAnswer }) {
+function Answer({ result, question }: { result: AskAnswer; question: string }) {
   if ((result.source === 'model' || result.source === 'cache') && result.answer && result.cited) {
     return (
       <Card title="Answer">
@@ -53,14 +58,25 @@ function Answer({ result }: { result: AskAnswer }) {
       </>
     );
   }
-  if (result.articles.length > 0) {
-    return (
-      <Card title="These articles may answer it">
-        <RowList label="These articles may answer it">{result.articles.map(row)}</RowList>
-      </Card>
-    );
-  }
-  return <p className="empty-state">No article answers that yet.</p>;
+  // articles (not in the articles, every model failed, or none asked) and no_match: said plainly, with Ask us right there.
+  const related = relatedArticles(question, result.articles);
+  return (
+    <div className="stack" data-testid="ask-not-found">
+      <p role="note" className="alert alert-info">
+        {NOT_FOUND}
+      </p>
+      <p>
+        <Link to="/staff/feedback" search={{ ask: question }} className="btn">
+          Ask us
+        </Link>
+      </p>
+      {related.length > 0 && (
+        <Card title="These articles may answer it">
+          <RowList label="These articles may answer it">{related.map(row)}</RowList>
+        </Card>
+      )}
+    </div>
+  );
 }
 
 /** The Ask BMS box; `onAsked` hands the question to "Not answered? Ask us". */
@@ -106,7 +122,7 @@ export function AskBms({ onAsked }: { onAsked?: (question: string) => void }) {
             {ask.error instanceof Error ? ask.error.message : 'Could not ask now. The articles below still answer.'}
           </p>
         )}
-        {ask.data && <Answer result={ask.data} />}
+        {ask.data && <Answer result={ask.data} question={ask.variables ?? text} />}
       </div>
     </section>
   );

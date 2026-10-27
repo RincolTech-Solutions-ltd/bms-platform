@@ -5,7 +5,7 @@ import type { Me } from '../api/client';
 import { mockMe } from '../api/retail-mock';
 import { offendingWords } from '../app/glossary';
 import { router } from '../app/router';
-import { ARTICLES, JOBS, REVISION, articleForScreen, articleText, articlesFor, parseArticle, searchArticles } from './corpus';
+import { ARTICLES, JOBS, REVISION, articleById, articleForScreen, articleText, articlesFor, parseArticle, relatedArticles, searchArticles } from './corpus';
 
 // The help corpus (issue #598, ADR-095): every article is well formed, every picture it names is a 412x900 WebP in public/help and
 // every picture there is used, the revision is the content hash the ADR states, the permissions and screens it names exist, the
@@ -43,19 +43,24 @@ const officer = {
 } as unknown as Me;
 const ids = (list: { id: string }[]) => list.map((a) => a.id);
 
+// The getting-started articles (issue #609) open before sign-in, where the picture script (docs/ui/how-do-i-598) needs a
+// local API, so they ship as text first; their pictures are a follow-up and this list shrinks as they land.
+const PICTURES_PENDING = ['start-using-bms', 'open-my-invitation', 'sign-in', 'install-bms'];
+
 describe('the help corpus', () => {
-  it('holds the 15 to 20 articles of the questions pilots asked, each job with one at least', () => {
+  it('holds the 15 to 30 articles of the questions pilots asked, each job with one at least', () => {
     expect(ARTICLES.length).toBeGreaterThanOrEqual(15);
-    expect(ARTICLES.length).toBeLessThanOrEqual(20);
+    expect(ARTICLES.length).toBeLessThanOrEqual(30);
     for (const job of JOBS) expect(ARTICLES.some((a) => a.job === job.id), job.label).toBe(true);
   });
 
-  it('gives every article a title, an introduction and at least two steps, every step with a captioned picture', () => {
+  it('gives every article a title, an introduction and at least two steps, every step with a captioned picture but those pending', () => {
     for (const a of ARTICLES) {
       expect(a.title, a.id).toMatch(/^(How do I|What|Why) .+\?$/);
       expect(a.intro.length, a.id).toBeGreaterThan(0);
       expect(a.steps.length, a.id).toBeGreaterThanOrEqual(2);
-      expect(a.steps.every((s) => s.picture?.caption), a.id).toBe(true);
+      if (PICTURES_PENDING.includes(a.id)) expect(a.steps.some((s) => s.picture), a.id).toBe(false);
+      else expect(a.steps.every((s) => s.picture?.caption), a.id).toBe(true);
       for (const s of a.steps) if (s.picture) expect(s.picture.file, a.id).toMatch(new RegExp(`^${a.id}-\\d+\\.webp$`));
     }
   });
@@ -170,6 +175,45 @@ describe('who sees which article', () => {
     expect(articleForScreen('/staff/retail/transfer', seller)).toBeUndefined();
     expect(articleForScreen('/staff/users', owner)?.id).toBe('change-roles');
     expect(articleForScreen('/staff/users/new', owner)?.id).toBe('invite-someone');
-    expect(articleForScreen('/staff/notifications', owner)).toBeUndefined();
+    expect(articleForScreen('/staff/reports', owner)).toBeUndefined();
+  });
+});
+
+describe('the getting-started articles (issue #609)', () => {
+  const START = { 'start-using-bms': ['/sign-up', '/sign-up/verify', '/application'], 'open-my-invitation': ['/accept-invitation'], 'sign-in': ['/sign-in', '/forgot-password', '/reset-password', '/find-sign-in'], 'install-bms': ['/staff/notifications'] };
+
+  it('come first, under Getting started, for everyone whatever their role or module', () => {
+    expect(JOBS[0]).toEqual({ id: 'start', label: 'Getting started' });
+    expect(ids(ARTICLES.slice(0, 4))).toEqual(Object.keys(START));
+    for (const people of [seller, owner, officer]) expect(ids(articlesFor(people))).toEqual(expect.arrayContaining(Object.keys(START)));
+  });
+
+  it('are linked from the screens they describe, and only those', () => {
+    for (const [id, screens] of Object.entries(START)) {
+      expect(articleById(id)?.screens, id).toEqual(screens);
+      for (const screen of screens) expect(articleForScreen(screen, seller)?.id, screen).toBe(id);
+    }
+  });
+
+  it('name the buttons the screens show and use no dashes', () => {
+    const text = (id: string) => articleText(articleById(id)!);
+    expect(text('start-using-bms')).toContain('Apply to start');
+    expect(text('start-using-bms')).toContain('Send application');
+    expect(text('start-using-bms')).toContain('Confirm my email');
+    expect(text('open-my-invitation')).toContain('Save and continue');
+    expect(text('open-my-invitation')).toContain('Skip for now');
+    expect(text('sign-in')).toContain('Forgot password?');
+    expect(text('sign-in')).toContain('Find your sign-in page');
+    expect(text('install-bms')).toContain('Add to Home Screen');
+    for (const id of Object.keys(START)) expect(text(id), id).not.toMatch(/[\u2013\u2014]| - /);
+  });
+
+  it('answer a first-time question, and Ask BMS lists only articles that share a real word with it', () => {
+    const question = 'How do I sign up to this app first time';
+    expect(searchArticles(ARTICLES, question)[0]?.id).toBe('start-using-bms');
+    const listed = ['add-an-item', 'approve-a-request', 'add-a-branch', 'start-using-bms', 'why-no-sale-at-a-store', 'choose-what-needs-approval'].map((id) => ({ id }));
+    expect(ids(relatedArticles(question, listed))).toEqual(['start-using-bms']);
+    expect(relatedArticles('how do I do this in the app', listed)).toEqual([]);
+    expect(ids(relatedArticles('move stock', [{ id: 'move-stock-store-to-shop' }, { id: 'unknown-article' }]))).toEqual(['move-stock-store-to-shop']);
   });
 });
