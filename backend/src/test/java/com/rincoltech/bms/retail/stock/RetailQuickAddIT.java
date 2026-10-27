@@ -111,7 +111,7 @@ class RetailQuickAddIT extends IntegrationTest {
 
         assertThat(stockAt(br2, product)).isEqualByComparingTo("600");
         assertThat(stockAt(hq, product)).isEqualByComparingTo("0");
-        // The other item is untouched: its stock stands and the count never names it.
+        // The other item is untouched: its stock stands and Quick add never names it.
         assertThat(stockAt(hq, other)).isEqualByComparingTo("7");
         assertThat(added.get("total_qty").asString()).isEqualTo("600");
         // One opening movement of its own source, at the buying price typed; no stock count, so no lost or damaged
@@ -125,6 +125,9 @@ class RetailQuickAddIT extends IntegrationTest {
                 .isEqualTo(1);
         assertThat(scalar("SELECT count(*) FROM retail_stock_movements WHERE product_id = ?", product))
                 .isEqualTo(1);
+        // The item is made in its own unit with no pack (ADR-099), so no pack purpose or pack price is set.
+        assertThat(scalar("SELECT count(*) FROM retail_product_units WHERE product_id = ?", product))
+                .isEqualTo(0);
         assertThat(scalar("SELECT count(*) FROM retail_stocktakes WHERE tenant_id = ?", t.tenantId()))
                 .isEqualTo(1);
         // Starting stock is never profit: inventory against opening balance equity, 600 at 4,000; the shrinkage account
@@ -298,7 +301,7 @@ class RetailQuickAddIT extends IntegrationTest {
     }
 
     @Test
-    void aNameAlreadyInTheListIsRefusedAndTheExistingItemTakesTheCount() {
+    void aNameAlreadyInTheListIsRefusedAndTheExistingItemTakesTheStock() {
         ResponseEntity<JsonNode> first = quickAdd(item("Test Rice 1kg", 5_000, "5", hq));
         UUID product = productOf(first);
 
@@ -318,12 +321,12 @@ class RetailQuickAddIT extends IntegrationTest {
         existing.put("product_id", product);
         existing.put("qty", "8");
         existing.put("branch_id", hq);
-        ResponseEntity<JsonNode> counted = quickAdd(existing);
-        assertThat(counted.getStatusCode()).as("%s", counted.getBody()).isEqualTo(HttpStatus.CREATED);
-        assertThat(counted.getBody().get("item_made").asBoolean()).isFalse();
+        ResponseEntity<JsonNode> added = quickAdd(existing);
+        assertThat(added.getStatusCode()).as("%s", added.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(added.getBody().get("item_made").asBoolean()).isFalse();
         assertThat(stockAt(hq, product)).isEqualByComparingTo("13");
-        assertThat(counted.getBody().get("qty").asString()).isEqualTo("8");
-        assertThat(counted.getBody().get("total_qty").asString()).isEqualTo("13");
+        assertThat(added.getBody().get("qty").asString()).isEqualTo("8");
+        assertThat(added.getBody().get("total_qty").asString()).isEqualTo("13");
         // Adding nothing to an item already in the list is refused.
         existing.put("qty", "0");
         assertThat(quickAdd(existing).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
@@ -335,7 +338,7 @@ class RetailQuickAddIT extends IntegrationTest {
     }
 
     @Test
-    void theCountNeedsStockCountPermissionAndNothingIsMadeWithoutIt() {
+    void addingStockNeedsStockCountPermissionAndNothingIsMadeWithoutIt() {
         ResponseEntity<JsonNode> refused = quickAdd(item("Test Pen Blue", 500, "30", hq), CATALOGUE_ONLY, "*", "k-1");
         assertThat(refused.getStatusCode()).isIn(HttpStatus.FORBIDDEN, HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(scalar(
@@ -364,7 +367,7 @@ class RetailQuickAddIT extends IntegrationTest {
     }
 
     @Test
-    void theCountIsLimitedToTheBranchesInScope() {
+    void addingStockIsLimitedToTheBranchesInScope() {
         ResponseEntity<JsonNode> r = quickAdd(
                 item("Test Torch", 8_000, "4", br2),
                 ADMIN,

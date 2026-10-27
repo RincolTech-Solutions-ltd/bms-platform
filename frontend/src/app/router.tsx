@@ -133,7 +133,7 @@ const retailScreen = <P extends string>(path: P, crumb?: string, search?: (s: Re
 const textParams = (...names: string[]) => (s: Record<string, unknown>) =>
   Object.fromEntries(names.map((n) => [n, typeof s[n] === 'string' ? s[n] : undefined])) as Record<string, string | undefined>;
 const retailHomeRoute = retailScreen('/').lazy(() => import('../areas/staff/retail/home').then((m) => m.Route));
-// `item` is the item Quick add just made (issue #632, Sell it) and `branch` where it was counted: the sale starts with it on there.
+// `item` is the item Quick add just made (issue #632, Sell it) and `branch` where its stock was added: the sale starts with it on there.
 const retailSaleRoute = retailScreen('/sale', 'Record a sale', textParams('item', 'branch')).lazy(() => import('../areas/staff/retail/sale').then((m) => m.Route));
 const retailCreditSalesRoute = retailScreen('/credit-sales', 'Credit sales').lazy(() => import('../areas/staff/retail/sales').then((m) => m.CreditRoute));
 const retailSalesRoute = retailScreen('/sales', 'All sales').lazy(() => import('../areas/staff/retail/sales').then((m) => m.Route));

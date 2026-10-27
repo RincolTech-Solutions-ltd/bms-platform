@@ -269,7 +269,7 @@ describe('Sell it from Quick add (issue #632)', () => {
   const here = owner.branches?.[0]?.id ?? '';
   const other = owner.branches?.[1]?.id ?? '';
 
-  it('puts the item on the sale at the branch Quick add counted at, and clears the address once it is on', async () => {
+  it('puts the item on the sale at the branch Quick add added its stock at, and clears the address once it is on', async () => {
     catalogue = [{ ...made, qty: '600' }];
     getProduct.mockResolvedValue(made);
     const started = vi.fn();

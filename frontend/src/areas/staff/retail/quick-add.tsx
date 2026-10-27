@@ -69,7 +69,7 @@ export const NOT_SURE = 'We could not tell whether this was saved. Tap Add again
 export function QuickAddForm({ initialName = '', onSell }: {
   /** What the name starts with: on Sell's not-found, what was typed in the search. */
   initialName?: string;
-  /** Opens Sell with the item on the sale, at the branch it was counted at. */
+  /** Opens Sell with the item on the sale, at the branch its stock was added at. */
   onSell?: (productId: string, branchId: string) => void;
 }) {
   const { me } = useStaff();
@@ -79,7 +79,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const here = useStockingBranch();
   const categories = useQuery({ queryKey: ['retail', 'catalogue', 'categories'], queryFn: () => retail.listCategories() });
   const units = useQuery({ queryKey: ['retail', 'catalogue', 'units'], queryFn: () => retail.listUnits() });
-  // Where the stock is: every branch that keeps goods where this person may count, stores too; the branch in use first.
+  // Where the stock is: every branch that keeps goods where this person may add stock, stores too; the branch in use first.
   const places = branchesWhere(me, COUNT).filter((b) => b.id && b.stocks_goods !== false);
   const mayCount = places.length > 0;
   const [chosenWhere, setWhere] = useState<string | null>(null);
@@ -107,7 +107,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
   // A Piece or a General the owner switched off is never switched back on by the server: the person chooses one instead.
   const pieceOff = piece === undefined && (units.data ?? []).some((u) => u.active === false && (u.name ?? '').trim().toLowerCase() === 'piece');
   const generalOff = (categories.data ?? []).some((c) => c.active === false && (c.name ?? '').trim().toLowerCase() === 'general');
-  // What was said when the person kept an item already in the list instead of a duplicate (someone who may not count).
+  // What was said when the person kept an item already in the list instead of a duplicate (someone who may not add stock).
   const [kept, setKept] = useState<string | null>(null);
   // The piece unit is chosen once the units are read, unless the person has chosen another.
   useEffect(() => {
@@ -287,7 +287,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
           />
         </>
       ) : (
-        // No branch where this person may count (rule 25): the field says so and who to ask, and the item is added with no stock.
+        // No branch where this person may add stock (rule 25): the field says so and who to ask, and the item is added with no stock.
         <EmptyChoice id="qa-where" label="Where" text={NO_PLACE} ask={NO_COUNT_HERE} />
       )}
       </div>
@@ -329,7 +329,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
           openLabel={mayCount ? 'Use the existing one and just add stock' : 'Keep the existing one'}
           onOpen={(id) => {
             if (mayCount) return add.mutate({ productId: id });
-            // Nothing to add for someone who may not count: the existing item stays as it is and the form is cleared, so Add
+            // Nothing to add for someone who may not add stock: the existing item stays as it is and the form is cleared, so Add
             // never sends the same name again.
             setKept(`${exists.name} is already in your items. Nothing new was added. To add stock to it, ask your manager.`);
             setExists(null);

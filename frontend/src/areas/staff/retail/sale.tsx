@@ -809,7 +809,7 @@ export function RecordSale({ startItem, startBranch, onStarted }: { startItem?: 
           <FirstItemsCard />
           {!noItems && <NoStockHere branchId={branchId} />}
           <SaleForm key={`${branchId}-${round}`} branchId={branchId} branchName={branchName} onSaved={(s, r) => { setSale(s); setReceived(r); }} onQueued={setQueued}
-            // Sell it names the branch it counted at: the item waits until that branch is the one in use, so it is never looked
+            // Sell it names the branch its stock was added at: the item waits until that branch is the one in use, so it is never looked
             // up (and the address cleared) at the branch the sale opened with before the switch landed.
             startItem={round === 0 && (!startBranch || startBranch === branchId) ? startItem : undefined} onStarted={onStarted} />
         </>

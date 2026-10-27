@@ -10,7 +10,7 @@ import { StaffContext } from '../context';
 
 // Quick add (issue #632): one form and one tap for an item, its prices and how many there are. Add sends one request with the
 // branch chosen, says what was added, and offers Add another (category and where kept) and Sell it. A name already in the list
-// offers to use that item and just add stock. Without the count permission the item is added with no stock. Offline, the form
+// offers to use that item and just add stock. Without retail.stocktake.commit, which adding stock needs, the item is added with no stock. Offline, the form
 // says it needs the internet. Every item, category and amount is fabricated.
 
 vi.setConfig({ testTimeout: 20000 });
@@ -39,7 +39,7 @@ const owner = mockMe('admin');
 const branch = owner.branches?.[0];
 const other = owner.branches?.[1];
 
-/** The owner without the count permission: catalogue manage only. */
+/** The owner who may not add stock (no retail.stocktake.commit): catalogue manage only. */
 function catalogueOnly(): Me {
   const scopes = { ...(owner.permission_scopes ?? {}) };
   delete scopes['retail.stocktake.commit'];
@@ -88,7 +88,7 @@ describe('quick add', () => {
     expect(onSell).toHaveBeenCalledWith('p1', branch?.id);
   });
 
-  it('counts at the branch or store chosen in Where, and Add another keeps the category and where', async () => {
+  it('adds the stock at the branch or store chosen in Where, and Add another keeps the category and where', async () => {
     quickAdd.mockResolvedValue({ product_id: 'p2', code: 'BLB-0001', description: 'Test Tube', unit: 'pc', item_made: true, category_made: false, unit_made: false, branch_id: other?.id, qty: '3' });
     open(owner);
     fireEvent.change(screen.getByLabelText(/^Where/), { target: { value: other?.id } });
@@ -161,7 +161,7 @@ describe('quick add', () => {
     expect(screen.queryByText('Add a buying price so profit is right. If you do not know it yet, buying stock sets it.')).toBeNull();
   });
 
-  it('adds the item with no stock for someone who may not count, and says to ask', async () => {
+  it('adds the item with no stock for someone who may not add stock, and says to ask', async () => {
     quickAdd.mockResolvedValue({ product_id: 'p4', description: 'Test Pen', unit: 'pc', item_made: true });
     open(catalogueOnly());
     expect(screen.getByTestId('qa-where-empty').textContent).toContain('The item is added with no stock. Ask your manager to add its stock.');
@@ -195,7 +195,7 @@ describe('quick add', () => {
     expect(screen.getByLabelText(/^Where/).getAttribute('aria-required')).toBe('true');
   });
 
-  it('keeps the existing item for someone who may not count, and clears the name so Add never loops', async () => {
+  it('keeps the existing item for someone who may not add stock, and clears the name so Add never loops', async () => {
     quickAdd.mockRejectedValueOnce(new RetailError('This product already exists: Test Pen (GNR-0002).', 422, 'duplicate_product_name', {
       existing_id: 'p8', existing_code: 'GNR-0002', existing_name: 'Test Pen', may_add_anyway: false,
     }));
@@ -244,7 +244,7 @@ describe('quick add', () => {
     expect((quickAdd.mock.calls[1] as [unknown, string])[1]).not.toBe((quickAdd.mock.calls[0] as [unknown, string])[1]);
   });
 
-  it('asks for the name, the price and the count before sending anything', async () => {
+  it('asks for the name, the price and how many before sending anything', async () => {
     open(owner);
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     expect(await screen.findByText('Type what the item is.')).toBeTruthy();
@@ -278,7 +278,7 @@ describe('the words and defaults', () => {
     expect(pieceUnit([{ id: 'a', name: 'Box' }])).toBeUndefined();
   });
 
-  it('says what was added, and nothing about stock when none was counted', () => {
+  it('says what was added, and nothing about stock when none was added', () => {
     expect(addedLine({ description: 'Test Bulb', unit: 'pc', item_made: true, qty: '600' }, 'Test Store')).toBe('Test Bulb added: 600 pc at Test Store');
     expect(addedLine({ description: 'Test Bulb', item_made: true }, 'Test Store')).toBe('Test Bulb added.');
     expect(addedLine({ description: 'Test Bulb', unit: 'pc', item_made: false, qty: '10', total_qty: '60' }, 'Test Store')).toBe('Test Bulb: 10 pc added at Test Store, 60 pc now');
