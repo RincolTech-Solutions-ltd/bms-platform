@@ -13847,6 +13847,10 @@ export interface components {
             qty?: string;
             /** Format: int64 */
             sell_minor?: number;
+            /** @description On the response that made the line only: true when use_from_now_on was left out because the pack has its own price and the caller may not change prices (issue #624) */
+            size_kept?: boolean;
+            /** @description Why the usual size was kept, in one plain sentence, with size_kept */
+            size_kept_note?: string;
             unit?: string;
             /** @description Base units in one pack of the line's unit */
             unit_factor?: string;
@@ -14949,6 +14953,8 @@ export interface components {
             below_cost?: boolean;
             /** @description Base units in one pack, three places, for example 12.000 */
             factor?: string;
+            /** @description True when the pack has its own selling price, sent to every caller (the amount only to one who may see prices): a new usual size or making it buy only then needs retail.price.edit (issue #624) */
+            has_own_price?: boolean;
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
@@ -15484,6 +15490,10 @@ export interface components {
             qty_total?: string;
             /** Format: int64 */
             sell_minor?: number;
+            /** @description On the response that made the line only: true when use_from_now_on was left out because the pack has its own price and the caller may not change prices (issue #624) */
+            size_kept?: boolean;
+            /** @description Why the usual size was kept, in one plain sentence, with size_kept */
+            size_kept_note?: string;
             unit?: string;
             /**
              * Format: int64
