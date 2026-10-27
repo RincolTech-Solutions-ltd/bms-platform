@@ -82,13 +82,17 @@ describe('Paid how on Buy stock', () => {
     expect(screen.getByRole('button', { name: 'Save the purchase' }).getAttribute('data-not-ready')).toBeNull();
   });
 
-  it('with no supplier yet, marks that line needed only until a new name is typed (review of #619)', async () => {
+  it('with no supplier yet, Save goes to Add a new supplier until a name is typed (review of #619)', async () => {
     screenOf(<RestockForm initial={restockDraft('credit')} />);
-    expect(await screen.findByText(/^No suppliers yet\. Type a new one below\./)).toBeTruthy();
-    expect(document.querySelector('[data-needed]')?.id).toBe('supplier');
-    fireEvent.change(screen.getByLabelText('Add a new supplier'), { target: { value: 'Test Supplier 09' } });
-    expect(screen.queryByTestId('credit-needs-supplier')).toBeNull();
+    expect(await screen.findByText('No suppliers yet. Type a new one below.')).toBeTruthy();
+    const name = screen.getByLabelText('Add a new supplier');
+    expect(name.getAttribute('aria-required')).toBe('true');
     expect(document.querySelector('[data-needed]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save the purchase' }));
+    expect(document.activeElement).toBe(name);
+    fireEvent.change(name, { target: { value: 'Test Supplier 09' } });
+    expect(screen.queryByTestId('credit-needs-supplier')).toBeNull();
+    expect(name.getAttribute('aria-required')).toBeNull();
   });
 
   it('draws the total cost in tabular figures', () => {

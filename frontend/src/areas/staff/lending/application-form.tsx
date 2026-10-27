@@ -164,7 +164,6 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
             <SelectField name="product_id" label="Loan product" form={form} required value={draft.productId} onChange={(v) => setDraft((d) => ({ ...d, productId: v, pledges: [] }))}
               blankLabel={products.isPending ? 'Loading products' : 'Choose a product'} options={(products.data ?? []).map((p) => ({ value: p.id ?? '', label: `${p.name ?? ''} (${p.code ?? ''})` }))}
               empty={products.data || products.isError ? { text: 'No loan products yet.', ask: 'Ask the owner to add a loan product first.', load: products } : undefined} />
-            <Problem error={products.error} />
           </>
         )}
         {terms && (

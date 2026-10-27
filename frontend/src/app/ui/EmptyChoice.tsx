@@ -146,7 +146,7 @@ export function EmptyChoice<T>({ id, label, text, ask, add, required = false, lo
       {load?.isError ? (
         <>
           <p role="alert">{LOAD_FAILED}</p>
-          <button type="button" id={id} onClick={() => void load.refetch()}>Try again</button>
+          <button type="button" id={id} {...needed} onClick={() => void load.refetch()}>Try again</button>
         </>
       ) : add ? (
         <>

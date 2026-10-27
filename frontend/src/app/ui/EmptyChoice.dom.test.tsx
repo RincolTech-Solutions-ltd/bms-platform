@@ -37,6 +37,12 @@ describe('EmptyChoice', () => {
     expect(refetch).toHaveBeenCalledTimes(1);
   });
 
+  it('makes Try again where Save goes when the field is needed and its list could not be read', () => {
+    const { container } = render(<EmptyChoice id="unit" label="Counted in" required text="No units yet." load={{ isError: true, refetch: () => undefined }} />);
+    expect(focusFirstMissing(container)).toBe(true);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Try again' }));
+  });
+
   it('is shown for a list that answered with none or failed, never while it loads', () => {
     expect(showsEmptyChoice({ isError: false, data: undefined })).toBe(false);
     expect(showsEmptyChoice({ isError: false, data: [] })).toBe(true);
