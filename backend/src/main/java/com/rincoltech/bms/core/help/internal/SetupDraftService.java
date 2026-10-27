@@ -79,7 +79,7 @@ class SetupDraftService implements SetupDrafts {
     }
 
     @Override
-    public <T> Result<T> draft(Request request, Reader<T> reader) {
+    public void requireOn() {
         if (!enabled()) {
             // Nothing of the business is read or sent for a business the platform has not named (owner decision D62).
             throw new ApiException(
@@ -88,15 +88,24 @@ class SetupDraftService implements SetupDrafts {
                     "The setup helper is off",
                     "Reading a list for you is not switched on for this business. Type it or import a file instead.");
         }
+    }
+
+    @Override
+    public <T> Result<T> draft(Request request, Reader<T> reader) {
+        requireOn();
         Principal principal = CurrentPrincipal.require();
-        ListFiles.Read given = given(request);
+        boolean typed = request.text() != null && !request.text().isBlank();
+        if (typed == (request.upload() != null)) {
+            throw ApiException.rule("setup_list_missing", "Type your list, or choose one photo or file.");
+        }
         Instant start = clock.now();
         Instant dayStart = LocalDate.ofInstant(start, tenant.profile().timezone())
                 .atStartOfDay(tenant.profile().timezone())
                 .toInstant();
+        // The limits are taken before the file is decoded, so a person past their hour costs the server nothing.
         SetupStore.Start started = store.start(
                 request.kind(),
-                given.source(),
+                typed ? "text" : ListFiles.source(request.upload()),
                 principal.userId(),
                 start,
                 start.minus(Duration.ofHours(1)),
@@ -112,10 +121,22 @@ class SetupDraftService implements SetupDrafts {
                     "You have sent " + properties.userHourlyDrafts()
                             + " lists in the last hour. Try again later, or type it or import a file instead.");
         }
-        Tally tally = new Tally(started.id(), start);
         if (started.limit() == SetupStore.Limit.BUSINESS) {
             return Result.none("daily_cap");
         }
+        Tally tally = new Tally(started.id(), start);
+        try {
+            return drafted(request, reader, tally);
+        } finally {
+            // Whatever went wrong after the row was written (a refused file, a failure of ours), it never stays
+            // started,
+            // so it cannot hold a place in the day's cap.
+            tally.finishIfOpen();
+        }
+    }
+
+    private <T> Result<T> drafted(Request request, Reader<T> reader, Tally tally) {
+        ListFiles.Read given = given(request);
         if (given.pictureDataUrl() == null
                 && (given.text() == null || given.text().isBlank())) {
             tally.finish("unreadable", null, 0);
@@ -190,12 +211,9 @@ class SetupDraftService implements SetupDrafts {
         return Result.none("all_failed");
     }
 
-    /** What the owner gave: exactly one of typed text and a file, the text cut to the limit. */
+    /** What the owner gave, exactly one of typed text and a file (checked already), read into text or a picture. */
     private ListFiles.Read given(Request request) {
         boolean typed = request.text() != null && !request.text().isBlank();
-        if (typed == (request.upload() != null)) {
-            throw ApiException.rule("setup_list_missing", "Type your list, or choose one photo or file.");
-        }
         ListFiles.Read read =
                 typed ? new ListFiles.Read(request.text().strip(), null, "text") : ListFiles.read(request.upload());
         if (read.text() != null && read.text().length() > properties.maxTextChars()) {
@@ -233,6 +251,7 @@ class SetupDraftService implements SetupDrafts {
         private int inputTokens;
         private int outputTokens;
         private long costMicro;
+        private boolean finished;
 
         Tally(UUID id, Instant start) {
             this.id = id;
@@ -245,7 +264,15 @@ class SetupDraftService implements SetupDrafts {
             costMicro += cost;
         }
 
+        /** A draft stopped by a refused file or a failure of ours is finished as one that could not be read or failed. */
+        void finishIfOpen() {
+            if (!finished) {
+                finish(costMicro > 0 || !failures.isEmpty() ? "all_failed" : "unreadable", null, 0);
+            }
+        }
+
         void finish(String outcome, AskProviders.Provider provider, int rows) {
+            finished = true;
             store.finish(
                     id,
                     new SetupStore.Finish(

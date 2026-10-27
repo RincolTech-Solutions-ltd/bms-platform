@@ -43,13 +43,26 @@ final class ItemDraftReader implements SetupDrafts.Reader<List<ItemDraftReader.R
     private final Map<String, String> units = new HashMap<>();
     private final int exponent;
     private final boolean withCost;
+    private final boolean withPacks;
 
     ItemDraftReader(ObjectMapper mapper, List<String> categories, List<String> units, int exponent, boolean withCost) {
+        this(mapper, categories, units, exponent, withCost, true);
+    }
+
+    /** {@code withPacks} false while the shop's pack capability is off: no pack is kept, as the import would refuse it. */
+    ItemDraftReader(
+            ObjectMapper mapper,
+            List<String> categories,
+            List<String> units,
+            int exponent,
+            boolean withCost,
+            boolean withPacks) {
         this.mapper = mapper;
         categories.forEach(c -> this.categories.putIfAbsent(key(c), c));
         units.forEach(u -> this.units.putIfAbsent(key(u), u));
         this.exponent = exponent;
         this.withCost = withCost;
+        this.withPacks = withPacks;
     }
 
     @Override
@@ -80,7 +93,8 @@ final class ItemDraftReader implements SetupDrafts.Reader<List<ItemDraftReader.R
             BigDecimal size = DraftJson.number(item, "pack_size");
             size = size == null ? null : size.stripTrailingZeros();
             String packSize = null;
-            if (packUnit != null
+            if (withPacks
+                    && packUnit != null
                     && size != null
                     && !key(packUnit).equals(key(unit))
                     && size.compareTo(BigDecimal.ONE) >= 0

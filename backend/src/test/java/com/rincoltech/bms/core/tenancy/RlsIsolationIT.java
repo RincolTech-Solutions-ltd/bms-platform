@@ -1110,7 +1110,7 @@ public class RlsIsolationIT {
                         INSERT INTO help_ask_spend (id, tenant_id, provider, model, reserved_at, cost_micro, cost_currency)
                         VALUES (?, ?, 'gemini', 'test-model', now(), 0, 'USD')
                         """).params(UUID.randomUUID(), t.tenantId()).update();
-        // The setup helper (migration V113, #626): a draft's row of counts, never the list.
+        // The setup helper (migration V112, #626): a draft's row of counts, never the list.
         owner.sql("""
                         INSERT INTO help_setup_drafts (id, tenant_id, user_id, asked_at, kind, source, outcome, provider,
                                                        model, rows_drafted, cost_currency)

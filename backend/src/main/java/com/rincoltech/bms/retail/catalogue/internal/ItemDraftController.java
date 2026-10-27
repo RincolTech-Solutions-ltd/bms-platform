@@ -1,6 +1,5 @@
 package com.rincoltech.bms.retail.catalogue.internal;
 
-import com.rincoltech.bms.core.help.SetupDrafts;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import com.rincoltech.bms.retail.catalogue.internal.ItemDraftApi.ItemDraft;
 import io.swagger.v3.oas.annotations.Operation;
@@ -47,6 +46,6 @@ class ItemDraftController {
             @Parameter(description = "The kind of shop chosen in Set up your shop, such as Hardware")
                     @RequestParam(name = "shop_type", required = false)
                     String shopType) {
-        return service.draft(text, SetupDrafts.Upload.of(file), shopType);
+        return service.draft(text, file, shopType);
     }
 }

@@ -504,7 +504,11 @@ class ExistingLoanImport {
                 return "Member " + m.memberNo() + " has this phone, in a branch outside yours.";
             }
             p.member = m;
-            p.matchedNote = "Member " + m.memberNo() + ", " + m.fullName() + ", has this phone";
+            p.matchedNote = "Member " + m.memberNo() + ", " + m.fullName() + ", has this phone"
+                    + (sameName(m.fullName(), name)
+                            ? ""
+                            : ". The file says " + name + ": check it is the same person before you record, or fix the"
+                                    + " phone");
             return null;
         }
         NewMember known = intake.byPhone.get(e164.get());
@@ -523,6 +527,11 @@ class ExistingLoanImport {
         p.newMember = known;
         p.member = known.placeholder;
         return null;
+    }
+
+    /** The same name ignoring case and runs of spaces. */
+    private static boolean sameName(String a, String b) {
+        return a.strip().replaceAll("\\s+", " ").equalsIgnoreCase(b.strip().replaceAll("\\s+", " "));
     }
 
     /** One repayment row of a loan already read; the problem, or null. */

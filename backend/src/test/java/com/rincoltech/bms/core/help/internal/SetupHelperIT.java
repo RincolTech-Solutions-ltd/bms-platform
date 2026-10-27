@@ -220,8 +220,9 @@ class SetupHelperIT extends IntegrationTest {
                 .isEqualTo("Test Fasteners");
         assertThat(rows.get(0).get("sell_price_minor").asLong()).isEqualTo(7500);
         assertThat(rows.get(0).get("cost_price_minor").asLong()).isEqualTo(6000);
-        assertThat(rows.get(1).get("pack_unit").asString()).isEqualTo("Box");
-        assertThat(rows.get(1).get("pack_factor").asString()).isEqualTo("12");
+        assertThat(rows.get(1).get("pack_unit").isNull())
+                .as("no pack while the shop's pack capability is off: the import would refuse it")
+                .isTrue();
 
         LlmClient.Request sent = GEMINI.requests().getFirst();
         assertThat(sent.json()).isTrue();
@@ -245,6 +246,28 @@ class SetupHelperIT extends IntegrationTest {
         assertThat(count("SELECT count(*) FROM help_ask_spend WHERE tenant_id = ? AND provider = 'gemini'"
                         + " AND settled_at IS NOT NULL"))
                 .isEqualTo(1);
+
+        // The rows, written as the screen writes them (setup-helper-state.ts itemsCsv), pass the real import's check.
+        StringBuilder csv = new StringBuilder("description,category,unit,cost_price,sell_price\n");
+        for (JsonNode r : rows) {
+            csv.append(String.join(
+                            ",",
+                            r.get("description").asString(),
+                            r.get("category").asString(),
+                            r.get("unit").asString(),
+                            r.get("cost_price_minor").isNull()
+                                    ? ""
+                                    : r.get("cost_price_minor").asString(),
+                            r.get("sell_price_minor").asString()))
+                    .append('\n');
+        }
+        JsonNode checked =
+                ok(api.post("/api/v1/retail/products/import?dry_run=true", Map.of("csv", csv.toString()), admin));
+        assertThat(checked.get("errors").asInt()).as("%s", checked).isZero();
+        assertThat(checked.get("added").asInt()).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM retail_products WHERE tenant_id = ?"))
+                .as("the check saves nothing either")
+                .isZero();
     }
 
     @Test
@@ -330,6 +353,9 @@ class SetupHelperIT extends IntegrationTest {
         ResponseEntity<JsonNode> wrongFile =
                 send(api, ITEMS, admin, null, new byte[] {(byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0});
         assertThat(wrongFile.getBody().get("code").asString()).isEqualTo("setup_file_not_read");
+        assertThat(lastDraft())
+                .as("a refused file never leaves its row started, so it holds no place in the day's cap")
+                .containsEntry("outcome", "unreadable");
         assertThat(GEMINI.requests()).isEmpty();
     }
 
@@ -371,5 +397,29 @@ class SetupHelperIT extends IntegrationTest {
                 .isZero();
         assertThat(count("SELECT count(*) FROM lending_members WHERE tenant_id = ?"))
                 .isEqualTo(1);
+    }
+
+    /**
+     * A member is named only to someone who may bring loans into that member's branch: a branch manager of the head office
+     * drafting a phone held in the second branch gets a new row, which the import refuses in its own words.
+     */
+    @Test
+    void aDraftNeverNamesAMemberOfABranchTheCallerMayNotUse() {
+        Map<String, Object> member = new java.util.LinkedHashMap<>();
+        member.put("branch_id", t.secondBranch());
+        member.put("full_name", "Test Member Elsewhere");
+        member.put("phone", "0700000203");
+        member.put("id_type", "none");
+        ResponseEntity<JsonNode> created = api.post("/api/v1/lending/members", member, admin);
+        assertThat(created.getStatusCode()).as("%s", created.getBody()).isEqualTo(HttpStatus.CREATED);
+        String manager = AskBmsIT.signIn(t, api, "setup-manager", new Api.Role("branch_manager", t.headOffice()));
+        GEMINI.thenAnswer(answer("""
+                {"loans": [{"ref": "Y-09", "member_name": "Someone", "member_phone": "0700000203", "principal": 100000,
+                  "date": "2026-08-01", "term_months": 1, "payments": []}]}"""));
+        JsonNode loan = ok(send(api, LOANS, manager, "Y-09 Someone 0700000203 100000", null))
+                .get("loans")
+                .get(0);
+        assertThat(loan.get("member_no").isNull()).isTrue();
+        assertThat(loan.get("member_full_name").isNull()).isTrue();
     }
 }

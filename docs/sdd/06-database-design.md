@@ -717,7 +717,7 @@ replaces only a row past its expiry under the same key (`ON CONFLICT ... WHERE e
 
 ### `help_setup_drafts` (RLS)
 
-(ADR-102; migration `V113`, issue #626) The setup helper's draft log: one row per draft, written before the providers are asked,
+(ADR-102; migration `V112`, issue #626) The setup helper's draft log: one row per draft, written before the providers are asked,
 under the business's advisory lock, so the person's hourly limit and the business's daily cap count rows already recorded.
 `id`, `tenant_id`, `user_id` (FK `(tenant_id, user_id)` to `users`), `asked_at`, `kind` (`retail` or `lending`), `source`
 (`text`, `photo` or `file`), `outcome` (`started` until it is finished, then `drafted`, `no_provider`, `all_failed`,

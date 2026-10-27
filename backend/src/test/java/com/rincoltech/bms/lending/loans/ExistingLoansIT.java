@@ -1383,7 +1383,8 @@ class ExistingLoansIT extends LoanFixtures {
         assertThat(messages(noBranch).get("REG-301"))
                 .as("a member already holding the phone needs no branch")
                 .startsWith("ready:")
-                .contains("Member " + known + ", Test Borrower Known, has this phone");
+                .contains("Member " + known + ", Test Borrower Known, has this phone")
+                .contains("The file says Someone Else: check it is the same person");
 
         ResponseEntity<JsonNode> checked = importCsv(csv, true, adminPerms, t.headOffice());
         assertThat(checked.getBody().get("errors").asInt())

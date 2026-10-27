@@ -1179,7 +1179,7 @@ written from this corpus, is Ask BMS (#20, owner decision D52, ADR-096, migratio
 
 ## 3.35.2 The setup helper: the app reads your list (SET)
 
-Issue #626, owner decision D62, ADR-102, migration `V113`, endpoints in chapter 7 (`GET /help/setup` in section 7.11.28, the two
+Issue #626, owner decision D62, ADR-102, migration `V112`, endpoints in chapter 7 (`GET /help/setup` in section 7.11.28, the two
 `/import/draft` routes beside their imports), `docs/runbooks/ask-bms.md`. Step 2 after Set up your shop (ADR-100). Off for every
 business until the platform names it in `BMS_SETUP_AI_TENANTS`.
 

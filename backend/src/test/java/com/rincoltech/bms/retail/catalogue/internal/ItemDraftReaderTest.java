@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -71,5 +72,30 @@ class ItemDraftReaderTest {
                                 "{\"items\": [{\"name\": \"Test Tea\", \"unit\": \"Packet\", \"sell_price\": \"120.505\"}]}")
                         .orElseThrow())
                 .containsExactly(new Row("Test Tea", "General", "Packet", 12051L, null, null, null));
+    }
+
+    /** While the shop's pack capability is off no pack is kept, since the import would refuse the row. */
+    @Test
+    void noPackIsKeptWhileThePackCapabilityIsOff() throws IOException {
+        ItemDraftReader off = new ItemDraftReader(
+                MAPPER, List.of("Test Groceries"), List.of("Piece", "Litre", "Kg", "Carton"), 0, true, false);
+        assertThat(off.read(fixture("retail-stock-book.json")).orElseThrow())
+                .extracting(Row::packUnit)
+                .containsOnlyNulls();
+    }
+
+    /** The reply shape the instructions ask for is one JSON object, with or without the buying price and the pack. */
+    @Test
+    void theAskedForReplyIsJsonInEveryForm() {
+        for (boolean cost : List.of(true, false)) {
+            for (boolean packs : List.of(true, false)) {
+                String text = ItemDraftService.instructions(cost, packs);
+                JsonNode shape = MAPPER.readTree(text.substring(text.indexOf("{\"items\"")));
+                JsonNode item = shape.get("items").get(0);
+                assertThat(item.has("buy_price")).isEqualTo(cost);
+                assertThat(item.has("pack_unit")).isEqualTo(packs);
+                assertThat(text.contains("bigger pack")).isEqualTo(packs);
+            }
+        }
     }
 }

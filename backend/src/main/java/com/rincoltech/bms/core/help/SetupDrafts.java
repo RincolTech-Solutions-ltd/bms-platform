@@ -19,6 +19,12 @@ public interface SetupDrafts {
     Status status();
 
     /**
+     * Throws 403 {@code setup_ai_off} unless the platform names the bound business. A caller calls it first, before it reads
+     * anything of the business for the context or the upload.
+     */
+    void requireOn();
+
+    /**
      * Drafts rows from what the owner gave. Throws 403 {@code setup_ai_off} while the helper is off for the business, 429
      * {@code setup_ai_rate_limited} past the person's drafts an hour, and 422 {@code setup_file_not_read} for a file of a
      * kind or size it cannot read. Not to be called inside a transaction: a provider may take its whole budget.

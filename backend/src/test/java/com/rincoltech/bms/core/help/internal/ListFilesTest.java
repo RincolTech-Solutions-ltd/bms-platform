@@ -115,6 +115,43 @@ class ListFilesTest {
         assertThat(scanned.source()).isEqualTo("file");
     }
 
+    /** A PNG whose header declares a picture of the given size and holds no pixels: what a crafted file looks like. */
+    static byte[] declaredPng(int width, int height) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write(new byte[] {(byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'});
+        java.nio.ByteBuffer ihdr = java.nio.ByteBuffer.allocate(17);
+        ihdr.put("IHDR".getBytes(StandardCharsets.US_ASCII)).putInt(width).putInt(height);
+        ihdr.put((byte) 8).put((byte) 6).put((byte) 0).put((byte) 0).put((byte) 0);
+        java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+        crc.update(ihdr.array());
+        out.write(java.nio.ByteBuffer.allocate(4).putInt(13).array());
+        out.write(ihdr.array());
+        out.write(java.nio.ByteBuffer.allocate(4).putInt((int) crc.getValue()).array());
+        return out.toByteArray();
+    }
+
+    /** The size is read from the header before anything is decoded, so a declared 40000 by 40000 picture is refused. */
+    @Test
+    void aPhotoDeclaringAHugeSizeIsRefusedBeforeItIsDecoded() throws IOException {
+        assertThatThrownBy(() -> ListFiles.read(upload("big.png", declaredPng(40_000, 40_000))))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("too big to read");
+    }
+
+    /** A page declaring 200 inches a side is drawn no larger than the longest side that is sent. */
+    @Test
+    void aScannedPageOfAnySizeIsDrawnSmall() throws IOException {
+        ByteArrayOutputStream scan = new ByteArrayOutputStream();
+        try (PDDocument doc = new PDDocument()) {
+            doc.addPage(new PDPage(new org.apache.pdfbox.pdmodel.common.PDRectangle(14_400, 14_400)));
+            doc.save(scan);
+        }
+        String url = ListFiles.read(upload("huge.pdf", scan.toByteArray())).pictureDataUrl();
+        BufferedImage sent = ImageIO.read(new ByteArrayInputStream(
+                Base64.getDecoder().decode(url.substring("data:image/jpeg;base64,".length()))));
+        assertThat(Math.max(sent.getWidth(), sent.getHeight())).isLessThanOrEqualTo(ListFiles.MAX_SIDE);
+    }
+
     @Test
     void anythingElseIsRefusedInPlainWords() {
         assertThatThrownBy(() ->

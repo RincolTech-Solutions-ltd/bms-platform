@@ -150,7 +150,7 @@ describe('the setup helper on Import existing loans', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Read my list' }));
     expect(await screen.findByText('1 loan from your register')).toBeTruthy();
     expect(screen.getByText('Worked out from 10% a month for 2 months. Check it against the register.')).toBeTruthy();
-    fireEvent.change(await screen.findByLabelText('Loan product for these loans'), { target: { value: 'LOAN1' } });
+    fireEvent.change(await screen.findByLabelText(/Loan product for these loans/), { target: { value: 'LOAN1' } });
     expect(importCsv).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Check these loans' }));
     await waitFor(() => expect(importCsv).toHaveBeenCalledTimes(1));

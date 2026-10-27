@@ -5,7 +5,7 @@
 Proposed (issue #626, owner decision D62 of 27 Oct 2026), accepted on merge. Step 2 of the setup helper, after Set up your shop
 (ADR-100, #628). Builds on ADR-096 (Ask BMS: its provider chain, keys, never-Claude guard and spend log are reused), ADR-037 (the
 gateway's OpenAI-compatible adapter, which gains a picture on a user message), the item import (#146, ADR-081) and the existing
-loans import (ADR-071). Migration `V113`. Endpoints in chapter 7: `GET /help/setup` (section 7.11.28),
+loans import (ADR-071). Migration `V112`. Endpoints in chapter 7: `GET /help/setup` (section 7.11.28),
 `POST /retail/products/import/draft` and `POST /lending/existing-loans/import/draft`. No permission added.
 
 ## Context
@@ -33,13 +33,13 @@ read. So what is sent, what is kept and who it is sent for has to be decided, an
 3. **What is sent.** To the one provider being tried, over https to its allow-listed host: the fixed instructions; the list as
    typed, or the text of the file (a CSV or text file as UTF-8, the cells of the first sheet of an Excel workbook, the text of a
    PDF), or one picture (a photo, or the first page of a scanned PDF) drawn again on the server as a JPEG at most 2000 pixels on its
-   longest side, so its metadata, a phone's location among it, never leaves; and a short context. For a shop the context is the
+   longest side, so its metadata, a phone's location among it, never leaves (its size is read from its header first: more than 120 megapixels is refused, and it is decoded skipping rows and columns, so no file can make the server hold a huge picture; a scanned page is drawn no larger than 2000 pixels whatever size it declares); and a short context. For a shop the context is the
    kind of shop, its active category and unit names with their usual packs, and up to 300 item names with their units, so names
    are matched and not drafted twice. For a lender it is the currency and today's date only: the member list is never sent, and a
-   drafted borrower is matched to a member by phone on the server (`MemberLookup.findByPhone`). Buying prices are neither asked for
+   drafted borrower is matched to a member by phone on the server (`MemberLookup.findByPhone`), and named only to someone who may bring loans into that member's branch. Buying prices are neither asked for
    nor returned for someone without `retail.profit.read`.
 4. **What is kept.** Nothing of the list, the file, the picture, the context or the draft: they live in the request and its
-   answer only, and no log line holds them. `help_setup_drafts` (V113, forced RLS) keeps one row per draft: who, when, retail or
+   answer only, and no log line holds them. `help_setup_drafts` (V112, forced RLS) keeps one row per draft: who, when, retail or
    lending, typed, photo or file, the outcome, the provider and model, the providers that failed before it as `name:reason`, how
    many rows came back, tokens and the estimated cost. Every provider call reserves and settles its cost in Ask BMS's
    `help_ask_spend`, so the DeepSeek monthly cap (`BMS_HELP_ASK_DEEPSEEK_MONTHLY_COST_MICRO`) counts both features together. The
@@ -52,7 +52,8 @@ read. So what is sent, what is kept and who it is sent for has to be decided, an
    (`LlmClient.Message`), so a provider is never asked to fetch a link. `NeverClaudeTest` covers both chains.
 6. **Limits before the work.** A person may ask for `BMS_SETUP_AI_USER_HOURLY_DRAFTS` (10) drafts an hour (429
    `setup_ai_rate_limited`) and a business may send `BMS_SETUP_AI_DAILY_DRAFTS` (30) a day to the providers; both are counted on
-   `help_setup_drafts` under the business's advisory lock, the row written before the providers are asked.
+   `help_setup_drafts` under the business's advisory lock, the row written before the file is decoded or a provider asked, and
+   always finished, so a refused file or a failure never holds a place in the day's cap.
 7. **A plain fallback.** No provider set, every provider failing or answering with something that is not the JSON asked for, the
    day's drafts used up, or a file with nothing to read is never an error: the response carries `reason` (`no_provider`,
    `all_failed`, `daily_cap`, `unreadable`) and no rows, and the screen says in one line why and that the owner can type the list

@@ -15,7 +15,7 @@
  * com.rincoltech.bms.core.help.SetupDrafts}: a vertical's import hands over a list the owner gave (typed, a photo, or a
  * CSV, Excel or PDF file) and gets draft rows back through the same chain, keys and spend log. Unlike a question, the list
  * is business data, so it goes to a provider only for a business named in {@code BMS_SETUP_AI_TENANTS}; nothing is kept
- * of it but a row of counts ({@code help_setup_drafts}, migration V113), and nothing is saved until the owner taps once in
+ * of it but a row of counts ({@code help_setup_drafts}, migration V112), and nothing is saved until the owner taps once in
  * the import's own check.
  */
 @ApplicationModule(

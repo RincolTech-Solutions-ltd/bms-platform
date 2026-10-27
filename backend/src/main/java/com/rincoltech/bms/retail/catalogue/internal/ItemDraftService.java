@@ -16,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.multipart.MultipartFile;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -34,7 +35,7 @@ class ItemDraftService {
     /** How many of the shop's item names the model reads, so it does not draft them again. */
     static final int KNOWN_ITEMS = 300;
 
-    static String instructions(boolean withCost) {
+    static String instructions(boolean withCost, boolean withPacks) {
         return """
                 You read a shop's list of goods for the BMS app: typed text, a photo of a stock book, a price list or a \
                 supplier invoice, or the cells of a spreadsheet. Draft the shop's items from it. Use ONLY what the list \
@@ -47,14 +48,18 @@ class ItemDraftService {
                         ? "its buying price for one unit, or null (on a supplier invoice the prices are buying prices: put"
                                 + " them there and leave the selling price null), "
                         : "")
+                + (withPacks
+                        ? "and, when the list shows a bigger pack it comes in (a carton of 24, a bale of 10), that pack's"
+                                + " unit and how many units are in it, else null. "
+                        : "")
                 + """
-                and, when the list shows a bigger pack it comes in (a carton of 24, a bale of 10), that pack's unit and \
-                how many units are in it, else null. Leave out the items the shop has already, totals, dates, names of \
+                Leave out the items the shop has already, totals, dates, names of \
                 people, phone numbers and anything that is not an item. Reply with one JSON object only: \
-                {"items": [{"name": "", "category": "", "unit": "", "sell_price": null, \
+                {"items": [{"name": "", "category": "", "unit": "", "sell_price": null\
                 """
-                + (withCost ? "\"buy_price\": null, " : "")
-                + "\"pack_unit\": null, \"pack_size\": null}]}";
+                + (withCost ? ", \"buy_price\": null" : "")
+                + (withPacks ? ", \"pack_unit\": null, \"pack_size\": null" : "")
+                + "}]}";
     }
 
     private final CatalogueRepository repo;
@@ -82,7 +87,7 @@ class ItemDraftService {
 
     private record Context(List<String> categories, List<String> units, String words, int exponent) {}
 
-    ItemDraft draft(String text, SetupDrafts.Upload upload, String shopType) {
+    ItemDraft draft(String text, MultipartFile file, String shopType) {
         Principal principal = CurrentPrincipal.require();
         if (!principal.hasPermission(ADMIN)) {
             throw new ApiException(
@@ -91,11 +96,18 @@ class ItemDraftService {
                     "Permission denied",
                     "Only an administrator can add items from a list.");
         }
+        drafts.requireOn();
+        SetupDrafts.Upload upload = SetupDrafts.Upload.of(file);
         boolean withCost = principal.hasPermission("retail.profit.read");
         Context context = reads.execute(tx -> context(shopType));
+        // A pack needs the shop's pack capability; while it is off the import refuses one, so none is asked for or
+        // kept.
+        boolean withPacks = Boolean.TRUE.equals(
+                settings.group("retail").get(com.rincoltech.bms.retail.catalogue.RetailCatalogue.UNITS_CAPABILITY));
         SetupDrafts.Result<List<ItemDraftReader.Row>> result = drafts.draft(
-                new SetupDrafts.Request("retail", instructions(withCost), context.words(), text, upload),
-                new ItemDraftReader(mapper, context.categories(), context.units(), context.exponent(), withCost));
+                new SetupDrafts.Request("retail", instructions(withCost, withPacks), context.words(), text, upload),
+                new ItemDraftReader(
+                        mapper, context.categories(), context.units(), context.exponent(), withCost, withPacks));
         return new ItemDraft(
                 result.reason(),
                 result.drafted().orElse(List.of()).stream()

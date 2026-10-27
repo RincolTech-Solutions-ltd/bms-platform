@@ -1,4 +1,4 @@
--- V113: the setup helper's draft log (issue #626, owner decision D62, ADR-102), after V112 (claimed by #630). Expand only,
+-- V112: the setup helper's draft log (issue #626, owner decision D62, ADR-102), directly after V111 (#628). Expand only,
 -- safe on a populated database: one new tenant table. No existing table, column, constraint or function is touched and no
 -- permission is added (drafting is allowed to whoever may run the import it fills).
 --

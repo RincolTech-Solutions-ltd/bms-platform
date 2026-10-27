@@ -11,7 +11,7 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * The setup helper's draft log (migration V113, ADR-102): one row per draft, written before the work under the business's
+ * The setup helper's draft log (migration V112, ADR-102): one row per draft, written before the work under the business's
  * advisory lock, so drafts sent at once are counted one after the other, then finished with what happened. Counts, names
  * and closed words only: never the list, the file or the draft. Each method runs in a short transaction of its own, so no
  * connection is held while a provider is asked.

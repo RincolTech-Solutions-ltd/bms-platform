@@ -5,6 +5,8 @@ import { BusyButton } from '../../../app/ui/BusyButton';
 import { existingLoans, type ExistingLoanImportResult, type ExistingLoansApi } from '../../../api/existing-loans';
 import { setupHelper, type SetupHelperApi } from '../../../api/setup-helper';
 import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
+import { Field } from '../../../app/ui/Field';
+import { Hint } from '../../../app/ui/Hint';
 import { useStaff } from '../context';
 import { NOT_UTF8, readCsvText } from '../retail/catalogue-import';
 import { Note, Problem, Success, useSingleBranch } from '../retail/ui';
@@ -146,15 +148,22 @@ export function ExistingLoansImport({ api = existingLoans, helperApi = setupHelp
             <EmptyChoice id="exl-draft-product" label="Loan product" load={products} text="No loan products yet." ask="Ask the owner to add a loan product first." />
           ) : (
             <>
-              <label htmlFor="exl-draft-product">Loan product for these loans</label>
-              <select id="exl-draft-product" aria-required="true" value={productCode} onChange={(e) => chooseProduct(e.target.value)}>
-                <option value="">Choose the product</option>
-                {(products.data ?? []).map((p) => <option key={p.id} value={p.code}>{p.code}: {p.name}</option>)}
-              </select>
+              <Field
+                id="exl-draft-product"
+                label="Loan product for these loans"
+                required
+                error={productCode === '' ? 'Choose the loan product.' : null}
+                control={(props) => (
+                  <select {...props} value={productCode} onChange={(e) => chooseProduct(e.target.value)}>
+                    <option value="">Choose the product</option>
+                    {(products.data ?? []).map((p) => <option key={p.id} value={p.code}>{p.code}: {p.name}</option>)}
+                  </select>
+                )}
+              />
             </>
           )}
           {!branchId && draft.some((l) => !l.memberNo) && (
-            <p className="hint">New members join the branch in use; choose one at the top.</p>
+            <Hint>New members join the branch in use; choose one at the top.</Hint>
           )}
           <LoanDraftList loans={draft} onChange={(loans) => editDraft(loans)} />
         </>

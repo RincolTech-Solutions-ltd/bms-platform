@@ -5,7 +5,7 @@ import type { components } from './schema';
 // The setup helper (issue #626, ADR-102): the app reads a list the owner gives (typed, a photo, or a CSV, Excel or PDF file)
 // into draft rows of an import. The server saves nothing: the rows go into the import's own check, and only the owner's tap
 // there adds them. The generated schema marks every field optional; these are the shapes the server always sends
-// (core/help/internal/SetupController.java, retail ItemDraftApi.java, lending ExistingLoanApi.java).
+// (core/help/internal/SetupHelperController.java, retail ItemDraftApi.java, lending ExistingLoanApi.java).
 
 export interface SetupHelperStatus {
   /** The helper may read a list for this business; while false the box is not drawn. */

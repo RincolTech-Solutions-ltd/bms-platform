@@ -3,6 +3,8 @@ package com.rincoltech.bms.lending.loans.internal;
 import com.rincoltech.bms.core.help.SetupDrafts;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.kernel.BusinessClock;
+import com.rincoltech.bms.kernel.CurrentPrincipal;
+import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.lending.loans.internal.ExistingLoanApi.RegisterDraft;
 import com.rincoltech.bms.lending.loans.internal.ExistingLoanApi.RegisterDraftLoan;
 import com.rincoltech.bms.lending.loans.internal.ExistingLoanApi.RegisterDraftPayment;
@@ -14,6 +16,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.multipart.MultipartFile;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -65,7 +68,10 @@ class LoanRegisterDraftService {
         this.reads.setReadOnly(true);
     }
 
-    RegisterDraft draft(String text, SetupDrafts.Upload upload) {
+    RegisterDraft draft(String text, MultipartFile file) {
+        drafts.requireOn();
+        SetupDrafts.Upload upload = SetupDrafts.Upload.of(file);
+        Principal principal = CurrentPrincipal.require();
         LocalDate today = clock.today(tenant.profile().timezone());
         String currency = tenant.profile().currency();
         Integer exponent = reads.execute(tx -> repo.currencyExponent(currency));
@@ -80,7 +86,15 @@ class LoanRegisterDraftService {
                 .map(l -> {
                     List<MemberSummary> holders =
                             l.memberPhone() == null ? List.of() : members.findByPhone(l.memberPhone());
-                    MemberSummary member = holders.size() == 1 ? holders.getFirst() : null;
+                    // Only a member in a branch the caller may bring loans into is named; any other stays a new row,
+                    // which
+                    // the import refuses with its own words, so a draft never tells another branch's members by phone.
+                    MemberSummary member = holders.size() == 1
+                                    && principal.may(
+                                            ExistingLoanService.PERMISSION,
+                                            holders.getFirst().branchId())
+                            ? holders.getFirst()
+                            : null;
                     return new RegisterDraftLoan(
                             l.ref(),
                             member == null ? null : member.memberNo(),

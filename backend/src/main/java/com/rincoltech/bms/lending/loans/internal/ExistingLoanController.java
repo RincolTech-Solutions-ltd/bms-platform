@@ -1,6 +1,5 @@
 package com.rincoltech.bms.lending.loans.internal;
 
-import com.rincoltech.bms.core.help.SetupDrafts;
 import com.rincoltech.bms.core.operations.Idempotency.Outcome;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import com.rincoltech.bms.lending.loans.internal.ExistingLoanApi.CancelRequest;
@@ -161,6 +160,6 @@ class ExistingLoanController {
             @Parameter(description = "A photo, or a CSV, Excel (.xlsx) or PDF file, 5 MB at most")
                     @RequestPart(name = "file", required = false)
                     MultipartFile file) {
-        return drafts.draft(text, SetupDrafts.Upload.of(file));
+        return drafts.draft(text, file);
     }
 }

@@ -96,8 +96,11 @@ export function ListReader<T extends { reason: DraftReason | null }>({
       <Segmented label="How you give the list" options={options} value={mode} onChange={(m) => { setMode(m); setFile(null); setMessage(null); setError(null); }} />
       {mode === 'type' && (
         <>
-          <label htmlFor="helper-text">{noun === 'items' ? 'Your items, one on each line' : 'The loans, one on each line'}</label>
-          <textarea id="helper-text" rows={6} value={text} onChange={(e) => setText(e.target.value)} />
+          <Field
+            id="helper-text"
+            label={noun === 'items' ? 'Your items, one on each line' : 'The loans, one on each line'}
+            control={(props) => <textarea {...props} rows={6} value={text} onChange={(e) => setText(e.target.value)} />}
+          />
         </>
       )}
       {mode === 'photo' && (
@@ -119,7 +122,7 @@ export function ListReader<T extends { reason: DraftReason | null }>({
       {error != null && (
         <>
           <Problem error={error} />
-          <p className="hint">{FALLBACK}</p>
+          <Hint>{FALLBACK}</Hint>
         </>
       )}
     </Card>
@@ -167,7 +170,7 @@ export function LoanDraftList({ loans, onChange }: { loans: LoanEdit[]; onChange
         <div key={i} className="stack" data-testid={`draft-loan-${i}`}>
           <Field id={slug(i, 'ref')} label="Number in the register" value={l.ref} onChange={(e) => set(i, { ref: e.target.value })} />
           {l.memberNo ? (
-            <p className="hint">{`Member ${l.memberNo}, ${l.memberFullName}, has this phone already.`}</p>
+            <Hint>{`Member ${l.memberNo}, ${l.memberFullName}, has this phone already.`}</Hint>
           ) : (
             <>
               <Field id={slug(i, 'member')} label="Member name" value={l.memberName} onChange={(e) => set(i, { memberName: e.target.value })} error={l.memberName.trim() === '' ? 'Add the member\'s name.' : null} hint="A new member, added with the loan." />

@@ -16,18 +16,24 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReadParam;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.http.HttpStatus;
@@ -44,6 +50,8 @@ final class ListFiles {
     static final int MAX_BYTES = 5 * 1024 * 1024;
     /** The longest side of a picture that is sent: ample to read a stock book, small to send. */
     static final int MAX_SIDE = 2000;
+    /** The most pixels a photo may declare: a 100 megapixel camera is far below it; a crafted header is not. */
+    static final long MAX_PIXELS = 120_000_000L;
 
     static final int MAX_PDF_PAGES = 10;
     static final long MAX_UNPACKED_BYTES = 20L * 1024 * 1024;
@@ -53,6 +61,12 @@ final class ListFiles {
     record Read(String text, String pictureDataUrl, String source) {}
 
     private ListFiles() {}
+
+    /** How the list was given, from the first bytes only, so the limits are taken before anything is decoded. */
+    static String source(Upload upload) {
+        byte[] b = upload.bytes() == null ? new byte[0] : upload.bytes();
+        return starts(b, 0xFF, 0xD8, 0xFF) || starts(b, 0x89, 'P', 'N', 'G') || webp(b) ? "photo" : "file";
+    }
 
     static Read read(Upload upload) {
         byte[] b = upload.bytes();
@@ -98,18 +112,43 @@ final class ListFiles {
                 && b[11] == 'P';
     }
 
-    private static BufferedImage decode(byte[] b) {
-        try {
-            BufferedImage image = ImageIO.read(new ByteArrayInputStream(b));
-            if (image == null) {
-                throw notRead("This photo cannot be read. Take it again, or choose a JPEG or PNG.");
+    /**
+     * The photo decoded small: its size is read from the header first, a picture of more than {@link #MAX_PIXELS} pixels is
+     * refused, and the decoder skips rows and columns so the picture in memory is about twice {@link #MAX_SIDE} on its
+     * longest side, whatever the file declares. A crafted header cannot make the server decode gigabytes.
+     */
+    static BufferedImage decode(byte[] b) {
+        String unread = "This photo cannot be read. Take it again, or choose a JPEG or PNG.";
+        try (ImageInputStream in = ImageIO.createImageInputStream(new ByteArrayInputStream(b))) {
+            Iterator<ImageReader> readers = in == null ? Collections.emptyIterator() : ImageIO.getImageReaders(in);
+            if (!readers.hasNext()) {
+                throw notRead(unread);
             }
-            return image;
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(in, true, true);
+                long width = reader.getWidth(0);
+                long height = reader.getHeight(0);
+                if (width < 1 || height < 1 || width * height > MAX_PIXELS) {
+                    throw notRead(
+                            "This photo is too big to read. Take it again with the camera, or choose a smaller one.");
+                }
+                ImageReadParam param = reader.getDefaultReadParam();
+                int step = (int) Math.max(1, Math.max(width, height) / (2L * MAX_SIDE));
+                param.setSourceSubsampling(step, step, 0, 0);
+                BufferedImage image = reader.read(0, param);
+                if (image == null) {
+                    throw notRead(unread);
+                }
+                return image;
+            } finally {
+                reader.dispose();
+            }
         } catch (IOException | RuntimeException e) {
             if (e instanceof ApiException a) {
                 throw a;
             }
-            throw notRead("This photo cannot be read. Take it again, or choose a JPEG or PNG.");
+            throw notRead(unread);
         }
     }
 
@@ -156,7 +195,11 @@ final class ListFiles {
             if (doc.getNumberOfPages() == 0) {
                 throw notRead("This PDF has no pages.");
             }
-            BufferedImage page = new PDFRenderer(doc).renderImageWithDPI(0, 150);
+            // At 150 dots an inch, but never more than MAX_SIDE on the longest side, whatever size the page declares.
+            PDRectangle box = doc.getPage(0).getCropBox();
+            float longest = Math.max(1f, Math.max(box.getWidth(), box.getHeight()));
+            float scale = Math.min(150f / 72f, MAX_SIDE / longest);
+            BufferedImage page = new PDFRenderer(doc).renderImage(0, scale);
             return new Read(null, picture(page), "file");
         } catch (IOException | RuntimeException e) {
             if (e instanceof ApiException a) {
