@@ -43,18 +43,26 @@ function transitioned(value: string): string[] {
   return value.split(/,(?![^(]*\))/).map((item) => item.trim().split(/\s+(?![^(]*\))/).find((word) => !NOT_A_PROPERTY.test(word)) ?? 'all');
 }
 
-// The pulse ban (issue #603, rule 13) is a plain token ban, not a CSS parser: what loops says `infinite`, and a var() other than a
-// motion token (var(--motion...), var(--ease...)) could hide a name or a count, so neither may stand in an animation value.
+// The pulse ban (issue #603, rule 13) is a plain token ban, not a CSS parser: what loops says `infinite` or a bare count above
+// one (issue #605), and a var() other than a motion token (var(--motion...), var(--ease...)) could hide a name or a count, so none
+// may stand in an animation value. A count is a bare number once the functions (cubic-bezier, steps) are taken out.
 const ANIMATION_DECL = /(?<![\w-])(?:-webkit-)?animation(?:-name|-iteration-count)?\s*:\s*([^;}]+)/g;
 const MOTION_TOKEN = /var\(--(?:motion|ease)[\w-]*\)/g;
 
 /** Each rule of `css`: its selectors and its declarations. */
 const rulesOf = (css: string) => [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => ({ selectors: (selector as string).split(',').map((s) => s.trim()), body: body as string }));
 
-/** The selectors of `css` whose animation loops (`infinite`) or carries a var() that is not a motion token. */
+const FUNCTION = /[\w-]+\([^()]*\)/g;
+const COUNT = /(?<![\w.%-])\d*\.?\d+(?![\w.%-])/g;
+
+/** True when an animation value loops, runs more than once, or carries a var() that is not a motion token. */
+const loops = (value: string) =>
+  /\binfinite\b/.test(value) || /var\(/.test(value.replace(MOTION_TOKEN, '')) || [...value.replace(FUNCTION, ' ').matchAll(COUNT)].some(([n]) => Number(n) > 1);
+
+/** The selectors of `css` whose animation loops, bar those naming .new-blink, which `blinksOffPin` pins to five runs. */
 function loopsIn(css: string): string[] {
   return rulesOf(css).flatMap(({ selectors, body }) =>
-    [...body.matchAll(ANIMATION_DECL)].some(([, value]) => /\binfinite\b/.test(value as string) || /var\(/.test((value as string).replace(MOTION_TOKEN, ''))) ? selectors : [],
+    [...body.matchAll(ANIMATION_DECL)].some(([, value]) => loops(value as string)) ? selectors.filter((s) => !/\.new-blink(?![\w-])/.test(s)) : [],
   );
 }
 
@@ -66,10 +74,13 @@ function blinksOffPin(css: string): string[] {
     .filter((decl) => decl !== 'animation: rt-new-blink 1s var(--ease-out) 5' && decl !== 'animation: none');
 }
 
-/** True when code animates without a stylesheet: a loop near animation, animate( or iterations, or an animation style set from code. */
+/**
+ * True when code animates without a stylesheet: a loop near animation, animate( or iterations (Number.POSITIVE_INFINITY too), or an
+ * animation style set from code, as a key with a value or as a shorthand key holding an imported value (`style={{ animation }}`).
+ */
 const animatesInCode = (source: string) =>
-  /(?:animation|animate\(|iterations)[\s\S]{0,200}?\b(?:Infinity|infinite)\b/i.test(source) ||
-  /\.style\.(?:webkit)?animation|setProperty\(\s*['"](?:-webkit-)?animation|['"](?:-webkit-)?animation[\w-]*['"]\s*:|\b(?:Webkit|Moz|ms)Animation|(?<![\w.-])animation[A-Za-z]*\s*:/.test(source);
+  /(?:animation|animate\(|iterations)[\s\S]{0,200}?\b(?:Infinity|infinite|POSITIVE_INFINITY)\b/i.test(source) ||
+  /\.style\.(?:webkit)?animation|setProperty\(\s*['"](?:-webkit-)?animation|['"](?:-webkit-)?animation[\w-]*['"]\s*:|\b(?:Webkit|Moz|ms)Animation|(?<![\w.-])animation[A-Za-z]*\s*:|[{,]\s*animation[A-Za-z]*\s*[,}]/.test(source);
 
 /** The source with its comments blanked: comments cite issues (#95) and name what was removed. */
 function code(file: string): string {
@@ -175,12 +186,17 @@ describe('design guard', () => {
     ['a count in a var()', '.x { animation: pulse 1s var(--forever); }'],
     ['the -webkit- prefix', '.x { -webkit-animation: pulse 1s infinite; }'],
     ['an important shorthand', '.x { animation: pulse 1s infinite !important; }'],
+    ['a count above one', '.x { animation: pulse 1s 30; }'],
+    ['a longhand count above one', '.x { animation-name: pulse; animation-iteration-count: 3; }'],
+    ['a count above one in a list', '.x { animation: spin 1s linear, pulse 2s 2.5; }'],
   ])('fails a loop written with %s', (_way, rule) => {
     expect(loopsIn(rule)).toEqual(['.x']);
   });
 
   it('lets a fade that runs once on the motion tokens, and no animation, pass', () => {
     expect(loopsIn('.a { animation: pulse var(--motion) var(--ease-out); }\n.b { animation: none; }\n.c { animation-iteration-count: 1; }')).toEqual([]);
+    expect(loopsIn('.d { animation: fade 1.5s cubic-bezier(0.2, 0, 0, 1) 0.2s 1; }\n.e { animation: tick 2s steps(4) both; }')).toEqual([]);
+    expect(loopsIn('.new-blink { animation: rt-new-blink 1s var(--ease-out) 5; }')).toEqual([]);
   });
 
   it.each([
@@ -198,6 +214,9 @@ describe('design guard', () => {
     ['style.animation', "el.style.animation = 'pulse 1s';"],
     ['setProperty', "el.style.setProperty('animation', 'pulse 1s');"],
     ['animate with Infinity', 'el.animate([{ opacity: 1 }, { opacity: 0.3 }], { duration: 1000, iterations: Infinity });'],
+    ['animate with Number.POSITIVE_INFINITY', 'el.animate(frames, { duration: 1000, iterations: Number.POSITIVE_INFINITY });'],
+    ['an imported value as a style key', '<span style={{ animation }} />'],
+    ['an imported value after another key', '<span style={{ opacity, animation }} />'],
   ])('fails code that animates with %s', (_way, source) => {
     expect(animatesInCode(source)).toBe(true);
   });
