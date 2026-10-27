@@ -5,7 +5,7 @@ import type { Me } from '../api/client';
 import { mockMe } from '../api/retail-mock';
 import { offendingWords } from '../app/glossary';
 import { router } from '../app/router';
-import { ARTICLES, JOBS, REVISION, articleById, articleForScreen, articleText, articlesFor, parseArticle, relatedArticles, searchArticles } from './corpus';
+import { ARTICLES, JOBS, REVISION, type Inline, articleById, articleForScreen, articleText, articlesFor, parseArticle, relatedArticles, searchArticles } from './corpus';
 
 // The help corpus (issue #598, ADR-095): every article is well formed, every picture it names is a 412x900 WebP in public/help and
 // every picture there is used, the revision is the content hash the ADR states, the permissions and screens it names exist, the
@@ -262,18 +262,20 @@ describe('the getting-started articles (issue #609)', () => {
 
 describe('a shop with no items is led to add them (issue #615)', () => {
   const READY = 'getting-your-shop-ready';
-  // The code of the screens the article walks through: every word it puts in bold must be a whole label in it.
-  const SOURCES = [
-    'areas/staff/home.tsx', 'areas/staff/menu.tsx', 'areas/staff/retail/first-items.tsx', 'areas/staff/retail/catalogue-products.tsx',
-    'areas/staff/retail/category-picker.tsx', 'areas/staff/retail/catalogue-import.tsx', 'areas/staff/retail/new-item-here.tsx',
-    'areas/staff/retail/sale.tsx', 'app/glossary.ts',
-  ];
-  const code = SOURCES.map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')).join('\n');
-  const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const bold = (id: string) => {
-    const a = articleById(id)!;
-    return [...new Set([...a.intro, ...a.steps.map((s) => s.text), ...a.notes].flat().filter((r) => r.strong).map((r) => r.text))];
+  // The code of the screens each part of the article walks through (its steps in order, then its notes): every word a part puts
+  // in bold must be a whole label in the code of that part's screens, so a label never passes by being on another screen.
+  const PARTS: Record<string, string[][]> = {
+    [READY]: [
+      ['areas/staff/home.tsx', 'areas/staff/menu.tsx', 'areas/staff/retail/first-items.tsx', 'areas/staff/retail/catalogue-products.tsx', 'areas/staff/retail/category-picker.tsx', 'app/glossary.ts'],
+      ['areas/staff/retail/first-items.tsx', 'areas/staff/retail/catalogue-import.tsx'],
+      ['app/glossary.ts'],
+      ['areas/staff/menu.tsx', 'areas/staff/retail/sale.tsx'],
+      ['areas/staff/retail/new-item-here.tsx'],
+    ],
   };
+  const source = (files: string[]) => files.map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')).join('\n');
+  const boldIn = (runs: Inline[]) => [...new Set(runs.flat().filter((r) => r.strong).map((r) => r.text))];
+  const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   it('lists Sell among the add-an-item screens, with the words a stuck shop owner types', () => {
     const item = articleById('add-an-item')!;
@@ -300,9 +302,18 @@ describe('a shop with no items is led to add them (issue #615)', () => {
     expect(articleText(ready)).not.toMatch(/[\u2013\u2014]| - /);
   });
 
-  it('puts in bold only labels the screens really show, each a whole label in their code', () => {
-    for (const id of [READY, 'add-an-item']) {
-      for (const label of bold(id)) expect(code, `${id}: ${label}`).toMatch(new RegExp(`(^|[>'"])\\s*${escape(label)}\\s*($|[<'"])`, 'm'));
-    }
+  it('puts in bold only labels the screens of each step really show, each a whole label in their code', () => {
+    const ready = articleById(READY)!;
+    const parts = [...ready.steps.map((step) => boldIn([step.text])), boldIn(ready.notes)];
+    expect(parts).toHaveLength(PARTS[READY]!.length);
+    parts.forEach((labels, i) => {
+      const code = source(PARTS[READY]![i]!);
+      expect(labels.length, `part ${i + 1}`).toBeGreaterThan(0);
+      for (const label of labels) expect(code, `part ${i + 1}: ${label}`).toMatch(new RegExp(`(^|[>'"])\\s*${escape(label)}\\s*($|[<'"])`, 'm'));
+    });
+    // The note added to the add-an-item article names the Sell search's own button.
+    const note = boldIn(articleById('add-an-item')!.notes.slice(-1));
+    expect(note).toEqual(['Not in the list? Add it here']);
+    expect(source(['areas/staff/retail/new-item-here.tsx'])).toMatch(/^\s*Not in the list\? Add it here\s*$/m);
   });
 });

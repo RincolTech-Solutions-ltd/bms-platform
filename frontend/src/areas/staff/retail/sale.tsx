@@ -12,7 +12,7 @@ import type { OutboxItem } from '../../../offline/outbox';
 import { newIdempotencyKey } from './idempotency';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
-import { parseCount, qtyString, showQty } from './maths';
+import { parseQty, qtyString, showQty } from './maths';
 import { buildSaleRequest, defaultPrice, draftProblem, draftTotal, lineFigures, lineHint, newLine, resolveRequestOf, withUnit, type Accounts, type Draft, type DraftLine, type Pricing } from './sale-state';
 import { MIN_REASON, hasNoPrice, isOverride, pricedLines, receiptNote, reasonOk, sourceNote } from './price-state';
 import { activePacks, chosenPack, enteredPriceMinor, enteredQty } from './units-state';
@@ -319,24 +319,36 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
     mark(next.length - 1, true);
     show(addedMessage(p.description, next[next.length - 1]?.qty), 'success');
   };
-  // Issue #615: an item the search did not find, added here. The server never sells what the branch does not hold, so whoever
-  // may count stock here also types how many there are, kept as a one-line stock count before the item joins the sale.
+  // Issue #615: an item the search did not find, added here. The server never sells what the branch does not hold, so a new
+  // item goes on the sale only with stock: whoever may count stock here types how many there are (more than 0), kept as a
+  // one-line stock count; anyone else is told to put stock in first. Only an item made here is counted: an existing item chosen
+  // from a name warning (Use this item) keeps its stock and goes on the sale as a picked one would.
   const profit = useProfitAccess();
   const mayCount = holdsAt(me, 'retail.stocktake.commit', branchId);
-  const addNew = async ({ product, qty }: AddedItem, clear: () => void) => {
-    const counted = mayCount ? parseCount(qty) : null;
+  const addNew = async ({ product, qty, sell }: AddedItem, clear: () => void) => {
+    const made = sell !== undefined;
+    const name = product.description ?? 'The item';
+    const counted = made && mayCount ? parseQty(qty) : null;
+    let counts = false;
     if (counted !== null && counted > 0) {
       try {
         const count = await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: product.id ?? '', counted_qty: qtyString(counted) }], note: 'Counted when the item was added on Sell' });
         await retail.commitStocktake(count.id ?? '');
+        counts = true;
       } catch {
-        show(`${product.description ?? 'The item'} is saved, but its count is not. Count it on ${WORDS.countStock}, then sell it.`, 'error');
-        return;
+        show(`${name} is saved, but its count is not. Count it on ${WORDS.countStock}, then sell it.`, 'error');
       }
     }
-    void queryClient.invalidateQueries({ queryKey: ['retail', 'products'] });
+    // The card of a shop with no items, the search and the branches that hold stock all read again with the new item.
+    for (const key of [['retail', 'catalogue'], ['retail', 'products'], ['retail', 'stocked-branches']]) void queryClient.invalidateQueries({ queryKey: key });
     clear();
-    add({ ...product, qty: counted !== null ? qtyString(counted) : '0' });
+    if (!made) {
+      add(product);
+      if (qty.trim() !== '') show(`${name} is already in your items, so its stock is not changed here. If it is wrong, use ${WORDS.countStock}.`, 'info');
+      return;
+    }
+    if (counts) add({ ...product, qty: qtyString(counted ?? 0) });
+    else if (counted === null) show(`${name} is saved. It has no stock here yet: use ${WORDS.buyStock} or ${WORDS.countStock}, then sell it.`, 'info');
   };
   // A scan (issue #345) adds the item at 1, or one more to its line in the pack the barcode is on; a pack it cannot
   // use is refused, never sold as one piece: ScanBar shows the refusal as a warning and no toast is raised.
@@ -440,7 +452,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
             onAdd={add}
             notFound={(term, clear) => (
               <ScreenToast.Provider value={show}>
-                <NewItemHere id="sale-new" description={term} ask={ASK_OWNER_ITEM} counting askCost={profit} qtyLabel={mayCount ? 'How many you have here' : undefined} onAdded={(added) => addNew(added, clear)} />
+                <NewItemHere id="sale-new" description={term} ask={ASK_OWNER_ITEM} askCost={profit} qtyLabel={mayCount ? 'How many you have here' : undefined}
+                  qtyError="Type how many you have here, more than 0." onAdded={(added) => addNew(added, clear)} />
               </ScreenToast.Provider>
             )}
           />

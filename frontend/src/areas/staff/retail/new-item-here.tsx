@@ -55,8 +55,10 @@ export function ItemCodeLine({ id, category }: { id: string; category: Category 
   );
 }
 
-export function NewItemHere({ id, qtyLabel, counting = false, askCost, description, ask = ASK_MANAGER, onAdded }: {
+export function NewItemHere({ id, qtyLabel, qtyError, counting = false, askCost, description, ask = ASK_MANAGER, onAdded }: {
   id: string;
+  /** What a missing or wrong quantity says, when the screen's words differ from buying or counting (Sell, issue #615). */
+  qtyError?: string;
   /** What the Description starts with: on Sell, what was typed in the search. */
   description?: string;
   /** What someone who may not add items is told, after "Not in the list?". */
@@ -92,11 +94,12 @@ export function NewItemHere({ id, qtyLabel, counting = false, askCost, descripti
     setOpen(false);
     setTimeout(() => document.getElementById(`${id}-open`)?.focus());
   };
-  return <NewItemForm id={id} qtyLabel={qtyLabel} counting={counting} askCost={askCost} initial={description} onAdded={onAdded} onClose={close} />;
+  return <NewItemForm id={id} qtyLabel={qtyLabel} qtyError={qtyError} counting={counting} askCost={askCost} initial={description} onAdded={onAdded} onClose={close} />;
 }
 
-function NewItemForm({ id, qtyLabel, counting, askCost, initial = '', onAdded, onClose }: {
+function NewItemForm({ id, qtyLabel, qtyError, counting, askCost, initial = '', onAdded, onClose }: {
   id: string;
+  qtyError?: string;
   initial?: string;
   qtyLabel?: string;
   counting: boolean;
@@ -286,7 +289,7 @@ function NewItemForm({ id, qtyLabel, counting, askCost, initial = '', onAdded, o
           id={`${id}-qty`}
           label={qtyLabel}
           required
-          error={qtyMilli === null ? (counting ? 'Type how many you counted, or 0.' : 'Type how many you bought.') : null}
+          error={qtyMilli === null ? (qtyError ?? (counting ? 'Type how many you counted, or 0.' : 'Type how many you bought.')) : null}
           showError={showErrors}
           inputMode="decimal"
           value={qty}
