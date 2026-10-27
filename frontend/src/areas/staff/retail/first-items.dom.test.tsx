@@ -264,3 +264,29 @@ describe('a Sell search that finds nothing', () => {
     expect(screen.queryByRole('button', { name: 'Not in the list? Add it here' })).toBeNull();
   });
 });
+
+describe('Sell it from Quick add (issue #632)', () => {
+  const here = owner.branches?.[0]?.id ?? '';
+  const other = owner.branches?.[1]?.id ?? '';
+
+  it('puts the item on the sale at the branch Quick add counted at, and clears the address once it is on', async () => {
+    catalogue = [{ ...made, qty: '600' }];
+    getProduct.mockResolvedValue(made);
+    const started = vi.fn();
+    open(<RecordSale startItem="p9" startBranch={here} onStarted={started} />, owner);
+    expect(await screen.findByRole('button', { name: 'Remove Test duvet cover' })).toBeTruthy();
+    await waitFor(() => expect(started).toHaveBeenCalledTimes(1));
+    expect(listProducts.mock.calls.some((c) => (c[0] as { branchId?: string }).branchId === here)).toBe(true);
+  });
+
+  it('waits while the branch in use is still another one, so the item is never looked up there', async () => {
+    catalogue = [{ ...made, qty: '600' }];
+    getProduct.mockResolvedValue(made);
+    const started = vi.fn();
+    open(<RecordSale startItem="p9" startBranch={other} onStarted={started} />, owner);
+    await screen.findByRole('heading', { name: 'Items' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(getProduct).not.toHaveBeenCalled();
+    expect(started).not.toHaveBeenCalled();
+  });
+});

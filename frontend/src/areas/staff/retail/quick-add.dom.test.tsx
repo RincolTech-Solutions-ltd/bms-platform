@@ -122,26 +122,28 @@ describe('quick add', () => {
     quickAdd.mockRejectedValueOnce(new RetailError('This product already exists: Test Rice 1kg (GNR-0001).', 422, 'duplicate_product_name', {
       existing_id: 'p9', existing_code: 'GNR-0001', existing_name: 'Test Rice 1kg', may_add_anyway: false,
     }));
-    quickAdd.mockResolvedValueOnce({ product_id: 'p9', code: 'GNR-0001', description: 'Test Rice 1kg', unit: 'pc', item_made: false, branch_id: branch?.id, qty: '8' });
+    quickAdd.mockResolvedValueOnce({ product_id: 'p9', code: 'GNR-0001', description: 'Test Rice 1kg', unit: 'pc', item_made: false, branch_id: branch?.id, qty: '8', total_qty: '58' });
     open(owner);
     type(/^Name/, 'Test Rice 1kg');
     type(/^Selling price/, '5000');
     type(/How many do you have here now/, '8');
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     const panel = await screen.findByTestId('name-exists');
+    expect(screen.getByTestId('qa-adds-to').textContent).toBe('The 8 you typed is added to the stock it already has there.');
     fireEvent.click(within(panel).getByRole('button', { name: 'Use the existing one and just add stock' }));
     await screen.findByTestId('qa-done');
     const [body, key] = quickAdd.mock.calls[1] as [Record<string, unknown>, string];
     expect(body).toEqual({ product_id: 'p9', qty: '8.000', branch_id: branch?.id });
     // The server answered the first request, so the second is a new one.
     expect(key).not.toBe((quickAdd.mock.calls[0] as [unknown, string])[1]);
-    expect(screen.getByTestId('qa-done').textContent).toBe(`Test Rice 1kg: you have 8 pc at ${branchLabel(branch)} now`);
+    expect(screen.getByTestId('qa-done').textContent).toBe(`Test Rice 1kg: 8 pc added at ${branchLabel(branch)}, 58 pc now`);
+    expect(screen.queryByTestId('qa-adds-to')).toBeNull();
   });
 
   it('adds the item with no stock for someone who may not count, and says to ask', async () => {
     quickAdd.mockResolvedValue({ product_id: 'p4', description: 'Test Pen', unit: 'pc', item_made: true });
     open(catalogueOnly());
-    expect(screen.getByTestId('qa-no-count')).toBeTruthy();
+    expect(screen.getByTestId('qa-where-empty').textContent).toContain('The item is added with no stock. Ask your manager to add its stock.');
     expect(screen.queryByLabelText(/How many do you have here now/)).toBeNull();
     type(/^Name/, 'Test Pen');
     type(/^Selling price/, '500');
@@ -182,7 +184,7 @@ describe('quick add', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     const panel = await screen.findByTestId('name-exists');
     fireEvent.click(within(panel).getByRole('button', { name: 'Keep the existing one' }));
-    expect(screen.getByTestId('qa-kept').textContent).toBe('Test Pen is already in your items. Nothing new was added.');
+    expect(screen.getByTestId('qa-kept').textContent).toBe('Test Pen is already in your items. Nothing new was added. To add stock to it, ask your manager.');
     expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe('');
     expect(quickAdd).toHaveBeenCalledTimes(1);
   });
@@ -217,5 +219,6 @@ describe('the words and defaults', () => {
   it('says what was added, and nothing about stock when none was counted', () => {
     expect(addedLine({ description: 'Test Bulb', unit: 'pc', item_made: true, qty: '600' }, 'Test Store')).toBe('Test Bulb added: 600 pc at Test Store');
     expect(addedLine({ description: 'Test Bulb', item_made: true }, 'Test Store')).toBe('Test Bulb added.');
+    expect(addedLine({ description: 'Test Bulb', unit: 'pc', item_made: false, qty: '10', total_qty: '60' }, 'Test Store')).toBe('Test Bulb: 10 pc added at Test Store, 60 pc now');
   });
 });

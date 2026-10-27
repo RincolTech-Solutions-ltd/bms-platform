@@ -5,6 +5,7 @@ import { RETAIL_CURRENCY, RetailError, retail, type QuickAdd, type Unit } from '
 import { branchLabel } from '../../../auth/branch';
 import { WORDS } from '../../../app/glossary';
 import { BusyButton } from '../../../app/ui/BusyButton';
+import { EmptyChoice } from '../../../app/ui/EmptyChoice';
 import { Field, FieldsNeededNote, focusFirstMissing } from '../../../app/ui/Field';
 import { parseMinor } from '../../../components/money';
 import { useOnline } from '../../../offline/offline-context';
@@ -13,7 +14,7 @@ import { CategoryPicker } from './category-picker';
 import { ExistsPanel, existingOf, type ExistingItem } from './catalogue-names';
 import { newIdempotencyKey } from './idempotency';
 import { PhotoChoice, sendNewPhoto } from './item-photo';
-import { parseCount, qtyString } from './maths';
+import { parseCount, qtyString, showQty } from './maths';
 import { branchesWhere, canUse } from './permissions';
 import { UnitPicker } from './unit-picker';
 import { Gate, Problem, money, useProfitAccess, useStockingBranch } from './ui';
@@ -21,13 +22,14 @@ import { Gate, Problem, money, useProfitAccess, useStockingBranch } from './ui';
 // Quick add (issue #632): a shop owner needed nine steps on four screens to add one item and its stock, and said AppSheet was
 // still easier. One form and one tap: the name, the selling price, the buying price (optional), how many there are here now,
 // where (the branch in use, or a store), the category (left out, the item goes under General) and the unit (the shop's piece
-// unit), and a photo if wanted. Add makes the item and records its count as a one-line stock count, in one request
-// (POST /retail/quick-add), so no other item's stock is touched. A name already in the list offers to use that item and just
-// count its stock. Nothing is kept for later: offline, the form says it needs the internet, as Add it here does.
+// unit), and a photo if wanted. Add makes the item and adds the quantity to its stock at that branch as opening stock, in one
+// request (POST /retail/quick-add, ADR-101), so no other item's stock is touched and it is never profit. A name already in the
+// list offers to use that item and just add the quantity to its stock. Nothing is kept for later: offline, the form says it needs the internet, as Add it here does.
 
 export const QUICK_ADD = 'Quick add';
 export const QUICK_ADD_OFFLINE = 'You are offline. Quick add needs the internet. Connect, then tap Add again.';
-export const NO_COUNT_HERE = 'You can add the item, but not count stock. Ask your manager to count it.';
+export const NO_PLACE = 'You have no branch where you can add stock.';
+export const NO_COUNT_HERE = 'The item is added with no stock. Ask your manager to add its stock.';
 
 const COUNT = 'retail.stocktake.commit';
 /** The piece unit a shop may already have, lower case, in the order the server prefers them. */
@@ -39,12 +41,12 @@ export function pieceUnit(units: Unit[]): Unit | undefined {
   return PIECE_NAMES.map((n) => active.find((u) => (u.name ?? '').trim().toLowerCase() === n)).find((u) => u !== undefined);
 }
 
-/** The line said once Add has worked: "Test bulb added: 600 pc at Bulb Store". */
+/** The line said once Add has worked: "Test bulb added: 600 pc at Bulb Store", or for an item already in the list what was added and what it has now. */
 export function addedLine(done: QuickAdd, where: string): string {
   const name = done.description ?? 'The item';
   if (done.qty === undefined) return `${name} added.`;
-  const counted = `${done.qty} ${done.unit ?? ''}`.trim();
-  return done.item_made ? `${name} added: ${counted} at ${where}` : `${name}: you have ${counted} at ${where} now`;
+  const of = (qty: string | undefined) => `${qty ?? ''} ${done.unit ?? ''}`.trim();
+  return done.item_made ? `${name} added: ${of(done.qty)} at ${where}` : `${name}: ${of(done.qty)} added at ${where}, ${of(done.total_qty)} now`;
 }
 
 /** The fetch never reached the server: no status and no problem body. */
@@ -238,8 +240,6 @@ export function QuickAddForm({ initialName = '', onSell }: {
             onChange={(e) => setQty(e.target.value)}
             autoComplete="off"
           />
-          {/* empty: the Where list is drawn only while mayCount, which is true only when it holds at least one branch; someone
-              with no branch to count at reads NO_COUNT_HERE instead, and the item is added with no stock. */}
           <Field
             id="qa-where"
             label="Where"
@@ -256,7 +256,8 @@ export function QuickAddForm({ initialName = '', onSell }: {
           />
         </>
       ) : (
-        <p className="hint" data-testid="qa-no-count">{NO_COUNT_HERE}</p>
+        // No branch where this person may count (rule 25): the field says so and who to ask, and the item is added with no stock.
+        <EmptyChoice id="qa-where" label="Where" text={NO_PLACE} ask={NO_COUNT_HERE} />
       )}
       </div>
       <div className="stack" data-tour="quick-add-more">
@@ -286,6 +287,9 @@ export function QuickAddForm({ initialName = '', onSell }: {
       )}
       <PhotoChoice id="qa-photo" file={photo} onChange={setPhoto} />
       </div>
+      {exists && mayCount && counted !== null && (
+        <p className="hint" data-testid="qa-adds-to">The {showQty(qtyString(counted))} you typed is added to the stock it already has there.</p>
+      )}
       {exists && (
         <ExistsPanel
           item={exists}
@@ -296,7 +300,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
             if (mayCount) return add.mutate({ productId: id });
             // Nothing to add for someone who may not count: the existing item stays as it is and the form is cleared, so Add
             // never sends the same name again.
-            setKept(`${exists.name} is already in your items. Nothing new was added.`);
+            setKept(`${exists.name} is already in your items. Nothing new was added. To add stock to it, ask your manager.`);
             setExists(null);
             setName('');
             setSell('');

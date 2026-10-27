@@ -1321,11 +1321,13 @@ export function createMockRetail(): RetailApi {
           products.set(p.id, p);
           history.set(p.id, [{ id: nextId('h'), at: new Date().toISOString(), source: 'initial', new_sell_minor: p.sellMinor, currency: 'UGX', ...(profitAccess ? { new_cost_minor: p.costMinor } : {}) }]);
         }
-        const counted = body.qty === undefined ? null : toMilli(body.qty);
-        if (counted !== null) move(branchId, p.id, counted - bal(branchId, p.id));
+        // The quantity is added to what the branch holds, never set (ADR-101).
+        const added = body.qty === undefined ? null : toMilli(body.qty);
+        if (body.product_id && !(added !== null && added > 0)) refuse(422, 'validation_failed', 'Type how many you are adding, more than 0.');
+        if (added !== null && added > 0) move(branchId, p.id, added);
         return {
           product_id: p.id, code: p.code, description: p.description, unit: p.unit, item_made: !body.product_id, category_made: categoryMade, unit_made: unitMade,
-          ...(counted !== null ? { branch_id: branchId, qty: plainQty(fromMilli(counted)), stocktake_id: nextId('8') } : {}),
+          ...(added !== null ? { branch_id: branchId, qty: plainQty(fromMilli(added)), total_qty: plainQty(fromMilli(bal(branchId, p.id))), ...(added > 0 ? { movement_id: nextId('9') } : {}) } : {}),
         };
       })),
 
