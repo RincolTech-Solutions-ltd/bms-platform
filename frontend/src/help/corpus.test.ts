@@ -45,8 +45,8 @@ const ids = (list: { id: string }[]) => list.map((a) => a.id);
 
 // The getting-started articles (issue #609) open before sign-in, where the picture script (docs/ui/how-do-i-598) needs a
 // local API, so they ship as text first; their pictures are a follow-up and this list shrinks as they land. Getting your shop
-// ready (issue #615) is a first-run walk through four screens, text first in the same way.
-const PICTURES_PENDING = ['start-using-bms', 'open-my-invitation', 'sign-in', 'install-bms', 'getting-your-shop-ready'];
+// ready (issue #615) and adding a photo (issue #617) are text first in the same way.
+const PICTURES_PENDING = ['start-using-bms', 'open-my-invitation', 'sign-in', 'install-bms', 'getting-your-shop-ready', 'add-a-photo'];
 
 describe('the help corpus', () => {
   it('holds the 15 to 30 articles of the questions pilots asked, each job with one at least', () => {
@@ -315,5 +315,48 @@ describe('a shop with no items is led to add them (issue #615)', () => {
     const note = boldIn(articleById('add-an-item')!.notes.slice(-1));
     expect(note).toEqual(['Not in the list? Add it here']);
     expect(source(['areas/staff/retail/new-item-here.tsx'])).toMatch(/^\s*Not in the list\? Add it here\s*$/m);
+  });
+});
+
+describe('a photo while adding an item (issue #617)', () => {
+  const PHOTO = 'add-a-photo';
+  // The code of the screens each part walks through (its steps in order, then its note).
+  const PARTS = [
+    ['areas/staff/retail/item-photo.tsx'],
+    ['areas/staff/retail/catalogue-products.tsx', 'areas/staff/retail/new-item-here.tsx'],
+    ['areas/staff/retail/catalogue-products.tsx', 'areas/staff/retail/item-photo.tsx'],
+    ['areas/staff/retail/catalogue-products.tsx'],
+  ];
+  const source = (files: string[]) => files.map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')).join('\n');
+  const boldIn = (runs: Inline[]) => [...new Set(runs.flat().filter((r) => r.strong).map((r) => r.text))];
+  const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const whole = (label: string) => new RegExp(`(^|[>'"])\\s*${escape(label)}\\s*($|[<'"])`, 'm');
+
+  it('has the article, on the new-item form and Edit, with the words people use, for whoever manages the catalogue', () => {
+    const photo = articleById(PHOTO)!;
+    expect(photo.title).toBe('How do I add a photo to an item?');
+    expect(photo.screens).toEqual(['/staff/retail/catalogue/products', '/staff/retail/catalogue/categories/$categoryId']);
+    expect(photo.words).toEqual(expect.arrayContaining(['photo', 'picture', 'image', 'upload']));
+    for (const typed of ['photo', 'picture of an item', 'upload an image']) expect(searchArticles(articlesFor(owner), typed)[0]?.id, typed).toBe(PHOTO);
+    expect(ids(articlesFor(seller))).not.toContain(PHOTO);
+    expect(articleText(photo)).not.toMatch(/[\u2013\u2014]| - /);
+  });
+
+  it('mentions the photo step in the add-an-item article', () => {
+    expect(articleText(articleById('add-an-item')!)).toContain('You can add a photo too, with Take a picture or Choose a photo.');
+  });
+
+  it('puts in bold only labels the screens of each step really show', () => {
+    const photo = articleById(PHOTO)!;
+    const parts = [...photo.steps.map((step) => boldIn([step.text])), boldIn(photo.notes)];
+    expect(parts).toHaveLength(PARTS.length);
+    parts.forEach((labels, i) => {
+      const code = source(PARTS[i]!);
+      expect(labels.length, `part ${i + 1}`).toBeGreaterThan(0);
+      for (const label of labels) expect(code, `part ${i + 1}: ${label}`).toMatch(whole(label));
+    });
+    const step = boldIn([articleById('add-an-item')!.steps[1]!.text]).filter((l) => /photo|picture/.test(l));
+    expect(step).toEqual(['Take a picture', 'Choose a photo']);
+    for (const label of step) expect(source(['areas/staff/retail/item-photo.tsx'])).toMatch(whole(label));
   });
 });
