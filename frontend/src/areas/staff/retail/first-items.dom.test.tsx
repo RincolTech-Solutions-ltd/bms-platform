@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
 import type { Product } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
+import { branchLabel } from '../../../auth/branch';
 import { StaffContext } from '../context';
 import { PICKER_LABEL } from '../../../test-utils/item-picker';
 import { chooseCategory } from '../../../test-utils/category-picker';
@@ -281,15 +282,21 @@ describe('Sell it from Quick add (issue #632)', () => {
     expect(listProducts.mock.calls.some((c) => (c[0] as { branchId?: string }).branchId === here)).toBe(true);
   });
 
-  it('waits while the branch in use is still another one, so the item is never looked up there', async () => {
+  it('says where the item is when the branch in use is another, offers the switch, and never looks it up here', async () => {
     catalogue = [{ ...made, qty: '600' }];
     getProduct.mockResolvedValue(made);
     const started = vi.fn();
     open(<RecordSale startItem="p9" startBranch={other} onStarted={started} />, owner);
-    await screen.findByRole('heading', { name: 'Items' });
-    await new Promise((r) => setTimeout(r, 50));
+    const note = await screen.findByTestId('sale-start-elsewhere');
+    const name = branchLabel(owner.branches?.[1]);
+    expect(note.textContent).toContain(`The item you just added is at ${name}. Switch to ${name} to sell it.`);
+    expect(within(note).getByRole('button', { name: `Switch to ${name}` })).toBeTruthy();
     expect(getProduct).not.toHaveBeenCalled();
-    expect(started).not.toHaveBeenCalled();
+    // Sell here without it forgets the item and clears the address, so the sale never waits.
+    fireEvent.click(within(note).getByRole('button', { name: 'Sell here without it' }));
+    expect(started).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('sale-start-elsewhere')).toBeNull();
+    expect(getProduct).not.toHaveBeenCalled();
   });
 });
 

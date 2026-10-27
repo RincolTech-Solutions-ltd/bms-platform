@@ -766,6 +766,29 @@ function NewSale({ sale, onNew }: { sale: Sale; onNew: () => void }) {
   );
 }
 
+/**
+ * Sell it from Quick add (issue #632) named another branch than the one in use: the sale says where the item was added, offers
+ * Switch to that branch where this person may sell there, and Sell here without it, which forgets the item, so the sale never
+ * waits in silence (a reload or a shared link included).
+ */
+export function StartElsewhere({ branchId, onDrop }: { branchId: string; onDrop: () => void }) {
+  const { me, chooseBranch } = useStaff();
+  const there = (me.branches ?? []).find((b) => b.id === branchId);
+  const name = there ? branchLabel(there) : 'another branch';
+  const may = there !== undefined && there.sells_goods !== false && holdsAt(me, 'retail.sale.create', branchId);
+  return (
+    <div role="status" className="alert alert-info" data-testid="sale-start-elsewhere">
+      <div className="stack">
+        <p>{may ? `The item you just added is at ${name}. Switch to ${name} to sell it.` : `The item you just added is at ${name}, where you do not sell.`}</p>
+        <p className="cluster">
+          {may && chooseBranch && <button type="button" onClick={() => chooseBranch(branchId)}>Switch to {name}</button>}
+          <button type="button" className="btn-ghost" onClick={onDrop}>Sell here without it</button>
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function RecordSale({ startItem, startBranch, onStarted }: { startItem?: string; startBranch?: string; onStarted?: () => void } = {}) {
   const { me } = useStaff();
   const roles = useBranchRoles(me);
@@ -781,6 +804,9 @@ export function RecordSale({ startItem, startBranch, onStarted }: { startItem?: 
   const [queued, setQueued] = useState<OutboxItem | null>(null);
   const [received, setReceived] = useState<number>();
   const [round, setRound] = useState(0);
+  // Sell here without it: the item named in the address is forgotten.
+  const [dropped, setDropped] = useState(false);
+  const elsewhere = !dropped && round === 0 && !!startItem && !!startBranch && startBranch !== branchId;
   const noItems = useNoItemsYet();
   // The receipt of the sale just made, with its number, stays until the cashier starts the next sale or leaves (#576, ADR-088).
   useUnsavedWork(sale !== null || queued !== null);
@@ -808,10 +834,11 @@ export function RecordSale({ startItem, startBranch, onStarted }: { startItem?: 
           {/* A shop with no items yet starts from the card (issue #615); "This branch holds no stock" would only confuse it. */}
           <FirstItemsCard />
           {!noItems && <NoStockHere branchId={branchId} />}
+          {elsewhere && startBranch && <StartElsewhere branchId={startBranch} onDrop={() => { setDropped(true); onStarted?.(); }} />}
           <SaleForm key={`${branchId}-${round}`} branchId={branchId} branchName={branchName} onSaved={(s, r) => { setSale(s); setReceived(r); }} onQueued={setQueued}
             // Sell it names the branch its stock was added at: the item waits until that branch is the one in use, so it is never looked
             // up (and the address cleared) at the branch the sale opened with before the switch landed.
-            startItem={round === 0 && (!startBranch || startBranch === branchId) ? startItem : undefined} onStarted={onStarted} />
+            startItem={!dropped && round === 0 && (!startBranch || startBranch === branchId) ? startItem : undefined} onStarted={onStarted} />
         </>
       )}
     </Gate>
