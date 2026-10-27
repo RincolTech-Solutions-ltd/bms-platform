@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping(path = "/api/v1/help/setup", produces = MediaType.APPLICATION_JSON_VALUE)
 @Tag(name = "help")
-class SetupController {
+class SetupHelperController {
 
     @Schema(name = "SetupHelperStatus")
     record SetupHelperStatus(
@@ -32,7 +32,7 @@ class SetupController {
 
     private final SetupDrafts drafts;
 
-    SetupController(SetupDrafts drafts) {
+    SetupHelperController(SetupDrafts drafts) {
         this.drafts = drafts;
     }
 

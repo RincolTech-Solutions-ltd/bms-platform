@@ -122,7 +122,7 @@ class AskProviders {
                 "{} providers: {}",
                 label,
                 chain.isEmpty()
-                        ? "none, the articles are shown"
+                        ? "Ask BMS".equals(label) ? "none, the articles are shown" : "none, the list is typed or imported"
                         : chain.stream().map(Provider::name).toList());
         return new AskProviders(chain);
     }
