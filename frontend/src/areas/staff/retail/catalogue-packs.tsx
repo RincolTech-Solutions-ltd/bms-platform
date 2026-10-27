@@ -64,6 +64,14 @@ export function usualFactor(unit: Unit | undefined, product: Product): string | 
   return pack?.size && pack.of_unit_id === product.unit_id ? showQty(pack.size) : null;
 }
 
+/**
+ * Review of #628: the size to show when another unit is chosen. A size filled in from the last unit's usual pack (or none) makes
+ * way for this unit's usual size, or for nothing when it has none; a size the owner typed stays.
+ */
+export function factorForUnit(factor: string, filled: string, usual: string | null): string {
+  return factor.trim() === '' || factor === filled ? (usual ?? '') : factor;
+}
+
 export function PackEditor({ product }: { product: Product }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
@@ -73,11 +81,21 @@ export function PackEditor({ product }: { product: Product }) {
   const units = useQuery({ queryKey: ['retail', 'catalogue', 'units'], queryFn: () => retail.listUnits(), enabled: allowed });
   const [unitId, setUnitId] = useState('');
   const [factor, setFactor] = useState('');
+  // The size last filled in from a unit's usual pack (issue #625): another unit replaces it, but never a size the owner typed.
+  const [filled, setFilled] = useState('');
+  const chooseUnit = (unit: Unit | undefined) => {
+    setUnitId(unit?.id ?? '');
+    const next = factorForUnit(factor, filled, usualFactor(unit, product));
+    if (next === factor) return;
+    setFactor(next);
+    setFilled(next);
+  };
   const add = useMutation({
     mutationFn: () => retail.addPack(id, { unit_id: unitId, factor: factor.trim() }),
     onSuccess: () => {
       setUnitId('');
       setFactor('');
+      setFilled('');
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
   });
@@ -111,7 +129,7 @@ export function PackEditor({ product }: { product: Product }) {
       ) : (
       <>
       <label htmlFor="pack-unit">Add a pack</label>
-      <select id="pack-unit" value={unitId} onChange={(e) => { setUnitId(e.target.value); setFactor(usualFactor(choices.find((u) => u.id === e.target.value), product) ?? factor); }}>
+      <select id="pack-unit" value={unitId} onChange={(e) => chooseUnit(choices.find((u) => u.id === e.target.value))}>
         <option value="">Choose a unit</option>
         {choices.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
       </select>

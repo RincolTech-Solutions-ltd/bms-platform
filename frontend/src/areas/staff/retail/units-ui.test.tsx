@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { Product, Sale } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
-import { PackEditor } from './catalogue-packs';
+import { PackEditor, factorForUnit } from './catalogue-packs';
 import { Receipt, SaleForm, SaleLineCard } from './sale';
 import { newLine } from './sale-state';
 
@@ -40,6 +40,16 @@ describe('pack sizes on the item', () => {
     expect(html).toContain('Cartons, boxes and other packs');
     expect(html).toContain('Add pack');
     expect(html).toContain('for="pack-factor"');
+  });
+});
+
+describe('the size a chosen unit fills in (issue #625)', () => {
+  it('fills in the usual size, replaces a filled one, clears it for a unit with none, and keeps a typed one', () => {
+    expect(factorForUnit('', '', '100')).toBe('100');
+    expect(factorForUnit('100', '100', '50')).toBe('50');
+    expect(factorForUnit('100', '100', null)).toBe('');
+    expect(factorForUnit('12', '100', '50')).toBe('12');
+    expect(factorForUnit('12', '', null)).toBe('12');
   });
 });
 
