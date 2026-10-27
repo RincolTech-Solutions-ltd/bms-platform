@@ -81,7 +81,7 @@ describe('the starting sets', () => {
       for (const name of t.categories) expect(name.length).toBeLessThanOrEqual(100);
       const words = [t.label, t.hint, ...t.categories, ...t.units, ...t.packs.map((p) => p.name)].join(' ');
       expect(offendingWords(words), t.id).toEqual([]);
-      expect(words, t.id).not.toMatch(/[–—]| - /);
+      expect(words, t.id).not.toMatch(/[\u2013\u2014]| - /);
     }
   });
 });
