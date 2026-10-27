@@ -1190,16 +1190,16 @@ Accepted (this list is the ADR index):
   DeepSeek through the gateway's adapter and never Claude (three names, a constant allow-list of one host each, startup refused), a cache
   keyed on everything that produced the answer, off unless `BMS_HELP_ASK_TENANTS` names the business, a daily question cap and
   a spend log (proposed, #20, owner decision D52; migration `V108`)
-- ADR-101 Quick add makes the item and its starting stock in one request: `POST /retail/quick-add` in `retail.stock`, the catalogue's
-  own create then the quantity added as opening stock against opening balance equity, never set and never a count, General and Piece
-  made when missing, the stock gated by `retail.stocktake.commit`
-  (#632, owner decision D67; no migration)
 - ADR-046 Two-step sign-in is optional by default (migration `V67`) and a tenant policy can require it for everyone or for chosen roles after a grace
   period; one deadline, enforced-now versus due-by, the forgotten-password rules unchanged (proposed, #348; FR-IAM-06, FR-IAM-16)
 - ADR-063 Production is created by Terraform on production day (`infra/production/`, a Hetzner root and an AWS root over shared
   cloud-init and Cloudflare modules, nothing applied before): the VM, its firewall, DNS, the R2 buckets with the ADR-058 lock and
   lifecycle rules and host tokens (the backup one cannot delete a locked backup; the DNS-01 one reaches the whole zone, an accepted risk); later updated by a signed pointer the owner moves with
   a local promote command, no deploy SSH key and no hosted job (proposed, #300, #301; provider, region and the promote command pending)
+- ADR-101 Quick add makes the item and its starting stock in one request: `POST /retail/quick-add` in `retail.stock`, the catalogue's
+  own create then the quantity added as opening stock against opening balance equity, never set and never a count, General and Piece
+  made when missing, the stock gated by `retail.stocktake.commit`
+  (#632, owner decision D67; no migration)
 
 Pending (cite only as "pending ADR-NNN"):
 

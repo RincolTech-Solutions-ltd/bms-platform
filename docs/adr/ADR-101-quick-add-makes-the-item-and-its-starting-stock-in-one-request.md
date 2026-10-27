@@ -22,10 +22,14 @@ and says so. The item needs a category and a unit; a new shop may have neither.
    transaction. The item is made through the catalogue's own create (now also reached through `RetailCatalogue.createItem`).
    It is a money-moving route: it takes an `Idempotency-Key`.
 2. The stock goes in as one `opening` movement of its own source type, `retail.quick_add`, at the branch's average (for a new
-   item, the buying price typed), under the balance row's lock, and posts to inventory against opening balance equity (3030),
-   as the import's opening stock does (`retail-import`, ADR-020). It is not a stock count: a count's difference posts to lost or
-   damaged stock, so a starting quantity would show as a gain and as profit. The reports that read lost or damaged stock read
-   stock-take adjustments by source, so they never see it; the stock history names it Opening stock. No other item moves.
+   item, the buying price typed), under the balance row's lock, and posts the same journal as the import's opening stock
+   (`retail-import`, ADR-020): debit inventory, credit opening balance equity (3030). The import's own movements are of kind
+   `legacy_balance` and historical; the kind `opening`, allowed since V11, had no writer before Quick add. It is not a stock
+   count: a count's difference posts to lost or damaged stock, so a starting quantity would show as a gain and as profit. The
+   daily profit and stock health read lost or damaged stock from stock-take adjustments by source, so they never see it, and
+   the stock history's label for the kind `opening` (Opening stock, already in the app) names it (`RetailQuickAddIT`,
+   `stock-correct.dom.test.tsx`). A later supplier credit or landed cost counts it as a later layer of stock, as any stock
+   that came in. No other item moves.
 3. The quantity is always added, never set: for a new item it is how many there are, and for an item already in the list
    (`product_id`, chosen when the name is refused as a repeat) it is added to what the branch holds, exactly; 0 is refused there.
    The item's prices stay as they are.
@@ -48,7 +52,9 @@ adding to an item already in the list can never lower its stock; a new shop need
 
 **Worse:** opening balance equity grows with every Quick add, so an accountant reads it as the owner's stock brought in, not
 as a purchase with a supplier and a cost of cash; a shop that bought the goods and wants them as a purchase still uses Buy
-stock. General and Piece are English names.
+stock. Stock added without a buying price (always so for someone who may not read cost, whose form does not ask it) goes in
+at 0, so its opening value is 0 and a later sale of it shows the whole price as profit until a purchase sets the cost. General
+and Piece are English names.
 
 **Watch for:** a second way to make items that skips a rule of `POST /retail/products`; Quick add must keep calling the same
 create. Goods that were really bought, entered through Quick add instead of Buy stock, leave what is owed to suppliers and the
