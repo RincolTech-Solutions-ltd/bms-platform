@@ -757,6 +757,12 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `DefaultUnits` in `retail.catalogue` through the existing unit insert, skipping a name the business has in any case, each unit audited
   `retail.unit.created` by the system. No API, permission or screen change (the inline Add a new unit is #616). Tests:
   `RetailDefaultUnitsIT`, `MigrationOrderIT.defaultUnitsMigrationFillsOnlyRetailBusinessesWithNoUnit`.
+- **Built (Quick add, issue #632, ADR-101, FR-RET-79):** no migration. `POST /api/v1/retail/quick-add` (`retail.stock`, permission
+  `retail.catalogue.manage`, `Idempotency-Key`) makes the item through `RetailCatalogue.createItem` (the catalogue's own create; General and
+  Piece made when left out and missing) and, with `qty`, commits a one-line stock count at the branch (`retail.stocktake.commit` there,
+  checked first), all in one transaction; with `product_id` only the count. The Quick add screen (`/staff/retail/quick-add`): the Stock menu
+  row and More, the first-run card's first action, the catalogue home, the Items page and Sell's not-found line; Add another and Sell it
+  (`/staff/retail/sale?item=`). Help: How do I add an item quickly?. Tests: `RetailQuickAddIT`, `quick-add.dom.test.tsx`.
 
 ## Reading order
 
@@ -1183,6 +1189,9 @@ Accepted (this list is the ADR index):
   DeepSeek through the gateway's adapter and never Claude (three names, a constant allow-list of one host each, startup refused), a cache
   keyed on everything that produced the answer, off unless `BMS_HELP_ASK_TENANTS` names the business, a daily question cap and
   a spend log (proposed, #20, owner decision D52; migration `V108`)
+- ADR-101 Quick add makes the item and its starting count in one request: `POST /retail/quick-add` in `retail.stock`, the catalogue's
+  own create then a committed one-line stock count, General and Piece made when missing, the count gated by `retail.stocktake.commit`
+  (#632, owner decision D67; no migration)
 - ADR-046 Two-step sign-in is optional by default (migration `V67`) and a tenant policy can require it for everyone or for chosen roles after a grace
   period; one deadline, enforced-now versus due-by, the forgotten-password rules unchanged (proposed, #348; FR-IAM-06, FR-IAM-16)
 - ADR-063 Production is created by Terraform on production day (`infra/production/`, a Hetzner root and an AWS root over shared

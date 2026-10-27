@@ -45,8 +45,8 @@ const ids = (list: { id: string }[]) => list.map((a) => a.id);
 
 // The getting-started articles (issue #609) open before sign-in, where the picture script (docs/ui/how-do-i-598) needs a
 // local API, so they ship as text first; their pictures are a follow-up and this list shrinks as they land. Getting your shop
-// ready (issue #615), adding a photo (issue #617) and an empty list (issue #619) are text first in the same way.
-const PICTURES_PENDING = ['start-using-bms', 'open-my-invitation', 'sign-in', 'install-bms', 'getting-your-shop-ready', 'add-a-photo', 'empty-list'];
+// ready (issue #615), adding a photo (issue #617), an empty list (issue #619) and Quick add (issue #632) are text first in the same way.
+const PICTURES_PENDING = ['start-using-bms', 'open-my-invitation', 'sign-in', 'install-bms', 'getting-your-shop-ready', 'add-a-photo', 'empty-list', 'add-an-item-quickly'];
 
 describe('the help corpus', () => {
   it('holds the 15 to 30 articles of the questions pilots asked, each job with one at least', () => {
@@ -404,5 +404,39 @@ describe('an empty list (issue #619)', () => {
     const inline = source(['areas/staff/retail/unit-picker.tsx', 'areas/staff/retail/category-picker.tsx', 'areas/staff/retail/purchasing-ui.tsx', 'areas/staff/retail/buyer-pricing.tsx']);
     for (const create of ['retail.createUnit', 'createCategory', 'retail.createSupplier', 'retail.createCustomerGroup']) expect(inline).toContain(create);
     for (const screen of ['catalogue-people.tsx', 'price-lists.tsx', '../branches/page.tsx']) expect(source([`areas/staff/retail/${screen}`]), screen).toMatch(/useComeBack\(\)[\s\S]*back\?\.\(\)/);
+  });
+});
+
+describe('adding an item quickly (issue #632)', () => {
+  const QUICK = 'add-an-item-quickly';
+  // The code of the screens each part walks through (its steps in order, then its notes).
+  const PARTS = [
+    ['areas/staff/menu.tsx', 'areas/staff/tabs.tsx', 'areas/staff/retail/first-items.tsx'],
+    ['areas/staff/retail/quick-add.tsx', 'app/glossary.ts'],
+    ['areas/staff/retail/quick-add.tsx', 'areas/staff/retail/item-photo.tsx'],
+    ['areas/staff/retail/quick-add.tsx'],
+    ['areas/staff/retail/quick-add.tsx'],
+  ];
+  const source = (files: string[]) => files.map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')).join('\n');
+  const boldIn = (runs: Inline[]) => [...new Set(runs.flat().filter((r) => r.strong).map((r) => r.text))];
+  const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  it('puts in bold only labels the screens of each step really show, each a whole label in their code', () => {
+    const quick = articleById(QUICK)!;
+    const parts = [...quick.steps.map((step) => boldIn([step.text])), boldIn(quick.notes)];
+    expect(parts).toHaveLength(PARTS.length);
+    parts.forEach((labels, i) => {
+      const code = source(PARTS[i]!);
+      expect(labels.length, `part ${i + 1}`).toBeGreaterThan(0);
+      for (const label of labels) expect(code, `part ${i + 1}: ${label}`).toMatch(new RegExp(`(^|[>'"])\\s*${escape(label)}\\s*($|[<'"])`, 'm'));
+    });
+  });
+
+  it('is found by the words a shop owner types, and only by whoever may add items', () => {
+    for (const typed of ['quick add', 'add stock', 'how many I have', 'add an item and its stock', 'quick']) {
+      expect(searchArticles(articlesFor(owner), typed)[0]?.id, typed).toBe(QUICK);
+    }
+    expect(articleForScreen('/staff/retail/quick-add', owner)?.id).toBe(QUICK);
+    expect(ids(articlesFor(seller))).not.toContain(QUICK);
   });
 });

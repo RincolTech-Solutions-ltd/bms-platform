@@ -2071,6 +2071,8 @@ module on again adds nothing. `S` marks `is_system_controlled`.
 
 Default units (issue #618, ADR-098): when retail is switched on for a business the application adds the units Piece, Pair, Set, Box, Pack, Kg, Litre and Metre with `created_by` null, skipping a name the business has; V109 added them to every retail business, not closed, that had no unit.
 
+Quick add (issue #632, ADR-101): an item added without a category goes under General and one without a unit is counted in the shop's piece unit (Piece, else pc or pcs); the application makes either with `INSERT ... ON CONFLICT DO NOTHING` on the name index when the business has none, so two adds at once make it once. No table or column changes.
+
 ### `retail_products` (RLS; `bms_app` SELECT, INSERT, UPDATE)
 
 | Column | Type | Notes |
