@@ -147,7 +147,7 @@ export function ExistingLoansImport({ api = existingLoans, helperApi = setupHelp
           ) : (
             <>
               <label htmlFor="exl-draft-product">Loan product for these loans</label>
-              <select id="exl-draft-product" value={productCode} onChange={(e) => chooseProduct(e.target.value)}>
+              <select id="exl-draft-product" aria-required="true" value={productCode} onChange={(e) => chooseProduct(e.target.value)}>
                 <option value="">Choose the product</option>
                 {(products.data ?? []).map((p) => <option key={p.id} value={p.code}>{p.code}: {p.name}</option>)}
               </select>
@@ -165,7 +165,7 @@ export function ExistingLoansImport({ api = existingLoans, helperApi = setupHelp
       <textarea id="exl-text" data-tour="existing-import-text" rows={8} value={text} spellCheck={false} onChange={(e) => { setText(e.target.value); setDraft(null); setDone(null); setWarning(null); }} />
       {warning && <p role="alert" className="alert alert-warning">{warning}</p>}
       <Problem error={check.error} />
-      <BusyButton busy={check.isPending} type="button" className="rt-primary" data-tour="existing-import-check" notReady={text.trim() === ''} onClick={() => check.mutate()}>
+      <BusyButton busy={check.isPending} type="button" className="rt-primary" data-tour="existing-import-check" notReady={text.trim() === '' || (draft !== null && productCode === '')} onClick={() => check.mutate()}>
         {draft ? 'Check these loans' : 'Check the file'}
       </BusyButton>
       {current && <LoanImportReport result={current} />}
