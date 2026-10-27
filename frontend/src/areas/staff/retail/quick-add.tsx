@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute, useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { RETAIL_CURRENCY, RetailError, retail, type QuickAdd, type Unit } from '../../../api/retail';
+import { RETAIL_CURRENCY, RetailError, retail, type QuickAdd, type QuickAddRequest, type Unit } from '../../../api/retail';
 import { branchLabel } from '../../../auth/branch';
 import { WORDS } from '../../../app/glossary';
 import { BusyButton } from '../../../app/ui/BusyButton';
@@ -15,7 +15,7 @@ import { ExistsPanel, existingOf, type ExistingItem } from './catalogue-names';
 import { newIdempotencyKey } from './idempotency';
 import { PhotoChoice, sendNewPhoto } from './item-photo';
 import { parseCount, qtyString, showQty } from './maths';
-import { branchesWhere, canUse } from './permissions';
+import { branchesWhere, canUse, holdsAt } from './permissions';
 import { UnitPicker } from './unit-picker';
 import { Gate, Problem, money, useProfitAccess, useStockingBranch } from './ui';
 
@@ -54,6 +54,17 @@ function unreachable(error: unknown): boolean {
   return error instanceof TypeError || (error instanceof RetailError && error.status === 0);
 }
 
+/**
+ * The server answered for certain that nothing was done: a 4xx refusal other than the key's own answers. A 5xx, a gateway timeout,
+ * a lost answer, a key still being worked on or a key sent with another body may hide a request that went through.
+ */
+export function refusedForCertain(error: unknown): boolean {
+  return error instanceof RetailError && error.status >= 400 && error.status < 500
+    && error.code !== 'idempotency_in_progress' && error.code !== 'idempotency_key_reused';
+}
+
+export const NOT_SURE = 'We could not tell whether this was saved. Tap Add again: it sends exactly the same, and it is never added twice.';
+
 export function QuickAddForm({ initialName = '', onSell }: {
   /** What the name starts with: on Sell's not-found, what was typed in the search. */
   initialName?: string;
@@ -70,7 +81,9 @@ export function QuickAddForm({ initialName = '', onSell }: {
   // Where the stock is: every branch that keeps goods where this person may count, stores too; the branch in use first.
   const places = branchesWhere(me, COUNT).filter((b) => b.id && b.stocks_goods !== false);
   const mayCount = places.length > 0;
-  const [where, setWhere] = useState(() => places.find((b) => b.id === here.branchId)?.id ?? places[0]?.id ?? '');
+  const [chosenWhere, setWhere] = useState<string | null>(null);
+  // Until the person picks one, Where follows the branch in use, which may be known only after the first render.
+  const where = chosenWhere ?? places.find((b) => b.id === here.branchId)?.id ?? places[0]?.id ?? '';
   const [name, setName] = useState(initialName.trim());
   const [sell, setSell] = useState('');
   const [cost, setCost] = useState('');
@@ -82,8 +95,12 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const [offline, setOffline] = useState(false);
   const [exists, setExists] = useState<ExistingItem | null>(null);
   const [done, setDone] = useState<{ added: QuickAdd; where: string; note: string | null } | null>(null);
-  // One key per attempt: kept while the answer is lost (the same request may go again), new once the server has answered.
+  // One key per attempt, and the request sent with it. While the answer is not certain (lost, a 5xx, a timeout) both are kept and
+  // Add sends exactly that request again, whatever was typed since, so a retry can never add the stock twice; a new key and a new
+  // request only once the server has answered for certain (success, or a 4xx refusal).
   const key = useRef(newIdempotencyKey());
+  const unsure = useRef<QuickAddRequest | null>(null);
+  const [notSure, setNotSure] = useState(false);
   const form = useRef<HTMLFormElement>(null);
   const piece = pieceUnit(units.data ?? []);
   // A Piece or a General the owner switched off is never switched back on by the server: the person chooses one instead.
@@ -107,8 +124,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
 
   const add = useMutation({
     mutationFn: async (extra: { productId?: string; duplicateReason?: string }) => {
-      const added = await retail.quickAdd(
-        {
+      const body: QuickAddRequest = unsure.current ?? {
           ...(extra.productId
             ? { product_id: extra.productId }
             : {
@@ -120,15 +136,17 @@ export function QuickAddForm({ initialName = '', onSell }: {
                 ...(extra.duplicateReason ? { duplicate_reason: extra.duplicateReason } : {}),
               }),
           ...(mayCount && counted !== null ? { qty: qtyString(counted), branch_id: where } : {}),
-        },
-        key.current,
-      );
+        };
+      unsure.current = body;
+      const added = await retail.quickAdd(body, key.current);
       // The photo after the item (#617): a failed upload leaves the item and says so under the line.
       const note = added.item_made ? await sendNewPhoto(added.product_id ?? '', photo) : null;
       return { added, note };
     },
     onSuccess: ({ added, note }) => {
       key.current = newIdempotencyKey();
+      unsure.current = null;
+      setNotSure(false);
       setExists(null);
       setDone({ added, where: whereName, note });
       // The first-run card, the item search, the stock lists and Home all read again with the new item.
@@ -137,9 +155,16 @@ export function QuickAddForm({ initialName = '', onSell }: {
       }
     },
     onError: (error) => {
-      if (unreachable(error)) return setOffline(true);
-      // The server answered, so the next attempt is a new request.
+      if (!refusedForCertain(error)) {
+        // The request may have gone through: the key and the request are kept for the next tap.
+        if (unreachable(error)) setOffline(true);
+        else setNotSure(true);
+        return;
+      }
+      // The server refused for certain, so the next attempt is a new request.
       key.current = newIdempotencyKey();
+      unsure.current = null;
+      setNotSure(false);
       const found = existingOf(error);
       if (found) setExists({ ...found, mayAddAnyway: found.mayAddAnyway && canAddAnyway });
     },
@@ -149,7 +174,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
     e?.preventDefault();
     if (add.isPending || exists !== null) return;
     setKept(null);
-    if (!complete) {
+    if (!complete && unsure.current === null) {
       setShowErrors(true);
       if (form.current) focusFirstMissing(form.current);
       return;
@@ -174,7 +199,8 @@ export function QuickAddForm({ initialName = '', onSell }: {
 
   if (done) {
     const sellsThere = (me.branches ?? []).some((b) => b.id === where && b.sells_goods !== false);
-    const canSell = onSell && canUse(me, 'sale') && sellsThere && done.added.qty !== undefined && Number(done.added.qty) > 0;
+    // Sell it only where this person may sell: the sale waits for that branch to be the one in use.
+    const canSell = onSell && canUse(me, 'sale') && holdsAt(me, 'retail.sale.create', where) && sellsThere && done.added.qty !== undefined && Number(done.added.qty) > 0;
     return (
       <section className="rt-card stack" aria-labelledby="qa-done">
         <p id="qa-done" role="status" className="alert alert-success" data-testid="qa-done">{addedLine(done.added, done.where)}</p>
@@ -314,7 +340,13 @@ export function QuickAddForm({ initialName = '', onSell }: {
         />
       )}
       {kept && <p role="status" className="hint" data-testid="qa-kept">{kept}</p>}
-      {offline ? <p role="alert" className="alert alert-warning" data-testid="qa-offline">{QUICK_ADD_OFFLINE}</p> : !exists && <Problem error={add.error} />}
+      {offline ? (
+        <p role="alert" className="alert alert-warning" data-testid="qa-offline">{QUICK_ADD_OFFLINE}</p>
+      ) : notSure ? (
+        <p role="alert" className="alert alert-warning" data-testid="qa-not-sure">{NOT_SURE}</p>
+      ) : (
+        !exists && <Problem error={add.error} />
+      )}
       <p className="cluster" data-tour="quick-add-go">
         <BusyButton busy={add.isPending} type="submit" className="rt-primary" disabled={exists !== null}>Add</BusyButton>
       </p>

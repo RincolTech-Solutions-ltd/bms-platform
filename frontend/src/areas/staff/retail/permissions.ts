@@ -158,8 +158,8 @@ const NEEDS: Record<RetailScreen, string[]> = {
   // The Catalogue home needs nothing itself: canUse opens it when any screen under it may be used.
   catalogue: [],
   // The lists these screens read are stock, purchase and sale reads; changing them needs the manage permissions.
-  // Quick add (issue #632): making the item is a catalogue change; its count also needs retail.stocktake.commit at the branch,
-  // without which the form adds the item and says to ask for the count.
+  // Quick add (issue #632): making the item is a catalogue change; adding its stock also needs retail.stocktake.commit at the
+  // branch, without which the form adds the item with no stock and says who to ask.
   quickAdd: ['retail.catalogue.manage', 'retail.stock.read'],
   products: ['retail.catalogue.manage', 'retail.stock.read'],
   categories: ['retail.catalogue.manage', 'retail.stock.read'],

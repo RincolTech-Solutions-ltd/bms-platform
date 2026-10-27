@@ -33,7 +33,7 @@ vi.mock('../../../api/retail', async (original) => {
   };
 });
 
-const { QuickAddForm, addedLine, pieceUnit } = await import('./quick-add');
+const { QuickAddForm, addedLine, pieceUnit, refusedForCertain } = await import('./quick-add');
 
 const owner = mockMe('admin');
 const branch = owner.branches?.[0];
@@ -189,6 +189,40 @@ describe('quick add', () => {
     expect(quickAdd).toHaveBeenCalledTimes(1);
   });
 
+  it('after an answer that may hide a save (a 502), Add sends exactly the same request with the same key, whatever was typed since', async () => {
+    quickAdd.mockRejectedValueOnce(new RetailError('Bad gateway', 502, 'bad_gateway'));
+    quickAdd.mockResolvedValueOnce({ product_id: 'p5', description: 'Test Torch', unit: 'pc', item_made: true, branch_id: branch?.id, qty: '10', total_qty: '10' });
+    open(owner);
+    type(/^Name/, 'Test Torch');
+    type(/^Selling price/, '8000');
+    type(/How many do you have here now/, '10');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect((await screen.findByTestId('qa-not-sure')).textContent).toBe('We could not tell whether this was saved. Tap Add again: it sends exactly the same, and it is never added twice.');
+    // A change made meanwhile is not sent: the request whose answer was lost goes again as it was.
+    type(/How many do you have here now/, '20');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await screen.findByTestId('qa-done');
+    const [first, second] = quickAdd.mock.calls as [Record<string, unknown>, string][];
+    expect(second?.[1]).toBe(first?.[1]);
+    expect(second?.[0]).toEqual(first?.[0]);
+    expect((second?.[0] as { qty?: string }).qty).toBe('10.000');
+  });
+
+  it('takes a new key once the server refuses for certain', async () => {
+    quickAdd.mockRejectedValueOnce(new RetailError('Choose a category.', 422, 'validation_failed'));
+    quickAdd.mockResolvedValueOnce({ product_id: 'p6', description: 'Test Fan', unit: 'pc', item_made: true, qty: '1', total_qty: '1' });
+    open(owner);
+    type(/^Name/, 'Test Fan');
+    type(/^Selling price/, '9000');
+    type(/How many do you have here now/, '1');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(quickAdd).toHaveBeenCalledTimes(1));
+    await screen.findByText('Choose a category.');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await screen.findByTestId('qa-done');
+    expect((quickAdd.mock.calls[1] as [unknown, string])[1]).not.toBe((quickAdd.mock.calls[0] as [unknown, string])[1]);
+  });
+
   it('asks for the name, the price and the count before sending anything', async () => {
     open(owner);
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
@@ -211,6 +245,13 @@ describe('quick add', () => {
 });
 
 describe('the words and defaults', () => {
+  it('counts only a 4xx refusal other than the answers about the key itself as certain', () => {
+    expect(refusedForCertain(new RetailError('x', 422, 'validation_failed'))).toBe(true);
+    for (const e of [new RetailError('x', 502), new RetailError('x', 504), new RetailError('x', 0), new RetailError('x', 409, 'idempotency_in_progress'), new RetailError('x', 422, 'idempotency_key_reused'), new TypeError('fetch')]) {
+      expect(refusedForCertain(e)).toBe(false);
+    }
+  });
+
   it('prefers Piece, then pc, of the switched-on units', () => {
     expect(pieceUnit([{ id: 'a', name: 'Box' }, { id: 'b', name: 'pc' }, { id: 'c', name: 'Piece', active: false }])?.id).toBe('b');
     expect(pieceUnit([{ id: 'a', name: 'Box' }])).toBeUndefined();

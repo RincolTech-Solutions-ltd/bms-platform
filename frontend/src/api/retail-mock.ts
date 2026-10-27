@@ -1290,7 +1290,8 @@ export function createMockRetail(): RetailApi {
       return delay({ ...st });
     },
 
-    // Quick add (issue #632): the item as createProduct makes it, General and Piece made when missing, then a one-line count.
+    // Quick add (issue #632, ADR-101): the item as createProduct makes it, General and Piece made when missing, then the quantity
+    // added to the branch's stock as opening stock, as the server does.
     quickAdd: (body, key) =>
       run(() => once(`quick-add|${key}`, body, () => {
         const branchId = body.branch_id ?? BRANCH_A;
@@ -1299,21 +1300,27 @@ export function createMockRetail(): RetailApi {
         let unitMade = false;
         if (body.product_id) {
           p = find(body.product_id);
+          if (!p.active) refuse(422, 'inactive_product', 'This item is switched off. Switch it on first, on Items.');
         } else {
           if (!(body.description ?? '').trim() || body.sell_minor === undefined) refuse(422, 'validation_failed', 'Type the name and the selling price.');
-          let category = body.category_id ? cats.find((c) => c.id === body.category_id) : cats.find((c) => c.name.toLowerCase() === 'general');
+          const general = cats.find((c) => c.name.toLowerCase() === 'general');
+          if (!body.category_id && general && !general.active) refuse(422, 'inactive_category', 'The General category is switched off. Choose a category.');
+          let category = body.category_id ? cats.find((c) => c.id === body.category_id) : general;
           if (!category) {
             category = { id: nextId('c'), name: 'General', active: true, version: 1, code_prefix: freePrefix(cats, 'General'), next: 1 };
             cats.push(category);
             categoryMade = true;
           }
-          let unit = body.unit_id ? unitRows.find((u) => u.id === body.unit_id) : ['piece', 'pc', 'pcs'].map((n) => unitRows.find((u) => u.name.toLowerCase() === n)).find(Boolean);
+          // Only a switched-on piece unit is used; a switched-off Piece is never switched back on (the server's rule).
+          let unit = body.unit_id ? unitRows.find((u) => u.id === body.unit_id) : ['piece', 'pc', 'pcs'].map((n) => unitRows.find((u) => u.active && u.name.toLowerCase() === n)).find(Boolean);
+          if (!body.unit_id && !unit && unitRows.some((u) => !u.active && u.name.toLowerCase() === 'piece')) refuse(422, 'inactive_unit', 'The Piece unit is switched off. Choose a unit.');
           if (!unit) {
             unit = { id: nextId('d'), name: 'Piece', active: true, version: 1 };
             unitRows.push(unit);
             unitMade = true;
           }
-          if (!category.active || !unit.active) refuse(422, 'inactive_category', 'This category or unit is switched off. Choose another one.');
+          if (!category.active) refuse(422, 'inactive_category', 'This category is switched off. Choose another one.');
+          if (!unit.active) refuse(422, 'inactive_unit', 'This unit is switched off. Choose another one.');
           sameNameCheck(body.description ?? '', unit.name, undefined, body.duplicate_reason);
           const [code, n] = freeCode(category);
           category.next = n + 1;
