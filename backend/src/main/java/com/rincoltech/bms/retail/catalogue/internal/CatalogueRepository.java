@@ -564,7 +564,8 @@ class CatalogueRepository {
                    round(k.factor * p.sell_minor)::bigint AS suggested_sell_minor,
                    coalesce(k.sell_minor, round(k.factor * p.sell_minor)) <= round(k.factor * coalesce(
                        (SELECT sum(b.qty * coalesce(b.avg_cost_minor, p.cost_minor)) / sum(b.qty)
-                          FROM retail_stock_balances b WHERE b.product_id = k.product_id AND b.qty > 0),
+                          FROM retail_stock_balances b
+                         WHERE b.tenant_id = k.tenant_id AND b.product_id = k.product_id AND b.qty > 0),
                        p.cost_minor)) AS below_cost
               FROM retail_product_units k JOIN retail_units u ON u.id = k.unit_id
               JOIN retail_products p ON p.id = k.product_id

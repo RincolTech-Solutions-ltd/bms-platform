@@ -12,6 +12,12 @@
 -- retail_product_units (a few rows per item). No grant or policy changes: bms_app keeps SELECT, INSERT and UPDATE on the table
 -- (V39) and its forced row-level security. lock_timeout is five seconds as in V96 and V109, so the migration fails and is
 -- retried rather than queueing every catalogue writer behind it.
+--
+-- One index: the item's average cost per piece that Edit item judges a pack's price against reads the balances of one product
+-- held anywhere (qty > 0), and no index of retail_stock_balances leads with the product (its key is tenant, branch, product).
+-- A partial index on (tenant_id, product_id) for the rows that hold stock serves it. CREATE INDEX takes SHARE on the table for
+-- the build, which blocks stock writes for that time: one row per item and branch held, so a short build for a small or medium
+-- business; Flyway runs the file in one transaction, so CONCURRENTLY is not possible here.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -19,6 +25,8 @@ ALTER TABLE retail_product_units
     ADD COLUMN purpose text NOT NULL DEFAULT 'both' CHECK (purpose IN ('buy', 'sell', 'both')),
     ADD COLUMN sell_minor bigint CHECK (sell_minor >= 0 AND sell_minor <= 10000000000000),
     ADD CONSTRAINT retail_product_units_buy_unpriced_chk CHECK (purpose <> 'buy' OR sell_minor IS NULL);
+
+CREATE INDEX retail_stock_balances_product_held ON retail_stock_balances (tenant_id, product_id) WHERE qty > 0;
 
 COMMENT ON COLUMN retail_product_units.purpose IS
     'What the pack is used for: buy (Buy stock, orders and goods received), sell (sales, scans, quotations) or both (ADR-099).';

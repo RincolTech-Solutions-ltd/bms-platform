@@ -734,13 +734,9 @@ class CatalogueService {
     static final String PRICE_EDIT = "retail.price.edit";
 
     /** Issue #624: setting or dropping a pack's own selling price is a price change, so it needs retail.price.edit. */
-    private static void requirePriceEdit() {
+    private static void requirePriceEdit(String detail) {
         if (!CurrentPrincipal.require().hasPermission(PRICE_EDIT)) {
-            throw new ApiException(
-                    HttpStatus.FORBIDDEN,
-                    "permission_denied",
-                    "Permission denied",
-                    "You may not change selling prices, so you cannot set a pack's price. Ask someone who may.");
+            throw new ApiException(HttpStatus.FORBIDDEN, "permission_denied", "Permission denied", detail);
         }
     }
 
@@ -775,7 +771,8 @@ class CatalogueService {
         }
         String purpose = r.purpose() == null ? "both" : r.purpose();
         if (r.sellMinor() != null) {
-            requirePriceEdit();
+            requirePriceEdit(
+                    "You may not change selling prices, so you cannot set a pack's price. Ask someone who may.");
             if (purpose.equals("buy")) {
                 throw buyOnlyPriced();
             }
@@ -837,8 +834,21 @@ class CatalogueService {
         }
         String purpose = r.purpose() == null ? before.purpose() : r.purpose();
         boolean clear = Boolean.TRUE.equals(r.clearSellMinor());
-        if (r.sellMinor() != null || clear) {
-            requirePriceEdit();
+        // A pack with its own price sells at it whatever its size: a new size, or making it buy only (which drops the
+        // price),
+        // changes what its pieces sell for, so it is a price change too (review of #624).
+        boolean priced = before.sellMinor() != null;
+        boolean resized = new java.math.BigDecimal(before.factor()).compareTo(factor) != 0;
+        if (r.sellMinor() != null
+                || clear
+                || priced
+                        && (resized
+                                || purpose.equals("buy") && !before.purpose().equals("buy"))) {
+            requirePriceEdit(
+                    priced && r.sellMinor() == null && !clear
+                            ? "This pack has its own selling price, so changing its size or making it only for buying changes what"
+                                    + " it sells for. Ask someone who may change prices."
+                            : "You may not change selling prices, so you cannot set a pack's price. Ask someone who may.");
         }
         if (r.sellMinor() != null && clear) {
             throw ApiException.validation(List.of(new FieldProblem(

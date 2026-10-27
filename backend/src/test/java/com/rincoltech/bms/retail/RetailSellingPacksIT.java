@@ -212,10 +212,33 @@ class RetailSellingPacksIT extends IntegrationTest {
         assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(addPack(box, "10", "sell", 900L, CATALOGUE_ONLY).getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
-        // The size may still be changed without it.
+        // The size of a pack without its own price may still be changed without it: it sells at the piece price times
+        // the size.
         assertThat(change(carton, Map.of("factor", "24"), CATALOGUE_ONLY).getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         assertThat(packOf(carton, ADMIN).has("sell_minor")).isFalse();
+
+        // Once it has its own price, a new size or making it buy only changes what its pieces sell for: a price change.
+        assertThat(change(carton, Map.of("sell_minor", 2_200), ADMIN).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> resized = change(carton, Map.of("factor", "48"), CATALOGUE_ONLY);
+        assertThat(resized.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(resized.getBody().toString()).contains("its own selling price");
+        assertThat(change(carton, Map.of("purpose", "buy"), CATALOGUE_ONLY).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        JsonNode kept = packOf(carton, ADMIN);
+        assertThat(kept.get("factor").asString()).isEqualTo("24.000");
+        assertThat(kept.get("purpose").asString()).isEqualTo("both");
+        assertThat(kept.get("sell_minor").asLong()).isEqualTo(2_200);
+        // Making it for selling only, or switching it off, leaves its price alone and needs no price permission.
+        assertThat(change(carton, Map.of("purpose", "sell"), CATALOGUE_ONLY).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        // Someone who may change prices may resize it; the price stays the pack's.
+        assertThat(change(carton, Map.of("factor", "48"), ADMIN)
+                        .getBody()
+                        .get("sell_minor")
+                        .asLong())
+                .isEqualTo(2_200);
     }
 
     // ---- price lists still win -------------------------------------------------------------
@@ -269,6 +292,67 @@ class RetailSellingPacksIT extends IntegrationTest {
                 .get("lines")
                 .get(0);
         assertThat(resolved.get("unit_price_minor").asLong()).isEqualTo(1_100);
+    }
+
+    // ---- quotations and customer orders -----------------------------------------------------
+
+    /** A quotation and a customer order go through the sale's pricing: the pack's own price, and never a pack only bought. */
+    @Test
+    void aQuotationAndAnOrderTakeThePacksOwnPrice() {
+        capability("documents", true);
+        pack(carton, "12", null, 1_100L);
+        pack(box, "10", "buy", null);
+        String docs = ADMIN + ",retail.document.issue";
+        String orders = ADMIN + ",retail.order.manage";
+
+        ResponseEntity<JsonNode> quoted = api.postKeyed(
+                "/quotations", quotation(carton), docs, "*", UUID.randomUUID().toString());
+        assertThat(quoted.getStatusCode()).as("%s", quoted.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(quoted.getBody().get("lines").get(0).get("unit_price_minor").asLong())
+                .isEqualTo(1_100);
+        ResponseEntity<JsonNode> quotedBox = api.postKeyed(
+                "/quotations", quotation(box), docs, "*", UUID.randomUUID().toString());
+        assertThat(quotedBox.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(quotedBox.getBody().toString()).contains("unknown_pack_unit");
+
+        ResponseEntity<JsonNode> ordered = api.postKeyed(
+                "/orders", order(carton), orders, "*", UUID.randomUUID().toString());
+        assertThat(ordered.getStatusCode()).as("%s", ordered.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(ordered.getBody().get("lines").get(0).get("unit_price_minor").asLong())
+                .isEqualTo(1_100);
+        ResponseEntity<JsonNode> orderedBox = api.postKeyed(
+                "/orders", order(box), orders, "*", UUID.randomUUID().toString());
+        assertThat(orderedBox.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(orderedBox.getBody().toString()).contains("unknown_pack_unit");
+    }
+
+    Map<String, Object> quotation(UUID unit) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", t.headOffice());
+        body.put("buyer_name", "Test Buyer 02");
+        body.put("buyer_contact", "+256700000002");
+        body.put(
+                "valid_until",
+                java.time.LocalDate.now(java.time.ZoneId.of("Africa/Kampala"))
+                        .plusDays(10)
+                        .toString());
+        body.put("lines", List.of(Map.of("product_id", pen, "unit_id", unit, "qty", "1")));
+        return body;
+    }
+
+    Map<String, Object> order(UUID unit) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", t.headOffice());
+        body.put("source", "walk_in");
+        body.put("customer_name", "Test Customer 03");
+        body.put("customer_phone", "+256700000013");
+        body.put("delivery_place", "Test Place, Plot 3");
+        body.put(
+                "delivery_date",
+                java.time.LocalDate.now(java.time.ZoneId.of("Africa/Kampala")).toString());
+        body.put("delivery_fee_minor", 0);
+        body.put("lines", List.of(Map.of("product_id", pen, "unit_id", unit, "qty", "1")));
+        return body;
     }
 
     // ---- below cost, per pack --------------------------------------------------------------
