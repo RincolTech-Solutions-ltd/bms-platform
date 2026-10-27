@@ -40,6 +40,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
@@ -359,6 +360,13 @@ class CatalogueService {
         boolean categoryMade = false;
         UUID category = categoryId;
         if (category == null) {
+            // A General the owner switched off is not switched back on behind their back: they choose a category.
+            if (repo.inactiveCategoryNames().contains(GENERAL.toLowerCase(Locale.ROOT))) {
+                throw ApiException.validation(List.of(new FieldProblem(
+                        "category_id",
+                        "inactive_category",
+                        "The General category is switched off. Choose a category.")));
+            }
             category = repo.categoryIdsByName().get(GENERAL.toLowerCase(Locale.ROOT));
         }
         if (category == null) {
@@ -369,12 +377,21 @@ class CatalogueService {
         boolean unitMade = false;
         UUID unit = unitId;
         if (unit == null) {
+            // Only a switched-on piece unit is used; a switched-off pc or pcs is passed over and Piece is made. A
+            // switched-off
+            // Piece is not switched back on: the person chooses a unit.
             Map<String, UUID> units = repo.unitIdsByName();
+            Set<String> off = repo.inactiveUnitNames();
             unit = PIECE_NAMES.stream()
+                    .filter(n -> !off.contains(n))
                     .map(units::get)
                     .filter(Objects::nonNull)
                     .findFirst()
                     .orElse(null);
+            if (unit == null && off.contains(PIECE.toLowerCase(Locale.ROOT))) {
+                throw ApiException.validation(List.of(new FieldProblem(
+                        "unit_id", "inactive_unit", "The Piece unit is switched off. Choose a unit.")));
+            }
         }
         if (unit == null) {
             unit = UUID.randomUUID();

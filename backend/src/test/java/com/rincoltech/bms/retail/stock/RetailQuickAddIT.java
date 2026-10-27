@@ -141,6 +141,82 @@ class RetailQuickAddIT extends IntegrationTest {
                 .isEqualTo(1);
     }
 
+    void switchOff(String table, UUID id) {
+        TestDatabase.owner()
+                .sql("UPDATE " + table + " SET active = false WHERE id = ?")
+                .param(id)
+                .update();
+    }
+
+    long costOf(UUID product) {
+        return scalar("SELECT cost_minor FROM retail_products WHERE id = ?", product);
+    }
+
+    @Test
+    void aSwitchedOffPcIsPassedOverAndPieceIsMade() {
+        UUID pc = api.unit("pc");
+        switchOff("retail_units", pc);
+        ResponseEntity<JsonNode> r = quickAdd(item("Test Candle", 300, "12", hq));
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(r.getBody().get("unit").asString()).isEqualTo("Piece");
+        assertThat(r.getBody().get("unit_made").asBoolean()).isTrue();
+    }
+
+    @Test
+    void aSwitchedOffPieceOrGeneralIsNotSwitchedBackOnAndTheFieldIsNamed() {
+        UUID piece = api.unit("Piece");
+        switchOff("retail_units", piece);
+        ResponseEntity<JsonNode> noUnit = quickAdd(item("Test Brush", 700, "2", hq));
+        assertThat(noUnit.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(noUnit.getBody().toString()).contains("unit_id").contains("Piece unit is switched off");
+
+        UUID general = api.category("General");
+        switchOff("retail_categories", general);
+        Map<String, Object> body = item("Test Brush", 700, "2", hq);
+        body.put("unit_id", api.unit("Bundle"));
+        ResponseEntity<JsonNode> noCategory = quickAdd(body);
+        assertThat(noCategory.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(noCategory.getBody().toString())
+                .contains("category_id")
+                .contains("General category is switched off");
+        // Nothing was made, and neither was switched back on.
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_products WHERE tenant_id = ? AND description = 'Test Brush'",
+                        t.tenantId()))
+                .isZero();
+        assertThat(scalar("SELECT count(*) FROM retail_units WHERE id = ? AND active", piece))
+                .isZero();
+        assertThat(scalar("SELECT count(*) FROM retail_categories WHERE id = ? AND active", general))
+                .isZero();
+    }
+
+    @Test
+    void aBuyingPriceFromSomeoneWhoMayNotReadCostIsKeptAsAddingOnItemsKeepsIt() {
+        String noProfit = "retail.catalogue.manage,retail.stock.read,retail.stocktake.commit";
+        Map<String, Object> body = item("Test Kettle", 9_000, "1", hq);
+        body.put("cost_minor", 6_000);
+        ResponseEntity<JsonNode> quick =
+                quickAdd(body, noProfit, "*", UUID.randomUUID().toString());
+        assertThat(quick.getStatusCode()).as("%s", quick.getBody()).isEqualTo(HttpStatus.CREATED);
+
+        Map<String, Object> plain = new LinkedHashMap<>();
+        plain.put("description", "Test Kettle Large");
+        plain.put("category_id", api.category("Test Kitchen"));
+        plain.put("unit_id", api.unit("Each"));
+        plain.put("cost_minor", 6_000);
+        plain.put("sell_minor", 9_000);
+        ResponseEntity<JsonNode> items = api.post("/products", plain, noProfit);
+        assertThat(items.getStatusCode()).as("%s", items.getBody()).isEqualTo(HttpStatus.CREATED);
+        // The same rule as Items: the price typed is kept, and neither answer shows a cost to someone without
+        // retail.profit.read.
+        assertThat(costOf(productOf(quick)))
+                .isEqualTo(costOf(RetailTestSupport.id(items)))
+                .isEqualTo(6_000);
+        assertThat(items.getBody().has("cost_minor")
+                        && !items.getBody().get("cost_minor").isNull())
+                .isFalse();
+    }
+
     @Test
     void aChosenCategoryAndUnitAreKept() {
         UUID category = api.category("Test Drinks");

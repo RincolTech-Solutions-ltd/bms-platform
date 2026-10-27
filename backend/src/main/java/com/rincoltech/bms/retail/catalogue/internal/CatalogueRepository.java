@@ -165,7 +165,6 @@ class CatalogueRepository {
                         """).params(id, name, createdBy).update();
     }
 
-    /** Lower-cased name to id, for the import's lookups. */
     /**
      * Issue #632: adds the category or unit unless the business has one of that name in any case (the unique name index), so
      * two quick adds at once make it once. True when this call made it.
@@ -178,6 +177,7 @@ class CatalogueRepository {
                 == 1;
     }
 
+    /** Lower-cased name to id, for the import's lookups. */
     Map<String, UUID> categoryIdsByName() {
         return namesToIds("retail_categories");
     }
