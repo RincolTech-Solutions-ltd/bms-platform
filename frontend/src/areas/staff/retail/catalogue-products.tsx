@@ -442,6 +442,7 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
   return (
     <>
       <p className="cluster">
+        <ScreenLink screen="quickAdd" to="/staff/retail/quick-add" action>Quick add</ScreenLink>
         <button type="button" onClick={onAdd} data-tour="product-add">Add an item</button>
         <Link className="btn" to={SIZES_NEW as never} data-tour="product-add-sizes">Add an item with sizes and colours</Link>
         <Link className="btn" to={SIZES_JOIN as never} data-tour="product-join-sizes">Join items as sizes of one item</Link>

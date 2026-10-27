@@ -1290,6 +1290,45 @@ export function createMockRetail(): RetailApi {
       return delay({ ...st });
     },
 
+    // Quick add (issue #632): the item as createProduct makes it, General and Piece made when missing, then a one-line count.
+    quickAdd: (body, key) =>
+      run(() => once(`quick-add|${key}`, body, () => {
+        const branchId = body.branch_id ?? BRANCH_A;
+        let p: MockProduct;
+        let categoryMade = false;
+        let unitMade = false;
+        if (body.product_id) {
+          p = find(body.product_id);
+        } else {
+          if (!(body.description ?? '').trim() || body.sell_minor === undefined) refuse(422, 'validation_failed', 'Type the name and the selling price.');
+          let category = body.category_id ? cats.find((c) => c.id === body.category_id) : cats.find((c) => c.name.toLowerCase() === 'general');
+          if (!category) {
+            category = { id: nextId('c'), name: 'General', active: true, version: 1, code_prefix: freePrefix(cats, 'General'), next: 1 };
+            cats.push(category);
+            categoryMade = true;
+          }
+          let unit = body.unit_id ? unitRows.find((u) => u.id === body.unit_id) : ['piece', 'pc', 'pcs'].map((n) => unitRows.find((u) => u.name.toLowerCase() === n)).find(Boolean);
+          if (!unit) {
+            unit = { id: nextId('d'), name: 'Piece', active: true, version: 1 };
+            unitRows.push(unit);
+            unitMade = true;
+          }
+          if (!category.active || !unit.active) refuse(422, 'inactive_category', 'This category or unit is switched off. Choose another one.');
+          sameNameCheck(body.description ?? '', unit.name, undefined, body.duplicate_reason);
+          const [code, n] = freeCode(category);
+          category.next = n + 1;
+          p = { id: nextId('b'), code, description: (body.description ?? '').trim(), category: category.name, unit: unit.name, costMinor: body.cost_minor ?? 0, sellMinor: body.sell_minor ?? 0, active: true, version: 1 };
+          products.set(p.id, p);
+          history.set(p.id, [{ id: nextId('h'), at: new Date().toISOString(), source: 'initial', new_sell_minor: p.sellMinor, currency: 'UGX', ...(profitAccess ? { new_cost_minor: p.costMinor } : {}) }]);
+        }
+        const counted = body.qty === undefined ? null : toMilli(body.qty);
+        if (counted !== null) move(branchId, p.id, counted - bal(branchId, p.id));
+        return {
+          product_id: p.id, code: p.code, description: p.description, unit: p.unit, item_made: !body.product_id, category_made: categoryMade, unit_made: unitMade,
+          ...(counted !== null ? { branch_id: branchId, qty: plainQty(fromMilli(counted)), stocktake_id: nextId('8') } : {}),
+        };
+      })),
+
     // The valuation is read with retail.stock.read; the value at price, cost and profit columns need retail.profit.read (ADR-055).
     // Without a branch it covers every branch, with a total per branch, as the server does (#144).
     valuation: ({ branchId, asOf }) => {

@@ -126,9 +126,14 @@ const staffOwnTwoStepRoute = createRoute({ getParentRoute: () => staffRoute, pat
 
 const staffRetailRoute = createRoute({ getParentRoute: () => staffRoute, path: '/retail', component: Outlet, staticData: { crumb: 'Retail' } });
 
-const retailScreen = <P extends string>(path: P, crumb?: string) => createRoute({ getParentRoute: () => staffRetailRoute, path, staticData: { crumb } });
+// `search` reads the address's query for a screen that takes one (Quick add's name and Sell's item, issue #632).
+const retailScreen = <P extends string>(path: P, crumb?: string, search?: (s: Record<string, unknown>) => Record<string, string | undefined>) =>
+  createRoute({ getParentRoute: () => staffRetailRoute, path, staticData: { crumb }, ...(search ? { validateSearch: search } : {}) });
+/** One text parameter of the address, or nothing. */
+const textParam = (name: string) => (s: Record<string, unknown>) => ({ [name]: typeof s[name] === 'string' ? s[name] : undefined });
 const retailHomeRoute = retailScreen('/').lazy(() => import('../areas/staff/retail/home').then((m) => m.Route));
-const retailSaleRoute = retailScreen('/sale', 'Record a sale').lazy(() => import('../areas/staff/retail/sale').then((m) => m.Route));
+// `item` is the item Quick add just made (issue #632, Sell it): the sale starts with it on.
+const retailSaleRoute = retailScreen('/sale', 'Record a sale', textParam('item')).lazy(() => import('../areas/staff/retail/sale').then((m) => m.Route));
 const retailCreditSalesRoute = retailScreen('/credit-sales', 'Credit sales').lazy(() => import('../areas/staff/retail/sales').then((m) => m.CreditRoute));
 const retailSalesRoute = retailScreen('/sales', 'All sales').lazy(() => import('../areas/staff/retail/sales').then((m) => m.Route));
 // Customer orders with delivery (issue #385): the list by step, one order with its history, and the fees and cancellations report.
@@ -139,6 +144,8 @@ const retailRestockRoute = retailScreen('/restock', WORDS.buyStock).lazy(() => i
 const retailRestocksRoute = retailScreen('/restocks', WORDS.pastPurchases).lazy(() => import('../areas/staff/retail/restocks').then((m) => m.Route));
 const retailUsageRoute = retailScreen('/usage', 'Usage and damage').lazy(() => import('../areas/staff/retail/usage').then((m) => m.Route));
 const retailStockRoute = retailScreen('/stock', 'Stock').lazy(() => import('../areas/staff/retail/stock').then((m) => m.Route));
+// Quick add (issue #632): `name` is what Sell's search typed before it found nothing, so the form starts with it.
+const retailQuickAddRoute = retailScreen('/quick-add', 'Quick add', textParam('name')).lazy(() => import('../areas/staff/retail/quick-add').then((m) => m.Route));
 const retailStocktakeRoute = retailScreen('/stocktake', WORDS.countStock).lazy(() => import('../areas/staff/retail/stocktake').then((m) => m.Route));
 const retailTransferRoute = retailScreen('/transfer', 'Move stock').lazy(() => import('../areas/staff/retail/transfer').then((m) => m.Route));
 const retailTransfersRoute = retailScreen('/transfers', 'Stock moves').lazy(() => import('../areas/staff/retail/transfers').then((m) => m.Route));
@@ -412,6 +419,7 @@ export const router = createRouter({
         retailUsageRoute,
         retailStockRoute,
         retailStocktakeRoute,
+        retailQuickAddRoute,
         retailTransferRoute,
         retailTransfersRoute,
         retailStockByLocationRoute,

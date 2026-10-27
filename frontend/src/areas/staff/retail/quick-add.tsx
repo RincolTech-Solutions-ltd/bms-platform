@@ -1,0 +1,311 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { createLazyRoute, useNavigate, useSearch } from '@tanstack/react-router';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { RETAIL_CURRENCY, RetailError, retail, type QuickAdd, type Unit } from '../../../api/retail';
+import { branchLabel } from '../../../auth/branch';
+import { WORDS } from '../../../app/glossary';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { Field, FieldsNeededNote, focusFirstMissing } from '../../../app/ui/Field';
+import { parseMinor } from '../../../components/money';
+import { useOnline } from '../../../offline/offline-context';
+import { useStaff } from '../context';
+import { CategoryPicker } from './category-picker';
+import { ExistsPanel, existingOf, type ExistingItem } from './catalogue-names';
+import { newIdempotencyKey } from './idempotency';
+import { PhotoChoice, sendNewPhoto } from './item-photo';
+import { parseCount, qtyString } from './maths';
+import { branchesWhere, canUse } from './permissions';
+import { UnitPicker } from './unit-picker';
+import { Gate, Problem, money, useProfitAccess, useStockingBranch } from './ui';
+
+// Quick add (issue #632): a shop owner needed nine steps on four screens to add one item and its stock, and said AppSheet was
+// still easier. One form and one tap: the name, the selling price, the buying price (optional), how many there are here now,
+// where (the branch in use, or a store), the category (left out, the item goes under General) and the unit (the shop's piece
+// unit), and a photo if wanted. Add makes the item and records its count as a one-line stock count, in one request
+// (POST /retail/quick-add), so no other item's stock is touched. A name already in the list offers to use that item and just
+// count its stock. Nothing is kept for later: offline, the form says it needs the internet, as Add it here does.
+
+export const QUICK_ADD = 'Quick add';
+export const QUICK_ADD_OFFLINE = 'You are offline. Quick add needs the internet. Connect, then tap Add again.';
+export const NO_COUNT_HERE = 'You can add the item, but not count stock. Ask your manager to count it.';
+
+const COUNT = 'retail.stocktake.commit';
+/** The piece unit a shop may already have, lower case, in the order the server prefers them. */
+const PIECE_NAMES = ['piece', 'pc', 'pcs'];
+
+/** The shop's piece unit, which the form starts with; undefined when the shop has none yet (the server makes Piece). */
+export function pieceUnit(units: Unit[]): Unit | undefined {
+  const active = units.filter((u) => u.active !== false);
+  return PIECE_NAMES.map((n) => active.find((u) => (u.name ?? '').trim().toLowerCase() === n)).find((u) => u !== undefined);
+}
+
+/** The line said once Add has worked: "Test bulb added: 600 pc at Bulb Store". */
+export function addedLine(done: QuickAdd, where: string): string {
+  const name = done.description ?? 'The item';
+  if (done.qty === undefined) return `${name} added.`;
+  const counted = `${done.qty} ${done.unit ?? ''}`.trim();
+  return done.item_made ? `${name} added: ${counted} at ${where}` : `${name}: you have ${counted} at ${where} now`;
+}
+
+/** The fetch never reached the server: no status and no problem body. */
+function unreachable(error: unknown): boolean {
+  return error instanceof TypeError || (error instanceof RetailError && error.status === 0);
+}
+
+export function QuickAddForm({ initialName = '', onSell }: {
+  /** What the name starts with: on Sell's not-found, what was typed in the search. */
+  initialName?: string;
+  /** Opens Sell with the item on the sale, at the branch it was counted at. */
+  onSell?: (productId: string, branchId: string) => void;
+}) {
+  const { me } = useStaff();
+  const online = useOnline();
+  const queryClient = useQueryClient();
+  const profit = useProfitAccess();
+  const here = useStockingBranch();
+  const categories = useQuery({ queryKey: ['retail', 'catalogue', 'categories'], queryFn: () => retail.listCategories() });
+  const units = useQuery({ queryKey: ['retail', 'catalogue', 'units'], queryFn: () => retail.listUnits() });
+  // Where the stock is: every branch that keeps goods where this person may count, stores too; the branch in use first.
+  const places = branchesWhere(me, COUNT).filter((b) => b.id && b.stocks_goods !== false);
+  const mayCount = places.length > 0;
+  const [where, setWhere] = useState(() => places.find((b) => b.id === here.branchId)?.id ?? places[0]?.id ?? '');
+  const [name, setName] = useState(initialName.trim());
+  const [sell, setSell] = useState('');
+  const [cost, setCost] = useState('');
+  const [qty, setQty] = useState('');
+  const [categoryId, setCategoryId] = useState('');
+  const [unitId, setUnitId] = useState('');
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [showErrors, setShowErrors] = useState(false);
+  const [offline, setOffline] = useState(false);
+  const [exists, setExists] = useState<ExistingItem | null>(null);
+  const [done, setDone] = useState<{ added: QuickAdd; where: string; note: string | null } | null>(null);
+  // One key per attempt: kept while the answer is lost (the same request may go again), new once the server has answered.
+  const key = useRef(newIdempotencyKey());
+  const form = useRef<HTMLFormElement>(null);
+  const piece = pieceUnit(units.data ?? []);
+  // The piece unit is chosen once the units are read, unless the person has chosen another.
+  useEffect(() => {
+    if (unitId === '' && piece?.id) setUnitId(piece.id);
+  }, [piece?.id, unitId]);
+  useEffect(() => { document.getElementById('qa-name')?.focus(); }, []);
+
+  const sellMinor = parseMinor(sell, RETAIL_CURRENCY);
+  const costMinor = cost.trim() === '' ? 0 : parseMinor(cost, RETAIL_CURRENCY);
+  const counted = mayCount ? parseCount(qty) : null;
+  const complete = name.trim() !== '' && sellMinor !== null && costMinor !== null && (!mayCount || (counted !== null && where !== ''));
+  const canAddAnyway = (me.permissions ?? []).includes('core.settings.manage');
+  const whereName = branchLabel((me.branches ?? []).find((b) => b.id === where));
+
+  const add = useMutation({
+    mutationFn: async (extra: { productId?: string; duplicateReason?: string }) => {
+      const added = await retail.quickAdd(
+        {
+          ...(extra.productId
+            ? { product_id: extra.productId }
+            : {
+                description: name.trim(),
+                sell_minor: sellMinor ?? 0,
+                ...(profit && costMinor ? { cost_minor: costMinor } : {}),
+                ...(categoryId ? { category_id: categoryId } : {}),
+                ...(unitId ? { unit_id: unitId } : {}),
+                ...(extra.duplicateReason ? { duplicate_reason: extra.duplicateReason } : {}),
+              }),
+          ...(mayCount && counted !== null ? { qty: qtyString(counted), branch_id: where } : {}),
+        },
+        key.current,
+      );
+      // The photo after the item (#617): a failed upload leaves the item and says so under the line.
+      const note = added.item_made ? await sendNewPhoto(added.product_id ?? '', photo) : null;
+      return { added, note };
+    },
+    onSuccess: ({ added, note }) => {
+      key.current = newIdempotencyKey();
+      setExists(null);
+      setDone({ added, where: whereName, note });
+      // The first-run card, the item search, the stock lists and Home all read again with the new item.
+      for (const k of [['retail', 'catalogue'], ['retail', 'products'], ['retail', 'stock'], ['retail', 'stocked-branches'], ['retail', 'home']]) {
+        void queryClient.invalidateQueries({ queryKey: k });
+      }
+    },
+    onError: (error) => {
+      if (unreachable(error)) return setOffline(true);
+      // The server answered, so the next attempt is a new request.
+      key.current = newIdempotencyKey();
+      const found = existingOf(error);
+      if (found) setExists({ ...found, mayAddAnyway: found.mayAddAnyway && canAddAnyway });
+    },
+  });
+
+  const submit = (e?: FormEvent) => {
+    e?.preventDefault();
+    if (add.isPending || exists !== null) return;
+    if (!complete) {
+      setShowErrors(true);
+      if (form.current) focusFirstMissing(form.current);
+      return;
+    }
+    // Read at the press: the browser's flag does not render the form again when the connection drops.
+    if (!online || (typeof navigator !== 'undefined' && navigator.onLine === false)) return setOffline(true);
+    setOffline(false);
+    add.mutate({});
+  };
+  /** Add another: a clear form, keeping the category and where, so a run of items from one shelf is quick. */
+  const another = () => {
+    setDone(null);
+    setName('');
+    setSell('');
+    setCost('');
+    setQty('');
+    setPhoto(null);
+    setShowErrors(false);
+    add.reset();
+    setTimeout(() => document.getElementById('qa-name')?.focus());
+  };
+
+  if (done) {
+    const sellsThere = (me.branches ?? []).some((b) => b.id === where && b.sells_goods !== false);
+    const canSell = onSell && canUse(me, 'sale') && sellsThere && done.added.qty !== undefined && Number(done.added.qty) > 0;
+    return (
+      <section className="rt-card stack" aria-labelledby="qa-done">
+        <p id="qa-done" role="status" className="alert alert-success" data-testid="qa-done">{addedLine(done.added, done.where)}</p>
+        {done.note && <p className="hint" data-testid="qa-photo-note">{done.note}</p>}
+        <p className="cluster">
+          <button type="button" className="rt-primary" onClick={another}>Add another</button>
+          {canSell && <button type="button" onClick={() => onSell(done.added.product_id ?? '', where)}>Sell it</button>}
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <form ref={form} className="stack" onSubmit={submit} noValidate aria-label={QUICK_ADD}>
+      <FieldsNeededNote />
+      <div className="stack" data-tour="quick-add-fields">
+      <Field
+        id="qa-name"
+        label="Name"
+        required
+        error={name.trim() === '' ? 'Type what the item is.' : null}
+        showError={showErrors}
+        value={name}
+        maxLength={300}
+        onChange={(e) => { setName(e.target.value); setExists(null); }}
+        autoComplete="off"
+      />
+      <Field
+        id="qa-sell"
+        label={`${WORDS.sellingPrice} (${RETAIL_CURRENCY})`}
+        required
+        error={sellMinor === null ? `Type the price you sell one at, in ${RETAIL_CURRENCY}.` : null}
+        showError={showErrors}
+        inputMode="numeric"
+        value={sell}
+        onChange={(e) => setSell(e.target.value)}
+        autoComplete="off"
+      />
+      {profit && (
+        <Field
+          id="qa-cost"
+          label={`${WORDS.buyingPrice} (${RETAIL_CURRENCY})`}
+          optional
+          error={costMinor === null ? `Type what you pay for one, in ${RETAIL_CURRENCY}, or leave it empty.` : null}
+          showError={showErrors}
+          hint={sellMinor !== null && costMinor !== null && costMinor > 0 && sellMinor <= costMinor ? `This is not below the selling price, ${money(sellMinor)}.` : 'Leave it empty if you do not know it yet; buying stock sets it.'}
+          inputMode="numeric"
+          value={cost}
+          onChange={(e) => setCost(e.target.value)}
+          autoComplete="off"
+        />
+      )}
+      {mayCount ? (
+        <>
+          <Field
+            id="qa-qty"
+            label="How many do you have here now?"
+            required
+            error={counted === null ? 'Type how many you have, or 0.' : null}
+            showError={showErrors}
+            inputMode="decimal"
+            value={qty}
+            onChange={(e) => setQty(e.target.value)}
+            autoComplete="off"
+          />
+          {/* empty: the Where list is drawn only while mayCount, so it holds at least one branch. */}
+          <div className="field">
+            <label htmlFor="qa-where">Where</label>
+            <select id="qa-where" value={where} onChange={(e) => setWhere(e.target.value)}>
+              {places.map((b) => (
+                <option key={b.id} value={b.id}>{branchLabel(b)}{b.sells_goods === false ? ' (store)' : ''}</option>
+              ))}
+            </select>
+          </div>
+        </>
+      ) : (
+        <p className="hint" data-testid="qa-no-count">{NO_COUNT_HERE}</p>
+      )}
+      </div>
+      <div className="stack" data-tour="quick-add-more">
+      <CategoryPicker
+        id="qa-category"
+        label={<>Category <span className="field-optional">(optional)</span></>}
+        categories={(categories.data ?? []).filter((c) => c.active !== false)}
+        value={categoryId}
+        onChange={setCategoryId}
+        noneLabel="General"
+        hint="Leave it to put the item under General."
+      />
+      <UnitPicker
+        id="qa-unit"
+        units={(units.data ?? []).filter((u) => u.active !== false)}
+        loading={units.data === undefined}
+        load={units}
+        value={unitId}
+        onChange={(next) => { setUnitId(next); setExists(null); }}
+        required={false}
+        error={null}
+        showError={false}
+      />
+      {units.data !== undefined && piece === undefined && unitId === '' && (
+        <p className="hint" data-testid="qa-piece-made">Left empty, the item is counted in Piece, made for you.</p>
+      )}
+      <PhotoChoice id="qa-photo" file={photo} onChange={setPhoto} />
+      </div>
+      {exists && (
+        <ExistsPanel
+          item={exists}
+          canAddAnyway={exists.mayAddAnyway}
+          busy={add.isPending}
+          openLabel={mayCount ? 'Use the existing one and just add stock' : 'Use the existing one'}
+          onOpen={(id) => (mayCount ? add.mutate({ productId: id }) : setExists(null))}
+          onAddAnyway={(reason) => add.mutate({ duplicateReason: reason })}
+          onChangeName={() => { setExists(null); setTimeout(() => document.getElementById('qa-name')?.focus()); }}
+        />
+      )}
+      {offline ? <p role="alert" className="alert alert-warning" data-testid="qa-offline">{QUICK_ADD_OFFLINE}</p> : !exists && <Problem error={add.error} />}
+      <p className="cluster" data-tour="quick-add-go">
+        <BusyButton busy={add.isPending} type="submit" className="rt-primary" disabled={exists !== null}>Add</BusyButton>
+      </p>
+    </form>
+  );
+}
+
+function QuickAddScreen() {
+  const { chooseBranch } = useStaff();
+  const navigate = useNavigate();
+  const { name } = useSearch({ strict: false }) as { name?: string };
+  return (
+    <Gate screen="quickAdd" title={QUICK_ADD}>
+      <p>An item, its prices and how many you have, in one tap.</p>
+      <QuickAddForm
+        initialName={name}
+        onSell={(productId, branchId) => {
+          chooseBranch?.(branchId);
+          void navigate({ to: '/staff/retail/sale', search: { item: productId } as never });
+        }}
+      />
+    </Gate>
+  );
+}
+
+export const Route = createLazyRoute('/staff/retail/quick-add')({ component: QuickAddScreen });
