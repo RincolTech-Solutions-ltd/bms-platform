@@ -47,7 +47,7 @@ const ids = (list: { id: string }[]) => list.map((a) => a.id);
 // local API, so they ship as text first; their pictures are a follow-up and this list shrinks as they land. Getting your shop
 // ready (issue #615), adding a photo (issue #617), an empty list (issue #619) and setting up your shop (issue #625) are text first
 // in the same way.
-const PICTURES_PENDING = ['start-using-bms', 'open-my-invitation', 'sign-in', 'install-bms', 'getting-your-shop-ready', 'add-a-photo', 'empty-list', 'set-up-your-shop'];
+const PICTURES_PENDING = ['start-using-bms', 'open-my-invitation', 'sign-in', 'install-bms', 'getting-your-shop-ready', 'add-a-photo', 'empty-list', 'set-up-your-shop', 'add-a-unit'];
 
 describe('the help corpus', () => {
   it('holds the 15 to 30 articles of the questions pilots asked, each job with one at least', () => {
@@ -361,6 +361,45 @@ describe('setting up a shop quickly (issue #625)', () => {
     const text = articleText(articleById(SETUP)!);
     expect(text).toContain('100 Metre in one Roll');
     expect(source(['areas/staff/retail/shop-starters.ts'])).toContain("{ name: 'Roll', size: 100, of: 'Metre', purpose: 'both' }");
+  });
+});
+
+describe('adding a unit (a tester asked, issue #625)', () => {
+  const UNIT = 'add-a-unit';
+  // The code of the screens each part walks through (its steps in order, then its note).
+  const PARTS = [
+    ['areas/staff/menu.tsx', 'areas/staff/retail/permissions.ts'],
+    ['areas/staff/retail/catalogue-lists.tsx'],
+    ['app/glossary.ts', 'areas/staff/retail/unit-picker.tsx'],
+    ['app/glossary.ts'],
+    ['areas/staff/retail/catalogue-products.tsx', 'app/glossary.ts', 'areas/staff/retail/catalogue-packs.tsx'],
+    ['areas/staff/retail/catalogue-lists.tsx'],
+  ];
+  // Units is the list of Categories with the noun unit (catalogue-lists.tsx), so its labels are read with the noun put in.
+  const source = (files: string[]) => files.map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')).join('\n').replace(/\$?\{noun\}/g, 'unit');
+  const boldIn = (runs: Inline[]) => [...new Set(runs.flat().filter((r) => r.strong).map((r) => r.text))];
+  const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  it('answers How do I add a unit? for whoever manages the catalogue, from the Units page', () => {
+    const unit = articleById(UNIT)!;
+    expect(unit.title).toBe('How do I add a unit?');
+    expect(searchArticles(articlesFor(owner), 'add a unit')[0]?.id).toBe(UNIT);
+    for (const word of ['pc', 'pieces', 'carton', 'counted in']) expect(ids(searchArticles(articlesFor(owner), word)), word).toContain(UNIT);
+    expect(ids(articlesFor(seller))).not.toContain(UNIT);
+    expect(articleForScreen('/staff/retail/catalogue/units', owner)?.id).toBe(UNIT);
+    expect(articleText(unit)).not.toMatch(/[\u2013\u2014]| - /);
+    expect(offendingWords(articleText(unit))).toEqual([]);
+  });
+
+  it('puts in bold only labels the screens of each step really show, each a whole label in their code', () => {
+    const unit = articleById(UNIT)!;
+    const parts = [...unit.steps.map((step) => boldIn([step.text])), boldIn(unit.notes)];
+    expect(parts).toHaveLength(PARTS.length);
+    parts.forEach((labels, i) => {
+      const code = source(PARTS[i]!);
+      expect(labels.length, `part ${i + 1}`).toBeGreaterThan(0);
+      for (const label of labels) expect(code, `part ${i + 1}: ${label}`).toMatch(new RegExp(`(^|[>'"\`])\\s*${escape(label)}\\s*($|[<'"\`])`, 'm'));
+    });
   });
 });
 
