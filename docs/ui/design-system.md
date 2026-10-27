@@ -372,7 +372,7 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
   Since #520 it also fails an emoji or a dash in any source, a gradient, glow or glass outside the two named stylesheets, a
   `.cluster.filters` row in place of Segmented, and, in `ui/kit.css`, a third radius or shadow, a target under 48px, an
   amount without tabular figures, a motion off the tokens or in a loop (bar the 400ms check), and a kit animation that still
-  moves under reduced motion; since #603 it bans `infinite` (shorthand, longhands, `-webkit-`), since #605 a bare count above one, and any `var()` but the motion tokens
+  moves under reduced motion; since #603 it bans `infinite` (shorthand, longhands, `-webkit-`), since #605 a bare count above one (an exponent too) and an iteration-count longhand that is not a plain number up to one, and any `var()` but the motion tokens
   in an animation value in every stylesheet, bar the named work-in-progress loops (the spinners, the skeleton shimmer, the
   busy button, the loading mark's `.brand-loader-arc` and `.brand-loader-core`, the sync dot while sending); every `.new-blink`
   rule must run `rt-new-blink` five times; and no TS or TSX file may set an animation from code (an imported value as a style key
