@@ -19,6 +19,14 @@ public interface RetailCatalogue {
      */
     long MAX_AMOUNT_MINOR = 10_000_000_000_000L;
 
+    /** Issue #624 (ADR-099): what a pack is for, as stored in retail_product_units.purpose and sent by the API. */
+    String PACK_BUY = "buy";
+
+    String PACK_SELL = "sell";
+    String PACK_BOTH = "both";
+    /** The three purposes, for request validation. */
+    String PACK_PURPOSES = PACK_BUY + "|" + PACK_SELL + "|" + PACK_BOTH;
+
     /** The key of the units-of-measure capability in the tenant's retail.capabilities settings group (ADR-033). */
     String UNITS_CAPABILITY = "units";
 
@@ -162,12 +170,12 @@ public interface RetailCatalogue {
 
         /** True when the pack may be used on a sale line (a walk-in sale, a scan, a quotation or an order). */
         public boolean sells() {
-            return !"buy".equals(purpose);
+            return !PACK_BUY.equals(purpose);
         }
 
         /** True when the pack may be used on Buy stock, a purchase order or goods received. */
         public boolean buys() {
-            return !"sell".equals(purpose);
+            return !PACK_SELL.equals(purpose);
         }
     }
 

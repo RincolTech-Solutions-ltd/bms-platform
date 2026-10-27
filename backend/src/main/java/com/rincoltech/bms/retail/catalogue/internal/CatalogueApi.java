@@ -1141,7 +1141,7 @@ final class CatalogueApi {
                     description = "Base units in one pack, at least 1, up to three places, for example 12 or 12.5")
             BigDecimal factor,
 
-            @Pattern(regexp = "buy|sell|both")
+            @Pattern(regexp = RetailCatalogue.PACK_PURPOSES)
             @Schema(
                     description =
                             "What the pack is for: buy, sell or both (the default); a pack bought only has no selling"
@@ -1168,7 +1168,7 @@ final class CatalogueApi {
 
             Boolean active,
 
-            @Pattern(regexp = "buy|sell|both")
+            @Pattern(regexp = RetailCatalogue.PACK_PURPOSES)
             @Schema(description = "buy, sell or both; a pack made buy only loses its selling price (issue #624)")
             String purpose,
 
@@ -1219,11 +1219,18 @@ final class CatalogueApi {
                     description =
                             "For a selling pack and a caller holding retail.profit.read: true when its price is not"
                                     + " above the size times the item's average cost per piece (ADR-079); absent otherwise")
-            Boolean belowCost) {
+            Boolean belowCost,
+
+            @Schema(
+                    description =
+                            "True when the pack has its own selling price, sent to every caller (the amount only to"
+                                    + " one who may see prices): a new usual size or making it buy only then needs"
+                                    + " retail.price.edit (issue #624)")
+            boolean hasOwnPrice) {
 
         /** True when the pack may be used on a sale, a scan at the till, a quotation or an order. */
         boolean sells() {
-            return !"buy".equals(purpose);
+            return !RetailCatalogue.PACK_BUY.equals(purpose);
         }
 
         /** The pack as this caller may read it: prices only with {@code prices}, the cost flag only with {@code cost}. */
@@ -1239,7 +1246,8 @@ final class CatalogueApi {
                     purpose,
                     prices ? sellMinor : null,
                     prices ? suggestedSellMinor : null,
-                    prices && cost && sells() ? belowCost : null);
+                    prices && cost && sells() ? belowCost : null,
+                    hasOwnPrice);
         }
     }
 

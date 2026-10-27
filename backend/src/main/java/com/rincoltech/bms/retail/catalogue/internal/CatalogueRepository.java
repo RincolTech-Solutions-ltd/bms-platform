@@ -583,7 +583,8 @@ class CatalogueRepository {
                 rs.getString("purpose"),
                 rs.getObject("sell_minor", Long.class),
                 rs.getObject("suggested_sell_minor", Long.class),
-                rs.getObject("below_cost", Boolean.class));
+                rs.getObject("below_cost", Boolean.class),
+                rs.getObject("sell_minor") != null);
     }
 
     List<Pack> packs(UUID productId) {

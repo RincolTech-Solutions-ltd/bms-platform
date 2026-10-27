@@ -769,11 +769,11 @@ class CatalogueService {
                     "pack_unit_is_base_unit",
                     "A pack must be a different unit from the one the product is counted in.");
         }
-        String purpose = r.purpose() == null ? "both" : r.purpose();
+        String purpose = r.purpose() == null ? RetailCatalogue.PACK_BOTH : r.purpose();
         if (r.sellMinor() != null) {
             requirePriceEdit(
                     "You may not change selling prices, so you cannot set a pack's price. Ask someone who may.");
-            if (purpose.equals("buy")) {
+            if (purpose.equals(RetailCatalogue.PACK_BUY)) {
                 throw buyOnlyPriced();
             }
         }
@@ -842,7 +842,8 @@ class CatalogueService {
         boolean priced = before.sellMinor() != null;
         boolean newPrice = r.sellMinor() != null && !r.sellMinor().equals(before.sellMinor());
         boolean resized = new java.math.BigDecimal(before.factor()).compareTo(factor) != 0;
-        boolean madeBuyOnly = purpose.equals("buy") && !before.purpose().equals("buy");
+        boolean madeBuyOnly =
+                purpose.equals(RetailCatalogue.PACK_BUY) && !before.purpose().equals(RetailCatalogue.PACK_BUY);
         if (newPrice || clear) {
             requirePriceEdit(
                     "You may not change selling prices, so you cannot set a pack's price. Ask someone who may.");
@@ -854,12 +855,13 @@ class CatalogueService {
             throw ApiException.validation(List.of(new FieldProblem(
                     "sell_minor", "invalid", "Give a new price or drop the pack's own price, not both.")));
         }
-        if (r.sellMinor() != null && purpose.equals("buy")) {
+        if (r.sellMinor() != null && purpose.equals(RetailCatalogue.PACK_BUY)) {
             throw buyOnlyPriced();
         }
         // A pack made buy only is no longer sold, so its own price goes with that change (audited below).
-        Long sellMinor =
-                clear || purpose.equals("buy") ? null : r.sellMinor() != null ? r.sellMinor() : before.sellMinor();
+        Long sellMinor = clear || purpose.equals(RetailCatalogue.PACK_BUY)
+                ? null
+                : r.sellMinor() != null ? r.sellMinor() : before.sellMinor();
         Map<String, Object> was = new LinkedHashMap<>();
         Map<String, Object> now = new LinkedHashMap<>();
         diff(was, now, "factor", before.factor(), factor.setScale(3).toPlainString());
