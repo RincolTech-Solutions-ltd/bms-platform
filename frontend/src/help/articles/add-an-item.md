@@ -4,8 +4,8 @@ job: items
 order: 20
 module: retail
 needs: retail.catalogue.manage, retail.stock.read
-screens: /staff/retail/catalogue/products, /staff/retail/catalogue/categories/$categoryId
-words: item, product, new item, item code, code, barcode, price, add item
+screens: /staff/retail/catalogue/products, /staff/retail/catalogue/categories/$categoryId, /staff/retail/sale
+words: item, product, new item, item code, code, barcode, price, add item, add items to sell, item not found, nothing when I search
 ---
 Add an item inside its category. The app gives it the next code of the category, such as BLB-0001. You never type a code.
 
@@ -17,3 +17,5 @@ Add an item inside its category. The app gives it the next code of the category,
    ![The new item in its category](add-an-item-3.webp)
 
 > You can also tap **Add an item** on the Items page. Pick the category first.
+
+> Searched on Sell and found nothing? Tap **Not in the list? Add it here** under the search. The item is made with what you typed and goes on the sale.

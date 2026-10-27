@@ -44,8 +44,9 @@ const officer = {
 const ids = (list: { id: string }[]) => list.map((a) => a.id);
 
 // The getting-started articles (issue #609) open before sign-in, where the picture script (docs/ui/how-do-i-598) needs a
-// local API, so they ship as text first; their pictures are a follow-up and this list shrinks as they land.
-const PICTURES_PENDING = ['start-using-bms', 'open-my-invitation', 'sign-in', 'install-bms'];
+// local API, so they ship as text first; their pictures are a follow-up and this list shrinks as they land. Getting your shop
+// ready (issue #615) is a first-run walk through four screens, text first in the same way.
+const PICTURES_PENDING = ['start-using-bms', 'open-my-invitation', 'sign-in', 'install-bms', 'getting-your-shop-ready'];
 
 describe('the help corpus', () => {
   it('holds the 15 to 30 articles of the questions pilots asked, each job with one at least', () => {
@@ -256,5 +257,52 @@ describe('the getting-started articles (issue #609)', () => {
     expect(ids(relatedArticles('how do I add a product', [signIn, ...listed]))).toEqual(['add-an-item', 'add-a-branch']);
     // An article a newer server has and this app does not yet is judged by the title the server sent.
     expect(ids(relatedArticles('move stock', [{ id: 'move-stock-store-to-shop', title: 'x' }, { id: 'not-here-yet', title: 'How do I move stock back?' }, { id: 'other', title: 'How do I fly?' }]))).toEqual(['move-stock-store-to-shop', 'not-here-yet']);
+  });
+});
+
+describe('a shop with no items is led to add them (issue #615)', () => {
+  const READY = 'getting-your-shop-ready';
+  // The code of the screens the article walks through: every word it puts in bold must be a whole label in it.
+  const SOURCES = [
+    'areas/staff/home.tsx', 'areas/staff/menu.tsx', 'areas/staff/retail/first-items.tsx', 'areas/staff/retail/catalogue-products.tsx',
+    'areas/staff/retail/category-picker.tsx', 'areas/staff/retail/catalogue-import.tsx', 'areas/staff/retail/new-item-here.tsx',
+    'areas/staff/retail/sale.tsx', 'app/glossary.ts',
+  ];
+  const code = SOURCES.map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')).join('\n');
+  const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const bold = (id: string) => {
+    const a = articleById(id)!;
+    return [...new Set([...a.intro, ...a.steps.map((s) => s.text), ...a.notes].flat().filter((r) => r.strong).map((r) => r.text))];
+  };
+
+  it('lists Sell among the add-an-item screens, with the words a stuck shop owner types', () => {
+    const item = articleById('add-an-item')!;
+    expect(item.screens).toContain('/staff/retail/sale');
+    expect(item.words).toEqual(expect.arrayContaining(['add items to sell', 'item not found', 'nothing when I search']));
+    for (const typed of ['item not found', 'nothing when I search', 'add items to sell', 'how do I add items to sell']) {
+      expect(searchArticles(articlesFor(owner), typed)[0]?.id, typed).toBe('add-an-item');
+    }
+  });
+
+  it('has a Getting your shop ready article: items, then stock, then sell, for whoever manages the catalogue', () => {
+    const ready = articleById(READY)!;
+    expect(ready.job).toBe('start');
+    expect(ready.steps.map((s) => s.text.map((r) => r.text).join(''))).toEqual([
+      expect.stringContaining('Add your first items'),
+      expect.stringContaining('Import a list'),
+      expect.stringMatching(/Buy stock[\s\S]*Count stock/),
+      expect.stringContaining('Record sale'),
+    ]);
+    expect(searchArticles(articlesFor(owner), 'getting your shop ready')[0]?.id).toBe(READY);
+    expect(ids(articlesFor(owner))).toContain(READY);
+    expect(ids(articlesFor(seller))).not.toContain(READY);
+    expect(articleForScreen('/staff/retail/catalogue/import', owner)?.id).toBe(READY);
+    expect(articleText(ready)).not.toMatch(/[\u2013\u2014]| - /);
+  });
+
+  it('puts in bold only labels the screens really show, each a whole label in their code', () => {
+    for (const id of [READY, 'add-an-item']) {
+      for (const label of bold(id)) expect(code, `${id}: ${label}`).toMatch(new RegExp(`(^|[>'"])\\s*${escape(label)}\\s*($|[<'"])`, 'm'));
+    }
   });
 });
