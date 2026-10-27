@@ -23,7 +23,8 @@ never sells whole) and packs that are only sold (a half carton nobody delivers).
 1. **A pack says what it is for.** `retail_product_units.purpose` is `buy`, `sell` or `both`, `both` by default and for every
    pack that exists. A pack only for buying is not offered on Sell, a quotation or an order and a sale line in it is refused (422
    `unknown_pack_unit`, "This item is not sold in that unit"), as for a pack switched off; offline, it is a `pack_inactive` clash
-   and the sale stands, as ADR-067 does for a pack switched off. A pack only for selling is not offered on Buy stock, a purchase
+   and the sale stands, as ADR-067 does for a pack switched off. A price list item on a pack only for buying is refused
+   with the same code. A pack only for selling is not offered on Buy stock, a purchase
    order or goods received and a line in it is refused with the same code ("not bought in that unit"). Stock counts, moves,
    returns and barcodes take any active pack, as before.
 2. **A selling pack has its own price.** `retail_product_units.sell_minor` is the selling price of one pack, in minor units, or
@@ -42,7 +43,8 @@ never sells whole) and packs that are only sold (a half carton nobody delivers).
    `retail.profit.read`; saving such a price is allowed, since the owner decides, and selling at it needs `retail.price.below_cost`.
 5. **A pack's price is a price.** Setting or dropping a pack's own price needs `retail.price.edit` as well as the route's
    `retail.catalogue.manage` (403 `permission_denied`). So does any change that moves what a pack with its own price sells for: a
-   new size (the same price for more or fewer pieces) or making it only for buying (which drops the price). The size of a pack
+   new size (the same price for more or fewer pieces), on Edit item or by ticking Use 30 from now on on Buy stock or goods
+   received (ADR-082 decision 2; the refusal rolls the delivery back), or making it only for buying (which drops the price). The size of a pack
    without its own price, making a pack only for selling, and switching it off or on need only `retail.catalogue.manage`. Every change is audited as
    `retail.product_unit.created` or `.updated` with the old and new `purpose` and `sell_minor`. No new permission.
 6. **Profit stays per piece.** A sale line keeps what was charged and, as before, the average cost per piece at the moment of sale;
