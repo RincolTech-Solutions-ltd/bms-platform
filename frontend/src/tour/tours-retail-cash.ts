@@ -205,10 +205,11 @@ export const shopSetupPage: Tour = {
   audience: (me) => held(me, CATALOGUE) && held(me, STOCK_READ),
   autoStart: false,
   page: '/staff/retail/catalogue/set-up',
+  // The list and Add these show only once a kind of shop is chosen, so those two steps point at no part of the page.
   steps: [
     step({ id: 'type', target: 'setup-type', title: 'What kind of shop is it?', body: 'Tap the kind of shop closest to yours. Something else gives just the common units.' }),
-    step({ id: 'list', target: 'setup-list', optional: true, title: 'Untick what you do not sell', body: 'Each category, unit and pack is ticked. Untick what you do not want. For a pack, change the usual size and say if you buy it, sell it or both.' }),
-    step({ id: 'add', target: 'setup-add', optional: true, title: 'Add these', body: 'Tap Add these. Names your shop has already are left as they are, so you can run it again safely.' }),
+    step({ id: 'list', title: 'Untick what you do not sell', body: 'Each category, unit and pack is ticked. Untick what you do not want. For a pack, change the usual size and say if you buy it, sell it or both.' }),
+    step({ id: 'add', title: 'Add these', body: 'Tap Add these. Names your shop has already are left as they are, so you can run it again safely.' }),
   ],
 };
 

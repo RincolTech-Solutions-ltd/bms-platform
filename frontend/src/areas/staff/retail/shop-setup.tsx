@@ -142,7 +142,7 @@ export function ShopSetupPage() {
           {open.length === 0 ? (
             <p className="empty-state" data-testid="setup-nothing-new">{NOTHING_NEW}</p>
           ) : (
-            <div className="stack" data-tour="setup-list">
+            <div className="stack">
               {open.some((i) => i.kind === 'category') && (
                 <Card title="Categories">
                   <Hint>The app makes the code letters of each category from its name, like BLB for Bulbs.</Hint>
@@ -193,7 +193,7 @@ export function ShopSetupPage() {
           {!online && <p className="hint" data-testid="setup-offline">{OFFLINE_ADD}</p>}
           {open.length > 0 && (
             <ActionBar>
-              <BusyButton busy={busy} type="button" className="rt-primary" data-tour="setup-add" disabled={!online || chosen.length === 0} notReady={firstBadSize !== undefined} onClick={() => void add()}>
+              <BusyButton busy={busy} type="button" className="rt-primary" disabled={!online || chosen.length === 0} notReady={firstBadSize !== undefined} onClick={() => void add()}>
                 {chosen.length > 0 ? `Add these (${chosen.length})` : 'Add these'}
               </BusyButton>
             </ActionBar>
