@@ -1,0 +1,366 @@
+package com.rincoltech.bms.retail;
+
+import static com.rincoltech.bms.retail.RetailTestSupport.ADMIN;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.rincoltech.bms.IntegrationTest;
+import com.rincoltech.bms.TestDatabase;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import tools.jackson.databind.JsonNode;
+
+/**
+ * Selling packs with their own prices (issue #624, owner decision D23, ADR-099; docs/specs/units-packs-and-costing.md
+ * section 3 and section 9 step 3): the suggested price, the price a walk-in sale takes against a price list sale, the
+ * below-cost check per pack against the average cost per piece times the size, and what a pack is for. Every name and
+ * amount is fabricated.
+ */
+class RetailSellingPacksIT extends IntegrationTest {
+
+    static final String SETTINGS = "core.settings.manage";
+    static final String MANAGER = ADMIN + ",retail.pricelist.manage,retail.pricelist.use";
+    /** Manages the catalogue (packs) but may not change selling prices. */
+    static final String CATALOGUE_ONLY = ADMIN.replace("retail.price.edit,", "");
+    /** May see prices but not cost. */
+    static final String NO_PROFIT = ADMIN.replace(",retail.profit.read", "");
+
+    @Autowired
+    TestRestTemplate http;
+
+    TestDatabase.Fixture t;
+    RetailTestSupport api;
+    /** Cost 83 and sell 100 per piece: a carton of twelve costs 996 and is suggested at 1,200. */
+    UUID pen;
+
+    UUID carton;
+    UUID halfCarton;
+    UUID box;
+
+    @BeforeEach
+    void setUp() {
+        t = TestDatabase.tenant("retail-selling-packs", false, true);
+        api = new RetailTestSupport(http, t);
+        pen = api.product("SP-PEN", 83, 100);
+        carton = api.unit("carton");
+        halfCarton = api.unit("half carton");
+        box = api.unit("box");
+        capability("units", true);
+        api.stockUp(t.headOffice(), pen, "1000");
+    }
+
+    // ---- helpers ---------------------------------------------------------------------------
+
+    void capability(String key, boolean on) {
+        String etag = api.get("/settings/capabilities", SETTINGS).getHeaders().getETag();
+        ResponseEntity<JsonNode> r = api.call(
+                HttpMethod.PUT,
+                "/settings/capabilities",
+                Map.of(key, on),
+                SETTINGS,
+                "*",
+                etag == null ? Map.of() : Map.of("If-Match", etag));
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+    }
+
+    ResponseEntity<JsonNode> addPack(UUID unit, String factor, String purpose, Long sell, String perms) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("unit_id", unit);
+        body.put("factor", factor);
+        if (purpose != null) {
+            body.put("purpose", purpose);
+        }
+        if (sell != null) {
+            body.put("sell_minor", sell);
+        }
+        return api.post("/products/" + pen + "/units", body, perms);
+    }
+
+    JsonNode pack(UUID unit, String factor, String purpose, Long sell) {
+        ResponseEntity<JsonNode> r = addPack(unit, factor, purpose, sell, ADMIN);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return r.getBody();
+    }
+
+    JsonNode packOf(UUID unit, String perms) {
+        for (JsonNode k :
+                api.get("/products/" + pen + "/units", perms).getBody().get("items")) {
+            if (k.get("unit_id").asString().equals(unit.toString())) {
+                return k;
+            }
+        }
+        throw new AssertionError("no pack " + unit);
+    }
+
+    ResponseEntity<JsonNode> change(UUID unit, Map<String, Object> body, String perms) {
+        return api.call(
+                HttpMethod.PATCH,
+                "/products/" + pen + "/units/" + unit,
+                body,
+                perms,
+                "*",
+                Map.of("If-Match", packOf(unit, ADMIN).get("version").asString()));
+    }
+
+    ResponseEntity<JsonNode> sale(String perms, UUID customer, UUID unit, String qty) {
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("product_id", pen);
+        line.put("qty", qty);
+        if (unit != null) {
+            line.put("unit_id", unit);
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", t.headOffice());
+        body.put("payment_method", "cash");
+        if (customer != null) {
+            body.put("customer_id", customer);
+        }
+        body.put("lines", List.of(line));
+        return api.call(
+                HttpMethod.POST,
+                "/sales",
+                body,
+                perms,
+                "*",
+                Map.of("Idempotency-Key", UUID.randomUUID().toString()));
+    }
+
+    JsonNode sold(String perms, UUID customer, UUID unit, String qty) {
+        ResponseEntity<JsonNode> r = sale(perms, customer, unit, qty);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return r.getBody().get("lines").get(0);
+    }
+
+    ResponseEntity<JsonNode> restock(UUID unit, String qty, long cost) {
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("product_id", pen);
+        line.put("cost_minor", cost);
+        line.put("unit_id", unit);
+        line.put("qty_by_branch", List.of(Map.of("branch_id", t.headOffice(), "qty", qty)));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("purchased_on", "2026-01-15");
+        body.put("payment_method", "cash");
+        body.put("lines", List.of(line));
+        return api.postKeyed("/purchases", body, ADMIN, "*", UUID.randomUUID().toString());
+    }
+
+    static String code(ResponseEntity<JsonNode> r) {
+        return r.getBody().get("code").asString();
+    }
+
+    // ---- the suggested price and the pack's own price --------------------------------------
+
+    /** The app suggests the piece price times the size; the owner types the real one, which a walk-in sale takes. */
+    @Test
+    void aSellingPackSuggestsAPriceAndSellsAtItsOwn() {
+        JsonNode added = pack(carton, "12", null, null);
+        assertThat(added.get("purpose").asString()).isEqualTo("both");
+        assertThat(added.get("suggested_sell_minor").asLong()).isEqualTo(1_200);
+        assertThat(added.has("sell_minor")).isFalse();
+        assertThat(added.get("below_cost").asBoolean()).isFalse();
+        // Without its own price the pack sells at the suggested price, as before.
+        assertThat(sold(ADMIN, null, carton, "1").get("sale_unit_price_minor").asLong())
+                .isEqualTo(1_200);
+
+        ResponseEntity<JsonNode> priced = change(carton, Map.of("sell_minor", 1_100), ADMIN);
+        assertThat(priced.getStatusCode()).as("%s", priced.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(priced.getBody().get("sell_minor").asLong()).isEqualTo(1_100);
+        assertThat(api.get("/products/" + pen, ADMIN)
+                        .getBody()
+                        .get("packs")
+                        .get(0)
+                        .get("sell_minor")
+                        .asLong())
+                .isEqualTo(1_100);
+
+        JsonNode line = sold(ADMIN, null, carton, "2");
+        assertThat(line.get("sale_unit_price_minor").asLong()).isEqualTo(1_100);
+        assertThat(line.get("line_total_minor").asLong()).isEqualTo(2_200);
+        // Profit stays per piece: 24 pieces at the average of 83.
+        assertThat(line.get("qty").asString()).isEqualTo("24.000");
+        assertThat(line.get("line_cost_minor").asLong()).isEqualTo(1_992);
+
+        // A half carton is just a selling pack of six with its own price.
+        pack(halfCarton, "6", "sell", 580L);
+        assertThat(sold(ADMIN, null, halfCarton, "1")
+                        .get("sale_unit_price_minor")
+                        .asLong())
+                .isEqualTo(580);
+
+        // Dropping the own price goes back to the suggested one.
+        assertThat(change(carton, Map.of("clear_sell_minor", true), ADMIN)
+                        .getBody()
+                        .has("sell_minor"))
+                .isFalse();
+        assertThat(sold(ADMIN, null, carton, "1").get("sale_unit_price_minor").asLong())
+                .isEqualTo(1_200);
+    }
+
+    /** Setting a pack's price is a price change: retail.price.edit, as for the item's own price. */
+    @Test
+    void aPacksPriceNeedsThePermissionToChangePrices() {
+        pack(carton, "12", null, null);
+        ResponseEntity<JsonNode> refused = change(carton, Map.of("sell_minor", 1_100), CATALOGUE_ONLY);
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(addPack(box, "10", "sell", 900L, CATALOGUE_ONLY).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        // The size may still be changed without it.
+        assertThat(change(carton, Map.of("factor", "24"), CATALOGUE_ONLY).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(packOf(carton, ADMIN).has("sell_minor")).isFalse();
+    }
+
+    // ---- price lists still win -------------------------------------------------------------
+
+    /** A walk-in sale takes the pack's own price; a customer on a price list gets the list's price for that pack. */
+    @Test
+    void aPriceListWinsOverThePacksOwnPrice() {
+        capability("price_lists", true);
+        pack(carton, "12", null, 1_100L);
+        ResponseEntity<JsonNode> list = api.post("/price-lists", Map.of("name", "Wholesale", "strict", false), MANAGER);
+        UUID wholesale = RetailTestSupport.id(list);
+        ResponseEntity<JsonNode> item = api.post(
+                "/price-lists/" + wholesale + "/items",
+                Map.of("product_id", pen, "unit_id", carton, "price_minor", 1_000),
+                MANAGER);
+        assertThat(item.getStatusCode()).as("%s", item.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 01"), ADMIN));
+        int version = 0;
+        for (JsonNode c : api.get("/customers", ADMIN).getBody().get("items")) {
+            if (c.get("id").asString().equals(buyer.toString())) {
+                version = c.get("version").asInt();
+            }
+        }
+        assertThat(api.call(
+                                HttpMethod.PUT,
+                                "/customers/" + buyer + "/pricing",
+                                Map.of("price_list_id", wholesale),
+                                MANAGER,
+                                "*",
+                                Map.of("If-Match", String.valueOf(version)))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        JsonNode listed = sold(MANAGER, buyer, carton, "1");
+        assertThat(listed.get("sale_unit_price_minor").asLong()).isEqualTo(1_000);
+        assertThat(listed.get("price").get("source").asString()).isEqualTo("list");
+
+        JsonNode walkIn = sold(MANAGER, null, carton, "1");
+        assertThat(walkIn.get("sale_unit_price_minor").asLong()).isEqualTo(1_100);
+        assertThat(walkIn.get("price").get("source").asString()).isEqualTo("retail");
+
+        // A list with no price for the pack falls back to the pack's own price, not the piece price times the size.
+        UUID other =
+                RetailTestSupport.id(api.post("/price-lists", Map.of("name", "Contractors", "strict", false), MANAGER));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", t.headOffice());
+        body.put("price_list_id", other);
+        body.put("lines", List.of(Map.of("product_id", pen, "unit_id", carton, "qty", "1")));
+        JsonNode resolved = api.post("/prices/resolve", body, MANAGER)
+                .getBody()
+                .get("lines")
+                .get(0);
+        assertThat(resolved.get("unit_price_minor").asLong()).isEqualTo(1_100);
+    }
+
+    // ---- below cost, per pack --------------------------------------------------------------
+
+    /** A pack is below cost when its price is not above the size times the average cost per piece (ADR-079). */
+    @Test
+    void theBelowCostCheckIsPerPack() {
+        // 12 x 83 = 996: 997 is above it, 996 is not.
+        assertThat(pack(carton, "12", null, 997L).get("below_cost").asBoolean()).isFalse();
+        assertThat(sold(ADMIN, null, carton, "1").get("line_total_minor").asLong())
+                .isEqualTo(997);
+
+        ResponseEntity<JsonNode> low = change(carton, Map.of("sell_minor", 996), ADMIN);
+        assertThat(low.getStatusCode()).isEqualTo(HttpStatus.OK);
+        // The editor is told, and the price is kept: the owner decides.
+        assertThat(low.getBody().get("below_cost").asBoolean()).isTrue();
+        // The cost flag never reaches a caller who may not read cost.
+        assertThat(packOf(carton, NO_PROFIT).has("below_cost")).isFalse();
+        assertThat(packOf(carton, NO_PROFIT).get("sell_minor").asLong()).isEqualTo(996);
+
+        ResponseEntity<JsonNode> refused = sale(ADMIN, null, carton, "1");
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(refused)).isEqualTo("price_below_cost");
+        assertThat(sold(ADMIN + ",retail.price.below_cost", null, carton, "1")
+                        .get("line_total_minor")
+                        .asLong())
+                .isEqualTo(996);
+
+        // A dearer delivery moves the average and with it the check.
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("product_id", pen);
+        line.put("cost_minor", 103);
+        line.put("qty_by_branch", List.of(Map.of("branch_id", t.headOffice(), "qty", "988")));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("purchased_on", "2026-01-15");
+        body.put("payment_method", "cash");
+        body.put("lines", List.of(line));
+        assertThat(api.postKeyed(
+                                "/purchases",
+                                body,
+                                ADMIN,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        // 976 left at 83 and 988 at 103 average 93 a piece, so a carton costs 1,116.
+        assertThat(change(carton, Map.of("sell_minor", 1_100), ADMIN)
+                        .getBody()
+                        .get("below_cost")
+                        .asBoolean())
+                .isTrue();
+        assertThat(code(sale(ADMIN, null, carton, "1"))).isEqualTo("price_below_cost");
+        assertThat(change(carton, Map.of("sell_minor", 1_200), ADMIN)
+                        .getBody()
+                        .get("below_cost")
+                        .asBoolean())
+                .isFalse();
+    }
+
+    // ---- what a pack is for ----------------------------------------------------------------
+
+    /** A pack only for buying is never sold or priced; a pack only for selling is never bought. */
+    @Test
+    void aPackIsUsedOnlyForWhatItIsFor() {
+        pack(box, "10", "buy", null);
+        pack(halfCarton, "6", "sell", 580L);
+
+        ResponseEntity<JsonNode> soldBox = sale(ADMIN, null, box, "1");
+        assertThat(soldBox.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(soldBox.getBody().toString()).contains("unknown_pack_unit");
+        assertThat(restock(box, "2", 800).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        ResponseEntity<JsonNode> boughtHalf = restock(halfCarton, "2", 400);
+        assertThat(boughtHalf.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(boughtHalf.getBody().toString()).contains("unknown_pack_unit");
+
+        ResponseEntity<JsonNode> pricedBox = addPack(carton, "12", "buy", 1_100L, ADMIN);
+        assertThat(pricedBox.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(pricedBox.getBody().toString()).contains("pack_not_sold");
+        assertThat(packOf(box, ADMIN).has("below_cost")).isFalse();
+
+        // Making a priced pack buy only drops its price; making it both again sells it at the suggested price.
+        ResponseEntity<JsonNode> bought = change(halfCarton, Map.of("purpose", "buy"), ADMIN);
+        assertThat(bought.getStatusCode()).as("%s", bought.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(bought.getBody().has("sell_minor")).isFalse();
+        assertThat(change(halfCarton, Map.of("purpose", "both"), ADMIN).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(sold(ADMIN, null, halfCarton, "1")
+                        .get("sale_unit_price_minor")
+                        .asLong())
+                .isEqualTo(600);
+        ResponseEntity<JsonNode> bad = change(halfCarton, Map.of("purpose", "gift"), ADMIN);
+        assertThat(bad.getStatusCode()).isIn(HttpStatus.BAD_REQUEST, HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+}
