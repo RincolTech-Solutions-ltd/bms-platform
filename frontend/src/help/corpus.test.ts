@@ -219,7 +219,7 @@ describe('the getting-started articles (issue #609)', () => {
       for (const label of labels) expect(code, `${id}: ${label}`).toMatch(new RegExp(`(^|[>'"])\\s*${escape(label)}\\s*($|[<'"])`, 'm'));
     }
     // install-bms step 1: the sign-in page draws the Install the app card.
-    expect(source(['areas/auth/sign-in.tsx'])).toContain('<InstallPrompt />');
+    expect(source(['areas/auth/sign-in.tsx'])).toMatch(/<InstallPrompt\b/);
   });
 
   it('give the numbers and promises the screens and the server give', () => {

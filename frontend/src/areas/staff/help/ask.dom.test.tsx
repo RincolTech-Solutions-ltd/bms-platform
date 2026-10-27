@@ -23,7 +23,7 @@ vi.mock('../../../api/help', async (original) => {
   return { ...real, askBms: ask };
 });
 
-const { HowDoIPage } = await import('./page');
+const { ArticleView, HowDoIPage } = await import('./page');
 const { ASK_STATUS_KEY, NOT_FOUND } = await import('./ask');
 
 afterEach(() => {
@@ -37,8 +37,8 @@ const owner = {
   permissions: [...((mockMe('admin') as Me).permissions ?? []), 'core.users.read', 'core.users.manage'],
 } as Me;
 
-function show(node: ReactNode, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
-  const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/help'] }) });
+function show(node: ReactNode, client = new QueryClient({ defaultOptions: { queries: { retry: false } } }), path = '/staff/help') {
+  const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: [path] }) });
   return render(
     <RouterContextProvider router={router}>
       <QueryClientProvider client={client}>
@@ -188,7 +188,10 @@ describe('Ask us after a not-found answer', () => {
     await notFoundShown();
     onlineManager.setOnline(false);
     try {
-      await waitFor(() => expect(screen.getAllByRole('link', { name: 'Ask us' })).toHaveLength(1));
+      // Offline the box stays drawn while Ask BMS is remembered as on, and so does the not-found line with its own Ask us.
+      expect(screen.getByRole('heading', { name: 'Ask BMS' })).toBeTruthy();
+      const askUs = within(screen.getByTestId('ask-not-found')).getByRole('link', { name: 'Ask us' });
+      expect(screen.getAllByRole('link', { name: 'Ask us' })).toEqual([askUs]);
     } finally {
       onlineManager.setOnline(true);
     }
@@ -201,6 +204,49 @@ describe('Ask us after a not-found answer', () => {
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Ask BMS' })).toBeNull());
     expect(screen.getAllByRole('link', { name: 'Ask us' })).toHaveLength(1);
     expect(screen.getByText('Not answered?')).toBeTruthy();
+  });
+
+  it('still shows Ask us when the not-found answer arrives after Ask BMS was turned off', async () => {
+    ask.status.mockResolvedValue({ enabled: true, revision: 'r' });
+    let answer: (a: AskAnswer) => void = () => {};
+    ask.ask.mockReturnValueOnce(new Promise<AskAnswer>((resolve) => (answer = resolve)));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    show(<HowDoIPage />, client);
+    await askQuestion('zzqx wvvy');
+    await waitFor(() => expect(ask.ask).toHaveBeenCalled());
+    act(() => client.setQueryData(ASK_STATUS_KEY, { enabled: false, revision: 'r' }));
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Ask BMS' })).toBeNull());
+    await act(async () => answer(reply({ source: 'no_match' })));
+    expect(screen.getAllByRole('link', { name: 'Ask us' })).toHaveLength(1);
+    expect(screen.getByText('Not answered?')).toBeTruthy();
+    // Turned back on, the box is empty and the page keeps its own Ask us.
+    act(() => client.setQueryData(ASK_STATUS_KEY, { enabled: true, revision: 'r' }));
+    expect(await screen.findByRole('heading', { name: 'Ask BMS' })).toBeTruthy();
+    expect(screen.queryByText(NOT_FOUND)).toBeNull();
+    expect(screen.getAllByRole('link', { name: 'Ask us' })).toHaveLength(1);
+    expect(screen.getByText('Not answered?')).toBeTruthy();
+  });
+
+  it('still shows Ask us on an article when Ask BMS is turned off', async () => {
+    ask.status.mockResolvedValue({ enabled: true, revision: 'r' });
+    ask.ask.mockResolvedValueOnce(reply({ source: 'no_match' }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    show(<ArticleView articleId="install-bms" />, client, '/staff/help/install-bms');
+    await askQuestion('zzqx wvvy');
+    expect(await screen.findByText(NOT_FOUND)).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: 'Ask us' })).toHaveLength(1);
+    expect(screen.queryByText('Not answered?')).toBeNull();
+    act(() => client.setQueryData(ASK_STATUS_KEY, { enabled: false, revision: 'r' }));
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Ask BMS' })).toBeNull());
+    expect(screen.getAllByRole('link', { name: 'Ask us' })).toHaveLength(1);
+    expect(screen.getByText('Not answered?')).toBeTruthy();
+  });
+
+  it('keeps the not-found line when only spaces are added to the same question', async () => {
+    await notFoundShown();
+    fireEvent.change(screen.getByLabelText(/Your question/), { target: { value: 'zzqx wvvy ' } });
+    expect(screen.getByText(NOT_FOUND)).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: 'Ask us' })).toHaveLength(1);
   });
 
   it('clears the not-found line when a new question is typed', async () => {
