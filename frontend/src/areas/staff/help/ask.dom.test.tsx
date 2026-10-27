@@ -186,22 +186,36 @@ describe('Ask us after a not-found answer', () => {
 
   it('still shows Ask us when the phone goes offline', async () => {
     await notFoundShown();
-    onlineManager.setOnline(false);
     try {
-      // Offline the box stays drawn while Ask BMS is remembered as on, and so does the not-found line with its own Ask us.
-      expect(screen.getByRole('heading', { name: 'Ask BMS' })).toBeTruthy();
-      const askUs = within(screen.getByTestId('ask-not-found')).getByRole('link', { name: 'Ask us' });
-      expect(screen.getAllByRole('link', { name: 'Ask us' })).toEqual([askUs]);
+      act(() => onlineManager.setOnline(false));
+      // Offline a question cannot be asked, so the box leaves the page and the page's own Ask us is back.
+      await waitFor(() => expect(screen.queryByRole('heading', { name: 'Ask BMS' })).toBeNull());
+      expect(screen.getAllByRole('link', { name: 'Ask us' })).toHaveLength(1);
+      expect(screen.getByText('Not answered?')).toBeTruthy();
     } finally {
-      onlineManager.setOnline(true);
+      act(() => onlineManager.setOnline(true));
     }
   });
 
-  it('still shows Ask us when Ask BMS is turned off', async () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    await notFoundShown(client);
-    act(() => client.setQueryData(ASK_STATUS_KEY, { enabled: false, revision: 'r' }));
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Ask BMS' })).toBeNull());
+  it('still shows Ask us when the phone goes offline while the question is on its way and the answer is not found', async () => {
+    ask.status.mockResolvedValue({ enabled: true, revision: 'r' });
+    let answer: (a: AskAnswer) => void = () => {};
+    ask.ask.mockReturnValueOnce(new Promise<AskAnswer>((resolve) => (answer = resolve)));
+    show(<HowDoIPage />);
+    await askQuestion('zzqx wvvy');
+    await waitFor(() => expect(ask.ask).toHaveBeenCalled());
+    try {
+      act(() => onlineManager.setOnline(false));
+      await waitFor(() => expect(screen.queryByRole('heading', { name: 'Ask BMS' })).toBeNull());
+      await act(async () => answer(reply({ source: 'no_match' })));
+      expect(screen.getAllByRole('link', { name: 'Ask us' })).toHaveLength(1);
+      expect(screen.getByText('Not answered?')).toBeTruthy();
+    } finally {
+      act(() => onlineManager.setOnline(true));
+    }
+    // Back online, the box is empty and the page keeps its own Ask us.
+    expect(await screen.findByRole('heading', { name: 'Ask BMS' })).toBeTruthy();
+    expect(screen.queryByText(NOT_FOUND)).toBeNull();
     expect(screen.getAllByRole('link', { name: 'Ask us' })).toHaveLength(1);
     expect(screen.getByText('Not answered?')).toBeTruthy();
   });
