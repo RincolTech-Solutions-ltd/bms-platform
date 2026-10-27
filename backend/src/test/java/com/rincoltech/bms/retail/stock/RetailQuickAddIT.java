@@ -257,8 +257,19 @@ class RetailQuickAddIT extends IntegrationTest {
                 .getBody();
         assertThat(profit.get("stocktake_difference_minor").asLong()).isZero();
         assertThat(profit.get("profit_minor").asLong()).isZero();
+        // Stock health's lost or damaged rows (used, damaged, short and over) and the margins see nothing of it.
         JsonNode health = api.get("/reports/stock-health", ADMIN).getBody();
-        assertThat(health.toString()).doesNotContain("\"over_lines\":1");
+        assertThat(health.get("shrinkage")).isNotNull();
+        for (JsonNode row : health.get("shrinkage")) {
+            assertThat(row.get("used_reports").asInt()
+                            + row.get("damaged_reports").asInt())
+                    .isZero();
+            assertThat(row.get("short_lines").asInt() + row.get("over_lines").asInt())
+                    .isZero();
+        }
+        JsonNode margins = api.get("/reports/margins?from=" + today + "&to=" + today, ADMIN)
+                .getBody();
+        assertThat(margins.get("by_product").toString()).doesNotContain(product.toString());
         // A switched-off item takes no stock here.
         switchOff("retail_products", product);
         Map<String, Object> more = new LinkedHashMap<>();
@@ -376,6 +387,27 @@ class RetailQuickAddIT extends IntegrationTest {
         assertThat(second.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
         assertThat(productOf(second)).isEqualTo(productOf(first));
         assertThat(stockAt(hq, productOf(first))).isEqualByComparingTo("50");
+    }
+
+    @Test
+    void aRetryAfterALostAnswerAddsOnceSoFiftyAndTenMakeSixty() {
+        UUID product = productOf(quickAdd(item("Test Chalk Box", 1_000, "50", hq)));
+        Map<String, Object> more = new LinkedHashMap<>();
+        more.put("product_id", product);
+        more.put("qty", "10");
+        more.put("branch_id", hq);
+        String key = UUID.randomUUID().toString();
+        // The first add commits; its answer is lost on the way (a 502 at the proxy), so the form sends the same request
+        // again.
+        assertThat(quickAdd(more, ADMIN, "*", key).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> retry = quickAdd(more, ADMIN, "*", key);
+        assertThat(retry.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
+        assertThat(retry.getBody().get("total_qty").asString()).isEqualTo("60");
+        assertThat(stockAt(hq, product)).isEqualByComparingTo("60");
+        // The same key with another quantity is refused, never a second add.
+        more.put("qty", "20");
+        assertThat(quickAdd(more, ADMIN, "*", key).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(stockAt(hq, product)).isEqualByComparingTo("60");
     }
 
     @Test
