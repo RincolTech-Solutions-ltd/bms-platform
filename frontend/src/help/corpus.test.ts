@@ -6,6 +6,7 @@ import { mockMe } from '../api/retail-mock';
 import { offendingWords } from '../app/glossary';
 import { router } from '../app/router';
 import { ARTICLES, JOBS, REVISION, type Inline, articleById, articleForScreen, articleText, articlesFor, parseArticle, relatedArticles, searchArticles } from './corpus';
+import { stocktakePage } from '../tour/tours';
 
 // The help corpus (issue #598, ADR-095): every article is well formed, every picture it names is a 412x900 WebP in public/help and
 // every picture there is used, the revision is the content hash the ADR states, the permissions and screens it names exist, the
@@ -45,8 +46,9 @@ const ids = (list: { id: string }[]) => list.map((a) => a.id);
 
 // The getting-started articles (issue #609) open before sign-in, where the picture script (docs/ui/how-do-i-598) needs a
 // local API, so they ship as text first; their pictures are a follow-up and this list shrinks as they land. Getting your shop
-// ready (issue #615), adding a photo (issue #617), an empty list (issue #619) and Quick add (issue #632) are text first in the same way.
-const PICTURES_PENDING = ['start-using-bms', 'open-my-invitation', 'sign-in', 'install-bms', 'getting-your-shop-ready', 'add-a-photo', 'empty-list', 'add-an-item-quickly'];
+// ready (issue #615), adding a photo (issue #617), an empty list (issue #619), selling packs at their own prices (issue #624)
+// and Quick add (issue #632) are text first in the same way.
+const PICTURES_PENDING = ['start-using-bms', 'open-my-invitation', 'sign-in', 'install-bms', 'getting-your-shop-ready', 'add-a-photo', 'empty-list', 'sell-packs-at-their-own-price', 'add-an-item-quickly'];
 
 describe('the help corpus', () => {
   it('holds the 15 to 30 articles of the questions pilots asked, each job with one at least', () => {
@@ -404,6 +406,78 @@ describe('an empty list (issue #619)', () => {
     const inline = source(['areas/staff/retail/unit-picker.tsx', 'areas/staff/retail/category-picker.tsx', 'areas/staff/retail/purchasing-ui.tsx', 'areas/staff/retail/buyer-pricing.tsx']);
     for (const create of ['retail.createUnit', 'createCategory', 'retail.createSupplier', 'retail.createCustomerGroup']) expect(inline).toContain(create);
     for (const screen of ['catalogue-people.tsx', 'price-lists.tsx', '../branches/page.tsx']) expect(source([`areas/staff/retail/${screen}`]), screen).toMatch(/useComeBack\(\)[\s\S]*back\?\.\(\)/);
+  });
+});
+
+describe('selling packs at their own prices (issue #624)', () => {
+  const PACKS = 'sell-packs-at-their-own-price';
+  // The code of the screens each part walks through (its steps in order, then its note).
+  const PARTS = [
+    ['areas/staff/retail/catalogue-products.tsx', 'app/glossary.ts', 'areas/staff/retail/catalogue-packs.tsx'],
+    ['areas/staff/retail/catalogue-packs.tsx'],
+    ['areas/staff/retail/catalogue-packs.tsx'],
+    ['areas/staff/retail/catalogue-packs.tsx'],
+    ['areas/staff/retail/sale.tsx'],
+    ['areas/staff/retail/catalogue-packs.tsx'],
+  ];
+  const source = (files: string[]) => files.map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')).join('\n');
+  const boldIn = (runs: Inline[]) => [...new Set(runs.flat().filter((r) => r.strong).map((r) => r.text))];
+  const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const whole = (label: string) => new RegExp(`(^|[>'"])\\s*${escape(label)}\\s*($|[<'"])`, 'm');
+
+  it('has the article, for whoever manages the catalogue, found with the words a shop owner types', () => {
+    const packs = articleById(PACKS)!;
+    expect(packs.title).toBe('How do I sell in a box and in pieces at different prices?');
+    expect(packs.job).toBe('items');
+    for (const typed of ['carton price', 'sell by the box', 'half carton']) expect(searchArticles(articlesFor(owner), typed)[0]?.id, typed).toBe(PACKS);
+    expect(ids(articlesFor(seller))).not.toContain(PACKS);
+    expect(articleText(packs)).not.toMatch(/[\u2013\u2014]| - /);
+  });
+
+  it('puts in bold only labels the screens of each step really show', () => {
+    const packs = articleById(PACKS)!;
+    const parts = [...packs.steps.map((step) => boldIn([step.text])), boldIn(packs.notes)];
+    expect(parts).toHaveLength(PARTS.length);
+    parts.forEach((labels, i) => {
+      const code = source(PARTS[i]!);
+      expect(labels.length, `part ${i + 1}`).toBeGreaterThan(0);
+      for (const label of labels) expect(code, `part ${i + 1}: ${label}`).toMatch(whole(label));
+    });
+  });
+
+  it('promises what the sale does: the price of the pack, else the piece price times the size', () => {
+    expect(articleText(articleById(PACKS)!)).toContain('suggests the piece price times the size');
+    expect(source(['areas/staff/retail/units-state.ts'])).toContain('return pack.sell_minor ?? packPriceMinor(pieceMinor, pack.factor);');
+    expect(source(['areas/staff/retail/sale-state.ts'])).toContain('packWalkInPrice(product.sell_minor ?? 0, pack)');
+  });
+});
+
+// Issue #629: a help caption said Finish where the button says Commit the count. The count article, its pictures' captions and
+// the count tour name the buttons the count screen shows, and none of them says Finish for committing the count.
+describe('the count stock words (issue #629)', () => {
+  const screen = readFileSync(new URL('../areas/staff/retail/stocktake.tsx', import.meta.url), 'utf8');
+  const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const whole = (label: string) => new RegExp(`(^|[>'"\`])\\s*${escape(label)}\\s*($|[<'"\`(])`, 'm');
+  const counting = ARTICLES.filter((a) => a.job === 'count-stock');
+
+  it('put in bold, and as captions, only labels the count screen shows, Commit the count among them', () => {
+    const count = articleById('count-stock')!;
+    const labels = [...new Set([...count.intro, ...count.steps.map((s) => s.text), ...count.notes].flat().filter((r) => r.strong).map((r) => r.text))];
+    expect(labels).toContain('Commit the count');
+    expect(count.steps.map((s) => s.picture?.caption)).toContain('Commit the count');
+    // Switch branch, Count stock and the warning's Confirm and Change are drawn by the shell, the menu and the entry checks.
+    for (const label of labels.filter((l) => !['Switch branch', 'Count stock', 'Confirm', 'Change'].includes(l))) expect(screen, label).toMatch(whole(label));
+    expect(count.words).toContain('commit the count');
+  });
+
+  it('never say Finish for committing a count, in an article, a word a person searches with or the tour', () => {
+    for (const a of counting) {
+      expect(articleText(a), a.id).not.toMatch(/\bfinish/i);
+      expect(a.words.join(' '), a.id).not.toMatch(/\bfinish/i);
+    }
+    const tour = stocktakePage.steps.map((s) => `${s.title} ${s.body}`).join('\n');
+    expect(tour).not.toMatch(/\bfinish/i);
+    expect(tour).toContain('Commit the count');
   });
 });
 
