@@ -15,6 +15,7 @@ import com.rincoltech.bms.kernel.PhoneNumbers;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.Search;
 import com.rincoltech.bms.kernel.Versions;
+import com.rincoltech.bms.lending.members.MemberIntake;
 import com.rincoltech.bms.lending.members.MemberLookup;
 import com.rincoltech.bms.lending.members.internal.MemberApi.BlacklistRequest;
 import com.rincoltech.bms.lending.members.internal.MemberApi.CreateMemberRequest;
@@ -41,7 +42,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-class MemberService implements MemberLookup {
+class MemberService implements MemberLookup, MemberIntake {
 
     static final int DEFAULT_LIMIT = 50;
     static final int MAX_LIMIT = 200;
@@ -408,6 +409,28 @@ class MemberService implements MemberLookup {
     @Transactional(readOnly = true)
     public Optional<MemberSummary> findByNumber(String memberNo) {
         return members.findByNumber(memberNo).map(MemberService::summary);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<MemberSummary> findByPhone(String phone) {
+        return PhoneNumbers.normaliseUganda(phone)
+                .map(e164 -> members.duplicateCandidates(null, e164, null, null).stream()
+                        .filter(c -> c.reasons().contains("phone"))
+                        .map(c -> members.findById(c.id()))
+                        .flatMap(Optional::stream)
+                        .map(MemberService::summary)
+                        .toList())
+                .orElse(List.of());
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public MemberSummary addFromRegister(UUID branchId, String fullName, String phone) {
+        MemberResponse created = create(new CreateMemberRequest(
+                branchId, fullName, null, null, phone, null, "none", null, null, null, null, "unknown", null, null, null,
+                null, null, null, null, null, null, false));
+        return summary(created);
     }
 
     @Override

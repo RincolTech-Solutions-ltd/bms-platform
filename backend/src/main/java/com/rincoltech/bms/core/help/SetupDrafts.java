@@ -39,6 +39,22 @@ public interface SetupDrafts {
     /** A chosen file. Its bytes are never printed. */
     record Upload(String fileName, String contentType, byte[] bytes) {
 
+        /** The file of a multipart request, or null when none was sent. */
+        public static Upload of(org.springframework.web.multipart.MultipartFile file) {
+            if (file == null || file.isEmpty()) {
+                return null;
+            }
+            try {
+                return new Upload(file.getOriginalFilename(), file.getContentType(), file.getBytes());
+            } catch (java.io.IOException e) {
+                throw new com.rincoltech.bms.kernel.ApiException(
+                        org.springframework.http.HttpStatus.BAD_REQUEST,
+                        "malformed_request",
+                        "Malformed request",
+                        "The upload could not be read.");
+            }
+        }
+
         @Override
         public String toString() {
             return "Upload[type=" + contentType + ", bytes=" + (bytes == null ? 0 : bytes.length) + "]";

@@ -1,14 +1,11 @@
 package com.rincoltech.bms.retail.catalogue.internal;
 
 import com.rincoltech.bms.core.help.SetupDrafts;
-import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import com.rincoltech.bms.retail.catalogue.internal.ItemDraftApi.ItemDraft;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import java.io.IOException;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -49,19 +46,6 @@ class ItemDraftController {
             @Parameter(description = "The kind of shop chosen in Set up your shop, such as Hardware")
                     @RequestParam(name = "shop_type", required = false)
                     String shopType) {
-        return service.draft(text, upload(file), shopType);
-    }
-
-    /** The chosen file for the helper, or null when none was sent. */
-    static SetupDrafts.Upload upload(MultipartFile file) {
-        if (file == null || file.isEmpty()) {
-            return null;
-        }
-        try {
-            return new SetupDrafts.Upload(file.getOriginalFilename(), file.getContentType(), file.getBytes());
-        } catch (IOException e) {
-            throw new ApiException(
-                    HttpStatus.BAD_REQUEST, "malformed_request", "Malformed request", "The upload could not be read.");
-        }
+        return service.draft(text, SetupDrafts.Upload.of(file), shopType);
     }
 }
