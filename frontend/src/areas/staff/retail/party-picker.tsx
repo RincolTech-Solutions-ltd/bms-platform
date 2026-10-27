@@ -19,12 +19,14 @@ export function useCashParties() {
   return useQuery({ queryKey: ['retail', 'cash-parties'], queryFn: () => retail.listCashParties() });
 }
 
-export function PartyPicker({ id, label, parties, loading = false, kinds, listed, value, onChange, noneLabel, addLabel, optional = false }: {
+export function PartyPicker({ id, label, parties, loading = false, load, kinds, listed, value, onChange, noneLabel, addLabel, optional = false }: {
   id: string;
   label: string;
   parties: CashParty[];
   /** The list is not known yet (on its way, or its read failed): the select shows, never the empty line. */
   loading?: boolean;
+  /** The read of the parties: a failed one says so with Try again (EmptyChoice). */
+  load?: { isError: boolean; refetch: () => unknown };
   /** The kinds a party added here may be; one means the kind is fixed, several means the person chooses. */
   kinds: CashPartyKind[];
   /** The kinds the list shows; every kind when absent (a beneficiary may be anyone in the list). */
@@ -56,11 +58,11 @@ export function PartyPicker({ id, label, parties, loading = false, kinds, listed
   const choices = parties.filter((p) => p.active !== false && (!listed || listed.includes(p.kind as CashPartyKind)));
   return (
     <>
-      {!adding && !loading && choices.length === 0 && (
-        <EmptyChoice id={id} label={label} text="Nobody in this list yet." ask="Ask the owner to add them first."
+      {!adding && (load?.isError || (!loading && choices.length === 0)) && (
+        <EmptyChoice id={id} label={label} load={load} text="Nobody in this list yet." ask="Ask the owner to add them first."
           add={addable.length > 0 ? { label: addLabel, onClick: () => { setAdding(true); add.reset(); } } : null} />
       )}
-      {!adding && (loading || choices.length > 0) && (
+      {!adding && !load?.isError && (loading || choices.length > 0) && (
         <>
           <label htmlFor={id}>{label}</label>
           <select id={id} value={value} onChange={(e) => onChange(e.target.value)} aria-required={!optional}>

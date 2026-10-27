@@ -5,7 +5,7 @@ import { retail, type Customer } from '../../../api/retail';
 import { useStaff } from '../context';
 import { PRICELIST_MANAGE, PRICE_LISTS, capabilityOn, holds } from './permissions';
 import { Problem, changeFailureText, requireVersion } from './ui';
-import { EmptyChoice } from '../../../app/ui/EmptyChoice';
+import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
 import { addOn } from './screen-link';
 
 // A credit buyer's customer group and own price list (ADR-033, issue #195). Shown on the Credit buyers page only while
@@ -40,8 +40,8 @@ export function BuyerPricing({ row }: { row: Customer }) {
       {!editing && <p><button type="button" className="btn-sm" onClick={() => setEditing(true)} aria-label={`Change the prices of ${row.name}`}>Change prices</button></p>}
       {editing && (
         <div className="stack">
-          {groupChoices.length === 0 && groups.data ? (
-            <EmptyChoice id={`buyer-group-${row.id}`} label="Customer group" text="No customer groups yet." add={{
+          {showsEmptyChoice(groups, groups.data && groupChoices) ? (
+            <EmptyChoice id={`buyer-group-${row.id}`} label="Customer group" load={groups} text="No customer groups yet." add={{
               label: 'Add a customer group', name: 'Name of the new group', send: 'Add group',
               create: (name) => retail.createCustomerGroup({ name }),
               onAdded: (group) => { void queryClient.invalidateQueries({ queryKey: ['retail', 'customer-groups'] }); setGroupId(group.id ?? ''); },
@@ -55,8 +55,8 @@ export function BuyerPricing({ row }: { row: Customer }) {
               </select>
             </>
           )}
-          {listChoices.length === 0 && lists.data ? (
-            <EmptyChoice id={`buyer-list-${row.id}`} label="Own price list (wins over the group's)" text="No price lists yet." ask="Ask the owner to add a price list first."
+          {showsEmptyChoice(lists, lists.data && listChoices) ? (
+            <EmptyChoice id={`buyer-list-${row.id}`} label="Own price list (wins over the group's)" load={lists} text="No price lists yet." ask="Ask the owner to add a price list first."
               add={addOn(me, 'priceLists', 'Add a price list', '/staff/retail/price-lists')} />
           ) : (
             <>

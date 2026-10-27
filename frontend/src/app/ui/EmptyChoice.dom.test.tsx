@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { focusFirstMissing } from './Field';
 
@@ -10,7 +10,7 @@ vi.mock('@tanstack/react-router', async (original) => {
   return { ...real, useRouter: () => null, Link: ({ children, to, search, ...rest }: { children: unknown; to: string; search?: Record<string, string> }) => <a href={`${to}?back=${encodeURIComponent(search?.back ?? '')}`} {...rest}>{children as never}</a> };
 });
 
-const { EmptyChoice, useComeBack } = await import('./EmptyChoice');
+const { EmptyChoice, LOAD_FAILED, showsEmptyChoice, useComeBack } = await import('./EmptyChoice');
 
 afterEach(() => {
   cleanup();
@@ -25,6 +25,24 @@ describe('EmptyChoice', () => {
     expect(screen.getByText('No suppliers yet.')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Add a supplier' }).getAttribute('href')).toBe('/staff/retail/catalogue/suppliers?back=%2Fstaff%2Fretail%2Frestock');
     expect(screen.queryByText(/Ask the owner/)).toBeNull();
+  });
+
+  it('never calls a list it could not read empty: it says so and offers Try again, whoever is asking (review of #619)', () => {
+    const refetch = vi.fn();
+    render(<EmptyChoice id="unit" label="Counted in" text="No units yet." ask="Ask the owner to add a unit first." add={{ label: 'Add a new unit', onClick: () => undefined }} load={{ isError: true, refetch }} />);
+    expect(screen.getByRole('alert').textContent).toBe(LOAD_FAILED);
+    expect(screen.queryByText('No units yet.')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add a new unit' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('is shown for a list that answered with none or failed, never while it loads', () => {
+    expect(showsEmptyChoice({ isError: false, data: undefined })).toBe(false);
+    expect(showsEmptyChoice({ isError: false, data: [] })).toBe(true);
+    expect(showsEmptyChoice({ isError: false, data: [1] })).toBe(false);
+    expect(showsEmptyChoice({ isError: false, data: [1] }, [])).toBe(true);
+    expect(showsEmptyChoice({ isError: true, data: undefined })).toBe(true);
   });
 
   it('says who to ask when the session may not add one', () => {

@@ -229,7 +229,7 @@ export function NewFamilyPage() {
           <input id="sizes-item-name" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} autoComplete="off" placeholder="Baby romper" />
           <ScreenToast.Provider value={show}>
             <CategoryPicker id="sizes-item-category" categories={(categories.data ?? []).filter((c) => c.active !== false)} value={categoryId} onChange={setCategoryId} />
-            <UnitPicker id="sizes-item-unit" units={(units.data ?? []).filter((u) => u.active !== false)} loading={units.data === undefined} value={unitId} onChange={setUnitId}
+            <UnitPicker id="sizes-item-unit" units={(units.data ?? []).filter((u) => u.active !== false)} loading={units.data === undefined} load={units} value={unitId} onChange={setUnitId}
               error={null} showError={false} required={false} />
           </ScreenToast.Provider>
           {profit && (

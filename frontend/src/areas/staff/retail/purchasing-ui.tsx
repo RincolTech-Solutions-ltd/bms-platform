@@ -114,10 +114,11 @@ export function SupplierField({ id, label = 'Supplier', value, suppliers, disabl
   // The form's own read of the suppliers, looked up in the cache without a second request: the empty line waits until it has
   // answered. A form drawn without a query client (a test) never shows it.
   const queryClient = useContext(QueryClientContext);
-  const listed = queryClient?.getQueryData(['retail', 'suppliers']) !== undefined;
-  if (listed && suppliers.length === 0) {
+  const read = queryClient?.getQueryState(['retail', 'suppliers']);
+  const failed = read?.status === 'error';
+  if (failed || (read?.data !== undefined && suppliers.length === 0)) {
     return (
-      <EmptyChoice id={id} label={label} required={required} text="No suppliers yet." ask="Ask the owner to add your suppliers first."
+      <EmptyChoice id={id} label={label} required={required} load={{ isError: failed, refetch: () => queryClient?.refetchQueries({ queryKey: ['retail', 'suppliers'] }) }} text="No suppliers yet." ask="Ask the owner to add your suppliers first."
         add={me && holds(me, 'retail.catalogue.manage') ? {
           label: 'Add a supplier', name: 'Name of the supplier', send: 'Add supplier', maxLength: 120,
           create: (name) => retail.createSupplier({ name }),

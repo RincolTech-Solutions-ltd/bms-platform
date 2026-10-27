@@ -133,11 +133,11 @@ export function SelectField({ name, label, form, hint, required, disabled, value
   /** An empty first choice ("Choose a branch"). */
   blankLabel?: string;
   /** What the field says when a list read from the server is empty (issue #619): the line, who to ask, and the way to add one. */
-  empty?: { text: string; ask: string; add?: ChoiceAdd<unknown> | null };
+  empty?: { text: string; ask: string; add?: ChoiceAdd<unknown> | null; load?: { isError: boolean; refetch: () => unknown } };
 }) {
   const id = form.idOf(name);
   const error = form.error(name);
-  if (empty && options.length === 0) return <EmptyChoice id={id} label={label} required={required} text={empty.text} ask={empty.ask} add={empty.add} />;
+  if (empty && (options.length === 0 || empty.load?.isError)) return <EmptyChoice id={id} label={label} required={required} load={empty.load} text={empty.text} ask={empty.ask} add={empty.add} />;
   return (
     <div className="mf-field">
       <label htmlFor={id}>{label}{required ? <span className="field-star" aria-hidden="true"> *</span> : null}</label>

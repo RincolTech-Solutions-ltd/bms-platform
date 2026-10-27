@@ -38,7 +38,7 @@ import { useUnsavedWork } from '../../../app/unsaved-work';
 import { entryWarnings, type EntryWarning } from './entry-checks-state';
 import { useEntryChecks, useEntryNorms } from './entry-checks';
 import { FirstItemsCard, useNoItemsYet } from './first-items';
-import { EmptyChoice } from '../../../app/ui/EmptyChoice';
+import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
 import { addOn } from './screen-link';
 
 // Record a sale (FR-RET-04, FR-RET-05). One idempotency key per draft, kept with the draft in this
@@ -517,8 +517,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
       {pricesOn && draft.method !== 'credit' && (
         <fieldset data-tour="sale-customer">
           <legend>Customer</legend>
-          {customers.data?.length === 0 ? (
-            <EmptyChoice id="price-customer" label="Customer (optional): sets the price list" text="No customers yet." ask="Ask the owner to add your customers first."
+          {showsEmptyChoice(customers) ? (
+            <EmptyChoice id="price-customer" label="Customer (optional): sets the price list" load={customers} text="No customers yet." ask="Ask the owner to add your customers first."
               add={addOn(me, 'buyers', 'Add a customer', '/staff/retail/catalogue/buyers')} />
           ) : (
           <>
@@ -535,8 +535,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
       )}
       {canChooseList && (
         <div>
-          {lists.data?.filter((l) => l.active).length === 0 ? (
-            <EmptyChoice id="price-list" label="Price list for this sale" text="No price lists yet." ask="Ask the owner to add a price list first."
+          {showsEmptyChoice(lists, lists.data?.filter((l) => l.active)) ? (
+            <EmptyChoice id="price-list" label="Price list for this sale" load={lists} text="No price lists yet." ask="Ask the owner to add a price list first."
               add={addOn(me, 'priceLists', 'Add a price list', '/staff/retail/price-lists')} />
           ) : (
           <>
@@ -590,10 +590,10 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
       {draft.method === 'credit' && (
         <fieldset>
           <legend>Customer from the list</legend>
-          {!addingBuyer && customers.data?.length === 0 && (
-            <EmptyChoice id="buyer" label="Buyer" text="No buyers yet." add={{ label: 'Add a new buyer', onClick: () => { setAddingBuyer(true); update({ customerId: '' }); } }} />
+          {!addingBuyer && showsEmptyChoice(customers) && (
+            <EmptyChoice id="buyer" label="Buyer" load={customers} text="No buyers yet." add={{ label: 'Add a new buyer', onClick: () => { setAddingBuyer(true); update({ customerId: '' }); } }} />
           )}
-          {!addingBuyer && customers.data?.length !== 0 && (
+          {!addingBuyer && !showsEmptyChoice(customers) && (
             <>
               <label htmlFor="buyer">Buyer</label>
               <select id="buyer" value={draft.customerId} onChange={(e) => update({ customerId: e.target.value })}>

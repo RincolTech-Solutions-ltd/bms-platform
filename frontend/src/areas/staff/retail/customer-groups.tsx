@@ -7,7 +7,7 @@ import { AddPanel } from './catalogue';
 import { ScreenLink, addOn } from './screen-link';
 import { Gate, Problem, changeFailureText, requireVersion } from './ui';
 import { WORDS } from '../../../app/glossary';
-import { EmptyChoice } from '../../../app/ui/EmptyChoice';
+import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
 import { useOptionalStaff, useStaff } from '../context';
 
 // Customer groups (ADR-033, issue #195): customers that share a price list. A buyer's own list wins over the list of
@@ -96,8 +96,8 @@ export function CustomerGroups() {
         <form onSubmit={(e) => { e.preventDefault(); if (name.trim()) create.mutate(); }} data-tour="customer-group-new">
           <label htmlFor="new-group-name">Name</label>
           <input id="new-group-name" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} autoComplete="off" />
-          {lists.data?.some((l) => l.active) === false ? (
-            <EmptyChoice id="new-group-list" label="Price list (optional)" text="No price lists yet." ask="Ask the owner to add a price list first."
+          {showsEmptyChoice(lists, lists.data?.filter((l) => l.active)) ? (
+            <EmptyChoice id="new-group-list" label="Price list (optional)" load={lists} text="No price lists yet." ask="Ask the owner to add a price list first."
               add={addOn(me, 'priceLists', 'Add a price list', '/staff/retail/price-lists')} />
           ) : (
             <>

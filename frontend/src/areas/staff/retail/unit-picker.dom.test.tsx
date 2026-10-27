@@ -28,11 +28,11 @@ afterEach(() => {
 
 const piece: Unit = { id: 'u1', name: 'piece', active: true, version: 1 };
 
-function Harness({ units }: { units: Unit[] }) {
+function Harness({ units, failed = false }: { units: Unit[]; failed?: boolean }) {
   const [value, setValue] = useState('');
   return (
     <>
-      <UnitPicker id="item-unit" units={units} loading={false} value={value} onChange={setValue} error={value === '' ? 'Choose a unit.' : null} showError={false} />
+      <UnitPicker id="item-unit" units={units} loading={failed} load={{ isError: failed, refetch: () => undefined }} value={value} onChange={setValue} error={value === '' ? 'Choose a unit.' : null} showError={false} />
       <output data-testid="chosen">{value}</output>
     </>
   );
@@ -86,6 +86,17 @@ describe('Counted in (issue #619)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add unit' }));
     expect((await screen.findByRole('alert')).textContent).toBe('A unit with this name already exists.');
     expect(screen.getByTestId('chosen').textContent).toBe('');
+  });
+
+  it('says the units could not be loaded when their read fails, never that there are none (review of #619)', () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <StaffContext.Provider value={{ me: mockMe('admin'), branch: '' }}><Harness units={[]} failed /></StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole('alert').textContent).toBe('This list could not be loaded. Check the connection.');
+    expect(screen.queryByText('No units yet.')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
   });
 
   it('tells someone who may not add units to ask the owner', () => {

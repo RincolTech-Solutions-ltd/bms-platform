@@ -15,7 +15,7 @@ import { useToast } from './toast';
 import { BranchRequired, Gate, Problem, WaitingForApproval, money, useBranchName, useSingleBranch } from './ui';
 import { showDate } from './transfers';
 import { ActionBar } from '../../../app/ui/ActionBar';
-import { EmptyChoice } from '../../../app/ui/EmptyChoice';
+import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
 import { addOn } from './screen-link';
 
 // Company expenses (FR-RET-24): shop, date, category, then an item of that category, an optional
@@ -52,9 +52,8 @@ export function ExpenseForm({ branchId, onSaved, onWaiting }: { branchId: string
     <form onSubmit={(e) => { e.preventDefault(); if (!blocked) save.mutate(); }}>
       <DateField id="expense-date" label="Date" value={draft.date} onChange={(date) => update({ date })} />
 
-      {categories.isError && <Problem error={categories.error} />}
-      {categories.data && activeCategories(list).length === 0 ? (
-        <EmptyChoice id="expense-category" label="Category" text="No expense categories yet." ask="Ask the owner to add expense categories first."
+      {showsEmptyChoice(categories, categories.data && activeCategories(list)) ? (
+        <EmptyChoice id="expense-category" label="Category" load={categories} text="No expense categories yet." ask="Ask the owner to add expense categories first."
           add={addOn(me, 'expenseSetup', 'Add an expense category', '/staff/retail/expense-lists')} />
       ) : (
       <>
@@ -92,7 +91,7 @@ export function ExpenseForm({ branchId, onSaved, onWaiting }: { branchId: string
       )}
 
       <PartyPicker
-        id="expense-party" label="Beneficiary (optional)" parties={parties.data ?? []} loading={parties.data === undefined} kinds={['other']} value={draft.partyId}
+        id="expense-party" label="Beneficiary (optional)" parties={parties.data ?? []} loading={parties.data === undefined} load={parties} kinds={['other']} value={draft.partyId}
         onChange={(partyId) => update({ partyId })} noneLabel="No beneficiary" addLabel="Add a new beneficiary" optional
       />
 

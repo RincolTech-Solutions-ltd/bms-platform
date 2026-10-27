@@ -14,12 +14,14 @@ import { ScreenToast } from './toast';
 
 const UNITS = ['retail', 'catalogue', 'units'];
 
-export function UnitPicker({ id, units, loading, value, onChange, error, showError, required = true }: {
+export function UnitPicker({ id, units, loading, load, value, onChange, error, showError, required = true }: {
   id: string;
   /** The units the form offers (it decides about switched-off ones). */
   units: Unit[];
   /** The list is not known yet (on its way, or its read failed): the select shows, never "No units yet." */
   loading: boolean;
+  /** The read of the units: a failed one says so with Try again (EmptyChoice). */
+  load?: { isError: boolean; refetch: () => unknown };
   value: string;
   onChange: (unitId: string) => void;
   error: string | null;
@@ -46,8 +48,8 @@ export function UnitPicker({ id, units, loading, value, onChange, error, showErr
       screenToast?.(`Added the unit ${unit.name ?? ''}.`, 'success');
     },
   };
-  if (units.length === 0 && !loading) {
-    return <EmptyChoice id={id} label={WORDS.countedIn} required={required} text="No units yet." ask="Ask the owner to add a unit first." add={canAdd ? add : null} />;
+  if (load?.isError || (units.length === 0 && !loading)) {
+    return <EmptyChoice id={id} label={WORDS.countedIn} required={required} load={load} text="No units yet." ask="Ask the owner to add a unit first." add={canAdd ? add : null} />;
   }
   if (adding) return <AddByName id={`${id}-add`} title={add.label} add={add} onCancel={() => setAdding(false)} />;
   return (

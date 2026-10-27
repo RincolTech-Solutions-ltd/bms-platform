@@ -8,7 +8,7 @@ import { Problem } from './ui';
 import { UNITS, capabilityOn, holds } from './permissions';
 import { factorMilli } from './units-state';
 import { WORDS } from '../../../app/glossary';
-import { EmptyChoice } from '../../../app/ui/EmptyChoice';
+import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
 
 // Pack sizes of an item (ADR-033, issue #194): a unit and the number of base units in one pack, for
 // example a carton of twelve pieces. Offered only while /me lists the units capability and the user may
@@ -92,8 +92,8 @@ export function PackEditor({ product }: { product: Product }) {
       <ul style={{ listStyle: 'none', padding: 0 }}>
         {(packs.data ?? []).map((k) => <PackRow key={`${k.unit_id}-${k.version}`} productId={id} pack={k} />)}
       </ul>
-      {units.data && choices.length === 0 ? (
-        <EmptyChoice id="pack-unit" label="Add a pack" text="No other unit to make a pack of yet." add={{
+      {showsEmptyChoice(units, units.data && choices) ? (
+        <EmptyChoice id="pack-unit" label="Add a pack" load={units} text="No other unit to make a pack of yet." add={{
           label: 'Add a new unit', name: 'Name of the new unit, such as carton', send: 'Add unit', maxLength: 50,
           create: (name) => retail.createUnit(name),
           onAdded: (unit) => {

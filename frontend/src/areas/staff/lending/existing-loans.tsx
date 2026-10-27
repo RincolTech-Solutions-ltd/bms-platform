@@ -12,7 +12,7 @@ import { money, words } from './loan-state';
 import { MemberPicker } from './member-picker';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
-import { EmptyChoice } from '../../../app/ui/EmptyChoice';
+import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
 
 // Record an existing loan (issue #466, FR-EXL-01 to FR-EXL-04, ADR-071), for a business moving off a paper register: the
 // member, the product, the amount lent, the real date it was given out, the term, the product's rate or the amount the
@@ -152,8 +152,8 @@ export function ExistingLoanForm({ api = existingLoans }: { api?: ExistingLoansA
     <form className="mf" aria-label="Record an existing loan" noValidate onSubmit={submit} data-tour="existing-form">
       <MemberPicker id="el-member" chosen={chosen} error={error('member_id')} errorId="el-member-error"
         onChoose={(m) => { setChosen(m); set('memberId', m?.id ?? null); }} />
-      {products.data?.length === 0 ? (
-        <EmptyChoice id="el-product" label="Loan product" text="No loan products yet." ask="Ask the owner to add a loan product first." />
+      {showsEmptyChoice(products) ? (
+        <EmptyChoice id="el-product" label="Loan product" load={products} text="No loan products yet." ask="Ask the owner to add a loan product first." />
       ) : (
       <>
       <label htmlFor="el-product">Loan product</label>

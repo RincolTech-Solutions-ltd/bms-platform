@@ -263,7 +263,7 @@ function NewItemForm({ id, qtyLabel, qtyError, counting, askCost, initial = '', 
       <UnitPicker
         id={`${id}-unit`}
         units={(units.data ?? []).filter((u) => u.active !== false)}
-        loading={units.data === undefined}
+        loading={units.data === undefined} load={units}
         value={unitId}
         onChange={(next) => { setUnitId(next); forget(); }}
         error={unitId === '' ? 'Choose a unit.' : null}

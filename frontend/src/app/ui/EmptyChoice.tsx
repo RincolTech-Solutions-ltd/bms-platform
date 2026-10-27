@@ -10,6 +10,13 @@ import { Field } from './Field';
 // under it. The field's label stays, so the form still names what is missing. design-guard.test.ts fails a select of options
 // read at run time that has no empty handling. The look is .empty-choice in src/app/ui/kit.css.
 
+/** What a field says when the list it needs could not be read. */
+export const LOAD_FAILED = 'This list could not be loaded. Check the connection.';
+
+/** True when a form shows the EmptyChoice for a list: it answered with none, or its read failed. Never while it loads. */
+export const showsEmptyChoice = (load: { isError: boolean; data?: readonly unknown[] }, rows = load.data): boolean =>
+  load.isError || (rows !== undefined && rows.length === 0);
+
 /** Adds a row by its name, in place: `create` makes it, `onAdded` puts it in the screen's list and chooses it. */
 export interface AddInline<T> {
   label: string;
@@ -109,9 +116,14 @@ export function AddByName<T>({ id, title, add, onCancel }: { id: string; title: 
  * session may add one, or else `ask` ("Ask the owner to add a unit first."). A `required` field's action is what Save takes the
  * person to (focusFirstMissing reads `data-needed`).
  */
-export function EmptyChoice<T>({ id, label, text, ask, add, required = false }: {
+export function EmptyChoice<T>({ id, label, text, ask, add, required = false, load }: {
   id: string;
   label?: ReactNode;
+  /**
+   * The read of the list. When it failed, the list is not known to be empty: the field says it could not be loaded and offers
+   * Try again, never "No units yet." and a way to add one that may already exist (review of #619).
+   */
+  load?: { isError: boolean; refetch: () => unknown };
   text: string;
   /** Who to ask, for a session that may not add one; left out where everyone may add one. */
   ask?: string;
@@ -131,7 +143,12 @@ export function EmptyChoice<T>({ id, label, text, ask, add, required = false }: 
           {required && <span className="field-star" aria-hidden="true"> *</span>}
         </span>
       )}
-      {add ? (
+      {load?.isError ? (
+        <>
+          <p role="alert">{LOAD_FAILED}</p>
+          <button type="button" id={id} onClick={() => void load.refetch()}>Try again</button>
+        </>
+      ) : add ? (
         <>
           <p>{text}</p>
           {isInline(add) ? (

@@ -295,10 +295,10 @@ export function CategoryPicker({ id, label = 'Category', categories, value, onCh
   const added = (row: Category) => keep(row, `Added the category ${row.name ?? ''}.${row.code_prefix ? ` Its item codes start with ${row.code_prefix}.` : ''}`);
   const chose = (row: Category, on: boolean) => (on ? keep(row, `Switched ${row.name ?? ''} on and chose it.`) : pick(row.id ?? ''));
   // Issue #619: with no category to choose, the field says so and adds the first one in place, or says who to ask.
-  if (all.data !== undefined && choicesList.length === 0 && noneLabel === undefined) {
+  if (choicesList.length === 0 && noneLabel === undefined && (all.data !== undefined || all.isError)) {
     return addingFirst && canAdd
-      ? <AddCategory id={id} initial="" existing={all.data} onAdded={(row) => { setAddingFirst(false); added(row); }} onChoose={(row, on) => { setAddingFirst(false); chose(row, on); }} onCancel={() => setAddingFirst(false)} />
-      : <EmptyChoice id={id} label={label} required={required} text="No categories yet." ask="Ask the owner to add a category first." add={canAdd ? { label: 'Add a category', onClick: () => setAddingFirst(true) } : null} />;
+      ? <AddCategory id={id} initial="" existing={all.data ?? []} onAdded={(row) => { setAddingFirst(false); added(row); }} onChoose={(row, on) => { setAddingFirst(false); chose(row, on); }} onCancel={() => setAddingFirst(false)} />
+      : <EmptyChoice id={id} label={label} required={required} load={all} text="No categories yet." ask="Ask the owner to add a category first." add={canAdd ? { label: 'Add a category', onClick: () => setAddingFirst(true) } : null} />;
   }
   const choices = <Choices id={id} categories={choicesList} existing={all.data ?? choicesList} value={value} noneLabel={noneLabel} canAdd={canAdd} onPick={pick} onAdded={added} onChoose={chose} />;
 
