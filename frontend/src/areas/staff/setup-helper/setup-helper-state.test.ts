@@ -62,7 +62,7 @@ describe('why there are no rows', () => {
     for (const reason of ['no_provider', 'all_failed', 'daily_cap', 'unreadable', null] as const) {
       const text = reasonText(reason, 'items');
       expect(text).toMatch(/type|Type|photo/);
-      expect(text).not.toMatch(/[–—]| - /);
+      expect(text).not.toMatch(/[\u2013\u2014]| - /);
     }
     expect(reasonText(null, 'loans')).toBe('No loans were found in your list. Type them below or import a file.');
   });
