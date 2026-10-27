@@ -223,7 +223,8 @@ class OpenAiCompatibleClientTest {
     /** Only a data URL of a picture, on a user message: a provider is never asked to fetch a link. */
     @Test
     void aPictureIsNeverALink() {
-        for (String bad : List.of("https://example.test/list.jpg", "data:text/html;base64,AAAA", "data:image/svg+xml;base64,AA")) {
+        for (String bad : List.of(
+                "https://example.test/list.jpg", "data:text/html;base64,AAAA", "data:image/svg+xml;base64,AA")) {
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> new LlmClient.Message("user", "x", bad))
                     .isInstanceOf(IllegalArgumentException.class);
         }

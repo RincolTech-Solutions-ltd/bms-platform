@@ -133,6 +133,7 @@ export function ExistingLoansImport({ api = existingLoans, helperApi = setupHelp
       {helper.enabled && (
         <ListReader
           photos={helper.photos}
+          tour="existing-import-helper"
           noun="loans"
           read={(given) => helperApi.draftLoans(given)}
           count={(d) => d.loans.length}

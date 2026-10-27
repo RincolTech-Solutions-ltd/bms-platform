@@ -218,7 +218,9 @@ class NeverClaudeTest {
         assertThat(chains.text().chain())
                 .extracting(AskProviders.Provider::name)
                 .containsExactly("gemini", "groq", "deepseek");
-        assertThat(chains.photos().chain()).extracting(AskProviders.Provider::name).containsExactly("gemini");
+        assertThat(chains.photos().chain())
+                .extracting(AskProviders.Provider::name)
+                .containsExactly("gemini");
         assertThat(chains.photos().chain().getFirst().client().model()).isEqualTo("gemini-3.5-flash-lite");
         SetupProviders withGroq = new AskConfiguration()
                 .setupProviders(ask, setup("gemini-3.5-flash", "test-groq-vision"), new Factory());
@@ -231,10 +233,12 @@ class NeverClaudeTest {
     @Test
     void aSetupPhotoModelNamingClaudeStopsStartup() {
         AskProperties ask = properties(gemini(GEMINI_URL, "gemini-3.5-flash-lite"), deepseek(270_000L));
-        assertThatThrownBy(() -> new AskConfiguration().setupProviders(ask, setup("claude-haiku-4-5", ""), new Factory()))
+        assertThatThrownBy(
+                        () -> new AskConfiguration().setupProviders(ask, setup("claude-haiku-4-5", ""), new Factory()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("never uses");
-        assertThatThrownBy(() -> new AskConfiguration().setupProviders(ask, setup("", "anthropic-vision"), new Factory()))
+        assertThatThrownBy(
+                        () -> new AskConfiguration().setupProviders(ask, setup("", "anthropic-vision"), new Factory()))
                 .isInstanceOf(IllegalStateException.class);
     }
 

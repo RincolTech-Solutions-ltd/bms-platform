@@ -126,6 +126,7 @@ export function ImportPage({ helperApi = setupHelper, shop }: { helperApi?: Setu
       {helper.enabled && (
         <ListReader
           photos={helper.photos}
+          tour="import-helper"
           noun="items"
           read={(given) => helperApi.draftItems(given, shop)}
           count={(d) => d.rows.length}

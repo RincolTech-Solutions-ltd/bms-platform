@@ -1343,8 +1343,7 @@ class ExistingLoansIT extends LoanFixtures {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("csv", csv);
         body.put("branch_id", branch);
-        return send(
-                HttpMethod.POST, EXISTING + "/import?dry_run=" + dryRun, as(admin, permissions, "*", null), body);
+        return send(HttpMethod.POST, EXISTING + "/import?dry_run=" + dryRun, as(admin, permissions, "*", null), body);
     }
 
     /** The outcome and message of each loan's first row (its loan row), by ref. */
@@ -1387,7 +1386,9 @@ class ExistingLoansIT extends LoanFixtures {
                 .contains("Member " + known + ", Test Borrower Known, has this phone");
 
         ResponseEntity<JsonNode> checked = importCsv(csv, true, adminPerms, t.headOffice());
-        assertThat(checked.getBody().get("errors").asInt()).as("%s", checked.getBody()).isZero();
+        assertThat(checked.getBody().get("errors").asInt())
+                .as("%s", checked.getBody())
+                .isZero();
         assertThat(checked.getBody().get("added").asInt()).isEqualTo(3);
         assertThat(checked.getBody().get("members_added").asInt()).isEqualTo(1);
         assertThat(messages(checked).get("REG-302")).contains("Adds a new member, Test Register New");
@@ -1396,7 +1397,9 @@ class ExistingLoansIT extends LoanFixtures {
                 .isEqualTo(members);
 
         ResponseEntity<JsonNode> committed = importCsv(csv, false, adminPerms, t.headOffice());
-        assertThat(committed.getBody().get("added").asInt()).as("%s", committed.getBody()).isEqualTo(3);
+        assertThat(committed.getBody().get("added").asInt())
+                .as("%s", committed.getBody())
+                .isEqualTo(3);
         assertThat(count("SELECT count(*) FROM lending_members WHERE tenant_id = ?", t.tenantId()))
                 .isEqualTo(members + 1);
         assertThat(count(

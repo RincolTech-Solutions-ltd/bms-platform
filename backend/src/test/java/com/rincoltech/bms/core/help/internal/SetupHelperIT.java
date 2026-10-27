@@ -86,15 +86,16 @@ class SetupHelperIT extends IntegrationTest {
         SetupProviders testSetupProviders() {
             AskProperties.Provider free = new AskProperties.Provider(null, null, null, null, null, null);
             AskProperties.Provider paid = new AskProperties.Provider(null, null, null, 1_000_000L, 1_000_000L, null);
-            AskProviders text = new AskProviders(List.of(
-                    new AskProviders.Provider("gemini", GEMINI, free),
-                    new AskProviders.Provider("groq", GROQ, free),
-                    new AskProviders.Provider("deepseek", DEEPSEEK, paid))) {
-                @Override
-                List<Provider> chain() {
-                    return noProviders ? List.of() : super.chain();
-                }
-            };
+            AskProviders text =
+                    new AskProviders(List.of(
+                            new AskProviders.Provider("gemini", GEMINI, free),
+                            new AskProviders.Provider("groq", GROQ, free),
+                            new AskProviders.Provider("deepseek", DEEPSEEK, paid))) {
+                        @Override
+                        List<Provider> chain() {
+                            return noProviders ? List.of() : super.chain();
+                        }
+                    };
             AskProviders photos = new AskProviders(List.of(new AskProviders.Provider("gemini", GEMINI_PHOTO, free)));
             return new SetupProviders(text, photos);
         }
@@ -137,8 +138,7 @@ class SetupHelperIT extends IntegrationTest {
         if (path.equals(ITEMS)) {
             form.add("shop_type", "Test Hardware");
         }
-        return as.call(
-                HttpMethod.POST, path, form, token, Map.of("Content-Type", MediaType.MULTIPART_FORM_DATA_VALUE));
+        return as.call(HttpMethod.POST, path, form, token, Map.of("Content-Type", MediaType.MULTIPART_FORM_DATA_VALUE));
     }
 
     JsonNode ok(ResponseEntity<JsonNode> r) {
@@ -167,7 +167,11 @@ class SetupHelperIT extends IntegrationTest {
     }
 
     long count(String sql) {
-        return TestDatabase.owner().sql(sql).param(t.tenantId()).query(Long.class).single();
+        return TestDatabase.owner()
+                .sql(sql)
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
     }
 
     String category(String name) {
@@ -323,7 +327,8 @@ class SetupHelperIT extends IntegrationTest {
         ResponseEntity<JsonNode> empty = send(api, ITEMS, admin, null, null);
         assertThat(empty.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(empty.getBody().get("code").asString()).isEqualTo("setup_list_missing");
-        ResponseEntity<JsonNode> wrongFile = send(api, ITEMS, admin, null, new byte[] {(byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0});
+        ResponseEntity<JsonNode> wrongFile =
+                send(api, ITEMS, admin, null, new byte[] {(byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0});
         assertThat(wrongFile.getBody().get("code").asString()).isEqualTo("setup_file_not_read");
         assertThat(GEMINI.requests()).isEmpty();
     }

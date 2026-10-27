@@ -34,6 +34,7 @@ export function ListReader<T extends { reason: DraftReason | null }>({
   read,
   drafted,
   count,
+  tour,
   codec = browserCodec,
 }: {
   photos: boolean;
@@ -41,6 +42,8 @@ export function ListReader<T extends { reason: DraftReason | null }>({
   read: (given: Given) => Promise<T>;
   drafted: (draft: T) => void;
   count: (draft: T) => number;
+  /** The page tour's target for the box. */
+  tour: string;
   codec?: Codec;
 }) {
   const [mode, setMode] = useState<Mode>('type');
@@ -83,6 +86,7 @@ export function ListReader<T extends { reason: DraftReason | null }>({
   };
   const title = noun === 'items' ? 'Let the app read your list' : 'Let the app read your register';
   return (
+    <div data-tour={tour}>
     <Card title={title}>
       <Hint full>
         {noun === 'items'
@@ -119,6 +123,7 @@ export function ListReader<T extends { reason: DraftReason | null }>({
         </>
       )}
     </Card>
+    </div>
   );
 }
 

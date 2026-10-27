@@ -34,8 +34,8 @@ class ListFilesTest {
 
     @Test
     void aCsvIsReadAsText() {
-        ListFiles.Read read = ListFiles.read(upload(
-                "list.csv", "﻿name,price\nTest Sugar,5500\n".getBytes(StandardCharsets.UTF_8)));
+        ListFiles.Read read =
+                ListFiles.read(upload("list.csv", "﻿name,price\nTest Sugar,5500\n".getBytes(StandardCharsets.UTF_8)));
         assertThat(read.text()).isEqualTo("name,price\nTest Sugar,5500");
         assertThat(read.pictureDataUrl()).isNull();
         assertThat(read.source()).isEqualTo("file");
@@ -50,8 +50,8 @@ class ListFilesTest {
         assertThat(read.source()).isEqualTo("photo");
         assertThat(read.text()).isNull();
         assertThat(read.pictureDataUrl()).startsWith("data:image/jpeg;base64,");
-        BufferedImage sent = ImageIO.read(new ByteArrayInputStream(Base64.getDecoder()
-                .decode(read.pictureDataUrl().substring("data:image/jpeg;base64,".length()))));
+        BufferedImage sent = ImageIO.read(new ByteArrayInputStream(
+                Base64.getDecoder().decode(read.pictureDataUrl().substring("data:image/jpeg;base64,".length()))));
         assertThat(sent.getWidth()).isEqualTo(ListFiles.MAX_SIDE);
         assertThat(sent.getHeight()).isEqualTo(667);
     }
@@ -64,8 +64,10 @@ class ListFilesTest {
             part(zip, "xl/sharedStrings.xml", """
                     <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">\
                     <si><t>Item</t></si><si><t>Price</t></si><si><r><t>Test </t></r><r><t>Sugar</t></r></si></sst>""");
-            part(zip, "xl/worksheets/sheet2.xml", "<worksheet><sheetData><row r=\"1\"><c r=\"A1\"><v>9</v></c></row>"
-                    + "</sheetData></worksheet>");
+            part(
+                    zip,
+                    "xl/worksheets/sheet2.xml",
+                    "<worksheet><sheetData><row r=\"1\"><c r=\"A1\"><v>9</v></c></row>" + "</sheetData></worksheet>");
             part(zip, "xl/worksheets/sheet1.xml", """
                     <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>\
                     <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>\
@@ -115,7 +117,8 @@ class ListFilesTest {
 
     @Test
     void anythingElseIsRefusedInPlainWords() {
-        assertThatThrownBy(() -> ListFiles.read(upload("old.xls", new byte[] {(byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0})))
+        assertThatThrownBy(() ->
+                        ListFiles.read(upload("old.xls", new byte[] {(byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0})))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("old Excel file");
         assertThatThrownBy(() -> ListFiles.read(upload("x.bin", new byte[] {(byte) 0xFF, (byte) 0xFE, 0, 1})))
@@ -124,7 +127,8 @@ class ListFilesTest {
         assertThatThrownBy(() -> ListFiles.read(upload("empty.csv", new byte[0])))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("empty");
-        assertThatThrownBy(() -> ListFiles.read(upload("photo.jpg", new byte[] {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1})))
+        assertThatThrownBy(() ->
+                        ListFiles.read(upload("photo.jpg", new byte[] {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 1})))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("photo cannot be read");
     }

@@ -25,7 +25,8 @@ class LoanRegisterReaderTest {
         }
     }
 
-    static final LoanRegisterReader READER = new LoanRegisterReader(JsonMapper.builder().build(), 0, "R261027");
+    static final LoanRegisterReader READER =
+            new LoanRegisterReader(JsonMapper.builder().build(), 0, "R261027");
 
     @Test
     void aRegisterAnswerBecomesDraftLoans() throws IOException {
@@ -42,9 +43,7 @@ class LoanRegisterReaderTest {
                                 650_000L,
                                 "10",
                                 true,
-                                List.of(
-                                        new Payment(LocalDate.of(2026, 9, 2), 200_000L),
-                                        new Payment(null, 200_000L))),
+                                List.of(new Payment(LocalDate.of(2026, 9, 2), 200_000L), new Payment(null, 200_000L))),
                         new Loan(
                                 "R261027-01",
                                 "Test Borrower Beta",

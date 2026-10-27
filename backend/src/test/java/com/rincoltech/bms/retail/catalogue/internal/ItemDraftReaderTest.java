@@ -67,7 +67,8 @@ class ItemDraftReaderTest {
     @Test
     void decimalsFollowTheCurrency() {
         ItemDraftReader kes = new ItemDraftReader(MAPPER, List.of(), List.of(), 2, true);
-        assertThat(kes.read("{\"items\": [{\"name\": \"Test Tea\", \"unit\": \"Packet\", \"sell_price\": \"120.505\"}]}")
+        assertThat(kes.read(
+                                "{\"items\": [{\"name\": \"Test Tea\", \"unit\": \"Packet\", \"sell_price\": \"120.505\"}]}")
                         .orElseThrow())
                 .containsExactly(new Row("Test Tea", "General", "Packet", 12051L, null, null, null));
     }
