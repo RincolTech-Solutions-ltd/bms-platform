@@ -10,6 +10,7 @@ import { AddPanel } from './catalogue';
 import { STATUS_LABEL, belowCostHint, buildItemRequest, emptyItemForm, fromQty, itemProblem, unitChoices, withProduct, type ItemForm } from './price-list-state';
 import { Gate, Note, ProductPicker, Problem, Success, changeFailureText, requireVersion } from './ui';
 import { BusyButton } from '../../../app/ui/BusyButton';
+import { useComeBack } from '../../../app/ui/EmptyChoice';
 
 // Price lists (ADR-033, issue #195; docs/specs/trade-capabilities.md section 3). A list holds the price of an item in a
 // unit (its base unit or a pack) from a quantity and for a date range. The retail price stays the item's own and is
@@ -202,6 +203,7 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
 export function PriceLists() {
   const { me } = useStaff();
   const queryClient = useQueryClient();
+  const back = useComeBack();
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
@@ -210,7 +212,11 @@ export function PriceLists() {
   const lists = useQuery({ queryKey: ['retail', 'price-lists'], queryFn: () => retail.listPriceLists() });
   const create = useMutation({
     mutationFn: () => retail.createPriceList({ name: name.trim(), strict }),
-    onSuccess: (l) => { setName(''); setStrict(false); setAdding(false); setOpen(l.id ?? null); void queryClient.invalidateQueries({ queryKey: ['retail'] }); },
+    onSuccess: (l) => {
+      setName(''); setStrict(false); setAdding(false); setOpen(l.id ?? null); void queryClient.invalidateQueries({ queryKey: ['retail'] });
+      // Opened from an empty list on a form (issue #619): what was added takes the person back to that form.
+      back?.();
+    },
   });
   const change = useMutation({
     mutationFn: (v: { list: PriceList; body: { name?: string; strict?: boolean; active?: boolean } }) => retail.updatePriceList(v.list.id ?? '', requireVersion(v.list.version), v.body),

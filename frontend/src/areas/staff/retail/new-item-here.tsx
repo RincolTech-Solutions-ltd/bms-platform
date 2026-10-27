@@ -121,7 +121,7 @@ function NewItemForm({ id, qtyLabel, qtyError, counting, askCost, initial = '', 
   const [cost, setCost] = useState(counting ? '0' : '');
   const [sell, setSell] = useState('');
   const [qty, setQty] = useState('');
-  // Issue #617: the optional photo, sent right after the item is made; a failed upload leaves the item and says so.
+  // Issue #617: the optional photo, sent once the item is on the line; a failed upload leaves the item and says so.
   const [photo, setPhoto] = useState<File | null>(null);
   const screenToast = useContext(ScreenToast);
   const [showErrors, setShowErrors] = useState(false);
@@ -155,11 +155,13 @@ function NewItemForm({ id, qtyLabel, qtyError, counting, askCost, initial = '', 
         cost_minor: costMinor ?? 0,
         ...(duplicateReason ? { duplicate_reason: duplicateReason } : {}),
       });
-      const photoNote = await sendNewPhoto(product.id ?? '', photo);
       void queryClient.invalidateQueries({ queryKey: ['retail', 'catalogue'] });
+      // The line first, then the photo (review of #616): a large photo on a slow connection never keeps the item off the
+      // purchase or the sale, and the form closes at once. A failed upload leaves the item and says so after the line's own word.
       await added(product, true);
-      // Said after the screen's own word about the line, so it is the toast that stays.
+      const photoNote = await sendNewPhoto(product.id ?? '', photo);
       if (photoNote) screenToast?.(`${product.description ?? 'The item'} is saved. ${photoNote}`, 'info');
+      void queryClient.invalidateQueries({ queryKey: ['retail', 'catalogue'] });
     },
     onError: (error) => {
       const found = existingOf(error);

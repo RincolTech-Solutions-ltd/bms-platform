@@ -52,7 +52,9 @@ export function useToast(ms: number = TOAST_MS, silent = false): { show: (messag
   const show = useCallback(
     (message: string, tone: ToastTone) => {
       clear();
-      setShown({ message, tone });
+      // An info never hides an error still showing (review of #616: a photo not saved after a count not saved): it is said after
+      // the error, in the error's toast, so the one toast a screen shows keeps what went wrong.
+      setShown((was) => (was?.tone === 'error' && tone === 'info' ? { message: `${was.message} ${message}`, tone: 'error' } : { message, tone }));
       timer.current = setTimeout(() => setShown(null), ms);
     },
     [ms],

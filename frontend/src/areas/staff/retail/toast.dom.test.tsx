@@ -49,4 +49,18 @@ describe('Toast', () => {
     const { container } = render(<>{result.current.toast}</>);
     expect(container.querySelector('.toast')?.className).toBe('toast toast-info');
   });
+
+  it('never lets an info hide an error still showing: it is said after it, in the error toast (review of #616)', () => {
+    const { result } = renderHook(() => useToast());
+    act(() => result.current.show('Test duvet cover is saved, but its count is not.', 'error'));
+    act(() => result.current.show('The photo was not saved.', 'info'));
+    const { container } = render(<>{result.current.toast}</>);
+    expect(container.querySelector('.toast')?.className).toBe('toast toast-error');
+    expect(container.querySelector('.toast')?.textContent).toBe('Test duvet cover is saved, but its count is not. The photo was not saved.');
+    cleanup();
+    const other = renderHook(() => useToast()).result;
+    act(() => other.current.show('Saved.', 'success'));
+    act(() => other.current.show('Already on the sale.', 'info'));
+    expect(render(<>{other.current.toast}</>).container.querySelector('.toast')?.className).toBe('toast toast-info');
+  });
 });
