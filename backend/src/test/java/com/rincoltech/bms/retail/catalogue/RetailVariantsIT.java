@@ -967,6 +967,13 @@ class RetailVariantsIT extends IntegrationTest {
         capability("units", true);
         JsonNode f = romper();
         UUID model = variant(f, "0-3m", "Blue");
+        // The piece prices compared are 9,000 and 12,000, far above 127, where boxed longs would not be the same
+        // object.
+        assertThat(api.get("/products/" + model, ADMIN)
+                        .getBody()
+                        .get("sell_minor")
+                        .asLong())
+                .isEqualTo(9_000);
         UUID carton = api.unit("test-carton");
         UUID dozen = api.unit("test-dozen");
         assertThat(api.post(
@@ -988,6 +995,16 @@ class RetailVariantsIT extends IntegrationTest {
                                 Map.of("size", "18-24m", "colour", "Blue", "sell_minor", 12_000))),
                 ADMIN);
         assertThat(more.getStatusCode()).as("%s", more.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(api.get("/products/" + variant(more.getBody(), "12-18m", "Blue"), ADMIN)
+                        .getBody()
+                        .get("sell_minor")
+                        .asLong())
+                .isEqualTo(9_000);
+        assertThat(api.get("/products/" + variant(more.getBody(), "18-24m", "Blue"), ADMIN)
+                        .getBody()
+                        .get("sell_minor")
+                        .asLong())
+                .isEqualTo(12_000);
         Map<String, Long> same = ownPrices(variant(more.getBody(), "12-18m", "Blue"));
         assertThat(same).containsEntry(carton.toString(), 100_000L).containsEntry(dozen.toString(), null);
         Map<String, Long> dearer = ownPrices(variant(more.getBody(), "18-24m", "Blue"));

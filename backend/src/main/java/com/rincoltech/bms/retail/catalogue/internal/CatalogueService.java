@@ -833,21 +833,22 @@ class CatalogueService {
             }
         }
         String purpose = r.purpose() == null ? before.purpose() : r.purpose();
-        boolean clear = Boolean.TRUE.equals(r.clearSellMinor());
+        // Dropping a price the pack does not have, or giving it the price it has, changes nothing and needs no
+        // permission.
+        boolean clear = Boolean.TRUE.equals(r.clearSellMinor()) && before.sellMinor() != null;
         // A pack with its own price sells at it whatever its size: a new size, or making it buy only (which drops the
         // price),
         // changes what its pieces sell for, so it is a price change too (review of #624).
         boolean priced = before.sellMinor() != null;
+        boolean newPrice = r.sellMinor() != null && !r.sellMinor().equals(before.sellMinor());
         boolean resized = new java.math.BigDecimal(before.factor()).compareTo(factor) != 0;
-        if (r.sellMinor() != null
-                || clear
-                || priced
-                        && (resized
-                                || purpose.equals("buy") && !before.purpose().equals("buy"))) {
+        boolean madeBuyOnly = purpose.equals("buy") && !before.purpose().equals("buy");
+        if (newPrice || clear) {
             requirePriceEdit(
-                    priced && r.sellMinor() == null && !clear
-                            ? "This pack has its own price. Ask someone who may change prices."
-                            : "You may not change selling prices, so you cannot set a pack's price. Ask someone who may.");
+                    "You may not change selling prices, so you cannot set a pack's price. Ask someone who may.");
+        }
+        if (priced && (resized || madeBuyOnly)) {
+            requirePriceEdit("This pack has its own price. Ask someone who may change prices.");
         }
         if (r.sellMinor() != null && clear) {
             throw ApiException.validation(List.of(new FieldProblem(
@@ -883,6 +884,12 @@ class CatalogueService {
         String size = factor.setScale(3).toPlainString();
         if (before.factor().equals(size)) {
             return;
+        }
+        // Review of #624: a pack with its own price sells at it whatever its size, so a new usual size is a price
+        // change,
+        // as on Edit item. The refusal rolls the whole delivery back, so nothing is written.
+        if (before.sellMinor() != null) {
+            requirePriceEdit("This pack has its own price. Ask someone who may change prices.");
         }
         repo.updatePack(before.id(), factor, before.active(), before.version());
         Map<String, Object> was = new LinkedHashMap<>();

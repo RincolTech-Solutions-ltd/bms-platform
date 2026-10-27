@@ -212,6 +212,10 @@ class RetailSellingPacksIT extends IntegrationTest {
         assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(addPack(box, "10", "sell", 900L, CATALOGUE_ONLY).getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
+        // Dropping a price the pack does not have changes nothing, so it needs no permission.
+        assertThat(change(carton, Map.of("clear_sell_minor", true), CATALOGUE_ONLY)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
         // The size of a pack without its own price may still be changed without it: it sells at the piece price times
         // the size.
         assertThat(change(carton, Map.of("factor", "24"), CATALOGUE_ONLY).getStatusCode())
@@ -247,6 +251,78 @@ class RetailSellingPacksIT extends IntegrationTest {
                         .get("sell_minor")
                         .asLong())
                 .isEqualTo(2_200);
+    }
+
+    /**
+     * Review of #624: "Use 30 from now on" on Buy stock (ADR-082) changes a pack's usual size, so on a pack with its own price
+     * it needs retail.price.edit too, and a refusal writes nothing.
+     */
+    @Test
+    void useFromNowOnOnAPricedPackNeedsThePermissionToChangePrices() {
+        pack(carton, "24", null, 2_200L);
+        ResponseEntity<JsonNode> refused = delivered(30, CATALOGUE_ONLY);
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(refused.getBody().toString())
+                .contains("This pack has its own price. Ask someone who may change prices.");
+        assertThat(packOf(carton, ADMIN).get("factor").asString()).isEqualTo("24.000");
+        assertThat(stock()).isEqualTo("1000.000");
+
+        ResponseEntity<JsonNode> allowed = delivered(30, ADMIN);
+        assertThat(allowed.getStatusCode()).as("%s", allowed.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode resized = packOf(carton, ADMIN);
+        assertThat(resized.get("factor").asString()).isEqualTo("30.000");
+        assertThat(resized.get("sell_minor").asLong()).isEqualTo(2_200);
+        assertThat(stock()).isEqualTo("1030.000");
+
+        // A pack without its own price still takes the delivery's size from someone who manages the catalogue.
+        pack(box, "10", null, null);
+        Map<String, Object> line = new LinkedHashMap<>(deliveryLine(box, 12));
+        assertThat(api.postKeyed(
+                                "/purchases",
+                                purchase(line),
+                                CATALOGUE_ONLY,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        assertThat(packOf(box, ADMIN).get("factor").asString()).isEqualTo("12.000");
+    }
+
+    ResponseEntity<JsonNode> delivered(int size, String perms) {
+        return api.postKeyed(
+                "/purchases",
+                purchase(deliveryLine(carton, size)),
+                perms,
+                "*",
+                UUID.randomUUID().toString());
+    }
+
+    Map<String, Object> deliveryLine(UUID unit, int size) {
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("product_id", pen);
+        line.put("cost_minor", 2_400);
+        line.put("unit_id", unit);
+        line.put("pack_size", String.valueOf(size));
+        line.put("use_from_now_on", true);
+        line.put("qty_by_branch", List.of(Map.of("branch_id", t.headOffice(), "qty", "1")));
+        return line;
+    }
+
+    static Map<String, Object> purchase(Map<String, Object> line) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("purchased_on", "2026-01-15");
+        body.put("payment_method", "cash");
+        body.put("lines", List.of(line));
+        return body;
+    }
+
+    String stock() {
+        return TestDatabase.owner()
+                .sql(
+                        "SELECT qty::text FROM retail_stock_balances WHERE tenant_id = ? AND branch_id = ? AND product_id = ?")
+                .params(t.tenantId(), t.headOffice(), pen)
+                .query(String.class)
+                .single();
     }
 
     // ---- price lists still win -------------------------------------------------------------
@@ -436,6 +512,16 @@ class RetailSellingPacksIT extends IntegrationTest {
         ResponseEntity<JsonNode> boughtHalf = restock(halfCarton, "2", 400);
         assertThat(boughtHalf.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(boughtHalf.getBody().toString()).contains("unknown_pack_unit");
+
+        // A price list never prices a pack only for buying.
+        capability("price_lists", true);
+        UUID list = RetailTestSupport.id(api.post("/price-lists", Map.of("name", "Trade", "strict", false), MANAGER));
+        ResponseEntity<JsonNode> listed = api.post(
+                "/price-lists/" + list + "/items",
+                Map.of("product_id", pen, "unit_id", box, "price_minor", 900),
+                MANAGER);
+        assertThat(listed.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(listed.getBody().toString()).contains("unknown_pack_unit");
 
         ResponseEntity<JsonNode> pricedBox = addPack(carton, "12", "buy", 1_100L, ADMIN);
         assertThat(pricedBox.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
