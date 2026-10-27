@@ -153,8 +153,22 @@ public interface RetailCatalogue {
                                         || Character.isWhitespace(c)));
     }
 
-    /** A pack size: {@code factor} base units in one pack of {@code unit}. */
-    record PackUnit(UUID unitId, String unit, BigDecimal factor, boolean active) {}
+    /**
+     * A pack size: {@code factor} base units in one pack of {@code unit}. Issue #624: {@code purpose} says whether it is
+     * bought, sold or both, and {@code sellMinor} is its own selling price per pack, null for the piece price times the size.
+     */
+    record PackUnit(UUID unitId, String unit, BigDecimal factor, boolean active, String purpose, Long sellMinor) {
+
+        /** True when the pack may be used on a sale line (a walk-in sale, a scan, a quotation or an order). */
+        public boolean sells() {
+            return !"buy".equals(purpose);
+        }
+
+        /** True when the pack may be used on Buy stock, a purchase order or goods received. */
+        public boolean buys() {
+            return !"sell".equals(purpose);
+        }
+    }
 
     record ProductSnapshot(
             UUID id,

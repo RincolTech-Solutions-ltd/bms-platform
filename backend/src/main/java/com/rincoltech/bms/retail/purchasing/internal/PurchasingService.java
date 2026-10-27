@@ -231,7 +231,8 @@ class PurchasingService {
                     continue;
                 }
                 PackUnit pack = catalogue.packUnit(p.id(), l.unitId()).orElse(null);
-                if (pack == null || !pack.active()) {
+                // Issue #624: a pack only for selling (a half carton) is never bought.
+                if (pack == null || !pack.active() || !pack.buys()) {
                     problems.add(new FieldProblem(
                             field + ".unit_id", "unknown_pack_unit", "This item is not bought in that unit."));
                     continue;

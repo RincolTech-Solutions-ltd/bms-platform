@@ -127,7 +127,8 @@ class PurchaseLines {
                 return null;
             }
             pack = catalogue.packUnit(p.id(), unitId).orElse(null);
-            if (pack == null || !pack.active()) {
+            // Issue #624: a pack only for selling (a half carton) is never bought.
+            if (pack == null || !pack.active() || !pack.buys()) {
                 problems.add(new FieldProblem(
                         field + ".unit_id", "unknown_pack_unit", "This item is not bought in that unit."));
                 return null;
@@ -171,7 +172,7 @@ class PurchaseLines {
                     "Each " + pack.unit() + " holds at least one, with at most three decimal places."));
             return null;
         }
-        return new PackUnit(pack.unitId(), pack.unit(), packSize, pack.active());
+        return new PackUnit(pack.unitId(), pack.unit(), packSize, pack.active(), pack.purpose(), pack.sellMinor());
     }
 
     /**

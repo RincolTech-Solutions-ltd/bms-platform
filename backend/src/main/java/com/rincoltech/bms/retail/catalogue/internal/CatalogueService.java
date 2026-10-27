@@ -116,7 +116,7 @@ class CatalogueService {
                             .toList();
                     // Absent, not an empty list, for an item with no barcode, as the schema says.
                     Product q = p.withBarcodes(own.isEmpty() ? null : own);
-                    return units ? q.withPacks(packs.getOrDefault(p.id(), List.of())) : q;
+                    return units ? q.withPacks(forCaller(packs.getOrDefault(p.id(), List.of()))) : q;
                 })
                 .toList();
     }
@@ -717,7 +717,39 @@ class CatalogueService {
     PackList packs(UUID productId) {
         requireUnits();
         repo.find(productId).orElseThrow(ApiException::notFound);
-        return new PackList(repo.packs(productId));
+        return new PackList(forCaller(repo.packs(productId)));
+    }
+
+    /** Issue #624: a pack's prices go only to a caller who may see prices, its cost flag only to one who may read cost. */
+    private static List<Pack> forCaller(List<Pack> packs) {
+        boolean prices = RetailCatalogue.maySeePrices(CurrentPrincipal.require());
+        boolean cost = mayReadCost();
+        return packs.stream().map(k -> k.forCaller(prices, cost)).toList();
+    }
+
+    private static Pack forCaller(Pack pack) {
+        return forCaller(List.of(pack)).getFirst();
+    }
+
+    static final String PRICE_EDIT = "retail.price.edit";
+
+    /** Issue #624: setting or dropping a pack's own selling price is a price change, so it needs retail.price.edit. */
+    private static void requirePriceEdit() {
+        if (!CurrentPrincipal.require().hasPermission(PRICE_EDIT)) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "permission_denied",
+                    "Permission denied",
+                    "You may not change selling prices, so you cannot set a pack's price. Ask someone who may.");
+        }
+    }
+
+    /** Issue #624: a pack bought only is never sold, so it has no selling price. */
+    private static ApiException buyOnlyPriced() {
+        return ApiException.validation(List.of(new FieldProblem(
+                "sell_minor",
+                "pack_not_sold",
+                "This pack is only for buying, so it has no selling price. Make it for selling or both first.")));
     }
 
     /**
@@ -741,6 +773,13 @@ class CatalogueService {
                     "pack_unit_is_base_unit",
                     "A pack must be a different unit from the one the product is counted in.");
         }
+        String purpose = r.purpose() == null ? "both" : r.purpose();
+        if (r.sellMinor() != null) {
+            requirePriceEdit();
+            if (purpose.equals("buy")) {
+                throw buyOnlyPriced();
+            }
+        }
         UUID id = UUID.randomUUID();
         try {
             repo.insertPack(
@@ -748,6 +787,8 @@ class CatalogueService {
                     productId,
                     r.unitId(),
                     r.factor(),
+                    purpose,
+                    r.sellMinor(),
                     CurrentPrincipal.require().userId());
         } catch (DuplicateKeyException e) {
             throw duplicate("duplicate_pack", "The product has a pack of this unit already.");
@@ -756,8 +797,12 @@ class CatalogueService {
         after.put("product_id", productId);
         after.put("unit_id", r.unitId());
         after.put("factor", r.factor().setScale(3).toPlainString());
+        after.put("purpose", purpose);
+        if (r.sellMinor() != null) {
+            after.put("sell_minor", r.sellMinor());
+        }
         audit.record(AuditLog.Entry.created("retail.product_unit.created", PACK, id, null, after));
-        return repo.pack(productId, r.unitId()).orElseThrow();
+        return forCaller(repo.pack(productId, r.unitId()).orElseThrow());
     }
 
     /** Change the factor (future sales and restocks only: lines keep the factor they used) or switch a pack off. */
@@ -790,20 +835,37 @@ class CatalogueService {
                         "This unit is now the one the item is counted in, so it cannot also be a pack.");
             }
         }
+        String purpose = r.purpose() == null ? before.purpose() : r.purpose();
+        boolean clear = Boolean.TRUE.equals(r.clearSellMinor());
+        if (r.sellMinor() != null || clear) {
+            requirePriceEdit();
+        }
+        if (r.sellMinor() != null && clear) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "sell_minor", "invalid", "Give a new price or drop the pack's own price, not both.")));
+        }
+        if (r.sellMinor() != null && purpose.equals("buy")) {
+            throw buyOnlyPriced();
+        }
+        // A pack made buy only is no longer sold, so its own price goes with that change (audited below).
+        Long sellMinor =
+                clear || purpose.equals("buy") ? null : r.sellMinor() != null ? r.sellMinor() : before.sellMinor();
         Map<String, Object> was = new LinkedHashMap<>();
         Map<String, Object> now = new LinkedHashMap<>();
         diff(was, now, "factor", before.factor(), factor.setScale(3).toPlainString());
         diff(was, now, "active", before.active(), active);
+        diff(was, now, "purpose", before.purpose(), purpose);
+        diff(was, now, "sell_minor", before.sellMinor(), sellMinor);
         if (now.isEmpty()) {
-            return before;
+            return forCaller(before);
         }
-        if (repo.updatePack(before.id(), factor, active, expected) == 0) {
+        if (repo.updatePack(before.id(), factor, active, purpose, sellMinor, expected) == 0) {
             throw repo.pack(productId, unitId)
                     .map(k -> Versions.conflict(k.version()))
                     .orElseGet(ApiException::notFound);
         }
         audit.record(new AuditLog.Entry("retail.product_unit.updated", PACK, before.id(), null, was, now));
-        return repo.pack(productId, unitId).orElseThrow();
+        return forCaller(repo.pack(productId, unitId).orElseThrow());
     }
 
     /** D23, issue #554: see {@code RetailCatalogue.useBuyingSize}. The caller holds the product's row lock. */

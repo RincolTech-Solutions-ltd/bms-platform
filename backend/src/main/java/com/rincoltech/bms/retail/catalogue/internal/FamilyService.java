@@ -523,8 +523,9 @@ class FamilyService {
         boolean packsOn = catalogue.unitsOn();
         int packs = 0;
         if (packsOn) {
-            for (UUID id : to) {
-                packs += repo.copyPacks(from.id(), id, by);
+            for (int i = 0; i < to.size(); i++) {
+                // Issue #624: a pack's own price goes with it only to a size that sells at the same piece price.
+                packs += repo.copyPacks(from.id(), to.get(i), plan.get(i).sellMinor() == from.sellMinor(), by);
             }
         }
         List<PriceItemTerms> items = repo.priceItemsInForce(
