@@ -128,7 +128,7 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
       <NoStockHere branchId={fromBranchId} />
       <div data-tour="transfer-to">
       {destinations.length === 0 ? (
-        <EmptyChoice id="transfer-to" label="To branch" required text="No other branch or store to move stock to." ask="Ask the owner to add a branch first."
+        <EmptyChoice id="transfer-to" label="To branch" text="No other branch or store to move stock to." ask="Ask the owner to add a branch first."
           add={canManageBranches(me) ? { label: 'Add a branch', to: '/staff/setup/branches' } : null} />
       ) : (
       <>

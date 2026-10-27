@@ -591,7 +591,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
         <fieldset>
           <legend>Customer from the list</legend>
           {!addingBuyer && customers.data?.length === 0 && (
-            <EmptyChoice id="buyer" label="Buyer" required text="No buyers yet." add={{ label: 'Add a new buyer', onClick: () => { setAddingBuyer(true); update({ customerId: '' }); } }} />
+            <EmptyChoice id="buyer" label="Buyer" text="No buyers yet." add={{ label: 'Add a new buyer', onClick: () => { setAddingBuyer(true); update({ customerId: '' }); } }} />
           )}
           {!addingBuyer && customers.data?.length !== 0 && (
             <>

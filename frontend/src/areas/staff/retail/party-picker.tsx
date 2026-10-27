@@ -57,7 +57,7 @@ export function PartyPicker({ id, label, parties, loading = false, kinds, listed
   return (
     <>
       {!adding && !loading && choices.length === 0 && (
-        <EmptyChoice id={id} label={label} required={!optional} text="Nobody in this list yet." ask="Ask the owner to add them first."
+        <EmptyChoice id={id} label={label} text="Nobody in this list yet." ask="Ask the owner to add them first."
           add={addable.length > 0 ? { label: addLabel, onClick: () => { setAdding(true); add.reset(); } } : null} />
       )}
       {!adding && (loading || choices.length > 0) && (
