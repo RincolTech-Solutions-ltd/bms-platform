@@ -1,9 +1,11 @@
-import { useId, useState, type FocusEvent, type InputHTMLAttributes, type ReactNode } from 'react';
+import { useId, useRef, useState, type FocusEvent, type InputHTMLAttributes, type ReactNode } from 'react';
 import { icons } from '../../components/icons';
 
 // The one form field (#520, docs/ui-rules.md rule 10): the label above, a hint under it, and the error in place of the hint.
 // The error shows only once the person has left the field (or the form was sent, `showError`), never while they type, and
-// stays until it is fixed. The field is described by the hint and the error and marked invalid while the error shows. Pass
+// stays until it is fixed. Leaving counts only once the person has been in the field (pressed on it, typed or changed it):
+// a blur the page caused, as when a tour takes the focus from a field the page focused on opening, is not the person leaving
+// (issue #642). The field is described by the hint and the error and marked invalid while the error shows. Pass
 // the input's own props (inputMode, autoComplete, value, onChange) as to an <input>, or draw another control with `control`,
 // which is handed the id and the aria props to put on it. The error line carries the error icon.
 //
@@ -58,6 +60,10 @@ export function Field({ label, hint, error, showError = false, id, control, onBl
   const own = useId();
   const fieldId = id ?? own;
   const [left, setLeft] = useState(false);
+  const used = useRef(false);
+  const use = () => {
+    used.current = true;
+  };
   const shown = error && (left || showError) ? error : null;
   const describedBy = shown ? `${fieldId}-error` : hint ? `${fieldId}-hint` : undefined;
   const props: FieldControlProps = {
@@ -66,12 +72,12 @@ export function Field({ label, hint, error, showError = false, id, control, onBl
     'aria-invalid': shown !== null,
     'aria-required': required || undefined,
     onBlur: (e) => {
-      setLeft(true);
+      if (used.current) setLeft(true);
       onBlur?.(e as FocusEvent<HTMLInputElement>);
     },
   };
   return (
-    <div className={className ? `field ${className}` : 'field'}>
+    <div className={className ? `field ${className}` : 'field'} onPointerDown={use} onKeyDown={use} onChange={use}>
       <label htmlFor={fieldId}>
         {label}
         {required && (

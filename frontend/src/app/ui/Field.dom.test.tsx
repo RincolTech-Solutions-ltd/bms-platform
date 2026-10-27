@@ -40,6 +40,27 @@ describe('Field', () => {
     expect(describedBy()).toBe('The buyer gets the receipt here.');
   });
 
+  it('keeps the error back when the page moves the focus away before the person has been in the field (issue #642)', () => {
+    render(<Phone />);
+    // The page focuses the field on opening, then a tour takes the focus: the person never left it.
+    input().focus();
+    fireEvent.blur(input());
+    expect(input().getAttribute('aria-invalid')).toBe('false');
+    expect(screen.queryByText(/Type the 10 digits/)).toBeNull();
+    // Once they press on it and leave, it is theirs to fix.
+    fireEvent.pointerDown(input());
+    fireEvent.blur(input());
+    expect(input().getAttribute('aria-invalid')).toBe('true');
+  });
+
+  it('counts a Tab out of the field as leaving it', () => {
+    render(<Phone />);
+    input().focus();
+    fireEvent.keyDown(input(), { key: 'Tab' });
+    fireEvent.blur(input());
+    expect(describedBy()).toBe('Type the 10 digits of the phone number, starting with 0.');
+  });
+
   it('shows the error at once after a send', () => {
     render(<Phone showError />);
     expect(input().getAttribute('aria-invalid')).toBe('true');

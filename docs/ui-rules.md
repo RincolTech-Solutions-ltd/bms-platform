@@ -40,7 +40,8 @@ back to what opened it.
 ## Forms
 
 10. Every input has a visible label. Validation runs on blur, not on every key, and the error shows under the field with an
-    icon. A required field shows `Label *`: the asterisk is red and `aria-hidden`, and the control keeps
+    icon. Only the person leaving a field they have pressed on or typed in counts: a blur the page causes (a tour taking the
+    focus from a field focused on opening) shows nothing, and the send shows every error (issue #642). A required field shows `Label *`: the asterisk is red and `aria-hidden`, and the control keeps
     `aria-required="true"`. A form with a required field starts with the line "Fields marked * are needed." A form where
     most fields are required may mark the few optional ones "(optional)" instead, never both styles on one form. The
     asterisk is the one allowed use of red on a normal screen. The send button stays enabled and takes the person to the
