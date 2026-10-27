@@ -84,7 +84,7 @@ describe('the title of the top bar', () => {
 describe('the menu of the top bar', () => {
   const menu = (signOut = true, onSignOut = () => undefined) => withClient(<TopMenu me={me} busy={false} onSignOut={onSignOut} signOut={signOut} />);
 
-  it('opens from one button and holds who is signed in, Help, Refresh, the theme and Sign out', () => {
+  it('opens from one button and holds who is signed in, Help, the theme and Sign out, and no Refresh (issue #631: it is in the bar)', () => {
     const onSignOut = vi.fn();
     menu(true, onSignOut);
     const button = screen.getByRole('button', { name: 'Menu for Test Person One' });
@@ -96,7 +96,7 @@ describe('the menu of the top bar', () => {
     expect(panel.hidden).toBe(false);
     expect(panel.textContent).toContain('Test Person One');
     expect(screen.getByRole('button', { name: 'Help' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Refresh this page' })).toBeTruthy();
+    expect(panel.querySelector('[data-tour="refresh"]')).toBeNull();
     expect(screen.getByRole('radiogroup', { name: 'Theme' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(onSignOut).toHaveBeenCalled();

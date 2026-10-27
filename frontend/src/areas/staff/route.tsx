@@ -16,6 +16,7 @@ import { CrumbProvider, StaffBreadcrumbs } from '../../components/breadcrumbs';
 import { icons } from '../../components/icons';
 import { MenuItemLink, SideMenu, SideNav, useCloseMenu, useIsPhone } from '../../components/side-menu';
 import { BusyButton } from '../../app/ui/BusyButton';
+import { RefreshButton } from '../../app/refresh-button';
 import { useHelpSheet } from '../../tour/host';
 import { BrandLoader } from '../../components/states';
 import { BillingBanner } from './billing/banner';
@@ -303,8 +304,8 @@ function StaffDrawer({ me, branch, onBranch, busy, onSignOut }: { me: Me; branch
 
 /**
  * The one top bar of the staff area (issue #526, replacing the brand bar and the staff bar of two rows): on a phone the business
- * and the branch in use as the title, which switches branch (from 720px they are at the top of the sidebar only, #564); Search (issue #551); the Online dot only while it has something to say;
- * and one menu holding who is signed in, Help, Refresh, Light or dark and Sign out. Below 720px the menu button at its left opens
+ * and the branch in use as the title, which switches branch (from 720px they are at the top of the sidebar only, #564); Search (issue #551); Refresh beside it
+ * (issue #631); the Online dot only while it has something to say; and one menu holding who is signed in, Help, Light or dark and Sign out. Below 720px the menu button at its left opens
  * the staff menu's drawer (issue #564), Sign out moves to the drawer and the More tab's page (it stays in the top menu while
  * two-step set-up blocks the page, which has no tabs) and Sell is the first bottom tab (issue #539). With StaffSideNav and the tab
  * bar it carries the data-tour anchors the first-run tours light up (tour/tours.ts).
@@ -336,6 +337,8 @@ export function StaffBar({
           {phone ? <BranchTitle me={me} branch={branch} onChoose={onBranch} /> : <span className="staff-bar-spacer" />}
           <SyncStatus />
           <FeatureSearch me={me} />
+          {/* Refresh beside Search on every staff screen (issue #631): its icon alone below 720px, a 48px target named Refresh. */}
+          <RefreshButton />
           {/* The Ask button (issue #603); none while two-step set-up blocks the page, whose header is kept minimal. */}
           {!mustSetUp(me) && <AskButton />}
           <TopMenu me={me} busy={busy} onSignOut={onSignOut} signOut={!phone || signOutInBar} />
