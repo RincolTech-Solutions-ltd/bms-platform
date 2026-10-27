@@ -44,8 +44,7 @@ final class ItemDraftReader implements SetupDrafts.Reader<List<ItemDraftReader.R
     private final int exponent;
     private final boolean withCost;
 
-    ItemDraftReader(
-            ObjectMapper mapper, List<String> categories, List<String> units, int exponent, boolean withCost) {
+    ItemDraftReader(ObjectMapper mapper, List<String> categories, List<String> units, int exponent, boolean withCost) {
         this.mapper = mapper;
         categories.forEach(c -> this.categories.putIfAbsent(key(c), c));
         units.forEach(u -> this.units.putIfAbsent(key(u), u));
@@ -113,7 +112,9 @@ final class ItemDraftReader implements SetupDrafts.Reader<List<ItemDraftReader.R
         if (major == null || major.signum() <= 0) {
             return null;
         }
-        long minor = major.setScale(exponent, RoundingMode.HALF_UP).movePointRight(exponent).longValue();
+        long minor = major.setScale(exponent, RoundingMode.HALF_UP)
+                .movePointRight(exponent)
+                .longValue();
         return minor <= 0 || minor > RetailCatalogue.MAX_AMOUNT_MINOR ? null : minor;
     }
 

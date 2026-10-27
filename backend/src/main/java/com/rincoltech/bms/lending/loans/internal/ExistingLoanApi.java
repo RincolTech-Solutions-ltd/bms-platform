@@ -196,10 +196,13 @@ final class ExistingLoanApi {
             int skipped,
             int errors,
 
-            @Schema(description = "Members new to the app that come in with the loans (issue #626); 0 while any row is an error")
+            @Schema(
+                    description =
+                            "Members new to the app that come in with the loans (issue #626); 0 while any row is an error")
             int membersAdded,
 
             List<ImportRow> rows) {}
+
     @Schema(name = "LoanRegisterDraft")
     record RegisterDraft(
             @Schema(
@@ -219,7 +222,9 @@ final class ExistingLoanApi {
             @Schema(description = "The register's number for the loan, or one the app made when it has none")
             String ref,
 
-            @Schema(description = "The member who has this phone already, or null for a member new to the app", nullable = true)
+            @Schema(
+                    description = "The member who has this phone already, or null for a member new to the app",
+                    nullable = true)
             String memberNo,
 
             @Schema(description = "That member's name in the app, or null", nullable = true)

@@ -43,7 +43,8 @@ public interface LlmClient {
             }
             if (imageDataUrl != null
                     && (!"user".equals(role) || !DATA_URL.matcher(imageDataUrl).matches())) {
-                throw new IllegalArgumentException("a picture is a base64 data URL of a JPEG, PNG or WebP on a user message");
+                throw new IllegalArgumentException(
+                        "a picture is a base64 data URL of a JPEG, PNG or WebP on a user message");
             }
         }
 

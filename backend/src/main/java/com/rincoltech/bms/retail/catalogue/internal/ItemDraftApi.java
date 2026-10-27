@@ -28,12 +28,15 @@ final class ItemDraftApi {
             String category,
             String unit,
 
-            @Schema(description = "Selling price of one unit in minor units; null when the list gives none", nullable = true)
+            @Schema(
+                    description = "Selling price of one unit in minor units; null when the list gives none",
+                    nullable = true)
             Long sellPriceMinor,
 
             @Schema(
-                    description = "Buying price of one unit in minor units; null when none, and always for a caller without"
-                            + " retail.profit.read",
+                    description =
+                            "Buying price of one unit in minor units; null when none, and always for a caller without"
+                                    + " retail.profit.read",
                     nullable = true)
             Long costPriceMinor,
 

@@ -428,8 +428,8 @@ class MemberService implements MemberLookup, MemberIntake {
     @Transactional(propagation = Propagation.MANDATORY)
     public MemberSummary addFromRegister(UUID branchId, String fullName, String phone) {
         MemberResponse created = create(new CreateMemberRequest(
-                branchId, fullName, null, null, phone, null, "none", null, null, null, null, "unknown", null, null, null,
-                null, null, null, null, null, null, false));
+                branchId, fullName, null, null, phone, null, "none", null, null, null, null, "unknown", null, null,
+                null, null, null, null, null, null, null, false));
         return summary(created);
     }
 

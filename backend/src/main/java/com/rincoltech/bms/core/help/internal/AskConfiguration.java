@@ -19,8 +19,8 @@ class AskConfiguration {
     @Bean
     SetupProviders setupProviders(AskProperties ask, SetupProperties setup, LlmClientFactory factory) {
         Duration budget = Duration.ofSeconds(setup.budgetSeconds());
-        AskProviders text =
-                AskProviders.from(ask, factory, budget, name -> ask.provider(name).model(), "Setup helper");
+        AskProviders text = AskProviders.from(
+                ask, factory, budget, name -> ask.provider(name).model(), "Setup helper");
         AskProviders photos = AskProviders.from(
                 ask,
                 factory,

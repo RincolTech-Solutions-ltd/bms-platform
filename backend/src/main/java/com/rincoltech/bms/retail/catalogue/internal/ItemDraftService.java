@@ -80,8 +80,7 @@ class ItemDraftService {
         this.reads.setReadOnly(true);
     }
 
-    private record Context(
-            List<String> categories, List<String> units, String words, int exponent) {}
+    private record Context(List<String> categories, List<String> units, String words, int exponent) {}
 
     ItemDraft draft(String text, SetupDrafts.Upload upload, String shopType) {
         Principal principal = CurrentPrincipal.require();
@@ -114,8 +113,10 @@ class ItemDraftService {
 
     /** What the shop has, in words for the model: its kind, active categories, units with their usual packs, and items. */
     private Context context(String shopType) {
-        List<String> categories =
-                repo.categories().stream().filter(Category::active).map(Category::name).toList();
+        List<String> categories = repo.categories().stream()
+                .filter(Category::active)
+                .map(Category::name)
+                .toList();
         List<Unit> units = repo.units().stream().filter(Unit::active).toList();
         List<String> items = repo.productLabels(KNOWN_ITEMS);
         Object kind = settings.group("retail").get("profile");
@@ -138,7 +139,8 @@ class ItemDraftService {
                                         .map(u -> u.usualPack() == null
                                                 ? u.name()
                                                 : u.name() + " (usually "
-                                                        + new java.math.BigDecimal(u.usualPack().size())
+                                                        + new java.math.BigDecimal(u.usualPack()
+                                                                        .size())
                                                                 .stripTrailingZeros()
                                                                 .toPlainString()
                                                         + " " + u.usualPack().ofUnit() + ")")

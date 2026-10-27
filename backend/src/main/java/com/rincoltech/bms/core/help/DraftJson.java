@@ -48,7 +48,10 @@ public final class DraftJson {
                 return v.decimalValue();
             }
             if (v.isString()) {
-                String s = v.asString("").replace(",", "").replace("/=", "").replaceAll("(?i)ugx|ksh|kes|tzs|usd|shs?\\.?", "")
+                String s = v.asString("")
+                        .replace(",", "")
+                        .replace("/=", "")
+                        .replaceAll("(?i)ugx|ksh|kes|tzs|usd|shs?\\.?", "")
                         .strip();
                 return s.matches("\\d{1,15}(\\.\\d{1,6})?") ? new BigDecimal(s) : null;
             }

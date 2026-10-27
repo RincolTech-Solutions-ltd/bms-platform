@@ -1,16 +1,16 @@
 package com.rincoltech.bms.lending.loans.internal;
 
 import com.rincoltech.bms.core.audit.AuditLog;
+import com.rincoltech.bms.core.tenancy.Branches;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.CsvTable;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
+import com.rincoltech.bms.kernel.PhoneNumbers;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.lending.loans.internal.ExistingLoanApi.ImportResult;
 import com.rincoltech.bms.lending.loans.internal.ExistingLoanApi.ImportRow;
-import com.rincoltech.bms.core.tenancy.Branches;
-import com.rincoltech.bms.kernel.PhoneNumbers;
 import com.rincoltech.bms.lending.members.MemberIntake;
 import com.rincoltech.bms.lending.members.MemberLookup;
 import com.rincoltech.bms.lending.members.MemberLookup.MemberSummary;
@@ -132,7 +132,8 @@ class ExistingLoanImport {
         NewMember(String name, String phone, UUID branchId) {
             this.name = name;
             this.phone = phone;
-            // Stands in for the member on a check, where nothing is saved; the commit puts the added member in its place.
+            // Stands in for the member on a check, where nothing is saved; the commit puts the added member in its
+            // place.
             this.placeholder =
                     new MemberSummary(UUID.randomUUID(), branchId, null, name, "pending", "active", false, null, null);
         }
@@ -173,7 +174,8 @@ class ExistingLoanImport {
                 List<UUID> open = branches.all().stream()
                         .filter(Branches.Branch::active)
                         .map(Branches.Branch::id)
-                        .filter(id -> principal.may(ADD_MEMBERS, id) && principal.may(ExistingLoanService.PERMISSION, id))
+                        .filter(id ->
+                                principal.may(ADD_MEMBERS, id) && principal.may(ExistingLoanService.PERMISSION, id))
                         .toList();
                 if (open.size() == 1) {
                     branch = open.getFirst();
@@ -346,9 +348,10 @@ class ExistingLoanImport {
             if (p.newMember != null) {
                 message.append(dryRun || errors > 0 ? ". Adds a new member, " : ". Added a new member, ")
                         .append(p.newMember.name)
-                        .append(p.newMember.added == null || p.newMember.added.memberNo() == null
-                                ? ""
-                                : " (" + p.newMember.added.memberNo() + ")");
+                        .append(
+                                p.newMember.added == null || p.newMember.added.memberNo() == null
+                                        ? ""
+                                        : " (" + p.newMember.added.memberNo() + ")");
             } else if (p.matchedNote != null) {
                 message.append(". ").append(p.matchedNote);
             }
@@ -432,7 +435,8 @@ class ExistingLoanImport {
         } else {
             Optional<MemberSummary> member = memberNo.isEmpty() ? Optional.empty() : members.findByNumber(memberNo);
             if (member.isEmpty()
-                    || !principal.may(ExistingLoanService.PERMISSION, member.get().branchId())) {
+                    || !principal.may(
+                            ExistingLoanService.PERMISSION, member.get().branchId())) {
                 return "No member with this member number in your branches.";
             }
             p.member = member.get();

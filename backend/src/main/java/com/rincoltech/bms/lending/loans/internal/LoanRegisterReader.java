@@ -142,7 +142,9 @@ final class LoanRegisterReader implements SetupDrafts.Reader<List<LoanRegisterRe
         if (major == null || major.signum() <= 0) {
             return null;
         }
-        long minor = major.setScale(exponent, RoundingMode.HALF_UP).movePointRight(exponent).longValue();
+        long minor = major.setScale(exponent, RoundingMode.HALF_UP)
+                .movePointRight(exponent)
+                .longValue();
         return minor <= 0 || minor > LoanApi.MAX_MONEY_MINOR ? null : minor;
     }
 

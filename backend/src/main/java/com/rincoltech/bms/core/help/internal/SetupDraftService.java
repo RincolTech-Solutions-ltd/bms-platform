@@ -116,7 +116,8 @@ class SetupDraftService implements SetupDrafts {
         if (started.limit() == SetupStore.Limit.BUSINESS) {
             return Result.none("daily_cap");
         }
-        if (given.pictureDataUrl() == null && (given.text() == null || given.text().isBlank())) {
+        if (given.pictureDataUrl() == null
+                && (given.text() == null || given.text().isBlank())) {
             tally.finish("unreadable", null, 0);
             return Result.none("unreadable");
         }
@@ -126,8 +127,8 @@ class SetupDraftService implements SetupDrafts {
             return Result.none("no_provider");
         }
         LlmClient.Request prompt = prompt(request, given);
-        long estimatedInput = Math.max(1, (prompt.characters() + 2L) / 3)
-                + (given.pictureDataUrl() == null ? 0 : PICTURE_TOKENS);
+        long estimatedInput =
+                Math.max(1, (prompt.characters() + 2L) / 3) + (given.pictureDataUrl() == null ? 0 : PICTURE_TOKENS);
         for (AskProviders.Provider provider : chain.chain()) {
             long reserved = provider.config().costMicro(estimatedInput, prompt.maxTokens());
             Optional<UUID> held = spend.reserve(
@@ -195,7 +196,8 @@ class SetupDraftService implements SetupDrafts {
         if (typed == (request.upload() != null)) {
             throw ApiException.rule("setup_list_missing", "Type your list, or choose one photo or file.");
         }
-        ListFiles.Read read = typed ? new ListFiles.Read(request.text().strip(), null, "text") : ListFiles.read(request.upload());
+        ListFiles.Read read =
+                typed ? new ListFiles.Read(request.text().strip(), null, "text") : ListFiles.read(request.upload());
         if (read.text() != null && read.text().length() > properties.maxTextChars()) {
             throw ApiException.rule(
                     "setup_list_too_long",

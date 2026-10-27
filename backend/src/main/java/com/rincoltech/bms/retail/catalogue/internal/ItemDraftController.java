@@ -33,8 +33,9 @@ class ItemDraftController {
     @PostMapping(path = "/products/import/draft", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @RequiresPermission("retail.catalogue.manage")
     @Operation(
-            summary = "Draft the item import from a typed list, a photo, or a CSV, Excel or PDF file (the setup helper);"
-                    + " saves nothing; administrators only; 403 setup_ai_off while it is off for the business",
+            summary =
+                    "Draft the item import from a typed list, a photo, or a CSV, Excel or PDF file (the setup helper);"
+                            + " saves nothing; administrators only; 403 setup_ai_off while it is off for the business",
             operationId = "draftRetailProductImport")
     ItemDraft draft(
             @Parameter(description = "The list as typed; leave it out when a file is sent")

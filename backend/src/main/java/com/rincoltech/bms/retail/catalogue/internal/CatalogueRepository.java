@@ -330,10 +330,7 @@ class CatalogueRepository {
                         SELECT p.description || ' (' || u.name || ')' FROM retail_products p
                           JOIN retail_units u ON u.id = p.unit_id
                          WHERE p.active ORDER BY p.created_at DESC, p.id LIMIT ?
-                        """)
-                .param(limit)
-                .query(String.class)
-                .list();
+                        """).param(limit).query(String.class).list();
     }
 
     /** Products whose name has the same key as the description, other than {@code excludeId}. */

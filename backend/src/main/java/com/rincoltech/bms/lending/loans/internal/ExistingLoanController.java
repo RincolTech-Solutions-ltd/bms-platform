@@ -1,7 +1,7 @@
 package com.rincoltech.bms.lending.loans.internal;
 
-import com.rincoltech.bms.core.operations.Idempotency.Outcome;
 import com.rincoltech.bms.core.help.SetupDrafts;
+import com.rincoltech.bms.core.operations.Idempotency.Outcome;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import com.rincoltech.bms.lending.loans.internal.ExistingLoanApi.CancelRequest;
 import com.rincoltech.bms.lending.loans.internal.ExistingLoanApi.ExistingLoan;
@@ -46,8 +46,7 @@ class ExistingLoanController {
     private final ExistingLoanImport importer;
     private final LoanRegisterDraftService drafts;
 
-    ExistingLoanController(
-            ExistingLoanService service, ExistingLoanImport importer, LoanRegisterDraftService drafts) {
+    ExistingLoanController(ExistingLoanService service, ExistingLoanImport importer, LoanRegisterDraftService drafts) {
         this.drafts = drafts;
         this.service = service;
         this.importer = importer;

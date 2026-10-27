@@ -65,7 +65,8 @@ class SetupStore {
             long businessLimit,
             String currency) {
         return writes.execute(tx -> {
-            jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended('help_setup:' || current_setting('app.tenant_id'), 0))")
+            jdbc.sql(
+                            "SELECT pg_advisory_xact_lock(hashtextextended('help_setup:' || current_setting('app.tenant_id'), 0))")
                     .query()
                     .listOfRows();
             long mine = jdbc.sql("SELECT count(*) FROM help_setup_drafts WHERE user_id = ? AND asked_at >= ?")
@@ -89,14 +90,7 @@ class SetupStore {
                                                            cost_currency)
                             VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?)
                             """)
-                    .params(
-                            id,
-                            userId,
-                            Timestamp.from(now),
-                            kind,
-                            source,
-                            capped ? "daily_cap" : "started",
-                            currency)
+                    .params(id, userId, Timestamp.from(now), kind, source, capped ? "daily_cap" : "started", currency)
                     .update();
             return new Start(id, capped ? Limit.BUSINESS : null);
         });
@@ -122,5 +116,4 @@ class SetupStore {
                         id)
                 .update());
     }
-
 }

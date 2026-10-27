@@ -22,8 +22,9 @@ class SetupController {
 
     @Schema(name = "SetupHelperStatus")
     record SetupHelperStatus(
-            @Schema(description = "The helper may read a typed list or a file for this business; while false the box is"
-                    + " not shown")
+            @Schema(
+                    description = "The helper may read a typed list or a file for this business; while false the box is"
+                            + " not shown")
             boolean enabled,
 
             @Schema(description = "A photo can be read too (a provider that reads pictures is set)")

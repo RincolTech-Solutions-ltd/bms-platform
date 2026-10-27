@@ -90,7 +90,12 @@ final class ListFiles {
     }
 
     private static boolean webp(byte[] b) {
-        return starts(b, 'R', 'I', 'F', 'F') && b.length > 12 && b[8] == 'W' && b[9] == 'E' && b[10] == 'B' && b[11] == 'P';
+        return starts(b, 'R', 'I', 'F', 'F')
+                && b.length > 12
+                && b[8] == 'W'
+                && b[9] == 'E'
+                && b[10] == 'B'
+                && b[11] == 'P';
     }
 
     private static BufferedImage decode(byte[] b) {
@@ -353,6 +358,7 @@ final class ListFiles {
     }
 
     static ApiException notRead(String message) {
-        return new ApiException(HttpStatus.UNPROCESSABLE_CONTENT, "setup_file_not_read", "The file cannot be read", message);
+        return new ApiException(
+                HttpStatus.UNPROCESSABLE_CONTENT, "setup_file_not_read", "The file cannot be read", message);
     }
 }
