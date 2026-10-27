@@ -58,6 +58,10 @@ describe('EmptyChoice', () => {
     render(<Probe />);
     expect(back).toBeNull();
     cleanup();
+    window.history.replaceState(null, '', '/staff/retail/catalogue/units?back=%2F%5Cexample.test');
+    render(<Probe />);
+    expect(back).toBeNull();
+    cleanup();
     window.history.replaceState(null, '', '/staff/retail/catalogue/units');
     render(<Probe />);
     expect(back).toBeNull();

@@ -38,7 +38,8 @@ function here(): string {
 export function useComeBack(): (() => void) | null {
   const router = useRouter({ warn: false });
   const back = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('back');
-  if (!back || !back.startsWith('/') || back.startsWith('//')) return null;
+  // A backslash is refused too: a browser reads /\\host as //host, another site.
+  if (!back || !back.startsWith('/') || back.startsWith('//') || back.includes('\\')) return null;
   return () => {
     if (router) void router.navigate({ href: back });
     else window.location.assign(back);

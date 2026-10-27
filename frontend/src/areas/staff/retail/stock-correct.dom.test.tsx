@@ -17,6 +17,7 @@ const correctStock = vi.fn();
 const stockHistory = vi.fn();
 const getProduct = vi.fn();
 const updateProduct = vi.fn();
+let categoriesFail = false;
 
 vi.mock('@tanstack/react-router', async (original) => {
   const real = await original<typeof import('@tanstack/react-router')>();
@@ -33,7 +34,7 @@ vi.mock('../../../api/retail', async (original) => {
       stockHistory: (...a: unknown[]) => stockHistory(...a),
       getProduct: (...a: unknown[]) => getProduct(...a),
       updateProduct: (...a: unknown[]) => updateProduct(...a),
-      listCategories: () => Promise.resolve([{ id: 'c1', name: 'Cables', active: true }, { id: 'c2', name: 'Fittings', active: true }, { id: 'c3', name: 'Old', active: false }]),
+      listCategories: () => (categoriesFail ? Promise.reject(new Error('down')) : Promise.resolve([{ id: 'c1', name: 'Cables', active: true }, { id: 'c2', name: 'Fittings', active: true }, { id: 'c3', name: 'Old', active: false }])),
     },
   };
 });
@@ -416,5 +417,15 @@ describe('the words', () => {
     expect(correctionWords(m({}))).toBeNull();
     expect(differenceWords('10', '10.000', 'roll')).toBeNull();
     expect(quantityProblem('2.5', '10.000')).toBeNull();
+  });
+
+  it('never says there is no other category when the list could not be read (review of #619)', async () => {
+    categoriesFail = true;
+    getProduct.mockResolvedValue({ id: 'p1', description: 'Cable 2.5mm', category_id: 'c1', category: 'Cables', version: 4 });
+    screenOf(admin, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);
+    open('The category is wrong');
+    await screen.findByRole('form', { name: 'Change the category' });
+    expect(screen.queryByText('No other category yet.')).toBeNull();
+    categoriesFail = false;
   });
 });

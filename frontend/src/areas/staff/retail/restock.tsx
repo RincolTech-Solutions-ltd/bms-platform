@@ -266,7 +266,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
       <div data-tour="restock-supplier">
       {noSuppliers ? (
         // The supplier is added right here, by the name typed below, when the purchase is saved.
-        <EmptyChoice id="supplier" label="Supplier" required={method === 'credit'} text="No suppliers yet. Type a new one below." />
+        <EmptyChoice id="supplier" label="Supplier" text="No suppliers yet. Type a new one below." />
       ) : (
       <>
       <label htmlFor="supplier">Supplier{method === 'credit' && <span className="field-star" aria-hidden="true"> *</span>}</label>

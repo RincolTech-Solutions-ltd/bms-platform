@@ -69,11 +69,11 @@ export function AdvanceForm({ branchId, onSaved }: { branchId: string; onSaved?:
     <form onSubmit={(e) => { e.preventDefault(); if (!blocked) save.mutate(); }}>
       <DateField id="advance-date" label="Date" value={draft.date} onChange={(date) => update({ date })} />
       <PartyPicker
-        id="advance-party" label="Who is the advance for?" parties={parties.data ?? []} loading={parties.isPending} kinds={[...ADVANCE_KINDS]} listed={[...ADVANCE_KINDS]} value={draft.partyId}
+        id="advance-party" label="Who is the advance for?" parties={parties.data ?? []} loading={parties.data === undefined} kinds={[...ADVANCE_KINDS]} listed={[...ADVANCE_KINDS]} value={draft.partyId}
         onChange={(partyId) => update({ partyId })} noneLabel="Choose who it is for" addLabel="Add a new person or company"
       />
       <PartyPicker
-        id="advance-taken-by" label="Who took the money? (optional)" parties={parties.data ?? []} loading={parties.isPending} kinds={[...ADVANCE_KINDS]} listed={[...ADVANCE_KINDS]} value={draft.takenById}
+        id="advance-taken-by" label="Who took the money? (optional)" parties={parties.data ?? []} loading={parties.data === undefined} kinds={[...ADVANCE_KINDS]} listed={[...ADVANCE_KINDS]} value={draft.takenById}
         onChange={(takenById) => update({ takenById })} noneLabel="Not recorded" addLabel="Add a new person" optional
       />
       <label htmlFor="advance-principal">Amount advanced</label>

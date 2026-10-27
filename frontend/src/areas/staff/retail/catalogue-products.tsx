@@ -258,7 +258,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
           <UnitPicker
             id="item-unit"
             units={unitChoices}
-            loading={units.isPending}
+            loading={units.data === undefined}
             value={unitId}
             onChange={(next) => { setUnitId(next); forget(); }}
             error={unitId === '' ? 'Choose a unit.' : null}

@@ -4,11 +4,10 @@ import { useState, type ReactNode } from 'react';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { retail, type CustomerGroup, type PriceList } from '../../../api/retail';
 import { AddPanel } from './catalogue';
-import { ScreenLink } from './screen-link';
+import { ScreenLink, addOn } from './screen-link';
 import { Gate, Problem, changeFailureText, requireVersion } from './ui';
 import { WORDS } from '../../../app/glossary';
 import { EmptyChoice } from '../../../app/ui/EmptyChoice';
-import { addOn } from './screen-link';
 import { useOptionalStaff, useStaff } from '../context';
 
 // Customer groups (ADR-033, issue #195): customers that share a price list. A buyer's own list wins over the list of

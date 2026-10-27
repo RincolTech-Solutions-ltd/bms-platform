@@ -132,6 +132,7 @@ export function SupplierField({ id, label = 'Supplier', value, suppliers, disabl
   return (
     <>
       <label htmlFor={id}>{label}{required && <Star />}</label>
+      {/* empty: with no supplier the field is the EmptyChoice returned above. */}
       <select id={id} value={value} disabled={disabled} aria-required={required || undefined} onChange={(e) => onChange(e.target.value)}>
         <option value="">Choose a supplier</option>
         {suppliers.map((s) => <option key={s.id} value={s.id}>{s.active === false ? `${s.name} (switched off)` : s.name}</option>)}

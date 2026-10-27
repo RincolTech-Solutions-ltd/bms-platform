@@ -23,7 +23,7 @@ export function PartyPicker({ id, label, parties, loading = false, kinds, listed
   id: string;
   label: string;
   parties: CashParty[];
-  /** The list is still on its way: the select shows, never the empty line. */
+  /** The list is not known yet (on its way, or its read failed): the select shows, never the empty line. */
   loading?: boolean;
   /** The kinds a party added here may be; one means the kind is fixed, several means the person chooses. */
   kinds: CashPartyKind[];

@@ -531,10 +531,10 @@ export function runtimeSelects(source: string): { line: number; list: string }[]
   });
 }
 
-/** True when the 30 lines above `line` hold an EmptyChoice or an `empty:` comment, or the 15 below an EmptyChoice (its other branch). */
+/** True when the 12 lines above `line` hold an EmptyChoice or an `empty:` comment, or the 15 below an EmptyChoice (its other branch). */
 export function handlesEmpty(source: string, line: number): boolean {
   const lines = source.split('\n');
-  const above = lines.slice(Math.max(0, line - 31), line).join('\n');
+  const above = lines.slice(Math.max(0, line - 13), line).join('\n');
   const below = lines.slice(line, line + 15).join('\n');
   return /<EmptyChoice\b|\/\/ empty: \S|\{\/\* empty: \S/.test(above) || /<EmptyChoice\b/.test(below);
 }
@@ -550,6 +550,16 @@ describe('design guard, an empty list is never a dead end (issue #619)', () => {
     expect(handlesEmpty('x\n<select>', 2)).toBe(false);
     expect(handlesEmpty('{units.length === 0 ? <EmptyChoice id="u" /> : (\n<select>', 2)).toBe(true);
     expect(handlesEmpty('// empty: a filter, "All" is always there\n<select>', 2)).toBe(true);
+  });
+
+  // The lending forms' SelectField draws the EmptyChoice itself when given `empty`: one of a run-time list must pass it.
+  it.each(sources)('%s passes `empty` to every SelectField of a run-time list', (file) => {
+    const source = readFileSync(join(SRC, file), 'utf8');
+    const missing = [...source.matchAll(/<SelectField\b[\s\S]*?\/>/g)]
+      .map(([tag]) => tag as string)
+      .filter((tag) => /options=\{\s*\(?[a-z]/.test(tag) && !/\bempty=/.test(tag) && !/\/\* empty: \S/.test(tag))
+      .map((tag) => `${file}: ${tag.slice(0, 80)}`);
+    expect(missing).toEqual([]);
   });
 
   it.each(sources)('%s shows the EmptyChoice for every select of a run-time list, or says why it is never empty', (file) => {

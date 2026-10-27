@@ -268,7 +268,8 @@ export function CategoryPicker({ id, label = 'Category', categories, value, onCh
   const canAdd = allowAdd && (me.permissions ?? []).includes(MANAGE);
   // Every category, switched-off ones too, for the taken-name check; the catalogue's own list, so no second request. Its answer
   // also says the screen's list has loaded, so an empty one is said (issue #619) and never shown while it is on its way.
-  const all = useQuery({ queryKey: CATEGORIES, queryFn: () => retail.listCategories(), enabled: canAdd });
+  // Read too for someone who may not add, while the screen offers none, so the empty line can say who to ask.
+  const all = useQuery({ queryKey: CATEGORIES, queryFn: () => retail.listCategories(), enabled: canAdd || categories.length === 0 });
   // The category this picker added or switched on, until the screen's own list carries it: the field names it at once.
   const [kept, setKept] = useState<Category | null>(null);
   const choicesList = kept && !categories.some((c) => c.id === kept.id) ? [...categories, kept] : categories;

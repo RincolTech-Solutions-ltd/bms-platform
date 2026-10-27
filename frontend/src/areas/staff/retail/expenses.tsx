@@ -92,7 +92,7 @@ export function ExpenseForm({ branchId, onSaved, onWaiting }: { branchId: string
       )}
 
       <PartyPicker
-        id="expense-party" label="Beneficiary (optional)" parties={parties.data ?? []} loading={parties.isPending} kinds={['other']} value={draft.partyId}
+        id="expense-party" label="Beneficiary (optional)" parties={parties.data ?? []} loading={parties.data === undefined} kinds={['other']} value={draft.partyId}
         onChange={(partyId) => update({ partyId })} noneLabel="No beneficiary" addLabel="Add a new beneficiary" optional
       />
 

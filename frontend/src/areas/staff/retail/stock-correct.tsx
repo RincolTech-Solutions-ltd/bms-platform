@@ -162,7 +162,7 @@ function CategoryForm({ row, onDone }: { row: StockRow; onDone: (message: string
       }}
     >
       <p>Now in <strong>{row.category}</strong>.</p>
-      {choices.every((c) => c.id === own) ? (
+      {categories.data !== undefined && choices.every((c) => c.id === own) ? (
         <EmptyChoice id="correct-category" label="The right category" text="No other category yet." ask="Ask the owner to add the category first."
           add={addOn(me, 'categories', 'Add a category', '/staff/retail/catalogue/categories')} />
       ) : (

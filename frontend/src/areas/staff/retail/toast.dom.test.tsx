@@ -57,6 +57,9 @@ describe('Toast', () => {
     const { container } = render(<>{result.current.toast}</>);
     expect(container.querySelector('.toast')?.className).toBe('toast toast-error');
     expect(container.querySelector('.toast')?.textContent).toBe('Test duvet cover is saved, but its count is not. The photo was not saved.');
+    // A second info replaces the first after the error; it never piles up.
+    act(() => result.current.show('Already on the sale.', 'info'));
+    expect(render(<>{result.current.toast}</>).container.querySelector('.toast')?.textContent).toBe('Test duvet cover is saved, but its count is not. Already on the sale.');
     cleanup();
     const other = renderHook(() => useToast()).result;
     act(() => other.current.show('Saved.', 'success'));

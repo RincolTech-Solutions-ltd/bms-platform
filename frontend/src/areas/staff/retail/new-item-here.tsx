@@ -164,7 +164,8 @@ function NewItemForm({ id, qtyLabel, qtyError, counting, askCost, initial = '', 
       await added(product, true);
       const photoNote = await sendNewPhoto(product.id ?? '', photo);
       if (photoNote) screenToast?.(`${product.description ?? 'The item'} is saved. ${photoNote}`, 'info');
-      void queryClient.invalidateQueries({ queryKey: ['retail', 'catalogue'] });
+      // The item's photo is read again once it is on the item.
+      else if (photo) void queryClient.invalidateQueries({ queryKey: ['retail', 'catalogue'] });
     },
     onError: (error) => {
       const found = existingOf(error);
@@ -262,7 +263,7 @@ function NewItemForm({ id, qtyLabel, qtyError, counting, askCost, initial = '', 
       <UnitPicker
         id={`${id}-unit`}
         units={(units.data ?? []).filter((u) => u.active !== false)}
-        loading={units.isPending}
+        loading={units.data === undefined}
         value={unitId}
         onChange={(next) => { setUnitId(next); forget(); }}
         error={unitId === '' ? 'Choose a unit.' : null}

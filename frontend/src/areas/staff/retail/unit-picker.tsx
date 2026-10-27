@@ -18,7 +18,7 @@ export function UnitPicker({ id, units, loading, value, onChange, error, showErr
   id: string;
   /** The units the form offers (it decides about switched-off ones). */
   units: Unit[];
-  /** The list is still on its way: the select shows, never "No units yet." */
+  /** The list is not known yet (on its way, or its read failed): the select shows, never "No units yet." */
   loading: boolean;
   value: string;
   onChange: (unitId: string) => void;

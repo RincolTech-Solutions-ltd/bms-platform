@@ -142,7 +142,6 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
       </>
       )}
       </div>
-      {destinations.length === 0 && <p>You have no other branch to move stock to.</p>}
       {sends && <Hint full>The stock leaves this branch now. The other branch counts it once they receive it.</Hint>}
 
       <div data-tour="transfer-search">
