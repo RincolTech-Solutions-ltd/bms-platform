@@ -57,3 +57,14 @@ of the same tasks to ground its answers, and a way to know when that corpus chan
 - The corpus ships with every app build, so an answer can be wrong only between a screen change and its article's update, the
   same window as a tour.
 - #20 reads the same files on the server; its cache key carries the revision, so an edited article retires its answers at once.
+
+## Amendment: getting started (issue #609)
+
+- A tenth job, **Getting started**, comes first: how a business starts using BMS (`/sign-up`, `/sign-up/verify`,
+  `/application`), opening an invitation (`/accept-invitation`), signing in and a forgotten password or sign-in page
+  (`/sign-in`, `/forgot-password`, `/reset-password`, `/find-sign-in`) and installing the app (`/staff/notifications`). They
+  need no permission and no module, so everyone sees them, and Ask BMS grounds on them like any other article.
+- Their screens open before sign-in, where the capture script of decision 3 needs a local API, so these four ship as text
+  first: `PICTURES_PENDING` in `corpus.test.ts` names them, checks they have no picture yet, and shrinks as their pictures
+  land. Every other article still has a picture on every step (decision 8).
+- The search drops its stop words before it stems a word, so "this" no longer becomes "thi" and matches "this branch".
