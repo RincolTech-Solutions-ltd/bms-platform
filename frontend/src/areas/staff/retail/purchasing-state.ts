@@ -203,6 +203,11 @@ export interface ReceiveLineForm {
   usualSize?: string;
   /** D23 (#554): make packSize the pack's usual size from now on. */
   fromNowOn?: boolean;
+  /**
+   * Issue #624: the line's pack has its own selling price, for an order line whose packs the form does not carry; then only
+   * someone who may change prices is offered "use from now on".
+   */
+  packHasOwnPrice?: boolean;
   /** Received now; blank means none of this line arrives. */
   qty: string;
   cost: string;

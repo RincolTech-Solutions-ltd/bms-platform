@@ -425,6 +425,9 @@ export function RestockSaved({ purchase, context, onNew }: { purchase: Purchase;
         From {context.supplierName || 'no supplier'}, bought on {showDate(purchase.purchased_on)}: {count} {count === 1 ? 'item' : 'items'}, total cost{' '}
         {money(purchase.total_minor ?? 0)}.
       </p>
+      {(purchase.lines ?? []).filter((l) => l.size_kept && l.size_kept_note).map((l) => (
+        <Note key={`kept-${l.id}`}>{`${l.description}: ${l.size_kept_note}`}</Note>
+      ))}
       {(purchase.lines ?? []).some((l) => l.unit) && (
         <ul>
           {(purchase.lines ?? []).filter((l) => l.unit).map((l) => (

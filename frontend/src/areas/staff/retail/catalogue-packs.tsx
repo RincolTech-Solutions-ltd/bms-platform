@@ -6,7 +6,7 @@ import { useStaff } from '../context';
 import { showQty } from './maths';
 import { Money, Problem, money } from './ui';
 import { UNITS, capabilityOn, holds } from './permissions';
-import { factorMilli, packPriceMinor } from './units-state';
+import { factorMilli, hasOwnPrice, packPriceMinor } from './units-state';
 import { WORDS } from '../../../app/glossary';
 import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
 import { Hint } from '../../../app/ui/Hint';
@@ -95,6 +95,9 @@ function PackSheet({ product, pack, mayPrice, onClose }: { product: Product; pac
   });
   const problem = factorProblem(factor);
   const body = packChange(pack, { factor, purpose, priceMinor }, mayPrice);
+  // Review of #624: a pack with its own price keeps its size and stays sold for someone who may not change prices. The flag
+  // comes to every caller, the amount only to one who may see prices.
+  const locked = hasOwnPrice(pack) && !mayPrice;
   const low = purpose === 'buy' ? null : packBelowCostHint(product, factor, mayPrice ? priceMinor : (pack.sell_minor ?? null));
   const id = pack.unit_id ?? '';
   return (
@@ -120,20 +123,21 @@ function PackSheet({ product, pack, mayPrice, onClose }: { product: Product; pac
         inputMode="decimal"
         value={factor}
         onChange={(e) => setFactor(e.target.value)}
+        readOnly={locked}
         aria-invalid={problem !== null}
         aria-describedby={problem !== null ? `pack-factor-problem-${id}` : undefined}
       />
       {problem !== null && <p id={`pack-factor-problem-${id}`} className="rt-flag">{problem}</p>}
       <p className="field-label">Used for</p>
-      <Segmented label="Used for" options={PURPOSES} value={purpose} onChange={setPurpose} />
+      <Segmented label="Used for" options={locked ? PURPOSES.filter((o) => o.value !== 'buy') : PURPOSES} value={purpose} onChange={setPurpose} />
       {purpose === 'buy' ? (
         <Hint>A pack only for buying is not offered when selling, so it has no selling price.</Hint>
       ) : mayPrice ? (
         <MoneyInput id={`pack-price-${id}`} label={`Selling price of one ${pack.unit}`} valueMinor={priceMinor} onChange={setPriceMinor} hint={suggestedHint(product, factor) ?? undefined} />
       ) : (
         <Hint full>
-          {pack.sell_minor !== undefined
-            ? 'This pack has its own price, so only someone who may change prices changes its size or makes it only for buying.'
+          {locked
+            ? 'This pack has its own price. Ask someone who may change prices to change its size or make it only for buying.'
             : 'Only someone who may change prices sets a pack\'s selling price.'}
         </Hint>
       )}

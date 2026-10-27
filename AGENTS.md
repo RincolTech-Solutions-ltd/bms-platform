@@ -1196,7 +1196,8 @@ Accepted (this list is the ADR index):
   a spend log (proposed, #20, owner decision D52; migration `V108`)
 - ADR-099 A selling pack has its own price and each pack says what it is for (buying, selling or both): walk-in sales, scans,
   quotations and orders take the pack's own price, else the piece price times the size; price lists still win; below cost per
-  pack against the average cost per piece times the size; a pack price needs `retail.price.edit` (proposed, #624, owner decision
+  pack against the average cost per piece times the size; a pack price, and a new size or buy only on a pack that has one (on Edit
+  item, or Use 30 from now on, which is then left out with `size_kept`), needs `retail.price.edit` (proposed, #624, owner decision
   D23; amends the ADR-033 amendments for units and price lists; migration `V110`)
 - ADR-046 Two-step sign-in is optional by default (migration `V67`) and a tenant policy can require it for everyone or for chosen roles after a grace
   period; one deadline, enforced-now versus due-by, the forgotten-password rules unchanged (proposed, #348; FR-IAM-06, FR-IAM-16)

@@ -26,7 +26,10 @@ never sells whole) and packs that are only sold (a half carton nobody delivers).
    and the sale stands, as ADR-067 does for a pack switched off. A price list item on a pack only for buying is refused
    with the same code. A pack only for selling is not offered on Buy stock, a purchase
    order or goods received and a line in it is refused with the same code ("not bought in that unit"). Stock counts, moves,
-   returns and barcodes take any active pack, as before.
+   returns and barcodes take any active pack, as before. An order made before the purpose changed still completes: goods
+   received against a purchase order line skip the purpose check, and a customer order's lines are delivered as agreed (the
+   sale's agreed lines skip it, as they skip a pack switched off). The purpose may change at any time; only new lines follow it.
+   The three values are one constant on the server (`RetailCatalogue.PACK_PURPOSES`).
 2. **A selling pack has its own price.** `retail_product_units.sell_minor` is the selling price of one pack, in minor units, or
    null. Null is the price it had until now, the piece price times the size rounded half up once, which the API sends as
    `suggested_sell_minor` and Edit item shows as the suggestion. A pack only for buying has no price (a check in the database, 422
@@ -45,7 +48,9 @@ never sells whole) and packs that are only sold (a half carton nobody delivers).
    `retail.catalogue.manage` (403 `permission_denied`). So does any change that moves what a pack with its own price sells for: a
    new size (the same price for more or fewer pieces), on Edit item or by ticking Use 30 from now on on Buy stock or goods
    received (ADR-082 decision 2: without the permission the delivery still saves at its own size and only "from now on" is left
-   out, which the screens say before sending), or making it only for buying (which drops the price). The size of a pack
+   out; the screens say so before sending, the line of the response says so with `size_kept` and a plain sentence, and the skip
+   is audited as `retail.product_unit.size_kept`), or making it only for buying (which drops the price). Every pack carries
+   `has_own_price` for every caller, the amount only for one who may see prices, so the screens know without the amount. The size of a pack
    without its own price, making a pack only for selling, and switching it off or on need only `retail.catalogue.manage`. Every change is audited as
    `retail.product_unit.created` or `.updated` with the old and new `purpose` and `sell_minor`. No new permission.
 6. **Profit stays per piece.** A sale line keeps what was charged and, as before, the average cost per piece at the moment of sale;

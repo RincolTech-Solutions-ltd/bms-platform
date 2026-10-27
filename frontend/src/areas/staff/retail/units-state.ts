@@ -44,7 +44,15 @@ export const OWN_PRICE_KEEPS_SIZE = 'This pack has its own price. Ask someone wh
 
 /** Issue #624 review: whether this person may make a delivery's size the pack's usual one (ADR-082, ADR-099). */
 export function mayKeepSize(pack: Pack | undefined, mayManageItems: boolean, mayChangePrices: boolean): boolean {
-  return mayManageItems && (pack?.sell_minor === undefined || mayChangePrices);
+  return mayManageItems && (!hasOwnPrice(pack) || mayChangePrices);
+}
+
+/**
+ * Issue #624 review: whether the pack has its own selling price. `has_own_price` comes to every caller, the amount only to one
+ * who may see prices, so a caller who cannot see prices is never offered a change that will not happen.
+ */
+export function hasOwnPrice(pack: Pack | undefined): boolean {
+  return pack?.has_own_price ?? pack?.sell_minor !== undefined;
 }
 
 /** The chosen pack of a line, or undefined for the base unit (no unit chosen, or one that is no longer a pack). */
