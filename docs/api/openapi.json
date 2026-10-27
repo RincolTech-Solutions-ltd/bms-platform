@@ -16686,6 +16686,104 @@
           }
         }
       },
+      "RetailQuickAdd" : {
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "category_made" : {
+            "description" : "True when this add made the General category",
+            "type" : "boolean"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "item_made" : {
+            "description" : "False when the item was already in the list",
+            "type" : "boolean"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "qty" : {
+            "description" : "The count recorded; absent when no stock was recorded",
+            "type" : "string"
+          },
+          "stocktake_id" : {
+            "description" : "The committed one-line stock count; absent when no stock was recorded",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "unit" : {
+            "type" : "string"
+          },
+          "unit_made" : {
+            "description" : "True when this add made the Piece unit",
+            "type" : "boolean"
+          }
+        }
+      },
+      "RetailQuickAddRequest" : {
+        "description" : "Issue #632: an item, its prices and how many there are at a branch, in one tap. With product_id, an item already in the list, only its count is recorded and the other item fields are ignored",
+        "properties" : {
+          "branch_id" : {
+            "description" : "Where the stock is; defaults to the caller's one branch",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "category_id" : {
+            "description" : "Left out: the item goes under General, made when the business has none",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "cost_minor" : {
+            "description" : "Left out: 0, set by the first restock",
+            "format" : "int64",
+            "maximum" : 10000000000000,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "description" : {
+            "description" : "The new item's name; required without product_id",
+            "maxLength" : 300,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "duplicate_reason" : {
+            "description" : "As on a new item: to add a name that exists already, administrators only",
+            "maxLength" : 300,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "product_id" : {
+            "description" : "An item already in the list, chosen instead of a new item of the same name",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "qty" : {
+            "description" : "How many there are at the branch now, recorded as a stock count of this one item (retail.stocktake.commit at the branch); left out, no stock is recorded",
+            "example" : "600",
+            "type" : "string"
+          },
+          "sell_minor" : {
+            "description" : "Required without product_id",
+            "format" : "int64",
+            "maximum" : 10000000000000,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "unit_id" : {
+            "description" : "Left out: the shop's piece unit (Piece or pc), made when the business has none",
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }
+      },
       "RetailQuotation" : {
         "properties" : {
           "branch_id" : {
@@ -40277,6 +40375,43 @@
         },
         "summary" : "Change the purchasing tolerances under If-Match; audited with old and new values (issue #198)",
         "tags" : [ "retail-payables" ]
+      }
+    },
+    "/api/v1/retail/quick-add" : {
+      "post" : {
+        "operationId" : "quickAddRetailItem",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailQuickAddRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailQuickAdd"
+                }
+              }
+            },
+            "description" : "The item, and the count when one was recorded"
+          }
+        },
+        "summary" : "Quick add: a new item (or one already in the list) and how many there are at a branch, as a one-line stock count, in one transaction; the count also needs retail.stocktake.commit there (issue #632); M",
+        "tags" : [ "retail-stock" ]
       }
     },
     "/api/v1/retail/quotations" : {

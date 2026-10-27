@@ -6028,6 +6028,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/quick-add": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Quick add: a new item (or one already in the list) and how many there are at a branch, as a one-line stock count, in one transaction; the count also needs retail.stocktake.commit there (issue #632); M */
+        post: operations["quickAddRetailItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/quotations": {
         parameters: {
             query?: never;
@@ -15777,6 +15794,70 @@ export interface components {
             /** Format: int32 */
             over_receipt_bp?: number;
             require_costing_before_sale?: boolean;
+        };
+        RetailQuickAdd: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description True when this add made the General category */
+            category_made?: boolean;
+            code?: string;
+            description?: string;
+            /** @description False when the item was already in the list */
+            item_made?: boolean;
+            /** Format: uuid */
+            product_id?: string;
+            /** @description The count recorded; absent when no stock was recorded */
+            qty?: string;
+            /**
+             * Format: uuid
+             * @description The committed one-line stock count; absent when no stock was recorded
+             */
+            stocktake_id?: string;
+            unit?: string;
+            /** @description True when this add made the Piece unit */
+            unit_made?: boolean;
+        };
+        /** @description Issue #632: an item, its prices and how many there are at a branch, in one tap. With product_id, an item already in the list, only its count is recorded and the other item fields are ignored */
+        RetailQuickAddRequest: {
+            /**
+             * Format: uuid
+             * @description Where the stock is; defaults to the caller's one branch
+             */
+            branch_id?: string;
+            /**
+             * Format: uuid
+             * @description Left out: the item goes under General, made when the business has none
+             */
+            category_id?: string;
+            /**
+             * Format: int64
+             * @description Left out: 0, set by the first restock
+             */
+            cost_minor?: number;
+            /** @description The new item's name; required without product_id */
+            description?: string;
+            /** @description As on a new item: to add a name that exists already, administrators only */
+            duplicate_reason?: string;
+            /**
+             * Format: uuid
+             * @description An item already in the list, chosen instead of a new item of the same name
+             */
+            product_id?: string;
+            /**
+             * @description How many there are at the branch now, recorded as a stock count of this one item (retail.stocktake.commit at the branch); left out, no stock is recorded
+             * @example 600
+             */
+            qty?: string;
+            /**
+             * Format: int64
+             * @description Required without product_id
+             */
+            sell_minor?: number;
+            /**
+             * Format: uuid
+             * @description Left out: the shop's piece unit (Piece or pc), made when the business has none
+             */
+            unit_id?: string;
         };
         RetailQuotation: {
             /** Format: uuid */
@@ -30198,6 +30279,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailPurchasingSettings"];
+                };
+            };
+        };
+    };
+    quickAddRetailItem: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailQuickAddRequest"];
+            };
+        };
+        responses: {
+            /** @description The item, and the count when one was recorded */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailQuickAdd"];
                 };
             };
         };
