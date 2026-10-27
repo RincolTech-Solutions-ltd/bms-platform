@@ -103,6 +103,11 @@ class QuickAddService {
                     .find(r.productId())
                     .orElseThrow(() -> ApiException.validation(
                             List.of(new FieldProblem("product_id", "unknown_product", "No such item."))));
+            // A switched-off item takes no new stock here: it is switched back on first, on Items.
+            if (!product.active()) {
+                throw ApiException.validation(List.of(new FieldProblem(
+                        "product_id", "inactive_product", "This item is switched off. Switch it on first, on Items.")));
+            }
         } else {
             NewItem made = catalogue.createItem(
                     r.description().trim(),

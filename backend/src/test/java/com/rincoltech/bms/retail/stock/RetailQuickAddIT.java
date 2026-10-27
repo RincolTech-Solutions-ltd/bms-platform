@@ -19,10 +19,12 @@ import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
 
 /**
- * Quick add (issue #632): one request makes the item and records how many there are at the chosen branch as a committed stock
- * count of that one line, in one transaction. Other items keep their stock, a name already in the list is refused with the
- * existing item to add stock to instead, General and Piece are made when missing, and the count needs its own permission.
- * Fabricated data.
+ * Quick add (issue #632, ADR-101, FR-RET-79): one request makes the item and adds the quantity typed to its stock at the chosen
+ * branch, in one transaction, as one opening movement posted to inventory against opening balance equity, never a stock count.
+ * Other items keep their stock, a name already in the list is refused with the existing item to add stock to instead (the
+ * quantity is added, never set), General and Piece are made when missing, the stock needs its own permission, and the stock
+ * history, the daily profit and stock health read it as opening stock, never as a difference or a loss. The tenant fixture has
+ * no unit and no category, so each test says which it adds. Fabricated data.
  */
 class RetailQuickAddIT extends IntegrationTest {
 
@@ -138,15 +140,14 @@ class RetailQuickAddIT extends IntegrationTest {
 
     @Test
     void generalAndPieceAreMadeWhenMissingAndUsedAfterwards() {
-        boolean hadPiece = scalar(
-                        "SELECT count(*) FROM retail_units WHERE tenant_id = ? AND lower(name) IN ('piece', 'pc', 'pcs')",
-                        t.tenantId())
-                > 0;
+        // The fixture starts with no unit at all (no default units, ADR-098, for a tenant made by the test database).
+        assertThat(scalar("SELECT count(*) FROM retail_units WHERE tenant_id = ?", t.tenantId()))
+                .isZero();
         ResponseEntity<JsonNode> first = quickAdd(item("Test Soap Bar", 2_500, "10", hq));
         assertThat(first.getStatusCode()).as("%s", first.getBody()).isEqualTo(HttpStatus.CREATED);
         assertThat(first.getBody().get("category_made").asBoolean()).isTrue();
-        assertThat(first.getBody().get("unit_made").asBoolean()).isEqualTo(!hadPiece);
-        assertThat(first.getBody().get("unit").asString()).isIn("Piece", "pc", "pcs");
+        assertThat(first.getBody().get("unit_made").asBoolean()).isTrue();
+        assertThat(first.getBody().get("unit").asString()).isEqualTo("Piece");
 
         ResponseEntity<JsonNode> second = quickAdd(item("Test Soap Box", 9_000, "2", hq));
         assertThat(second.getStatusCode()).as("%s", second.getBody()).isEqualTo(HttpStatus.CREATED);
@@ -236,6 +237,38 @@ class RetailQuickAddIT extends IntegrationTest {
         assertThat(items.getBody().has("cost_minor")
                         && !items.getBody().get("cost_minor").isNull())
                 .isFalse();
+    }
+
+    @Test
+    void theHistoryAndTheReportsReadItAsOpeningStockNeverAsADifferenceOrALoss() {
+        Map<String, Object> body = item("Test Lantern", 15_000, "20", hq);
+        body.put("cost_minor", 10_000);
+        UUID product = productOf(quickAdd(body));
+        JsonNode moves = api.get("/stock/movements?branch_id=" + hq + "&product_id=" + product, ADMIN)
+                .getBody()
+                .get("items");
+        assertThat(moves).hasSize(1);
+        assertThat(moves.get(0).get("kind").asString()).isEqualTo("opening");
+        assertThat(moves.get(0).get("source_type").asString()).isEqualTo("retail.quick_add");
+        assertThat(moves.get(0).get("qty").asString()).isEqualTo("20.000");
+        String today = java.time.LocalDate.now(com.rincoltech.bms.kernel.BusinessClock.DEFAULT_ZONE)
+                .toString();
+        JsonNode profit = api.get("/reports/profit/daily?from=" + today + "&to=" + today, ADMIN)
+                .getBody();
+        assertThat(profit.get("stocktake_difference_minor").asLong()).isZero();
+        assertThat(profit.get("profit_minor").asLong()).isZero();
+        JsonNode health = api.get("/reports/stock-health", ADMIN).getBody();
+        assertThat(health.toString()).doesNotContain("\"over_lines\":1");
+        // A switched-off item takes no stock here.
+        switchOff("retail_products", product);
+        Map<String, Object> more = new LinkedHashMap<>();
+        more.put("product_id", product);
+        more.put("qty", "5");
+        more.put("branch_id", hq);
+        ResponseEntity<JsonNode> off = quickAdd(more);
+        assertThat(off.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(off.getBody().toString()).contains("inactive_product");
+        assertThat(stockAt(hq, product)).isEqualByComparingTo("20");
     }
 
     @Test
