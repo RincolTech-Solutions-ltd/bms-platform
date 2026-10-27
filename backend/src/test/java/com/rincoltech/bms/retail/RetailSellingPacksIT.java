@@ -263,12 +263,16 @@ class RetailSellingPacksIT extends IntegrationTest {
         // Someone who may not change prices: the delivery saves at its own size, only "from now on" is left out.
         ResponseEntity<JsonNode> kept = delivered(30, CATALOGUE_ONLY);
         assertThat(kept.getStatusCode()).as("%s", kept.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode keptLine = kept.getBody().get("lines").get(0);
+        assertThat(keptLine.get("size_kept").asBoolean()).isTrue();
+        assertThat(keptLine.get("size_kept_note").asString()).contains("This pack has its own price");
         assertThat(packOf(carton, ADMIN).get("factor").asString()).isEqualTo("24.000");
         assertThat(packOf(carton, ADMIN).get("sell_minor").asLong()).isEqualTo(2_200);
         assertThat(stock()).isEqualTo("1030.000");
 
         ResponseEntity<JsonNode> allowed = delivered(30, ADMIN);
         assertThat(allowed.getStatusCode()).as("%s", allowed.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(allowed.getBody().get("lines").get(0).has("size_kept")).isFalse();
         JsonNode resized = packOf(carton, ADMIN);
         assertThat(resized.get("factor").asString()).isEqualTo("30.000");
         assertThat(resized.get("sell_minor").asLong()).isEqualTo(2_200);
@@ -408,6 +412,34 @@ class RetailSellingPacksIT extends IntegrationTest {
                 "/orders", order(box), orders, "*", UUID.randomUUID().toString());
         assertThat(orderedBox.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(orderedBox.getBody().toString()).contains("unknown_pack_unit");
+    }
+
+    /** Review of #624 (ADR-099 decision 1): an order taken in a pack later made buy only is still delivered. */
+    @Test
+    void anOrderTakenInAPackLaterMadeBuyOnlyIsStillDelivered() {
+        pack(carton, "12", null, 1_100L);
+        String orders = ADMIN + ",retail.order.manage";
+        ResponseEntity<JsonNode> ordered = api.postKeyed(
+                "/orders", order(carton), orders, "*", UUID.randomUUID().toString());
+        assertThat(ordered.getStatusCode()).as("%s", ordered.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(change(carton, Map.of("purpose", "buy"), ADMIN).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        ResponseEntity<JsonNode> delivered = api.postKeyed(
+                "/orders/" + ordered.getBody().get("id").asString() + "/deliver",
+                Map.of("payment_method", "cash"),
+                orders,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(delivered.getStatusCode()).as("%s", delivered.getBody()).isEqualTo(HttpStatus.OK);
+        JsonNode sale = api.get("/sales/" + delivered.getBody().get("sale_id").asString(), ADMIN)
+                .getBody()
+                .get("lines")
+                .get(0);
+        // The price agreed on the order stands.
+        assertThat(sale.get("sale_unit_price_minor").asLong()).isEqualTo(1_100);
+        // A new sale in that carton is refused.
+        assertThat(sale(ADMIN, null, carton, "1").getBody().toString()).contains("unknown_pack_unit");
     }
 
     Map<String, Object> quotation(UUID unit) {

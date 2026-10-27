@@ -881,26 +881,32 @@ class CatalogueService {
     }
 
     /** D23, issue #554: see {@code RetailCatalogue.useBuyingSize}. The caller holds the product's row lock. */
-    void useBuyingSize(UUID productId, UUID unitId, java.math.BigDecimal factor, String sourceType, UUID sourceId) {
+    boolean useBuyingSize(UUID productId, UUID unitId, java.math.BigDecimal factor, String sourceType, UUID sourceId) {
         Pack before = repo.pack(productId, unitId).orElseThrow(ApiException::notFound);
         String size = factor.setScale(3).toPlainString();
         if (before.factor().equals(size)) {
-            return;
+            return true;
         }
-        // Review of #624: a pack with its own price sells at it whatever its size, so a new usual size is a
-        // price change, as on Edit item. Without retail.price.edit the delivery still saves at its own size and
-        // only "from now on" is left out; the screens say so before sending.
-        if (before.sellMinor() != null && !CurrentPrincipal.require().hasPermission(PRICE_EDIT)) {
-            return;
-        }
-        repo.updatePack(before.id(), factor, before.active(), before.version());
         Map<String, Object> was = new LinkedHashMap<>();
         Map<String, Object> now = new LinkedHashMap<>();
         was.put("factor", before.factor());
+        // Review of #624: a pack with its own price sells at it whatever its size, so a new usual size is a
+        // price change, as on Edit item. Without retail.price.edit the delivery still saves at its own size, the
+        // usual size stays, the skip is audited, and the response says so on the line.
+        if (before.sellMinor() != null && !CurrentPrincipal.require().hasPermission(PRICE_EDIT)) {
+            now.put("factor_asked", size);
+            now.put("reason", "own_price");
+            now.put("source_type", sourceType);
+            now.put("source_id", sourceId);
+            audit.record(new AuditLog.Entry("retail.product_unit.size_kept", PACK, before.id(), null, was, now));
+            return false;
+        }
+        repo.updatePack(before.id(), factor, before.active(), before.version());
         now.put("factor", size);
         now.put("source_type", sourceType);
         now.put("source_id", sourceId);
         audit.record(new AuditLog.Entry("retail.product_unit.updated", PACK, before.id(), null, was, now));
+        return true;
     }
 
     /**

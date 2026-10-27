@@ -114,9 +114,11 @@ public interface RetailCatalogue {
      * holds the product's row lock (ADR-079: product rows before balance rows), which a pack edit also takes, so the two
      * never interleave. Lines already made keep the size they used. Nothing is written when the size is already the usual
      * one, nor (issue #624) when the pack has its own selling price and the caller may not change prices: the delivery
-     * keeps its own size and the pack's usual size stays.
+     * keeps its own size and the pack's usual size stays, with a {@code retail.product_unit.size_kept} audit row.
+     *
+     * @return false when the usual size was left as it was because the pack has its own price (issue #624)
      */
-    void useBuyingSize(UUID productId, UUID unitId, BigDecimal factor, String sourceType, UUID sourceId);
+    boolean useBuyingSize(UUID productId, UUID unitId, BigDecimal factor, String sourceType, UUID sourceId);
 
     /**
      * The one normal form of a product code, for the API and the importer alike (review F9):

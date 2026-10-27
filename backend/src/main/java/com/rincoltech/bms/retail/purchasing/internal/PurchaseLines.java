@@ -127,8 +127,10 @@ class PurchaseLines {
                 return null;
             }
             pack = catalogue.packUnit(p.id(), unitId).orElse(null);
-            // Issue #624: a pack only for selling (a half carton) is never bought.
-            if (pack == null || !pack.active() || !pack.buys()) {
+            // Issue #624: a pack only for selling (a half carton) is never bought, except on goods received against an
+            // order line made before the pack's purpose changed (allowInactive marks such a line), so the order
+            // completes.
+            if (pack == null || !pack.active() || !pack.buys() && !allowInactive) {
                 problems.add(new FieldProblem(
                         field + ".unit_id", "unknown_pack_unit", "This item is not bought in that unit."));
                 return null;
@@ -152,6 +154,15 @@ class PurchaseLines {
         long total = value(qty, enteredCost);
         long stocked = pack == null ? total : value(base, costBase);
         return new Planned(p, pack, base, pack == null ? null : qty, enteredCost, costBase, total, stocked);
+    }
+
+    /**
+     * Issue #624: what a delivery line says when its "use from now on" was left out because the pack has its own selling
+     * price and the caller may not change prices.
+     */
+    static String sizeKeptNote(BigDecimal size) {
+        return "This pack has its own price, so only this delivery counts as " + Quantities.format(size)
+                + " in each pack and its usual size stays. Ask someone who may change prices.";
     }
 
     /**

@@ -52,9 +52,9 @@ class CatalogueLookup implements RetailCatalogue {
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
-    public void useBuyingSize(
+    public boolean useBuyingSize(
             UUID productId, UUID unitId, java.math.BigDecimal factor, String sourceType, UUID sourceId) {
-        service.useBuyingSize(productId, unitId, factor, sourceType, sourceId);
+        return service.useBuyingSize(productId, unitId, factor, sourceType, sourceId);
     }
 
     @Override
