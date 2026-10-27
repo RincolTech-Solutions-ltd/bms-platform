@@ -58,6 +58,12 @@ function PackRow({ productId, pack }: { productId: string; pack: Pack }) {
   );
 }
 
+/** Issue #625: the unit's usual pack size, when it counts what this item is counted in, as the number to start from. */
+export function usualFactor(unit: Unit | undefined, product: Product): string | null {
+  const pack = unit?.usual_pack;
+  return pack?.size && pack.of_unit_id === product.unit_id ? showQty(pack.size) : null;
+}
+
 export function PackEditor({ product }: { product: Product }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
@@ -105,7 +111,7 @@ export function PackEditor({ product }: { product: Product }) {
       ) : (
       <>
       <label htmlFor="pack-unit">Add a pack</label>
-      <select id="pack-unit" value={unitId} onChange={(e) => setUnitId(e.target.value)}>
+      <select id="pack-unit" value={unitId} onChange={(e) => { setUnitId(e.target.value); setFactor(usualFactor(choices.find((u) => u.id === e.target.value), product) ?? factor); }}>
         <option value="">Choose a unit</option>
         {choices.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
       </select>
