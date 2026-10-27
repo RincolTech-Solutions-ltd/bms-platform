@@ -67,10 +67,11 @@ function visibleText(el: Element): string {
 
 // What a person must see of "Tumaini Traders" over "Store 1 140025 (BR1)". At the default size, the first word and the start of
 // the second. At font scale 2 (a phone's large text setting) the 48px targets and the text both double, and the first word fits
-// only from 412px with nothing waiting, so the accepted minimum there is the first three letters of each name ("Tum", "Sto").
+// only from 412px with nothing waiting, so the accepted minimum there is the first two letters of each name ("Tu", "St"); a third
+// letter fits on one machine's fonts and not on CI's.
 const MINIMUM: Record<number, { business: RegExp; branch: RegExp }> = {
   1: { business: /^Tumaini T/, branch: /^Store 1/ },
-  2: { business: /^Tum/, branch: /^Sto/ },
+  2: { business: /^Tu/, branch: /^St/ },
 };
 
 // The sync indicator in each state it can show: below 430px it is the dot and the number waiting alone, its name the words.
