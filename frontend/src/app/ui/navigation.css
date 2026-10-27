@@ -30,6 +30,13 @@
   min-height: 56px;
 }
 
+/* Below 430px the bar's controls sit closer, so the branch name keeps its room (issue #605); each is still a 48px target. */
+@media (max-width: 429px) {
+  .staff-bar-top {
+    gap: var(--space-1);
+  }
+}
+
 .staff-bar-spacer {
   flex: 1 1 0;
 }
@@ -846,8 +853,10 @@ img.menu-shop-logo {
 .sync-button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-2);
-  min-height: 44px;
+  min-width: var(--tap);
+  min-height: var(--tap);
 }
 
 .sync-dot {
@@ -872,21 +881,9 @@ img.menu-shop-logo {
   white-space: nowrap;
 }
 
-.sync-short {
+.sync-short,
+.sync-number {
   display: none;
-}
-
-/* Below 430px online is the dot alone in a 48px target (issue #605), so the branch name keeps its room; the button's name still
-   says Online. Offline and Syncing keep their word, so no state rests on colour alone (WCAG 1.4.1). */
-@media (max-width: 429px) {
-  .sync-button[data-state='online'] {
-    justify-content: center;
-    min-width: var(--tap);
-  }
-
-  .sync-button[data-state='online'] .sync-word {
-    display: none;
-  }
 }
 
 @media (max-width: 480px) {
@@ -895,6 +892,19 @@ img.menu-shop-logo {
   }
 
   .sync-short {
+    display: inline;
+  }
+}
+
+/* Below 430px the button is the dot and the number waiting alone, "3", in every state (issue #605), so the branch name keeps its
+   room. Its name and title keep the words ("Offline, 3 waiting to sync"); offline, the banner under the bar says it in words too. */
+@media (max-width: 429px) {
+  .sync-word,
+  .sync-short {
+    display: none;
+  }
+
+  .sync-number {
     display: inline;
   }
 }

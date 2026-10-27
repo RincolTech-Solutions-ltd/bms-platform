@@ -14,8 +14,9 @@ import '../src/app/ui/index.css';
 
 // The page header.layout.test.ts lays out in a real browser (issue #603): the staff top bar of an owner on the sale page, with
 // a long branch name, the Ask button (?ask=1: Ask BMS on, else How do I?) and its New dot, under the app's own stylesheets.
-// ?font= scales the root font size as a phone's large text setting does. Since issue #605 the bar also holds the Online
-// indicator of a person who sells offline and the business name over the branch; ?branch= and ?business= set those names.
+// ?font= scales the root font size as a phone's large text setting does. Since issue #605 the bar also holds the sync
+// indicator of a person who sells offline (?sync= online, offline or syncing; ?waiting= the sales queued) and the business name
+// over the branch (?branch=, ?business=).
 // Every name is invented.
 
 const query = new URLSearchParams(window.location.search);
@@ -33,12 +34,29 @@ client.setQueryData(ASK_STATUS_KEY, { enabled: query.get('ask') === '1', revisio
 // This page's host, 127.0.0.1, read as a business's own address, so the title shows the business name from its branding.
 client.setQueryData(['app-config'], { tenantHostPattern: '{slug}.0.0.1', platformHost: 'localhost' });
 client.setQueryData(['branding'], { display_name: query.get('business') ?? 'Kabalagala Hardware Traders', logo_url: null });
-// A manager who sells offline always has the Online indicator, online with nothing waiting.
-const nothingWaiting = { items: [], syncing: false, needsSignIn: false };
+// A manager who sells offline always has the sync indicator: ?sync= is online (the default), offline or syncing, and ?waiting=
+// the number of sales queued on the phone.
+const sync = query.get('sync') ?? 'online';
+const queued = Array.from({ length: Number(query.get('waiting') ?? '0') }, (_, i) => ({
+  id: `00000000-0000-4000-8000-00000000050${i}`,
+  scope: 'layout',
+  key: `layout-${i}`,
+  occurredAt: `2026-10-26T08:0${i}:00Z`,
+  branchId: branch,
+  branchName: 'Test Branch A',
+  method: 'cash',
+  totalMinor: 12000,
+  lines: [],
+  provisionalNo: `OFF-0000050${i}`,
+  state: 'queued',
+  attempts: 0,
+  nextAttemptAt: 0,
+}));
+const snapshot = { items: queued, syncing: sync === 'syncing', needsSignIn: false };
 const offline = {
   manager: true,
-  connectivity: { online: () => true, subscribe: () => () => undefined },
-  engine: { subscribe: () => () => undefined, snapshot: () => nothingWaiting },
+  connectivity: { online: () => sync !== 'offline', subscribe: () => () => undefined },
+  engine: { subscribe: () => () => undefined, snapshot: () => snapshot },
 } as unknown as Offline;
 const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/retail/sale'] }) });
 
