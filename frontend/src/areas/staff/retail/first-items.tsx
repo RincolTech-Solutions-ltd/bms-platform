@@ -42,8 +42,9 @@ export function FirstItemsCard() {
         <div className="stack" data-testid="first-items-actions">
           {/* Quick add first (issue #632): one form for the item, its prices and how many there are. */}
           <ScreenLink screen="quickAdd" to="/staff/retail/quick-add" action>Quick add an item</ScreenLink>
-          <ScreenLink screen="products" to="/staff/retail/catalogue/products">Add your first items</ScreenLink>
+          {/* Then Set up your shop beside it, then the Items page and the import (owner's order, review round 4 of #632). */}
           <ScreenLink screen="shopSetup" to="/staff/retail/catalogue/set-up">Set up your shop</ScreenLink>
+          <ScreenLink screen="products" to="/staff/retail/catalogue/products">Add your first items</ScreenLink>
           <ScreenLink screen="importer" to="/staff/retail/catalogue/import">Import a list</ScreenLink>
           <Link className="link-row" to="/staff/help/$articleId" params={{ articleId: 'getting-your-shop-ready' }}>
             How do I get my shop ready to sell?

@@ -292,3 +292,13 @@ describe('Sell it from Quick add (issue #632)', () => {
     expect(started).not.toHaveBeenCalled();
   });
 });
+
+describe('the first-run card order (issue #632)', () => {
+  it('has Quick add as its one primary action, then Set up your shop, Add your first items and Import a list', async () => {
+    open(<RecordSale key="sale" />, owner);
+    const actions = await screen.findByTestId('first-items-actions');
+    const links = within(actions).getAllByRole('link');
+    expect(links.map((l) => l.textContent)).toEqual(['Quick add an item', 'Set up your shop', 'Add your first items', 'Import a list', 'How do I get my shop ready to sell?']);
+    expect(links.filter((l) => (l.className ?? '').includes('btn-primary')).map((l) => l.textContent)).toEqual(['Quick add an item']);
+  });
+});
