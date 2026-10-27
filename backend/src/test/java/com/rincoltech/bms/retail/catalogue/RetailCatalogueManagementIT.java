@@ -229,6 +229,17 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                         .getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(actions()).contains("retail.unit.created", "retail.unit.updated");
+        // The audit names the smaller unit, as a person reads it, never its id.
+        String audited = TestDatabase.owner()
+                .sql("SELECT string_agg(cast(data AS text),"
+                        + " ' ') FROM audit_log WHERE tenant_id = ? AND action LIKE 'retail.unit.%'")
+                .param(t.tenantId())
+                .query(String.class)
+                .single();
+        assertThat(audited)
+                .contains("100.000 test-metre both", "50.000 test-piece buy")
+                .doesNotContain(metre.toString())
+                .doesNotContain(piece.toString());
     }
 
     @Test

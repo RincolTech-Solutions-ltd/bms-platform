@@ -195,7 +195,7 @@ class CatalogueService {
     Unit createUnit(UnitRequest r) {
         UUID id = UUID.randomUUID();
         String name = r.name().trim();
-        requireUsualPackOf(id, r.usualPack());
+        Unit of = requireUsualPackOf(id, r.usualPack());
         try {
             repo.insertUnit(id, name, CurrentPrincipal.require().userId());
         } catch (DuplicateKeyException e) {
@@ -205,7 +205,9 @@ class CatalogueService {
         after.put("name", name);
         if (r.usualPack() != null) {
             repo.setUsualPack(id, r.usualPack());
-            after.put("usual_pack", usualPackText(r.usualPack()));
+            after.put(
+                    "usual_pack",
+                    usualPackText(r.usualPack().size(), of.name(), r.usualPack().purpose()));
         }
         audit.record(AuditLog.Entry.created("retail.unit.created", "retail.unit", id, null, after));
         return repo.unit(id).orElseThrow();
@@ -213,11 +215,11 @@ class CatalogueService {
 
     /**
      * Issue #625, ADR-100: a pack's usual size counts another unit of the business that is switched on. The size is a starting
-     * number for the item's own pack, so it ties nothing down and has no price.
+     * number for the item's own pack, so it ties nothing down and has no price. Returns that smaller unit, or null with no pack.
      */
-    private void requireUsualPackOf(UUID unitId, UsualPackRequest pack) {
+    private Unit requireUsualPackOf(UUID unitId, UsualPackRequest pack) {
         if (pack == null) {
-            return;
+            return null;
         }
         Unit of = repo.unit(pack.ofUnitId()).orElse(null);
         if (of == null || of.id().equals(unitId)) {
@@ -228,10 +230,12 @@ class CatalogueService {
             throw ApiException.validation(List.of(new FieldProblem(
                     "usual_pack.of_unit_id", "inactive_unit", "This unit is switched off. Choose another one.")));
         }
+        return of;
     }
 
-    private static String usualPackText(UsualPackRequest pack) {
-        return pack.size().setScale(3).toPlainString() + " " + pack.ofUnitId() + " " + pack.purpose();
+    /** The audit of a usual pack names the smaller unit, as a person reads it (review of #628): "100.000 Metre both". */
+    private static String usualPackText(BigDecimal size, String ofUnit, String purpose) {
+        return size.setScale(3).toPlainString() + " " + ofUnit + " " + purpose;
     }
 
     /** Rename or (de)activate; the row stays, so products and history keep their meaning (#146). */
@@ -285,14 +289,14 @@ class CatalogueService {
         diff(was, now, "name", before.name(), name);
         diff(was, now, "active", before.active(), active);
         if (r.usualPack() != null) {
-            requireUsualPackOf(id, r.usualPack());
+            Unit of = requireUsualPackOf(id, r.usualPack());
             UsualPack had = before.usualPack();
             diff(
                     was,
                     now,
                     "usual_pack",
-                    had == null ? null : had.size() + " " + had.ofUnitId() + " " + had.purpose(),
-                    usualPackText(r.usualPack()));
+                    had == null ? null : usualPackText(new BigDecimal(had.size()), had.ofUnit(), had.purpose()),
+                    usualPackText(r.usualPack().size(), of.name(), r.usualPack().purpose()));
         }
         if (now.isEmpty()) {
             return before;
