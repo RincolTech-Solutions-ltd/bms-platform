@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
 import { RetailError } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
+import { IDEMPOTENCY_UNSURE_CODES } from '../../../api/retail-errors';
+import { readFileSync } from 'node:fs';
 import { branchLabel } from '../../../auth/branch';
 import { StaffContext } from '../context';
 
@@ -229,6 +231,56 @@ describe('quick add', () => {
     expect((second?.[0] as { qty?: string }).qty).toBe('10.000');
   });
 
+  it('locks the form while a send is not confirmed, and names the branch from the answer, never the select', async () => {
+    quickAdd.mockRejectedValueOnce(new RetailError('Bad gateway', 502, 'bad_gateway'));
+    // The replay adds at the first branch, whatever the select shows now.
+    quickAdd.mockResolvedValueOnce({ product_id: 'p5', description: 'Test Kettle', unit: 'pc', item_made: true, branch_id: branch?.id, qty: '10', total_qty: '10' });
+    open(owner);
+    type(/^Name/, 'Test Kettle');
+    type(/^Selling price/, '8000');
+    type(/How many do you have here now/, '10');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await screen.findByTestId('qa-not-sure');
+    expect((screen.getByTestId('qa-fields') as HTMLFieldSetElement).disabled).toBe(true);
+    // Even a change that slips through (a script, an old browser) is not sent: the held request goes again.
+    fireEvent.change(screen.getByLabelText(/^Where/), { target: { value: other?.id } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await screen.findByTestId('qa-done');
+    expect((quickAdd.mock.calls[1] as [Record<string, unknown>])[0]).toMatchObject({ branch_id: branch?.id });
+    expect(screen.getByTestId('qa-done').textContent).toBe(`Test Kettle added: 10 pc at ${branchLabel(branch)}`);
+  });
+
+  it('offers Start again only after the server refused for certain, and it clears the form', async () => {
+    quickAdd.mockRejectedValueOnce(new RetailError('Bad gateway', 502, 'bad_gateway'));
+    quickAdd.mockRejectedValueOnce(new RetailError('Choose a category.', 422, 'validation_failed'));
+    open(owner);
+    type(/^Name/, 'Test Mat');
+    type(/^Selling price/, '3000');
+    type(/How many do you have here now/, '1');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await screen.findByTestId('qa-not-sure');
+    expect(screen.queryByRole('button', { name: 'Start again' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start again' }));
+    expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe('');
+    expect((screen.getByTestId('qa-fields') as HTMLFieldSetElement).disabled).toBe(false);
+  });
+
+  it('never refuses silently when the existing item is chosen with nothing to add', async () => {
+    quickAdd.mockRejectedValueOnce(new RetailError('This product already exists: Test Rice 1kg (GNR-0001).', 422, 'duplicate_product_name', {
+      existing_id: 'p9', existing_code: 'GNR-0001', existing_name: 'Test Rice 1kg', may_add_anyway: false,
+    }));
+    open(owner);
+    type(/^Name/, 'Test Rice 1kg');
+    type(/^Selling price/, '5000');
+    type(/How many do you have here now/, '0');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    const panel = await screen.findByTestId('name-exists');
+    fireEvent.click(within(panel).getByRole('button', { name: 'Use the existing one and just add stock' }));
+    expect(screen.getByTestId('qa-panel-note').textContent).toBe('Type how many you are adding, more than 0, then tap Use the existing one and just add stock again.');
+    expect(quickAdd).toHaveBeenCalledTimes(1);
+  });
+
   it('takes a new key once the server refuses for certain', async () => {
     quickAdd.mockRejectedValueOnce(new RetailError('Choose a category.', 422, 'validation_failed'));
     quickAdd.mockResolvedValueOnce({ product_id: 'p6', description: 'Test Fan', unit: 'pc', item_made: true, qty: '1', total_qty: '1' });
@@ -266,6 +318,12 @@ describe('quick add', () => {
 });
 
 describe('the words and defaults', () => {
+  it('names the same idempotency codes as the server', () => {
+    const java = readFileSync(`${process.cwd()}/../backend/src/main/java/com/rincoltech/bms/core/operations/Idempotency.java`, 'utf8');
+    for (const code of IDEMPOTENCY_UNSURE_CODES) expect(java).toContain(`= "${code}";`);
+    expect(IDEMPOTENCY_UNSURE_CODES).toHaveLength(2);
+  });
+
   it('counts only a 4xx refusal other than the answers about the key itself as certain', () => {
     expect(refusedForCertain(new RetailError('x', 422, 'validation_failed'))).toBe(true);
     for (const e of [new RetailError('x', 502), new RetailError('x', 504), new RetailError('x', 0), new RetailError('x', 409, 'idempotency_in_progress'), new RetailError('x', 422, 'idempotency_key_reused'), new TypeError('fetch')]) {

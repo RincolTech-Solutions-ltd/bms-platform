@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute, useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { RETAIL_CURRENCY, RetailError, retail, type QuickAdd, type QuickAddRequest, type Unit } from '../../../api/retail';
+import { IDEMPOTENCY_UNSURE_CODES } from '../../../api/retail-errors';
 import { branchLabel } from '../../../auth/branch';
 import { WORDS } from '../../../app/glossary';
 import { BusyButton } from '../../../app/ui/BusyButton';
@@ -60,7 +61,7 @@ function unreachable(error: unknown): boolean {
  */
 export function refusedForCertain(error: unknown): boolean {
   return error instanceof RetailError && error.status >= 400 && error.status < 500
-    && error.code !== 'idempotency_in_progress' && error.code !== 'idempotency_key_reused';
+    && !IDEMPOTENCY_UNSURE_CODES.includes(error.code ?? '');
 }
 
 export const NO_COST_HINT = 'Add a buying price so profit is right. If you do not know it yet, buying stock sets it.';
@@ -95,13 +96,19 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const [showErrors, setShowErrors] = useState(false);
   const [offline, setOffline] = useState(false);
   const [exists, setExists] = useState<ExistingItem | null>(null);
-  const [done, setDone] = useState<{ added: QuickAdd; where: string; note: string | null } | null>(null);
+  const [done, setDone] = useState<{ added: QuickAdd; note: string | null } | null>(null);
   // One key per attempt, and the request sent with it. While the answer is not certain (lost, a 5xx, a timeout) both are kept and
   // Add sends exactly that request again, whatever was typed since, so a retry can never add the stock twice; a new key and a new
   // request only once the server has answered for certain (success, or a 4xx refusal).
   const key = useRef(newIdempotencyKey());
   const unsure = useRef<QuickAddRequest | null>(null);
   const [notSure, setNotSure] = useState(false);
+  // True while a request may have gone through: every field is locked, so what is shown is what is being sent again.
+  const [held, setHeld] = useState(false);
+  // True after the server refused for certain (nothing was saved): Start again is offered then, and only then.
+  const [refused, setRefused] = useState(false);
+  // What the duplicate panel says when the quantity is not yet above 0.
+  const [panelNote, setPanelNote] = useState<string | null>(null);
   const form = useRef<HTMLFormElement>(null);
   const piece = pieceUnit(units.data ?? []);
   // A Piece or a General the owner switched off is never switched back on by the server: the person chooses one instead.
@@ -121,7 +128,6 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const complete = name.trim() !== '' && sellMinor !== null && costMinor !== null && (!mayCount || (counted !== null && where !== ''))
     && (!pieceOff || unitId !== '') && (!generalOff || categoryId !== '');
   const canAddAnyway = (me.permissions ?? []).includes('core.settings.manage');
-  const whereName = branchLabel((me.branches ?? []).find((b) => b.id === where));
 
   const add = useMutation({
     mutationFn: async (extra: { productId?: string; duplicateReason?: string }) => {
@@ -148,8 +154,10 @@ export function QuickAddForm({ initialName = '', onSell }: {
       key.current = newIdempotencyKey();
       unsure.current = null;
       setNotSure(false);
+      setHeld(false);
+      setRefused(false);
       setExists(null);
-      setDone({ added, where: whereName, note });
+      setDone({ added, note });
       // The first-run card, the item search, the stock lists and Home all read again with the new item.
       for (const k of [['retail', 'catalogue'], ['retail', 'products'], ['retail', 'stock'], ['retail', 'stocked-branches'], ['retail', 'home']]) {
         void queryClient.invalidateQueries({ queryKey: k });
@@ -160,13 +168,16 @@ export function QuickAddForm({ initialName = '', onSell }: {
         // The request may have gone through: the key and the request are kept for the next tap.
         if (unreachable(error)) setOffline(true);
         else setNotSure(true);
+        setHeld(true);
         return;
       }
       // The server refused for certain, so the next attempt is a new request.
       key.current = newIdempotencyKey();
       unsure.current = null;
       setNotSure(false);
+      setHeld(false);
       const found = existingOf(error);
+      setRefused(!found);
       if (found) setExists({ ...found, mayAddAnyway: found.mayAddAnyway && canAddAnyway });
     },
   });
@@ -175,6 +186,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
     e?.preventDefault();
     if (add.isPending || exists !== null) return;
     setKept(null);
+    setRefused(false);
     if (!complete && unsure.current === null) {
       setShowErrors(true);
       if (form.current) focusFirstMissing(form.current);
@@ -184,6 +196,21 @@ export function QuickAddForm({ initialName = '', onSell }: {
     if (!online || (typeof navigator !== 'undefined' && navigator.onLine === false)) return setOffline(true);
     setOffline(false);
     add.mutate({});
+  };
+  /** Start again: everything typed is cleared, after the server said for certain that nothing was saved. */
+  const startAgain = () => {
+    setName('');
+    setSell('');
+    setCost('');
+    setQty('');
+    setCategoryId('');
+    setUnitId(piece?.id ?? '');
+    setWhere(null);
+    setPhoto(null);
+    setShowErrors(false);
+    setRefused(false);
+    add.reset();
+    setTimeout(() => document.getElementById('qa-name')?.focus());
   };
   /** Add another: a clear form, keeping the category and where, so a run of items from one shelf is quick. */
   const another = () => {
@@ -199,20 +226,23 @@ export function QuickAddForm({ initialName = '', onSell }: {
   };
 
   if (done) {
-    const sellsThere = (me.branches ?? []).some((b) => b.id === where && b.sells_goods !== false);
+    // The branch the server added the stock at, from its answer: never the select, which a retry may have left elsewhere.
+    const at = done.added.branch_id ?? '';
+    const atName = branchLabel((me.branches ?? []).find((b) => b.id === at));
+    const sellsThere = (me.branches ?? []).some((b) => b.id === at && b.sells_goods !== false);
     // Sell it only where this person may sell: the sale waits for that branch to be the one in use.
     const stocked = done.added.qty !== undefined && Number(done.added.qty) > 0;
-    const canSell = onSell && canUse(me, 'sale') && holdsAt(me, 'retail.sale.create', where) && sellsThere && stocked;
+    const canSell = onSell && canUse(me, 'sale') && holdsAt(me, 'retail.sale.create', at) && sellsThere && stocked;
     // Someone who sells, but not at this branch (or at a store), is told why there is no Sell it, rather than left waiting.
     const notHere = onSell && canUse(me, 'sale') && stocked && !canSell;
     return (
       <section className="rt-card stack" aria-labelledby="qa-done">
-        <p id="qa-done" role="status" className="alert alert-success" data-testid="qa-done">{addedLine(done.added, done.where)}</p>
+        <p id="qa-done" role="status" className="alert alert-success" data-testid="qa-done">{addedLine(done.added, atName)}</p>
         {done.note && <p className="hint" data-testid="qa-photo-note">{done.note}</p>}
-        {notHere && <p className="hint" data-testid="qa-not-here">{sellsThere ? `You do not sell at ${done.where}, so Sell it is not offered here.` : `${done.where} is a store, so the item is sold from a shop.`}</p>}
+        {notHere && <p className="hint" data-testid="qa-not-here">{sellsThere ? `You do not sell at ${atName}, so Sell it is not offered here.` : `${atName} is a store, so the item is sold from a shop.`}</p>}
         <p className="cluster">
           <button type="button" className="rt-primary" onClick={another}>Add another</button>
-          {canSell && <button type="button" onClick={() => onSell(done.added.product_id ?? '', where)}>Sell it</button>}
+          {canSell && <button type="button" onClick={() => onSell(done.added.product_id ?? '', at)}>Sell it</button>}
         </p>
       </section>
     );
@@ -221,6 +251,8 @@ export function QuickAddForm({ initialName = '', onSell }: {
   return (
     <form ref={form} className="stack" onSubmit={submit} noValidate aria-label={QUICK_ADD}>
       <FieldsNeededNote />
+      {/* While a send is not confirmed every field is locked: Add sends again exactly what is shown (review round 4). */}
+      <fieldset disabled={held} className="form-lock stack" data-testid="qa-fields">
       <div className="stack" data-tour="quick-add-fields">
       <Field
         id="qa-name"
@@ -318,9 +350,11 @@ export function QuickAddForm({ initialName = '', onSell }: {
       )}
       <PhotoChoice id="qa-photo" file={photo} onChange={setPhoto} />
       </div>
-      {exists && mayCount && counted !== null && (
+      </fieldset>
+      {exists && mayCount && counted !== null && counted > 0 && (
         <p className="hint" data-testid="qa-adds-to">The {showQty(qtyString(counted))} you typed is added to the stock it already has there.</p>
       )}
+      {exists && panelNote && <p role="alert" className="alert alert-warning" data-testid="qa-panel-note">{panelNote}</p>}
       {exists && (
         <ExistsPanel
           item={exists}
@@ -328,7 +362,16 @@ export function QuickAddForm({ initialName = '', onSell }: {
           busy={add.isPending}
           openLabel={mayCount ? 'Use the existing one and just add stock' : 'Keep the existing one'}
           onOpen={(id) => {
-            if (mayCount) return add.mutate({ productId: id });
+            if (mayCount && counted !== null && counted > 0) {
+              setPanelNote(null);
+              return add.mutate({ productId: id });
+            }
+            if (mayCount) {
+              // Nothing to add yet: say so in the panel, never a silent refusal.
+              setPanelNote('Type how many you are adding, more than 0, then tap Use the existing one and just add stock again.');
+              setTimeout(() => document.getElementById('qa-qty')?.focus());
+              return;
+            }
             // Nothing to add for someone who may not add stock: the existing item stays as it is and the form is cleared, so Add
             // never sends the same name again.
             setKept(`${exists.name} is already in your items. Nothing new was added. To add stock to it, ask your manager.`);
@@ -341,7 +384,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
             setTimeout(() => document.getElementById('qa-name')?.focus());
           }}
           onAddAnyway={(reason) => add.mutate({ duplicateReason: reason })}
-          onChangeName={() => { setExists(null); setTimeout(() => document.getElementById('qa-name')?.focus()); }}
+          onChangeName={() => { setExists(null); setPanelNote(null); setTimeout(() => document.getElementById('qa-name')?.focus()); }}
         />
       )}
       {kept && <p role="status" className="hint" data-testid="qa-kept">{kept}</p>}
@@ -354,6 +397,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
       )}
       <p className="cluster" data-tour="quick-add-go">
         <BusyButton busy={add.isPending} type="submit" className="rt-primary" disabled={exists !== null}>Add</BusyButton>
+        {refused && <button type="button" className="btn-ghost" onClick={startAgain}>Start again</button>}
       </p>
     </form>
   );
