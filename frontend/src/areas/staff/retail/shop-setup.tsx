@@ -55,6 +55,8 @@ export function ShopSetupPage() {
   const [edits, setEdits] = useState<Record<string, PackEdit>>({});
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<SetupResult | null>(null);
+  // A size's problem shows once its field is left, or Add these takes the person to it (docs/ui-rules.md rule 10).
+  const [left, setLeft] = useState<Set<string>>(new Set());
   const categories = useQuery({ queryKey: ['retail', 'catalogue', 'categories'], queryFn: () => retail.listCategories() });
   const units = useQuery({ queryKey: ['retail', 'catalogue', 'units'], queryFn: () => retail.listUnits() });
   const type = shopTypeById(typeId);
@@ -84,7 +86,9 @@ export function ShopSetupPage() {
 
   const add = async () => {
     if (!type || busy) return;
+    // Add these stays enabled; a wrong size sends nothing and the press takes the person to it (docs/ui-rules.md rule 6).
     if (firstBadSize) {
+      setLeft((was) => new Set(was).add(key(firstBadSize.kind, firstBadSize.name)));
       document.getElementById(`setup-size-${firstBadSize.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`)?.focus();
       return;
     }
@@ -131,7 +135,7 @@ export function ShopSetupPage() {
         <legend>What kind of shop is it?</legend>
         {SHOP_TYPES.map((t) => (
           <label key={t.id} htmlFor={`setup-type-${t.id}`}>
-            <input id={`setup-type-${t.id}`} type="radio" name="setup-type" value={t.id} checked={typeId === t.id} onChange={() => { setTypeId(t.id); setUnticked(new Set()); setEdits({}); setResult(null); }} />{' '}
+            <input id={`setup-type-${t.id}`} type="radio" name="setup-type" value={t.id} checked={typeId === t.id} onChange={() => { setTypeId(t.id); setUnticked(new Set()); setEdits({}); setLeft(new Set()); setResult(null); }} />{' '}
             {t.label} <span className="hint">{t.hint}</span>
           </label>
         ))}
@@ -163,14 +167,14 @@ export function ShopSetupPage() {
                     const needs = packNeeds(i, ticked, units.data ?? []);
                     const e = edits[k] ?? { size: String(i.size), use: i.use ?? 'both' };
                     const slug = i.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-                    const problem = factorProblem(e.size);
+                    const problem = left.has(k) ? factorProblem(e.size) : null;
                     return (
                       <div key={i.name} className="stack" data-testid={`setup-pack-${slug}`}>
                         <Choice item={i} ticked={on} onTick={(v) => tick(i, v)} meta={needs ? `Tick ${needs} too, or this pack is left out.` : packText(e.size, i.of ?? '', e.use)} />
                         {on && !needs && (
                           <>
                             <label htmlFor={`setup-size-${slug}`}>{`${i.of} in one ${i.name}`}</label>
-                            <input id={`setup-size-${slug}`} inputMode="decimal" value={e.size} onChange={(ev) => edit(i, { size: ev.target.value })} aria-invalid={problem !== null} aria-describedby={problem !== null ? `setup-size-problem-${slug}` : undefined} />
+                            <input id={`setup-size-${slug}`} inputMode="decimal" value={e.size} onChange={(ev) => edit(i, { size: ev.target.value })} onBlur={() => setLeft((was) => new Set(was).add(k))} aria-invalid={problem !== null} aria-describedby={problem !== null ? `setup-size-problem-${slug}` : undefined} />
                             {problem !== null && <p id={`setup-size-problem-${slug}`} className="rt-flag">{problem}</p>}
                             <p className="hint">How do you buy and sell this?</p>
                             <Segmented label={`How do you buy and sell a ${i.name}?`} options={USES} value={e.use} onChange={(use) => edit(i, { use })} />
@@ -193,7 +197,7 @@ export function ShopSetupPage() {
           {!online && <p className="hint" data-testid="setup-offline">{OFFLINE_ADD}</p>}
           {open.length > 0 && (
             <ActionBar>
-              <BusyButton busy={busy} type="button" className="rt-primary" disabled={!online || chosen.length === 0} notReady={firstBadSize !== undefined} onClick={() => void add()}>
+              <BusyButton busy={busy} type="button" className="rt-primary" disabled={!online || chosen.length === 0} onClick={() => void add()}>
                 {chosen.length > 0 ? `Add these (${chosen.length})` : 'Add these'}
               </BusyButton>
             </ActionBar>

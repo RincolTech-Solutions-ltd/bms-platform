@@ -129,6 +129,20 @@ describe('Set up your shop (issue #625)', () => {
     expect(within(screen.getByTestId('setup-pack-crate')).getByText(/Tick Bottle too, or this pack is left out\./)).toBeTruthy();
   });
 
+  it('shows a wrong size once its field is left, and Add these sends nothing until it is right', async () => {
+    draw();
+    fireEvent.click(screen.getByLabelText(/Phones and accessories/));
+    const box = within(await screen.findByTestId('setup-pack-box'));
+    const size = box.getByLabelText('Piece in one Box');
+    fireEvent.change(size, { target: { value: '0' } });
+    expect(box.queryByText(/Enter how many/)).toBeNull();
+    fireEvent.blur(size);
+    expect(box.getByText(/Enter how many of the item are in one pack/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^Add these/ }));
+    await waitFor(() => expect(document.activeElement).toBe(size));
+    expect(createCategory).not.toHaveBeenCalled();
+  });
+
   it('is only for someone who may add categories and units', () => {
     draw(mockMe('sales'));
     expect(screen.queryByText('What kind of shop is it?')).toBeNull();
