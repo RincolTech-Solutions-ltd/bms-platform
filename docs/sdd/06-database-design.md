@@ -715,6 +715,17 @@ articles only), `cited_article varchar(80)`, `provider`, `model`, `revision varc
 `created_at`; 30 days by default, a safety net, since any change is a new key). Grants `SELECT, INSERT, UPDATE`: the update
 replaces only a row past its expiry under the same key (`ON CONFLICT ... WHERE expires_at <= the new created_at`).
 
+### `help_setup_drafts` (RLS)
+
+(ADR-102; migration `V113`, issue #626) The setup helper's draft log: one row per draft, written before the providers are asked,
+under the business's advisory lock, so the person's hourly limit and the business's daily cap count rows already recorded.
+`id`, `tenant_id`, `user_id` (FK `(tenant_id, user_id)` to `users`), `asked_at`, `kind` (`retail` or `lending`), `source`
+(`text`, `photo` or `file`), `outcome` (`started` until it is finished, then `drafted`, `no_provider`, `all_failed`,
+`daily_cap` or `unreadable`), `provider` (`gemini`, `groq` or `deepseek`, set exactly when `drafted`), `model`, `failures
+text[]` (`name:reason`), `rows_drafted`, `input_tokens`, `output_tokens`, `cost_micro`, `cost_currency`, `latency_ms`. Never the
+list, the file, the picture or the draft. Indexes on `(tenant_id, user_id, asked_at)` and `(tenant_id, asked_at)`. Grants
+`SELECT, INSERT, UPDATE`: the update finishes a `started` row. Each provider call is a row of `help_ask_spend` too. The purge of
+a closed business deletes the rows.
 ### `subscription_module_requests` (RLS)
 
 (ADR-073; migration `V90`, issue #472) One row per module the Owner asked for. `module_key text NOT NULL` (`^[a-z]{2,30}$`),
