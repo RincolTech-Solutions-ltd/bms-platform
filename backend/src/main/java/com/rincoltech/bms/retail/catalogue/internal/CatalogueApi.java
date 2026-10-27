@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
@@ -39,7 +40,26 @@ final class CatalogueApi {
             String codePrefix) {}
 
     @Schema(name = "RetailUnitRequest")
-    record UnitRequest(@NotBlank @Size(max = 30) String name) {}
+    record UnitRequest(
+            @NotBlank @Size(max = 30) String name, @Valid UsualPackRequest usualPack) {}
+
+    /** Issue #625, ADR-100: a unit that is a pack, with its usual size in a smaller unit and what it is for. Never a price. */
+    @Schema(
+            name = "RetailUsualPackRequest",
+            description =
+                    "The usual size of this pack in a smaller unit, such as a roll of 100 metres, and what it is for")
+    record UsualPackRequest(
+            @NotNull
+            @DecimalMin("1")
+            @Digits(integer = 11, fraction = 3)
+            @Schema(type = "string", description = "How many of the smaller unit, at least 1, up to three places")
+            BigDecimal size,
+
+            @NotNull @Schema(description = "The smaller unit, such as Metre or Piece")
+            UUID ofUnitId,
+
+            @NotNull @Pattern(regexp = "buying|selling|both") @Schema(allowableValues = {"buying", "selling", "both"})
+            String use) {}
 
     @Schema(name = "RetailCategoryUpdate", description = "Omitted fields are unchanged; a category is never deleted")
     record UpdateCategoryRequest(
@@ -50,7 +70,12 @@ final class CatalogueApi {
             String codePrefix) {}
 
     @Schema(name = "RetailUnitUpdate", description = "Omitted fields are unchanged; a unit is never deleted")
-    record UpdateUnitRequest(@Size(min = 1, max = 30) String name, Boolean active) {}
+    record UpdateUnitRequest(
+            @Size(min = 1, max = 30) String name,
+            Boolean active,
+
+            @Valid @Schema(description = "Issue #625: sets the usual pack; left out, it is unchanged")
+            UsualPackRequest usualPack) {}
 
     @Schema(name = "RetailCategory")
     record Category(
@@ -81,7 +106,22 @@ final class CatalogueApi {
             int productCount,
 
             @Schema(description = "Send as If-Match when updating")
-            int version) {}
+            int version,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(description = "Issue #625: present only when this unit is a pack with a usual size")
+            UsualPack usualPack) {}
+
+    @Schema(name = "RetailUsualPack", description = "The usual size of a pack in a smaller unit, and what it is for")
+    record UsualPack(
+            @Schema(description = "How many of the smaller unit, three places, for example 100.000")
+            String size,
+
+            UUID ofUnitId,
+            @Schema(description = "The smaller unit's name") String ofUnit,
+
+            @Schema(allowableValues = {"buying", "selling", "both"})
+            String use) {}
 
     @Schema(name = "RetailCategoryPrefixSuggestion")
     record PrefixSuggestion(String codePrefix) {}

@@ -32,6 +32,8 @@ import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdateCategoryR
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdatePackRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdateProductRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdateUnitRequest;
+import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UsualPack;
+import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UsualPackRequest;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -191,15 +193,45 @@ class CatalogueService {
 
     @Transactional
     Unit createUnit(UnitRequest r) {
-        Unit u = new Unit(UUID.randomUUID(), r.name().trim(), true, 0, 1);
+        UUID id = UUID.randomUUID();
+        String name = r.name().trim();
+        requireUsualPackOf(id, r.usualPack());
         try {
-            repo.insertUnit(u.id(), u.name(), CurrentPrincipal.require().userId());
+            repo.insertUnit(id, name, CurrentPrincipal.require().userId());
         } catch (DuplicateKeyException e) {
             throw duplicate("duplicate_unit", "A unit with this name exists.");
         }
-        audit.record(
-                AuditLog.Entry.created("retail.unit.created", "retail.unit", u.id(), null, Map.of("name", u.name())));
-        return u;
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("name", name);
+        if (r.usualPack() != null) {
+            repo.setUsualPack(id, r.usualPack());
+            after.put("usual_pack", usualPackText(r.usualPack()));
+        }
+        audit.record(AuditLog.Entry.created("retail.unit.created", "retail.unit", id, null, after));
+        return repo.unit(id).orElseThrow();
+    }
+
+    /**
+     * Issue #625, ADR-100: a pack's usual size counts another unit of the business that is switched on. The size is a starting
+     * number for the item's own pack, so it ties nothing down and has no price.
+     */
+    private void requireUsualPackOf(UUID unitId, UsualPackRequest pack) {
+        if (pack == null) {
+            return;
+        }
+        Unit of = repo.unit(pack.ofUnitId()).orElse(null);
+        if (of == null || of.id().equals(unitId)) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "usual_pack.of_unit_id", "unknown_unit", "Choose another unit that this pack holds.")));
+        }
+        if (!of.active()) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "usual_pack.of_unit_id", "inactive_unit", "This unit is switched off. Choose another one.")));
+        }
+    }
+
+    private static String usualPackText(UsualPackRequest pack) {
+        return pack.size().setScale(3).toPlainString() + " " + pack.ofUnitId() + " " + pack.use();
     }
 
     /** Rename or (de)activate; the row stays, so products and history keep their meaning (#146). */
@@ -252,6 +284,16 @@ class CatalogueService {
         Map<String, Object> now = new LinkedHashMap<>();
         diff(was, now, "name", before.name(), name);
         diff(was, now, "active", before.active(), active);
+        if (r.usualPack() != null) {
+            requireUsualPackOf(id, r.usualPack());
+            UsualPack had = before.usualPack();
+            diff(
+                    was,
+                    now,
+                    "usual_pack",
+                    had == null ? null : had.size() + " " + had.ofUnitId() + " " + had.use(),
+                    usualPackText(r.usualPack()));
+        }
         if (now.isEmpty()) {
             return before;
         }
@@ -266,6 +308,9 @@ class CatalogueService {
             }
         } catch (DuplicateKeyException e) {
             throw duplicate("duplicate_unit", "A unit with this name exists.");
+        }
+        if (now.containsKey("usual_pack")) {
+            repo.setUsualPack(id, r.usualPack());
         }
         audit.record(new AuditLog.Entry("retail.unit.updated", "retail.unit", id, null, was, now));
         return repo.unit(id).orElseThrow();
