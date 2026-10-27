@@ -6037,7 +6037,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Quick add: a new item (or one already in the list) and how many there are at a branch, as a one-line stock count, in one transaction; the count also needs retail.stocktake.commit there (issue #632); M */
+        /** Quick add: a new item (or one already in the list) and stock added at a branch as opening stock, in one transaction; the stock also needs retail.stocktake.commit there (issue #632, ADR-101); M */
         post: operations["quickAddRetailItem"];
         delete?: never;
         options?: never;
@@ -15804,20 +15804,22 @@ export interface components {
             description?: string;
             /** @description False when the item was already in the list */
             item_made?: boolean;
-            /** Format: uuid */
-            product_id?: string;
-            /** @description The count recorded; absent when no stock was recorded */
-            qty?: string;
             /**
              * Format: uuid
-             * @description The committed one-line stock count; absent when no stock was recorded
+             * @description The opening movement of source retail.quick_add; absent when nothing was added
              */
-            stocktake_id?: string;
+            movement_id?: string;
+            /** Format: uuid */
+            product_id?: string;
+            /** @description The quantity added; absent when no stock was recorded */
+            qty?: string;
+            /** @description What the branch holds now; absent when no stock was recorded */
+            total_qty?: string;
             unit?: string;
             /** @description True when this add made the Piece unit */
             unit_made?: boolean;
         };
-        /** @description Issue #632: an item, its prices and how many there are at a branch, in one tap. With product_id, an item already in the list, only its count is recorded and the other item fields are ignored */
+        /** @description Issue #632: an item, its prices and how many there are at a branch, in one tap. With product_id, an item already in the list, only the quantity is added and the other item fields are ignored */
         RetailQuickAddRequest: {
             /**
              * Format: uuid
@@ -15844,7 +15846,7 @@ export interface components {
              */
             product_id?: string;
             /**
-             * @description How many there are at the branch now, recorded as a stock count of this one item (retail.stocktake.commit at the branch); left out, no stock is recorded
+             * @description How many to add to the item's stock at the branch (retail.stocktake.commit there), as opening stock against opening balance equity; more than 0 with product_id; left out, no stock is recorded
              * @example 600
              */
             qty?: string;
@@ -30298,7 +30300,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The item, and the count when one was recorded */
+            /** @description The item, and the stock added when some was */
             201: {
                 headers: {
                     [name: string]: unknown;

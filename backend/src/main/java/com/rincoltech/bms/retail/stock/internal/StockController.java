@@ -195,12 +195,12 @@ class StockController {
     @RequiresPermission("retail.catalogue.manage")
     @Operation(
             summary =
-                    "Quick add: a new item (or one already in the list) and how many there are at a branch, as a one-line"
-                            + " stock count, in one transaction; the count also needs retail.stocktake.commit there (issue #632); M",
+                    "Quick add: a new item (or one already in the list) and stock added at a branch as opening stock, in one"
+                            + " transaction; the stock also needs retail.stocktake.commit there (issue #632, ADR-101); M",
             operationId = "quickAddRetailItem")
     @ApiResponse(
             responseCode = "201",
-            description = "The item, and the count when one was recorded",
+            description = "The item, and the stock added when some was",
             content =
                     @Content(
                             mediaType = MediaType.APPLICATION_JSON_VALUE,

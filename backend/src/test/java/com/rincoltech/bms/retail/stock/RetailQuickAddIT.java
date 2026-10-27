@@ -76,6 +76,16 @@ class RetailQuickAddIT extends IntegrationTest {
         return TestDatabase.owner().sql(sql).params(params).query(Long.class).single();
     }
 
+    /** Debits less credits on the account of `systemKey` from entries of `sourceType`. */
+    long sourceTotal(String systemKey, String sourceType) {
+        return scalar("""
+                        SELECT coalesce(sum(l.debit - l.credit), 0) FROM journal_lines l
+                          JOIN journal_entries j ON j.id = l.entry_id
+                          JOIN gl_accounts a ON a.id = l.account_id
+                         WHERE l.tenant_id = ? AND a.system_key = ? AND j.source_type = ?
+                        """, t.tenantId(), systemKey, sourceType);
+    }
+
     static UUID productOf(ResponseEntity<JsonNode> r) {
         return UUID.fromString(r.getBody().get("product_id").asString());
     }
@@ -101,14 +111,25 @@ class RetailQuickAddIT extends IntegrationTest {
         assertThat(stockAt(hq, product)).isEqualByComparingTo("0");
         // The other item is untouched: its stock stands and the count never names it.
         assertThat(stockAt(hq, other)).isEqualByComparingTo("7");
-        UUID stocktake = UUID.fromString(added.get("stocktake_id").asString());
-        assertThat(scalar("SELECT count(*) FROM retail_stocktake_lines WHERE stocktake_id = ?", stocktake))
-                .isEqualTo(1);
+        assertThat(added.get("total_qty").asString()).isEqualTo("600");
+        // One opening movement of its own source, at the buying price typed; no stock count, so no lost or damaged
+        // stock.
+        UUID movement = UUID.fromString(added.get("movement_id").asString());
         assertThat(scalar(
-                        "SELECT count(*) FROM retail_stocktakes WHERE id = ? AND status = 'committed' AND branch_id = ?",
-                        stocktake,
+                        "SELECT count(*) FROM retail_stock_movements WHERE id = ? AND kind = 'opening'"
+                                + " AND source_type = 'retail.quick_add' AND branch_id = ? AND qty = 600 AND unit_cost_minor = 4000",
+                        movement,
                         br2))
                 .isEqualTo(1);
+        assertThat(scalar("SELECT count(*) FROM retail_stock_movements WHERE product_id = ?", product))
+                .isEqualTo(1);
+        assertThat(scalar("SELECT count(*) FROM retail_stocktakes WHERE tenant_id = ?", t.tenantId()))
+                .isEqualTo(1);
+        // Starting stock is never profit: inventory against opening balance equity, 600 at 4,000; the shrinkage account
+        // holds only the other item's count.
+        assertThat(sourceTotal("inventory", "retail.quick_add")).isEqualTo(2_400_000);
+        assertThat(sourceTotal("opening_balance_equity", "retail.quick_add")).isEqualTo(-2_400_000);
+        assertThat(sourceTotal("stock_shrinkage", "retail.quick_add")).isZero();
         // The item carries the prices typed.
         JsonNode read = api.get("/products/" + product, ADMIN).getBody();
         assertThat(read.get("sell_minor").asLong()).isEqualTo(6_000);
@@ -248,7 +269,7 @@ class RetailQuickAddIT extends IntegrationTest {
                 .isEqualTo(1);
         assertThat(stockAt(hq, product)).isEqualByComparingTo("5");
 
-        // Use the existing one and just add stock: the count is how many there are now.
+        // Use the existing one and just add stock: exactly the quantity typed is added, 5 becomes 13, never set to 8.
         Map<String, Object> existing = new LinkedHashMap<>();
         existing.put("product_id", product);
         existing.put("qty", "8");
@@ -256,7 +277,12 @@ class RetailQuickAddIT extends IntegrationTest {
         ResponseEntity<JsonNode> counted = quickAdd(existing);
         assertThat(counted.getStatusCode()).as("%s", counted.getBody()).isEqualTo(HttpStatus.CREATED);
         assertThat(counted.getBody().get("item_made").asBoolean()).isFalse();
-        assertThat(stockAt(hq, product)).isEqualByComparingTo("8");
+        assertThat(stockAt(hq, product)).isEqualByComparingTo("13");
+        assertThat(counted.getBody().get("qty").asString()).isEqualTo("8");
+        assertThat(counted.getBody().get("total_qty").asString()).isEqualTo("13");
+        // Adding nothing to an item already in the list is refused.
+        existing.put("qty", "0");
+        assertThat(quickAdd(existing).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(api.get("/products/" + product, ADMIN)
                         .getBody()
                         .get("sell_minor")
@@ -280,8 +306,8 @@ class RetailQuickAddIT extends IntegrationTest {
                 "*",
                 UUID.randomUUID().toString());
         assertThat(itemOnly.getStatusCode()).as("%s", itemOnly.getBody()).isEqualTo(HttpStatus.CREATED);
-        assertThat(itemOnly.getBody().has("stocktake_id")
-                        && !itemOnly.getBody().get("stocktake_id").isNull())
+        assertThat(itemOnly.getBody().has("movement_id")
+                        && !itemOnly.getBody().get("movement_id").isNull())
                 .isFalse();
 
         // Without catalogue manage the route is refused.

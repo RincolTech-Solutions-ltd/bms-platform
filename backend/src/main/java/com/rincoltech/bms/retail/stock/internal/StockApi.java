@@ -156,7 +156,7 @@ final class StockApi {
             name = "RetailQuickAddRequest",
             description =
                     "Issue #632: an item, its prices and how many there are at a branch, in one tap. With product_id, an item"
-                            + " already in the list, only its count is recorded and the other item fields are ignored")
+                            + " already in the list, only the quantity is added and the other item fields are ignored")
     record QuickAddRequest(
             @Schema(description = "An item already in the list, chosen instead of a new item of the same name")
             UUID productId,
@@ -183,8 +183,10 @@ final class StockApi {
             @Schema(
                     type = "string",
                     example = "600",
-                    description = "How many there are at the branch now, recorded as a stock count of this one item"
-                            + " (retail.stocktake.commit at the branch); left out, no stock is recorded")
+                    description =
+                            "How many to add to the item's stock at the branch (retail.stocktake.commit there), as"
+                                    + " opening stock against opening balance equity; more than 0 with product_id; left out, no"
+                                    + " stock is recorded")
             BigDecimal qty,
 
             @Schema(description = "Where the stock is; defaults to the caller's one branch")
@@ -212,11 +214,14 @@ final class StockApi {
 
             UUID branchId,
 
-            @Schema(type = "string", description = "The count recorded; absent when no stock was recorded")
+            @Schema(type = "string", description = "The quantity added; absent when no stock was recorded")
             String qty,
 
-            @Schema(description = "The committed one-line stock count; absent when no stock was recorded")
-            UUID stocktakeId) {}
+            @Schema(type = "string", description = "What the branch holds now; absent when no stock was recorded")
+            String totalQty,
+
+            @Schema(description = "The opening movement of source retail.quick_add; absent when nothing was added")
+            UUID movementId) {}
 
     @Schema(
             name = "RetailStockCorrectionRequest",
