@@ -112,7 +112,8 @@ export function EmptyChoice<T>({ id, label, text, ask, add, required = false }: 
   id: string;
   label?: ReactNode;
   text: string;
-  ask: string;
+  /** Who to ask, for a session that may not add one; left out where everyone may add one. */
+  ask?: string;
   add?: ChoiceAdd<T> | null;
   required?: boolean;
 }) {
@@ -122,9 +123,9 @@ export function EmptyChoice<T>({ id, label, text, ask, add, required = false }: 
     return <AddByName id={id} title={add.label} add={{ ...add, onAdded: (row) => { setAdding(false); add.onAdded(row); } }} onCancel={() => setAdding(false)} />;
   }
   return (
-    <div className="field empty-choice" data-empty-choice="" data-testid={`${id}-empty`}>
+    <div className="field empty-choice" data-empty-choice="" data-testid={`${id}-empty`} {...(label !== undefined ? { role: 'group', 'aria-labelledby': `${id}-label` } : {})}>
       {label !== undefined && (
-        <span className="field-label">
+        <span className="field-label" id={`${id}-label`}>
           {label}
           {required && <span className="field-star" aria-hidden="true"> *</span>}
         </span>
@@ -141,7 +142,7 @@ export function EmptyChoice<T>({ id, label, text, ask, add, required = false }: 
           )}
         </>
       ) : (
-        <p id={id} tabIndex={-1} {...needed}>{text} {ask}</p>
+        <p id={id} tabIndex={-1} {...needed}>{ask ? `${text} ${ask}` : text}</p>
       )}
     </div>
   );

@@ -14,7 +14,7 @@ import { ScreenToast } from './toast';
 
 const UNITS = ['retail', 'catalogue', 'units'];
 
-export function UnitPicker({ id, units, loading, value, onChange, error, showError }: {
+export function UnitPicker({ id, units, loading, value, onChange, error, showError, required = true }: {
   id: string;
   /** The units the form offers (it decides about switched-off ones). */
   units: Unit[];
@@ -24,6 +24,8 @@ export function UnitPicker({ id, units, loading, value, onChange, error, showErr
   onChange: (unitId: string) => void;
   error: string | null;
   showError: boolean;
+  /** Marked needed with the red asterisk; off on a form that marks none (Add an item with sizes and colours). */
+  required?: boolean;
 }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
@@ -45,7 +47,7 @@ export function UnitPicker({ id, units, loading, value, onChange, error, showErr
     },
   };
   if (units.length === 0 && !loading) {
-    return <EmptyChoice id={id} label={WORDS.countedIn} required text="No units yet." ask="Ask the owner to add a unit first." add={canAdd ? add : null} />;
+    return <EmptyChoice id={id} label={WORDS.countedIn} required={required} text="No units yet." ask="Ask the owner to add a unit first." add={canAdd ? add : null} />;
   }
   if (adding) return <AddByName id={`${id}-add`} title={add.label} add={add} onCancel={() => setAdding(false)} />;
   return (
@@ -53,7 +55,7 @@ export function UnitPicker({ id, units, loading, value, onChange, error, showErr
       <Field
         id={id}
         label={WORDS.countedIn}
-        required
+        required={required}
         error={error}
         showError={showError}
         control={(props) => (

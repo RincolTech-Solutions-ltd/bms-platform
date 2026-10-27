@@ -105,6 +105,7 @@ export function AddPriceForm({ today, busy, error, onSubmit, onCancel }: {
         >
           <p><strong>{form.product.description}</strong> ({form.product.code}), retail price {money(form.product.sell_minor ?? 0)} per {form.product.unit}</p>
           <label htmlFor="price-unit">Price for</label>
+          {/* empty: the item's own unit is always the first choice. */}
           <select id="price-unit" value={form.unitId} onChange={(e) => setForm({ ...form, unitId: e.target.value })}>
             {units.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
           </select>

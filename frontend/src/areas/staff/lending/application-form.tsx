@@ -162,9 +162,9 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
             <MemberPicker id={form.idOf('member_id')} required chosen={shown} error={form.error('member_id')} errorId={`${form.idOf('member_id')}-error`}
               onChoose={(m) => { setChosen(m); form.edited('member_id'); setDraft((d) => ({ ...d, memberId: m?.id ?? '', pledges: [] })); }} />
             <SelectField name="product_id" label="Loan product" form={form} required value={draft.productId} onChange={(v) => setDraft((d) => ({ ...d, productId: v, pledges: [] }))}
-              blankLabel={products.isPending ? 'Loading products' : 'Choose a product'} options={(products.data ?? []).map((p) => ({ value: p.id ?? '', label: `${p.name ?? ''} (${p.code ?? ''})` }))} />
+              blankLabel={products.isPending ? 'Loading products' : 'Choose a product'} options={(products.data ?? []).map((p) => ({ value: p.id ?? '', label: `${p.name ?? ''} (${p.code ?? ''})` }))}
+              empty={products.data ? { text: 'No loan products yet.', ask: 'Ask the owner to add a loan product first.' } : undefined} />
             <Problem error={products.error} />
-            {products.data && products.data.length === 0 && <p className="alert alert-info">There is no loan product yet. An administrator adds one before loans can be given.</p>}
           </>
         )}
         {terms && (
