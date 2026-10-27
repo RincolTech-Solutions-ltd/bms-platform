@@ -8,8 +8,9 @@ import { ScreenLink } from './screen-link';
 
 // The starting card of a shop with no items yet (issue #615): a new business opened Sell, searched, found nothing and had to
 // ask on WhatsApp how to add items. While the business has no item at all, Sell and Home show this card first. Whoever
-// manages the catalogue gets Add your first items (the Items page, whose Add an item takes the category inline) and, with
-// the import screen, Import a list; anyone else is told to ask the owner. Quick add (issue #632) is the first action. The read is one page of the catalogue, every item
+// manages the catalogue gets Quick add (issue #632) as the first action, Add your first items (the Items page, whose Add an
+// item takes the category inline), Set up your shop (issue #625: the starting categories, units and packs of a kind of shop)
+// and, with the import screen, Import a list; anyone else is told to ask the owner. The read is one page of the catalogue, every item
 // switched on or off, under the catalogue's own cache key, so adding an item anywhere hides the card.
 
 export const NO_ITEMS_YET = 'Your shop has no items yet. Add the things you sell, then you can sell them.';
@@ -42,6 +43,7 @@ export function FirstItemsCard() {
           {/* Quick add first (issue #632): one form for the item, its prices and how many there are. */}
           <ScreenLink screen="quickAdd" to="/staff/retail/quick-add" action>Quick add an item</ScreenLink>
           <ScreenLink screen="products" to="/staff/retail/catalogue/products">Add your first items</ScreenLink>
+          <ScreenLink screen="shopSetup" to="/staff/retail/catalogue/set-up">Set up your shop</ScreenLink>
           <ScreenLink screen="importer" to="/staff/retail/catalogue/import">Import a list</ScreenLink>
           <Link className="link-row" to="/staff/help/$articleId" params={{ articleId: 'getting-your-shop-ready' }}>
             How do I get my shop ready to sell?
