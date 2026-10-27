@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
@@ -24,7 +24,7 @@ vi.mock('../../../api/help', async (original) => {
 });
 
 const { HowDoIPage } = await import('./page');
-const { NOT_FOUND } = await import('./ask');
+const { ASK_STATUS_KEY, NOT_FOUND } = await import('./ask');
 
 afterEach(() => {
   cleanup();
@@ -37,9 +37,8 @@ const owner = {
   permissions: [...((mockMe('admin') as Me).permissions ?? []), 'core.users.read', 'core.users.manage'],
 } as Me;
 
-function show(node: ReactNode) {
+function show(node: ReactNode, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/help'] }) });
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <RouterContextProvider router={router}>
       <QueryClientProvider client={client}>
@@ -171,5 +170,44 @@ describe('Ask BMS', () => {
     expect(ask.ask).not.toHaveBeenCalled();
     await askQuestion('How do I move stock?');
     expect((await screen.findByRole('alert')).textContent).toBe('Could not ask now. The articles below still answer.');
+  });
+});
+
+// Issue #611: after a not-found answer the page always keeps an Ask us, whatever happens to the Ask BMS box next.
+describe('Ask us after a not-found answer', () => {
+  async function notFoundShown(client?: QueryClient) {
+    ask.status.mockResolvedValue({ enabled: true, revision: 'r' });
+    ask.ask.mockResolvedValueOnce(reply({ source: 'no_match' }));
+    show(<HowDoIPage />, client);
+    await askQuestion('zzqx wvvy');
+    expect(await screen.findByText(NOT_FOUND)).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: 'Ask us' })).toHaveLength(1);
+  }
+
+  it('still shows Ask us when the phone goes offline', async () => {
+    await notFoundShown();
+    onlineManager.setOnline(false);
+    try {
+      await waitFor(() => expect(screen.getAllByRole('link', { name: 'Ask us' })).toHaveLength(1));
+    } finally {
+      onlineManager.setOnline(true);
+    }
+  });
+
+  it('still shows Ask us when Ask BMS is turned off', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await notFoundShown(client);
+    act(() => client.setQueryData(ASK_STATUS_KEY, { enabled: false, revision: 'r' }));
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Ask BMS' })).toBeNull());
+    expect(screen.getAllByRole('link', { name: 'Ask us' })).toHaveLength(1);
+    expect(screen.getByText('Not answered?')).toBeTruthy();
+  });
+
+  it('clears the not-found line when a new question is typed', async () => {
+    await notFoundShown();
+    fireEvent.change(screen.getByLabelText(/Your question/), { target: { value: 'zzqx wvvy count' } });
+    await waitFor(() => expect(screen.queryByText(NOT_FOUND)).toBeNull());
+    expect(screen.getAllByRole('link', { name: 'Ask us' })).toHaveLength(1);
+    expect(screen.getByText('Not answered?')).toBeTruthy();
   });
 });

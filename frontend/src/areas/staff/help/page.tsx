@@ -46,7 +46,8 @@ export function HowDoIPage() {
   const found = useMemo(() => searchArticles(mine, search.term), [mine, search.term]);
   const { enabled: askEnabled, known } = useAskStatus();
   const [asked, setAsked] = useState('');
-  // Ask BMS said the help has no answer, with its own Ask us right under it (issue #609): one Ask us, not two.
+  // Ask BMS said the help has no answer, with its own Ask us right under it (issue #609): one Ask us, not two. Only while the box
+  // is drawn, so turning Ask BMS off never leaves the page without one (issue #611).
   const [askNotFound, setAskNotFound] = useState(false);
   // The top bar's Ask button opens /staff/help#ask (issue #603): once the server has said whether Ask BMS is on, the cursor goes
   // to the question box, or to the article search while it is off or the phone is offline (a remembered "on" cannot be asked
@@ -89,7 +90,7 @@ export function HowDoIPage() {
           </div>
         )}
       </SearchResults>
-      {(search.text.trim() || !askNotFound) && <AskUs text={search.text.trim() ? search.text : asked} />}
+      {(search.text.trim() || !(askEnabled && askNotFound)) && <AskUs text={search.text.trim() ? search.text : asked} />}
     </main>
   );
 }
@@ -142,7 +143,7 @@ export function ArticleView({ articleId }: { articleId: string }) {
           <Words runs={runs} />
         </p>
       ))}
-      {!askNotFound && <AskUs text={article.title} />}
+      {!(askEnabled && askNotFound) && <AskUs text={article.title} />}
       <p>
         <Link to="/staff/help" className="btn btn-ghost">All the answers</Link>
       </p>

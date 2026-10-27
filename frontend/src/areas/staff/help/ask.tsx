@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { askBms, type AskAnswer } from '../../../api/help';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Field } from '../../../app/ui/Field';
@@ -13,6 +13,8 @@ import { relatedArticles } from '../../../help/corpus';
 // the model found none in the articles, every model failed, or no article matched) it says so in one line with Ask us right
 // under it, then lists only the articles that share a real word with the question; the page then drops its own "Not
 // answered? Ask us", so there is one. With no model to ask, or the day's questions used up, the matching articles are listed.
+// Typing a new question clears that line, and so does the box leaving the page (offline, or Ask BMS turned off), so the page's
+// own Ask us comes back (issue #611).
 
 export const NOT_FOUND = 'I could not find this in the help yet. Tap Ask us and it comes to the team.';
 
@@ -96,7 +98,7 @@ function Answer({ result, question }: { result: AskAnswer; question: string }) {
 
 /**
  * The Ask BMS box; `onAsked` hands the question to "Not answered? Ask us", and `onNotFound` tells the page whether the answer
- * shown says the help has none, with its own Ask us.
+ * shown says the help has none, with its own Ask us. Pass a stable `onNotFound` (a state setter): it is told `false` on unmount.
  */
 export function AskBms({ onAsked, onNotFound }: { onAsked?: (question: string) => void; onNotFound?: (shown: boolean) => void }) {
   const [question, setQuestion] = useState('');
@@ -106,6 +108,7 @@ export function AskBms({ onAsked, onNotFound }: { onAsked?: (question: string) =
     onMutate: () => onNotFound?.(false),
     onSuccess: (result) => onNotFound?.(notFound(result)),
   });
+  useEffect(() => () => onNotFound?.(false), [onNotFound]);
   const text = question.trim();
   const tooShort = text.length < 3 ? 'Type your question, in your own words.' : null;
   return (
@@ -130,7 +133,13 @@ export function AskBms({ onAsked, onNotFound }: { onAsked?: (question: string) =
           autoComplete="off"
           error={tooShort}
           showError={tried}
-          onChange={(e) => setQuestion(e.target.value)}
+          onChange={(e) => {
+            setQuestion(e.target.value);
+            if (ask.data && notFound(ask.data)) {
+              ask.reset();
+              onNotFound?.(false);
+            }
+          }}
         />
         <p>
           <BusyButton type="submit" className="rt-primary" busy={ask.isPending}>
