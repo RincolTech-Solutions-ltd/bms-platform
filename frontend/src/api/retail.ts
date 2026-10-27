@@ -595,7 +595,7 @@ export interface RetailApi {
   createUsage(body: UsageRequest, idempotencyKey: string): Promise<Usage>;
   createStocktake(body: StocktakeRequest): Promise<Stocktake>;
   commitStocktake(id: string): Promise<Stocktake>;
-  /** Quick add (issue #632): makes the item and records its count at the branch in one transaction; takes the Idempotency-Key of its form. */
+  /** Quick add (issue #632): makes the item and adds its stock at the branch as opening stock in one transaction; takes the Idempotency-Key of its form. */
   quickAdd(body: QuickAddRequest, idempotencyKey: string): Promise<QuickAdd>;
   /** Every product with its balance in each branch the caller may read (#144). */
   listStockAllBranches(q: { query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel; includeClosed?: boolean; includeInactive?: boolean; signal?: AbortSignal }): Promise<AllBranchesStock>;

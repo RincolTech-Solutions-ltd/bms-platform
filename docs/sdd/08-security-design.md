@@ -664,7 +664,7 @@ Notes:
   unknown code sees the message without "Add this barcode to a product". The label shows the selling price, which an administrator may
   see. The camera stays under `Permissions-Policy: camera=(self)`; no CSP change (the fallback decoder is pure JavaScript, no WebAssembly).
 - Quick add (issue #632, ADR-101, FR-RET-79) adds no permission, so the matrix is unchanged. `POST /retail/quick-add` needs
-  `retail.catalogue.manage` (making an item is a catalogue change) and, for the count it records, `retail.stocktake.commit` at the chosen
+  `retail.catalogue.manage` (making an item is a catalogue change) and, for the stock it adds, `retail.stocktake.commit` at the chosen
   branch, checked before anything is made; without a quantity the catalogue permission alone adds the item with no stock. A repeated name
   is refused as on Items, and adding it anyway still needs `core.settings.manage` and a reason.
 - Corrections of entry mistakes (issues #351 and #352, ADR-044, FR-RET-44 to FR-RET-46) add no permission, so the matrix is unchanged. Voiding a
