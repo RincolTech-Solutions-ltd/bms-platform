@@ -59,10 +59,11 @@ final class CatalogueApi {
             UUID ofUnitId,
 
             @NotNull
-            @Pattern(regexp = "buy|sell|both")
+            @Pattern(regexp = RetailCatalogue.PACK_PURPOSES)
             @Schema(
                     allowableValues = {"buy", "sell", "both"},
-                    description = "What the pack is for, the values of a pack's purpose on an item (#624)")
+                    description = "What the pack is for, the values of a pack's purpose on an item (#624); an item's"
+                            + " pack of this unit added with no purpose takes it")
             String purpose) {}
 
     @Schema(name = "RetailCategoryUpdate", description = "Omitted fields are unchanged; a category is never deleted")
@@ -1187,8 +1188,8 @@ final class CatalogueApi {
             @Pattern(regexp = RetailCatalogue.PACK_PURPOSES)
             @Schema(
                     description =
-                            "What the pack is for: buy, sell or both (the default); a pack bought only has no selling"
-                                    + " price (issue #624)")
+                            "What the pack is for: buy, sell or both; a pack bought only has no selling price (issue #624)."
+                                    + " Left out, the unit's usual purpose (issue #625), else both")
             String purpose,
 
             @PositiveOrZero

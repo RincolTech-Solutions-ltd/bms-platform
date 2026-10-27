@@ -1,11 +1,11 @@
+import type { Purpose } from './catalogue-packs';
+
 // The starting sets of Set up your shop (issue #625, docs/specs/units-packs-and-costing.md section 4 and section 9 step 5): for
 // each kind of shop, the categories, the units things are counted in, and the packs with their usual size and what they are for.
 // They are bundled with the app, so the list shows with no network and no AI. Names are the words a shop in Kampala uses, and the
 // units start from the eight every retail shop already has (ADR-098: Piece, Pair, Set, Box, Pack, Kg, Litre, Metre), so a name
-// that is there already is skipped. A pack never carries a price here: the owner sets prices on each item (#624).
-
-/** What a pack is for, with the values and words of a pack on an item (#624, ADR-099): Buying, Selling or Both. */
-export type Purpose = 'buy' | 'sell' | 'both';
+// that is there already is skipped. A pack never carries a price here: the owner sets prices on each item (#624). What a pack is
+// for is the Purpose of a pack on an item (ADR-099), so a starter pack and an item's pack are one idea.
 
 export interface StarterPack {
   name: string;

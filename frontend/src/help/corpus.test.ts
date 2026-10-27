@@ -327,7 +327,8 @@ describe('setting up a shop quickly (issue #625)', () => {
   const PARTS = [
     ['areas/staff/menu.tsx', 'areas/staff/retail/first-items.tsx', 'areas/staff/retail/catalogue.tsx'],
     ['areas/staff/retail/shop-setup.tsx', 'areas/staff/retail/shop-starters.ts'],
-    ['areas/staff/retail/shop-setup.tsx', 'areas/staff/retail/shop-setup-state.ts'],
+    // The Used for words (Both, Selling, Buying) are those of a pack on an item, kept once in the pack editor (ADR-099).
+    ['areas/staff/retail/shop-setup.tsx', 'areas/staff/retail/shop-setup-state.ts', 'areas/staff/retail/catalogue-packs.tsx'],
     ['areas/staff/retail/shop-setup.tsx'],
     ['areas/staff/retail/permissions.ts'],
   ];

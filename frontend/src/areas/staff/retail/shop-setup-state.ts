@@ -1,5 +1,6 @@
 import { RetailError, type Category, type RetailApi, type Unit } from '../../../api/retail';
-import type { Purpose, ShopType } from './shop-starters';
+import type { Purpose } from './catalogue-packs';
+import type { ShopType } from './shop-starters';
 
 // Set up your shop (issue #625): what a starting set would add to this shop, and adding it through the routes that add one
 // category or one unit, so no new endpoint is needed. A name the shop has already, in any case and switched on or off, is
@@ -34,13 +35,6 @@ export function planSetup(type: ShopType, categories: Category[], units: Unit[])
     }),
   ];
 }
-
-/** The choices of Used for, in the order and words of a pack on an item (#624, ADR-099). */
-export const PURPOSES: { value: Purpose; label: string }[] = [
-  { value: 'both', label: 'Both' },
-  { value: 'sell', label: 'Selling' },
-  { value: 'buy', label: 'Buying' },
-];
 
 /** A pack in plain words: "100 Metre, for buying and selling". */
 export function packText(size: number | string, of: string, purpose: Purpose | string | undefined): string {

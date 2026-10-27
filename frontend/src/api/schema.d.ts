@@ -14987,7 +14987,7 @@ export interface components {
         RetailPackRequest: {
             /** @description Base units in one pack, at least 1, up to three places, for example 12 or 12.5 */
             factor: string;
-            /** @description What the pack is for: buy, sell or both (the default); a pack bought only has no selling price (issue #624) */
+            /** @description What the pack is for: buy, sell or both; a pack bought only has no selling price (issue #624). Left out, the unit's usual purpose (issue #625), else both */
             purpose?: string;
             /**
              * Format: int64
@@ -18137,7 +18137,7 @@ export interface components {
              */
             of_unit_id: string;
             /**
-             * @description What the pack is for, the values of a pack's purpose on an item (#624)
+             * @description What the pack is for, the values of a pack's purpose on an item (#624); an item's pack of this unit added with no purpose takes it
              * @enum {string}
              */
             purpose: "buy" | "sell" | "both";

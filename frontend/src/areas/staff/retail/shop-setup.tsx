@@ -11,9 +11,9 @@ import { Segmented } from '../../../app/ui/Segmented';
 import { Skeleton } from '../../../app/ui/Skeleton';
 import { SuccessScreen } from '../../../app/ui/SuccessScreen';
 import { useOnline } from '../../../offline/offline-context';
-import { factorProblem } from './catalogue-packs';
-import { SHOP_TYPES, shopTypeById, type Purpose } from './shop-starters';
-import { PURPOSES, applySetup, key, packNeeds, packText, planSetup, type SetupItem, type SetupResult } from './shop-setup-state';
+import { PURPOSES, factorProblem, type Purpose } from './catalogue-packs';
+import { SHOP_TYPES, shopTypeById } from './shop-starters';
+import { applySetup, key, packNeeds, packText, planSetup, type SetupItem, type SetupResult } from './shop-setup-state';
 import { Gate, Problem } from './ui';
 
 // Set up your shop (issue #625, docs/specs/units-packs-and-costing.md section 9 step 5): a new shop owner should not build
