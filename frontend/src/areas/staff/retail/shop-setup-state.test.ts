@@ -15,7 +15,7 @@ function fakeShop(start: { categories?: string[]; units?: string[] } = {}) {
   const clash = (rows: { name?: string }[], name: string, code: string) => {
     if (rows.some((r) => r.name?.toLowerCase() === name.toLowerCase())) throw new RetailError('exists', 409, code);
   };
-  const usual = (p: UsualPackRequest): Unit['usual_pack'] => ({ size: Number(p.size).toFixed(3), of_unit_id: p.of_unit_id, of_unit: units.find((u) => u.id === p.of_unit_id)?.name ?? '', use: p.use });
+  const usual = (p: UsualPackRequest): Unit['usual_pack'] => ({ size: Number(p.size).toFixed(3), of_unit_id: p.of_unit_id, of_unit: units.find((u) => u.id === p.of_unit_id)?.name ?? '', purpose: p.purpose });
   const api = {
     createCategory: (name: string) => {
       clash(categories, name, 'duplicate_category');
@@ -96,7 +96,7 @@ describe('Set up your shop', () => {
     for (const name of type.units) expect(shop.units.map((u) => u.name)).toContain(name);
     for (const p of type.packs) {
       const unit = shop.units.find((u) => u.name === p.name)!;
-      expect(unit.usual_pack, `${id}: ${p.name}`).toEqual({ size: p.size.toFixed(3), of_unit_id: shop.units.find((u) => u.name === p.of)!.id, of_unit: p.of, use: p.use });
+      expect(unit.usual_pack, `${id}: ${p.name}`).toEqual({ size: p.size.toFixed(3), of_unit_id: shop.units.find((u) => u.name === p.of)!.id, of_unit: p.of, purpose: p.purpose });
     }
     // No name twice, in any case.
     const names = shop.units.map((u) => u.name!.toLowerCase());
@@ -127,7 +127,7 @@ describe('Set up your shop', () => {
   it('keeps a unit that has a usual size as it is', async () => {
     const shop = fakeShop({ units: ['Piece', 'Metre'] });
     const metre = shop.units.find((u) => u.name === 'Metre')!;
-    shop.units.push({ id: 'u-roll', name: 'Roll', active: true, version: 3, usual_pack: { size: '25.000', of_unit_id: metre.id, of_unit: 'Metre', use: 'selling' } });
+    shop.units.push({ id: 'u-roll', name: 'Roll', active: true, version: 3, usual_pack: { size: '25.000', of_unit_id: metre.id, of_unit: 'Metre', purpose: 'sell' } });
     const { result } = await run(shop, 'hardware');
     expect(result.added.map((a) => a.name)).not.toContain('Roll');
     expect(shop.units.find((u) => u.name === 'Roll')).toMatchObject({ version: 3, usual_pack: { size: '25.000' } });
@@ -150,14 +150,14 @@ describe('Set up your shop', () => {
     expect(shop.units.find((u) => u.name === 'Box')?.usual_pack?.of_unit).toBe('Piece');
   });
 
-  it('takes a changed size and use, and never sends a price', async () => {
+  it('takes a changed size and purpose, and never sends a price', async () => {
     const shop = fakeShop();
     const sent: unknown[] = [];
     const api = { ...shop.api, createUnit: (name: string, pack?: UsualPackRequest) => { sent.push(pack); return shop.api.createUnit(name, pack); } };
-    const plan = planSetup(shopTypeById('supermarket')!, [], [...shop.units]).map((i) => (i.name === 'Crate' ? { ...i, size: 12, use: 'selling' as const } : i));
+    const plan = planSetup(shopTypeById('supermarket')!, [], [...shop.units]).map((i) => (i.name === 'Crate' ? { ...i, size: 12, purpose: 'sell' as const } : i));
     await applySetup(api, plan, allTicked(plan), [...shop.units]);
-    expect(shop.units.find((u) => u.name === 'Crate')!.usual_pack).toMatchObject({ size: '12.000', use: 'selling' });
-    for (const body of sent.filter(Boolean)) expect(Object.keys(body as object).sort()).toEqual(['of_unit_id', 'size', 'use']);
+    expect(shop.units.find((u) => u.name === 'Crate')!.usual_pack).toMatchObject({ size: '12.000', purpose: 'sell' });
+    for (const body of sent.filter(Boolean)) expect(Object.keys(body as object).sort()).toEqual(['of_unit_id', 'purpose', 'size']);
   });
 
   it('counts a name another phone added meanwhile as there, and stops at a real failure saying what was added', async () => {
@@ -176,7 +176,7 @@ describe('Set up your shop', () => {
 
   it('says a pack in plain words', () => {
     expect(packText('100.000', 'Metre', 'both')).toBe('100 Metre, for buying and selling');
-    expect(packText(50, 'Piece', 'buying')).toBe('50 Piece, for buying');
-    expect(packText(12, 'Piece', 'selling')).toBe('12 Piece, for selling');
+    expect(packText(50, 'Piece', 'buy')).toBe('50 Piece, for buying');
+    expect(packText(12, 'Piece', 'sell')).toBe('12 Piece, for selling');
   });
 });

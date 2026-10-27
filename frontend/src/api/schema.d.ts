@@ -18084,10 +18084,10 @@ export interface components {
             of_unit?: string;
             /** Format: uuid */
             of_unit_id?: string;
+            /** @enum {string} */
+            purpose?: "buy" | "sell" | "both";
             /** @description How many of the smaller unit, three places, for example 100.000 */
             size?: string;
-            /** @enum {string} */
-            use?: "buying" | "selling" | "both";
         };
         /** @description The usual size of this pack in a smaller unit, such as a roll of 100 metres, and what it is for */
         RetailUsualPackRequest: {
@@ -18096,10 +18096,13 @@ export interface components {
              * @description The smaller unit, such as Metre or Piece
              */
             of_unit_id: string;
+            /**
+             * @description What the pack is for, the values of a pack's purpose on an item (#624)
+             * @enum {string}
+             */
+            purpose: "buy" | "sell" | "both";
             /** @description How many of the smaller unit, at least 1, up to three places */
             size: string;
-            /** @enum {string} */
-            use: "buying" | "selling" | "both";
         };
         RetailValuation: {
             /** Format: date */

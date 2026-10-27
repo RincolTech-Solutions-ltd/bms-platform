@@ -8,7 +8,7 @@ import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 
 // Set up your shop (issue #625): the owner picks a kind of shop, sees its categories, units and packs ticked, unticks what they
-// do not sell, changes a pack's size or use, and taps Add these. Names the shop has are shown as already there and not sent.
+// do not sell, changes a pack's size or what it is used for, and taps Add these. Names the shop has are shown as already there and not sent.
 // The list is bundled, so it shows offline. Every name and number is fabricated.
 
 vi.setConfig({ testTimeout: 20000 });
@@ -84,7 +84,7 @@ describe('Set up your shop (issue #625)', () => {
     fireEvent.click(screen.getByLabelText('Paint'));
     expect((screen.getByLabelText('Paint') as HTMLInputElement).checked).toBe(false);
 
-    // A pack shows its usual size and the question How do you buy and sell this?; the owner changes both.
+    // A pack shows its usual size and its Used for; the owner changes both.
     const roll = within(screen.getByTestId('setup-pack-roll'));
     fireEvent.change(roll.getByLabelText('Metre in one Roll'), { target: { value: '50' } });
     fireEvent.click(roll.getByRole('radio', { name: 'Selling' }));
@@ -94,9 +94,9 @@ describe('Set up your shop (issue #625)', () => {
     await screen.findByText('Your shop is set up');
     expect(createCategory.mock.calls.map((c) => c[0])).toEqual(['Nails and screws', 'Pipes and fittings', 'Tools', 'Iron sheets', 'Wire']);
     expect(createUnit.mock.calls.filter((c) => c[1] === undefined).map((c) => c[0])).toEqual(['Kg', 'Metre', 'Litre']);
-    expect(createUnit).toHaveBeenCalledWith('Roll', { size: '50', of_unit_id: 'u-Metre', use: 'selling' });
+    expect(createUnit).toHaveBeenCalledWith('Roll', { size: '50', of_unit_id: 'u-Metre', purpose: 'sell' });
     // Box is a unit the shop has with no usual size: it gets one, never a second Box.
-    expect(updateUnit).toHaveBeenCalledWith('u2', 2, { usual_pack: { size: '50', of_unit_id: 'u1', use: 'both' } });
+    expect(updateUnit).toHaveBeenCalledWith('u2', 2, { usual_pack: { size: '50', of_unit_id: 'u1', purpose: 'both' } });
     expect(createUnit.mock.calls.map((c) => c[0])).not.toContain('Box');
     expect(screen.getByText('Added 5 categories, 3 units and 4 packs.')).toBeTruthy();
     expect(screen.getByText('Item codes start with NAI')).toBeTruthy();

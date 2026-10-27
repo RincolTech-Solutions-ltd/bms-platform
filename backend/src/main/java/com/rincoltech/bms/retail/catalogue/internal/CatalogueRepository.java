@@ -72,7 +72,7 @@ class CatalogueRepository {
     List<Unit> units() {
         return jdbc.sql("""
                         SELECT u.id, u.name, u.active, u.version, (SELECT count(*) FROM retail_products p WHERE p.unit_id = u.id) AS used,
-                               u.pack_size, u.pack_of_unit_id, o.name AS pack_of, u.pack_use
+                               u.pack_size, u.pack_of_unit_id, o.name AS pack_of, u.pack_purpose
                           FROM retail_units u
                           LEFT JOIN retail_units o ON o.id = u.pack_of_unit_id
                          ORDER BY lower(u.name), u.id
@@ -91,7 +91,7 @@ class CatalogueRepository {
                                                 .toPlainString(),
                                         rs.getObject("pack_of_unit_id", UUID.class),
                                         rs.getString("pack_of"),
-                                        rs.getString("pack_use"))))
+                                        rs.getString("pack_purpose"))))
                 .list();
     }
 
@@ -143,8 +143,8 @@ class CatalogueRepository {
 
     /** Issue #625, ADR-100: the usual size of a pack and what it is for; the V111 check keeps all three or none. */
     void setUsualPack(UUID id, UsualPackRequest pack) {
-        jdbc.sql("UPDATE retail_units SET pack_size = ?, pack_of_unit_id = ?, pack_use = ? WHERE id = ?")
-                .params(pack.size(), pack.ofUnitId(), pack.use(), id)
+        jdbc.sql("UPDATE retail_units SET pack_size = ?, pack_of_unit_id = ?, pack_purpose = ? WHERE id = ?")
+                .params(pack.size(), pack.ofUnitId(), pack.purpose(), id)
                 .update();
     }
 

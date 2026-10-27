@@ -167,13 +167,17 @@ class RetailCatalogueManagementIT extends IntegrationTest {
         UUID metre = api.unit("test-metre");
         ResponseEntity<JsonNode> roll = api.post(
                 "/units",
-                Map.of("name", "test-roll", "usual_pack", Map.of("size", "100", "of_unit_id", metre, "use", "both")),
+                Map.of(
+                        "name",
+                        "test-roll",
+                        "usual_pack",
+                        Map.of("size", "100", "of_unit_id", metre, "purpose", "both")),
                 ADMIN);
         assertThat(roll.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         JsonNode pack = roll.getBody().get("usual_pack");
         assertThat(pack.get("size").asString()).isEqualTo("100.000");
         assertThat(pack.get("of_unit").asString()).isEqualTo("test-metre");
-        assertThat(pack.get("use").asString()).isEqualTo("both");
+        assertThat(pack.get("purpose").asString()).isEqualTo("both");
         assertThat(roll.getBody().has("price")).isFalse();
 
         // A plain unit has none; setting one later is an update, and the list shows it.
@@ -181,7 +185,7 @@ class RetailCatalogueManagementIT extends IntegrationTest {
         UUID piece = api.unit("test-piece");
         assertThat(patch(
                                 "/units/" + box,
-                                Map.of("usual_pack", Map.of("size", "50", "of_unit_id", piece, "use", "buying")),
+                                Map.of("usual_pack", Map.of("size", "50", "of_unit_id", piece, "purpose", "buy")),
                                 ADMIN)
                         .getBody()
                         .get("usual_pack")
@@ -197,19 +201,22 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                 assertThat(u.has("usual_pack")).isFalse();
             }
         }
-        assertThat(listed.get("usual_pack").get("use").asString()).isEqualTo("buying");
+        assertThat(listed.get("usual_pack").get("purpose").asString()).isEqualTo("buy");
 
         // A pack of itself, of a unit it does not have, a size under one or an unknown use is refused.
-        Map<String, Object> self = Map.of("usual_pack", Map.of("size", "2", "of_unit_id", box, "use", "both"));
+        Map<String, Object> self = Map.of("usual_pack", Map.of("size", "2", "of_unit_id", box, "purpose", "both"));
         assertThat(patch("/units/" + box, self, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         Map<String, Object> unknown = Map.of(
-                "name", "test-bale", "usual_pack", Map.of("size", "2", "of_unit_id", UUID.randomUUID(), "use", "both"));
+                "name",
+                "test-bale",
+                "usual_pack",
+                Map.of("size", "2", "of_unit_id", UUID.randomUUID(), "purpose", "both"));
         assertThat(api.post("/units", unknown, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        Map<String, Object> small =
-                Map.of("name", "test-bale", "usual_pack", Map.of("size", "0.5", "of_unit_id", piece, "use", "both"));
+        Map<String, Object> small = Map.of(
+                "name", "test-bale", "usual_pack", Map.of("size", "0.5", "of_unit_id", piece, "purpose", "both"));
         assertThat(api.post("/units", small, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        Map<String, Object> use =
-                Map.of("name", "test-bale", "usual_pack", Map.of("size", "2", "of_unit_id", piece, "use", "renting"));
+        Map<String, Object> use = Map.of(
+                "name", "test-bale", "usual_pack", Map.of("size", "2", "of_unit_id", piece, "purpose", "renting"));
         assertThat(api.post("/units", use, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(api.post(
                                 "/units",
@@ -217,7 +224,7 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                                         "name",
                                         "test-bale",
                                         "usual_pack",
-                                        Map.of("size", "2", "of_unit_id", piece, "use", "both")),
+                                        Map.of("size", "2", "of_unit_id", piece, "purpose", "both")),
                                 READER)
                         .getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);

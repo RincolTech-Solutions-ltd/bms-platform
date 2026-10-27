@@ -4,7 +4,8 @@
 // units start from the eight every retail shop already has (ADR-098: Piece, Pair, Set, Box, Pack, Kg, Litre, Metre), so a name
 // that is there already is skipped. A pack never carries a price here: the owner sets prices on each item (#624).
 
-export type PackUse = 'buying' | 'selling' | 'both';
+/** What a pack is for, with the values and words of a pack on an item (#624, ADR-099): Buying, Selling or Both. */
+export type Purpose = 'buy' | 'sell' | 'both';
 
 export interface StarterPack {
   name: string;
@@ -12,7 +13,7 @@ export interface StarterPack {
   size: number;
   /** The smaller unit the size counts, one of the shop type's units or one the shop has. */
   of: string;
-  use: PackUse;
+  purpose: Purpose;
 }
 
 export interface ShopType {
@@ -36,9 +37,9 @@ export const SHOP_TYPES: ShopType[] = [
     categories: ['Bedsheets', 'Blankets', 'Duvets', 'Pillows', 'Curtains', 'Towels', 'Mattresses', 'Kitchenware'],
     units: ['Piece', 'Pair', 'Set', 'Metre'],
     packs: [
-      { name: 'Bale', size: 50, of: 'Piece', use: 'buying' },
-      { name: 'Dozen', size: 12, of: 'Piece', use: 'both' },
-      { name: 'Roll', size: 50, of: 'Metre', use: 'both' },
+      { name: 'Bale', size: 50, of: 'Piece', purpose: 'buy' },
+      { name: 'Dozen', size: 12, of: 'Piece', purpose: 'both' },
+      { name: 'Roll', size: 50, of: 'Metre', purpose: 'both' },
     ],
   },
   {
@@ -48,10 +49,10 @@ export const SHOP_TYPES: ShopType[] = [
     categories: ['Bulbs', 'Sockets and switches', 'Extensions', 'Cables', 'TVs', 'Radios and speakers', 'Batteries'],
     units: ['Piece', 'Metre'],
     packs: [
-      { name: 'Carton', size: 100, of: 'Piece', use: 'buying' },
-      { name: 'Box', size: 10, of: 'Piece', use: 'both' },
-      { name: 'Dozen', size: 12, of: 'Piece', use: 'selling' },
-      { name: 'Roll', size: 100, of: 'Metre', use: 'both' },
+      { name: 'Carton', size: 100, of: 'Piece', purpose: 'buy' },
+      { name: 'Box', size: 10, of: 'Piece', purpose: 'both' },
+      { name: 'Dozen', size: 12, of: 'Piece', purpose: 'sell' },
+      { name: 'Roll', size: 100, of: 'Metre', purpose: 'both' },
     ],
   },
   {
@@ -61,10 +62,10 @@ export const SHOP_TYPES: ShopType[] = [
     categories: ['Nails and screws', 'Cement', 'Paint', 'Pipes and fittings', 'Tools', 'Iron sheets', 'Wire'],
     units: ['Piece', 'Kg', 'Metre', 'Litre'],
     packs: [
-      { name: 'Box', size: 50, of: 'Piece', use: 'both' },
-      { name: 'Roll', size: 100, of: 'Metre', use: 'both' },
-      { name: 'Dozen', size: 12, of: 'Piece', use: 'selling' },
-      { name: 'Tin', size: 4, of: 'Litre', use: 'both' },
+      { name: 'Box', size: 50, of: 'Piece', purpose: 'both' },
+      { name: 'Roll', size: 100, of: 'Metre', purpose: 'both' },
+      { name: 'Dozen', size: 12, of: 'Piece', purpose: 'sell' },
+      { name: 'Tin', size: 4, of: 'Litre', purpose: 'both' },
     ],
   },
   {
@@ -74,8 +75,8 @@ export const SHOP_TYPES: ShopType[] = [
     categories: ['Phones', 'Chargers', 'Earphones', 'Phone covers', 'Screen protectors', 'Memory cards'],
     units: ['Piece'],
     packs: [
-      { name: 'Box', size: 10, of: 'Piece', use: 'both' },
-      { name: 'Carton', size: 100, of: 'Piece', use: 'buying' },
+      { name: 'Box', size: 10, of: 'Piece', purpose: 'both' },
+      { name: 'Carton', size: 100, of: 'Piece', purpose: 'buy' },
     ],
   },
   {
@@ -85,8 +86,8 @@ export const SHOP_TYPES: ShopType[] = [
     categories: ['Shirts', 'Trousers', 'Dresses', 'Shoes', 'Children clothes', 'Underwear', 'Bags'],
     units: ['Piece', 'Pair', 'Set'],
     packs: [
-      { name: 'Bale', size: 100, of: 'Piece', use: 'buying' },
-      { name: 'Dozen', size: 12, of: 'Piece', use: 'both' },
+      { name: 'Bale', size: 100, of: 'Piece', purpose: 'buy' },
+      { name: 'Dozen', size: 12, of: 'Piece', purpose: 'both' },
     ],
   },
   {
@@ -96,12 +97,12 @@ export const SHOP_TYPES: ShopType[] = [
     categories: ['Drinks', 'Sugar, rice and flour', 'Cooking oil', 'Soap and cleaning', 'Biscuits and sweets', 'Eggs', 'Toiletries'],
     units: ['Piece', 'Kg', 'Litre', 'Bottle', 'Packet'],
     packs: [
-      { name: 'Crate', size: 24, of: 'Bottle', use: 'both' },
-      { name: 'Carton', size: 24, of: 'Piece', use: 'both' },
-      { name: 'Half carton', size: 12, of: 'Piece', use: 'selling' },
-      { name: 'Sack', size: 50, of: 'Kg', use: 'both' },
-      { name: 'Jerrycan', size: 20, of: 'Litre', use: 'both' },
-      { name: 'Tray', size: 30, of: 'Piece', use: 'both' },
+      { name: 'Crate', size: 24, of: 'Bottle', purpose: 'both' },
+      { name: 'Carton', size: 24, of: 'Piece', purpose: 'both' },
+      { name: 'Half carton', size: 12, of: 'Piece', purpose: 'sell' },
+      { name: 'Sack', size: 50, of: 'Kg', purpose: 'both' },
+      { name: 'Jerrycan', size: 20, of: 'Litre', purpose: 'both' },
+      { name: 'Tray', size: 30, of: 'Piece', purpose: 'both' },
     ],
   },
   {
@@ -111,10 +112,10 @@ export const SHOP_TYPES: ShopType[] = [
     categories: ['Medicines', 'First aid', 'Baby care', 'Skin care', 'Hair care', 'Perfumes'],
     units: ['Piece', 'Tablet', 'Bottle', 'Tube'],
     packs: [
-      { name: 'Strip', size: 10, of: 'Tablet', use: 'both' },
-      { name: 'Tin', size: 1000, of: 'Tablet', use: 'buying' },
-      { name: 'Carton', size: 24, of: 'Piece', use: 'buying' },
-      { name: 'Dozen', size: 12, of: 'Piece', use: 'both' },
+      { name: 'Strip', size: 10, of: 'Tablet', purpose: 'both' },
+      { name: 'Tin', size: 1000, of: 'Tablet', purpose: 'buy' },
+      { name: 'Carton', size: 24, of: 'Piece', purpose: 'buy' },
+      { name: 'Dozen', size: 12, of: 'Piece', purpose: 'both' },
     ],
   },
   {

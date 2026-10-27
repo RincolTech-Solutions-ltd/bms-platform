@@ -12,13 +12,13 @@ import { Skeleton } from '../../../app/ui/Skeleton';
 import { SuccessScreen } from '../../../app/ui/SuccessScreen';
 import { useOnline } from '../../../offline/offline-context';
 import { factorProblem } from './catalogue-packs';
-import { SHOP_TYPES, shopTypeById, type PackUse } from './shop-starters';
-import { USE_WORDS, applySetup, key, packNeeds, packText, planSetup, type SetupItem, type SetupResult } from './shop-setup-state';
+import { SHOP_TYPES, shopTypeById, type Purpose } from './shop-starters';
+import { PURPOSES, applySetup, key, packNeeds, packText, planSetup, type SetupItem, type SetupResult } from './shop-setup-state';
 import { Gate, Problem } from './ui';
 
 // Set up your shop (issue #625, docs/specs/units-packs-and-costing.md section 9 step 5): a new shop owner should not build
 // categories and units one by one. The owner says what kind of shop it is; the app lists that kind's categories, units and
-// packs with their usual size, each ticked; the owner unticks what they do not want, changes a size or how a pack is used, and
+// packs with their usual size, each ticked; the owner unticks what they do not want, changes a size or what a pack is used for, and
 // taps Add these. The lists are bundled (shop-starters.ts), so they show offline; adding needs the network. Names the shop has
 // are shown as already there and never added twice. Prices are never set here: each item's packs get their prices on the item.
 
@@ -26,10 +26,8 @@ export const SET_UP_TITLE = 'Set up your shop';
 export const NOTHING_NEW = 'Your shop has all of these already.';
 export const OFFLINE_ADD = 'You are offline. Connect to the internet to add these.';
 
-const USES: { value: PackUse; label: string }[] = (['buying', 'selling', 'both'] as const).map((value) => ({ value, label: USE_WORDS[value] }));
-
 /** What one pack row may change before it is added: its usual size and what it is for. */
-type PackEdit = { size: string; use: PackUse };
+type PackEdit = { size: string; purpose: Purpose };
 
 export function addedText(result: SetupResult): string {
   const count = (kind: string) => result.added.filter((a) => a.kind === kind).length;
@@ -68,7 +66,7 @@ export function ShopSetupPage() {
   const ticked = new Set(open.map((i) => key(i.kind, i.name)).filter((k) => !unticked.has(k)));
   const withEdits = (i: SetupItem): SetupItem => {
     const e = edits[key(i.kind, i.name)];
-    return e ? { ...i, size: Number(e.size), use: e.use } : i;
+    return e ? { ...i, size: Number(e.size), purpose: e.purpose } : i;
   };
   const sizeProblem = (i: SetupItem) => factorProblem(edits[key(i.kind, i.name)]?.size ?? String(i.size));
   const chosen = open.filter((i) => ticked.has(key(i.kind, i.name)) && !packNeeds(i, ticked, units.data ?? []));
@@ -81,7 +79,7 @@ export function ShopSetupPage() {
   });
   const edit = (i: SetupItem, change: Partial<PackEdit>) => setEdits((was) => {
     const k = key(i.kind, i.name);
-    return { ...was, [k]: { size: was[k]?.size ?? String(i.size), use: was[k]?.use ?? i.use ?? 'both', ...change } };
+    return { ...was, [k]: { size: was[k]?.size ?? String(i.size), purpose: was[k]?.purpose ?? i.purpose ?? 'both', ...change } };
   });
 
   const add = async () => {
@@ -165,19 +163,19 @@ export function ShopSetupPage() {
                     const k = key(i.kind, i.name);
                     const on = ticked.has(k);
                     const needs = packNeeds(i, ticked, units.data ?? []);
-                    const e = edits[k] ?? { size: String(i.size), use: i.use ?? 'both' };
+                    const e = edits[k] ?? { size: String(i.size), purpose: i.purpose ?? 'both' };
                     const slug = i.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
                     const problem = left.has(k) ? factorProblem(e.size) : null;
                     return (
                       <div key={i.name} className="stack" data-testid={`setup-pack-${slug}`}>
-                        <Choice item={i} ticked={on} onTick={(v) => tick(i, v)} meta={needs ? `Tick ${needs} too, or this pack is left out.` : packText(e.size, i.of ?? '', e.use)} />
+                        <Choice item={i} ticked={on} onTick={(v) => tick(i, v)} meta={needs ? `Tick ${needs} too, or this pack is left out.` : packText(e.size, i.of ?? '', e.purpose)} />
                         {on && !needs && (
                           <>
                             <label htmlFor={`setup-size-${slug}`}>{`${i.of} in one ${i.name}`}</label>
                             <input id={`setup-size-${slug}`} inputMode="decimal" value={e.size} onChange={(ev) => edit(i, { size: ev.target.value })} onBlur={() => setLeft((was) => new Set(was).add(k))} aria-invalid={problem !== null} aria-describedby={problem !== null ? `setup-size-problem-${slug}` : undefined} />
                             {problem !== null && <p id={`setup-size-problem-${slug}`} className="rt-flag">{problem}</p>}
-                            <p className="hint">How do you buy and sell this?</p>
-                            <Segmented label={`How do you buy and sell a ${i.name}?`} options={USES} value={e.use} onChange={(use) => edit(i, { use })} />
+                            <p className="field-label">Used for</p>
+                            <Segmented label={`Used for, ${i.name}`} options={PURPOSES} value={e.purpose} onChange={(purpose) => edit(i, { purpose })} />
                           </>
                         )}
                       </div>

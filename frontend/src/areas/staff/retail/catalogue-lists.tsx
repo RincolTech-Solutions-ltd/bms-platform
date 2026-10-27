@@ -149,7 +149,7 @@ function NamedList({ noun, plural, list, create, update, withPrefix = false }: {
             noun={noun}
             detail={withPrefix && 'code_prefix' in r
               ? <p className="hint">Item codes start with <strong>{r.code_prefix}</strong>, next {r.next_code}.</p>
-              : 'usual_pack' in r && r.usual_pack ? <p className="hint">{`Usual pack: ${packText(r.usual_pack.size ?? '', r.usual_pack.of_unit ?? '', r.usual_pack.use)}.`}</p> : undefined}
+              : 'usual_pack' in r && r.usual_pack ? <p className="hint">{`Usual pack: ${packText(r.usual_pack.size ?? '', r.usual_pack.of_unit ?? '', r.usual_pack.purpose)}.`}</p> : undefined}
             extra={withPrefix
               ? <Link className="btn-sm" to={`/staff/retail/catalogue/categories/${r.id ?? ''}` as never} aria-label={`Open ${r.name} and its items`}>Open</Link>
               : <ScreenLink screen="products" to="/staff/retail/catalogue/products" label={`See the items of ${r.name}`}>Items</ScreenLink>}

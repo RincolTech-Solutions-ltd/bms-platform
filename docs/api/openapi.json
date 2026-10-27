@@ -21111,12 +21111,12 @@
             "format" : "uuid",
             "type" : "string"
           },
-          "size" : {
-            "description" : "How many of the smaller unit, three places, for example 100.000",
+          "purpose" : {
+            "enum" : [ "buy", "sell", "both" ],
             "type" : "string"
           },
-          "use" : {
-            "enum" : [ "buying", "selling", "both" ],
+          "size" : {
+            "description" : "How many of the smaller unit, three places, for example 100.000",
             "type" : "string"
           }
         }
@@ -21129,17 +21129,18 @@
             "format" : "uuid",
             "type" : "string"
           },
+          "purpose" : {
+            "description" : "What the pack is for, the values of a pack's purpose on an item (#624)",
+            "enum" : [ "buy", "sell", "both" ],
+            "pattern" : "buy|sell|both",
+            "type" : "string"
+          },
           "size" : {
             "description" : "How many of the smaller unit, at least 1, up to three places",
             "type" : "string"
-          },
-          "use" : {
-            "enum" : [ "buying", "selling", "both" ],
-            "pattern" : "buying|selling|both",
-            "type" : "string"
           }
         },
-        "required" : [ "of_unit_id", "size", "use" ]
+        "required" : [ "of_unit_id", "purpose", "size" ]
       },
       "RetailValuation" : {
         "properties" : {

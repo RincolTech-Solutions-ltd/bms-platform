@@ -1,10 +1,10 @@
 import { RetailError, type Category, type RetailApi, type Unit } from '../../../api/retail';
-import type { PackUse, ShopType } from './shop-starters';
+import type { Purpose, ShopType } from './shop-starters';
 
 // Set up your shop (issue #625): what a starting set would add to this shop, and adding it through the routes that add one
 // category or one unit, so no new endpoint is needed. A name the shop has already, in any case and switched on or off, is
 // skipped and never made twice, so running it again adds nothing new. A pack whose name is a unit the shop has without a usual
-// size gets the size and use set on that unit (the default units of ADR-098 include Box and Pack); a unit that has one keeps it.
+// size gets the size and purpose set on that unit (the default units of ADR-098 include Box and Pack); a unit that has one keeps it.
 
 export type ItemKind = 'category' | 'unit' | 'pack';
 
@@ -16,7 +16,7 @@ export interface SetupItem {
   /** Packs only: the usual size and the smaller unit it counts, and what the pack is for. */
   size?: number;
   of?: string;
-  use?: PackUse;
+  purpose?: Purpose;
 }
 
 export const key = (kind: ItemKind, name: string) => `${kind}:${name.toLowerCase()}`;
@@ -30,17 +30,21 @@ export function planSetup(type: ShopType, categories: Category[], units: Unit[])
     ...type.units.map((name): SetupItem => ({ kind: 'unit', name, status: unit(name) ? 'there' : 'add' })),
     ...type.packs.map((p): SetupItem => {
       const had = unit(p.name);
-      return { kind: 'pack', name: p.name, size: p.size, of: p.of, use: p.use, status: !had ? 'add' : had.usual_pack ? 'there' : 'size' };
+      return { kind: 'pack', name: p.name, size: p.size, of: p.of, purpose: p.purpose, status: !had ? 'add' : had.usual_pack ? 'there' : 'size' };
     }),
   ];
 }
 
-/** The plain words of a pack's use, as the question How do you buy and sell this? answers it. */
-export const USE_WORDS: Record<PackUse, string> = { buying: 'Buying', selling: 'Selling', both: 'Both' };
+/** The choices of Used for, in the order and words of a pack on an item (#624, ADR-099). */
+export const PURPOSES: { value: Purpose; label: string }[] = [
+  { value: 'both', label: 'Both' },
+  { value: 'sell', label: 'Selling' },
+  { value: 'buy', label: 'Buying' },
+];
 
 /** A pack in plain words: "100 Metre, for buying and selling". */
-export function packText(size: number | string, of: string, use: PackUse | string | undefined): string {
-  const what = use === 'buying' ? 'for buying' : use === 'selling' ? 'for selling' : 'for buying and selling';
+export function packText(size: number | string, of: string, purpose: Purpose | string | undefined): string {
+  const what = purpose === 'buy' ? 'for buying' : purpose === 'sell' ? 'for selling' : 'for buying and selling';
   return `${Number(size)} ${of}, ${what}`;
 }
 
@@ -88,11 +92,11 @@ export async function applySetup(api: Pick<RetailApi, 'createCategory' | 'create
         result.skipped.push(item.name);
         continue;
       }
-      const pack = { size: String(item.size), of_unit_id: of.id, use: item.use ?? 'both' };
+      const pack = { size: String(item.size), of_unit_id: of.id, purpose: item.purpose ?? 'both' };
       const had = known.find((u) => same(u.name, item.name));
       if (had?.id && item.status === 'size') await api.updateUnit(had.id, had.version ?? 1, { usual_pack: pack });
       else await api.createUnit(item.name, pack);
-      result.added.push({ kind: 'pack', name: item.name, detail: packText(pack.size, of.name ?? '', pack.use) });
+      result.added.push({ kind: 'pack', name: item.name, detail: packText(pack.size, of.name ?? '', pack.purpose) });
     } catch (error) {
       // Added meanwhile, on another phone: it is there, which is what was asked.
       if (error instanceof RetailError && (error.code === 'duplicate_category' || error.code === 'duplicate_unit')) {

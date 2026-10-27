@@ -231,7 +231,7 @@ class CatalogueService {
     }
 
     private static String usualPackText(UsualPackRequest pack) {
-        return pack.size().setScale(3).toPlainString() + " " + pack.ofUnitId() + " " + pack.use();
+        return pack.size().setScale(3).toPlainString() + " " + pack.ofUnitId() + " " + pack.purpose();
     }
 
     /** Rename or (de)activate; the row stays, so products and history keep their meaning (#146). */
@@ -291,7 +291,7 @@ class CatalogueService {
                     was,
                     now,
                     "usual_pack",
-                    had == null ? null : had.size() + " " + had.ofUnitId() + " " + had.use(),
+                    had == null ? null : had.size() + " " + had.ofUnitId() + " " + had.purpose(),
                     usualPackText(r.usualPack()));
         }
         if (now.isEmpty()) {

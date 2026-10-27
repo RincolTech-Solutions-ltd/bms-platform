@@ -58,8 +58,12 @@ final class CatalogueApi {
             @NotNull @Schema(description = "The smaller unit, such as Metre or Piece")
             UUID ofUnitId,
 
-            @NotNull @Pattern(regexp = "buying|selling|both") @Schema(allowableValues = {"buying", "selling", "both"})
-            String use) {}
+            @NotNull
+            @Pattern(regexp = "buy|sell|both")
+            @Schema(
+                    allowableValues = {"buy", "sell", "both"},
+                    description = "What the pack is for, the values of a pack's purpose on an item (#624)")
+            String purpose) {}
 
     @Schema(name = "RetailCategoryUpdate", description = "Omitted fields are unchanged; a category is never deleted")
     record UpdateCategoryRequest(
@@ -120,8 +124,8 @@ final class CatalogueApi {
             UUID ofUnitId,
             @Schema(description = "The smaller unit's name") String ofUnit,
 
-            @Schema(allowableValues = {"buying", "selling", "both"})
-            String use) {}
+            @Schema(allowableValues = {"buy", "sell", "both"})
+            String purpose) {}
 
     @Schema(name = "RetailCategoryPrefixSuggestion")
     record PrefixSuggestion(String codePrefix) {}

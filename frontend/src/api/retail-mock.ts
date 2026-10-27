@@ -272,7 +272,7 @@ export function createMockRetail(): RetailApi {
   const unitRows: { id: string; name: string; active: boolean; version: number; usual_pack?: Unit['usual_pack'] }[] = unitNames.map((name, i) => ({ id: `00000000-0000-4000-8000-0000000d${String(i + 1).padStart(4, '0')}`, name, active: true, version: 1 }));
   // Issue #625: a pack's usual size in a smaller unit, as the server keeps it (three places, with the smaller unit's name).
   const usualPackOf = (p: UsualPackRequest): Unit['usual_pack'] => ({
-    size: Number(p.size).toFixed(3), of_unit_id: p.of_unit_id, of_unit: unitRows.find((x) => x.id === p.of_unit_id)?.name ?? '', use: p.use,
+    size: Number(p.size).toFixed(3), of_unit_id: p.of_unit_id, of_unit: unitRows.find((x) => x.id === p.of_unit_id)?.name ?? '', purpose: p.purpose,
   });
   const categoryId = (name: string): string => cats.find((c) => c.name === name)?.id ?? '';
   const history = new Map<string, PriceChange[]>();

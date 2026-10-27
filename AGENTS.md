@@ -757,9 +757,10 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `DefaultUnits` in `retail.catalogue` through the existing unit insert, skipping a name the business has in any case, each unit audited
   `retail.unit.created` by the system. No API, permission or screen change (the inline Add a new unit is #616). Tests:
   `RetailDefaultUnitsIT`, `MigrationOrderIT.defaultUnitsMigrationFillsOnlyRetailBusinessesWithNoUnit`.
-- **Built (Set up your shop, issue #625, ADR-100, FR-RET-01, units spec section 9 step 5):** migration `V111` (`V110` is left to
-  #624): `retail_units` gains `pack_size`, `pack_of_unit_id` and `pack_use`, the usual size of a unit that is a pack in a smaller
-  unit and what it is for (buying, selling or both), all three or none, never a price; the units routes take and return it as
+- **Built (Set up your shop, issue #625, ADR-100, FR-RET-01, units spec section 9 step 5):** migration `V111` (`V110` is
+  #624, PR #627, which merges first): `retail_units` gains `pack_size`, `pack_of_unit_id` and `pack_purpose`, the usual size of a
+  unit that is a pack in a smaller unit and what it is for (`buy`, `sell` or `both`, the values and Used for words of a pack's
+  `purpose` on an item, #624), all three or none, never a price; the units routes take and return it as
   `usual_pack`. The screen `/staff/retail/catalogue/set-up` (screen `shopSetup`, the permissions of Categories and Units), offered
   from the first-run card (#615) and the Catalogue home, asks "What kind of shop is it?" from eight bundled starting sets
   (`shop-starters.ts`), lists their categories, units and packs ticked, and adds what stays ticked through the existing create

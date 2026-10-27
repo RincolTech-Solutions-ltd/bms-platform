@@ -360,7 +360,7 @@ describe('setting up a shop quickly (issue #625)', () => {
   it('gives the example the starting sets really hold', () => {
     const text = articleText(articleById(SETUP)!);
     expect(text).toContain('100 Metre in one Roll');
-    expect(source(['areas/staff/retail/shop-starters.ts'])).toContain("{ name: 'Roll', size: 100, of: 'Metre', use: 'both' }");
+    expect(source(['areas/staff/retail/shop-starters.ts'])).toContain("{ name: 'Roll', size: 100, of: 'Metre', purpose: 'both' }");
   });
 });
 
