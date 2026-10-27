@@ -282,7 +282,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
       {supplierId === '' && (
         <>
           <label htmlFor="new-supplier">{noSuppliers ? 'Add a new supplier' : 'Or add a new supplier'}</label>
-          <input id="new-supplier" value={newSupplier} aria-required={(noSuppliers && supplierProblem !== null) || undefined} onChange={(e) => setNewSupplier(e.target.value)} />
+          <input id="new-supplier" value={newSupplier} aria-required={supplierProblem !== null || undefined} data-needed={supplierProblem !== null ? '' : undefined} onChange={(e) => setNewSupplier(e.target.value)} />
         </>
       )}
       <label htmlFor="bought-on">Bought on</label>

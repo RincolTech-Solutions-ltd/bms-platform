@@ -87,12 +87,13 @@ describe('Paid how on Buy stock', () => {
     expect(await screen.findByText('No suppliers yet. Type a new one below.')).toBeTruthy();
     const name = screen.getByLabelText('Add a new supplier');
     expect(name.getAttribute('aria-required')).toBe('true');
-    expect(document.querySelector('[data-needed]')).toBeNull();
+    expect(document.querySelector('[data-needed]')).toBe(name);
     fireEvent.click(screen.getByRole('button', { name: 'Save the purchase' }));
     expect(document.activeElement).toBe(name);
     fireEvent.change(name, { target: { value: 'Test Supplier 09' } });
     expect(screen.queryByTestId('credit-needs-supplier')).toBeNull();
     expect(name.getAttribute('aria-required')).toBeNull();
+    expect(document.querySelector('[data-needed]')).toBeNull();
   });
 
   it('draws the total cost in tabular figures', () => {
