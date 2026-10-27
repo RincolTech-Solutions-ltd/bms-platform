@@ -8,8 +8,14 @@
 --
 -- Expand only, safe on a populated database: inserts only, no table, column, constraint, grant or policy changes (bms_app
 -- already has SELECT, INSERT and UPDATE on retail_units, which keeps its forced row-level security). The unique index
--- retail_units_name (tenant_id, lower(name)) holds; ON CONFLICT DO NOTHING keeps a re-run harmless. lock_timeout is five
--- seconds as in V96 and V108, so the migration fails and is retried rather than queueing writers of the catalogue.
+-- retail_units_name (tenant_id, lower(name)) holds; ON CONFLICT DO NOTHING keeps a re-run harmless. Switching a module off
+-- deletes its tenant_modules row (V43), so the rows read here are the modules switched on. Unlike the application path, the
+-- backfill writes no retail.unit.created audit rows: it runs as the migration with nobody bound, as earlier backfills did.
+--
+-- Locks, said plainly. With BYPASSRLS (bms_owner as provisioned) nothing is altered and the insert takes only ROW EXCLUSIVE on
+-- retail_units. An owner without it toggles FORCE ROW LEVEL SECURITY on retail_units, tenant_modules and tenants, which takes
+-- ACCESS EXCLUSIVE on all three until the commit (a catalogue change, no scan). lock_timeout is five seconds as in V96 and
+-- V108, so the migration fails and is retried rather than queueing every request behind it.
 
 SET LOCAL lock_timeout = '5s';
 

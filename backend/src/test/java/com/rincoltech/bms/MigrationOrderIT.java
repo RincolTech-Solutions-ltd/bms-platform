@@ -2381,10 +2381,13 @@ class MigrationOrderIT {
             for (UUID id : List.of(empty, withUnit, lendingOnly, closed)) {
                 owner.sql("INSERT INTO tenants (id, slug, name, plan_id, status) VALUES (?, ?, 'Test Tenant V109', "
                                 + "'00000000-0000-4000-8000-000000000001', ?)")
-                        .params(id, "test-v109-" + id.toString().substring(0, 8), id == closed ? "closed" : "active")
+                        .params(
+                                id,
+                                "test-v109-" + id.toString().substring(0, 8),
+                                id.equals(closed) ? "closed" : "active")
                         .update();
                 owner.sql("INSERT INTO tenant_modules (tenant_id, module_key) VALUES (?, ?)")
-                        .params(id, id == lendingOnly ? "lending" : "retail")
+                        .params(id, id.equals(lendingOnly) ? "lending" : "retail")
                         .update();
             }
             owner.sql("INSERT INTO retail_units (id, tenant_id, name) VALUES (gen_random_uuid(), ?, 'piece')")

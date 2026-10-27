@@ -79,18 +79,21 @@ class RetailDefaultUnitsIT extends IntegrationTest {
                 .list();
     }
 
+    static long systemUnitAudits(UUID tenantId) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.unit.created'"
+                        + " AND actor_kind = 'system'")
+                .param(tenantId)
+                .query(Long.class)
+                .single();
+    }
+
     @Test
     void aNewRetailBusinessStartsWithTheDefaultUnits() {
         UUID tenantId = create(List.of("retail"));
 
         assertThat(units(tenantId)).containsExactlyElementsOf(DEFAULTS);
-        assertThat(TestDatabase.owner()
-                        .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.unit.created'"
-                                + " AND actor_kind = 'system'")
-                        .param(tenantId)
-                        .query(Long.class)
-                        .single())
-                .isEqualTo(DEFAULTS.size());
+        assertThat(systemUnitAudits(tenantId)).isEqualTo(DEFAULTS.size());
     }
 
     @Test
@@ -101,8 +104,9 @@ class RetailDefaultUnitsIT extends IntegrationTest {
     @Test
     void switchingRetailOnLaterAddsOnlyTheNamesTheBusinessLacks() {
         UUID tenantId = create(List.of("lending"));
+        // A unit the owner switched off still holds its name.
         TestDatabase.owner()
-                .sql("INSERT INTO retail_units (id, tenant_id, name) VALUES (?, ?, 'PIECE')")
+                .sql("INSERT INTO retail_units (id, tenant_id, name, active) VALUES (?, ?, 'PIECE', false)")
                 .params(UUID.randomUUID(), tenantId)
                 .update();
 
@@ -111,10 +115,12 @@ class RetailDefaultUnitsIT extends IntegrationTest {
         List<String> names = units(tenantId);
         assertThat(names).hasSize(DEFAULTS.size()).contains("PIECE").doesNotContain("Piece");
         assertThat(names.stream().map(String::toLowerCase).distinct()).hasSize(DEFAULTS.size());
+        assertThat(systemUnitAudits(tenantId)).isEqualTo(DEFAULTS.size() - 1);
 
         switchModules(tenantId, List.of("lending"));
         switchModules(tenantId, List.of("lending", "retail"));
 
         assertThat(units(tenantId)).isEqualTo(names);
+        assertThat(systemUnitAudits(tenantId)).isEqualTo(DEFAULTS.size() - 1);
     }
 }

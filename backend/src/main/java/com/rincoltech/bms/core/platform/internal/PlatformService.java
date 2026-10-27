@@ -601,11 +601,11 @@ class PlatformService implements TenantProvisioning {
 
     /** ADR-098: each vertical's own set-up of the modules just switched on, in the transaction bound to the tenant. */
     private void setUp(UUID tenantId, List<String> switchedOn) {
-        if (!tenantId.equals(TenantContext.current().orElse(null))) {
-            throw new IllegalStateException("a module is set up only in a transaction bound to its tenant");
-        }
         for (ModuleSetUp setUp : setUps) {
             if (switchedOn.contains(setUp.moduleKey())) {
+                if (!tenantId.equals(TenantContext.current().orElse(null))) {
+                    throw new IllegalStateException("a module is set up only in a transaction bound to its tenant");
+                }
                 setUp.switchedOn();
             }
         }
