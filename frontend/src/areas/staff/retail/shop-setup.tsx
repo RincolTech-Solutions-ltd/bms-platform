@@ -182,7 +182,7 @@ export function ShopSetupPage() {
                     const problem = left.has(k) ? factorProblem(e.size) : null;
                     return (
                       <div key={i.name} className="stack" data-testid={`setup-pack-${slug}`}>
-                        <Choice item={i} ticked={on} onTick={(v) => tick(i, v)} meta={needs ?? packText(e.size, i.of ?? '', e.purpose)} />
+                        <Choice item={i} ticked={on} onTick={(v) => tick(i, v)} meta={needs ?? (factorProblem(e.size) === null ? packText(e.size, i.of ?? '', e.purpose) : undefined)} />
                         {on && !needs && (
                           <>
                             <label htmlFor={`setup-size-${slug}`}>{`${i.of} in one ${i.name}`}</label>

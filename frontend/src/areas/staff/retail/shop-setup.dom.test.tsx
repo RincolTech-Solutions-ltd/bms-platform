@@ -163,6 +163,8 @@ describe('Set up your shop (issue #625)', () => {
     fireEvent.click(screen.getByLabelText(/Phones and accessories/));
     const box = within(await screen.findByTestId('setup-pack-box'));
     const size = box.getByLabelText('Piece in one Box');
+    fireEvent.change(size, { target: { value: 'ten' } });
+    expect(box.queryByText(/NaN/)).toBeNull();
     fireEvent.change(size, { target: { value: '0' } });
     expect(box.queryByText(/Enter how many/)).toBeNull();
     fireEvent.blur(size);
