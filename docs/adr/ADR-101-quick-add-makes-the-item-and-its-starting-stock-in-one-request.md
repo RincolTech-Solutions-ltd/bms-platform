@@ -53,7 +53,8 @@ adding to an item already in the list can never lower its stock; a new shop need
 **Worse:** opening balance equity grows with every Quick add, so an accountant reads it as the owner's stock brought in, not
 as a purchase with a supplier and a cost of cash; a shop that bought the goods and wants them as a purchase still uses Buy
 stock. Stock added without a buying price (always so for someone who may not read cost, whose form does not ask it) goes in
-at 0, so its opening value is 0 and a later sale of it shows the whole price as profit until a purchase sets the cost. General
+at 0, so its opening value is 0 and a later sale of it shows the whole price as profit until a purchase sets the cost. The form
+says so under an empty Buying price ("Add a buying price so profit is right"). General
 and Piece are English names.
 
 **Watch for:** a second way to make items that skips a rule of `POST /retail/products`; Quick add must keep calling the same

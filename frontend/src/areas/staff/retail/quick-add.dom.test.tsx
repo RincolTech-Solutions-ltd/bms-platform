@@ -140,6 +140,27 @@ describe('quick add', () => {
     expect(screen.queryByTestId('qa-adds-to')).toBeNull();
   });
 
+  it('says why there is no Sell it when the person may not sell at that branch', async () => {
+    quickAdd.mockResolvedValue({ product_id: 'p7', description: 'Test Tray', unit: 'pc', item_made: true, branch_id: other?.id, qty: '2', total_qty: '2' });
+    const scopes = { ...(owner.permission_scopes ?? {}), 'retail.sale.create': { all_branches: false, branch_ids: [branch?.id ?? ''] } };
+    open({ ...owner, permission_scopes: scopes });
+    fireEvent.change(screen.getByLabelText(/^Where/), { target: { value: other?.id } });
+    type(/^Name/, 'Test Tray');
+    type(/^Selling price/, '700');
+    type(/How many do you have here now/, '2');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await screen.findByTestId('qa-done');
+    expect(screen.queryByRole('button', { name: 'Sell it' })).toBeNull();
+    expect(screen.getByTestId('qa-not-here').textContent).toBe(`You do not sell at ${branchLabel(other)}, so Sell it is not offered here.`);
+  });
+
+  it('asks for a buying price so profit is right, while it is empty', () => {
+    open(owner);
+    expect(screen.getByText('Add a buying price so profit is right. If you do not know it yet, buying stock sets it.')).toBeTruthy();
+    type(/^Buying price/, '400');
+    expect(screen.queryByText('Add a buying price so profit is right. If you do not know it yet, buying stock sets it.')).toBeNull();
+  });
+
   it('adds the item with no stock for someone who may not count, and says to ask', async () => {
     quickAdd.mockResolvedValue({ product_id: 'p4', description: 'Test Pen', unit: 'pc', item_made: true });
     open(catalogueOnly());

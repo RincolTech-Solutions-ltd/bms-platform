@@ -63,6 +63,7 @@ export function refusedForCertain(error: unknown): boolean {
     && error.code !== 'idempotency_in_progress' && error.code !== 'idempotency_key_reused';
 }
 
+export const NO_COST_HINT = 'Add a buying price so profit is right. If you do not know it yet, buying stock sets it.';
 export const NOT_SURE = 'We could not tell whether this was saved. Tap Add again: it sends exactly the same, and it is never added twice.';
 
 export function QuickAddForm({ initialName = '', onSell }: {
@@ -200,11 +201,15 @@ export function QuickAddForm({ initialName = '', onSell }: {
   if (done) {
     const sellsThere = (me.branches ?? []).some((b) => b.id === where && b.sells_goods !== false);
     // Sell it only where this person may sell: the sale waits for that branch to be the one in use.
-    const canSell = onSell && canUse(me, 'sale') && holdsAt(me, 'retail.sale.create', where) && sellsThere && done.added.qty !== undefined && Number(done.added.qty) > 0;
+    const stocked = done.added.qty !== undefined && Number(done.added.qty) > 0;
+    const canSell = onSell && canUse(me, 'sale') && holdsAt(me, 'retail.sale.create', where) && sellsThere && stocked;
+    // Someone who sells, but not at this branch (or at a store), is told why there is no Sell it, rather than left waiting.
+    const notHere = onSell && canUse(me, 'sale') && stocked && !canSell;
     return (
       <section className="rt-card stack" aria-labelledby="qa-done">
         <p id="qa-done" role="status" className="alert alert-success" data-testid="qa-done">{addedLine(done.added, done.where)}</p>
         {done.note && <p className="hint" data-testid="qa-photo-note">{done.note}</p>}
+        {notHere && <p className="hint" data-testid="qa-not-here">{sellsThere ? `You do not sell at ${done.where}, so Sell it is not offered here.` : `${done.where} is a store, so the item is sold from a shop.`}</p>}
         <p className="cluster">
           <button type="button" className="rt-primary" onClick={another}>Add another</button>
           {canSell && <button type="button" onClick={() => onSell(done.added.product_id ?? '', where)}>Sell it</button>}
@@ -246,7 +251,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
           optional
           error={costMinor === null ? `Type what you pay for one, in ${RETAIL_CURRENCY}, or leave it empty.` : null}
           showError={showErrors}
-          hint={sellMinor !== null && costMinor !== null && costMinor > 0 && sellMinor <= costMinor ? `This is not below the selling price, ${money(sellMinor)}.` : 'Leave it empty if you do not know it yet; buying stock sets it.'}
+          hint={sellMinor !== null && costMinor !== null && costMinor > 0 && sellMinor <= costMinor ? `This is not below the selling price, ${money(sellMinor)}.` : costMinor === 0 ? NO_COST_HINT : undefined}
           inputMode="numeric"
           value={cost}
           onChange={(e) => setCost(e.target.value)}
