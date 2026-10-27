@@ -5,9 +5,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.core.operations.Idempotency;
 import com.rincoltech.bms.retail.RetailTestSupport;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -256,23 +258,64 @@ class RetailQuickAddIT extends IntegrationTest {
         assertThat(moves.get(0).get("qty").asString()).isEqualTo("20.000");
         String today = java.time.LocalDate.now(com.rincoltech.bms.kernel.BusinessClock.DEFAULT_ZONE)
                 .toString();
-        JsonNode profit = api.get("/reports/profit/daily?from=" + today + "&to=" + today, ADMIN)
-                .getBody();
-        assertThat(profit.get("stocktake_difference_minor").asLong()).isZero();
-        assertThat(profit.get("profit_minor").asLong()).isZero();
-        // Stock health's lost or damaged rows (used, damaged, short and over) and the margins see nothing of it.
-        JsonNode health = api.get("/reports/stock-health", ADMIN).getBody();
-        assertThat(health.get("shrinkage")).isNotNull();
-        for (JsonNode row : health.get("shrinkage")) {
-            assertThat(row.get("used_reports").asInt()
-                            + row.get("damaged_reports").asInt())
-                    .isZero();
-            assertThat(row.get("short_lines").asInt() + row.get("over_lines").asInt())
-                    .isZero();
-        }
+        // Sell two at 15,000 and report one used, so every report has a row of this item and its checks cannot pass
+        // empty.
+        ResponseEntity<JsonNode> sale = api.sell(hq, "cash", product, "2");
+        assertThat(sale.getStatusCode()).as("%s", sale.getBody()).isEqualTo(HttpStatus.CREATED);
+        Map<String, Object> used = new LinkedHashMap<>();
+        used.put("branch_id", hq);
+        used.put("kind", "used");
+        used.put("reason", "Test lamp for the counter");
+        used.put("lines", List.of(Map.of("product_id", product, "qty", "1")));
+        ResponseEntity<JsonNode> usage =
+                api.postKeyed("/usage", used, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(usage.getStatusCode()).as("%s", usage.getBody()).isEqualTo(HttpStatus.CREATED);
+        // The usage is costed from the opening layer, 10,000 a piece.
+        assertThat(usage.getBody().get("lines").get(0).get("unit_cost_minor").asLong())
+                .isEqualTo(10_000);
+
+        // Margins: the two sold cost the opening layer's 10,000 each, so 30,000 of sales make 10,000 of profit.
         JsonNode margins = api.get("/reports/margins?from=" + today + "&to=" + today, ADMIN)
                 .getBody();
-        assertThat(margins.get("by_product").toString()).doesNotContain(product.toString());
+        JsonNode row = null;
+        for (JsonNode r : margins.get("by_product")) {
+            if (r.get("id").asString().equals(product.toString())) {
+                row = r;
+            }
+        }
+        assertThat(row).as("%s", margins).isNotNull();
+        assertThat(new BigDecimal(row.get("qty").asString())).isEqualByComparingTo("2");
+        assertThat(row.get("sales_minor").asLong()).isEqualTo(30_000);
+        assertThat(row.get("cost_minor").asLong()).isEqualTo(20_000);
+        assertThat(row.get("profit_minor").asLong()).isEqualTo(10_000);
+
+        // The daily profit: the sale and the usage at the opening cost, and no stock-take difference from the opening
+        // stock.
+        JsonNode profit = api.get("/reports/profit/daily?from=" + today + "&to=" + today, ADMIN)
+                .getBody();
+        assertThat(profit.get("sales_minor").asLong()).isEqualTo(30_000);
+        assertThat(profit.get("cost_of_sales_minor").asLong()).isEqualTo(20_000);
+        assertThat(profit.get("usage_cost_minor").asLong()).isEqualTo(10_000);
+        assertThat(profit.get("stocktake_difference_minor").asLong()).isZero();
+
+        // Stock health's lost or damaged row of the branch: the one usage report, no short or over line, no stock-take
+        // gain.
+        JsonNode health = api.get("/reports/stock-health", ADMIN).getBody();
+        JsonNode shrink = null;
+        for (JsonNode r : health.get("shrinkage")) {
+            if (r.get("branch_id").asString().equals(hq.toString())) {
+                shrink = r;
+            }
+        }
+        assertThat(shrink).as("%s", health.get("shrinkage")).isNotNull();
+        assertThat(shrink.get("used_reports").asInt()).isEqualTo(1);
+        assertThat(shrink.get("used_cost_minor").asLong()).isEqualTo(10_000);
+        assertThat(shrink.get("damaged_reports").asInt()).isZero();
+        assertThat(shrink.get("short_lines").asInt() + shrink.get("over_lines").asInt())
+                .isZero();
+        assertThat(shrink.get("stocktake_gain_minor").asLong()).isZero();
+        assertThat(shrink.get("stocktake_loss_minor").asLong()).isZero();
+        assertThat(stockAt(hq, product)).isEqualByComparingTo("17");
         // A switched-off item takes no stock here.
         switchOff("retail_products", product);
         Map<String, Object> more = new LinkedHashMap<>();
@@ -282,7 +325,7 @@ class RetailQuickAddIT extends IntegrationTest {
         ResponseEntity<JsonNode> off = quickAdd(more);
         assertThat(off.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(off.getBody().toString()).contains("inactive_product");
-        assertThat(stockAt(hq, product)).isEqualByComparingTo("20");
+        assertThat(stockAt(hq, product)).isEqualByComparingTo("17");
     }
 
     @Test
@@ -409,7 +452,11 @@ class RetailQuickAddIT extends IntegrationTest {
         assertThat(stockAt(hq, product)).isEqualByComparingTo("60");
         // The same key with another quantity is refused, never a second add.
         more.put("qty", "20");
-        assertThat(quickAdd(more, ADMIN, "*", key).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        ResponseEntity<JsonNode> reused = quickAdd(more, ADMIN, "*", key);
+        assertThat(reused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        // The code the form treats as "may have been saved" (quick-add.tsx, IDEMPOTENCY_UNSURE_CODES), so it never
+        // takes a new key.
+        assertThat(reused.getBody().get("code").asString()).isEqualTo(Idempotency.KEY_REUSED);
         assertThat(stockAt(hq, product)).isEqualByComparingTo("60");
     }
 
