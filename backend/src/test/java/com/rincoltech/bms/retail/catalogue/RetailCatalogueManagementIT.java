@@ -161,6 +161,69 @@ class RetailCatalogueManagementIT extends IntegrationTest {
         assertThat(actions()).contains("retail.unit.updated");
     }
 
+    /** Issue #625, ADR-100: a unit can be a pack with a usual size in another unit and a use, set on create or later. */
+    @Test
+    void aUnitKeepsItsUsualPackSizeAndUse() {
+        UUID metre = api.unit("test-metre");
+        ResponseEntity<JsonNode> roll = api.post(
+                "/units",
+                Map.of("name", "test-roll", "usual_pack", Map.of("size", "100", "of_unit_id", metre, "use", "both")),
+                ADMIN);
+        assertThat(roll.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        JsonNode pack = roll.getBody().get("usual_pack");
+        assertThat(pack.get("size").asString()).isEqualTo("100.000");
+        assertThat(pack.get("of_unit").asString()).isEqualTo("test-metre");
+        assertThat(pack.get("use").asString()).isEqualTo("both");
+        assertThat(roll.getBody().has("price")).isFalse();
+
+        // A plain unit has none; setting one later is an update, and the list shows it.
+        UUID box = api.unit("test-box");
+        UUID piece = api.unit("test-piece");
+        assertThat(patch(
+                                "/units/" + box,
+                                Map.of("usual_pack", Map.of("size", "50", "of_unit_id", piece, "use", "buying")),
+                                ADMIN)
+                        .getBody()
+                        .get("usual_pack")
+                        .get("size")
+                        .asString())
+                .isEqualTo("50.000");
+        JsonNode listed = null;
+        for (JsonNode u : api.get("/units", ADMIN).getBody().get("items")) {
+            if (u.get("id").asString().equals(box.toString())) {
+                listed = u;
+            }
+            if (u.get("id").asString().equals(piece.toString())) {
+                assertThat(u.has("usual_pack")).isFalse();
+            }
+        }
+        assertThat(listed.get("usual_pack").get("use").asString()).isEqualTo("buying");
+
+        // A pack of itself, of a unit it does not have, a size under one or an unknown use is refused.
+        Map<String, Object> self = Map.of("usual_pack", Map.of("size", "2", "of_unit_id", box, "use", "both"));
+        assertThat(patch("/units/" + box, self, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        Map<String, Object> unknown = Map.of(
+                "name", "test-bale", "usual_pack", Map.of("size", "2", "of_unit_id", UUID.randomUUID(), "use", "both"));
+        assertThat(api.post("/units", unknown, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        Map<String, Object> small =
+                Map.of("name", "test-bale", "usual_pack", Map.of("size", "0.5", "of_unit_id", piece, "use", "both"));
+        assertThat(api.post("/units", small, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        Map<String, Object> use =
+                Map.of("name", "test-bale", "usual_pack", Map.of("size", "2", "of_unit_id", piece, "use", "renting"));
+        assertThat(api.post("/units", use, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(api.post(
+                                "/units",
+                                Map.of(
+                                        "name",
+                                        "test-bale",
+                                        "usual_pack",
+                                        Map.of("size", "2", "of_unit_id", piece, "use", "both")),
+                                READER)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(actions()).contains("retail.unit.created", "retail.unit.updated");
+    }
+
     @Test
     void aSupplierIsEditedAndSwitchedOff() {
         UUID supplier = RetailTestSupport.id(

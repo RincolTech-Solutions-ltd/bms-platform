@@ -17997,6 +17997,7 @@ export interface components {
              * @description Products (active or not) that use this unit
              */
             product_count?: number;
+            usual_pack?: components["schemas"]["RetailUsualPack"];
             /**
              * Format: int32
              * @description Send as If-Match when updating
@@ -18008,11 +18009,13 @@ export interface components {
         };
         RetailUnitRequest: {
             name: string;
+            usual_pack?: components["schemas"]["RetailUsualPackRequest"];
         };
         /** @description Omitted fields are unchanged; a unit is never deleted */
         RetailUnitUpdate: {
             active?: boolean;
             name?: string;
+            usual_pack?: components["schemas"]["RetailUsualPackRequest"];
         };
         RetailUsageLine: {
             code?: string;
@@ -18074,6 +18077,29 @@ export interface components {
              */
             occurred_on?: string;
             reason: string;
+        };
+        /** @description The usual size of a pack in a smaller unit, and what it is for */
+        RetailUsualPack: {
+            /** @description The smaller unit's name */
+            of_unit?: string;
+            /** Format: uuid */
+            of_unit_id?: string;
+            /** @description How many of the smaller unit, three places, for example 100.000 */
+            size?: string;
+            /** @enum {string} */
+            use?: "buying" | "selling" | "both";
+        };
+        /** @description The usual size of this pack in a smaller unit, such as a roll of 100 metres, and what it is for */
+        RetailUsualPackRequest: {
+            /**
+             * Format: uuid
+             * @description The smaller unit, such as Metre or Piece
+             */
+            of_unit_id: string;
+            /** @description How many of the smaller unit, at least 1, up to three places */
+            size: string;
+            /** @enum {string} */
+            use: "buying" | "selling" | "both";
         };
         RetailValuation: {
             /** Format: date */
