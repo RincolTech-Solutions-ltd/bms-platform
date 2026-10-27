@@ -1,0 +1,254 @@
+package com.rincoltech.bms.retail.stock;
+
+import static com.rincoltech.bms.retail.RetailTestSupport.ADMIN;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.rincoltech.bms.IntegrationTest;
+import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.retail.RetailTestSupport;
+import java.math.BigDecimal;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import tools.jackson.databind.JsonNode;
+
+/**
+ * Quick add (issue #632): one request makes the item and records how many there are at the chosen branch as a committed stock
+ * count of that one line, in one transaction. Other items keep their stock, a name already in the list is refused with the
+ * existing item to add stock to instead, General and Piece are made when missing, and the count needs its own permission.
+ * Fabricated data.
+ */
+class RetailQuickAddIT extends IntegrationTest {
+
+    /** Catalogue manage without counting stock. */
+    static final String CATALOGUE_ONLY = "retail.catalogue.manage,retail.stock.read";
+
+    @Autowired
+    TestRestTemplate http;
+
+    TestDatabase.Fixture t;
+    RetailTestSupport api;
+    UUID hq;
+    UUID br2;
+
+    @BeforeEach
+    void setUp() {
+        t = TestDatabase.tenant("retail-quick", false, true);
+        api = new RetailTestSupport(http, t);
+        hq = t.headOffice();
+        br2 = t.secondBranch();
+    }
+
+    ResponseEntity<JsonNode> quickAdd(Map<String, Object> body, String perms, String scope, String key) {
+        return api.postKeyed("/quick-add", body, perms, scope, key);
+    }
+
+    ResponseEntity<JsonNode> quickAdd(Map<String, Object> body) {
+        return quickAdd(body, ADMIN, "*", UUID.randomUUID().toString());
+    }
+
+    static Map<String, Object> item(String name, long sell, String qty, UUID branch) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("description", name);
+        body.put("sell_minor", sell);
+        if (qty != null) {
+            body.put("qty", qty);
+        }
+        body.put("branch_id", branch);
+        return body;
+    }
+
+    BigDecimal stockAt(UUID branch, UUID product) {
+        return TestDatabase.owner()
+                .sql("SELECT coalesce(sum(qty), 0) FROM retail_stock_balances WHERE branch_id = ? AND product_id = ?")
+                .params(branch, product)
+                .query(BigDecimal.class)
+                .single();
+    }
+
+    long scalar(String sql, Object... params) {
+        return TestDatabase.owner().sql(sql).params(params).query(Long.class).single();
+    }
+
+    static UUID productOf(ResponseEntity<JsonNode> r) {
+        return UUID.fromString(r.getBody().get("product_id").asString());
+    }
+
+    @Test
+    void oneTapMakesTheItemAndItsStockAtTheChosenBranchOnly() {
+        UUID other = api.product("QA-OTHER", 500, 800);
+        api.stockUp(hq, other, "7");
+
+        Map<String, Object> body = item("Test Bulb 60W", 6_000, "600", br2);
+        body.put("cost_minor", 4_000);
+        ResponseEntity<JsonNode> r = quickAdd(body);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode added = r.getBody();
+        UUID product = productOf(r);
+        assertThat(added.get("item_made").asBoolean()).isTrue();
+        assertThat(added.get("description").asString()).isEqualTo("Test Bulb 60W");
+        assertThat(added.get("code").asString()).isEqualTo("GNR-0001");
+        assertThat(added.get("qty").asString()).isEqualTo("600");
+        assertThat(added.get("branch_id").asString()).isEqualTo(br2.toString());
+
+        assertThat(stockAt(br2, product)).isEqualByComparingTo("600");
+        assertThat(stockAt(hq, product)).isEqualByComparingTo("0");
+        // The other item is untouched: its stock stands and the count never names it.
+        assertThat(stockAt(hq, other)).isEqualByComparingTo("7");
+        UUID stocktake = UUID.fromString(added.get("stocktake_id").asString());
+        assertThat(scalar("SELECT count(*) FROM retail_stocktake_lines WHERE stocktake_id = ?", stocktake))
+                .isEqualTo(1);
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_stocktakes WHERE id = ? AND status = 'committed' AND branch_id = ?",
+                        stocktake,
+                        br2))
+                .isEqualTo(1);
+        // The item carries the prices typed.
+        JsonNode read = api.get("/products/" + product, ADMIN).getBody();
+        assertThat(read.get("sell_minor").asLong()).isEqualTo(6_000);
+        assertThat(read.get("cost_minor").asLong()).isEqualTo(4_000);
+    }
+
+    @Test
+    void generalAndPieceAreMadeWhenMissingAndUsedAfterwards() {
+        boolean hadPiece = scalar(
+                        "SELECT count(*) FROM retail_units WHERE tenant_id = ? AND lower(name) IN ('piece', 'pc', 'pcs')",
+                        t.tenantId())
+                > 0;
+        ResponseEntity<JsonNode> first = quickAdd(item("Test Soap Bar", 2_500, "10", hq));
+        assertThat(first.getStatusCode()).as("%s", first.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(first.getBody().get("category_made").asBoolean()).isTrue();
+        assertThat(first.getBody().get("unit_made").asBoolean()).isEqualTo(!hadPiece);
+        assertThat(first.getBody().get("unit").asString()).isIn("Piece", "pc", "pcs");
+
+        ResponseEntity<JsonNode> second = quickAdd(item("Test Soap Box", 9_000, "2", hq));
+        assertThat(second.getStatusCode()).as("%s", second.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(second.getBody().get("category_made").asBoolean()).isFalse();
+        assertThat(second.getBody().get("unit_made").asBoolean()).isFalse();
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_categories WHERE tenant_id = ? AND lower(name) = 'general'",
+                        t.tenantId()))
+                .isEqualTo(1);
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_units WHERE tenant_id = ? AND lower(name) IN ('piece', 'pc', 'pcs')",
+                        t.tenantId()))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void aChosenCategoryAndUnitAreKept() {
+        UUID category = api.category("Test Drinks");
+        UUID unit = api.unit("Bottle");
+        Map<String, Object> body = item("Test Juice 500ml", 3_000, "24", hq);
+        body.put("category_id", category);
+        body.put("unit_id", unit);
+        ResponseEntity<JsonNode> r = quickAdd(body);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(r.getBody().get("unit").asString()).isEqualTo("Bottle");
+        assertThat(r.getBody().get("category_made").asBoolean()).isFalse();
+        JsonNode read = api.get("/products/" + productOf(r), ADMIN).getBody();
+        assertThat(read.get("category_id").asString()).isEqualTo(category.toString());
+    }
+
+    @Test
+    void aNameAlreadyInTheListIsRefusedAndTheExistingItemTakesTheCount() {
+        ResponseEntity<JsonNode> first = quickAdd(item("Test Rice 1kg", 5_000, "5", hq));
+        UUID product = productOf(first);
+
+        ResponseEntity<JsonNode> again = quickAdd(item("test rice 1KG", 5_200, "8", hq));
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(again.getBody().get("code").asString()).isEqualTo("duplicate_product_name");
+        assertThat(again.getBody().get("existing_id").asString()).isEqualTo(product.toString());
+        // Nothing was made and the stock is as it was.
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_products WHERE tenant_id = ? AND lower(description) = 'test rice 1kg'",
+                        t.tenantId()))
+                .isEqualTo(1);
+        assertThat(stockAt(hq, product)).isEqualByComparingTo("5");
+
+        // Use the existing one and just add stock: the count is how many there are now.
+        Map<String, Object> existing = new LinkedHashMap<>();
+        existing.put("product_id", product);
+        existing.put("qty", "8");
+        existing.put("branch_id", hq);
+        ResponseEntity<JsonNode> counted = quickAdd(existing);
+        assertThat(counted.getStatusCode()).as("%s", counted.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(counted.getBody().get("item_made").asBoolean()).isFalse();
+        assertThat(stockAt(hq, product)).isEqualByComparingTo("8");
+        assertThat(api.get("/products/" + product, ADMIN)
+                        .getBody()
+                        .get("sell_minor")
+                        .asLong())
+                .isEqualTo(5_000);
+    }
+
+    @Test
+    void theCountNeedsStockCountPermissionAndNothingIsMadeWithoutIt() {
+        ResponseEntity<JsonNode> refused = quickAdd(item("Test Pen Blue", 500, "30", hq), CATALOGUE_ONLY, "*", "k-1");
+        assertThat(refused.getStatusCode()).isIn(HttpStatus.FORBIDDEN, HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_products WHERE tenant_id = ? AND description = 'Test Pen Blue'",
+                        t.tenantId()))
+                .isZero();
+
+        // Without a quantity, catalogue manage alone makes the item, with no stock recorded.
+        ResponseEntity<JsonNode> itemOnly = quickAdd(
+                item("Test Pen Blue", 500, null, null),
+                CATALOGUE_ONLY,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(itemOnly.getStatusCode()).as("%s", itemOnly.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(itemOnly.getBody().has("stocktake_id")
+                        && !itemOnly.getBody().get("stocktake_id").isNull())
+                .isFalse();
+
+        // Without catalogue manage the route is refused.
+        ResponseEntity<JsonNode> seller = quickAdd(
+                item("Test Pen Red", 500, "3", hq),
+                RetailTestSupport.SALES + ",retail.stocktake.commit",
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(seller.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void theCountIsLimitedToTheBranchesInScope() {
+        ResponseEntity<JsonNode> r = quickAdd(
+                item("Test Torch", 8_000, "4", br2),
+                ADMIN,
+                hq.toString(),
+                UUID.randomUUID().toString());
+        assertThat(r.getStatusCode().is4xxClientError()).isTrue();
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_products WHERE tenant_id = ? AND description = 'Test Torch'",
+                        t.tenantId()))
+                .isZero();
+    }
+
+    @Test
+    void theSameKeyReplaysAndMakesOneItem() {
+        String key = UUID.randomUUID().toString();
+        Map<String, Object> body = item("Test Matches", 200, "50", hq);
+        ResponseEntity<JsonNode> first = quickAdd(body, ADMIN, "*", key);
+        ResponseEntity<JsonNode> second = quickAdd(body, ADMIN, "*", key);
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(second.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
+        assertThat(productOf(second)).isEqualTo(productOf(first));
+        assertThat(stockAt(hq, productOf(first))).isEqualByComparingTo("50");
+    }
+
+    @Test
+    void aMissingNameOrPriceIsRefused() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("qty", "1");
+        ResponseEntity<JsonNode> r = quickAdd(body);
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().toString()).contains("description").contains("sell_minor");
+    }
+}
