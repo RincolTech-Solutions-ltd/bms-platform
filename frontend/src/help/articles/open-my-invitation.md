@@ -3,7 +3,7 @@ title: How do I open my invitation and choose a password?
 job: start
 order: 20
 screens: /accept-invitation
-words: invited, invitation, accept, join, choose a password, set password, create password, first time, new staff, new user, link, two step
+words: invited, i was invited, invitation, accept, join, joining, choose a password, set password, create password, first time, link, two step
 ---
 Your administrator invites you with your email or phone, and you get a link by email, SMS or WhatsApp. You open it once to choose your password.
 
