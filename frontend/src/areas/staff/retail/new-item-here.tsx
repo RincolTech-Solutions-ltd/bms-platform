@@ -19,7 +19,8 @@ import { Problem, money } from './ui';
 // Selling price, the quantity, one Save. Saving creates the item through the same create call as Items, so the server makes the code
 // (ADR-081) and keeps the name rules (issue #352); the screen then puts it on the purchase or the count without leaving.
 // Only retail.catalogue.manage may add items; anyone else is told to ask their manager. The form is a group, not a <form>:
-// it sits inside the purchase form, and Enter in it saves the item, never the purchase.
+// it sits inside the purchase form, and Enter in it saves the item, never the purchase. Sell offers it too (issue #615), only
+// when the search finds nothing, with the Description already holding what was typed and its own words for who to ask.
 
 export const ASK_MANAGER = 'Ask your manager to add this item.';
 export const OFFLINE_TEXT = 'You are offline. Adding a new item needs the internet. Connect, then tap Save the item again.';
@@ -54,8 +55,12 @@ export function ItemCodeLine({ id, category }: { id: string; category: Category 
   );
 }
 
-export function NewItemHere({ id, qtyLabel, counting = false, askCost, onAdded }: {
+export function NewItemHere({ id, qtyLabel, counting = false, askCost, description, ask = ASK_MANAGER, onAdded }: {
   id: string;
+  /** What the Description starts with: on Sell, what was typed in the search. */
+  description?: string;
+  /** What someone who may not add items is told, after "Not in the list?". */
+  ask?: string;
   /** The quantity's label; absent when the screen takes the quantity on its own line. */
   qtyLabel?: string;
   /** A count, where 0 is a quantity; a purchase needs more than 0. */
@@ -69,7 +74,7 @@ export function NewItemHere({ id, qtyLabel, counting = false, askCost, onAdded }
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   if (!(me.permissions ?? []).includes('retail.catalogue.manage')) {
-    return <p className="hint" data-testid={`${id}-ask`}>Not in the list? {ASK_MANAGER}</p>;
+    return <p className="hint" data-testid={`${id}-ask`}>Not in the list? {ask}</p>;
   }
   if (!open) {
     return (
@@ -87,11 +92,12 @@ export function NewItemHere({ id, qtyLabel, counting = false, askCost, onAdded }
     setOpen(false);
     setTimeout(() => document.getElementById(`${id}-open`)?.focus());
   };
-  return <NewItemForm id={id} qtyLabel={qtyLabel} counting={counting} askCost={askCost} onAdded={onAdded} onClose={close} />;
+  return <NewItemForm id={id} qtyLabel={qtyLabel} counting={counting} askCost={askCost} initial={description} onAdded={onAdded} onClose={close} />;
 }
 
-function NewItemForm({ id, qtyLabel, counting, askCost, onAdded, onClose }: {
+function NewItemForm({ id, qtyLabel, counting, askCost, initial = '', onAdded, onClose }: {
   id: string;
+  initial?: string;
   qtyLabel?: string;
   counting: boolean;
   askCost: boolean;
@@ -104,7 +110,7 @@ function NewItemForm({ id, qtyLabel, counting, askCost, onAdded, onClose }: {
   const categories = useQuery({ queryKey: ['retail', 'catalogue', 'categories'], queryFn: () => retail.listCategories() });
   const units = useQuery({ queryKey: ['retail', 'catalogue', 'units'], queryFn: () => retail.listUnits() });
   const [categoryId, setCategoryId] = useState('');
-  const [description, setDescription] = useState('');
+  const [description, setDescription] = useState(initial.trim());
   const [unitId, setUnitId] = useState('');
   const [cost, setCost] = useState(counting ? '0' : '');
   const [sell, setSell] = useState('');
