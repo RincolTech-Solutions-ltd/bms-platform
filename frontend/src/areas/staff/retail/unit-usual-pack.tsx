@@ -159,7 +159,6 @@ export function UsualPackSheet({ unit, units, onClose, onSaved }: {
           onChange={(e) => setSize(e.target.value)}
           autoComplete="off"
         />
-        <p className="field-label">Used for</p>
         <Segmented label="Used for" options={PURPOSES} value={purpose} onChange={setPurpose} />
         <Problem error={save.error} />
       </form>}

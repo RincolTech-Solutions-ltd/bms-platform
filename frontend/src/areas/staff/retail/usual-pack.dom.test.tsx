@@ -127,6 +127,15 @@ describe('a usual pack on the Units page (issue #637)', () => {
     await waitFor(() => expect(updateUnit).toHaveBeenCalledWith('u-ctn', 1, { clear_usual_pack: true }));
   });
 
+  it('names Used for once, by the choice itself, with no loose label beside it (issue #662)', async () => {
+    units = [metre, roll];
+    draw(<UnitsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Usual pack of Roll' }));
+    const sheet = await screen.findByRole('dialog');
+    expect(within(sheet).getByRole('radiogroup', { name: 'Used for' })).toBeTruthy();
+    expect(within(sheet).queryByText('Used for')).toBeNull();
+  });
+
   it('never offers a usual pack on a unit another usual pack counts, as the server refuses it', async () => {
     units = [metre, roll, dozen];
     draw(<UnitsPage />);
