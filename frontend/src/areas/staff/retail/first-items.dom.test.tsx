@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
 import { RetailError, type Product, type Stocktake } from '../../../api/retail';
@@ -10,6 +10,8 @@ import { branchLabel } from '../../../auth/branch';
 import { StaffContext } from '../context';
 import { PICKER_LABEL } from '../../../test-utils/item-picker';
 import { chooseCategory } from '../../../test-utils/category-picker';
+import { OfflineProvider, type Offline } from '../../../offline/offline-context';
+import { testConnectivity } from '../../../offline/test-kit';
 
 // Issue #615: a new shop with no items opened Sell, searched, found nothing and had to ask how to add items. Now Sell and Home
 // start with a card that leads to adding them (or says to ask the owner), and a Sell search that finds nothing offers Add it
@@ -24,6 +26,7 @@ const createProduct = vi.fn();
 const createCategory = vi.fn();
 const createStocktake = vi.fn();
 const commitStocktake = vi.fn();
+const discardStocktake = vi.fn();
 const similarProducts = vi.fn();
 const listCatalogue = vi.fn();
 const getProduct = vi.fn();
@@ -57,6 +60,7 @@ vi.mock('../../../api/retail', async (original) => {
       createProduct: (...a: unknown[]) => createProduct(...a),
       createStocktake: (...a: unknown[]) => createStocktake(...a),
       commitStocktake: (...a: unknown[]) => commitStocktake(...a),
+      discardStocktake: (...a: unknown[]) => discardStocktake(...a),
     },
   };
 });
@@ -67,6 +71,7 @@ vi.mock('../../../api/retail-analytics', async (original) => {
 
 const { RecordSale, SaleForm } = await import('./sale');
 const { StaffHome } = await import('../home');
+const { useActiveBranch } = await import('../branch-picker');
 
 const owner = mockMe('admin');
 const seller = mockMe('sales');
@@ -80,6 +85,8 @@ afterEach(() => {
   createCategory.mockReset();
   createStocktake.mockReset();
   commitStocktake.mockReset();
+  discardStocktake.mockReset();
+  discardStocktake.mockImplementation((id: string) => Promise.resolve({ id, status: 'discarded' }));
   similarProducts.mockReset();
   similarProducts.mockResolvedValue({ exact: [], similar: [] });
   getProduct.mockReset();
@@ -88,6 +95,7 @@ afterEach(() => {
   listProducts.mockImplementation(() => Promise.resolve(catalogue));
 });
 listProducts.mockImplementation(() => Promise.resolve(catalogue));
+discardStocktake.mockImplementation((id: string) => Promise.resolve({ id, status: 'discarded' }));
 
 similarProducts.mockResolvedValue({ exact: [], similar: [] });
 
@@ -267,6 +275,7 @@ describe('a Sell search that finds nothing', () => {
     expect(screen.queryByText(/its count is not/)).toBeNull();
   });
 
+  const sheet: Product = { ...made, id: 'p8', code: 'DUV-0003', description: 'Test bed sheet' };
   // Issue #656: the records already hold 10 of the item just made, so a count of 4 is a big drop, asked before any draft exists.
   const holdsTen = () => listProducts.mockImplementation(({ query }: { query?: string }) => Promise.resolve(query === 'DUV-0001' ? [{ ...made, qty: '10.000' }] : []));
   const tickAndCommitPillow = (ask: HTMLElement) => {
@@ -345,7 +354,6 @@ describe('a Sell search that finds nothing', () => {
   });
 
   it('leaves no draft when the sale is cleared while a tick is asked (issue #656)', async () => {
-    const sheet: Product = { ...made, id: 'p8', code: 'DUV-0003', description: 'Test bed sheet' };
     holdsTen();
     createProduct.mockResolvedValueOnce(sheet).mockResolvedValueOnce(made);
     createStocktake.mockResolvedValue({ id: 's8', status: 'draft', lines: [{ product_id: 'p8', expected_qty: '0.000', counted_qty: '3.000' }] });
@@ -390,12 +398,204 @@ describe('a Sell search that finds nothing', () => {
     await fill('4');
     tickAndCommit(await screen.findByTestId('sale-count-drop-p9'));
     expect(await screen.findByText('The count of Test duvet cover is not committed. Try again.')).toBeTruthy();
-    // A draft now exists, so Not now is gone: the count is sent, not left behind.
-    expect(within(screen.getByTestId('sale-count-drop-p9')).queryByRole('button', { name: 'Not now' })).toBeNull();
     fireEvent.click(within(screen.getByTestId('sale-count-drop-p9')).getByRole('button', { name: 'Commit the count' }));
     expect(await screen.findByRole('button', { name: 'Remove Test duvet cover' })).toBeTruthy();
     expect(createStocktake).toHaveBeenCalledTimes(1);
     expect(commitStocktake.mock.calls).toEqual([['s1', ['p9']], ['s1', ['p9']]]);
+  });
+
+  // Issue #656, round 3: a draft exists once Commit the count was pressed; when its commit is lost it is discarded on every way out.
+  const lostCommit = () => {
+    holdsTen();
+    createProduct.mockResolvedValueOnce(sheet).mockResolvedValue(made);
+    createStocktake.mockImplementation(({ lines }: { lines: { product_id: string }[] }) =>
+      Promise.resolve(lines[0]!.product_id === 'p8' ? { id: 's8', status: 'draft', lines: [{ product_id: 'p8', expected_qty: '0.000', counted_qty: '3.000' }] } : draftOf('10.000')));
+    commitStocktake.mockImplementation((id: string) => (id === 's8' ? Promise.resolve({ id, status: 'committed' }) : Promise.reject(new RetailError('Offline', 503, 'unavailable'))));
+  };
+  /** A bed sheet on the sale, then the duvet cover's count ticked and its commit lost, so its draft s1 is open. */
+  const toLostCommit = async () => {
+    await fill('3');
+    expect(await screen.findByRole('button', { name: 'Remove Test bed sheet' })).toBeTruthy();
+    await fill('4');
+    tickAndCommit(await screen.findByTestId('sale-count-drop-p9'));
+    expect(await screen.findByText('The count of Test duvet cover is not committed. Try again.')).toBeTruthy();
+    expect(createStocktake).toHaveBeenCalledTimes(2);
+    expect(discardStocktake).not.toHaveBeenCalled();
+  };
+
+  it('discards the draft of a lost commit when the sale is cleared (issue #656)', async () => {
+    lostCommit();
+    open(<RecordSale />, owner);
+    await toLostCommit();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear this sale' }));
+    await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
+    expect(screen.queryByTestId('sale-count-drop-p9')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remove Test bed sheet' })).toBeNull();
+    expect(sessionStorage.getItem('sale-held-counts')).toBe('[]');
+  });
+
+  it('discards the draft of a lost commit when the screen is left (issue #656)', async () => {
+    lostCommit();
+    open(<RecordSale />, owner);
+    await toLostCommit();
+    cleanup();
+    await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
+    expect(discardStocktake).toHaveBeenCalledTimes(1);
+  });
+
+  it('discards the draft of a lost commit when Not now is pressed (issue #656)', async () => {
+    lostCommit();
+    open(<RecordSale />, owner);
+    await toLostCommit();
+    fireEvent.click(within(screen.getByTestId('sale-count-drop-p9')).getByRole('button', { name: 'Not now' }));
+    await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
+    expect(screen.queryByTestId('sale-count-drop-p9')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Remove Test bed sheet' })).toBeTruthy();
+  });
+
+  it('discards the draft of a lost commit when the branch is switched (issue #656)', async () => {
+    lostCommit();
+    const [here, other] = [owner.branches?.[0]?.id ?? '', owner.branches?.[1]?.id ?? 'other'];
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const at = (branch: string) => (
+      <QueryClientProvider client={client}>
+        <StaffContext.Provider value={{ me: owner, branch, chooseBranch }}><SaleForm key={branch} branchId={branch} /></StaffContext.Provider>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(at(here));
+    await toLostCommit();
+    rerender(at(other));
+    await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
+    expect(screen.queryByTestId('sale-count-drop-p9')).toBeNull();
+  });
+
+  it('offline, keeps the sale and the branch until the draft of a lost commit is committed or discarded (issue #656)', async () => {
+    lostCommit();
+    const network = testConnectivity(true);
+    const offline = { scope: 'test', connectivity: network, catalogue: null, engine: { subscribe: () => () => undefined, snapshot: () => ({ items: [], syncing: false, needsSignIn: false }) } } as unknown as Offline;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // The staff area's branch switch, with the sale form made again for each branch as RecordSale does.
+    function Shell() {
+      const { branch, choose } = useActiveBranch(owner);
+      if (!branch) return null;
+      return (
+        <StaffContext.Provider value={{ me: owner, branch, chooseBranch: choose }}>
+          <p data-testid="branch-in-use">{branch}</p>
+          <button type="button" onClick={() => choose((owner.branches ?? []).find((b) => b.id !== branch)?.id ?? '')}>Switch branch</button>
+          <SaleForm key={branch} branchId={branch} />
+        </StaffContext.Provider>
+      );
+    }
+    render(<QueryClientProvider client={client}><OfflineProvider value={offline}><Shell /></OfflineProvider></QueryClientProvider>);
+    const started = (await screen.findByTestId('branch-in-use')).textContent;
+    await toLostCommit();
+    act(() => network.set(false));
+    const words = 'A count on this sale is not committed. Connect to the internet, then commit the count or press Not now, before you clear the sale or switch branch.';
+    fireEvent.click(screen.getByRole('button', { name: 'Clear this sale' }));
+    expect(await screen.findByText(words)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Remove Test bed sheet' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
+    expect(screen.getByTestId('branch-in-use').textContent).toBe(started);
+    fireEvent.click(within(screen.getByTestId('sale-count-drop-p9')).getByRole('button', { name: 'Not now' }));
+    expect(screen.getByTestId('sale-count-drop-p9')).toBeTruthy();
+    expect(discardStocktake).not.toHaveBeenCalled();
+    // Back online, the draft is still this sale's: nothing is discarded until the person clears it.
+    act(() => network.set(true));
+    expect(screen.queryByText(words)).toBeNull();
+    expect(discardStocktake).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
+    await waitFor(() => expect(screen.getByTestId('branch-in-use').textContent).not.toBe(started));
+    await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
+  });
+
+  it('sends a discard lost to leaving the screen again the next time Sell opens online (issue #656)', async () => {
+    sessionStorage.setItem('sale-held-counts', JSON.stringify(['s-left']));
+    open(<RecordSale />, owner);
+    await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s-left'));
+    await waitFor(() => expect(sessionStorage.getItem('sale-held-counts')).toBe('[]'));
+  });
+
+  it('ignores a count answered after the sale was cleared, and discards its draft (issue #656)', async () => {
+    holdsTen();
+    createProduct.mockResolvedValueOnce(sheet).mockResolvedValue(made);
+    let made9: (s: Stocktake) => void = () => undefined;
+    createStocktake.mockImplementation(({ lines }: { lines: { product_id: string }[] }) =>
+      lines[0]!.product_id === 'p8' ? Promise.resolve({ id: 's8', status: 'draft', lines: [] }) : new Promise<Stocktake>((resolve) => { made9 = resolve; }));
+    commitStocktake.mockImplementation((id: string) => Promise.resolve({ id, status: 'committed' }));
+    open(<RecordSale />, owner);
+    await fill('3');
+    expect(await screen.findByRole('button', { name: 'Remove Test bed sheet' })).toBeTruthy();
+    await fill('4');
+    tickAndCommit(await screen.findByTestId('sale-count-drop-p9'));
+    await waitFor(() => expect(createStocktake).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear this sale' }));
+    await act(async () => made9(draftOf('10.000')));
+    await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
+    expect(commitStocktake).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
+    expect(screen.queryByTestId('sale-count-drop-p9')).toBeNull();
+  });
+
+  it('puts nothing on a cleared sale when a commit on its way lands after Clear this sale (issue #656)', async () => {
+    holdsTen();
+    createProduct.mockResolvedValueOnce(sheet).mockResolvedValue(made);
+    createStocktake.mockImplementation(({ lines }: { lines: { product_id: string }[] }) =>
+      Promise.resolve(lines[0]!.product_id === 'p8' ? { id: 's8', status: 'draft', lines: [] } : draftOf('10.000')));
+    let landed: (s: Stocktake) => void = () => undefined;
+    commitStocktake.mockImplementation((id: string) => (id === 's8' ? Promise.resolve({ id, status: 'committed' }) : new Promise<Stocktake>((resolve) => { landed = resolve; })));
+    open(<RecordSale />, owner);
+    await fill('3');
+    expect(await screen.findByRole('button', { name: 'Remove Test bed sheet' })).toBeTruthy();
+    await fill('4');
+    tickAndCommit(await screen.findByTestId('sale-count-drop-p9'));
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('s1', ['p9']));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear this sale' }));
+    await act(async () => landed({ ...draftOf('10.000'), status: 'committed' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove Test bed sheet' })).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
+    expect(screen.queryByTestId('sale-count-drop-p9')).toBeNull();
+  });
+
+  it('keeps each item busy on its own while two counts are on their way (issue #656)', async () => {
+    const pillow: Product = { ...made, id: 'p10', code: 'DUV-0002', description: 'Test pillow case' };
+    listProducts.mockImplementation(({ query }: { query?: string }) =>
+      Promise.resolve(query === 'DUV-0001' ? [{ ...made, qty: '10.000' }] : query === 'DUV-0002' ? [{ ...pillow, qty: '6.000' }] : []));
+    createProduct.mockResolvedValueOnce(made).mockResolvedValueOnce(pillow);
+    const waiting = new Map<string, (s: Stocktake) => void>();
+    createStocktake.mockImplementation(({ lines }: { lines: { product_id: string }[] }) =>
+      new Promise<Stocktake>((resolve) => waiting.set(lines[0]!.product_id, resolve)));
+    commitStocktake.mockImplementation((id: string) => Promise.resolve({ id, status: 'committed' }));
+    open(<RecordSale />, owner);
+    await fill('4');
+    await fill('2');
+    tickAndCommit(await screen.findByTestId('sale-count-drop-p9'));
+    tickAndCommitPillow(await screen.findByTestId('sale-count-drop-p10'));
+    await waitFor(() => expect(waiting.size).toBe(2));
+    // Both on their way: neither offers Not now, so neither can be dropped while its count is made.
+    expect(within(screen.getByTestId('sale-count-drop-p9')).queryByRole('button', { name: 'Not now' })).toBeNull();
+    expect(within(screen.getByTestId('sale-count-drop-p10')).queryByRole('button', { name: 'Not now' })).toBeNull();
+    await act(async () => waiting.get('p10')!({ id: 's-p10', status: 'draft', lines: [] }));
+    expect(await screen.findByRole('button', { name: 'Remove Test pillow case' })).toBeTruthy();
+    // The first is still on its way: still busy, still no Not now.
+    expect(within(screen.getByTestId('sale-count-drop-p9')).queryByRole('button', { name: 'Not now' })).toBeNull();
+    await act(async () => waiting.get('p9')!({ id: 's-p9', status: 'draft', lines: [] }));
+    expect(await screen.findByRole('button', { name: 'Remove Test duvet cover' })).toBeTruthy();
+    expect(commitStocktake.mock.calls).toEqual([['s-p10', ['p10']], ['s-p9', ['p9']]]);
+    expect(discardStocktake).not.toHaveBeenCalled();
+  });
+
+  it('takes a commit sent again that the server already took as committed (issue #656)', async () => {
+    holdsTen();
+    createProduct.mockResolvedValue(made);
+    createStocktake.mockResolvedValue(draftOf('10.000'));
+    commitStocktake.mockRejectedValueOnce(new RetailError('Offline', 503, 'unavailable')).mockRejectedValue(new RetailError('Stock count committed', 409, 'stocktake_committed'));
+    open(<RecordSale />, owner);
+    await fill('4');
+    tickAndCommit(await screen.findByTestId('sale-count-drop-p9'));
+    expect(await screen.findByText('The count of Test duvet cover is not committed. Try again.')).toBeTruthy();
+    fireEvent.click(within(screen.getByTestId('sale-count-drop-p9')).getByRole('button', { name: 'Commit the count' }));
+    expect(await screen.findByRole('button', { name: 'Remove Test duvet cover' })).toBeTruthy();
+    expect(discardStocktake).not.toHaveBeenCalled();
   });
 
   it('shows the server words of a refusal and stops asking, since a second press never passes (issue #656)', async () => {
@@ -409,6 +609,8 @@ describe('a Sell search that finds nothing', () => {
     expect(await screen.findByText('Stock of Test duvet cover moved since the count. Count it again. Test duvet cover is not on the sale: use Count stock, then sell it.')).toBeTruthy();
     expect(screen.queryByTestId('sale-count-drop-p9')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
+    // A refusal never passes on a second press, so its draft is not left open.
+    await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
   });
 
   it('never sends a draft that turned into a big drop after the balance was read (issue #636)', async () => {
@@ -419,6 +621,8 @@ describe('a Sell search that finds nothing', () => {
     await fill('4');
     expect(await screen.findByText('Test duvet cover is saved, but its count is not. Count it on Count stock, then sell it.')).toBeTruthy();
     expect(commitStocktake).not.toHaveBeenCalled();
+    // The draft that turned into a big drop is discarded, not left open (issue #656).
+    expect(discardStocktake).toHaveBeenCalledWith('s1');
   });
 
   it('keeps an open Add it here with what was typed when a later search finds something (review of #616)', async () => {

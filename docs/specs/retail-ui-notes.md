@@ -1399,7 +1399,8 @@ the items show only while you search, and go away once one is picked. Every item
   the words of Count stock, **Yes, ... is right**, **Commit the count** (which only then makes the count and sends it
   acknowledged, and puts the item on the sale) and **Not now** (the item stays off the sale, nothing is left open). Each item
   asks its own tick, makes its own count and has its own press, so a tick or a busy button never carries to another item. A
-  lost commit sends the same draft again. Once a draft exists, **Not now**, **Clear this sale**, leaving the screen and
+  lost commit sends the same draft again, and one the server had already taken (409 `stocktake_committed`) counts as
+  committed. Once a draft exists, **Not now**, **Clear this sale**, leaving the screen and
   switching branch discard it (`POST /retail/stocktakes/{id}/discard`); a count pressed before the sale was cleared or the
   branch switched is ignored when its answer comes, and its draft discarded, so the item never lands on another sale. Offline,
   Not now, Clear this sale and the branch switch wait, with the line "A count on this sale is not committed. Connect to the

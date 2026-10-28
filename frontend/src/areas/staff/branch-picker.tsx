@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Me } from '../../api/client';
 import { PLATFORM_BRAND, useBusinessName, useLogo, useLogoSrc, useShellBrand } from '../../app/branding';
 import { icons } from '../../components/icons';
@@ -21,6 +21,20 @@ export function useStockedBranches(me: Me | undefined) {
   });
 }
 
+// Issue #656: a screen that must not change branch yet (Sell, offline, holding a count it cannot discard) is asked first, and says why.
+const branchHolds = new Set<() => boolean>();
+
+/** While the calling screen is open, `holds` is asked before every change of branch: true keeps the branch, and the screen says why. */
+export function useBranchHold(holds: () => boolean): void {
+  const latest = useRef(holds);
+  latest.current = holds;
+  useEffect(() => {
+    const ask = () => latest.current();
+    branchHolds.add(ask);
+    return () => void branchHolds.delete(ask);
+  }, []);
+}
+
 /** The active branch, a way to choose it (remembered per tenant and user), and whether it is known yet. */
 export function useActiveBranch(me: Me | undefined): { branch: string | null; choose: (selection: string) => void; ready: boolean } {
   const [branch, setBranch] = useState<string | null>(null);
@@ -38,6 +52,7 @@ export function useActiveBranch(me: Me | undefined): { branch: string | null; ch
   }, [me, waiting, stocked.data]);
 
   const choose = (selection: string) => {
+    if ([...branchHolds].some((holds) => holds())) return;
     setBranch(selection);
     if (me) saveBranch(me.user_id ?? '', selection);
   };
