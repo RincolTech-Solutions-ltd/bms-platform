@@ -613,6 +613,56 @@ class RetailQuickAddIT extends IntegrationTest {
     }
 
     @Test
+    void aBankedCashDayTreatsAPaidQuickAddExactlyAsBuyStockTreatsACashRestock() {
+        // Buy stock has no banked-day refusal (only a supplier payment in cash has one, cash_day_banked): its cash
+        // restock is
+        // dated today and leaves the till today. A paid Quick add runs the same record(), so it must give the same
+        // outcome.
+        String today = java.time.LocalDate.now(com.rincoltech.bms.kernel.BusinessClock.DEFAULT_ZONE)
+                .toString();
+        String owner = ADMIN + ",retail.banking.record";
+        Map<String, Object> banking = new LinkedHashMap<>();
+        banking.put("branch_id", hq);
+        banking.put("business_date", today);
+        banking.put("amount_minor", 1_000);
+        ResponseEntity<JsonNode> banked = api.postKeyed(
+                "/bankings", banking, owner, "*", UUID.randomUUID().toString());
+        assertThat(banked.getStatusCode()).as("%s", banked.getBody()).isEqualTo(HttpStatus.CREATED);
+
+        UUID bought = productOf(quickAdd(item("Test Beans 1kg", 6_000, null, null)));
+        Map<String, Object> restock = new LinkedHashMap<>();
+        restock.put("purchased_on", today);
+        restock.put("payment_method", "cash");
+        restock.put(
+                "lines",
+                List.of(Map.of(
+                        "product_id",
+                        bought,
+                        "cost_minor",
+                        4_000,
+                        "qty_by_branch",
+                        List.of(Map.of("branch_id", hq, "qty", "2")))));
+        ResponseEntity<JsonNode> buyStock = api.postKeyed(
+                "/purchases", restock, owner, "*", UUID.randomUUID().toString());
+
+        Map<String, Object> body = item("Test Peas 1kg", 7_000, "2", hq);
+        body.put("cost_minor", 5_000);
+        body.put("paid_from", "cash");
+        ResponseEntity<JsonNode> paid =
+                quickAdd(body, owner, "*", UUID.randomUUID().toString());
+
+        assertThat(paid.getStatusCode()).as("%s", paid.getBody()).isEqualTo(buyStock.getStatusCode());
+        assertThat(buyStock.getStatusCode()).as("%s", buyStock.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_purchases WHERE tenant_id = ? AND payment_method = 'cash'"
+                                + " AND purchased_on = ?::date",
+                        t.tenantId(),
+                        today))
+                .isEqualTo(2);
+        assertThat(sourceTotal("cash_on_hand", "retail.purchase")).isEqualTo(-18_000);
+    }
+
+    @Test
     void payingFromCashNeedsTheBuyingPriceAndAQuantity() {
         Map<String, Object> body = item("Test Oil 1L", 8_000, null, hq);
         body.put("paid_from", "cash");
