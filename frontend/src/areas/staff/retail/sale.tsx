@@ -915,8 +915,8 @@ function keepCount(id: string, kept: boolean) {
   }
 }
 
-/** A clear refusal from the server, which a second try would only meet again. */
-const refused = (e: unknown): e is RetailError => e instanceof RetailError && e.status >= 400 && e.status < 500;
+/** A clear refusal from the server, which a second try would only meet again (a timeout or too many requests is not one). */
+const refused = (e: unknown): e is RetailError => e instanceof RetailError && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429;
 
 /** Issue #656: commits a count Sell made; one the server already took (409 stocktake_committed, its first answer lost) stands. */
 async function commitMade(id: string, acknowledged?: string[]) {

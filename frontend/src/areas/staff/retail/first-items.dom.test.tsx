@@ -679,7 +679,8 @@ describe('a Sell search that finds nothing', () => {
   it('never discards the count of a new item whose commit is still lost after its second try, and says it may not be in (issue #656)', async () => {
     createProduct.mockResolvedValue(made);
     createStocktake.mockResolvedValue(draftOf('0.000'));
-    commitStocktake.mockRejectedValue(new RetailError('Offline', 503, 'unavailable'));
+    // Too many requests is no refusal: the count may still be taken, so it is tried again and never discarded.
+    commitStocktake.mockRejectedValueOnce(new RetailError('Too many requests', 429, 'rate_limited')).mockRejectedValue(new RetailError('Offline', 503, 'unavailable'));
     open(<RecordSale />, owner);
     await fill('4');
     expect(await screen.findByText('The count of Test duvet cover may not be committed. Check it on Count stock before you sell it.')).toBeTruthy();
