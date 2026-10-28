@@ -71,6 +71,14 @@ class MemberRepository {
             UUID officerUserId,
             UUID createdBy) {}
 
+    /**
+     * What every new member starts as: the literals of the insert below, and of a check's stand-in for one (issue #626);
+     * {@code ExistingLoansIT} asserts a member added from a register carries exactly these.
+     */
+    static final String INITIAL_KYC_STATUS = "incomplete";
+
+    static final String INITIAL_STATUS = "active";
+
     void insert(NewMember m) {
         jdbc.sql("""
                         INSERT INTO lending_members (

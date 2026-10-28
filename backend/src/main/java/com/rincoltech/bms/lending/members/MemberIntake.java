@@ -1,6 +1,7 @@
 package com.rincoltech.bms.lending.members;
 
 import com.rincoltech.bms.lending.members.MemberLookup.MemberSummary;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -12,6 +13,16 @@ import java.util.UUID;
 public interface MemberIntake {
 
     MemberSummary addFromRegister(UUID branchId, String fullName, String phone);
+
+    /**
+     * The rules {@link #addFromRegister} applies, other than whether the phone is held already, run without writing: the
+     * caller's scope in an active branch, the name the member form takes and a Uganda phone. The problem in plain words that
+     * name no member, or empty when the member could be added. Never throws for a refusal, so a check can go on.
+     */
+    Optional<String> problemAdding(UUID branchId, String fullName, String phone);
+
+    /** The member {@link #addFromRegister} would make, before it is made: the same starting KYC and status, no number yet. */
+    MemberSummary preview(UUID branchId, String fullName);
 
     /**
      * Refuses with 422 {@code plan_limit_reached} when {@code newMembers} more active members would pass the plan's member

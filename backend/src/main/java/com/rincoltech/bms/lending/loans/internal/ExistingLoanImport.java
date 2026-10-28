@@ -129,13 +129,11 @@ class ExistingLoanImport {
         final MemberSummary placeholder;
         MemberSummary added;
 
-        NewMember(String name, String phone, UUID branchId) {
+        /** {@code placeholder} is the member module's preview of the member, standing in on a check, where nothing is saved. */
+        NewMember(String name, String phone, MemberSummary placeholder) {
             this.name = name;
             this.phone = phone;
-            // Stands in for the member on a check, where nothing is saved; the commit puts the added member in its
-            // place.
-            this.placeholder = new MemberSummary(
-                    UUID.randomUUID(), branchId, null, name, "incomplete", "active", false, null, null);
+            this.placeholder = placeholder;
         }
     }
 
@@ -428,10 +426,14 @@ class ExistingLoanImport {
         try {
             return intake.addFromRegister(branch, m.name, m.phone);
         } catch (ApiException e) {
-            if ("duplicate_phone".equals(e.code())) {
-                throw taken;
-            }
-            throw e;
+            // Every refusal of the member form is said in words that name no member: its own may list who holds a
+            // phone.
+            throw "duplicate_phone".equals(e.code())
+                    ? taken
+                    : ApiException.rule(
+                            "import_member_not_added",
+                            "A new member in the file could not be added. Nothing was recorded. Check the file again;"
+                                    + " if it still passes, ask an administrator.");
         }
     }
 
@@ -535,15 +537,10 @@ class ExistingLoanImport {
      * The problem, or null.
      */
     private String readNewMember(Pending p, String name, String phone, Principal principal, Intake intake) {
-        if (name.length() > 200) {
-            return "The member's name is longer than 200 characters.";
-        }
         Optional<String> e164 = PhoneNumbers.normaliseUganda(phone);
-        if (e164.isEmpty()) {
-            return "The member's phone must be a Uganda number, for example 0772 123456. A new member needs one.";
-        }
         // One read per phone in a file: a register lists a borrower's loans one after another.
-        List<MemberSummary> holders = intake.holders.computeIfAbsent(e164.get(), members::findByPhone);
+        List<MemberSummary> holders =
+                e164.isEmpty() ? List.of() : intake.holders.computeIfAbsent(e164.get(), members::findByPhone);
         boolean oneInScope = holders.size() == 1
                 && principal.may(
                         ExistingLoanService.PERMISSION, holders.getFirst().branchId());
@@ -553,18 +550,15 @@ class ExistingLoanImport {
             p.matchedNote = "Member " + m.memberNo() + ", " + m.fullName() + ", has this phone"
                     + (sameName(m.fullName(), name)
                             ? ""
-                            : ". The file says " + name + ". If this is the same person, tick This is the same person"
-                                    + " (or, for a file you typed, record it as it is); if not, remove this loan");
+                            : ". The file says " + name + ". Record this loan only if it is the same person; if not,"
+                                    + " remove it from the file");
             return null;
         }
         // Two holders, or one in a branch outside the caller's, read exactly as no holder: the check says a new member
-        // comes
-        // in, word for word as for a phone nobody holds, so a check cannot tell whether a phone is held where the
-        // caller
-        // cannot see. The commit then cannot add that member (the phone is taken) and records nothing, in words that
-        // name
-        // no member and no branch.
-        NewMember known = intake.byPhone.get(e164.get());
+        // comes in, word for word as for a phone nobody holds, so a check cannot tell whether a phone is held where the
+        // caller cannot see. The commit then cannot add that member (the phone is taken) and records nothing, in words
+        // that name no member and no branch.
+        NewMember known = e164.isEmpty() ? null : intake.byPhone.get(e164.get());
         if (known != null) {
             if (!known.name.equalsIgnoreCase(name)) {
                 return "This phone is given to " + known.name + " on another row. One phone is one member.";
@@ -574,7 +568,12 @@ class ExistingLoanImport {
             if (problem != null) {
                 return problem;
             }
-            known = new NewMember(name, e164.get(), intake.branch);
+            // The member form's own rules, other than whether the phone is held, from the members module itself.
+            Optional<String> refused = this.intake.problemAdding(intake.branch, name, phone);
+            if (refused.isPresent()) {
+                return refused.get();
+            }
+            known = new NewMember(name, e164.orElseThrow(), this.intake.preview(intake.branch, name));
             intake.byPhone.put(e164.get(), known);
         }
         p.newMember = known;

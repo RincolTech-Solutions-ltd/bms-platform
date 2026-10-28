@@ -79,6 +79,21 @@ class ListFilesTest {
                 .isEqualTo("Item\tPrice\nTest Sugar\t\t5500\n\tTest Salt");
     }
 
+    /** A sheet part named with a number too long for an int is read, never a 500. */
+    @Test
+    void aSheetNamedWithAHugeNumberIsStillRead() throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
+            part(
+                    zip,
+                    "xl/worksheets/sheet99999999999.xml",
+                    "<worksheet><sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\">"
+                            + "<is><t>Test Salt</t></is></c></row></sheetData></worksheet>");
+        }
+        assertThat(ListFiles.read(upload("odd.xlsx", bytes.toByteArray())).text())
+                .isEqualTo("Test Salt");
+    }
+
     static void part(ZipOutputStream zip, String name, String xml) throws IOException {
         zip.putNextEntry(new ZipEntry(name));
         zip.write(xml.getBytes(StandardCharsets.UTF_8));

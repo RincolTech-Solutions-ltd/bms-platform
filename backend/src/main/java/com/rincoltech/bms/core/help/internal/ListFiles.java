@@ -309,8 +309,9 @@ final class ListFiles {
         }
     }
 
+    /** The number of a sheet part; a number too long to be one sorts last, so a crafted name is never a 500. */
     private static int sheetNo(String name) {
-        return Integer.parseInt(name.replaceAll("\\D", ""));
+        return parseInt(name.replaceAll("\\D", ""), Integer.MAX_VALUE);
     }
 
     private static XMLStreamReader xml(byte[] part) throws XMLStreamException {

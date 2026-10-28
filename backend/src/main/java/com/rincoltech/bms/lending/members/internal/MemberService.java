@@ -439,10 +439,50 @@ class MemberService implements MemberLookup, MemberIntake {
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public MemberSummary addFromRegister(UUID branchId, String fullName, String phone) {
-        MemberResponse created = create(new CreateMemberRequest(
+        return summary(create(registerRequest(branchId, fullName, phone)));
+    }
+
+    /** A register line as the member form's request: name and phone, no ID (KYC later), nothing else known. */
+    private static CreateMemberRequest registerRequest(UUID branchId, String fullName, String phone) {
+        return new CreateMemberRequest(
                 branchId, fullName, null, null, phone, null, "none", null, null, null, null, "unknown", null, null,
-                null, null, null, null, null, null, null, false));
-        return summary(created);
+                null, null, null, null, null, null, null, false);
+    }
+
+    @Override
+    public Optional<String> problemAdding(UUID branchId, String fullName, String phone) {
+        CreateMemberRequest r = registerRequest(branchId, fullName, phone);
+        Principal principal = CurrentPrincipal.require();
+        // create()'s own checks in its order, and the form's bean rules on the name (@NotBlank, @Size(max = 200)).
+        if (!principal.may("lending.members.create", r.branchId())
+                || branches.findActive(r.branchId()).isEmpty()) {
+            return Optional.of(
+                    "You may not add members in this branch. Choose another branch, or add the member first.");
+        }
+        if (r.fullName() == null || r.fullName().isBlank() || r.fullName().length() > 200) {
+            return Optional.of("The member's name is empty or longer than 200 characters.");
+        }
+        if (PhoneNumbers.normaliseUganda(r.phone()).isEmpty()) {
+            return Optional.of(
+                    "The member's phone must be a Uganda number, for example 0772 123456. A new member needs one.");
+        }
+        // id_type none needs no number (checkIdentity); whether the phone is held, and the plan's member limit, are the
+        // import's to check on the whole file.
+        return Optional.empty();
+    }
+
+    @Override
+    public MemberSummary preview(UUID branchId, String fullName) {
+        return new MemberSummary(
+                UUID.randomUUID(),
+                branchId,
+                null,
+                fullName.trim(),
+                MemberRepository.INITIAL_KYC_STATUS,
+                MemberRepository.INITIAL_STATUS,
+                false,
+                null,
+                null);
     }
 
     @Override

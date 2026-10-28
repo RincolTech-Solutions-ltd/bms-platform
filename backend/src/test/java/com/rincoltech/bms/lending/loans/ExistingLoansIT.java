@@ -1384,9 +1384,9 @@ class ExistingLoansIT extends LoanFixtures {
                 .as("a member already holding the phone needs no branch")
                 .startsWith("ready:")
                 .endsWith("Member " + known
-                        + ", Test Borrower Known, has this phone. The file says Someone Else. If this is the same"
-                        + " person, tick This is the same person (or, for a file you typed, record it as it is); if"
-                        + " not, remove this loan")
+                        + ", Test Borrower Known, has this phone. The file says Someone Else. Record this loan only"
+                        + " if it is the same person; if not, remove it from the file")
+                .doesNotContain("tick")
                 .doesNotContain("fix the phone");
 
         ResponseEntity<JsonNode> checked = importCsv(csv, true, adminPerms, t.headOffice());
@@ -1414,6 +1414,15 @@ class ExistingLoansIT extends LoanFixtures {
                 .as("two loans, one new member, in the branch given")
                 .isEqualTo(1);
         assertThat(messages(committed).get("REG-302")).contains("Added a new member, Test Register New (M");
+        // The member the check stood in for is the member the commit made: the same starting KYC and status.
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT kyc_status || '/' || status FROM lending_members WHERE tenant_id = ? AND phone_e164 ="
+                                        + " '+256700000302'")
+                        .param(t.tenantId())
+                        .query(String.class)
+                        .single())
+                .isEqualTo("incomplete/active");
 
         String refused = header
                 + "loan,REG-311,,Test Register Two,0700000311,EXL8,300000," + d1 + ",2,,,,,,\n"
