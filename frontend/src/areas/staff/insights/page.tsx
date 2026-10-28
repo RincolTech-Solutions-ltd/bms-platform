@@ -10,6 +10,7 @@ import {
   type InsightsRevenue,
   type InsightsTable,
 } from '../../../api/insights';
+import { businessToday } from '../../../api/retail';
 import { branchFilter } from '../../../auth/branch';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { useStaff } from '../context';
@@ -67,7 +68,7 @@ function InsightsPage() {
   const { me, branch } = useStaff();
   const [tab, setTab] = useState<string>('brief');
   const [preset, setPreset] = useState('month');
-  const initial = presetRange('month', new Date());
+  const initial = presetRange('month', businessToday());
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
   const [grain, setGrain] = useState('');
@@ -110,7 +111,7 @@ function InsightsPage() {
   function choosePreset(value: string) {
     setPreset(value);
     if (value !== 'custom') {
-      const r = presetRange(value, new Date());
+      const r = presetRange(value, businessToday());
       setFrom(r.from);
       setTo(r.to);
     }
@@ -175,7 +176,7 @@ function InsightsPage() {
         </label>
         <label>
           To
-          <input type="date" value={to} min={from} max={presetRange('today', new Date()).to} onChange={(e) => { setPreset('custom'); setTo(e.target.value); }} />
+          <input type="date" value={to} min={from} max={businessToday()} onChange={(e) => { setPreset('custom'); setTo(e.target.value); }} />
         </label>
         <label>
           Group by
