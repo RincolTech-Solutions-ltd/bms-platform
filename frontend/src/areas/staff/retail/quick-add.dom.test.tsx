@@ -342,3 +342,53 @@ describe('the words and defaults', () => {
     expect(addedLine({ description: 'Test Bulb', unit: 'pc', item_made: false, qty: '10', total_qty: '60' }, 'Test Store')).toBe('Test Bulb: 10 pc added at Test Store, 60 pc now');
   });
 });
+
+// Issue #646: "I just bought these, take the money from cash", off by default, sends paid_from with the buying price, shows the
+// total and the account before Add, and is offered only to someone who may buy stock at that branch.
+describe('quick add paid for now from cash', () => {
+  it('is off by default, so the request is opening stock as before', async () => {
+    quickAdd.mockResolvedValue({ product_id: 'p9', description: 'Test Jar', unit: 'pc', item_made: true, branch_id: branch?.id, qty: '2' });
+    open(owner);
+    expect((screen.getByLabelText(/I just bought these/) as HTMLInputElement).checked).toBe(false);
+    type(/^Name/, 'Test Jar');
+    type(/^Selling price/, '1000');
+    type(/How many do you have here now/, '2');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await screen.findByTestId('qa-done');
+    expect((quickAdd.mock.calls[0] as [Record<string, unknown>])[0]).not.toHaveProperty('paid_from');
+  });
+
+  it('ticked, needs the buying price, shows what comes out of Cash, and sends it', async () => {
+    quickAdd.mockResolvedValue({ product_id: 'p8', description: 'Test Soap Bar', unit: 'pc', item_made: true, branch_id: branch?.id, qty: '12', paid_from: 'cash', purchase_no: 'RP00000001', paid_minor: 30000 });
+    open(owner);
+    type(/^Name/, 'Test Soap Bar');
+    type(/^Selling price/, '3000');
+    type(/How many do you have here now/, '12');
+    fireEvent.click(screen.getByLabelText(/I just bought these/));
+    // The buying price is needed now, no longer optional.
+    expect(screen.getByLabelText(/^Buying price/).getAttribute('aria-required')).toBe('true');
+    expect(screen.getByTestId('qa-paid-from').textContent).toContain('Type the buying price and how many');
+    type(/^Buying price/, '2500');
+    expect(screen.getByTestId('qa-paid-from').textContent).toContain(`UGX 30,000 comes out of Cash at ${branchLabel(branch)}.`);
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await screen.findByTestId('qa-done');
+    expect((quickAdd.mock.calls[0] as [Record<string, unknown>])[0]).toMatchObject({ paid_from: 'cash', cost_minor: 2500, qty: '12.000' });
+    expect(screen.getByTestId('qa-paid').textContent).toContain('RP00000001');
+  });
+
+  it('can take the money from mobile money instead', async () => {
+    open(owner);
+    type(/^Buying price/, '1000');
+    type(/How many do you have here now/, '3');
+    fireEvent.click(screen.getByLabelText(/I just bought these/));
+    fireEvent.click(screen.getByRole('radio', { name: 'Mobile money' }));
+    expect(screen.getByTestId('qa-paid-from').textContent).toContain('UGX 3,000 comes out of Mobile money');
+  });
+
+  it('is not offered to someone who may not buy stock', () => {
+    const scopes = { ...(owner.permission_scopes ?? {}) };
+    delete scopes['retail.purchase.create'];
+    open({ ...owner, permissions: (owner.permissions ?? []).filter((p) => p !== 'retail.purchase.create'), permission_scopes: scopes });
+    expect(screen.queryByLabelText(/I just bought these/)).toBeNull();
+  });
+});
