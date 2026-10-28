@@ -35,6 +35,8 @@ export interface LoanEdit {
   totalWorkedOut: boolean;
   ratePercent: string;
   payments: PaymentEdit[];
+  /** The owner ticked This is the same person, for a member found by phone under another name. */
+  sameConfirmed: boolean;
 }
 
 /** Minor units as the import file writes them: 5500, or 120.50 for a currency with two decimals; empty for none. */
@@ -71,6 +73,7 @@ export function fromLoanDraft(loans: LoanDraftRow[], exponent: number): LoanEdit
     totalWorkedOut: l.total_worked_out,
     ratePercent: l.rate_percent ?? '',
     payments: (l.payments ?? []).map((p) => ({ date: p.date ?? '', amount: majorText(p.amount_minor, exponent) })),
+    sameConfirmed: false,
   }));
 }
 
@@ -130,6 +133,16 @@ export function loansCsv(loans: LoanEdit[], productCode: string): string {
 export function sameName(a: string, b: string): boolean {
   const norm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
   return norm(a) === norm(b);
+}
+
+/** A loan whose phone belongs to a member the register names otherwise: the owner says it is the same person first. */
+export function namesDiffer(l: LoanEdit): boolean {
+  return l.memberNo !== '' && l.memberName.trim() !== '' && !sameName(l.memberName, l.memberFullName);
+}
+
+/** True while a loan whose names differ is not yet confirmed: Check these loans sends nothing then. */
+export function needsConfirming(loans: LoanEdit[] | null): boolean {
+  return (loans ?? []).some((l) => namesDiffer(l) && !l.sameConfirmed);
 }
 
 /** Why there are no rows, in plain words, always with the way on: type it or import a file. */

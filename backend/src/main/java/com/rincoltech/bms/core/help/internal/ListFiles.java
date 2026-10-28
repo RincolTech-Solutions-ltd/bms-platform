@@ -22,6 +22,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import javax.imageio.ImageIO;
@@ -59,6 +62,34 @@ final class ListFiles {
     static final int MAX_PDF_PAGES = 10;
     static final long MAX_UNPACKED_BYTES = 20L * 1024 * 1024;
     static final int MAX_CELLS = 50_000;
+
+    /**
+     * How many pictures the server decodes at once, whatever the number of drafts in flight: each may briefly hold tens of
+     * megabytes, so a burst of photos waits its turn instead of running the heap out.
+     */
+    static final int DECODES_AT_ONCE = 2;
+
+    private static final Semaphore DECODES = new Semaphore(DECODES_AT_ONCE, true);
+
+    private static <T> T oneAtATime(Supplier<T> work) {
+        try {
+            if (!DECODES.tryAcquire(20, TimeUnit.SECONDS)) {
+                throw new ApiException(
+                        HttpStatus.SERVICE_UNAVAILABLE,
+                        "setup_busy",
+                        "The app is busy",
+                        "The app is reading other photos just now. Try again in a minute, or type the list.");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw notRead("The photo could not be read just now. Try again.");
+        }
+        try {
+            return work.get();
+        } finally {
+            DECODES.release();
+        }
+    }
 
     /** What is sent: text, or one picture as a data URL; {@code source} is {@code photo} or {@code file} for the log. */
     record Read(String text, String pictureDataUrl, String source) {}
@@ -121,6 +152,10 @@ final class ListFiles {
      * longest side, whatever the file declares. A crafted header cannot make the server decode gigabytes.
      */
     static BufferedImage decode(byte[] b) {
+        return oneAtATime(() -> decodeNow(b));
+    }
+
+    private static BufferedImage decodeNow(byte[] b) {
         String unread = "This photo cannot be read. Take it again, or choose a JPEG or PNG.";
         try (ImageInputStream in = ImageIO.createImageInputStream(new ByteArrayInputStream(b))) {
             Iterator<ImageReader> readers = in == null ? Collections.emptyIterator() : ImageIO.getImageReaders(in);
@@ -202,7 +237,13 @@ final class ListFiles {
             PDRectangle box = doc.getPage(0).getCropBox();
             float longest = Math.max(1f, Math.max(box.getWidth(), box.getHeight()));
             float scale = Math.min(150f / 72f, MAX_SIDE / longest);
-            BufferedImage page = new PDFRenderer(doc).renderImage(0, scale);
+            BufferedImage page = oneAtATime(() -> {
+                try {
+                    return new PDFRenderer(doc).renderImage(0, scale);
+                } catch (IOException e) {
+                    throw notRead("This PDF cannot be read. Take a photo of the page instead.");
+                }
+            });
             return new Read(null, picture(page), "file");
         } catch (IOException | RuntimeException e) {
             if (e instanceof ApiException a) {

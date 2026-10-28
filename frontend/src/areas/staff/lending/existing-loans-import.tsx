@@ -11,7 +11,7 @@ import { useStaff } from '../context';
 import { NOT_UTF8, readCsvText } from '../retail/catalogue-import';
 import { Note, Problem, Success, useSingleBranch } from '../retail/ui';
 import { ListReader, LoanDraftList, useSetupHelper } from '../setup-helper/setup-helper';
-import { fromLoanDraft, loansCsv, type LoanEdit } from '../setup-helper/setup-helper-state';
+import { fromLoanDraft, loansCsv, needsConfirming, type LoanEdit } from '../setup-helper/setup-helper-state';
 import { IMPORT_COLUMNS, IMPORT_TEMPLATE, canBringIn } from './existing-loans-state';
 import { NoAccess } from '../../../app/ui/EmptyState';
 
@@ -174,7 +174,7 @@ export function ExistingLoansImport({ api = existingLoans, helperApi = setupHelp
       <textarea id="exl-text" data-tour="existing-import-text" rows={8} value={text} spellCheck={false} onChange={(e) => { setText(e.target.value); setDraft(null); setDone(null); setWarning(null); }} />
       {warning && <p role="alert" className="alert alert-warning">{warning}</p>}
       <Problem error={check.error} />
-      <BusyButton busy={check.isPending} type="button" className="rt-primary" data-tour="existing-import-check" notReady={text.trim() === '' || (draft !== null && productCode === '')} onClick={() => check.mutate()}>
+      <BusyButton busy={check.isPending} type="button" className="rt-primary" data-tour="existing-import-check" notReady={text.trim() === '' || (draft !== null && (productCode === '' || needsConfirming(draft)))} onClick={() => check.mutate()}>
         {draft ? 'Check these loans' : 'Check the file'}
       </BusyButton>
       {current && <LoanImportReport result={current} />}

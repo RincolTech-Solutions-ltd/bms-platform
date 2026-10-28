@@ -33,7 +33,7 @@ read. So what is sent, what is kept and who it is sent for has to be decided, an
 3. **What is sent.** To the one provider being tried, over https to its allow-listed host: the fixed instructions; the list as
    typed, or the text of the file (a CSV or text file as UTF-8, the cells of the first sheet of an Excel workbook, the text of a
    PDF), or one picture (a photo, or the first page of a scanned PDF) drawn again on the server as a JPEG at most 2000 pixels on its
-   longest side, so its metadata, a phone's location among it, never leaves (its size is read from its header first: more than 40 megapixels is refused, which also bounds the coefficient buffers of a progressive JPEG, and it is decoded skipping rows and columns, so no file can make the server hold a huge picture; a scanned page is drawn no larger than 2000 pixels whatever size it declares); and a short context. For a shop the context is the
+   longest side, so its metadata, a phone's location among it, never leaves (its size is read from its header first: more than 40 megapixels is refused, at most two pictures are decoded at once, which also bounds the coefficient buffers of a progressive JPEG, and it is decoded skipping rows and columns, so no file can make the server hold a huge picture; a scanned page is drawn no larger than 2000 pixels whatever size it declares); and a short context. For a shop the context is the
    kind of shop, its active category and unit names with their usual packs, and up to 300 item names with their units, so names
    are matched and not drafted twice. For a lender it is the currency and today's date only: the member list is never sent, and a
    drafted borrower is matched to a member by phone on the server (`MemberLookup.findByPhone`), and named only to someone who may bring loans into that member's branch. Buying prices are neither asked for
@@ -62,7 +62,7 @@ read. So what is sent, what is kept and who it is sent for has to be decided, an
    `all_failed`, `daily_cap`, `unreadable`) and no rows, and the screen says in one line why and that the owner can type the list
    or import a file, which work as before. A file of the wrong kind or size is 422 `setup_file_not_read` in plain words.
 8. **A register brings its members.** The existing loans import gains two optional columns, `member_name` and `member_phone`,
-   for a loan row with no `member_no`: the one member with that phone is used; with none, the check says a new member comes in
+   for a loan row with no `member_no`: the one member with that phone is used when the caller may bring loans into that member's branch (a different name is a warning on the row, and the screen asks the owner to tick that it is the same person before it checks); otherwise, with no holder, two, or one the caller may not see, the check says word for word that a new member comes in, so it tells nothing about phones held elsewhere, and a commit that cannot give the phone records nothing (`import_member_phone_taken`, naming no one); with none, the check says a new member comes in
    with the loan and the commit adds the member (name and phone, no ID, KYC later) through the member form's rules
    (`MemberIntake`, the caller's `lending.members.create` scope, the phone, the plan's member limit) in the same transaction, in
    the branch in use (`branch_id`) or the only branch the caller may add members in. A monthly rate and a term with no total

@@ -8,7 +8,7 @@ import { Card } from '../../../app/ui/ListRow';
 import { Segmented } from '../../../app/ui/Segmented';
 import { browserCodec, PrepareError, prepareFile, type Codec } from '../lending/image-prep';
 import { Note, Problem } from '../retail/ui';
-import { FALLBACK, reasonText, sameName, type ItemEdit, type LoanEdit } from './setup-helper-state';
+import { FALLBACK, namesDiffer, reasonText, type ItemEdit, type LoanEdit } from './setup-helper-state';
 
 // The setup helper's box on the two import screens (issue #626, ADR-102): the owner types the list, takes a photo of the stock
 // book or register, or chooses a CSV, Excel or PDF file, and the app reads it into rows the owner can change or remove. The
@@ -170,8 +170,20 @@ export function LoanDraftList({ loans, onChange }: { loans: LoanEdit[]; onChange
         <div key={i} className="stack" data-testid={`draft-loan-${i}`}>
           <Field id={slug(i, 'ref')} label="Number in the register" value={l.ref} onChange={(e) => set(i, { ref: e.target.value })} />
           {l.memberNo ? (
-            l.memberName && !sameName(l.memberName, l.memberFullName) ? (
-              <Note>{`Member ${l.memberNo}, ${l.memberFullName}, has this phone already. The register says ${l.memberName}: check it is the same person, or fix the phone.`}</Note>
+            namesDiffer(l) ? (
+              <>
+                <Note>{`Member ${l.memberNo}, ${l.memberFullName}, has this phone already. The register says ${l.memberName}. Tick below if it is the same person, or remove this loan.`}</Note>
+                <label htmlFor={slug(i, 'same')}>
+                  <input
+                    id={slug(i, 'same')}
+                    type="checkbox"
+                    checked={l.sameConfirmed}
+                    {...(l.sameConfirmed ? {} : { 'data-needed': '' })}
+                    onChange={(e) => set(i, { sameConfirmed: e.target.checked })}
+                  />{' '}
+                  {`${l.memberName} is ${l.memberFullName}, the same person`}
+                </label>
+              </>
             ) : (
               <Hint>{`Member ${l.memberNo}, ${l.memberFullName}, has this phone already.`}</Hint>
             )

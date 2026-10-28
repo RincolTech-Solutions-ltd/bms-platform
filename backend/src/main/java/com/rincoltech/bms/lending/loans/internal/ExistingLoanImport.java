@@ -134,8 +134,8 @@ class ExistingLoanImport {
             this.phone = phone;
             // Stands in for the member on a check, where nothing is saved; the commit puts the added member in its
             // place.
-            this.placeholder =
-                    new MemberSummary(UUID.randomUUID(), branchId, null, name, "pending", "active", false, null, null);
+            this.placeholder = new MemberSummary(
+                    UUID.randomUUID(), branchId, null, name, "incomplete", "active", false, null, null);
         }
     }
 
@@ -328,8 +328,7 @@ class ExistingLoanImport {
             if (!dryRun && errors == 0) {
                 if (p.newMember != null) {
                     if (p.newMember.added == null) {
-                        p.newMember.added =
-                                this.intake.addFromRegister(intake.branch, p.newMember.name, p.newMember.phone);
+                        p.newMember.added = addMember(intake.branch, p.newMember);
                         membersAdded++;
                     }
                     p.checked = withMember(p.checked, p.newMember.added);
@@ -385,6 +384,28 @@ class ExistingLoanImport {
                 errors,
                 errors > 0 ? 0 : (int) newMembers,
                 report);
+    }
+
+    /**
+     * Adds a member new to the app, or refuses the whole commit when the phone is taken (by a member the caller may not see,
+     * or by two members), in words that name neither: the transaction rolls back and nothing is recorded.
+     */
+    private MemberSummary addMember(UUID branch, NewMember m) {
+        ApiException taken = ApiException.rule(
+                "import_member_phone_taken",
+                "A new member in the file has a phone the app cannot give them. Nothing was recorded. Ask an administrator"
+                        + " to find the member with that phone, then put their member number in member_no.");
+        if (!members.findByPhone(m.phone).isEmpty()) {
+            throw taken;
+        }
+        try {
+            return intake.addFromRegister(branch, m.name, m.phone);
+        } catch (ApiException e) {
+            if ("duplicate_phone".equals(e.code())) {
+                throw taken;
+            }
+            throw e;
+        }
     }
 
     private static String outcomeOf(Map<Integer, ImportRow> byLine, int line) {
@@ -508,14 +529,13 @@ class ExistingLoanImport {
                                     + " phone");
             return null;
         }
-        if (!holders.isEmpty()) {
-            // Two holders, or one in a branch outside the caller's: one plain refusal that names no member and no
-            // branch,
-            // so a check cannot be used to learn who holds a phone elsewhere. A new member could not take the phone
-            // anyway.
-            return "This phone is already a member's in the app. Put that member's number in member_no, or ask an"
-                    + " administrator.";
-        }
+        // Two holders, or one in a branch outside the caller's, read exactly as no holder: the check says a new member
+        // comes
+        // in, word for word as for a phone nobody holds, so a check cannot tell whether a phone is held where the
+        // caller
+        // cannot see. The commit then cannot add that member (the phone is taken) and records nothing, in words that
+        // name
+        // no member and no branch.
         NewMember known = intake.byPhone.get(e164.get());
         if (known != null) {
             if (!known.name.equalsIgnoreCase(name)) {

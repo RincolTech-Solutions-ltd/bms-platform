@@ -1426,6 +1426,46 @@ class ExistingLoansIT extends LoanFixtures {
                 .startsWith("error:You may not add members.");
     }
 
+    /**
+     * A phone held by a member in a branch the caller cannot see reads on the check exactly as a phone nobody holds (a new
+     * member comes in), so a check is no way to learn who holds a phone elsewhere; the commit then cannot add that member and
+     * records nothing, in words that name no member and no branch (issue #626).
+     */
+    @Test
+    void frExl06_aPhoneHeldInAnotherBranchReadsAsNewAndTheCommitRefusesWithoutNamingAnyone() {
+        product("EXL9", Map.of());
+        String elsewhere = memberNo(member("Test Borrower Elsewhere", "0700000401", t.secondBranch(), true));
+        assertThat(setGoLive(today.minusDays(10)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        LocalDate d1 = today.minusMonths(2);
+        String header = "kind,ref,member_name,member_phone,product_code,principal,disbursement_date,term\n";
+        String csv = header
+                + "loan,REG-401,Test Register Held,0700000401,EXL9,300000," + d1 + ",2\n"
+                + "loan,REG-402,Test Register Held,0700000402,EXL9,300000," + d1 + ",2\n";
+        String headOfficeOnly = t.headOffice().toString();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("csv", csv);
+        body.put("branch_id", t.headOffice());
+        ResponseEntity<JsonNode> checked = send(
+                HttpMethod.POST, EXISTING + "/import?dry_run=true", as(admin, adminPerms, headOfficeOnly, null), body);
+        assertThat(checked.getStatusCode()).as("%s", checked.getBody()).isEqualTo(HttpStatus.OK);
+        Map<String, String> rows = messages(checked);
+        assertThat(rows.get("REG-401")).startsWith("ready:").contains("Adds a new member, Test Register Held");
+        assertThat(rows.get("REG-401")).isEqualTo(rows.get("REG-402"));
+        assertThat(checked.getBody().toString()).doesNotContain(elsewhere).doesNotContain("Elsewhere");
+
+        long members = count("SELECT count(*) FROM lending_members WHERE tenant_id = ?", t.tenantId());
+        ResponseEntity<JsonNode> committed = send(
+                HttpMethod.POST, EXISTING + "/import?dry_run=false", as(admin, adminPerms, headOfficeOnly, null), body);
+        assertThat(committed.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(committed)).isEqualTo("import_member_phone_taken");
+        assertThat(committed.getBody().toString()).doesNotContain(elsewhere).doesNotContain("Elsewhere");
+        assertThat(count("SELECT count(*) FROM lending_members WHERE tenant_id = ?", t.tenantId()))
+                .as("nothing recorded: not even the other new member")
+                .isEqualTo(members);
+        assertThat(count("SELECT count(*) FROM lending_loans WHERE tenant_id = ?", t.tenantId()))
+                .isZero();
+    }
+
     // ---- Isolation (NFR-ISO-02) -----------------------------------------------------------
 
     /** Another business sees neither the loan nor its repayments, and its import cannot skip on this one's numbers. */

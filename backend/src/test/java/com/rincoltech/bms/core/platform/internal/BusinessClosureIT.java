@@ -674,6 +674,9 @@ class BusinessClosureIT extends IntegrationTest {
                         "payment_intents",
                         "billing_contacts");
 
+        assertThat(count("SELECT count(*) FROM help_setup_drafts WHERE tenant_id = ?", t.tenantId()))
+                .as("the setup helper's draft row seeded by RlsIsolationIT.seedOneRowInEveryTable")
+                .isEqualTo(1);
         ResponseEntity<JsonNode> removed = remove(op, closureId, code(op));
         assertThat(removed.getStatusCode()).as("%s", removed.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(removed.getBody().get("erased").get("core").asInt()).isPositive();

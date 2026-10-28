@@ -422,17 +422,22 @@ class SetupHelperIT extends IntegrationTest {
         assertThat(loan.get("member_no").isNull()).isTrue();
         assertThat(loan.get("member_full_name").isNull()).isTrue();
 
-        // The row the screen then sends to the import's check is refused in words that name no member and no branch.
+        // The row the screen then sends to the import's check reads exactly as a row whose phone nobody holds: the same
+        // outcome and the same words, so the check cannot tell that a member elsewhere holds it.
         String elsewhere = created.getBody().get("member_no").asString();
         String csv = "kind,ref,member_no,member_name,member_phone,product_code,principal,disbursement_date\n"
-                + "loan,Y-09,,Someone,+256700000203,LOAN1,100000,2026-08-01\n";
+                + "loan,Y-09,,Someone,+256700000203,LOAN1,100000,2026-08-01\n"
+                + "loan,Y-10,,Someone,+256700000299,LOAN1,100000,2026-08-01\n";
         ResponseEntity<JsonNode> checked = api.post(
                 "/api/v1/lending/existing-loans/import?dry_run=true",
                 Map.of("csv", csv, "branch_id", t.headOffice().toString()),
                 manager);
         assertThat(checked.getStatusCode()).as("%s", checked.getBody()).isEqualTo(HttpStatus.OK);
-        String message = checked.getBody().get("rows").get(0).get("message").asString();
-        assertThat(message).startsWith("This phone is already a member's in the app.");
+        JsonNode held = checked.getBody().get("rows").get(0);
+        JsonNode free = checked.getBody().get("rows").get(1);
+        assertThat(held.get("outcome").asString()).isEqualTo(free.get("outcome").asString());
+        assertThat(held.get("message").asString()).isEqualTo(free.get("message").asString());
+        assertThat(checked.getBody().toString()).doesNotContain("outside yours");
         assertThat(checked.getBody().toString()).doesNotContain(elsewhere).doesNotContain("Test Member Elsewhere");
     }
 

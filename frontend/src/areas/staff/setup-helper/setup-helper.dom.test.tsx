@@ -154,12 +154,23 @@ describe('the setup helper on Import existing loans', () => {
     expect(importCsv.mock.calls[0]?.[2]).toBeUndefined();
   });
 
-  it('warns when the member who has the phone is called something else in the register', async () => {
+  it('asks the owner to confirm a member found by phone under another name before the check sends anything', async () => {
+    const result: ExistingLoanImportResult = { dry_run: true, rows_read: 1, loans: 1, repayments: 0, added: 1, skipped: 0, errors: 0, members_added: 0, rows: [] };
+    const importCsv = vi.fn().mockResolvedValue(result);
     const known = { ...register, loans: [{ ...register.loans[0]!, member_no: 'M000001', member_full_name: 'Test Member Known', member_name: 'T. Other' }] };
-    draw(<ExistingLoansImport api={loansApi(vi.fn())} helperApi={helper({ draftLoans: vi.fn().mockResolvedValue(known) })} />);
+    draw(<ExistingLoansImport api={loansApi(importCsv)} helperApi={helper({ draftLoans: vi.fn().mockResolvedValue(known) })} />);
     fireEvent.change(await screen.findByLabelText('The loans, one on each line'), { target: { value: 'Y-01 T. Other 400000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Read my list' }));
-    expect(await screen.findByText('Member M000001, Test Member Known, has this phone already. The register says T. Other: check it is the same person, or fix the phone.')).toBeTruthy();
+    expect(await screen.findByText('Member M000001, Test Member Known, has this phone already. The register says T. Other. Tick below if it is the same person, or remove this loan.')).toBeTruthy();
+    fireEvent.change(await screen.findByLabelText(/Loan product for these loans/), { target: { value: 'LOAN1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Check these loans' }));
+    const same = screen.getByLabelText('T. Other is Test Member Known, the same person') as HTMLInputElement;
+    expect(same.checked).toBe(false);
+    expect(importCsv).not.toHaveBeenCalled();
+    fireEvent.click(same);
+    fireEvent.click(screen.getByRole('button', { name: 'Check these loans' }));
+    await waitFor(() => expect(importCsv).toHaveBeenCalledTimes(1));
+    expect(importCsv.mock.calls[0]?.[0]).toContain('loan,Y-01,,T. Other,+256700000202,LOAN1');
   });
 
   it('reads a register into loans with a new member by name and phone, checked by the import in the branch in use', async () => {
