@@ -693,6 +693,67 @@ describe('a Sell search that finds nothing', () => {
     expect(createStocktake).toHaveBeenCalledTimes(1);
   });
 
+  // Issue #664: the count of a new item (no tick asked) whose draft is still being made when the sale or the screen changes.
+  // JUSTIFICATION-A3: the three tests issue #664 names, with the setup they share.
+  /** Holds the duvet cover's count on its way; the answer it returns gives draft s1 when called. */
+  const countOnItsWay = (first: Product = made) => {
+    createProduct.mockResolvedValueOnce(first).mockResolvedValue(made);
+    let answer: () => void = () => undefined;
+    createStocktake.mockImplementation(({ lines }: { lines: { product_id: string }[] }) =>
+      lines[0]!.product_id === 'p8' ? Promise.resolve({ id: 's8', status: 'draft', lines: [] }) : new Promise<Stocktake>((resolve) => { answer = () => resolve(draftOf('0.000')); }));
+    commitStocktake.mockImplementation((id: string) => Promise.resolve({ id, status: 'committed' }));
+    return async () => {
+      await waitFor(() => expect(createStocktake).toHaveBeenCalledWith(expect.objectContaining({ lines: [expect.objectContaining({ product_id: 'p9' })] })));
+      return () => answer();
+    };
+  };
+  /** The draft s1 that came after the sale or screen changed is discarded, never committed, and nothing is said. */
+  const discardedUnsent = async () => {
+    await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
+    expect(commitStocktake).not.toHaveBeenCalledWith('s1');
+    expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
+    expect(screen.queryByText(/its count is not|may not be committed/)).toBeNull();
+  };
+
+  it('discards the count of a new item that answers after Clear this sale, and puts nothing on the sale (issue #664)', async () => {
+    const onItsWay = countOnItsWay(sheet);
+    open(<RecordSale />, owner);
+    await fill('3');
+    expect(await screen.findByRole('button', { name: 'Remove Test bed sheet' })).toBeTruthy();
+    await fill('4');
+    const answer = await onItsWay();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear this sale' }));
+    await act(async () => answer());
+    await discardedUnsent();
+  });
+
+  it('discards the count of a new item that answers after the screen was left (issue #664)', async () => {
+    const onItsWay = countOnItsWay();
+    open(<RecordSale />, owner);
+    await fill('4');
+    const answer = await onItsWay();
+    cleanup();
+    await act(async () => answer());
+    await discardedUnsent();
+  });
+
+  it('discards the count of a new item that answers after a branch switch, and puts nothing on the new branch sale (issue #664)', async () => {
+    const onItsWay = countOnItsWay();
+    const [here, other] = [owner.branches?.[0]?.id ?? '', owner.branches?.[1]?.id ?? 'other'];
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const at = (branch: string) => (
+      <QueryClientProvider client={client}>
+        <StaffContext.Provider value={{ me: owner, branch, chooseBranch }}><SaleForm key={branch} branchId={branch} /></StaffContext.Provider>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(at(here));
+    await fill('4');
+    const answer = await onItsWay();
+    rerender(at(other));
+    await act(async () => answer());
+    await discardedUnsent();
+  });
+
   it('sends the commit of a new item again on the same draft when its answer is lost, and takes one the server already took (issue #656)', async () => {
     createProduct.mockResolvedValue(made);
     createStocktake.mockResolvedValue(draftOf('0.000'));
