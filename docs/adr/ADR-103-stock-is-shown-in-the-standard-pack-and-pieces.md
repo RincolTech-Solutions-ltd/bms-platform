@@ -42,3 +42,12 @@ pieces is always shown before a count is reviewed or a move is saved.
 
 **Worse:** a pack switched off or resized changes how stock reads at once, by design; only a count already typed keeps its
 pack. Another rule is one subquery and one test to change.
+
+## Note (28 October 2026, issue #660, reviews of #654 and #658)
+
+Tier one of decision 1 is tightened. A pack comes first only when it is used for selling or both and its unit's usual pack
+(ADR-100) counts the item's own base unit (`pack_of_unit_id` is the item's unit) and is itself for selling or both. A unit
+whose usual pack is a box of 50 metres is no longer promoted on an item counted in pieces, and a usual pack only bought
+promotes nothing. The other tiers and the tie-break (the biggest, then the lower unit id) are unchanged. The rule stays one
+subquery, `RetailCatalogue.standardPackSql`; the PWA still only reads the `standard` flag, so server and client cannot
+disagree. `RetailUnitsIT.aUsualPackOfAnotherUnitIsNotPromoted` and the matching case in `units-state.test.ts` show it.
