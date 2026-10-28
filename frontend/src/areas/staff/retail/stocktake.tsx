@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { Highlight } from '../../../app/ui/SearchBox';
 import { ItemCombobox } from '../../../app/ui/ItemCombobox';
 import { matchesSearch, useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { retail, type Product, type StockRow, type Stocktake, type StocktakeLine } from '../../../api/retail';
-import { milliOf, parseCount, parseQty, qtyString, showQty } from './maths';
+import { bigDrop, milliOf, parseCount, parseQty, qtyString, showQty } from './maths';
 import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne } from './barcode-state';
 import { SkeletonList } from '../../../components/states';
@@ -27,15 +27,6 @@ import { useEntryChecks, useEntryNorms } from './entry-checks';
 /** The variance written at commit once committed, otherwise the draft's (counted less expected). */
 const variance = (l: StocktakeLine): string => l.committed_variance_qty ?? l.variance_qty ?? '0';
 
-/**
- * Issue #629: a count that takes an item holding stock to 0, or to less than half of what it held, is the likely slip of a
- * tap (a 0 meant for the next line). It asks before it is committed; a count that keeps more than half stays as it is.
- */
-export function bigDrop(l: StocktakeLine): boolean {
-  const expected = milliOf(l.expected_qty ?? '0');
-  return expected > 0 && milliOf(l.counted_qty ?? '0') * 2 < expected;
-}
-
 /** "This removes 8 pieces. Is that right?" for a big drop, in the item's unit when the sheet gives it. */
 export function dropWords(l: StocktakeLine, unit: string | undefined): string {
   const removed = milliOf(l.expected_qty ?? '0') - milliOf(l.counted_qty ?? '0');
@@ -56,6 +47,7 @@ export function StocktakeReview({ stocktake, onCommit, busy, units }: {
   // The big drops ticked as right; Commit the count waits for every one of them. A line without a product id has a key of its
   // own, so one tick never answers for another (issue #636).
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
+  const hintId = useId();
   const keyOf = (l: StocktakeLine, i: number) => l.product_id ?? `line-${i}`;
   const asked = draft ? changed.flatMap((l, i) => (bigDrop(l) ? [keyOf(l, i)] : [])) : [];
   const open = asked.filter((id) => !ticked.has(id)).length;
@@ -115,9 +107,9 @@ export function StocktakeReview({ stocktake, onCommit, busy, units }: {
       {draft && onCommit && (
         <>
           {/* Issue #636: the button names its hint, so a press that goes to a tick says why. */}
-          {open > 0 && <p className="hint" id="count-commit-hint">{open === 1 ? 'Tick the line marked above before you commit the count.' : `Tick the ${open} lines marked above before you commit the count.`}</p>}
+          {open > 0 && <p className="hint" id={hintId}>{open === 1 ? 'Tick the line marked above before you commit the count.' : `Tick the ${open} lines marked above before you commit the count.`}</p>}
           <BusyButton type="button" className="rt-primary" busy={busy === true} notReady={open > 0}
-            aria-describedby={open > 0 ? 'count-commit-hint' : undefined} onClick={() => onCommit(changed.flatMap((l, i) => (l.product_id && ticked.has(keyOf(l, i)) ? [l.product_id] : [])))}>
+            aria-describedby={open > 0 ? hintId : undefined} onClick={() => onCommit(changed.flatMap((l, i) => (l.product_id && ticked.has(keyOf(l, i)) ? [l.product_id] : [])))}>
             Commit the count
           </BusyButton>
         </>

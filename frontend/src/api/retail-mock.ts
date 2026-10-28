@@ -18,6 +18,7 @@ import { createDocumentsMock } from './retail-documents-mock';
 import { createReturnsMock } from './retail-returns-mock';
 import { createPurchasingMock } from './retail-purchasing-mock';
 import { barcodeKey, checkBarcode, scanKeys, shopEan } from '../areas/staff/retail/barcode-state';
+import { bigDrop } from '../areas/staff/retail/maths';
 import { MAX_VARIANTS, cleanOption, planVariants, variantDescription, variantKey, variantLabel } from './retail-variants';
 
 // Fabricated retail data for VITE_RETAIL_MOCK and for tests: invented products, branches and
@@ -157,8 +158,6 @@ const atLevel = (qty: number, level?: 'out' | 'low'): boolean => level === undef
 const toMilli = (text: string): number => Math.round(Number(text) * 1000);
 /** A quantity without trailing zeros: 10.000 is 10. */
 const plainQty = (q: string): string => (q.includes('.') ? q.replace(/0+$/, '').replace(/\.$/, '') : q);
-/** A count that takes an item holding stock to 0, or to less than half of it (issue #636, the server's rule). */
-const bigDropOf = (l: { expected_qty?: string; counted_qty?: string }): boolean => toMilli(l.expected_qty ?? '0') > 0 && toMilli(l.counted_qty ?? '0') * 2 < toMilli(l.expected_qty ?? '0');
 const fromMilli = (m: number): string => `${m < 0 ? '-' : ''}${Math.floor(Math.abs(m) / 1000)}.${String(Math.abs(m) % 1000).padStart(3, '0')}`;
 const lineTotal = (price: number, qtyMilli: number): number => Number((BigInt(price) * BigInt(qtyMilli) + 500n) / 1000n);
 const today = (): string => businessToday();
@@ -1300,9 +1299,9 @@ export function createMockRetail(): RetailApi {
       if (!st) return Promise.reject(new RetailError('That could not be found.', 404, 'not_found'));
       if (st.status === 'committed') return Promise.reject(new RetailError(retailMessage({ code: 'stocktake_committed' }, 409), 409, 'stocktake_committed'));
       // Issue #636, as the server: a big drop left out of the acknowledged lines refuses the commit.
-      const unticked = (st.lines ?? []).filter((l) => bigDropOf(l) && !acknowledged.includes(l.product_id ?? '')).map((l) => l.code);
+      const unticked = (st.lines ?? []).filter((l) => bigDrop(l) && !acknowledged.includes(l.product_id ?? '')).map((l) => l.description ?? l.code);
       if (unticked.length > 0) {
-        const detail = `The count of ${unticked.join(', ')} takes most of its stock away. Review the difference again and tick each line marked before you commit the count.`;
+        const detail = `The count of ${unticked.join(', ')} removes more than half of what was there. Review the difference again and tick each line marked before you commit the count.`;
         return Promise.reject(new RetailError(retailMessage({ code: 'big_drop_not_acknowledged', detail }, 409), 409, 'big_drop_not_acknowledged'));
       }
       (st.lines ?? []).forEach((l) => move(st.branch_id ?? BRANCH_A, l.product_id ?? '', toMilli(l.variance_qty ?? '0')));
