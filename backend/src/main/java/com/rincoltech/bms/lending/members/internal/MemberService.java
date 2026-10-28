@@ -472,12 +472,14 @@ class MemberService implements MemberLookup, MemberIntake {
     }
 
     @Override
-    public MemberSummary preview(UUID branchId, String fullName) {
+    public MemberSummary preview(UUID branchId, String fullName, String phone) {
+        // From the very request addFromRegister sends, so the two cannot drift apart.
+        CreateMemberRequest r = registerRequest(branchId, fullName, phone);
         return new MemberSummary(
                 UUID.randomUUID(),
-                branchId,
+                r.branchId(),
                 null,
-                fullName.trim(),
+                r.fullName().trim(),
                 MemberRepository.INITIAL_KYC_STATUS,
                 MemberRepository.INITIAL_STATUS,
                 false,

@@ -22,7 +22,7 @@ public interface MemberIntake {
     Optional<String> problemAdding(UUID branchId, String fullName, String phone);
 
     /** The member {@link #addFromRegister} would make, before it is made: the same starting KYC and status, no number yet. */
-    MemberSummary preview(UUID branchId, String fullName);
+    MemberSummary preview(UUID branchId, String fullName, String phone);
 
     /**
      * Refuses with 422 {@code plan_limit_reached} when {@code newMembers} more active members would pass the plan's member

@@ -1548,6 +1548,37 @@ class ExistingLoansIT extends LoanFixtures {
                 .isEqualTo(1);
     }
 
+    /**
+     * A refusal of the member form itself (a name longer than the form takes, a branch that is not active) is on the check,
+     * row by row, in the words the commit then gives: the check runs the members module's own rules, not a copy of them.
+     */
+    @Test
+    void frExl06_theMemberFormsRefusalsAreOnTheCheckInTheCommitsWords() {
+        product("EXL11", Map.of());
+        assertThat(setGoLive(today.minusDays(10)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        LocalDate d1 = today.minusMonths(2);
+        String csv = "kind,ref,member_name,member_phone,product_code,principal,disbursement_date,term\n"
+                + "loan,REG-601," + "Test Long Name ".repeat(15) + ",0700000601,EXL11,300000," + d1 + ",2\n";
+        ResponseEntity<JsonNode> checked = importCsv(csv, true, adminPerms, t.headOffice());
+        assertThat(messages(checked).get("REG-601"))
+                .isEqualTo("error:The member's name is empty or longer than 200 characters.");
+        ResponseEntity<JsonNode> committed = importCsv(csv, false, adminPerms, t.headOffice());
+        assertThat(messages(committed)).isEqualTo(messages(checked));
+
+        TestDatabase.owner()
+                .sql("UPDATE branches SET status = 'inactive' WHERE id = ?")
+                .param(t.secondBranch())
+                .update();
+        String fine = "kind,ref,member_name,member_phone,product_code,principal,disbursement_date,term\n"
+                + "loan,REG-602,Test Register Closed,0700000602,EXL11,300000," + d1 + ",2\n";
+        ResponseEntity<JsonNode> closed = importCsv(fine, true, adminPerms, t.secondBranch());
+        assertThat(messages(closed).get("REG-602")).startsWith("error:");
+        assertThat(messages(importCsv(fine, false, adminPerms, t.secondBranch())))
+                .isEqualTo(messages(closed));
+        assertThat(count("SELECT count(*) FROM lending_loans WHERE tenant_id = ?", t.tenantId()))
+                .isZero();
+    }
+
     // ---- Isolation (NFR-ISO-02) -----------------------------------------------------------
 
     /** Another business sees neither the loan nor its repayments, and its import cannot skip on this one's numbers. */

@@ -573,7 +573,7 @@ class ExistingLoanImport {
             if (refused.isPresent()) {
                 return refused.get();
             }
-            known = new NewMember(name, e164.orElseThrow(), this.intake.preview(intake.branch, name));
+            known = new NewMember(name, e164.orElseThrow(), this.intake.preview(intake.branch, name, phone));
             intake.byPhone.put(e164.get(), known);
         }
         p.newMember = known;
