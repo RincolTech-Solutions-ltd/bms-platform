@@ -293,6 +293,21 @@ describe('a count that wipes or halves stock', () => {
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('st1', ['A-1', 'A-2']));
   });
 
+  // Issue #636: no screen of the count says Finish, the review and the committed screen included.
+  it('never says Finish on Review the difference or once committed', async () => {
+    const noFinish = () => {
+      expect(document.body.textContent).not.toMatch(/finish/i);
+      expect([...document.querySelectorAll('[aria-label]')].map((e) => e.getAttribute('aria-label')).join(' ')).not.toMatch(/finish/i);
+    };
+    await review();
+    noFinish();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Four Way is right' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Two Way is right' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    await screen.findByRole('heading', { name: 'Stock count committed' });
+    noFinish();
+  });
+
   it('asks again after Back to the count, since the review is a new one', async () => {
     await review();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Four Way is right' }));
