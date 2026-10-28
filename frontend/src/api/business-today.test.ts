@@ -22,7 +22,7 @@ describe('businessToday', () => {
     expect(businessToday()).toBe('2026-10-29');
     vi.setSystemTime(new Date('2026-10-28T23:59:59Z'));
     expect(businessToday()).toBe('2026-10-29');
-    expect(new Date().toISOString().slice(0, 10)).toBe('2026-10-28'); // business-date: allow, the UTC day it differs from
+    expect(new Date().toISOString().slice(0, 10)).toBe('2026-10-28'); // business-day-ok:the UTC day it differs from
     // The month and the year turn over on the same boundary.
     vi.setSystemTime(new Date('2026-12-31T22:00:00Z'));
     expect(businessToday()).toBe('2027-01-01');
@@ -43,9 +43,10 @@ describe('businessToday', () => {
 // The guard: no screen reads the device's calendar day. Each of these is the mistake of #667 or can be: a date part of the
 // local clock, a UTC day cut from an instant, a date or time formatted without a timeZone, date-fns on now. A line that
 // really means it (a calendar sum on a UTC midnight, a moment shown on this phone's own clock) carries
-// `business-date: allow, <why>` on that line or the one above. The mock server stands in for the backend and is left out.
+// `business-day-ok:<why>` on that line or the one above. The mock server stands in for the backend and is left out. The
+// repository has no ESLint (its lint is tsc), so this scan, like the design guard, is the lint rule.
 const SRC = fileURLToPath(new URL('../', import.meta.url));
-const ALLOW = 'business-date: allow';
+const ALLOW = 'business-day-ok:';
 const DEVICE_DAY = [
   /\.get(?:FullYear|Month|Date|Day)\(\)/,
   /toISOString\(\)\s*\.\s*(?:slice|substring|substr)\(\s*0\s*,\s*10\s*\)/,

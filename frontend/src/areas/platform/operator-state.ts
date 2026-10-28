@@ -78,7 +78,7 @@ function parts(day: string): [number, number, number] {
 
 function iso(y: number, m: number, d: number): string {
   const date = new Date(Date.UTC(y, m - 1, d));
-  return date.toISOString().slice(0, 10); // business-date: allow, a calendar sum on a UTC midnight
+  return date.toISOString().slice(0, 10); // business-day-ok:a calendar sum on a UTC midnight
 }
 
 /** 21 Oct 2026. */

@@ -40,7 +40,7 @@ function closeSheet(d: HTMLDialogElement | null) {
 }
 
 function when(iso: string): string {
-  const at = new Date(iso); // business-date: allow, a moment shown on this phone's clock, never sent
+  const at = new Date(iso); // business-day-ok:a moment shown on this phone's clock, never sent
   return `${at.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
 }
 

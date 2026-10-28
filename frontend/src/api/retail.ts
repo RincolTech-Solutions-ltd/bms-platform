@@ -281,7 +281,7 @@ export function businessToday(now: Date = new Date(), zone: string = businessZon
 export function daysBefore(date: string, days: number): string {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10); // business-date: allow, a calendar sum on a UTC midnight
+  return d.toISOString().slice(0, 10); // business-day-ok:a calendar sum on a UTC midnight
 }
 
 /** Stock lists can show only items out of stock (zero or less) or low (at or below the server's threshold, 5). */

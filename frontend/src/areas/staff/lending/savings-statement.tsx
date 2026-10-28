@@ -14,7 +14,7 @@ import { PeriodPicker } from '../../../app/ui/PeriodPicker';
 export function threeMonthsBefore(day: string): string {
   const [y, m, d] = day.split('-').map(Number);
   const back = new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1 - 3, (d ?? 1) + 1));
-  return back.toISOString().slice(0, 10); // business-date: allow, a calendar sum on a UTC midnight
+  return back.toISOString().slice(0, 10); // business-day-ok:a calendar sum on a UTC midnight
 }
 
 export function StatementTable({ s }: { s: SavingsStatement }) {

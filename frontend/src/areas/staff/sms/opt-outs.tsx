@@ -74,7 +74,7 @@ export function OptOutRows({ items, term, canManage, busy, onRemove }: {
               </td>
               <td className="num">{i.recipient_masked ? <Highlight text={i.recipient_masked} term={term} /> : 'Any number'}</td>
               <td>{SCOPE_WORDS[i.scope] ?? i.scope}</td>
-              {/* business-date: allow, a moment shown on this phone's clock, never sent */}
+              {/* business-day-ok:a moment shown on this phone's clock, never sent */}
               <td>{new Date(i.created_at).toLocaleDateString(undefined, { dateStyle: 'medium' })}</td>
               {canManage && (
                 <td>

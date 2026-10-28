@@ -154,7 +154,7 @@ function InsightsPage() {
       <div className="iv-head">
         <h1>Insights</h1>
         <p className="ln-muted" aria-live="polite">
-          {/* business-date: allow, the time this phone last refreshed, on its own clock */}
+          {/* business-day-ok:the time this phone last refreshed, on its own clock */}
           {updated ? `Updated ${updated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}, refreshes every minute` : 'Loading'}
         </p>
         <button type="button" className="btn-ghost btn-sm iv-noprint" onClick={() => window.print()}>
