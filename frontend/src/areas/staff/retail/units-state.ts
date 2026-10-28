@@ -140,19 +140,26 @@ function counted(milli: bigint, unit: string): string {
 
 /**
  * Issue #650 (units spec section 3, "Stock is shown both ways"): a stock quantity in the item's standard pack and its base unit,
- * with the total: "5 Cartons and 7 Pieces (127 Pieces)". Less than one pack reads in the base unit only ("7 Pieces"); below
- * zero says how far short ("1 Carton and 3 Pieces short (-27 Pieces)"). An item with no pack reads as it always did ("127 Piece").
+ * and the total in the base unit when that says more: "5 Cartons and 7 Pieces" with "127 Pieces". Less than one pack reads in the
+ * base unit only ("7 Pieces"); below zero says how far short ("1 Carton and 3 Pieces short" with "-27 Pieces"). An item with no
+ * pack reads as it always did ("127 Piece").
  */
-export function packsAndPieces(qty: string, unit: string | undefined, pack: PackSize | undefined): string {
+export function packsAndPiecesParts(qty: string, unit: string | undefined, pack: PackSize | undefined): { inPacks: string; total?: string } {
   const f = factorMilli(pack?.factor);
-  if (!unit || !pack?.unit || f === null || f <= 1000n) return `${showQty(qty)}${unit ? ` ${unit}` : ''}`;
+  if (!unit || !pack?.unit || f === null || f <= 1000n) return { inPacks: `${showQty(qty)}${unit ? ` ${unit}` : ''}` };
   const milli = BigInt(milliOf(qty));
   const size = milli < 0n ? -milli : milli;
   const packs = size / f;
   const rest = size - packs * f;
   const parts = [packs > 0n ? counted(packs * 1000n, pack.unit) : '', rest > 0n || packs === 0n ? counted(rest, unit) : ''].filter(Boolean).join(' and ');
-  const short = milli < 0n ? ' short' : '';
-  return packs > 0n ? `${parts}${short} (${showQty(qty)} ${plural(unit)})` : `${parts}${short}`;
+  const inPacks = milli < 0n ? `${parts} short` : parts;
+  return packs > 0n ? { inPacks, total: `${showQty(qty)} ${plural(unit)}` } : { inPacks };
+}
+
+/** Issue #650: the same in one line, the one every screen says: "5 Cartons and 7 Pieces (127 Pieces)". */
+export function packsAndPieces(qty: string, unit: string | undefined, pack: PackSize | undefined): string {
+  const { inPacks, total } = packsAndPiecesParts(qty, unit, pack);
+  return total ? `${inPacks} (${total})` : inPacks;
 }
 
 /** Issue #650: why a count or a move typed in packs and pieces cannot be read, or null when it can. */

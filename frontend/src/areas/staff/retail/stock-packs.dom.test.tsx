@@ -61,7 +61,7 @@ describe('Stock in packs and pieces', () => {
     screenOf(<AllBranchesList data={data} showCost={false} />);
     expect(screen.getByText(/Total/).textContent).toContain('5 Cartons and 7 Pieces (127 Pieces)');
     fireEvent.click(screen.getByRole('button', { name: 'Show branches' }));
-    expect(screen.getByText('4 Cartons and 4 Pieces (100 Pieces)')).toBeTruthy();
-    expect(screen.getByText('1 Carton and 3 Pieces (27 Pieces)')).toBeTruthy();
+    const branches = [...document.querySelectorAll('.rt-card .rt-row')].slice(1).map((r) => r.textContent);
+    expect(branches).toEqual(['Test Main (HQ)4 Cartons and 4 Pieces (100 Pieces)', 'Test Two (B2)1 Carton and 3 Pieces (27 Pieces)']);
   });
 });

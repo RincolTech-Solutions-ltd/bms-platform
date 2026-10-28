@@ -9,7 +9,7 @@ import { branchLabel } from '../../../auth/branch';
 import { useCrumbTail } from '../../../components/breadcrumbs';
 import { GroupControls, GroupedBodies, GroupedCards, sameUnitQty, useCategoryGroups } from './category-groups';
 import { lineTotalMinor, milliOf } from './maths';
-import { packsAndPieces, type PackSize } from './units-state';
+import { packsAndPiecesParts, type PackSize } from './units-state';
 import { EmptyState, SkeletonList } from '../../../components/states';
 import { BranchRequired, CategoryLabel, Gate, NoStockHere, Problem, money, useBranchView, useIsPhone, useProfitAccess } from './ui';
 import { CorrectItem, mayCorrect } from './stock-correct';
@@ -61,8 +61,8 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
           )}
         </td>
         {!phone && !grouping && <td>{r.category}</td>}
-        <td className="num">
-          {packsAndPieces(r.qty ?? '0', r.unit, r.standard_pack)}
+        <td className={r.standard_pack ? 'num qty-packs' : 'num'}>
+          <InPacks qty={r.qty ?? '0'} unit={r.unit} pack={r.standard_pack} />
           {r.negative && <div className="rt-flag">Negative</div>}
           {keptWords(r.qty, r.reserved_qty) && <div className="hint">{keptWords(r.qty, r.reserved_qty)}</div>}
         </td>
@@ -93,11 +93,20 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
   );
 }
 
+/**
+ * Issue #650: a quantity in the item's standard pack and pieces, the total in pieces on a line of its own so a narrow cell
+ * wraps between the two, never inside a number. The words are packsAndPieces' own.
+ */
+function InPacks({ qty, unit, pack }: { qty: string; unit?: string; pack?: PackSize }) {
+  const { inPacks, total } = packsAndPiecesParts(qty, unit, pack);
+  return total ? <><span className="qty-in-packs">{inPacks}</span> <span className="qty-total">({total})</span></> : <>{inPacks}</>;
+}
+
 /** One quantity with its unit, in the item's standard pack and pieces when it has one (issue #650), and the negative flag in words. */
 function Qty({ qty, unit, negative, pack }: { qty: string; unit?: string; negative?: boolean; pack?: PackSize }) {
   return (
     <>
-      {packsAndPieces(qty, unit, pack)}
+      <InPacks qty={qty} unit={unit} pack={pack} />
       {negative && <div className="rt-flag">Negative</div>}
     </>
   );
@@ -117,7 +126,7 @@ export function AllBranchesTable({ data, showCost: mayCost, searching = false, f
   const row = (r: AllBranchesStock['items'][number]) => (
     <tr key={r.product_id}>
       <td>{r.description}{!grouping && <><br /><CategoryLabel category={r.category} /></>}</td>
-      <td className="num"><strong><Qty qty={r.total_qty ?? '0'} unit={r.unit} negative={r.negative} pack={r.standard_pack} /></strong></td>
+      <td className={r.standard_pack ? 'num qty-packs' : 'num'}><strong><Qty qty={r.total_qty ?? '0'} unit={r.unit} negative={r.negative} pack={r.standard_pack} /></strong></td>
       {(r.balances ?? []).map((c) => (
         <td key={c.branch_id} className="num"><Qty qty={c.qty ?? '0'} negative={c.negative} /></td>
       ))}

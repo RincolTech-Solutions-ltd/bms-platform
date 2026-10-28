@@ -1,0 +1,12 @@
+import react from '@vitejs/plugin-react';
+import { chromium } from 'playwright';
+import { createServer } from 'vite';
+const server = await createServer({ configFile: false, root: process.cwd(), plugins: [react()], logLevel: 'silent', server: { port: 0, host: '127.0.0.1' } });
+await server.listen();
+const base = server.resolvedUrls.local[0];
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 360, height: 900 }, hasTouch: true, isMobile: true });
+await page.goto(`${base}layout/stock-packs.html?screen=move&font=${process.argv[2]}`);
+await page.waitForTimeout(3000);
+console.log(JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('body *')].map((e) => ({ t: e.tagName + '.' + e.className + '#' + e.id, r: Math.round(e.getBoundingClientRect().right) })).filter((x) => x.r > 360).slice(0, 15))));
+await browser.close(); await server.close();
