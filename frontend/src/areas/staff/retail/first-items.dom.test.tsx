@@ -734,24 +734,51 @@ describe('a Sell search that finds nothing', () => {
     const answer = await onItsWay();
     cleanup();
     await act(async () => answer());
-    await discardedUnsent();
+    // The screen is gone, so only the requests carry weight.
+    await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
+    expect(commitStocktake).not.toHaveBeenCalledWith('s1');
   });
 
   it('discards the count of a new item that answers after a branch switch, and puts nothing on the new branch sale (issue #664)', async () => {
     const onItsWay = countOnItsWay();
-    const [here, other] = [owner.branches?.[0]?.id ?? '', owner.branches?.[1]?.id ?? 'other'];
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const at = (branch: string) => (
-      <QueryClientProvider client={client}>
-        <StaffContext.Provider value={{ me: owner, branch, chooseBranch }}><SaleForm key={branch} branchId={branch} /></StaffContext.Provider>
-      </QueryClientProvider>
-    );
-    const { rerender } = render(at(here));
+    // The staff area's branch switch through the picker and its holds, with the sale form made again for each branch.
+    function Shell() {
+      const { branch, choose } = useActiveBranch(owner);
+      if (!branch) return null;
+      return (
+        <StaffContext.Provider value={{ me: owner, branch, chooseBranch: choose }}>
+          <p data-testid="branch-in-use">{branch}</p>
+          <button type="button" onClick={() => choose((owner.branches ?? []).find((b) => b.id !== branch)?.id ?? '')}>Switch branch</button>
+          <SaleForm key={branch} branchId={branch} />
+        </StaffContext.Provider>
+      );
+    }
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><Shell /></QueryClientProvider>);
+    const started = (await screen.findByTestId('branch-in-use')).textContent;
     await fill('4');
     const answer = await onItsWay();
-    rerender(at(other));
+    fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
+    await waitFor(() => expect(screen.getByTestId('branch-in-use').textContent).not.toBe(started));
     await act(async () => answer());
     await discardedUnsent();
+  });
+
+  it('leaves the commit of a new item on its way alone when Sell is opened again, and the count stands (issue #664)', async () => {
+    createProduct.mockResolvedValue(made);
+    createStocktake.mockResolvedValue(draftOf('0.000'));
+    let landed: () => void = () => undefined;
+    commitStocktake.mockImplementation((id: string) => new Promise((resolve) => { landed = () => resolve({ ...draftOf('0.000'), id, status: 'committed' }); }));
+    open(<RecordSale />, owner);
+    await fill('4');
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('s1'));
+    // The screen is left and Sell opened again online while the first form's commit is on its way.
+    cleanup();
+    open(<RecordSale />, owner);
+    await act(async () => undefined);
+    await act(async () => landed());
+    await waitFor(() => expect(sessionStorage.getItem('sale-held-counts')).toBe('[]'));
+    expect(commitStocktake.mock.calls).toEqual([['s1']]);
+    expect(discardStocktake).not.toHaveBeenCalled();
   });
 
   it('sends the commit of a new item again on the same draft when its answer is lost, and takes one the server already took (issue #656)', async () => {

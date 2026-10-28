@@ -23,7 +23,8 @@ export function useStockedBranches(me: Me | undefined) {
 
 // Issue #656: a screen that must not change branch yet (Sell, offline, holding a count it cannot discard) is asked first, and says why.
 const branchHolds = new Set<() => boolean>();
-// Issue #664: told after each render of a holding screen and when it closes, since its hold may have lifted then.
+// Issue #664: told after each render of a holding screen and when it closes, since its hold may have lifted then. A hold must
+// only lift on a render: one lifted by a ref change alone is not seen until the screen next renders.
 const holdLifts = new Set<() => void>();
 
 /** While the calling screen is open, `holds` is asked before every change of branch: true keeps the branch, and the screen says why. */
@@ -74,7 +75,7 @@ export function useActiveBranch(me: Me | undefined): { branch: string | null; ch
       const next = initialBranch(me, loadBranch(me.user_id ?? ''), stocked.data ? new Set(stocked.data) : null);
       if (current === null || next === current || ![...branchHolds].some((holds) => holds())) setBranch(next);
       else held.current = true;
-    }
+    } else held.current = false;
     setReady(true);
   }, [me, waiting, stocked.data, retry]);
 
