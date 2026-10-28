@@ -279,6 +279,9 @@ describe('a count that wipes or halves stock', () => {
     await review();
     const commit = screen.getByRole('button', { name: 'Commit the count' });
     expect(screen.getByText('Tick the 2 lines marked above before you commit the count.')).toBeTruthy();
+    // Issue #636: the hint is the button's description, so a screen reader hears why a press goes to a tick.
+    expect(commit.getAttribute('aria-describedby')).toBe('count-commit-hint');
+    expect(document.getElementById('count-commit-hint')?.textContent).toBe('Tick the 2 lines marked above before you commit the count.');
     fireEvent.click(commit);
     expect(commitStocktake).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Yes, Test Plug Four Way is right' }));
@@ -288,6 +291,7 @@ describe('a count that wipes or halves stock', () => {
     expect(commitStocktake).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Yes, Test Plug Two Way is right' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Two Way is right' }));
+    expect(commit.getAttribute('aria-describedby')).toBeNull();
     fireEvent.click(commit);
     // Issue #636: the commit names the ticked lines, so the server can refuse a big drop nobody ticked.
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('st1', ['A-1', 'A-2']));

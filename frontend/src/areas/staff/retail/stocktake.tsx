@@ -112,8 +112,10 @@ export function StocktakeReview({ stocktake, onCommit, busy, units }: {
       )}
       {draft && onCommit && (
         <>
-          {open > 0 && <p className="hint">{open === 1 ? 'Tick the line marked above before you commit the count.' : `Tick the ${open} lines marked above before you commit the count.`}</p>}
-          <BusyButton type="button" className="rt-primary" busy={busy === true} notReady={open > 0} onClick={() => onCommit(asked.filter((id) => ticked.has(id)))}>
+          {/* Issue #636: the button names its hint, so a press that goes to a tick says why. */}
+          {open > 0 && <p className="hint" id="count-commit-hint">{open === 1 ? 'Tick the line marked above before you commit the count.' : `Tick the ${open} lines marked above before you commit the count.`}</p>}
+          <BusyButton type="button" className="rt-primary" busy={busy === true} notReady={open > 0}
+            aria-describedby={open > 0 ? 'count-commit-hint' : undefined} onClick={() => onCommit(asked.filter((id) => ticked.has(id)))}>
             Commit the count
           </BusyButton>
         </>
