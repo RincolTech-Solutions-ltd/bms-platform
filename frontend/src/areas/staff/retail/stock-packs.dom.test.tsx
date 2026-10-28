@@ -47,7 +47,7 @@ describe('Stock in packs and pieces', () => {
     expect(rowOf('Test soap').textContent).toContain('5 Cartons and 7 Pieces (127 Pieces)');
     expect(rowOf('Test biscuits').textContent).toContain('7 Pieces');
     expect(rowOf('Test biscuits').textContent).not.toContain('Carton');
-    expect(rowOf('Test juice').textContent).toContain('1 Carton and 3 Pieces short (-27 Pieces)');
+    expect(rowOf('Test juice').textContent).toContain('1 Carton and 3 Pieces short (27 Pieces short)');
     expect(rowOf('Test juice').textContent).toContain('Negative');
     expect(rowOf('Test cable').textContent).toContain('40 Metre');
   });

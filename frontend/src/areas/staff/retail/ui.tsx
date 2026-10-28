@@ -332,7 +332,7 @@ export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStoc
  * left, or as pieces alone, with the total in pieces under it before anything is sent. Each box has its own label and is
  * named with the item (`nameId`); the pieces box takes `id`, so a scan, a warning and the cursor find it as before.
  */
-export function PacksAndPiecesFields({ id, nameId, unit, pack, packs, pieces, onPacks, onPieces, onBlur, onPiecesKeyDown, totalWord, after }: {
+export function PacksAndPiecesFields({ id, nameId, unit, pack, packs, pieces, onPacks, onPieces, onBlur, onPiecesKeyDown, totalWord, after, invalid = false }: {
   id: string;
   nameId: string;
   unit: string;
@@ -347,6 +347,8 @@ export function PacksAndPiecesFields({ id, nameId, unit, pack, packs, pieces, on
   totalWord: string;
   /** Shown at the end of the row, such as the 0 button of a count. */
   after?: ReactNode;
+  /** The quantity is refused for a reason of its own, such as more than the branch holds: both boxes are marked. */
+  invalid?: boolean;
 }) {
   const problem = packsAndPiecesProblem(packs, pieces, unit, pack.unit);
   const total = problem === null ? packsAndPiecesMilli(packs, pieces, pack) : null;
@@ -358,13 +360,13 @@ export function PacksAndPiecesFields({ id, nameId, unit, pack, packs, pieces, on
         <span className="count-part">
           <label id={`${id}-packs-label`} htmlFor={`${id}-packs`}>{plural(pack.unit)}</label>
           <input id={`${id}-packs`} inputMode="numeric" value={packs} aria-labelledby={`${nameId} ${id}-packs-label`}
-            aria-invalid={packs.trim() !== '' && !/^\d+$/.test(packs.trim())} onChange={(e) => onPacks(e.target.value)} onBlur={leave(id)}
+            aria-invalid={invalid || (packs.trim() !== '' && !/^\d+$/.test(packs.trim()))} onChange={(e) => onPacks(e.target.value)} onBlur={leave(id)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById(id)?.focus(); } }} />
         </span>
         <span className="count-part">
           <label id={`${id}-label`} htmlFor={id}>{plural(unit)}</label>
           <input id={id} inputMode="decimal" value={pieces} aria-labelledby={`${nameId} ${id}-label`} aria-describedby={`${id}-total`}
-            aria-invalid={pieces.trim() !== '' && parseCount(pieces) === null} onChange={(e) => onPieces(e.target.value)} onBlur={leave(`${id}-packs`)}
+            aria-invalid={invalid || (pieces.trim() !== '' && parseCount(pieces) === null)} onChange={(e) => onPieces(e.target.value)} onBlur={leave(`${id}-packs`)}
             onKeyDown={onPiecesKeyDown} />
         </span>
         {after}

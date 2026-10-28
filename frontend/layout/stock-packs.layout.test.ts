@@ -3,7 +3,7 @@ import { chromium, type Browser } from 'playwright';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// Stock in cartons and pieces laid out in Chromium (issue #650): Stock, Count stock and Move stock on a phone 360 wide, at the
+// Stock in cartons and pieces laid out in Chromium (issue #650): Stock (one shop and All branches), Count stock and Move stock on a phone 360 wide, at the
 // default and a large font size. The page never scrolls sideways, the quantity in packs and pieces wraps inside its cell, and on
 // a count or a move line the two boxes, their labels, the 0 button and the total end inside the card, every box a full tap.
 
@@ -36,6 +36,29 @@ describe.each([1, 2])('Stock in cartons and pieces at 360px, font scale %i', (fo
     );
     expect(cells.some((c) => c.text.includes('(1127 Pieces)'))).toBe(true);
     for (const cell of cells) expect(cell.over, cell.text).toBeLessThanOrEqual(0);
+    await page.close();
+  });
+
+  it('All branches on a phone fits, the total and each branch in packs inside its card', async () => {
+    const page = await browser.newPage({ viewport: { width: WIDTH, height: 900 }, hasTouch: true, isMobile: true });
+    await page.goto(`${base}layout/stock-packs.html?screen=all&font=${font}`);
+    await page.getByText('46 Half cartons and 23 Pieces').first().waitFor();
+    const show = page.getByRole('button', { name: 'Show branches' });
+    while ((await show.count()) > 0) await show.first().click();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth), 'page width').toBeLessThanOrEqual(WIDTH);
+    const parts = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('.rt-card')].flatMap((card) => {
+        const box = card.getBoundingClientRect();
+        return [...card.querySelectorAll<HTMLElement>('.rt-row, .rt-row > *, .qty-in-packs, .qty-total')].map((e) => ({
+          what: `${e.tagName.toLowerCase()}.${e.className} ${e.textContent ?? ''}`, right: e.getBoundingClientRect().right, card: box.right, over: e.scrollWidth - e.clientWidth,
+        }));
+      }),
+    );
+    expect(parts.some((p) => p.what.includes('(1127 Pieces)'))).toBe(true);
+    for (const p of parts) {
+      expect(p.right, p.what).toBeLessThanOrEqual(p.card + 0.5);
+      expect(p.over, p.what).toBeLessThanOrEqual(0);
+    }
     await page.close();
   });
 

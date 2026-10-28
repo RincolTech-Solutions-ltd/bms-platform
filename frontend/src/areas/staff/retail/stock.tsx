@@ -128,7 +128,7 @@ export function AllBranchesTable({ data, showCost: mayCost, searching = false, f
       <td>{r.description}{!grouping && <><br /><CategoryLabel category={r.category} /></>}</td>
       <td className={r.standard_pack ? 'num qty-packs' : 'num'}><strong><Qty qty={r.total_qty ?? '0'} unit={r.unit} negative={r.negative} pack={r.standard_pack} /></strong></td>
       {(r.balances ?? []).map((c) => (
-        <td key={c.branch_id} className="num"><Qty qty={c.qty ?? '0'} negative={c.negative} /></td>
+        <td key={c.branch_id} className={r.standard_pack ? 'num qty-packs' : 'num'}><Qty qty={c.qty ?? '0'} unit={r.standard_pack ? r.unit : undefined} negative={c.negative} pack={r.standard_pack} /></td>
       ))}
       {showCost && <td className="num">{r.cost_minor !== undefined ? money(r.cost_minor) : ''}</td>}
       <td className="num">{r.sell_minor !== undefined ? money(r.sell_minor) : ''}</td>

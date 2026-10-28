@@ -11,7 +11,7 @@ import { PACK_UNUSABLE, plusOne } from './barcode-state';
 import { SkeletonList } from '../../../components/states';
 import { BranchRequired, CategoryLabel, Gate, Note, PacksAndPiecesFields, Problem, useProfitAccess, useStockingBranch } from './ui';
 import { UNITS, capabilityOn, needsOf } from './permissions';
-import { chosenPack, packsAndPieces, packsAndPiecesMilli, type PackSize } from './units-state';
+import { chosenPack, packsAndPieces, packsAndPiecesMilli, samePack, type PackSize } from './units-state';
 import { useStaff } from '../context';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { WORDS, plural } from '../../../app/glossary';
@@ -143,8 +143,9 @@ function CountSheet({ branchId }: { branchId: string }) {
   const unitsOn = capabilityOn(me, 'retail', UNITS);
   const search = useLiveSearch();
   const [counts, setCounts] = useState<Record<string, string>>({});
-  // Issue #650: the cartons typed for an item with a standard pack; its pieces stay in counts, and the total is what is sent.
-  const [packCounts, setPackCounts] = useState<Record<string, string>>({});
+  // Issue #650: the cartons typed for an item with a standard pack, with the pack they were typed in, so a pack changed or
+  // removed while counting never reads the same number in another size; its pieces stay in counts, the total is what is sent.
+  const [packCounts, setPackCounts] = useState<Record<string, { text: string; pack: PackSize }>>({});
   // Every pick, scan or new item says so (issue #498): a short toast with the count it now has, and the line flashes once.
   // The counts as of the last add are kept, as on the sale, so a scan answered after a render sees the latest.
   const { added, flashOf, show, toast } = useItemAdded();
@@ -180,13 +181,13 @@ function CountSheet({ branchId }: { branchId: string }) {
   // pieces typed. A count that cannot be read stays as typed, so it is marked as not valid and never sent.
   const totals = useMemo(() => {
     const out: Record<string, string> = { ...counts };
-    for (const [id, packs] of Object.entries(packCounts)) {
-      if (packs.trim() === '') continue;
-      const milli = packsAndPiecesMilli(packs, counts[id] ?? '', packOf.get(id));
-      out[id] = milli === null ? `${packs} ${counts[id] ?? ''}` : qtyString(milli);
+    for (const [id, { text, pack }] of Object.entries(packCounts)) {
+      if (text.trim() === '') continue;
+      const milli = packsAndPiecesMilli(text, counts[id] ?? '', pack);
+      out[id] = milli === null ? `${text} ${counts[id] ?? ''}` : qtyString(milli);
     }
     return out;
-  }, [counts, packCounts, packOf]);
+  }, [counts, packCounts]);
   const confirming = askedOn !== null && askedOn === totals;
   const setConfirming = (on: boolean) => setAskedOn(on ? totals : null);
   /** A line leaves Not counted yet once its count is in, and goes back if the count is emptied. */
@@ -224,7 +225,7 @@ function CountSheet({ branchId }: { branchId: string }) {
   const entered = Object.entries(totals).filter(([, v]) => v.trim() !== '');
   const bad = entered.some(([, v]) => parseCount(v) === null);
   const review = useMutation({
-    mutationFn: () => retail.createStocktake({ branch_id: branchId, lines: entered.map(([productId, countedQty]) => ({ product_id: productId, counted_qty: countedQty.trim() })) }),
+    mutationFn: () => retail.createStocktake({ branch_id: branchId, lines: entered.map(([productId, countedQty]) => ({ product_id: productId, counted_qty: qtyString(parseCount(countedQty) ?? 0) })) }),
     onSuccess: setDraft,
   });
   // Issue #353: each count against what the records hold here, or, where they hold nothing, against the item's usual purchase;
@@ -284,7 +285,9 @@ function CountSheet({ branchId }: { branchId: string }) {
   };
   const line = (r: StockRow, waiting: boolean) => {
     const id = r.product_id ?? '';
-    const pack = r.standard_pack;
+    // The pack the cartons were typed in, while any are typed; else the item's standard pack now.
+    const typed = packCounts[id];
+    const pack = typed && typed.text.trim() !== '' ? typed.pack : r.standard_pack;
     const enter = (e: KeyboardEvent<HTMLInputElement>) => {
       if (e.key !== 'Enter') return;
       settle(id);
@@ -293,7 +296,7 @@ function CountSheet({ branchId }: { branchId: string }) {
       if (next) setFocusOn((f) => ({ id: next, pick: (f?.pick ?? 0) + 1 }));
     };
     const zero = waiting && (
-      <button type="button" className="btn-sm" aria-label={`Count 0 of ${r.description ?? ''}`} onClick={() => { setCounts((c) => ({ ...c, [id]: '0' })); setPackCounts((c) => ({ ...c, [id]: '' })); setDone((d) => (d.includes(id) ? d : [...d, id])); }}>
+      <button type="button" className="btn-sm" aria-label={`Count 0 of ${r.description ?? ''}`} onClick={() => { setCounts((c) => ({ ...c, [id]: '0' })); setPackCounts((c) => { const n = { ...c }; delete n[id]; return n; }); setDone((d) => (d.includes(id) ? d : [...d, id])); }}>
         0
       </button>
     );
@@ -306,8 +309,12 @@ function CountSheet({ branchId }: { branchId: string }) {
           <strong id={`count-${id}-name`}>{r.description}</strong>
           <CategoryLabel category={r.category} />
           <PacksAndPiecesFields id={`count-${id}`} nameId={`count-${id}-name`} unit={r.unit} pack={{ unit: pack.unit, factor: pack.factor }} totalWord="Counted"
-            packs={packCounts[id] ?? ''} pieces={counts[id] ?? ''} onBlur={() => settle(id)} onPiecesKeyDown={enter} after={zero}
-            onPacks={(v) => setPackCounts((c) => ({ ...c, [id]: v }))} onPieces={(v) => setCounts((c) => ({ ...c, [id]: v }))} />
+            packs={typed?.text ?? ''} pieces={counts[id] ?? ''} onBlur={() => settle(id)} onPiecesKeyDown={enter} after={zero}
+            onPacks={(v) => setPackCounts((c) => ({ ...c, [id]: { text: v, pack: c[id] && c[id].text.trim() !== '' ? c[id].pack : { unit: pack.unit, factor: pack.factor } } }))}
+            onPieces={(v) => setCounts((c) => ({ ...c, [id]: v }))} />
+          {typed && typed.text.trim() !== '' && !samePack(typed.pack, r.standard_pack) && (
+            <p className="hint">{`Counted in ${plural(pack.unit ?? '')} of ${showQty(pack.factor ?? '')}, as when you started. This item's pack has changed since.`}</p>
+          )}
           {entry.notes(id)}
         </div>
       );

@@ -158,20 +158,22 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
         const pack = standardPack(l.product);
         const unit = l.product.unit;
         const inPacks = pack?.unit && unit ? { unit: pack.unit, factor: pack.factor } : null;
+        // The fields say a quantity they cannot read themselves; the line's hint says the rest, such as more than the branch holds.
+        const unreadable = inPacks && unit ? packsAndPiecesProblem(l.packs ?? '', l.qty, unit, inPacks.unit) !== null : false;
         return (
           <div key={l.product.id} className="rt-card line-card">
             {flashOf(l.product.id ?? '')}
             <strong id={`tq-${i}-name`}>{l.product.description}</strong>
             {inPacks && unit ? (
               <PacksAndPiecesFields id={`tq-${i}`} nameId={`tq-${i}-name`} unit={unit} pack={inPacks} totalWord="Moving"
-                packs={l.packs ?? ''} pieces={l.qty} onPacks={(v) => change({ packs: v })} onPieces={(v) => change({ qty: v })} />
+                packs={l.packs ?? ''} pieces={l.qty} onPacks={(v) => change({ packs: v })} onPieces={(v) => change({ qty: v })} invalid={hint !== null && !unreadable} />
             ) : (
               <>
                 <label htmlFor={`tq-${i}`}>Quantity ({l.product.unit})</label>
                 <input id={`tq-${i}`} inputMode="decimal" value={l.qty} aria-invalid={hint !== null} onChange={(e) => change({ qty: e.target.value })} />
               </>
             )}
-            {hint && !(inPacks && unit && packsAndPiecesProblem(l.packs ?? '', l.qty, unit, inPacks.unit)) && <p role="alert" className="rt-flag">{hint}</p>}
+            {hint && !unreadable && <p role="alert" className="rt-flag">{hint}</p>}
             {entry.notes(l.product.id ?? String(i))}
             <button type="button" aria-label={`Remove ${l.product.description}`}
               onClick={() => setDraft((d) => ({ ...d, lines: d.lines.filter((_, n) => n !== i) }))}>Remove</button>
