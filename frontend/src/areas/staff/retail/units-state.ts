@@ -1,5 +1,6 @@
 import type { Pack, Product, SaleLine } from '../../../api/retail';
-import { showQty } from './maths';
+import { plural } from '../../../app/glossary';
+import { milliOf, parseCount, qtyString, showQty } from './maths';
 
 // Units of measure (ADR-033, issue #194): the pure conversions the sale and restock forms show before
 // they send. Stock is held in the item's base unit; a pack has a factor, the number of base units in
@@ -113,4 +114,65 @@ export function enteredQty(line: SaleLine): string {
 /** A sale line's price in the unit it was entered in: per pack for a pack line, per base unit otherwise. */
 export function enteredPriceMinor(line: SaleLine): number {
   return line.sale_unit ? (line.sale_unit_price_minor ?? 0) : (line.unit_price_minor ?? 0);
+}
+
+/** Issue #650: an item's standard pack, the one its stock is shown in: a unit and how many base units one holds ("24.000"). */
+export type PackSize = { unit?: string; factor?: string };
+
+/**
+ * Issue #650: the pack an item's stock is shown in, as the server picks it for a stock row (`standard_pack`): the active pack
+ * holding the most base units, more than one; on a tie the unit name first in plain code order. None while packs are off.
+ */
+export function standardPack(product: Product): Pack | undefined {
+  return activePacks(product)
+    .filter((k) => (factorMilli(k.factor) ?? 0n) > 1000n)
+    .sort((x, y) => {
+      const d = (factorMilli(y.factor) ?? 0n) - (factorMilli(x.factor) ?? 0n);
+      if (d !== 0n) return d > 0n ? 1 : -1;
+      return (x.unit ?? '') < (y.unit ?? '') ? -1 : (x.unit ?? '') > (y.unit ?? '') ? 1 : 0;
+    })[0];
+}
+
+/** "1 Carton", "3 Cartons", "2.5 Kgs": a count with its unit, singular only for exactly one. */
+function counted(milli: bigint, unit: string): string {
+  return `${showQty(qtyString(Number(milli)))} ${milli === 1000n ? unit : plural(unit)}`;
+}
+
+/**
+ * Issue #650 (units spec section 3, "Stock is shown both ways"): a stock quantity in the item's standard pack and its base unit,
+ * with the total: "5 Cartons and 7 Pieces (127 Pieces)". Less than one pack reads in the base unit only ("7 Pieces"); below
+ * zero says how far short ("1 Carton and 3 Pieces short (-27 Pieces)"). An item with no pack reads as it always did ("127 Piece").
+ */
+export function packsAndPieces(qty: string, unit: string | undefined, pack: PackSize | undefined): string {
+  const f = factorMilli(pack?.factor);
+  if (!unit || !pack?.unit || f === null || f <= 1000n) return `${showQty(qty)}${unit ? ` ${unit}` : ''}`;
+  const milli = BigInt(milliOf(qty));
+  const size = milli < 0n ? -milli : milli;
+  const packs = size / f;
+  const rest = size - packs * f;
+  const parts = [packs > 0n ? counted(packs * 1000n, pack.unit) : '', rest > 0n || packs === 0n ? counted(rest, unit) : ''].filter(Boolean).join(' and ');
+  const short = milli < 0n ? ' short' : '';
+  return packs > 0n ? `${parts}${short} (${showQty(qty)} ${plural(unit)})` : `${parts}${short}`;
+}
+
+/** Issue #650: why a count or a move typed in packs and pieces cannot be read, or null when it can. */
+export function packsAndPiecesProblem(packs: string, pieces: string, unit: string, pack: string): string | null {
+  if (packs.trim() !== '' && !/^\d+$/.test(packs.trim())) return `Type whole ${plural(pack)}, and the rest in ${plural(unit)}.`;
+  if (pieces.trim() !== '' && parseCount(pieces) === null) return `Type ${plural(unit)} as a number, with at most three decimals.`;
+  return null;
+}
+
+/**
+ * Issue #650: a count or a move typed as packs and pieces, in base unit thousandths: whole packs times the pack's size plus the
+ * pieces. Pieces alone is the plain quantity. Null when nothing is typed, a part cannot be read, or the total is too large.
+ */
+export function packsAndPiecesMilli(packs: string, pieces: string, pack: PackSize | undefined): number | null {
+  const p = packs.trim();
+  const f = factorMilli(pack?.factor);
+  if (p === '' || f === null) return pieces.trim() === '' ? null : parseCount(pieces);
+  if (!/^\d+$/.test(p)) return null;
+  const rest = pieces.trim() === '' ? 0 : parseCount(pieces);
+  if (rest === null) return null;
+  const total = BigInt(p) * f + BigInt(rest);
+  return total > MAX_MILLI || total > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(total);
 }
