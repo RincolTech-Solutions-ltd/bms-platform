@@ -756,8 +756,8 @@ class RetailUnitsIT extends IntegrationTest {
     // ---- stock in packs and pieces (issue #650) ---------------------------------------------
 
     /**
-     * The stock lists and the item carry the standard pack (ADR-103), only while the capability is on: the shop's usual pack
-     * for that unit first, then a pack for buying and selling before one only for buying, then the biggest.
+     * The stock lists and the item carry the standard pack (ADR-103), only while the capability is on: a selling pack whose
+     * unit has a usual pack first, then the biggest selling pack, then the biggest of any, a tie going to the unit id.
      */
     @Test
     void stockRowsCarryTheStandardPack() {
@@ -778,7 +778,13 @@ class RetailUnitsIT extends IntegrationTest {
         assertThat(all.get("standard_pack").get("unit").asString()).isEqualTo("carton");
         assertThat(standardOnItem(pen)).isEqualTo("carton");
 
-        // The shop's usual pack of dozen, twelve pieces (ADR-100), comes first.
+        // A bale only bought keeps its place even with a usual pack: only a pack used for selling or both comes first.
+        TestDatabase.owner()
+                .sql("UPDATE retail_units SET pack_size = 100, pack_of_unit_id = ?, pack_purpose = 'buy' WHERE id = ?")
+                .params(piece, bale)
+                .update();
+        assertThat(standardOf(pen)).isEqualTo("carton 24.000");
+        // A selling pack whose unit has a usual pack, dozen of twelve pieces (ADR-100), comes first.
         TestDatabase.owner()
                 .sql("UPDATE retail_units SET pack_size = 12, pack_of_unit_id = ?, pack_purpose = 'both' WHERE id = ?")
                 .params(piece, dozen)
@@ -793,6 +799,20 @@ class RetailUnitsIT extends IntegrationTest {
                 .params(t.tenantId(), pen, dozen)
                 .update();
         assertThat(standardOf(pen)).isEqualTo("carton 24.000");
+        // Only packs for buying left: the biggest of any; on a tie of size, the lower unit id.
+        TestDatabase.owner()
+                .sql(
+                        "UPDATE retail_product_units SET purpose = 'buy', sell_minor = NULL WHERE tenant_id = ? AND product_id = ?")
+                .params(t.tenantId(), pen)
+                .update();
+        assertThat(standardOf(pen)).isEqualTo("bale 100.000");
+        TestDatabase.owner()
+                .sql(
+                        "UPDATE retail_product_units SET factor = 24 WHERE tenant_id = ? AND product_id = ? AND unit_id = ?")
+                .params(t.tenantId(), pen, bale)
+                .update();
+        String lower = bale.toString().compareTo(carton.toString()) < 0 ? "bale" : "carton";
+        assertThat(standardOf(pen)).isEqualTo(lower + " 24.000");
         UUID plain = api.product("UNIT-PLAIN", 50, 60);
         assertThat(rowOf(api.get("/stock?branch_id=" + t.headOffice(), ADMIN).getBody(), plain)
                         .has("standard_pack"))

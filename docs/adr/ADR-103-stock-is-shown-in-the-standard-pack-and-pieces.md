@@ -15,12 +15,12 @@ carry any pack: a stock row had the unit and the quantity only.
 
 ## Decision
 
-1. **The standard pack is the item's usual pack for buying or selling.** Of the item's active packs holding more than one
-   base unit, in this order: the shop's usual pack for that unit in the item's own unit (ADR-100: Dozen usually holds 12
-   Pieces); then a pack used for both buying and selling, then one for selling, then one only for buying (ADR-099); then
-   the biggest; then the unit name in byte order. So a Bale of 100 that is only bought is never how the shelf is counted
-   while the item has a Dozen or a Carton it sells. An item with no such pack, or a shop with the units capability off,
-   shows its stock in the base unit, as before.
+1. **The standard pack is the pack the shop counts and sells in.** Of the item's active packs holding more than one base
+   unit: first a pack whose unit has a usual pack (ADR-100) and that is used for selling or both (ADR-099); else the
+   biggest pack used for selling or both; else the biggest active pack. Within each step the biggest wins, and a tie goes
+   to the lower unit id, never the name. So a Bale of 100 that is only bought is never how the shelf is counted while the
+   item has a Dozen or a Carton it sells. An item with no such pack, or a shop with the units capability off, shows its
+   stock in the base unit, as before (review of #654, the PR author's rule).
 2. **One rule, on the server.** The rule is one SQL subquery, `RetailCatalogue.standardPackSql`. `GET /retail/stock` and
    `GET /retail/stock/all-branches` carry `standard_pack: {unit, factor}` on each row while the units capability is on,
    and every pack of an item carries `standard`, true for that one pack, which Move stock reads from the item it picked
@@ -41,4 +41,4 @@ carry any pack: a stock row had the unit and the quantity only.
 pieces is always shown before a count is reviewed or a move is saved.
 
 **Worse:** a pack switched off or resized changes how stock reads at once, by design; only a count already typed keeps its
-pack. The owner may still choose another rule (issue #650 review): it is one subquery and one test to change.
+pack. Another rule is one subquery and one test to change.

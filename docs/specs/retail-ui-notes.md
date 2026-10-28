@@ -534,7 +534,7 @@ one pack), change the number, switch a pack off. The unit choice on the sale scr
 whoever manages the catalogue (`capability-units`: an introduction and the Catalogue tile); `units` is marked ready in `capabilities-state.ts`.
 It adds no routes, so there is no new breadcrumb: the item screen already adds the item's name as its last crumb.
 
-**Stock in packs and pieces (#650, ADR-103).** An item with a standard pack (its usual pack, ADR-103, sent as `standard_pack` on the stock rows and `standard` on its packs) shows
+**Stock in packs and pieces (#650, ADR-103).** An item with a standard pack (the pack the shop counts and sells in, ADR-103, sent as `standard_pack` on the stock rows and `standard` on its packs) shows
 its stock on Stock as "5 Cartons and 7 Pieces" with "(127 Pieces)" under it; less than a carton reads in pieces only, and below zero reads "1 Carton
 and 3 Pieces short (27 Pieces short)"; on a wide screen each branch column reads the same way. On Count stock and Move stock the line has two boxes, Cartons and Pieces, each with its own label; the person types cartons and
 the pieces left, or pieces alone, and the total in pieces shows under the boxes before Review the difference or Move stock. A scan still adds to the
