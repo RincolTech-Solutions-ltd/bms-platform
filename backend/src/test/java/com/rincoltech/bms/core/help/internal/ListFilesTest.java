@@ -95,11 +95,12 @@ class ListFilesTest {
     }
 
     /**
-     * A cell reference past Excel's last column (ZZZZZZ1 would be column 321 million) is dropped, never a row of millions
-     * of tabs; a sheet that would still become more text than the cap is refused in plain words.
+     * A cell reference past Excel's last column (ZZZZZZ1 would be column 321 million) is refused in plain words, 422
+     * setup_file_not_read, never a row of millions of tabs; a sheet that would still become more text than the cap is
+     * refused too.
      */
     @Test
-    void aCellPastTheLastColumnIsDroppedAndAHugeSheetRefused() throws IOException {
+    void aCellPastTheLastColumnIsRefusedAndAHugeSheetToo() throws IOException {
         assertThat(ListFiles.column("XFD1")).isEqualTo(ListFiles.MAX_COLUMNS - 1);
         assertThat(ListFiles.column("ZZZZZZ1")).isEqualTo(-1);
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
@@ -107,12 +108,15 @@ class ListFilesTest {
             part(
                     zip,
                     "xl/worksheets/sheet1.xml",
-                    "<worksheet><sheetData><row r=\"1\">"
-                            + "<c r=\"A1\" t=\"inlineStr\"><is><t>Test Salt</t></is></c><c r=\"ZZZZZZ1\"><v>1</v></c>"
+                    "<worksheet><sheetData><row r=\"1\"><c r=\"ZZZZZZ1\"><v>1</v></c>"
                             + "</row></sheetData></worksheet>");
         }
-        assertThat(ListFiles.read(upload("crafted.xlsx", bytes.toByteArray())).text())
-                .isEqualTo("Test Salt");
+        assertThatThrownBy(() -> ListFiles.read(upload("crafted.xlsx", bytes.toByteArray())))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.code()).isEqualTo("setup_file_not_read");
+                    assertThat(e.status().value()).isEqualTo(422);
+                })
+                .hasMessageContaining("past the last column");
 
         StringBuilder wide = new StringBuilder("<worksheet><sheetData>");
         for (int r = 1; r <= 200; r++) {

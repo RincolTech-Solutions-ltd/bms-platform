@@ -1577,6 +1577,41 @@ class ExistingLoansIT extends LoanFixtures {
                 .isZero();
     }
 
+    /**
+     * The member form's duplicate gate is about the phone only (its {@code confirmed_not_duplicate} answers
+     * {@code duplicate_phone}): a register borrower whose name is a member's in another branch, under another phone, is
+     * not refused by it. The check says a new member comes in, naming no one, and the commit reaches the member form and
+     * adds that member: the check says what the commit does.
+     */
+    @Test
+    void frExl06_aNameAnotherMemberHasIsNoRefusalOnTheCheckOrTheCommit() {
+        product("EXL12", Map.of());
+        String namesake = memberNo(member("Test Borrower Namesake", "0700000701", t.secondBranch(), true));
+        assertThat(setGoLive(today.minusDays(10)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        LocalDate d1 = today.minusMonths(2);
+        String csv = "kind,ref,member_name,member_phone,product_code,principal,disbursement_date,term\n"
+                + "loan,REG-701,Test Borrower Namesake,0700000702,EXL12,300000," + d1 + ",2\n";
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("csv", csv);
+        body.put("branch_id", t.headOffice());
+        String headOfficeOnly = t.headOffice().toString();
+        ResponseEntity<JsonNode> checked = send(
+                HttpMethod.POST, EXISTING + "/import?dry_run=true", as(admin, adminPerms, headOfficeOnly, null), body);
+        assertThat(messages(checked).get("REG-701")).startsWith("ready:").contains("Adds a new member, Test Borrower");
+        assertThat(checked.getBody().toString()).doesNotContain(namesake);
+        long members = count("SELECT count(*) FROM lending_members WHERE tenant_id = ?", t.tenantId());
+        ResponseEntity<JsonNode> committed = send(
+                HttpMethod.POST, EXISTING + "/import?dry_run=false", as(admin, adminPerms, headOfficeOnly, null), body);
+        assertThat(committed.getStatusCode()).as("%s", committed.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(messages(committed).get("REG-701"))
+                .startsWith("added:")
+                .contains("Added a new member, Test Borrower");
+        assertThat(committed.getBody().toString()).doesNotContain(namesake);
+        assertThat(count("SELECT count(*) FROM lending_members WHERE tenant_id = ?", t.tenantId()))
+                .as("the commit reached the member form, which added the member")
+                .isEqualTo(members + 1);
+    }
+
     // ---- Isolation (NFR-ISO-02) -----------------------------------------------------------
 
     /** Another business sees neither the loan nor its repayments, and its import cannot skip on this one's numbers. */

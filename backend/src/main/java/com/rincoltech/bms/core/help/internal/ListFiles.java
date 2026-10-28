@@ -395,10 +395,11 @@ final class ListFiles {
                         text = text.replaceAll("[\\t\\r\\n]+", " ").strip();
                         if (!text.isEmpty()) {
                             int col = column(ref);
-                            if (col >= 0) {
-                                rows.computeIfAbsent(rowNo, k -> new TreeMap<>())
-                                        .put(col, text);
+                            if (col < 0) {
+                                throw notRead("This sheet has a cell past the last column Excel allows. Open it, save"
+                                        + " it again, and choose it again, or save it as CSV.");
                             }
+                            rows.computeIfAbsent(rowNo, k -> new TreeMap<>()).put(col, text);
                         }
                         value = null;
                     }
@@ -435,7 +436,8 @@ final class ListFiles {
             }
             col = col * 26 + (ch - 'A' + 1);
             if (col > MAX_COLUMNS) {
-                // Past Excel's last column (XFD): a crafted reference, whose empty cells before it would be millions.
+                // Past Excel's last column (XFD): a crafted reference, whose empty cells before it would be millions;
+                // refused.
                 return -1;
             }
         }
