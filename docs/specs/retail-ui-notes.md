@@ -1390,8 +1390,8 @@ the items show only while you search, and go away once one is picked. Every item
   records ever hold more, Sell asks that line's tick itself (issue #656), from the balance it reads before any draft exists:
   the words of Count stock, **Yes, ... is right**, **Commit the count** (which only then makes the count and sends it
   acknowledged, and puts the item on the sale) and **Not now** (the item stays off the sale, nothing is left open). Leaving the
-  screen, clearing the sale or switching branch while the tick is asked leaves no draft behind. One tick at a time: a second new
-  item counted meanwhile is saved and left for Count stock. A lost commit sends the same draft again; a refusal shows the
+  screen, clearing the sale or switching branch while the tick is asked leaves no draft behind. Each item asks its own tick and
+  makes its own count, so a tick never carries to another item. A lost commit sends the same draft again; a refusal shows the
   server's words and leaves the item for Count stock. Stock that arrives between the read and the count is never sent to be
   refused: the line has its tick on Count stock.
 - **Scan box.** Unchanged (ADR-070 decision 11, owner decision D7): a scanner types only into the Scan box, which adds the item or one more.

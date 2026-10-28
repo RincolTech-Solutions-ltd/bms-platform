@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute, useNavigate, useSearch } from '@tanstack/react-router';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { SEARCH_DELAY_MS, createDebouncer } from '../../../app/ui/useLiveSearch';
 import { Stepper } from '../../../app/ui/Stepper';
@@ -352,17 +352,18 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
   const profit = useProfitAccess();
   const mayCount = holdsAt(me, 'retail.stocktake.commit', branchId);
   // Issue #656: a count that would be a big drop asks its tick before any draft is made, so leaving, clearing the sale or
-  // switching branch (which makes this form again) leaves no count open. One at a time: a second new item waits for Count stock.
-  const [held, setHeld] = useState<HeldCount | null>(null);
+  // switching branch (which makes this form again) leaves no count open. Each item has its own tick and its own count.
+  const [held, setHeld] = useState<HeldCount[]>([]);
+  const drop = (id: string | undefined) => setHeld((l) => l.filter((x) => x.product.id !== id));
   const commitHeld = useMutation({
     mutationFn: async (h: HeldCount) => {
       // A draft whose commit was lost is sent again, never made twice.
       const draftId = h.draftId ?? (await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: h.product.id ?? '', counted_qty: qtyString(h.counted) }], note: 'Counted when the item was added on Sell' })).id ?? '';
-      setHeld({ ...h, draftId });
+      setHeld((l) => l.map((x) => (x.product.id === h.product.id ? { ...x, draftId } : x)));
       return retail.commitStocktake(draftId, [h.product.id ?? '']);
     },
     onSuccess: (_, h) => {
-      setHeld(null);
+      drop(h.product.id);
       for (const key of [['retail', 'products'], ['retail', 'stocked-branches']]) void queryClient.invalidateQueries({ queryKey: key });
       add({ ...h.product, qty: qtyString(h.counted) });
     },
@@ -370,7 +371,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       const name = h.product.description ?? 'the item';
       // A refusal never passes on a second press: the server's words, and the item is left for Count stock.
       if (e instanceof RetailError && e.status >= 400 && e.status < 500) {
-        setHeld(null);
+        drop(h.product.id);
         const words = typeof e.problem?.detail === 'string' ? e.problem.detail : e.message;
         show(`${words} ${name} is not on the sale: use ${WORDS.countStock}, then sell it.`, 'error');
       } else show(`The count of ${name} is not committed. Try again.`, 'error');
@@ -382,16 +383,14 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     const counted = made && mayCount ? parseQty(qty) : null;
     let counts = false;
     let asks = false;
-    if (counted !== null && counted > 0 && held) {
-      show(`${name} is saved. Answer the count of ${held.product.description ?? 'the item above'} first, then count ${name} on ${WORDS.countStock}.`, 'info');
-    } else if (counted !== null && counted > 0) {
+    if (counted !== null && counted > 0) {
       try {
         // Issue #636: an item made here holds nothing, so its count is never a big drop. Should the records hold more, the tick is
         // asked first from the balance read here (issue #656), and the draft is made only when Commit the count is pressed.
         const here = (await retail.listProducts({ query: product.code ?? product.description ?? '', branchId })).find((p) => p.id === product.id);
         const expected = here?.qty ?? '0';
         if (bigDrop({ expected_qty: expected, counted_qty: qtyString(counted) })) {
-          setHeld({ product, counted, expected });
+          setHeld((l) => [...l.filter((x) => x.product.id !== product.id), { product, counted, expected }]);
           asks = true;
         } else {
           const count = await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: product.id ?? '', counted_qty: qtyString(counted) }], note: 'Counted when the item was added on Sell' });
@@ -497,6 +496,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
   });
   const clear = () => {
     discard();
+    // Issue #656: a tick still asked goes with the sale; nothing was made for it.
+    setHeld([]);
     setAddingBuyer(false);
     setReceived('');
     setConfirmClear(false);
@@ -540,10 +541,10 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         )}
       </div>
       <ScanBar id="sale-scan" branchId={branchId} onFound={scanAdd} autoFocus toasts />
-      {held && (
-        <HeldCountTick key={held.product.id} held={held} busy={commitHeld.isPending} onCommit={() => commitHeld.mutate(held)}
-          onCancel={() => { setHeld(null); show(`${held.product.description ?? 'The item'} is saved. It is not on the sale: count it on ${WORDS.countStock}, then sell it.`, 'info'); }} />
-      )}
+      {held.map((h) => (
+        <HeldCountTick key={h.product.id} held={h} busy={commitHeld.isPending && commitHeld.variables?.product.id === h.product.id} onCommit={() => commitHeld.mutate(h)}
+          onCancel={() => { drop(h.product.id); show(`${h.product.description ?? 'The item'} is saved. It is not on the sale: count it on ${WORDS.countStock}, then sell it.`, 'info'); }} />
+      ))}
 
       <h2>
         Items{' '}
@@ -789,17 +790,18 @@ type HeldCount = { product: Product; counted: number; expected: string; draftId?
  */
 function HeldCountTick({ held, busy, onCommit, onCancel }: { held: HeldCount; busy: boolean; onCommit: () => void; onCancel: () => void }) {
   const [ok, setOk] = useState(false);
+  const wordsId = useId();
   const name = held.product.description ?? 'this item';
   const line = { expected_qty: held.expected, counted_qty: qtyString(held.counted) };
   return (
-    <div className="alert alert-warning entry-warning" data-testid="sale-count-drop">
+    <div className="alert alert-warning entry-warning" data-testid={`sale-count-drop-${held.product.id ?? ''}`}>
       <span className="entry-warning-icon" aria-hidden="true">{icons.warning}</span>
       <div>
-        <p id="sale-count-drop-words">
+        <p id={wordsId}>
           The records show {showQty(line.expected_qty)} of {name} here, and you counted {showQty(line.counted_qty)}. {dropWords(line, undefined)}
         </p>
         <label className="count-drop-tick">
-          <input type="checkbox" checked={ok} aria-describedby="sale-count-drop-words" data-needed={ok ? undefined : ''} onChange={(e) => setOk(e.target.checked)} />
+          <input type="checkbox" checked={ok} aria-describedby={wordsId} data-needed={ok ? undefined : ''} onChange={(e) => setOk(e.target.checked)} />
           {`Yes, ${name} is right`}
         </label>
         <BusyButton type="button" className="rt-primary" busy={busy} notReady={!ok} onClick={onCommit}>Commit the count</BusyButton>
