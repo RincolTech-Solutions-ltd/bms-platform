@@ -76,7 +76,12 @@ with shop money then saw too much cash in the cash book and the books.
    stock's own steps (`PurchasingService.buy`), in Quick add's transaction. Quick add's `Idempotency-Key` covers the whole request,
    so a retry never posts twice.
 3. Buy stock's permission, `retail.purchase.create`, is needed at the branch as well as `retail.stocktake.commit`, both checked on
-   the server before anything is made. The form offers the tick only to someone who holds it there and may see the buying price.
+   the server before anything is made; without it the answer is 403 `permission_denied` (not the branch's 422, since the branch is
+   fine for the stock). The server needs only these two: `retail.profit.read` is not checked there, as `POST /retail/products` and
+   Buy stock keep a buying price whatever the caller may read. The form is stricter and offers the tick only to someone who holds
+   `retail.purchase.create` at Where and may see the buying price; when Where moves to a place where they may not buy, the tick stays
+   in view with a line saying so and Add sends nothing until they untick it or move back, so a ticked add never goes in as
+   opening stock unnoticed.
 4. The form shows the account and the total that will come out ("UGX 30,000 comes out of Cash at Test Shop") before Add, and the
    answer names the purchase. The help's How do I add an item quickly? says when to tick it and points to Buy stock for bigger
    deliveries. No migration.

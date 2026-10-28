@@ -508,9 +508,21 @@ class RetailQuickAddIT extends IntegrationTest {
         assertThat(sourceTotal("inventory", "retail.quick_add")).isZero();
         assertThat(scalar(
                         "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.stock.quick_added'"
-                                + " AND data -> 'after' ->> 'paid_from' = 'cash'",
-                        t.tenantId()))
+                                + " AND data -> 'after' ->> 'paid_from' = 'cash' AND entity_type = 'retail.quick_add'"
+                                + " AND data -> 'after' ->> 'purchase_id' = (SELECT id::text FROM retail_purchases"
+                                + " WHERE tenant_id = ? AND purchase_no = ?)"
+                                + " AND entity_id <> (SELECT id FROM retail_purchases WHERE tenant_id = ? AND purchase_no = ?)",
+                        t.tenantId(),
+                        t.tenantId(),
+                        purchaseNo,
+                        t.tenantId(),
+                        purchaseNo))
                 .isEqualTo(1);
+        // The purchase sets the same cost the new item was made with, so the price history gains no second row.
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_price_history WHERE product_id = ? AND source = 'purchase'",
+                        product))
+                .isZero();
     }
 
     @Test
@@ -553,18 +565,51 @@ class RetailQuickAddIT extends IntegrationTest {
         Map<String, Object> body = item("Test Salt", 1_000, "3", hq);
         body.put("cost_minor", 700);
         body.put("paid_from", "cash");
-        ResponseEntity<JsonNode> refused = quickAdd(
+        // The same body without paid_from is accepted for this caller, so the refusal is the permission and nothing
+        // else.
+        String counter = "retail.catalogue.manage,retail.stock.read,retail.stocktake.commit";
+        ResponseEntity<JsonNode> refused =
+                quickAdd(body, counter, "*", UUID.randomUUID().toString());
+        assertThat(refused.getStatusCode()).as("%s", refused.getBody()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(refused.getBody().get("code").asString()).isEqualTo("permission_denied");
+
+        // Buy stock held only at the second branch: refused at the head office, the branch the money would leave.
+        ResponseEntity<JsonNode> elsewhere = api.call(
+                org.springframework.http.HttpMethod.POST,
+                "/quick-add",
                 body,
-                "retail.catalogue.manage,retail.stock.read,retail.stocktake.commit",
+                counter,
                 "*",
-                UUID.randomUUID().toString());
-        assertThat(refused.getStatusCode()).isIn(HttpStatus.FORBIDDEN, HttpStatus.UNPROCESSABLE_CONTENT);
+                Map.of(
+                        "Idempotency-Key",
+                        UUID.randomUUID().toString(),
+                        "X-Dev-Scopes",
+                        "retail.purchase.create=" + br2));
+        assertThat(elsewhere.getStatusCode()).as("%s", elsewhere.getBody()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(elsewhere.getBody().get("code").asString()).isEqualTo("permission_denied");
         assertThat(scalar(
                         "SELECT count(*) FROM retail_products WHERE tenant_id = ? AND description = 'Test Salt'",
                         t.tenantId()))
                 .isZero();
         assertThat(scalar("SELECT count(*) FROM retail_purchases WHERE tenant_id = ?", t.tenantId()))
                 .isZero();
+
+        // At the branch where it is held, the same add goes through as a purchase.
+        body.put("branch_id", br2);
+        ResponseEntity<JsonNode> there = api.call(
+                org.springframework.http.HttpMethod.POST,
+                "/quick-add",
+                body,
+                counter,
+                "*",
+                Map.of(
+                        "Idempotency-Key",
+                        UUID.randomUUID().toString(),
+                        "X-Dev-Scopes",
+                        "retail.purchase.create=" + br2));
+        assertThat(there.getStatusCode()).as("%s", there.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(scalar("SELECT count(*) FROM retail_purchases WHERE tenant_id = ?", t.tenantId()))
+                .isEqualTo(1);
     }
 
     @Test

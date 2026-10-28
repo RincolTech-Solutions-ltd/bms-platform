@@ -668,7 +668,7 @@ Notes:
   branch, checked before anything is made; without a quantity the catalogue permission alone adds the item with no stock. A repeated name
   is refused as on Items, and adding it anyway still needs `core.settings.manage` and a reason. Paying for the goods from the branch's cash
   or mobile money (`paid_from`, issue #646) also needs `retail.purchase.create` at that branch, Buy stock's own permission, checked before
-  anything is made.
+  anything is made (403 `permission_denied`).
 - Corrections of entry mistakes (issues #351 and #352, ADR-044, FR-RET-44 to FR-RET-46) add no permission, so the matrix is unchanged. Voiding a
   restock (`POST /retail/purchases/{id}/void`) and reading one restock need `retail.purchase.create`; the void needs it at **every** branch the
   restock added stock to (403 `permission_denied` when one is outside the caller's scope), because it takes stock out of all of them. Correcting a

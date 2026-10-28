@@ -7,6 +7,7 @@ import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.BusinessClock;
+import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.NewItem;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.ProductSnapshot;
@@ -27,6 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -109,10 +111,14 @@ class QuickAddService {
         }
         // The branch first: someone who may not count stock there is refused before anything is made.
         UUID branch = r.qty() == null ? null : branches.resolveStocking(COUNT, r.branchId());
-        // Paid from cash: the money leaves under Buy stock's permission at that branch, checked before anything is
-        // made.
-        if (paid) {
-            branches.resolveStocking(BUY, branch);
+        // Paid from cash: the money leaves under Buy stock's permission at that branch, checked before
+        // anything is made. A 403 of its own: the branch is fine for the stock, only the money may not leave.
+        if (paid && !CurrentPrincipal.require().may(BUY, branch)) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "permission_denied",
+                    "Permission denied",
+                    "Taking the money from cash needs the permission to buy stock at this branch.");
         }
         ProductSnapshot product;
         boolean categoryMade = false;
@@ -147,7 +153,7 @@ class QuickAddService {
             // The purchase locks the item, then its balance row (ADR-079 lock order); the total is read after it.
             bought = purchases.buy(branch, product.id(), r.qty(), r.costMinor(), r.paidFrom());
             total = Quantities.format(ledger.lock(branch, product.id()));
-            audited(bought.purchaseId(), branch, product, r.qty(), r.costMinor(), r.paidFrom());
+            audited(id, branch, product, r.qty(), r.costMinor(), r.paidFrom(), bought.purchaseId());
         } else if (branch != null) {
             // Under the balance row's lock: the quantity typed is added to what the branch holds now, exactly.
             BigDecimal before = ledger.lock(branch, product.id());
@@ -193,17 +199,25 @@ class QuickAddService {
                 id,
                 SOURCE + ":" + id,
                 List.of(Leg.debit("inventory", value), Leg.credit("opening_balance_equity", value))));
-        audited(id, branch, product, qty, cost, null);
+        audited(id, branch, product, qty, cost, null, null);
         return movementId;
     }
 
-    private void audited(UUID id, UUID branch, ProductSnapshot product, BigDecimal qty, long cost, String paidFrom) {
+    private void audited(
+            UUID id,
+            UUID branch,
+            ProductSnapshot product,
+            BigDecimal qty,
+            long cost,
+            String paidFrom,
+            UUID purchaseId) {
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("product_id", product.id());
         after.put("qty", Quantities.format(qty));
         after.put("unit_cost_minor", cost);
         if (paidFrom != null) {
             after.put("paid_from", paidFrom);
+            after.put("purchase_id", purchaseId);
         }
         audit.record(AuditLog.Entry.created("retail.stock.quick_added", SOURCE, id, branch, after));
     }
