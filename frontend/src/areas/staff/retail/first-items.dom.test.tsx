@@ -298,6 +298,16 @@ describe('Sell it from Quick add (issue #632)', () => {
     expect(screen.queryByTestId('sale-start-elsewhere')).toBeNull();
     expect(getProduct).not.toHaveBeenCalled();
   });
+
+  it('says to search for the item when the branch list does not return it, and never drops it in silence (issue #641)', async () => {
+    catalogue = [];
+    getProduct.mockResolvedValue(made);
+    const started = vi.fn();
+    open(<RecordSale startItem="p9" startBranch={here} onStarted={started} />, owner);
+    expect((await screen.findByText('Test duvet cover did not come up here. Search for it to add it.'))).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
+    await waitFor(() => expect(started).toHaveBeenCalledTimes(1));
+  });
 });
 
 describe('the first-run card order (issue #632)', () => {
