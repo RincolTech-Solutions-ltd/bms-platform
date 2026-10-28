@@ -25,7 +25,8 @@ vi.mock('../../../api/retail', async (original) => {
 });
 
 // Issue #667: the clock is pinned to 22:00 UTC on 28 Oct 2026, when Kampala is already on 29 Oct, so a list that mixed the
-// device's date with the business date would ask for backwards days here every run.
+// device's date with the business date would ask for backwards days here every run. It is pinned at module scope, before the
+// imports below and the `today` they compute, so it must stay above them.
 vi.useFakeTimers({ toFake: ['Date'] });
 vi.setSystemTime(new Date('2026-10-28T22:00:00Z'));
 afterAll(() => vi.useRealTimers());

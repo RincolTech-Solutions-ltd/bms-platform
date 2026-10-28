@@ -14,7 +14,7 @@ const messageOf = (e: unknown) => (e instanceof Error ? e.message : 'Your referr
 
 function When({ iso }: { iso?: string | null }) {
   if (!iso) return null;
-  const d = new Date(iso);
+  const d = new Date(iso); // business-date: allow, a moment shown on this phone's clock, never sent
   return <>{Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</>;
 }
 

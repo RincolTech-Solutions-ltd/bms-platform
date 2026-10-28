@@ -81,7 +81,7 @@ export function searchCatalogue(catalogue: Catalogue | null, branchId: string, t
 /** "Prices as of 22 Oct, 09:14", in the device's own words for the time. */
 export function pricesAsOfWords(pricesAsOf: string | undefined): string {
   if (!pricesAsOf) return 'No prices saved on this phone yet. Go online once to save them.';
-  const at = new Date(pricesAsOf);
+  const at = new Date(pricesAsOf); // business-date: allow, a moment shown on this phone's clock, never sent
   return `Prices as of ${at.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}, ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
 }
 
