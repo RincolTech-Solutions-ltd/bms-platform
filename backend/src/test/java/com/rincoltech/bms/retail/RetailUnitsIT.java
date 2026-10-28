@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,6 +19,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Units of measure (ADR-033, issue #194; docs/specs/trade-capabilities.md section 4 and 13): pack
@@ -848,6 +850,27 @@ class RetailUnitsIT extends IntegrationTest {
                 .update();
         assertThat(standardOf(pen)).isEqualTo("carton 24.000");
         assertThat(standardOnItem(pen)).isEqualTo("carton");
+        // The payload the PWA's contract test reads is this one (fixtures/retail/standard-pack-660.json).
+        JsonNode contract = JsonMapper.builder()
+                .build()
+                .readTree(Path.of("../fixtures/retail/standard-pack-660.json").toFile());
+        List<String> packs = new ArrayList<>();
+        for (JsonNode k : api.get("/products/" + pen, ADMIN).getBody().get("packs")) {
+            packs.add(k.get("unit").asString() + " " + k.get("factor").asString() + " "
+                    + k.get("purpose").asString() + " " + k.get("standard").asBoolean());
+        }
+        List<String> expected = new ArrayList<>();
+        for (JsonNode k : contract.get("item_packs")) {
+            expected.add(k.get("unit").asString() + " " + k.get("factor").asString() + " "
+                    + k.get("purpose").asString() + " " + k.get("standard").asBoolean());
+        }
+        assertThat(packs).containsExactlyInAnyOrderElementsOf(expected);
+        JsonNode row =
+                rowOf(api.get("/stock?branch_id=" + t.headOffice(), ADMIN).getBody(), pen);
+        JsonNode want = contract.get("stock_row");
+        assertThat(row.get("unit").asString()).isEqualTo(want.get("unit").asString());
+        assertThat(row.get("qty").asString()).isEqualTo(want.get("qty").asString());
+        assertThat(row.get("standard_pack")).isEqualTo(want.get("standard_pack"));
 
         TestDatabase.owner()
                 .sql("UPDATE retail_units SET pack_size = 10, pack_of_unit_id = ?, pack_purpose = 'buy' WHERE id = ?")
