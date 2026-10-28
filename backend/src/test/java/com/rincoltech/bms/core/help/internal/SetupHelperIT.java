@@ -422,23 +422,11 @@ class SetupHelperIT extends IntegrationTest {
         assertThat(loan.get("member_no").isNull()).isTrue();
         assertThat(loan.get("member_full_name").isNull()).isTrue();
 
-        // The row the screen then sends to the import's check reads exactly as a row whose phone nobody holds: the same
-        // outcome and the same words, so the check cannot tell that a member elsewhere holds it.
-        String elsewhere = created.getBody().get("member_no").asString();
-        String csv = "kind,ref,member_no,member_name,member_phone,product_code,principal,disbursement_date\n"
-                + "loan,Y-09,,Someone,+256700000203,LOAN1,100000,2026-08-01\n"
-                + "loan,Y-10,,Someone,+256700000299,LOAN1,100000,2026-08-01\n";
-        ResponseEntity<JsonNode> checked = api.post(
-                "/api/v1/lending/existing-loans/import?dry_run=true",
-                Map.of("csv", csv, "branch_id", t.headOffice().toString()),
-                manager);
-        assertThat(checked.getStatusCode()).as("%s", checked.getBody()).isEqualTo(HttpStatus.OK);
-        JsonNode held = checked.getBody().get("rows").get(0);
-        JsonNode free = checked.getBody().get("rows").get(1);
-        assertThat(held.get("outcome").asString()).isEqualTo(free.get("outcome").asString());
-        assertThat(held.get("message").asString()).isEqualTo(free.get("message").asString());
-        assertThat(checked.getBody().toString()).doesNotContain("outside yours");
-        assertThat(checked.getBody().toString()).doesNotContain(elsewhere).doesNotContain("Test Member Elsewhere");
+        // What the import's check then says of this row is ExistingLoansIT's to prove, on ready rows:
+        // frExl06_aPhoneHeldInAnotherBranchReadsAsNewAndTheCommitRefusesWithoutNamingAnyone.
+        assertThat(loan.toString())
+                .doesNotContain(created.getBody().get("member_no").asString())
+                .doesNotContain("Test Member Elsewhere");
     }
 
     /**

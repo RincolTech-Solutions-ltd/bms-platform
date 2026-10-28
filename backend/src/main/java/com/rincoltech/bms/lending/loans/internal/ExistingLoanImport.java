@@ -144,6 +144,7 @@ class ExistingLoanImport {
         final Principal principal;
         final UUID requested;
         final Map<String, NewMember> byPhone = new LinkedHashMap<>();
+        final Map<String, List<MemberSummary>> holders = new HashMap<>();
         UUID branch;
         String branchProblem;
         boolean branchRead;
@@ -306,6 +307,32 @@ class ExistingLoanImport {
                 byLine.put(at, error(at, p.ref, message));
                 if (at != p.line) {
                     byLine.put(p.line, error(p.line, p.ref, "A repayment row of this loan has an error."));
+                }
+            }
+        }
+        // The members new to the app must fit the plan, as the member form checks one at a time: a check says what the
+        // commit would, so past the limit every loan that brings a new member is a row with a problem.
+        Set<NewMember> fresh = new java.util.LinkedHashSet<>();
+        for (Pending p : loans.values()) {
+            if (p.newMember != null && p.checked != null && !byLine.containsKey(p.line)) {
+                fresh.add(p.newMember);
+            }
+        }
+        if (!fresh.isEmpty()) {
+            try {
+                this.intake.checkRoomFor(fresh.size());
+            } catch (ApiException e) {
+                for (Pending p : loans.values()) {
+                    if (p.newMember != null && p.checked != null && !byLine.containsKey(p.line)) {
+                        byLine.put(
+                                p.line,
+                                error(
+                                        p.line,
+                                        p.ref,
+                                        "The business's plan has no room for the " + fresh.size()
+                                                + " new members this file brings. Add fewer, or ask the operator"
+                                                + " about a bigger plan."));
+                    }
                 }
             }
         }
@@ -515,7 +542,8 @@ class ExistingLoanImport {
         if (e164.isEmpty()) {
             return "The member's phone must be a Uganda number, for example 0772 123456. A new member needs one.";
         }
-        List<MemberSummary> holders = members.findByPhone(e164.get());
+        // One read per phone in a file: a register lists a borrower's loans one after another.
+        List<MemberSummary> holders = intake.holders.computeIfAbsent(e164.get(), members::findByPhone);
         boolean oneInScope = holders.size() == 1
                 && principal.may(
                         ExistingLoanService.PERMISSION, holders.getFirst().branchId());
@@ -525,8 +553,8 @@ class ExistingLoanImport {
             p.matchedNote = "Member " + m.memberNo() + ", " + m.fullName() + ", has this phone"
                     + (sameName(m.fullName(), name)
                             ? ""
-                            : ". The file says " + name + ": check it is the same person before you record, or fix the"
-                                    + " phone");
+                            : ". The file says " + name + ". Record it only if this is the same person; if not, take"
+                                    + " this loan out");
             return null;
         }
         // Two holders, or one in a branch outside the caller's, read exactly as no holder: the check says a new member

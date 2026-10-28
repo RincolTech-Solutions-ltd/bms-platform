@@ -424,6 +424,18 @@ class MemberService implements MemberLookup, MemberIntake {
                 .orElse(List.of());
     }
 
+    /**
+     * In a short read-only transaction of its own, so a refusal (which marks the transaction it runs in for rollback) leaves
+     * the caller's check free to report it on its rows.
+     */
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    public void checkRoomFor(int newMembers) {
+        if (newMembers > 0) {
+            planLimits.checkRoomFor(PlanLimits.MAX_ACTIVE_MEMBERS, members.countActive() + newMembers - 1);
+        }
+    }
+
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public MemberSummary addFromRegister(UUID branchId, String fullName, String phone) {

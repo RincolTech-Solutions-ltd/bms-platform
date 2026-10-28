@@ -12,4 +12,11 @@ import java.util.UUID;
 public interface MemberIntake {
 
     MemberSummary addFromRegister(UUID branchId, String fullName, String phone);
+
+    /**
+     * Refuses with 422 {@code plan_limit_reached} when {@code newMembers} more active members would pass the plan's member
+     * limit, so a check of an import says what its commit would: read-only, the limit {@link #addFromRegister} applies, in a
+     * transaction of its own so the caller may catch the refusal and go on.
+     */
+    void checkRoomFor(int newMembers);
 }

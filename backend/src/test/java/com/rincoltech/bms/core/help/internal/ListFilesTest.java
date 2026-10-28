@@ -190,6 +190,19 @@ class ListFilesTest {
         assertThat(read.pictureDataUrl()).startsWith("data:image/jpeg;base64,");
     }
 
+    /**
+     * The decoder steps over rows and columns rounded up, so even a picture just under the cap (7999 by 5000) is held at
+     * most 4000 pixels long, never at full size.
+     */
+    @Test
+    void theSubsamplingRoundsUp() {
+        assertThat(ListFiles.subsampling(3000, 1000)).isEqualTo(1);
+        assertThat(ListFiles.subsampling(4000, 3000)).isEqualTo(1);
+        assertThat(ListFiles.subsampling(4001, 10)).isEqualTo(2);
+        assertThat(ListFiles.subsampling(7999, 5000)).isEqualTo(2);
+        assertThat(Math.ceilDiv(7999, ListFiles.subsampling(7999, 5000))).isLessThanOrEqualTo(2 * ListFiles.MAX_SIDE);
+    }
+
     /** A page declaring 200 inches a side is drawn no larger than the longest side that is sent. */
     @Test
     void aScannedPageOfAnySizeIsDrawnSmall() throws IOException {

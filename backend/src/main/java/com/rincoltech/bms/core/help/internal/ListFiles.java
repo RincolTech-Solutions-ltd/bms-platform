@@ -59,6 +59,9 @@ final class ListFiles {
      */
     static final long MAX_PIXELS = 40_000_000L;
 
+    /** The most pixels a WebP photo may declare: at full size it stays near 64 MB in memory. */
+    static final long MAX_WEBP_PIXELS = 16_000_000L;
+
     static final int MAX_PDF_PAGES = 10;
     static final long MAX_UNPACKED_BYTES = 20L * 1024 * 1024;
     static final int MAX_CELLS = 50_000;
@@ -111,7 +114,7 @@ final class ListFiles {
             throw notRead("The file is bigger than 5 MB. Choose a smaller one, or take a photo of the page.");
         }
         if (starts(b, 0xFF, 0xD8, 0xFF) || starts(b, 0x89, 'P', 'N', 'G') || webp(b)) {
-            return new Read(null, picture(decode(b)), "photo");
+            return new Read(null, oneAtATime(() -> picture(decodeNow(b))), "photo");
         }
         if (starts(b, '%', 'P', 'D', 'F')) {
             return pdf(b);
@@ -151,8 +154,9 @@ final class ListFiles {
      * refused, and the decoder skips rows and columns so the picture in memory is about twice {@link #MAX_SIDE} on its
      * longest side, whatever the file declares. A crafted header cannot make the server decode gigabytes.
      */
-    static BufferedImage decode(byte[] b) {
-        return oneAtATime(() -> decodeNow(b));
+    /** How many rows and columns the decoder steps over, rounded up: the picture in memory is at most twice MAX_SIDE long. */
+    static int subsampling(long width, long height) {
+        return (int) Math.max(1, Math.ceilDiv(Math.max(width, height), 2L * MAX_SIDE));
     }
 
     private static BufferedImage decodeNow(byte[] b) {
@@ -167,12 +171,14 @@ final class ListFiles {
                 reader.setInput(in, true, true);
                 long width = reader.getWidth(0);
                 long height = reader.getHeight(0);
-                if (width < 1 || height < 1 || width * height > MAX_PIXELS) {
+                // WebP's reader may decode at full size whatever the subsampling, so it is held to a smaller picture.
+                long cap = "webp".equalsIgnoreCase(reader.getFormatName()) ? MAX_WEBP_PIXELS : MAX_PIXELS;
+                if (width < 1 || height < 1 || width * height > cap) {
                     throw notRead(
                             "This photo is too big to read. Take it again with the camera, or choose a smaller one.");
                 }
                 ImageReadParam param = reader.getDefaultReadParam();
-                int step = (int) Math.max(1, Math.max(width, height) / (2L * MAX_SIDE));
+                int step = subsampling(width, height);
                 param.setSourceSubsampling(step, step, 0, 0);
                 BufferedImage image = reader.read(0, param);
                 if (image == null) {
@@ -237,14 +243,15 @@ final class ListFiles {
             PDRectangle box = doc.getPage(0).getCropBox();
             float longest = Math.max(1f, Math.max(box.getWidth(), box.getHeight()));
             float scale = Math.min(150f / 72f, MAX_SIDE / longest);
-            BufferedImage page = oneAtATime(() -> {
+            // Drawn and written as JPEG inside one turn, so no more than DECODES_AT_ONCE pages are held at any time.
+            String picture = oneAtATime(() -> {
                 try {
-                    return new PDFRenderer(doc).renderImage(0, scale);
+                    return picture(new PDFRenderer(doc).renderImage(0, scale));
                 } catch (IOException e) {
                     throw notRead("This PDF cannot be read. Take a photo of the page instead.");
                 }
             });
-            return new Read(null, picture(page), "file");
+            return new Read(null, picture, "file");
         } catch (IOException | RuntimeException e) {
             if (e instanceof ApiException a) {
                 throw a;
