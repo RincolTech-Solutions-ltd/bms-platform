@@ -3,7 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
-import type { Product } from '../../../api/retail';
+import { RetailError, type Product, type Stocktake } from '../../../api/retail';
+import { bigDrop } from './maths';
 import { mockMe } from '../../../api/retail-mock';
 import { branchLabel } from '../../../auth/branch';
 import { StaffContext } from '../context';
@@ -27,6 +28,7 @@ const similarProducts = vi.fn();
 const listCatalogue = vi.fn();
 const getProduct = vi.fn();
 const listProducts = vi.fn();
+const chooseBranch = vi.fn();
 const made: Product = { id: 'p9', code: 'DUV-0001', description: 'Test duvet cover', category_id: 'c9', category: 'Duvets', unit_id: 'u1', unit: 'piece', sell_minor: 45000, cost_minor: 0, active: true, version: 1 };
 const duvets = { id: 'c9', name: 'Duvets', active: true, product_count: 0, version: 1, code_prefix: 'DUV', next_code: 'DUV-0001' };
 
@@ -82,6 +84,7 @@ afterEach(() => {
   similarProducts.mockResolvedValue({ exact: [], similar: [] });
   getProduct.mockReset();
   listProducts.mockReset();
+  chooseBranch.mockReset();
   listProducts.mockImplementation(() => Promise.resolve(catalogue));
 });
 listProducts.mockImplementation(() => Promise.resolve(catalogue));
@@ -91,7 +94,7 @@ similarProducts.mockResolvedValue({ exact: [], similar: [] });
 function open(node: JSX.Element, me: Me) {
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <StaffContext.Provider value={{ me, branch: me.branches?.[0]?.id ?? '', chooseBranch: () => undefined }}>{node}</StaffContext.Provider>
+      <StaffContext.Provider value={{ me, branch: me.branches?.[0]?.id ?? '', chooseBranch }}>{node}</StaffContext.Provider>
     </QueryClientProvider>,
   );
 }
@@ -246,6 +249,35 @@ describe('a Sell search that finds nothing', () => {
     expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
   });
 
+  // Issue #636: the server refuses a commit that leaves out a big drop. Here the commit is the server's rule, on the shared bigDrop.
+  const serverCommit = (draft: Stocktake) => (id: string, acknowledged: string[] = []) => {
+    const unticked = (draft.lines ?? []).filter((l) => bigDrop(l) && !acknowledged.includes(l.product_id ?? ''));
+    return unticked.length > 0 ? Promise.reject(new RetailError('Tick the lines marked before you commit', 409, 'big_drop_not_acknowledged')) : Promise.resolve({ ...draft, id, status: 'committed' });
+  };
+  const draftOf = (expected: string): Stocktake => ({ id: 's1', status: 'draft', lines: [{ product_id: 'p9', code: 'DUV-0001', description: 'Test duvet cover', expected_qty: expected, counted_qty: '4.000', variance_qty: (4 - Number(expected)).toFixed(3) }] });
+
+  it('commits the count of a new item, which holds nothing, so the server never asks for a tick (issue #636)', async () => {
+    createProduct.mockResolvedValue(made);
+    createStocktake.mockResolvedValue(draftOf('0.000'));
+    commitStocktake.mockImplementation(serverCommit(draftOf('0.000')));
+    open(<RecordSale />, owner);
+    await fill('4');
+    expect(await screen.findByRole('button', { name: 'Remove Test duvet cover' })).toBeTruthy();
+    expect(commitStocktake).toHaveBeenCalledWith('s1');
+    expect(screen.queryByText(/its count is not/)).toBeNull();
+  });
+
+  it('never sends a big drop to be refused: the count is left for Count stock, and the screen says so (issue #636)', async () => {
+    createProduct.mockResolvedValue(made);
+    createStocktake.mockResolvedValue(draftOf('10.000'));
+    commitStocktake.mockImplementation(serverCommit(draftOf('10.000')));
+    open(<RecordSale />, owner);
+    await fill('4');
+    expect(await screen.findByText('Test duvet cover is saved, but its count is not. Count it on Count stock, then sell it.')).toBeTruthy();
+    expect(commitStocktake).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
+  });
+
   it('keeps an open Add it here with what was typed when a later search finds something (review of #616)', async () => {
     cats = [duvets];
     listProducts.mockImplementation(({ query }: { query?: string }) => Promise.resolve(query === 'Test duvet' ? [{ ...made, qty: '2.000' }] : []));
@@ -290,13 +322,24 @@ describe('Sell it from Quick add (issue #632)', () => {
     const note = await screen.findByTestId('sale-start-elsewhere');
     const name = branchLabel(owner.branches?.[1]);
     expect(note.textContent).toContain(`The item you just added is at ${name}. Switch to ${name} to sell it.`);
-    expect(within(note).getByRole('button', { name: `Switch to ${name}` })).toBeTruthy();
+    fireEvent.click(within(note).getByRole('button', { name: `Switch to ${name}` }));
+    expect(chooseBranch).toHaveBeenCalledWith(other);
     expect(getProduct).not.toHaveBeenCalled();
     // Sell here without it forgets the item and clears the address, so the sale never waits.
     fireEvent.click(within(note).getByRole('button', { name: 'Sell here without it' }));
     expect(started).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('sale-start-elsewhere')).toBeNull();
     expect(getProduct).not.toHaveBeenCalled();
+  });
+
+  it('says to search for the item when the branch list does not return it, and never drops it in silence (issue #641)', async () => {
+    catalogue = [];
+    getProduct.mockResolvedValue(made);
+    const started = vi.fn();
+    open(<RecordSale startItem="p9" startBranch={here} onStarted={started} />, owner);
+    expect((await screen.findByText('Test duvet cover did not come up here. Search for it to add it.'))).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
+    await waitFor(() => expect(started).toHaveBeenCalledTimes(1));
   });
 });
 

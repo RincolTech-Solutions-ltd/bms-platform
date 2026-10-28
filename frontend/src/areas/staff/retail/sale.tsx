@@ -12,7 +12,7 @@ import type { OutboxItem } from '../../../offline/outbox';
 import { newIdempotencyKey } from './idempotency';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
-import { parseQty, qtyString, showQty } from './maths';
+import { bigDrop, parseQty, qtyString, showQty } from './maths';
 import { buildSaleRequest, defaultPrice, draftProblem, draftTotal, lineFigures, lineHint, newLine, resolveRequestOf, withUnit, type Accounts, type Draft, type DraftLine, type Pricing } from './sale-state';
 import { MIN_REASON, hasNoPrice, isOverride, pricedLines, receiptNote, reasonOk, sourceNote } from './price-state';
 import { chosenPack, enteredPriceMinor, enteredQty, sellingPacks } from './units-state';
@@ -332,10 +332,12 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     if (!startItem || started.current) return;
     started.current = true;
     void retail.getProduct(startItem)
-      .then((p) => retail.listProducts({ query: p.code ?? p.description ?? '', branchId }))
-      .then((found) => {
+      .then(async (item) => {
+        const found = await retail.listProducts({ query: item.code ?? item.description ?? '', branchId });
         const p = found.find((x) => x.id === startItem);
+        // Not in what this branch's list returns (issue #641): said, never dropped in silence.
         if (p) add(p);
+        else show(`${item.description ?? 'The item'} did not come up here. Search for it to add it.`, 'info');
       })
       .catch(() => show('The item could not be read. Search for it to add it.', 'error'))
       .finally(() => onStarted?.());
@@ -355,6 +357,9 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     if (counted !== null && counted > 0) {
       try {
         const count = await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: product.id ?? '', counted_qty: qtyString(counted) }], note: 'Counted when the item was added on Sell' });
+        // Issue #636: an item made here holds nothing and is counted above 0, so this is never a big drop. Should the records
+        // ever hold more, the count is left for Count stock, where the line has its tick, rather than sent to be refused.
+        if ((count.lines ?? []).some(bigDrop)) throw new Error('big drop');
         await retail.commitStocktake(count.id ?? '');
         counts = true;
       } catch {
