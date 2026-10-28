@@ -53,9 +53,11 @@ export function StocktakeReview({ stocktake, onCommit, busy, units }: {
 }) {
   const changed = (stocktake.lines ?? []).filter((l) => milliOf(variance(l)) !== 0);
   const draft = stocktake.status === 'draft';
-  // The big drops ticked as right; Commit the count waits for every one of them.
+  // The big drops ticked as right; Commit the count waits for every one of them. A line without a product id has a key of its
+  // own, so one tick never answers for another (issue #636).
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
-  const asked = draft ? changed.filter(bigDrop).map((l) => l.product_id ?? '') : [];
+  const keyOf = (l: StocktakeLine, i: number) => l.product_id ?? `line-${i}`;
+  const asked = draft ? changed.flatMap((l, i) => (bigDrop(l) ? [keyOf(l, i)] : [])) : [];
   const open = asked.filter((id) => !ticked.has(id)).length;
   const tick = (id: string, on: boolean) => setTicked((t) => { const n = new Set(t); if (on) n.add(id); else n.delete(id); return n; });
   return (
@@ -74,9 +76,9 @@ export function StocktakeReview({ stocktake, onCommit, busy, units }: {
             </tr>
           </thead>
           <tbody>
-            {changed.map((l) => {
+            {changed.map((l, i) => {
               const v = milliOf(variance(l));
-              const id = l.product_id ?? '';
+              const id = keyOf(l, i);
               return (
                 <Fragment key={id}>
                   <tr>
@@ -91,7 +93,7 @@ export function StocktakeReview({ stocktake, onCommit, busy, units }: {
                     <tr className="count-drop-row">
                       <td colSpan={4}>
                         <div className="alert alert-warning entry-warning" data-testid={`count-drop-${id}`}>
-                          <span className="entry-warning-icon" aria-hidden="true">{icons.error}</span>
+                          <span className="entry-warning-icon" aria-hidden="true">{icons.warning}</span>
                           <div>
                             <p id={`count-drop-${id}-words`}>{dropWords(l, units?.get(id))}</p>
                             <label className="count-drop-tick">
@@ -115,7 +117,7 @@ export function StocktakeReview({ stocktake, onCommit, busy, units }: {
           {/* Issue #636: the button names its hint, so a press that goes to a tick says why. */}
           {open > 0 && <p className="hint" id="count-commit-hint">{open === 1 ? 'Tick the line marked above before you commit the count.' : `Tick the ${open} lines marked above before you commit the count.`}</p>}
           <BusyButton type="button" className="rt-primary" busy={busy === true} notReady={open > 0}
-            aria-describedby={open > 0 ? 'count-commit-hint' : undefined} onClick={() => onCommit(asked.filter((id) => ticked.has(id)))}>
+            aria-describedby={open > 0 ? 'count-commit-hint' : undefined} onClick={() => onCommit(changed.flatMap((l, i) => (l.product_id && ticked.has(keyOf(l, i)) ? [l.product_id] : [])))}>
             Commit the count
           </BusyButton>
         </>

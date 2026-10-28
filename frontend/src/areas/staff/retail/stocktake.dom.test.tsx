@@ -25,7 +25,7 @@ vi.mock('../../../api/retail', async (original) => {
   return { ...real, retail: { ...real.retail, listStock: (...a: unknown[]) => listStock(...a), createStocktake: (...a: unknown[]) => createStocktake(...a), commitStocktake: (...a: unknown[]) => commitStocktake(...a) } };
 });
 
-const { StocktakePage } = await import('./stocktake');
+const { StocktakePage, StocktakeReview } = await import('./stocktake');
 
 afterEach(() => {
   cleanup();
@@ -310,6 +310,22 @@ describe('a count that wipes or halves stock', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
     await screen.findByRole('heading', { name: 'Stock count committed' });
     noFinish();
+  });
+
+  // Issue #636: lines without a product id never share a tick, and the warning shows the warning icon, not the error one.
+  it('gives each line without a product id a tick of its own, under the warning icon', () => {
+    const onCommit = vi.fn();
+    const noId = (description: string) => ({ ...line('', description, '8.000', '0.000'), product_id: undefined });
+    render(<StocktakeReview stocktake={{ id: 'st9', status: 'draft', lines: [noId('Test Fuse One'), noId('Test Fuse Two')] }} onCommit={onCommit} />);
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2);
+    expect(document.querySelector('.entry-warning-icon path')?.getAttribute('d')).toBe('M12 3.5 2.5 20h19z');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Fuse One is right' }));
+    expect((screen.getByRole('checkbox', { name: 'Yes, Test Fuse Two is right' }) as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    expect(onCommit).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Fuse Two is right' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    expect(onCommit).toHaveBeenCalledWith([]);
   });
 
   it('asks again after Back to the count, since the review is a new one', async () => {
