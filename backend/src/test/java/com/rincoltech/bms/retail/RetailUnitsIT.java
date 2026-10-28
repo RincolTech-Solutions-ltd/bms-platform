@@ -826,6 +826,43 @@ class RetailUnitsIT extends IntegrationTest {
                 .isFalse();
     }
 
+    /**
+     * Issue #660 (ADR-103): a unit's usual pack promotes a pack only when it counts the item's own base unit and is for selling
+     * or both. A box whose usual pack is 50 metres is not promoted on an item counted in pieces, nor a box of pieces only
+     * bought; the biggest selling pack stays the standard one.
+     */
+    @Test
+    void aUsualPackOfAnotherUnitIsNotPromoted() {
+        switchUnits(true);
+        UUID box = api.unit("box");
+        UUID metre = api.unit("metre");
+        pack(pen, box, "10");
+        pack(pen, carton, "24");
+        api.stockUp(t.headOffice(), pen, "127");
+        assertThat(standardOf(pen)).isEqualTo("carton 24.000");
+
+        TestDatabase.owner()
+                .sql("UPDATE retail_units SET pack_size = 50, pack_of_unit_id = ?, pack_purpose = 'sell' WHERE id = ?")
+                .params(metre, box)
+                .update();
+        assertThat(standardOf(pen)).isEqualTo("carton 24.000");
+        assertThat(standardOnItem(pen)).isEqualTo("carton");
+
+        TestDatabase.owner()
+                .sql("UPDATE retail_units SET pack_size = 10, pack_of_unit_id = ?, pack_purpose = 'buy' WHERE id = ?")
+                .params(piece, box)
+                .update();
+        assertThat(standardOf(pen)).isEqualTo("carton 24.000");
+
+        // A usual pack of pieces for selling promotes the box over the bigger carton.
+        TestDatabase.owner()
+                .sql("UPDATE retail_units SET pack_purpose = 'sell' WHERE id = ?")
+                .params(box)
+                .update();
+        assertThat(standardOf(pen)).isEqualTo("box 10.000");
+        assertThat(standardOnItem(pen)).isEqualTo("box");
+    }
+
     String standardOf(UUID product) {
         JsonNode pack = rowOf(
                         api.get("/stock?branch_id=" + t.headOffice(), ADMIN).getBody(), product)
