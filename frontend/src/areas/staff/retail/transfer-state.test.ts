@@ -28,7 +28,9 @@ describe('stock move form (FR-RET-16)', () => {
     expect(transferLineHint({ product: soap, qty: '90000000000', packs: '1000000000' })).toBe(tooMany);
     // Cartons typed for an item with no pack, or no unit, never read as too many.
     expect(transferLineHint({ product: cable, qty: '', packs: '2' })).toBe(tooFew);
-    expect(transferLineHint({ product: { ...soap, unit: undefined }, qty: '', packs: 'abc' })).toBe(tooFew);
+    expect(transferLineHint({ product: { ...soap, unit: undefined }, qty: '', packs: '99999999999999' })).toBe(tooFew);
+    // Unreadable cartons are said to be unreadable, even beside too many pieces.
+    expect(transferLineHint({ product: soap, qty: '99999999999999', packs: 'abc' })).not.toBe(tooManyPieces);
     expect(transferLineHint({ product: soap, qty: '', packs: '0' })).toBe(tooFew);
   });
 

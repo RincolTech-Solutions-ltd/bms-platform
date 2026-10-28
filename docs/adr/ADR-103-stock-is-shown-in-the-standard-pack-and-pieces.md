@@ -54,7 +54,9 @@ bought promotes nothing. The other tiers and the tie-break (the biggest, then th
 
 The rule stays one subquery, `RetailCatalogue.standardPackSql`, and the PWA only reads it: it takes the pack marked
 `standard` and never ranks packs itself (a pack it is sent carries no usual pack), so server and client cannot disagree.
-`RetailUnitsIT.aUsualPackOfAnotherUnitIsNotPromoted` pins the rule's cases, the tie-break included, and asserts that the live
+`RetailUnitsIT.aUsualPackOfAnotherUnitIsNotPromoted` pins the usual-pack cases and the tie-break;
+`RetailUnitsIT.stockRowsCarryTheStandardPack` pins the fallbacks (the biggest pack for selling, then the biggest of any, a
+tie going to the lower unit id, and an item pack only for buying never promoted). The first test also asserts that the live
 item packs and stock row of the box of 50 metres case equal `fixtures/retail/standard-pack-660.json`. The PWA's contract test
 (`transfer-packs.dom.test.tsx`) feeds that same file to Move stock, which moves the item in cartons, never in boxes.
 

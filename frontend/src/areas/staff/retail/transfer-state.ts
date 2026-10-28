@@ -53,12 +53,14 @@ export function transferLineHint(line: TransferLineDraft): string | null {
   const { qty, unit } = line.product;
   const milli = lineMilli(line);
   // Numbers that read but add up to more than a quantity can hold are too many, not too few or unreadable (reviews of #654 and
-  // #659). Only a pack with a size reads cartons; with none, or no cartons typed, the pieces alone are judged.
+  // #659). Only a pack with a size and a unit reads cartons; with none, or no cartons typed, the pieces alone are judged, and
+  // unreadable cartons are said to be unreadable before any count of pieces is judged.
   const packs = (line.packs ?? '').trim();
   const number = (text: string) => /^\d+(\.\d{1,3})?$/.test(text.trim());
-  const tooManyPieces = milli === null && number(line.qty) && /[1-9]/.test(line.qty) && parseQty(line.qty) === null;
+  const tooManyPieces = milli === null && (packs === '' || /^\d+$/.test(packs)) && number(line.qty) && /[1-9]/.test(line.qty)
+    && parseQty(line.qty) === null;
   if (tooManyPieces) return 'That is more pieces than BMS can move at once. Check the number.';
-  const tooMany = milli === null && !!pack && packs !== '' && packsAndPiecesMilli('1', '', pack) !== null && /^\d+$/.test(packs)
+  const tooMany = milli === null && !!pack && !!unit && !!pack.unit && packs !== '' && packsAndPiecesMilli('1', '', pack) !== null && /^\d+$/.test(packs)
     && (line.qty.trim() === '' || number(line.qty)) && packsAndPiecesMilli(packs, line.qty, pack) === null;
   if (tooMany) return 'That is more than BMS can move at once. Check the number.';
   const unreadable = pack?.unit && unit ? packsAndPiecesProblem(line.packs ?? '', line.qty, unit, pack.unit) : null;
