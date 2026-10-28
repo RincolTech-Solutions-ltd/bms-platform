@@ -1407,7 +1407,11 @@ the items show only while you search, and go away once one is picked. Every item
   internet, then commit the count or press Not now, before you clear the sale or switch branch."; a discard lost to leaving the
   screen offline or a reload is sent again the next time Sell is open and online. A refusal shows the server's words, discards
   the draft and leaves the item for Count stock. Stock that arrives between the read and the count, or a balance the search did
-  not return, is never sent to be refused: that draft is discarded and the line has its tick on Count stock.
+  not return, is never sent to be refused: that draft is discarded and the line has its tick on Count stock. The usual count of
+  a new item (no tick asked) follows the same rules: an answer after **Clear this sale** or leaving the screen puts nothing on
+  the sale (a draft not yet committed is discarded, a commit that landed stands), and a commit whose answer is lost is sent once
+  more on the same draft; still lost, the draft is kept for a later discard and Sell says the count may not be committed.
+  Count stock shows a discarded count as cancelled, never as committed.
 - **Scan box.** Unchanged (ADR-070 decision 11, owner decision D7): a scanner types only into the Scan box, which adds the item or one more.
 - **Tours.** `retail-sales` version 16, `page-stocktake` 3 (the search on top and the list Not counted yet), `page-restock` 3, `page-usage` 2, `page-transfer` 3,
   `page-sizes-join` 2 and `page-labels` 2 word their search steps for the list that shows while you type.
