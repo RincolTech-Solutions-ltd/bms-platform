@@ -468,4 +468,117 @@ class RetailQuickAddIT extends IntegrationTest {
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(r.getBody().toString()).contains("description").contains("sell_minor");
     }
+    // Issue #646: "I just bought these, take the money from cash" books the goods as a purchase paid from the branch's
+    // cash or
+    // mobile money, as Buy stock does: the cash goes down by qty times cost and nothing posts to opening balance
+    // equity.
+
+    @Test
+    void paidFromCashTheCashGoesDownByQtyTimesCostAndTheStockGoesUp() {
+        Map<String, Object> body = item("Test Soap Bar", 3_000, "12", br2);
+        body.put("cost_minor", 2_500);
+        body.put("paid_from", "cash");
+        ResponseEntity<JsonNode> r = quickAdd(body);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID product = productOf(r);
+        assertThat(r.getBody().get("paid_from").asString()).isEqualTo("cash");
+        assertThat(r.getBody().get("paid_minor").asLong()).isEqualTo(30_000);
+        assertThat(r.getBody().get("total_qty").asString()).isEqualTo("12");
+        String purchaseNo = r.getBody().get("purchase_no").asString();
+        assertThat(stockAt(br2, product)).isEqualByComparingTo("12");
+        // One cash purchase at the branch, with no supplier, read by the cash book as cash out of the till.
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_purchases WHERE tenant_id = ? AND purchase_no = ?"
+                                + " AND payment_method = 'cash' AND supplier_id IS NULL AND total_minor = 30000",
+                        t.tenantId(),
+                        purchaseNo))
+                .isEqualTo(1);
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_stock_movements WHERE product_id = ? AND branch_id = ?"
+                                + " AND kind = 'purchase' AND source_type = 'retail.purchase' AND qty = 12 AND unit_cost_minor = 2500",
+                        product,
+                        br2))
+                .isEqualTo(1);
+        assertThat(scalar("SELECT count(*) FROM retail_stock_movements WHERE product_id = ?", product))
+                .isEqualTo(1);
+        // Dr stock, Cr cash; never opening balance equity.
+        assertThat(sourceTotal("inventory", "retail.purchase")).isEqualTo(30_000);
+        assertThat(sourceTotal("cash_on_hand", "retail.purchase")).isEqualTo(-30_000);
+        assertThat(sourceTotal("opening_balance_equity", "retail.quick_add")).isZero();
+        assertThat(sourceTotal("inventory", "retail.quick_add")).isZero();
+        assertThat(scalar(
+                        "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.stock.quick_added'"
+                                + " AND data -> 'after' ->> 'paid_from' = 'cash'",
+                        t.tenantId()))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void anItemAlreadyInTheListPaidFromMobileMoneyIsAPurchaseOnMobileMoney() {
+        UUID product = productOf(quickAdd(item("Test Rice 1kg", 5_000, "10", hq)));
+        Map<String, Object> more = new LinkedHashMap<>();
+        more.put("product_id", product);
+        more.put("qty", "4");
+        more.put("branch_id", hq);
+        more.put("cost_minor", 4_200);
+        more.put("paid_from", "mobile_money");
+        ResponseEntity<JsonNode> r = quickAdd(more);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(r.getBody().get("total_qty").asString()).isEqualTo("14");
+        assertThat(stockAt(hq, product)).isEqualByComparingTo("14");
+        assertThat(sourceTotal("mobile_money", "retail.purchase")).isEqualTo(-16_800);
+        assertThat(sourceTotal("cash_on_hand", "retail.purchase")).isZero();
+    }
+
+    @Test
+    void aRetryOfAPaidAddPostsOnce() {
+        Map<String, Object> body = item("Test Sugar 2kg", 9_000, "5", hq);
+        body.put("cost_minor", 7_000);
+        body.put("paid_from", "cash");
+        String key = UUID.randomUUID().toString();
+        ResponseEntity<JsonNode> first = quickAdd(body, ADMIN, "*", key);
+        ResponseEntity<JsonNode> retry = quickAdd(body, ADMIN, "*", key);
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(retry.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
+        assertThat(retry.getBody().get("purchase_no").asString())
+                .isEqualTo(first.getBody().get("purchase_no").asString());
+        assertThat(scalar("SELECT count(*) FROM retail_purchases WHERE tenant_id = ?", t.tenantId()))
+                .isEqualTo(1);
+        assertThat(sourceTotal("cash_on_hand", "retail.purchase")).isEqualTo(-35_000);
+        assertThat(stockAt(hq, productOf(first))).isEqualByComparingTo("5");
+    }
+
+    @Test
+    void payingFromCashNeedsBuyStockPermissionOnTheServerAndNothingIsMadeWithoutIt() {
+        Map<String, Object> body = item("Test Salt", 1_000, "3", hq);
+        body.put("cost_minor", 700);
+        body.put("paid_from", "cash");
+        ResponseEntity<JsonNode> refused = quickAdd(
+                body,
+                "retail.catalogue.manage,retail.stock.read,retail.stocktake.commit",
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(refused.getStatusCode()).isIn(HttpStatus.FORBIDDEN, HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_products WHERE tenant_id = ? AND description = 'Test Salt'",
+                        t.tenantId()))
+                .isZero();
+        assertThat(scalar("SELECT count(*) FROM retail_purchases WHERE tenant_id = ?", t.tenantId()))
+                .isZero();
+    }
+
+    @Test
+    void payingFromCashNeedsTheBuyingPriceAndAQuantity() {
+        Map<String, Object> body = item("Test Oil 1L", 8_000, null, hq);
+        body.put("paid_from", "cash");
+        ResponseEntity<JsonNode> r = quickAdd(body);
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().toString()).contains("cost_minor").contains("qty");
+        body.put("paid_from", "bank");
+        body.put("qty", "1");
+        body.put("cost_minor", 6_000);
+        assertThat(quickAdd(body).getStatusCode()).isIn(HttpStatus.BAD_REQUEST, HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(scalar("SELECT count(*) FROM retail_purchases WHERE tenant_id = ?", t.tenantId()))
+                .isZero();
+    }
 }

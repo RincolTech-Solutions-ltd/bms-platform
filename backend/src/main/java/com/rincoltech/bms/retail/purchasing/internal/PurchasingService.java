@@ -27,6 +27,7 @@ import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.UpdateSupplie
 import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.VoidPurchaseRequest;
 import com.rincoltech.bms.retail.purchasing.internal.PurchasingRepository.NewLine;
 import com.rincoltech.bms.retail.stock.Quantities;
+import com.rincoltech.bms.retail.stock.QuickAddPurchase;
 import com.rincoltech.bms.retail.stock.RetailBooks;
 import com.rincoltech.bms.retail.stock.RetailBooks.Leg;
 import com.rincoltech.bms.retail.stock.RetailBooks.Posting;
@@ -58,7 +59,7 @@ import org.springframework.transaction.annotation.Transactional;
  * and their history rows, its movements and its journal entries commit together or not at all.
  */
 @Service
-class PurchasingService {
+class PurchasingService implements QuickAddPurchase {
 
     static final String PURCHASE = "retail.purchase";
     static final String PERMISSION = "retail.purchase.create";
@@ -180,6 +181,23 @@ class PurchasingService {
     @Transactional
     Outcome<Purchase> create(String idempotencyKey, PurchaseRequest r) {
         return idempotency.once(idempotencyKey, "POST", PATH, r, Purchase.class, () -> record(r));
+    }
+
+    /**
+     * Issue #646: goods just bought, added through Quick add and paid from cash or mobile money, are one restock of one line,
+     * dated today, recorded by the same steps as Buy stock, in Quick add's transaction (its key covers a retry).
+     */
+    @Override
+    @Transactional
+    public Bought buy(UUID branchId, UUID productId, BigDecimal qty, long costMinor, String method) {
+        Purchase made = record(new PurchaseRequest(
+                null,
+                clock.today(tenant.profile().timezone()),
+                method,
+                "Quick add",
+                List.of(new PurchaseLineRequest(
+                        productId, costMinor, null, List.of(new BranchQty(branchId, qty)), null, null, null))));
+        return new Bought(made.id(), made.purchaseNo(), made.totalMinor());
     }
 
     /**
