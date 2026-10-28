@@ -49,5 +49,10 @@ Tier one of decision 1 is tightened. A pack comes first only when it is used for
 (ADR-100) counts the item's own base unit (`pack_of_unit_id` is the item's unit) and is itself for selling or both. A unit
 whose usual pack is a box of 50 metres is no longer promoted on an item counted in pieces, and a usual pack only bought
 promotes nothing. The other tiers and the tie-break (the biggest, then the lower unit id) are unchanged. The rule stays one
-subquery, `RetailCatalogue.standardPackSql`; the PWA still only reads the `standard` flag, so server and client cannot
-disagree. `RetailUnitsIT.aUsualPackOfAnotherUnitIsNotPromoted` and the matching case in `units-state.test.ts` show it.
+subquery, `RetailCatalogue.standardPackSql`, and the PWA stays a pure reader: it takes the pack marked `standard` and never
+ranks packs itself (a pack it is sent carries no usual pack), so server and client cannot disagree.
+`RetailUnitsIT.aUsualPackOfAnotherUnitIsNotPromoted` pins the rule's cases, the tie-break included, on both `/retail/stock`
+and the item's packs; `units-state.test.ts` pins only that the PWA reads the flag, not the rule.
+
+Folded in from the review of #659: Move stock says "That is more than BMS can move at once" for any number that reads but is
+too large to hold, pieces included, and cartons typed for an item with no pack or no unit never read as too many.
