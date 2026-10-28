@@ -268,7 +268,7 @@ export function UsersScreen() {
                         {error && <p role="alert" className="alert alert-danger">{error}</p>}
                         <p>Sign <strong>{u.full_name}</strong> out on every phone and computer? Use this when their phone is lost or stolen. They stay on your business's staff and sign in again with their password.</p>
                         <p className="cluster">
-                          <BusyButton type="button" busy={busyId === u.id} disabled={busyId !== null} onClick={() => void signOutDevices(u)}>
+                          <BusyButton type="button" className="btn-danger" busy={busyId === u.id} disabled={busyId !== null} onClick={() => void signOutDevices(u)}>
                             Yes, sign them out
                           </BusyButton>
                           <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={busyId !== null} onClick={() => setMode(null)}>Cancel</button>

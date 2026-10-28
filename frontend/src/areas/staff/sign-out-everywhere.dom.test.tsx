@@ -6,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, type Me } from '../../api/client';
 import { router as appRouter } from '../../app/router';
 import { getAccessToken, logoutPending, setAccessToken } from '../../auth/session';
+import { mockMe } from '../../api/retail-mock';
+import { OfflineProvider } from '../../offline/offline-context';
+import { provisionalNumber, type OutboxItem } from '../../offline/outbox';
+import { testOffline } from '../../offline/test-kit';
+import { SignOutEverywhere } from './top-bar';
 
 // Sign out everywhere (issue #647): the person menu asks first, then ends every session of the person on the server, this
 // device included, and goes to sign-in. With no answer nothing is signed out here either: other devices can only be signed
@@ -85,5 +90,54 @@ describe('sign out everywhere', () => {
     expect(router.state.location.pathname).toBe('/staff');
     expect(getAccessToken()).toBe('test-token-seller-05');
     expect(logoutPending()).toBe(false);
+  });
+});
+
+// ADR-067 decision 9: sales waiting on this phone are never lost by signing out. Sign out everywhere says how many wait and
+// runs the same forget() as Sign out, which keeps the outbox for this person.
+function waitingSale(id: string, scope: string): OutboxItem {
+  return {
+    id,
+    scope,
+    key: `key-${id}`,
+    request: { payment_method: 'cash', lines: [] },
+    occurredAt: '2026-10-28T08:00:00Z',
+    branchId: 'b1',
+    branchName: 'Test Branch A',
+    method: 'cash',
+    totalMinor: 25000,
+    lines: [],
+    provisionalNo: provisionalNumber(`${id}0000000`),
+    state: 'queued',
+    attempts: 0,
+    nextAttemptAt: 0,
+  };
+}
+
+describe('sign out everywhere with sales waiting', () => {
+  it('says the waiting sales stay on this phone, and they do', async () => {
+    const offline = testOffline(mockMe('sales'), { online: false });
+    if (!offline) throw new Error('a seller sells offline');
+    for (const id of ['a', 'b', 'c']) await offline.engine.queue(waitingSale(id, offline.scope));
+    const onConfirm = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <OfflineProvider value={offline}>
+          <SignOutEverywhere open waiting={3} busy={false} onConfirm={onConfirm} onClose={() => undefined} />
+        </OfflineProvider>
+      </QueryClientProvider>,
+    );
+    const question = await screen.findByRole('dialog', { name: 'Sign out everywhere?' });
+    expect(within(question).getByText('3 sales are still on this phone. They stay here and are sent when you sign in here again.')).toBeTruthy();
+    fireEvent.click(within(question).getByRole('button', { name: 'Sign out everywhere' }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+
+    // What the sign-out then does on this phone: the catalogue and the profile go, the three sales stay.
+    await offline.store.putCatalogue(offline.scope, { pricesAsOf: 'x', products: {}, customers: [] });
+    await offline.store.putProfile(offline.scope, mockMe('sales'));
+    await offline.forget();
+    expect(await offline.store.catalogue(offline.scope)).toBeNull();
+    expect(await offline.store.profile(offline.scope)).toBeNull();
+    expect(await offline.store.outbox(offline.scope)).toHaveLength(3);
   });
 });
