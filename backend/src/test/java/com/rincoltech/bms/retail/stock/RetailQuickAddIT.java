@@ -663,6 +663,56 @@ class RetailQuickAddIT extends IntegrationTest {
     }
 
     @Test
+    void whatBuyStockRefusesAPaidQuickAddRefusesTheSameWayAndTakesNoCash() {
+        UUID item = productOf(quickAdd(item("Test Flour 2kg", 9_000, null, null)));
+        String today = java.time.LocalDate.now(com.rincoltech.bms.kernel.BusinessClock.DEFAULT_ZONE)
+                .toString();
+        // A quantity finer than a thousandth, and a cost above the largest amount: Buy stock refuses both.
+        List<Map<String, Object>> refusedValues = List.of(
+                Map.of("qty", "1.2345", "cost_minor", 1_000L),
+                Map.of(
+                        "qty",
+                        "1",
+                        "cost_minor",
+                        com.rincoltech.bms.retail.catalogue.RetailCatalogue.MAX_AMOUNT_MINOR + 1));
+        for (Map<String, Object> v : refusedValues) {
+            Map<String, Object> restock = new LinkedHashMap<>();
+            restock.put("purchased_on", today);
+            restock.put("payment_method", "cash");
+            restock.put(
+                    "lines",
+                    List.of(Map.of(
+                            "product_id",
+                            item,
+                            "cost_minor",
+                            v.get("cost_minor"),
+                            "qty_by_branch",
+                            List.of(Map.of("branch_id", hq, "qty", v.get("qty"))))));
+            ResponseEntity<JsonNode> buyStock = api.postKeyed(
+                    "/purchases", restock, ADMIN, "*", UUID.randomUUID().toString());
+
+            Map<String, Object> paid = new LinkedHashMap<>();
+            paid.put("product_id", item);
+            paid.put("qty", v.get("qty"));
+            paid.put("branch_id", hq);
+            paid.put("cost_minor", v.get("cost_minor"));
+            paid.put("paid_from", "cash");
+            ResponseEntity<JsonNode> quick = quickAdd(paid);
+
+            assertThat(buyStock.getStatusCode())
+                    .as("%s %s", v, buyStock.getBody())
+                    .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+            assertThat(quick.getStatusCode()).as("%s %s", v, quick.getBody()).isEqualTo(buyStock.getStatusCode());
+            assertThat(quick.getBody().get("code").asString())
+                    .isEqualTo(buyStock.getBody().get("code").asString());
+        }
+        assertThat(scalar("SELECT count(*) FROM retail_purchases WHERE tenant_id = ?", t.tenantId()))
+                .isZero();
+        assertThat(sourceTotal("cash_on_hand", "retail.purchase")).isZero();
+        assertThat(stockAt(hq, item)).isEqualByComparingTo("0");
+    }
+
+    @Test
     void payingFromCashNeedsTheBuyingPriceAndAQuantity() {
         Map<String, Object> body = item("Test Oil 1L", 8_000, null, hq);
         body.put("paid_from", "cash");

@@ -36,6 +36,7 @@ import com.rincoltech.bms.retail.stock.RetailCapabilities;
 import com.rincoltech.bms.retail.stock.StockLedger;
 import com.rincoltech.bms.retail.stock.StockLedger.Movement;
 import com.rincoltech.bms.retail.stock.StockLedger.Recorded;
+import jakarta.validation.Validator;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -78,6 +79,7 @@ class PurchasingService implements QuickAddPurchase {
     private final BusinessClock clock;
     private final AuditLog audit;
     private final RetailCapabilities capabilities;
+    private final Validator validator;
 
     PurchasingService(
             PurchasingRepository repo,
@@ -90,7 +92,8 @@ class PurchasingService implements QuickAddPurchase {
             CurrentTenant tenant,
             BusinessClock clock,
             AuditLog audit,
-            RetailCapabilities capabilities) {
+            RetailCapabilities capabilities,
+            Validator validator) {
         this.repo = repo;
         this.catalogue = catalogue;
         this.stock = stock;
@@ -102,6 +105,7 @@ class PurchasingService implements QuickAddPurchase {
         this.clock = clock;
         this.audit = audit;
         this.capabilities = capabilities;
+        this.validator = validator;
     }
 
     static String accountFor(String method) {
@@ -190,14 +194,33 @@ class PurchasingService implements QuickAddPurchase {
     @Override
     @Transactional
     public Bought buy(UUID branchId, UUID productId, BigDecimal qty, long costMinor, String method) {
-        Purchase made = record(new PurchaseRequest(
+        PurchaseRequest r = new PurchaseRequest(
                 null,
                 clock.today(tenant.profile().timezone()),
                 method,
                 "Quick add",
                 List.of(new PurchaseLineRequest(
-                        productId, costMinor, null, List.of(new BranchQty(branchId, qty)), null, null, null))));
+                        productId, costMinor, null, List.of(new BranchQty(branchId, qty)), null, null, null)));
+        // The bounds Buy stock's route checks before record(), so nothing Buy stock refuses is taken here; named by the
+        // Quick add field the value came from.
+        List<FieldProblem> problems = validator.validate(r).stream()
+                .map(v -> new FieldProblem(quickAddField(v.getPropertyPath().toString()), "invalid", v.getMessage()))
+                .toList();
+        if (!problems.isEmpty()) {
+            throw ApiException.validation(problems);
+        }
+        Purchase made = record(r);
         return new Bought(made.id(), made.purchaseNo(), made.totalMinor());
+    }
+
+    private static String quickAddField(String path) {
+        if (path.endsWith(".qty")) {
+            return "qty";
+        }
+        if (path.endsWith(".costMinor")) {
+            return "cost_minor";
+        }
+        return path.equals("paymentMethod") ? "paid_from" : path;
     }
 
     /**
