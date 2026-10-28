@@ -829,7 +829,8 @@ class RetailUnitsIT extends IntegrationTest {
     /**
      * Issue #660 (ADR-103): a unit's usual pack promotes a pack only when it counts the item's own base unit and is for selling
      * or both. A box whose usual pack is 50 metres is not promoted on an item counted in pieces, nor a box of pieces only
-     * bought; the biggest selling pack stays the standard one.
+     * bought; the biggest selling pack stays the standard one. A usual pack of pieces for selling or both promotes its pack,
+     * and two promoted packs of one size go to the lower unit id.
      */
     @Test
     void aUsualPackOfAnotherUnitIsNotPromoted() {
@@ -861,6 +862,23 @@ class RetailUnitsIT extends IntegrationTest {
                 .update();
         assertThat(standardOf(pen)).isEqualTo("box 10.000");
         assertThat(standardOnItem(pen)).isEqualTo("box");
+        // A usual pack for both promotes it too.
+        TestDatabase.owner()
+                .sql("UPDATE retail_units SET pack_purpose = 'both' WHERE id = ?")
+                .params(box)
+                .update();
+        assertThat(standardOf(pen)).isEqualTo("box 10.000");
+
+        // Two promoted packs of the same size: the lower unit id wins, as in the other tiers.
+        UUID bundle = api.unit("bundle");
+        pack(pen, bundle, "10");
+        TestDatabase.owner()
+                .sql("UPDATE retail_units SET pack_size = 10, pack_of_unit_id = ?, pack_purpose = 'sell' WHERE id = ?")
+                .params(piece, bundle)
+                .update();
+        String lower = bundle.toString().compareTo(box.toString()) < 0 ? "bundle" : "box";
+        assertThat(standardOf(pen)).isEqualTo(lower + " 10.000");
+        assertThat(standardOnItem(pen)).isEqualTo(lower);
     }
 
     String standardOf(UUID product) {
