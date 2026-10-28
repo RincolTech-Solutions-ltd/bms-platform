@@ -83,6 +83,10 @@ totals shown while typing are a preview; the server's response is the receipt.
   (`BusinessClock`). Move stock's date and Restock's "Bought on" start on it, and Daily profit's range is the
   last seven days ending on it. Before #112 Restock and Daily profit used the UTC date, which is yesterday
   between midnight and 03:00 in Kampala. Usage, sale and stock-take send no date and take the server's.
+  Since #667 it is the one helper for today in the whole app: the lending forms, the insights quick ranges and
+  the operator screens (`todayInKampala`) take it too, so no screen mixes it with the device's date between
+  21:00 and 24:00 UTC. `src/api/business-today.test.ts` pins that boundary and guards the app against reading
+  the device's calendar day (`getDate()`, `getMonth()`, `getFullYear()`, `getDay()`).
 - **Stock moves (#112 item 1).** A row reads the date ("6 Oct 2026", on one line), "From X to Y", the item
   count with the first two item names, and "by you" for the user's own moves; tapping it opens the move. The
   API gives a transfer no number of its own and `created_by` is an id, so no number or other name is shown.
