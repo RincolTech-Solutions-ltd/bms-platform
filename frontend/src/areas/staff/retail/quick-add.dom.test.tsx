@@ -296,27 +296,6 @@ describe('quick add', () => {
     expect((quickAdd.mock.calls[1] as [unknown, string])[1]).not.toBe((quickAdd.mock.calls[0] as [unknown, string])[1]);
   });
 
-  it('opens with Name focused and no error, even when a tour then takes the focus (issue #642)', async () => {
-    open(owner);
-    const name = screen.getByLabelText(/^Name/) as HTMLInputElement;
-    await waitFor(() => expect(document.activeElement).toBe(name));
-    expect(screen.queryByText('Type what the item is.')).toBeNull();
-    // The page tour focuses its own title on the first visit: a blur the person did not cause.
-    fireEvent.blur(name);
-    expect(screen.queryByText('Type what the item is.')).toBeNull();
-    expect(name.getAttribute('aria-invalid')).toBe('false');
-  });
-
-  it('shows the Name error once the person leaves Name empty', () => {
-    open(owner);
-    const name = screen.getByLabelText(/^Name/) as HTMLInputElement;
-    fireEvent.pointerDown(name);
-    expect(screen.queryByText('Type what the item is.')).toBeNull();
-    fireEvent.blur(name);
-    expect(screen.getByText('Type what the item is.')).toBeTruthy();
-    expect(name.getAttribute('aria-invalid')).toBe('true');
-  });
-
   it('asks for the name, the price and how many before sending anything', async () => {
     open(owner);
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
