@@ -453,17 +453,24 @@ class MemberService implements MemberLookup, MemberIntake {
             validateNew(registerRequest(branchId, fullName, phone), CurrentPrincipal.require());
             return Optional.empty();
         } catch (ApiException e) {
-            String field = e.errors().isEmpty() ? "" : e.errors().getFirst().field();
-            return Optional.of(
-                    switch (field) {
-                        case "branch_id" ->
-                            "You may not add members in this branch. Choose another branch, or add the member first.";
-                        case "full_name" -> "The member's name is empty or longer than 200 characters.";
-                        case "phone" ->
-                            "The member's phone must be a Uganda number, for example 0772 123456. A new member needs one.";
-                        default -> "The member cannot be added from this row. Add the member first in Members.";
-                    });
+            return Optional.of(plainRefusal(e));
         }
+    }
+
+    @Override
+    public String plainRefusal(ApiException e) {
+        if ("plan_limit_reached".equals(e.code())) {
+            return "The business's plan has no room for more members. Add fewer, or ask the operator about a bigger plan.";
+        }
+        String field = e.errors().isEmpty() ? "" : e.errors().getFirst().field();
+        return switch (field) {
+            case "branch_id" ->
+                "You may not add members in this branch. Choose another branch, or add the member first.";
+            case "full_name" -> "The member's name is empty or longer than 200 characters.";
+            case "phone" ->
+                "The member's phone must be a Uganda number, for example 0772 123456. A new member needs one.";
+            default -> "The member cannot be added from this row. Add the member first in Members.";
+        };
     }
 
     /** What validateNew read from a request: the phones in E.164 and the national ID, if any. */

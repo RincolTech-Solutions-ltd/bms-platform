@@ -276,6 +276,7 @@ bms:
       max-text-chars: ${BMS_SETUP_AI_MAX_TEXT_CHARS:30000}
       gemini-photo-model: ${BMS_SETUP_AI_GEMINI_PHOTO_MODEL:}
       groq-photo-model: ${BMS_SETUP_AI_GROQ_PHOTO_MODEL:}
+      use-deepseek: ${BMS_SETUP_AI_USE_DEEPSEEK:true}
   # JUSTIFICATION-A3: the two new configuration groups (bms.pesapal, bms.payments) for slice #213 are new settings, not wrapped code.
   # Payment collections through Pesapal (ADR-035, spec 3.11). Nothing here collects by default: with no credentials the
   # gateway is off, and startup refuses any base URL that could reach the live provider from outside production (only the

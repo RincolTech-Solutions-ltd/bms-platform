@@ -426,14 +426,14 @@ class ExistingLoanImport {
         try {
             return intake.addFromRegister(branch, m.name, m.phone);
         } catch (ApiException e) {
-            // Every refusal of the member form is said in words that name no member: its own may list who holds a
-            // phone.
+            // Every refusal of the member form is said in words that name no member (its own may list who holds a
+            // phone),
+            // and in the very words the check gives for the same refusal (MemberIntake.plainRefusal).
             throw "duplicate_phone".equals(e.code())
                     ? taken
                     : ApiException.rule(
                             "import_member_not_added",
-                            "A new member in the file could not be added. Nothing was recorded. Check the file again;"
-                                    + " if it still passes, ask an administrator.");
+                            m.name + ": " + intake.plainRefusal(e) + " Nothing was recorded.");
         }
     }
 

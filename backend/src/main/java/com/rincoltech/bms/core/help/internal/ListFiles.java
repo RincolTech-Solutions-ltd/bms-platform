@@ -365,13 +365,25 @@ final class ListFiles {
         StringBuilder value = null;
         boolean inValue = false;
         int rowNo = 0;
+        // The column of the next cell when a cell gives no reference: one after the last of its row, as Excel reads it.
+        int nextCol = 0;
+        int col = 0;
         while (r.hasNext()) {
             int e = r.next();
             if (e == XMLStreamReader.START_ELEMENT) {
                 switch (r.getLocalName()) {
-                    case "row" -> rowNo = parseInt(r.getAttributeValue(null, "r"), rowNo + 1);
+                    case "row" -> {
+                        rowNo = parseInt(r.getAttributeValue(null, "r"), rowNo + 1);
+                        nextCol = 0;
+                    }
                     case "c" -> {
                         ref = r.getAttributeValue(null, "r");
+                        col = ref == null ? nextCol : column(ref);
+                        if (col < 0 || col >= MAX_COLUMNS) {
+                            throw notRead("This sheet has a cell past the last column Excel allows. Open it, save"
+                                    + " it again, and choose it again, or save it as CSV.");
+                        }
+                        nextCol = col + 1;
                         type = r.getAttributeValue(null, "t");
                         value = new StringBuilder();
                         if (++cells > MAX_CELLS) {
@@ -394,11 +406,6 @@ final class ListFiles {
                         }
                         text = text.replaceAll("[\\t\\r\\n]+", " ").strip();
                         if (!text.isEmpty()) {
-                            int col = column(ref);
-                            if (col < 0) {
-                                throw notRead("This sheet has a cell past the last column Excel allows. Open it, save"
-                                        + " it again, and choose it again, or save it as CSV.");
-                            }
                             rows.computeIfAbsent(rowNo, k -> new TreeMap<>()).put(col, text);
                         }
                         value = null;
@@ -411,13 +418,15 @@ final class ListFiles {
         for (TreeMap<Integer, String> row : rows.values()) {
             int last = row.lastKey();
             for (int c = 0; c <= last; c++) {
+                String cell = row.getOrDefault(c, "");
+                // Checked before the text grows, so one huge cell never takes the sheet past the cap even once.
+                if ((long) out.length() + cell.length() + 1 > MAX_SHEET_CHARS) {
+                    throw notRead("This sheet is too big. Split it into smaller files.");
+                }
                 if (c > 0) {
                     out.append('\t');
                 }
-                out.append(row.getOrDefault(c, ""));
-                if (out.length() > MAX_SHEET_CHARS) {
-                    throw notRead("This sheet is too big. Split it into smaller files.");
-                }
+                out.append(cell);
             }
             out.append('\n');
         }
@@ -430,7 +439,7 @@ final class ListFiles {
             return 0;
         }
         int col = 0;
-        for (char ch : ref.toCharArray()) {
+        for (char ch : ref.toUpperCase(java.util.Locale.ROOT).toCharArray()) {
             if (ch < 'A' || ch > 'Z') {
                 break;
             }

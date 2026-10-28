@@ -250,6 +250,8 @@ services:
       BMS_SETUP_AI_MAX_TEXT_CHARS: ${BMS_SETUP_AI_MAX_TEXT_CHARS:-}
       BMS_SETUP_AI_GEMINI_PHOTO_MODEL: ${BMS_SETUP_AI_GEMINI_PHOTO_MODEL:-}
       BMS_SETUP_AI_GROQ_PHOTO_MODEL: ${BMS_SETUP_AI_GROQ_PHOTO_MODEL:-}
+      # true by default: DeepSeek (paid, capped) is the last resort as in Ask BMS; false keeps the helper on the free tiers.
+      BMS_SETUP_AI_USE_DEEPSEEK: ${BMS_SETUP_AI_USE_DEEPSEEK:-true}
       # Global sign-up caps per hour (chapter 7 section 7.10); defaults 30 and 60.
       BMS_SIGNUP_MAX_APPLICATIONS_PER_HOUR: ${BMS_SIGNUP_MAX_APPLICATIONS_PER_HOUR:-30}
       BMS_SIGNUP_MAX_VERIFICATION_EMAILS_PER_HOUR: ${BMS_SIGNUP_MAX_VERIFICATION_EMAILS_PER_HOUR:-60}

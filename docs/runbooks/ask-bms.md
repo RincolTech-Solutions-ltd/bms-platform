@@ -108,6 +108,7 @@ taps once to add them.
 | `BMS_SETUP_AI_TENANTS` | empty | Tenant **ids**, comma separated. Separate from `BMS_HELP_ASK_TENANTS`. Name HATS, Modern Electronics, Dodo's and Yasad first (D62), each only once its owner has agreed |
 | `BMS_SETUP_AI_GEMINI_PHOTO_MODEL` | empty | The Gemini model that reads a photo; empty is `BMS_HELP_ASK_GEMINI_MODEL`, which reads pictures |
 | `BMS_SETUP_AI_GROQ_PHOTO_MODEL` | empty | A Groq vision model; empty leaves Groq out of photos. DeepSeek reads no pictures and is never sent one |
+| `BMS_SETUP_AI_USE_DEEPSEEK` | true | DeepSeek (paid, capped by `BMS_HELP_ASK_DEEPSEEK_MONTHLY_COST_MICRO`) is the last resort for a typed list or a file, as in Ask BMS; `false` keeps the helper on the free tiers alone |
 | `BMS_SETUP_AI_DAILY_DRAFTS` | 30 | Drafts one business may send to the providers a day |
 | `BMS_SETUP_AI_USER_HOURLY_DRAFTS` | 10 | Drafts one person may ask for in any hour (429 `setup_ai_rate_limited` past it) |
 | `BMS_SETUP_AI_BUDGET_SECONDS` | 25 | One provider's time with its retries, at most 30 |

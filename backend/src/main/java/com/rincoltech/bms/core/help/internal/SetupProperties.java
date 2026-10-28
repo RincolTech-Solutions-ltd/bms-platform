@@ -21,6 +21,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *     Gemini model, which reads pictures
  * @param groqPhotoModel {@code BMS_SETUP_AI_GROQ_PHOTO_MODEL}: a Groq vision model; blank leaves Groq out of photos.
  *     DeepSeek reads no pictures, so it is never asked about a photo
+ * @param useDeepseek {@code BMS_SETUP_AI_USE_DEEPSEEK}: whether DeepSeek, paid and capped, is the last resort for a typed
+ *     list or a file as in Ask BMS (the default, true); false keeps the helper on the free tiers alone
  */
 @ConfigurationProperties("bms.help.setup")
 record SetupProperties(
@@ -31,7 +33,8 @@ record SetupProperties(
         Integer maxTokens,
         Integer maxTextChars,
         String geminiPhotoModel,
-        String groqPhotoModel) {
+        String groqPhotoModel,
+        Boolean useDeepseek) {
 
     static final int MAX_BUDGET_SECONDS = 30;
 
@@ -44,6 +47,7 @@ record SetupProperties(
         maxTextChars = maxTextChars == null ? 30_000 : Math.clamp(maxTextChars, 1000, 100_000);
         geminiPhotoModel = geminiPhotoModel == null ? "" : geminiPhotoModel.strip();
         groqPhotoModel = groqPhotoModel == null ? "" : groqPhotoModel.strip();
+        useDeepseek = useDeepseek == null || useDeepseek;
     }
 
     /** The businesses the helper is on for. An entry that is not a UUID names nobody. */

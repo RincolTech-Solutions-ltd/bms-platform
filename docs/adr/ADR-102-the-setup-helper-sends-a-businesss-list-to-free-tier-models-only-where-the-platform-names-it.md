@@ -51,7 +51,7 @@ read. So what is sent, what is kept and who it is sent for has to be decided, an
    never-Claude checks (`AskProviders`), built a second time with the helper's own budget (25 seconds a provider by default, at
    most 30, `BMS_SETUP_AI_BUDGET_SECONDS`) and output allowance (8000 tokens). A photo goes to a chain of its own: Gemini (its Ask
    BMS model, or `BMS_SETUP_AI_GEMINI_PHOTO_MODEL`) and Groq only with a vision model in `BMS_SETUP_AI_GROQ_PHOTO_MODEL`; DeepSeek
-   reads no pictures and is never sent one. A picture is only ever a `data:` URL of a JPEG, PNG or WebP on a user message
+   reads no pictures and is never sent one. `BMS_SETUP_AI_USE_DEEPSEEK=false` leaves DeepSeek out of the helper altogether, for an owner who wants the free tiers only; Ask BMS keeps its own chain. A picture is only ever a `data:` URL of a JPEG, PNG or WebP on a user message
    (`LlmClient.Message`), so a provider is never asked to fetch a link. `NeverClaudeTest` covers both chains.
 6. **Limits before the work.** A person may ask for `BMS_SETUP_AI_USER_HOURLY_DRAFTS` (10) drafts an hour (429
    `setup_ai_rate_limited`) and a business may send `BMS_SETUP_AI_DAILY_DRAFTS` (30) a day to the providers; both are counted on

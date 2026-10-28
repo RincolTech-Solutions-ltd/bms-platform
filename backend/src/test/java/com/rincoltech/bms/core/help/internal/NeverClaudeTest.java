@@ -203,7 +203,7 @@ class NeverClaudeTest {
     }
 
     static SetupProperties setup(String geminiPhoto, String groqPhoto) {
-        return new SetupProperties("", null, null, null, null, null, geminiPhoto, groqPhoto);
+        return new SetupProperties("", null, null, null, null, null, geminiPhoto, groqPhoto, null);
     }
 
     /**
@@ -228,6 +228,23 @@ class NeverClaudeTest {
                 .extracting(p -> p.name() + "/" + p.client().model())
                 .containsExactly("gemini/gemini-3.5-flash", "groq/test-groq-vision");
         assertThat(factory.built).noneMatch(b -> ANTHROPIC.matcher(b).find());
+    }
+
+    /** The helper can be kept on the free tiers alone: BMS_SETUP_AI_USE_DEEPSEEK=false leaves DeepSeek out of it. */
+    @Test
+    void theSetupHelperCanLeaveDeepSeekOut() {
+        AskProperties ask = properties(gemini(GEMINI_URL, "gemini-3.5-flash-lite"), deepseek(270_000L));
+        SetupProperties free = new SetupProperties("", null, null, null, null, null, "", "", false);
+        assertThat(new AskConfiguration()
+                        .setupProviders(ask, free, new Factory())
+                        .text()
+                        .chain())
+                .extracting(AskProviders.Provider::name)
+                .containsExactly("gemini", "groq");
+        assertThat(AskProviders.from(ask, new Factory()).chain())
+                .as("Ask BMS keeps its own chain")
+                .extracting(AskProviders.Provider::name)
+                .containsExactly("gemini", "groq", "deepseek");
     }
 
     @Test

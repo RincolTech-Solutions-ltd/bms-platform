@@ -134,6 +134,23 @@ class ListFilesTest {
                 .hasMessageContaining("too big");
     }
 
+    /** Cells with no reference follow one another along their row, and a lower case reference reads as upper case. */
+    @Test
+    void cellsWithoutAReferenceKeepTheirPlace() throws IOException {
+        assertThat(ListFiles.column("zz1")).isEqualTo(ListFiles.column("ZZ1"));
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
+            part(
+                    zip,
+                    "xl/worksheets/sheet1.xml",
+                    "<worksheet><sheetData><row r=\"1\">"
+                            + "<c t=\"inlineStr\"><is><t>Test Salt</t></is></c><c><v>500</v></c><c r=\"d1\"><v>9</v></c>"
+                            + "</row></sheetData></worksheet>");
+        }
+        assertThat(ListFiles.read(upload("norefs.xlsx", bytes.toByteArray())).text())
+                .isEqualTo("Test Salt\t500\t\t9");
+    }
+
     static void part(ZipOutputStream zip, String name, String xml) throws IOException {
         zip.putNextEntry(new ZipEntry(name));
         zip.write(xml.getBytes(StandardCharsets.UTF_8));

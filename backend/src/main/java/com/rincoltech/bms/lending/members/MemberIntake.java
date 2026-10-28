@@ -21,6 +21,12 @@ public interface MemberIntake {
      */
     Optional<String> problemAdding(UUID branchId, String fullName, String phone);
 
+    /**
+     * A refusal of the member form in words that name no member, the same words {@link #problemAdding} gives, so the import
+     * says a refusal met at its commit exactly as its check would have.
+     */
+    String plainRefusal(com.rincoltech.bms.kernel.ApiException refusal);
+
     /** The member {@link #addFromRegister} would make, before it is made: the same starting KYC and status, no number yet. */
     MemberSummary preview(UUID branchId, String fullName, String phone);
 
