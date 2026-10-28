@@ -152,15 +152,22 @@ owner decided on 28 October 2026 (D71) that a phone in use stays signed in, with
    by the acting administrator. The person stays active and signs in again with the password; it is for a lost or stolen
    phone. Another administrator's devices only by the Owner (403 `owner_only`, `owner_protected` on the Owner), as every
    other change to an administrator (ADR-062); oneself is refused (422 `cannot_sign_out_self_here`), since the person menu
-   does that. Not a maker-checker action: like the MFA reset it must work with one administrator.
+   does that. An unknown id, another business's user and a person outside the caller's branches are 404 before anything is
+   revoked (the branch rule of the reset of a sign-in, ADR-017); someone invited or deactivated is 409, having no session. Not a maker-checker action: like the MFA reset it must work with one administrator.
 5. **Both act at once**: the authentication filter checks the session row on every request, so a still-valid access token
-   of a signed-out device is refused (`session_revoked`) on its next request, and its refresh cookie too.
+   of a signed-out device is refused (`session_revoked`) on its next request, and its refresh cookie too. A refresh now locks
+   the user's row before its session row, the order in which every revocation of all of a user's sessions locks (sign out
+   everywhere, deactivation, a password or MFA reset), so a refresh running at the same moment either finishes first and its
+   new session is revoked, or waits and finds its session revoked; before, a refresh could add a session the revocation did
+   not see.
 6. **What ends every session is unchanged**: a password reset, deactivation, an MFA reset and the step-up lock.
 7. **The trade-off.** An unlocked phone, or a copied refresh cookie, stays usable for up to 30 idle days and 90 in all, not 7.
    The controls are the phone's screen lock, Sign out everywhere from any other device, an administrator's Sign out their
    devices, deactivation and a new password. The help article "My phone was lost. How do I sign it out?" says so.
 8. **Tests**: `SessionLimitsTest` pins both principals' limits; `StaffAuthIT` shows a session used again after 29 days still
    refreshing with its 90 days unmoved and a 90 day cookie, one idle for 30 days refused, one past 90 days refused however
-   recently used, Sign out everywhere ending every device and its audit row, and the per-staff sign-out with and without the
-   permission and its audit row; `TenantOwnerIT` holds the Owner rule; the deactivation, MFA reset and password reset tests
+   recently used, Sign out everywhere ending every device (a refreshed session too) and its audit row, and the per-staff
+   sign-out with and without the permission, outside the caller's branches, for another business's user and for someone not
+   active, and its audit row; `SuspendedTenantInterceptorTest` lets both sign-outs through for a suspended business;
+   `TenantOwnerIT` holds the Owner rule; the deactivation, MFA reset and password reset tests
    still show every session ending.

@@ -138,6 +138,8 @@ function StaffLayout() {
       }
       // Sign out everywhere ends other devices' sessions, which only the server can do: without an answer nothing is signed out.
       if (!ended && everywhere && !mock) {
+        // Still signed in here: this device hears this person's notifications again.
+        void push.sync();
         setSignOutError('Connect to the internet to sign out everywhere.');
         setAskEverywhere(false);
         return;
@@ -148,6 +150,7 @@ function StaffLayout() {
         setSignOutError('Connect to the internet to sign out.');
         return;
       }
+      // Keeps the outbox: sales still waiting are sent when this person signs in here again (offline-context.dom.test.tsx).
       await offline?.forget();
       offline?.engine.stop();
       setAskEverywhere(false);

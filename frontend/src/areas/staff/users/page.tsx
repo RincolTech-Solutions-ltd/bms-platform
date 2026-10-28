@@ -246,7 +246,7 @@ export function UsersScreen() {
                           </button>
                         )}
                         {u.id !== me.user_id && u.status === 'active' && (
-                          <button type="button" /* busy-exempt: opens a panel */ className="btn-sm" disabled={busyId !== null} onClick={() => { setMode({ kind: 'sign-out', id: u.id ?? '' }); setError(null); }}>
+                          <button type="button" /* busy-exempt: opens a panel */ className="btn-ghost btn-sm" disabled={busyId !== null} onClick={() => { setMode({ kind: 'sign-out', id: u.id ?? '' }); setError(null); }}>
                             Sign out their devices
                           </button>
                         )}
@@ -266,9 +266,9 @@ export function UsersScreen() {
                     {mode?.id === u.id && mode?.kind === 'sign-out' && (
                       <div className="alert alert-warning stack" role="group" aria-label={`Sign out ${u.full_name}`}>
                         {error && <p role="alert" className="alert alert-danger">{error}</p>}
-                        <p>Sign <strong>{u.full_name}</strong> out on every phone and computer? Use this when their phone is lost or stolen. They stay on your staff and sign in again with their password.</p>
+                        <p>Sign <strong>{u.full_name}</strong> out on every phone and computer? Use this when their phone is lost or stolen. They stay on your business's staff and sign in again with their password.</p>
                         <p className="cluster">
-                          <BusyButton type="button" className="btn-danger" busy={busyId === u.id} disabled={busyId !== null} onClick={() => void signOutDevices(u)}>
+                          <BusyButton type="button" busy={busyId === u.id} disabled={busyId !== null} onClick={() => void signOutDevices(u)}>
                             Yes, sign them out
                           </BusyButton>
                           <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={busyId !== null} onClick={() => setMode(null)}>Cancel</button>

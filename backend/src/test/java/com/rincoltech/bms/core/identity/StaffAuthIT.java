@@ -527,6 +527,7 @@ class StaffAuthIT extends IntegrationTest {
 
         ResponseEntity<JsonNode> self =
                 api.post("/api/v1/users/" + admin + "/sign-out", null, adminSession.accessToken());
+        assertThat(self.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(self.getBody().get("code").asString()).isEqualTo("cannot_sign_out_self_here");
 
         ResponseEntity<JsonNode> done =
@@ -551,6 +552,123 @@ class StaffAuthIT extends IntegrationTest {
         assertThat(api.get("/api/v1/me", colleagueSession.accessToken()).getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         assertThat(api.login(email, Api.PASSWORD).getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    /**
+     * Issue #647: a session that was refreshed before Sign out everywhere is ended too; neither the rotated cookie nor the
+     * new one, nor the new access token, works afterwards.
+     */
+    @Test
+    void signOutEverywhereEndsARefreshedSessionToo() {
+        String email = Api.email("rotated");
+        UUID seller = Api.staff(t, email, new Role("cashier", t.headOffice()));
+        Session first = api.signIn(seller, email, Api.PASSWORD, null);
+        ResponseEntity<JsonNode> rotated = api.refresh(first.refreshToken());
+        assertThat(rotated.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String newCookie = api.refreshCookie(rotated);
+        String newAccess = rotated.getBody().get("access_token").asString();
+
+        assertThat(api.post("/api/v1/auth/logout-everywhere", null, newAccess).getStatusCode())
+                .isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(api.get("/api/v1/me", newAccess).getBody().get("code").asString())
+                .isEqualTo("session_revoked");
+        assertThat(api.refresh(newCookie).getBody().get("code").asString()).isEqualTo("session_revoked");
+        assertThat(api.refresh(first.refreshToken()).getBody().get("code").asString())
+                .isEqualTo("session_revoked");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM auth_sessions WHERE user_id = ? AND revoked_at IS NULL")
+                        .param(seller)
+                        .query(Long.class)
+                        .single())
+                .isZero();
+    }
+
+    /** Issue #647: only an active person is signed out; someone still invited or deactivated has no session (409). */
+    @Test
+    void onlyAnActivePersonIsSignedOut() {
+        UUID invited = Api.staff(t, Api.email("invited"), new Role("cashier", t.headOffice()));
+        TestDatabase.owner()
+                .sql("UPDATE users SET status = 'invited' WHERE id = ?")
+                .param(invited)
+                .update();
+        String leaverEmail = Api.email("gone");
+        UUID leaver = Api.staff(t, leaverEmail, new Role("cashier", t.headOffice()));
+        assertThat(api.post("/api/v1/users/" + leaver + "/deactivate", null, adminSession.accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        for (UUID target : List.of(invited, leaver)) {
+            ResponseEntity<JsonNode> refused =
+                    api.post("/api/v1/users/" + target + "/sign-out", null, adminSession.accessToken());
+            assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(refused.getBody().get("code").asString()).isEqualTo("invalid_status_transition");
+            assertThat(audits("core.user.signed_out_everywhere", target)).isZero();
+        }
+    }
+
+    /**
+     * Issue #647: another business's staff member, or an id that is nobody, is not found (404) before anything is revoked,
+     * and that person's sessions stay alive.
+     */
+    @Test
+    void anotherBusinessesStaffIsNotFound() {
+        TestDatabase.Fixture other = TestDatabase.tenant("auth-signout-other", true);
+        Api otherApi = Api.tenant(http, other.slug());
+        String email = Api.email("elsewhere");
+        UUID elsewhere = Api.staff(other, email, new Role("cashier", other.headOffice()));
+        Session theirs = otherApi.signIn(elsewhere, email, Api.PASSWORD, null);
+
+        for (UUID target : List.of(elsewhere, UUID.randomUUID())) {
+            ResponseEntity<JsonNode> refused =
+                    api.post("/api/v1/users/" + target + "/sign-out", null, adminSession.accessToken());
+            assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        }
+        assertThat(otherApi.get("/api/v1/me", theirs.accessToken()).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM auth_sessions WHERE user_id = ? AND revoked_at IS NOT NULL")
+                        .param(elsewhere)
+                        .query(Long.class)
+                        .single())
+                .isZero();
+    }
+
+    /** Issue #647 and ADR-017: an administrator whose permission covers some branches signs out only people inside them. */
+    @Test
+    void aBranchScopedAdminSignsOutOnlyPeopleInTheirBranches() {
+        String inEmail = Api.email("branch2-seller");
+        UUID inBranch = Api.staff(t, inEmail, new Role("cashier", t.secondBranch()));
+        Session inSession = api.signIn(inBranch, inEmail, Api.PASSWORD, null);
+        String hqEmail = Api.email("hq-seller");
+        UUID headOffice = Api.staff(t, hqEmail, new Role("cashier", t.headOffice()));
+        Session hqSession = api.signIn(headOffice, hqEmail, Api.PASSWORD, null);
+        Map<String, String> scoped = Map.of(
+                "X-Dev-User-Id", admin.toString(),
+                "X-Dev-Permissions", "core.users.manage",
+                "X-Dev-Branch-Ids", t.secondBranch().toString());
+
+        ResponseEntity<JsonNode> outside = api.call(
+                org.springframework.http.HttpMethod.POST,
+                "/api/v1/users/" + headOffice + "/sign-out",
+                null,
+                null,
+                scoped);
+        assertThat(outside.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(api.get("/api/v1/me", hqSession.accessToken()).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(audits("core.user.signed_out_everywhere", headOffice)).isZero();
+
+        ResponseEntity<JsonNode> inside = api.call(
+                org.springframework.http.HttpMethod.POST,
+                "/api/v1/users/" + inBranch + "/sign-out",
+                null,
+                null,
+                scoped);
+        assertThat(inside.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(api.get("/api/v1/me", inSession.accessToken())
+                        .getBody()
+                        .get("code")
+                        .asString())
+                .isEqualTo("session_revoked");
     }
 
     /** FR-IAM-08: deactivation refuses the next request of a still-valid access token. */

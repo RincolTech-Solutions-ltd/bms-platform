@@ -61,8 +61,9 @@ describe('the help corpus', () => {
 
   it('gives every article a title, an introduction and at least two steps, every step with a captioned picture but those pending', () => {
     for (const a of ARTICLES) {
-      // One plain sentence may set the scene first, as the lost phone's title does (issue #647).
-      expect(a.title, a.id).toMatch(/^([A-Z][^.?]*\. )?(How do I|What|Why) .+\?$/);
+      // The lost phone's title, set by issue #647, says what happened before it asks; every other title asks at once.
+      if (a.id === 'lost-phone') expect(a.title).toBe('My phone was lost. How do I sign it out?');
+      else expect(a.title, a.id).toMatch(/^(How do I|What|Why) .+\?$/);
       expect(a.intro.length, a.id).toBeGreaterThan(0);
       expect(a.steps.length, a.id).toBeGreaterThanOrEqual(2);
       if (PICTURES_PENDING.includes(a.id)) expect(a.steps.some((s) => s.picture), a.id).toBe(false);
