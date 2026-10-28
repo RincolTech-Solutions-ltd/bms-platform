@@ -372,11 +372,13 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       drafts.current.clear();
     };
   }, []);
+  // The drafts of new items whose commit is on its way (issue #664): the re-send below leaves them alone.
+  const sending = useRef(new Set<string>());
   // A discard that could not be sent (the screen left offline, a reload) is sent again once Sell is open and online.
   useEffect(() => {
     if (!online) return;
     setStuck(false);
-    const live = [...drafts.current.values()];
+    const live = [...drafts.current.values(), ...sending.current];
     for (const id of keptCounts()) if (!live.includes(id)) discardCount(id);
   }, [online]);
   const holdsDraft = () => {
@@ -473,6 +475,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
             discardCount(draftId);
             throw stale() ? new StaleCount() : new Error('big drop');
           }
+          sending.current.add(draftId);
           try {
             // No press to try again here: a commit whose answer was lost is sent once more on the same draft.
             await commitMade(draftId).catch((e: unknown) => {
@@ -485,6 +488,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
             if (refused(e)) discardCount(draftId);
             else lost = true;
             throw e;
+          } finally {
+            sending.current.delete(draftId);
           }
           keepCount(draftId, false);
           if (stale()) throw new StaleCount();

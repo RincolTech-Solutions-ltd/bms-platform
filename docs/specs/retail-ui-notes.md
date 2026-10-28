@@ -1410,7 +1410,9 @@ the items show only while you search, and go away once one is picked. Every item
   not return, is never sent to be refused: that draft is discarded and the line has its tick on Count stock. The usual count of
   a new item (no tick asked) follows the same rules: an answer after **Clear this sale** or leaving the screen puts nothing on
   the sale (a draft not yet committed is discarded, a commit that landed stands), and a commit whose answer is lost is sent once
-  more on the same draft; still lost, the draft is kept for a later discard and Sell says the count may not be committed.
+  more on the same draft; still lost, the draft is kept for a later discard and Sell says the count may not be committed. The
+  later discard never takes a draft whose commit is still on its way, so a connection that comes back between the two tries
+  leaves the count to be sent again (issue #664).
   Count stock shows a discarded count as cancelled, never as committed.
 - **Scan box.** Unchanged (ADR-070 decision 11, owner decision D7): a scanner types only into the Scan box, which adds the item or one more.
 - **Tours.** `retail-sales` version 16, `page-stocktake` 3 (the search on top and the list Not counted yet), `page-restock` 3, `page-usage` 2, `page-transfer` 3,

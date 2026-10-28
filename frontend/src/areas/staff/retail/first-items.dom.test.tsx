@@ -690,6 +690,36 @@ describe('a Sell search that finds nothing', () => {
     expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
   });
 
+  /** Sell inside the offline context, with a network the test turns off and on. */
+  const openWithNetwork = () => {
+    const network = testConnectivity(true);
+    const offline = { scope: 'test', connectivity: network, catalogue: null, engine: { subscribe: () => () => undefined, snapshot: () => ({ items: [], syncing: false, needsSignIn: false }) } } as unknown as Offline;
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <OfflineProvider value={offline}><StaffContext.Provider value={{ me: owner, branch: owner.branches?.[0]?.id ?? '', chooseBranch }}><SaleForm branchId={owner.branches?.[0]?.id ?? ''} /></StaffContext.Provider></OfflineProvider>
+      </QueryClientProvider>,
+    );
+    return network;
+  };
+
+  it('never discards the count of a new item whose commit is on its way when the connection comes back, and puts it on the sale (issue #664)', async () => {
+    createProduct.mockResolvedValue(made);
+    createStocktake.mockResolvedValue(draftOf('0.000'));
+    let first: (e: unknown) => void = () => undefined;
+    commitStocktake.mockImplementationOnce(() => new Promise((_, reject) => { first = reject; })).mockResolvedValue({ ...draftOf('0.000'), status: 'committed' });
+    const network = openWithNetwork();
+    await fill('4');
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalledTimes(1));
+    // The connection drops and comes back before the first commit's answer, which is then lost: the commit is sent again.
+    act(() => network.set(false));
+    act(() => network.set(true));
+    await act(async () => first(new RetailError('Offline', 503, 'unavailable')));
+    expect(await screen.findByRole('button', { name: 'Remove Test duvet cover' })).toBeTruthy();
+    expect(commitStocktake.mock.calls).toEqual([['s1'], ['s1']]);
+    expect(discardStocktake).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('sale-held-counts')).toBe('[]');
+  });
+
   it('keeps an open Add it here with what was typed when a later search finds something (review of #616)', async () => {
     cats = [duvets];
     listProducts.mockImplementation(({ query }: { query?: string }) => Promise.resolve(query === 'Test duvet' ? [{ ...made, qty: '2.000' }] : []));
