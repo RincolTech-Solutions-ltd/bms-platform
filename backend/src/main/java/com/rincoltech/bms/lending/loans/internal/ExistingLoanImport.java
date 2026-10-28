@@ -553,8 +553,8 @@ class ExistingLoanImport {
             p.matchedNote = "Member " + m.memberNo() + ", " + m.fullName() + ", has this phone"
                     + (sameName(m.fullName(), name)
                             ? ""
-                            : ". The file says " + name + ". Record it only if this is the same person; if not, take"
-                                    + " this loan out");
+                            : ". The file says " + name + ". If this is the same person, tick This is the same person"
+                                    + " (or, for a file you typed, record it as it is); if not, remove this loan");
             return null;
         }
         // Two holders, or one in a branch outside the caller's, read exactly as no holder: the check says a new member

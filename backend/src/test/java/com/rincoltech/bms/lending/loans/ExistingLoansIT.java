@@ -1384,8 +1384,9 @@ class ExistingLoansIT extends LoanFixtures {
                 .as("a member already holding the phone needs no branch")
                 .startsWith("ready:")
                 .endsWith("Member " + known
-                        + ", Test Borrower Known, has this phone. The file says Someone Else. Record it"
-                        + " only if this is the same person; if not, take this loan out")
+                        + ", Test Borrower Known, has this phone. The file says Someone Else. If this is the same"
+                        + " person, tick This is the same person (or, for a file you typed, record it as it is); if"
+                        + " not, remove this loan")
                 .doesNotContain("fix the phone");
 
         ResponseEntity<JsonNode> checked = importCsv(csv, true, adminPerms, t.headOffice());
@@ -1516,7 +1517,10 @@ class ExistingLoansIT extends LoanFixtures {
                 .isEqualTo(2);
         assertThat(messages(checked).get("REG-501")).startsWith("error:The business's plan has no room for the 2 new");
         ResponseEntity<JsonNode> committed = importCsv(csv, false, adminPerms, t.headOffice());
-        assertThat(committed.getBody().get("errors").asInt()).as("the commit says what the check said").isEqualTo(2);
+        assertThat(committed.getBody().get("errors").asInt())
+                .as("the commit says what the check said")
+                .isEqualTo(2);
+        assertThat(messages(committed)).as("in the same words, row by row").isEqualTo(messages(checked));
         assertThat(committed.getBody().get("added").asInt()).isZero();
         assertThat(count("SELECT count(*) FROM lending_members WHERE tenant_id = ?", t.tenantId()))
                 .isEqualTo(active);

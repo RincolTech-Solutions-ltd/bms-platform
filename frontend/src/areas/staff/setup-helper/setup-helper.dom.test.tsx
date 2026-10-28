@@ -161,10 +161,10 @@ describe('the setup helper on Import existing loans', () => {
     draw(<ExistingLoansImport api={loansApi(importCsv)} helperApi={helper({ draftLoans: vi.fn().mockResolvedValue(known) })} />);
     fireEvent.change(await screen.findByLabelText('The loans, one on each line'), { target: { value: 'Y-01 T. Other 400000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Read my list' }));
-    expect(await screen.findByText('Member M000001, Test Member Known, has this phone already. The register says T. Other. Tick below if it is the same person, or remove this loan.')).toBeTruthy();
+    expect(await screen.findByText('Member M000001, Test Member Known, has this phone already. The register says T. Other. If this is the same person, tick This is the same person; if not, remove this loan.')).toBeTruthy();
     fireEvent.change(await screen.findByLabelText(/Loan product for these loans/), { target: { value: 'LOAN1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Check these loans' }));
-    const same = screen.getByLabelText('T. Other is Test Member Known, the same person') as HTMLInputElement;
+    const same = screen.getByLabelText('This is the same person') as HTMLInputElement;
     expect(same.checked).toBe(false);
     expect(importCsv).not.toHaveBeenCalled();
     fireEvent.click(same);

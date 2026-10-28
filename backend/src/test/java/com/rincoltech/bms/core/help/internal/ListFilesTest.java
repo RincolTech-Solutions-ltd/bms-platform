@@ -203,6 +203,17 @@ class ListFilesTest {
         assertThat(Math.ceilDiv(7999, ListFiles.subsampling(7999, 5000))).isLessThanOrEqualTo(2 * ListFiles.MAX_SIDE);
     }
 
+    /** A real 7999 by 5000 PNG, just under the cap, is decoded stepped and sent no longer than MAX_SIDE. */
+    @Test
+    void aPhotoJustUnderTheCapIsDecodedSmall() throws IOException {
+        ByteArrayOutputStream png = new ByteArrayOutputStream();
+        ImageIO.write(new BufferedImage(7999, 5000, BufferedImage.TYPE_BYTE_BINARY), "png", png);
+        String url = ListFiles.read(upload("big.png", png.toByteArray())).pictureDataUrl();
+        BufferedImage sent = ImageIO.read(new ByteArrayInputStream(
+                Base64.getDecoder().decode(url.substring("data:image/jpeg;base64,".length()))));
+        assertThat(Math.max(sent.getWidth(), sent.getHeight())).isEqualTo(ListFiles.MAX_SIDE);
+    }
+
     /** A page declaring 200 inches a side is drawn no larger than the longest side that is sent. */
     @Test
     void aScannedPageOfAnySizeIsDrawnSmall() throws IOException {

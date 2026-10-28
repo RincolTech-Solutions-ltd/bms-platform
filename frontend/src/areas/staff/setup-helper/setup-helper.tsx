@@ -172,7 +172,7 @@ export function LoanDraftList({ loans, onChange }: { loans: LoanEdit[]; onChange
           {l.memberNo ? (
             namesDiffer(l) ? (
               <>
-                <Note>{`Member ${l.memberNo}, ${l.memberFullName}, has this phone already. The register says ${l.memberName}. Tick below if it is the same person, or remove this loan.`}</Note>
+                <Note>{`Member ${l.memberNo}, ${l.memberFullName}, has this phone already. The register says ${l.memberName}. If this is the same person, tick This is the same person; if not, remove this loan.`}</Note>
                 <label htmlFor={slug(i, 'same')}>
                   <input
                     id={slug(i, 'same')}
@@ -181,7 +181,7 @@ export function LoanDraftList({ loans, onChange }: { loans: LoanEdit[]; onChange
                     {...(l.sameConfirmed ? {} : { 'data-needed': '' })}
                     onChange={(e) => set(i, { sameConfirmed: e.target.checked })}
                   />{' '}
-                  {`${l.memberName} is ${l.memberFullName}, the same person`}
+                  This is the same person
                 </label>
               </>
             ) : (
