@@ -441,10 +441,13 @@ describe('quick add paid for now from cash', () => {
     expect(screen.getByTestId('qa-paid-from').textContent).toContain('Type the buying price and how many');
     type(/^Buying price/, '2500');
     expect(screen.getByTestId('qa-paid-from').textContent).toContain(`UGX 30,000 comes out of Cash at ${branchLabel(branch)}.`);
+    // The amount is in the kit's tabular figures (rule 8), so it does not jiggle while the price is typed.
+    expect(screen.getByTestId('qa-paid-total').className).toBe('num');
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     await screen.findByTestId('qa-done');
     expect((quickAdd.mock.calls[0] as [Record<string, unknown>])[0]).toMatchObject({ paid_from: 'cash', cost_minor: 2500, qty: '12.000' });
-    expect(screen.getByTestId('qa-paid').textContent).toContain('RP00000001');
+    expect(screen.getByTestId('qa-paid').textContent).toContain('recorded as Buy stock RP00000001');
+    expect(screen.getByTestId('qa-paid').querySelector('.num')?.textContent).toBe('UGX 30,000');
   });
 
   it('can take the money from mobile money instead', async () => {

@@ -141,6 +141,8 @@ export function QuickAddForm({ initialName = '', onSell }: {
   // Ticked, then Where moved to a place where this person may not buy stock: Add is held until they untick or move back, so
   // goods meant as paid for never go in as opening stock unnoticed.
   const cannotPayHere = paid && profit && mayCount && !holdsAt(me, BUY, where);
+  // The place named on the paid lines; never empty, even before Where is known.
+  const whereName = branchLabel(places.find((b) => b.id === where)) || 'this place';
   const paidMinor = paying && counted !== null && costMinor !== null ? Math.round((counted * costMinor) / 1000) : null;
   const complete = name.trim() !== '' && sellMinor !== null && costMinor !== null && (!mayCount || (counted !== null && where !== ''))
     && (!pieceOff || unitId !== '') && (!generalOff || categoryId !== '')
@@ -260,7 +262,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
       <section className="rt-card stack" aria-labelledby="qa-done">
         <p id="qa-done" role="status" className="alert alert-success" data-testid="qa-done">{addedLine(done.added, atName)}</p>
         {done.added.paid_from && done.added.paid_minor !== undefined && (
-          <p className="hint" data-testid="qa-paid">{money(done.added.paid_minor)} taken from {done.added.paid_from === 'cash' ? 'Cash' : 'Mobile money'} at {atName}, purchase {done.added.purchase_no}.</p>
+          <p className="hint" data-testid="qa-paid"><span className="num">{money(done.added.paid_minor)}</span> taken from {done.added.paid_from === 'cash' ? 'Cash' : 'Mobile money'} at {atName}, recorded as Buy stock {done.added.purchase_no}.</p>
         )}
         {done.note && <p className="hint" data-testid="qa-photo-note">{done.note}</p>}
         {notHere && <p className="hint" data-testid="qa-not-here">{sellsThere ? `You do not sell at ${atName}, so Sell it is not offered here.` : `${atName} is a store, so the item is sold from a shop.`}</p>}
@@ -357,7 +359,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
               </label>
               {cannotPayHere && (
                 <p id="qa-paid-here" role="alert" className="alert alert-warning" data-testid="qa-paid-here">
-                  {`You may not buy stock at ${branchLabel(places.find((b) => b.id === where))}, so the money cannot be taken there. Choose another place, or untick this.`}
+                  {`You may not buy stock at ${whereName}, so the money cannot be taken there. Choose another place, or untick this.`}
                 </p>
               )}
               {paying && (
@@ -365,7 +367,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
                   <Segmented label="Paid from" options={PAID_FROM} value={paidFrom} onChange={setPaidFrom} />
                   <Hint full>
                     {paidMinor !== null && paidMinor > 0
-                      ? `${money(paidMinor)} comes out of ${paidFrom === 'cash' ? 'Cash' : 'Mobile money'} at ${branchLabel(places.find((b) => b.id === where))}.`
+                      ? <><span className="num" data-testid="qa-paid-total">{money(paidMinor)}</span>{` comes out of ${paidFrom === 'cash' ? 'Cash' : 'Mobile money'} at ${whereName}.`}</>
                       : 'Type the buying price and how many, to see what comes out.'}
                   </Hint>
                 </>
