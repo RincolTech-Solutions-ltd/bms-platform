@@ -385,6 +385,43 @@ describe('quick add paid for now from cash', () => {
     expect(screen.getByTestId('qa-paid-from').textContent).toContain('UGX 3,000 comes out of Mobile money');
   });
 
+  /** The owner who may buy stock only at the branch in use, not at the other place. */
+  function buysHereOnly(): Me {
+    return { ...owner, permission_scopes: { ...(owner.permission_scopes ?? {}), 'retail.purchase.create': { all_branches: false, branch_ids: [branch?.id ?? ''] } } };
+  }
+  function fillPaid(name: string) {
+    type(/^Name/, name);
+    type(/^Selling price/, '1500');
+    type(/^Buying price/, '1000');
+    type(/How many do you have here now/, '2');
+    fireEvent.click(screen.getByLabelText(/I just bought these/));
+  }
+
+  it('ticked, then Where moved to a place this person may not buy at, holds Add and says so, never opening stock', () => {
+    open(buysHereOnly());
+    fillPaid('Test Cup');
+    fireEvent.change(screen.getByLabelText(/^Where/), { target: { value: other?.id } });
+    // The tick stays in view, ticked, with a plain line, and Add sends nothing.
+    expect((screen.getByLabelText(/I just bought these/) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByTestId('qa-paid-here').textContent).toContain(`You may not buy stock at ${branchLabel(other)}`);
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(quickAdd).not.toHaveBeenCalled();
+  });
+
+  it('moved back to where buying is allowed, sends as paid, and Add another starts with the tick off', async () => {
+    quickAdd.mockResolvedValue({ product_id: 'p7', description: 'Test Cup', unit: 'pc', item_made: true, branch_id: branch?.id, qty: '2', paid_from: 'cash', purchase_no: 'RP00000002', paid_minor: 2000 });
+    open(buysHereOnly());
+    fillPaid('Test Cup');
+    fireEvent.change(screen.getByLabelText(/^Where/), { target: { value: other?.id } });
+    fireEvent.change(screen.getByLabelText(/^Where/), { target: { value: branch?.id } });
+    expect(screen.queryByTestId('qa-paid-here')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await screen.findByTestId('qa-done');
+    expect((quickAdd.mock.calls[0] as [Record<string, unknown>])[0]).toMatchObject({ paid_from: 'cash', branch_id: branch?.id });
+    fireEvent.click(screen.getByRole('button', { name: 'Add another' }));
+    expect((screen.getByLabelText(/I just bought these/) as HTMLInputElement).checked).toBe(false);
+  });
+
   it('is not offered to someone who may not buy stock', () => {
     const scopes = { ...(owner.permission_scopes ?? {}) };
     delete scopes['retail.purchase.create'];

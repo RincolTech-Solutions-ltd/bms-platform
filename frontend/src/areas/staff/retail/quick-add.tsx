@@ -137,10 +137,13 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const counted = mayCount ? parseCount(qty) : null;
   // Paid for now from cash: only where this person may buy stock, and with the buying price, which the purchase needs.
   const paying = paid && profit && mayCount && holdsAt(me, BUY, where);
+  // Ticked, then Where moved to a place where this person may not buy stock: Add is held until they untick or move back, so
+  // goods meant as paid for never go in as opening stock unnoticed.
+  const cannotPayHere = paid && profit && mayCount && !holdsAt(me, BUY, where);
   const paidMinor = paying && counted !== null && costMinor !== null ? Math.round((counted * costMinor) / 1000) : null;
   const complete = name.trim() !== '' && sellMinor !== null && costMinor !== null && (!mayCount || (counted !== null && where !== ''))
     && (!pieceOff || unitId !== '') && (!generalOff || categoryId !== '')
-    && (!paying || (costMinor > 0 && counted !== null && counted > 0));
+    && (!paying || (costMinor > 0 && counted !== null && counted > 0)) && !cannotPayHere;
   const canAddAnyway = (me.permissions ?? []).includes('core.settings.manage');
 
   const add = useMutation({
@@ -339,11 +342,23 @@ export function QuickAddForm({ initialName = '', onSell }: {
               </select>
             )}
           />
-          {profit && holdsAt(me, BUY, where) && (
+          {profit && (holdsAt(me, BUY, where) || paid) && (
             <div className="stack" data-testid="qa-paid-from">
               <label htmlFor="qa-paid">
-                <input id="qa-paid" type="checkbox" checked={paid} onChange={(e) => setPaid(e.target.checked)} /> {PAID_TICK}
+                <input
+                  id="qa-paid"
+                  type="checkbox"
+                  checked={paid}
+                  onChange={(e) => setPaid(e.target.checked)}
+                  aria-invalid={cannotPayHere || undefined}
+                  aria-describedby={cannotPayHere ? 'qa-paid-here' : undefined}
+                /> {PAID_TICK}
               </label>
+              {cannotPayHere && (
+                <p id="qa-paid-here" role="alert" className="alert alert-warning" data-testid="qa-paid-here">
+                  {`You may not buy stock at ${branchLabel(places.find((b) => b.id === where))}, so the money cannot be taken there. Choose another place, or untick this.`}
+                </p>
+              )}
               {paying && (
                 <>
                   <Segmented label="Paid from" options={PAID_FROM} value={paidFrom} onChange={setPaidFrom} />
