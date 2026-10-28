@@ -363,6 +363,13 @@ class StockService {
         Stocktake s = repo.stocktake(id, true)
                 .filter(x -> principal.may("retail.stocktake.commit", x.branchId()))
                 .orElseThrow(ApiException::notFound);
+        if (s.status().equals("discarded")) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "stocktake_discarded",
+                    "Stock count discarded",
+                    "This stock count was discarded, so it cannot be committed. Count the items again.");
+        }
         if (!s.status().equals("draft")) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
@@ -447,6 +454,38 @@ class StockService {
         after.put("adjusted_lines", movements.size());
         audit.record(new AuditLog.Entry(
                 "retail.stocktake.committed", STOCKTAKE, id, s.branchId(), Map.of("status", "draft"), after));
+        return visible(repo.stocktake(id, false).orElseThrow());
+    }
+
+    /**
+     * Issue #656: ends a draft count without writing stock, so it no longer blocks a correction of its items or the closing of
+     * its branch. The person who made it, or anyone who may count at its branch, may discard it. Discarding a discarded count
+     * again returns it unchanged; a committed count is refused with 409 {@code stocktake_committed}.
+     */
+    @Transactional
+    Stocktake discard(UUID id) {
+        Principal principal = CurrentPrincipal.require();
+        Stocktake s = repo.stocktake(id, true)
+                .filter(x -> principal.userId().equals(x.createdBy())
+                        || principal.may("retail.stocktake.commit", x.branchId()))
+                .orElseThrow(ApiException::notFound);
+        if (s.status().equals("committed")) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "stocktake_committed",
+                    "Stock count committed",
+                    "This stock count has been committed already, so it cannot be discarded.");
+        }
+        if (s.status().equals("draft")) {
+            repo.markDiscarded(id, principal.userId());
+            audit.record(new AuditLog.Entry(
+                    "retail.stocktake.discarded",
+                    STOCKTAKE,
+                    id,
+                    s.branchId(),
+                    Map.of("status", "draft"),
+                    Map.of("status", "discarded")));
+        }
         return visible(repo.stocktake(id, false).orElseThrow());
     }
 

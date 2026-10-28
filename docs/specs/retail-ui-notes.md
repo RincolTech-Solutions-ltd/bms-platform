@@ -1397,11 +1397,16 @@ the items show only while you search, and go away once one is picked. Every item
   The count Sell makes of an item added there is of a new item, which holds nothing, so it is never a big drop; should the
   records ever hold more, Sell asks that line's tick itself (issue #656), from the balance it reads before any draft exists:
   the words of Count stock, **Yes, ... is right**, **Commit the count** (which only then makes the count and sends it
-  acknowledged, and puts the item on the sale) and **Not now** (the item stays off the sale, nothing is left open). Leaving the
-  screen, clearing the sale or switching branch while the tick is asked leaves no draft behind. Each item asks its own tick and
-  makes its own count, so a tick never carries to another item. A lost commit sends the same draft again; a refusal shows the
-  server's words and leaves the item for Count stock. Stock that arrives between the read and the count is never sent to be
-  refused: the line has its tick on Count stock.
+  acknowledged, and puts the item on the sale) and **Not now** (the item stays off the sale, nothing is left open). Each item
+  asks its own tick, makes its own count and has its own press, so a tick or a busy button never carries to another item. A
+  lost commit sends the same draft again. Once a draft exists, **Not now**, **Clear this sale**, leaving the screen and
+  switching branch discard it (`POST /retail/stocktakes/{id}/discard`); a count pressed before the sale was cleared or the
+  branch switched is ignored when its answer comes, and its draft discarded, so the item never lands on another sale. Offline,
+  Not now, Clear this sale and the branch switch wait, with the line "A count on this sale is not committed. Connect to the
+  internet, then commit the count or press Not now, before you clear the sale or switch branch."; a discard lost to leaving the
+  screen offline or a reload is sent again the next time Sell is open and online. A refusal shows the server's words, discards
+  the draft and leaves the item for Count stock. Stock that arrives between the read and the count, or a balance the search did
+  not return, is never sent to be refused: that draft is discarded and the line has its tick on Count stock.
 - **Scan box.** Unchanged (ADR-070 decision 11, owner decision D7): a scanner types only into the Scan box, which adds the item or one more.
 - **Tours.** `retail-sales` version 16, `page-stocktake` 3 (the search on top and the list Not counted yet), `page-restock` 3, `page-usage` 2, `page-transfer` 3,
   `page-sizes-join` 2 and `page-labels` 2 word their search steps for the list that shows while you type.
