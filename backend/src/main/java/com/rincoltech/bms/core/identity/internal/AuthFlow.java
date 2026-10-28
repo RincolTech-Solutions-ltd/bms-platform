@@ -533,6 +533,17 @@ class AuthFlow {
         });
     }
 
+    /**
+     * Sign out everywhere (issue #647): every session of the user ends, this one included, so a lost or lent phone is
+     * refused on its next request. Audited with how many sessions ended.
+     */
+    @Transactional
+    int logoutEverywhere(Accounts accounts, UUID userId) {
+        int ended = accounts.sessions().revokeAllOf(userId, "sign_out", clock.now());
+        accounts.audit("core.auth.signed_out_everywhere", userId, Map.of("sessions_ended", ended));
+        return ended;
+    }
+
     private Outcome signIn(
             Accounts accounts,
             UUID userId,

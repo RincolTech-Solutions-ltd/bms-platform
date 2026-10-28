@@ -460,6 +460,99 @@ class StaffAuthIT extends IntegrationTest {
         assertThat(expired.getBody().get("code").asString()).isEqualTo("session_expired");
     }
 
+    /** The audit row of an action on a user: who did it and how many sessions it ended. */
+    Map<String, Object> auditRow(String action, UUID entityId) {
+        return TestDatabase.owner()
+                .sql("SELECT actor_user_id, data -> 'after' ->> 'sessions_ended' AS sessions_ended FROM audit_log"
+                        + " WHERE tenant_id = ? AND action = ? AND entity_id = ?")
+                .params(t.tenantId(), action, entityId)
+                .query()
+                .singleRow();
+    }
+
+    /**
+     * Issue #647: Sign out everywhere ends every session of the person at once, on this phone and every other; the next
+     * request of a still-valid access token and every refresh cookie are refused, and it is audited.
+     */
+    @Test
+    void signOutEverywhereEndsEveryDeviceAtOnce() {
+        String email = Api.email("everywhere");
+        UUID seller = Api.staff(t, email, new Role("cashier", t.headOffice()));
+        Session phone = api.signIn(seller, email, Api.PASSWORD, null);
+        Session laptop = api.signIn(seller, email, Api.PASSWORD, null);
+
+        ResponseEntity<JsonNode> out = api.post("/api/v1/auth/logout-everywhere", null, laptop.accessToken());
+        assertThat(out.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(out.getHeaders().getFirst(org.springframework.http.HttpHeaders.SET_COOKIE))
+                .contains("Max-Age=0");
+
+        for (Session device : List.of(phone, laptop)) {
+            assertThat(api.get("/api/v1/me", device.accessToken())
+                            .getBody()
+                            .get("code")
+                            .asString())
+                    .isEqualTo("session_revoked");
+            assertThat(api.refresh(device.refreshToken()).getBody().get("code").asString())
+                    .isEqualTo("session_revoked");
+        }
+        Map<String, Object> audited = auditRow("core.auth.signed_out_everywhere", seller);
+        assertThat(audited.get("actor_user_id")).isEqualTo(seller);
+        assertThat(audited.get("sessions_ended")).isEqualTo("2");
+        // Nobody else is touched, and the person signs in again with the password.
+        assertThat(api.get("/api/v1/me", adminSession.accessToken()).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(api.login(email, Api.PASSWORD).getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    /**
+     * Issue #647: whoever may manage users signs one staff member out on every device, for a lost phone; the person stays
+     * active. Without the permission it is refused and nothing ends, and nobody uses it on themselves.
+     */
+    @Test
+    void anAdministratorSignsOutOnePersonsDevices() {
+        String email = Api.email("lostphone");
+        UUID seller = Api.staff(t, email, new Role("cashier", t.headOffice()));
+        Session phone = api.signIn(seller, email, Api.PASSWORD, null);
+        Session tablet = api.signIn(seller, email, Api.PASSWORD, null);
+        String colleagueEmail = Api.email("colleague");
+        UUID colleague = Api.staff(t, colleagueEmail, new Role("cashier", t.headOffice()));
+        Session colleagueSession = api.signIn(colleague, colleagueEmail, Api.PASSWORD, null);
+
+        ResponseEntity<JsonNode> refused =
+                api.post("/api/v1/users/" + seller + "/sign-out", null, colleagueSession.accessToken());
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(refused.getBody().get("code").asString()).isEqualTo("permission_denied");
+        assertThat(api.get("/api/v1/me", phone.accessToken()).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(audits("core.user.signed_out_everywhere", seller)).isZero();
+
+        ResponseEntity<JsonNode> self =
+                api.post("/api/v1/users/" + admin + "/sign-out", null, adminSession.accessToken());
+        assertThat(self.getBody().get("code").asString()).isEqualTo("cannot_sign_out_self_here");
+
+        ResponseEntity<JsonNode> done =
+                api.post("/api/v1/users/" + seller + "/sign-out", null, adminSession.accessToken());
+        assertThat(done.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(done.getBody().get("status").asString()).isEqualTo("active");
+        for (Session device : List.of(phone, tablet)) {
+            assertThat(api.get("/api/v1/me", device.accessToken())
+                            .getBody()
+                            .get("code")
+                            .asString())
+                    .isEqualTo("session_revoked");
+            assertThat(api.refresh(device.refreshToken()).getBody().get("code").asString())
+                    .isEqualTo("session_revoked");
+        }
+        Map<String, Object> audited = auditRow("core.user.signed_out_everywhere", seller);
+        assertThat(audited.get("actor_user_id")).isEqualTo(admin);
+        assertThat(audited.get("sessions_ended")).isEqualTo("2");
+        // The administrator and the colleague stay signed in; the person signs in again with the password.
+        assertThat(api.get("/api/v1/me", adminSession.accessToken()).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(api.get("/api/v1/me", colleagueSession.accessToken()).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(api.login(email, Api.PASSWORD).getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
     /** FR-IAM-08: deactivation refuses the next request of a still-valid access token. */
     @Test
     void deactivationRevokesSessionsImmediately() {
