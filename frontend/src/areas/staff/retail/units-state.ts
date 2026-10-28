@@ -120,7 +120,7 @@ export function enteredPriceMinor(line: SaleLine): number {
 export type PackSize = { unit?: string; factor?: string };
 
 /**
- * Issue #650 (ADR-102): the pack an item's stock is shown and counted in, the one the server marks `standard` by its one rule
+ * Issue #650 (ADR-103): the pack an item's stock is shown and counted in, the one the server marks `standard` by its one rule
  * (the shop's usual pack, then for buying and selling, then the biggest), as it sends `standard_pack` on a stock row. None while
  * packs are off.
  */

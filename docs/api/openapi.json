@@ -15285,7 +15285,7 @@
             "type" : "integer"
           },
           "standard" : {
-            "description" : "Issue #650 (ADR-102): true for the item's standard pack, the one its stock is shown and counted in; at most one pack of an item",
+            "description" : "Issue #650 (ADR-103): true for the item's standard pack, the one its stock is shown and counted in; at most one pack of an item",
             "type" : "boolean"
           },
           "suggested_sell_minor" : {

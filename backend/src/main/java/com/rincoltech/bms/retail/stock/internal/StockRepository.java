@@ -154,7 +154,7 @@ class StockRepository {
             StandardPack standardPack) {}
 
     /**
-     * Issue #650: the pack a product's stock is shown in, its standard pack, by the catalogue's one rule (ADR-102); the
+     * Issue #650: the pack a product's stock is shown in, its standard pack, by the catalogue's one rule (ADR-103); the
      * service leaves it out while the units capability is off.
      */
     static final String STANDARD_PACK =

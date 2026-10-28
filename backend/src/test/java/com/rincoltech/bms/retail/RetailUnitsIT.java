@@ -756,7 +756,7 @@ class RetailUnitsIT extends IntegrationTest {
     // ---- stock in packs and pieces (issue #650) ---------------------------------------------
 
     /**
-     * The stock lists and the item carry the standard pack (ADR-102), only while the capability is on: the shop's usual pack
+     * The stock lists and the item carry the standard pack (ADR-103), only while the capability is on: the shop's usual pack
      * for that unit first, then a pack for buying and selling before one only for buying, then the biggest.
      */
     @Test

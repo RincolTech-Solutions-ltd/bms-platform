@@ -1,4 +1,4 @@
-# ADR-102: Stock is shown in the item's standard pack and its pieces
+# ADR-103: Stock is shown in the item's standard pack and its pieces
 
 ## Status
 

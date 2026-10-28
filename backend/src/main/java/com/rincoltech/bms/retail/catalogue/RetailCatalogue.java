@@ -31,7 +31,7 @@ public interface RetailCatalogue {
     String UNITS_CAPABILITY = "units";
 
     /**
-     * Issue #650 (ADR-102): the standard pack of the product aliased {@code product}, the one its stock is shown and counted
+     * Issue #650 (ADR-103): the standard pack of the product aliased {@code product}, the one its stock is shown and counted
      * in, as a subquery of {@code pack_id}, {@code pack_unit} and {@code pack_factor} (one row or none). Of its active packs
      * holding more than one base unit: the shop's usual pack for that unit in the item's own unit first (ADR-100), then one
      * used for both buying and selling, then for selling, then for buying (ADR-099), then the biggest, then the unit name in

@@ -1279,7 +1279,7 @@ final class CatalogueApi {
 
             @Schema(
                     description =
-                            "Issue #650 (ADR-102): true for the item's standard pack, the one its stock is shown and"
+                            "Issue #650 (ADR-103): true for the item's standard pack, the one its stock is shown and"
                                     + " counted in; at most one pack of an item")
             boolean standard) {
 

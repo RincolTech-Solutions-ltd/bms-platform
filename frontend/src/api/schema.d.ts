@@ -15156,7 +15156,7 @@ export interface components {
              * @description The pack's own selling price for a walk-in sale; absent when it has none (it then sells at suggested_sell_minor) or the caller may not see prices (issue #624)
              */
             sell_minor?: number;
-            /** @description Issue #650 (ADR-102): true for the item's standard pack, the one its stock is shown and counted in; at most one pack of an item */
+            /** @description Issue #650 (ADR-103): true for the item's standard pack, the one its stock is shown and counted in; at most one pack of an item */
             standard?: boolean;
             /**
              * Format: int64
