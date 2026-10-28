@@ -7,8 +7,9 @@
 -- neither can change again.
 --
 -- Expand only, safe on a populated database. ADD COLUMN with no default is a catalogue change in PostgreSQL 16, with no table
--- rewrite. The status check is replaced as in V38: the new one is added NOT VALID and validated (every row is draft or
--- committed, so it cannot fail), then the old one is dropped. The guard function is replaced in place; its triggers stay.
+-- rewrite. The status check is replaced as in V38 (every row is draft or committed, so it cannot fail), then the old one is
+-- dropped; ADD COLUMN already holds ACCESS EXCLUSIVE, so the NOT VALID split saves no lock, only a short scan of a small table.
+-- The guard function is replaced in place; its triggers stay.
 -- lock_timeout is five seconds as in V96 and V111, so the migration fails and is retried rather than queueing every count
 -- behind the ACCESS EXCLUSIVE lock on retail_stocktakes. bms_app keeps its SELECT, INSERT and UPDATE and forced RLS.
 

@@ -625,6 +625,70 @@ describe('a Sell search that finds nothing', () => {
     expect(discardStocktake).toHaveBeenCalledWith('s1');
   });
 
+  it('puts nothing on a cleared sale when the count of a new item lands after Clear this sale, and keeps the count (issue #656)', async () => {
+    createProduct.mockResolvedValueOnce(sheet).mockResolvedValue(made);
+    createStocktake.mockImplementation(({ lines }: { lines: { product_id: string }[] }) =>
+      Promise.resolve(lines[0]!.product_id === 'p8' ? { id: 's8', status: 'draft', lines: [] } : draftOf('0.000')));
+    let landed: (s: Stocktake) => void = () => undefined;
+    commitStocktake.mockImplementation((id: string) => (id === 's8' ? Promise.resolve({ id, status: 'committed' }) : new Promise<Stocktake>((resolve) => { landed = resolve; })));
+    open(<RecordSale />, owner);
+    await fill('3');
+    expect(await screen.findByRole('button', { name: 'Remove Test bed sheet' })).toBeTruthy();
+    await fill('4');
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('s1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear this sale' }));
+    await act(async () => landed({ ...draftOf('0.000'), status: 'committed' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove Test bed sheet' })).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
+    expect(screen.queryByText(/its count is not/)).toBeNull();
+    expect(discardStocktake).not.toHaveBeenCalled();
+  });
+
+  it('asks no tick on a cleared sale when the balance read answers after Clear this sale (issue #656)', async () => {
+    createProduct.mockResolvedValueOnce(sheet).mockResolvedValue(made);
+    createStocktake.mockResolvedValue({ id: 's8', status: 'draft', lines: [] });
+    commitStocktake.mockImplementation((id: string) => Promise.resolve({ id, status: 'committed' }));
+    let read: (p: Product[]) => void = () => undefined;
+    listProducts.mockImplementation(({ query }: { query?: string }) =>
+      query === 'DUV-0001' ? new Promise<Product[]>((resolve) => { read = resolve; }) : Promise.resolve([]));
+    open(<RecordSale />, owner);
+    await fill('3');
+    expect(await screen.findByRole('button', { name: 'Remove Test bed sheet' })).toBeTruthy();
+    await fill('4');
+    await waitFor(() => expect(listProducts).toHaveBeenCalledWith(expect.objectContaining({ query: 'DUV-0001' })));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear this sale' }));
+    await act(async () => read([{ ...made, qty: '10.000' }]));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove Test bed sheet' })).toBeNull());
+    expect(screen.queryByTestId('sale-count-drop-p9')).toBeNull();
+    expect(createStocktake).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends the commit of a new item again on the same draft when its answer is lost, and takes one the server already took (issue #656)', async () => {
+    createProduct.mockResolvedValue(made);
+    createStocktake.mockResolvedValue(draftOf('0.000'));
+    commitStocktake.mockRejectedValueOnce(new Error('timed out')).mockRejectedValue(new RetailError('Stock count committed', 409, 'stocktake_committed'));
+    open(<RecordSale />, owner);
+    await fill('4');
+    expect(await screen.findByRole('button', { name: 'Remove Test duvet cover' })).toBeTruthy();
+    expect(commitStocktake.mock.calls).toEqual([['s1'], ['s1']]);
+    expect(createStocktake).toHaveBeenCalledTimes(1);
+    expect(discardStocktake).not.toHaveBeenCalled();
+    expect(screen.queryByText(/its count is not/)).toBeNull();
+  });
+
+  it('never discards the count of a new item whose commit is still lost after its second try, and says it may not be in (issue #656)', async () => {
+    createProduct.mockResolvedValue(made);
+    createStocktake.mockResolvedValue(draftOf('0.000'));
+    commitStocktake.mockRejectedValue(new RetailError('Offline', 503, 'unavailable'));
+    open(<RecordSale />, owner);
+    await fill('4');
+    expect(await screen.findByText('The count of Test duvet cover may not be committed. Check it on Count stock before you sell it.')).toBeTruthy();
+    expect(commitStocktake).toHaveBeenCalledTimes(2);
+    expect(discardStocktake).not.toHaveBeenCalled();
+    expect(JSON.parse(sessionStorage.getItem('sale-held-counts') ?? '[]')).toEqual(['s1']);
+    expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
+  });
+
   it('keeps an open Add it here with what was typed when a later search finds something (review of #616)', async () => {
     cats = [duvets];
     listProducts.mockImplementation(({ query }: { query?: string }) => Promise.resolve(query === 'Test duvet' ? [{ ...made, qty: '2.000' }] : []));

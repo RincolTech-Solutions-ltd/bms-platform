@@ -38,6 +38,8 @@ export function useBranchHold(holds: () => boolean): void {
 /** The active branch, a way to choose it (remembered per tenant and user), and whether it is known yet. */
 export function useActiveBranch(me: Me | undefined): { branch: string | null; choose: (selection: string) => void; ready: boolean } {
   const [branch, setBranch] = useState<string | null>(null);
+  const shown = useRef(branch);
+  shown.current = branch;
   const [ready, setReady] = useState(false);
   const stocked = useStockedBranches(me);
   // Waits for the stock read only while it is on its way (a failure or no stock read starts as before).
@@ -46,8 +48,12 @@ export function useActiveBranch(me: Me | undefined): { branch: string | null; ch
   useEffect(() => {
     if (!me || waiting) return;
     const valid = (s: string | null) => (s === ALL_BRANCHES ? Boolean(me.all_branches) : (me.branches ?? []).some((b) => b.id === s));
-    // A profile refetch (every token refresh) keeps the branch already in use.
-    setBranch((current) => (current !== null && valid(current) ? current : initialBranch(me, loadBranch(me.user_id ?? ''), stocked.data ? new Set(stocked.data) : null)));
+    // A profile refetch (every token refresh) keeps the branch already in use, and a screen that holds the branch keeps it too.
+    const current = shown.current;
+    if (current === null || !valid(current)) {
+      const next = initialBranch(me, loadBranch(me.user_id ?? ''), stocked.data ? new Set(stocked.data) : null);
+      if (current === null || next === current || ![...branchHolds].some((holds) => holds())) setBranch(next);
+    }
     setReady(true);
   }, [me, waiting, stocked.data]);
 

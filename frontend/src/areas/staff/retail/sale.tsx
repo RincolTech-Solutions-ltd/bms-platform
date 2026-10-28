@@ -375,6 +375,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
   // A discard that could not be sent (the screen left offline, a reload) is sent again once Sell is open and online.
   useEffect(() => {
     if (!online) return;
+    setStuck(false);
     const live = [...drafts.current.values()];
     for (const id of keptCounts()) if (!live.includes(id)) discardCount(id);
   }, [online]);
@@ -401,10 +402,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         discardCount(draftId);
         throw new StaleCount();
       }
-      // The first commit landed and only its answer was lost: the count stands.
-      await retail.commitStocktake(draftId, [id]).catch((e: unknown) => {
-        if (!(e instanceof RetailError && e.code === 'stocktake_committed')) throw e;
-      });
+      await commitMade(draftId, [id]);
       drafts.current.delete(id);
       keepCount(draftId, false);
     } catch (e) {
@@ -422,7 +420,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     if (e instanceof StaleCount) return;
     const name = h.product.description ?? 'the item';
     // A refusal never passes on a second press: the server's words, the draft discarded and the item left for Count stock.
-    if (e instanceof RetailError && e.status >= 400 && e.status < 500) {
+    if (refused(e)) {
       const draftId = drafts.current.get(h.product.id ?? '');
       drafts.current.delete(h.product.id ?? '');
       if (draftId !== undefined) discardCount(draftId);
@@ -450,30 +448,51 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     const counted = made && mayCount ? parseQty(qty) : null;
     let counts = false;
     let asks = false;
+    let lost = false;
+    // Issue #656: an answer that comes after Clear this sale or after the screen closed is ignored, as on a held count: a draft
+    // not committed yet is discarded, a count that landed stands, and the item goes on no sale.
+    const startedIn = round.current;
+    const stale = () => gone.current || round.current !== startedIn;
     if (counted !== null && counted > 0) {
       try {
         // Issue #636: an item made here holds nothing, so its count is never a big drop. Should the records hold more, the tick is
         // asked first from the balance read here (issue #656), and the draft is made only when Commit the count is pressed.
         const here = (await retail.listProducts({ query: product.code ?? product.description ?? '', branchId })).find((p) => p.id === product.id);
+        if (stale()) throw new StaleCount();
         const expected = here?.qty ?? '0';
         if (bigDrop({ expected_qty: expected, counted_qty: qtyString(counted) })) {
           setHeld((l) => [...l.filter((x) => x.product.id !== product.id), { product, counted, expected }]);
           asks = true;
         } else {
           const count = await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: product.id ?? '', counted_qty: qtyString(counted) }], note: 'Counted when the item was added on Sell' });
+          const draftId = count.id ?? '';
+          keepCount(draftId, true);
+          // Stock that arrived between the read and the count (or a balance the search did not return): never sent to be
+          // refused, and the draft is discarded (issue #656), so the item is counted again on Count stock with its tick.
+          if (stale() || (count.lines ?? []).some(bigDrop)) {
+            discardCount(draftId);
+            throw stale() ? new StaleCount() : new Error('big drop');
+          }
           try {
-            // Stock that arrived between the read and the count (or a balance the search did not return): never sent to be
-            // refused, and the draft is discarded (issue #656), so the item is counted again on Count stock with its tick.
-            if ((count.lines ?? []).some(bigDrop)) throw new Error('big drop');
-            await retail.commitStocktake(count.id ?? '');
-            counts = true;
+            // No press to try again here: a commit whose answer was lost is sent once more on the same draft.
+            await commitMade(draftId).catch((e: unknown) => {
+              if (refused(e)) throw e;
+              return commitMade(draftId);
+            });
           } catch (e) {
-            discardCount(count.id ?? '');
+            // Only a refusal is discarded. A commit whose answer is still lost may have landed: its draft stays kept, and is
+            // discarded when Sell next opens online unless it was committed.
+            if (refused(e)) discardCount(draftId);
+            else lost = true;
             throw e;
           }
+          keepCount(draftId, false);
+          if (stale()) throw new StaleCount();
+          counts = true;
         }
-      } catch {
-        show(`${name} is saved, but its count is not. Count it on ${WORDS.countStock}, then sell it.`, 'error');
+      } catch (e) {
+        if (lost) show(`The count of ${name} may not be committed. Check it on ${WORDS.countStock} before you sell it.`, 'error');
+        else if (!(e instanceof StaleCount)) show(`${name} is saved, but its count is not. Count it on ${WORDS.countStock}, then sell it.`, 'error');
       }
     }
     // The card of a shop with no items, the search and the branches that hold stock all read again with the new item.
@@ -489,6 +508,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         show(`${name} is in your items, but its stock here could not be read. Search for it again.`, 'error');
         return;
       }
+      if (stale()) return;
       if (!here || !(Number(here.qty ?? '0') > 0)) {
         show(`${name} is already in your items, but it has no stock here yet, so it is not on the sale. Use ${WORDS.buyStock} or ${WORDS.countStock} first.`, 'info');
         return;
@@ -497,6 +517,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       if (qty.trim() !== '') show(`${name} is already in your items, so its stock is not changed here. If it is wrong, use ${WORDS.countStock}.`, 'info');
       return;
     }
+    if (stale()) return;
     if (counts) add({ ...product, qty: qtyString(counted ?? 0) });
     else if (asks) return;
     else if (counted === null) show(`${name} is saved. It has no stock here yet: use ${WORDS.buyStock} or ${WORDS.countStock}, then sell it.`, 'info');
@@ -892,6 +913,16 @@ function keepCount(id: string, kept: boolean) {
   } catch {
     // Without storage the discard is tried once.
   }
+}
+
+/** A clear refusal from the server, which a second try would only meet again. */
+const refused = (e: unknown): e is RetailError => e instanceof RetailError && e.status >= 400 && e.status < 500;
+
+/** Issue #656: commits a count Sell made; one the server already took (409 stocktake_committed, its first answer lost) stands. */
+async function commitMade(id: string, acknowledged?: string[]) {
+  await (acknowledged ? retail.commitStocktake(id, acknowledged) : retail.commitStocktake(id)).catch((e: unknown) => {
+    if (!(e instanceof RetailError && e.code === 'stocktake_committed')) throw e;
+  });
 }
 
 /** Issue #656: ends a draft Sell made; one already committed or discarded, or not found, is forgotten too. */
