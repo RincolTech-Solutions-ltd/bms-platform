@@ -496,8 +496,10 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
           counts = true;
         }
       } catch (e) {
-        if (lost) show(`The count of ${name} may not be committed. Check it on ${WORDS.countStock} before you sell it.`, 'error');
-        else if (!(e instanceof StaleCount)) show(`${name} is saved, but its count is not. Count it on ${WORDS.countStock}, then sell it.`, 'error');
+        // A sale cleared or a screen left meanwhile hears nothing of it (issue #664); the kept draft is dealt with as above.
+        if (lost) {
+          if (!stale()) show(`The count of ${name} may not be committed. Check it on ${WORDS.countStock} before you sell it.`, 'error');
+        } else if (!(e instanceof StaleCount)) show(`${name} is saved, but its count is not. Count it on ${WORDS.countStock}, then sell it.`, 'error');
       }
     }
     // The card of a shop with no items, the search and the branches that hold stock all read again with the new item.

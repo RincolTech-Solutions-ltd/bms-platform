@@ -720,6 +720,28 @@ describe('a Sell search that finds nothing', () => {
     expect(sessionStorage.getItem('sale-held-counts')).toBe('[]');
   });
 
+  it('says nothing of a lost commit of a new item once the sale is cleared, and keeps its draft for a later discard (issue #664)', async () => {
+    createProduct.mockResolvedValueOnce(sheet).mockResolvedValue(made);
+    createStocktake.mockImplementation(({ lines }: { lines: { product_id: string }[] }) =>
+      Promise.resolve(lines[0]!.product_id === 'p8' ? { id: 's8', status: 'draft', lines: [] } : draftOf('0.000')));
+    let first: (e: unknown) => void = () => undefined;
+    commitStocktake.mockResolvedValueOnce({ id: 's8', status: 'committed' })
+      .mockImplementationOnce(() => new Promise((_, reject) => { first = reject; })).mockRejectedValue(new RetailError('Offline', 503, 'unavailable'));
+    open(<RecordSale />, owner);
+    await fill('3');
+    expect(await screen.findByRole('button', { name: 'Remove Test bed sheet' })).toBeTruthy();
+    await fill('4');
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('s1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear this sale' }));
+    await act(async () => first(new RetailError('Offline', 503, 'unavailable')));
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalledTimes(3));
+    await act(async () => undefined);
+    expect(screen.queryByText(/may not be committed/)).toBeNull();
+    expect(screen.queryByText(/its count is not/)).toBeNull();
+    expect(JSON.parse(sessionStorage.getItem('sale-held-counts') ?? '[]')).toEqual(['s1']);
+    expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
+  });
+
   it('keeps an open Add it here with what was typed when a later search finds something (review of #616)', async () => {
     cats = [duvets];
     listProducts.mockImplementation(({ query }: { query?: string }) => Promise.resolve(query === 'Test duvet' ? [{ ...made, qty: '2.000' }] : []));
