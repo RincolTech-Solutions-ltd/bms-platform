@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { Product, SaleLine } from '../../../api/retail';
+import type { Pack, Product, SaleLine } from '../../../api/retail';
 import { buildPurchase, restockLineProblem, restockTotal, withUnit as restockWithUnit, type RestockLine } from './restock';
 import { buildSaleRequest, defaultPrice, draftTotal, lineHint, newLine, withUnit, type Draft } from './sale-state';
 import { factorProblem } from './catalogue-packs';
-import { baseCostMinor, baseQtyMilli, enteredPriceMinor, enteredQty, packPriceMinor, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, standardPack } from './units-state';
+import { baseCostMinor, baseQtyMilli, enteredPriceMinor, enteredQty, packPriceMinor, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, samePack, standardPack } from './units-state';
 
 // Units of measure (ADR-033, issue #194): the forms convert with the same rules as the server
 // (Quantities.java) so a line is judged before it is sent. Names and amounts are fabricated.
@@ -155,7 +155,7 @@ describe('stock in packs and pieces (issue #650)', () => {
     expect(packsAndPieces('0.000', 'Piece', carton)).toBe('0 Pieces');
   });
   it('says how far short a negative stock is', () => {
-    expect(packsAndPieces('-27.000', 'Piece', carton)).toBe('1 Carton and 3 Pieces short (-27 Pieces)');
+    expect(packsAndPieces('-27.000', 'Piece', carton)).toBe('1 Carton and 3 Pieces short (27 Pieces short)');
     expect(packsAndPieces('-3.000', 'Piece', carton)).toBe('3 Pieces short');
   });
   it('shows an item with no pack as it always did', () => {
@@ -182,13 +182,18 @@ describe('stock in packs and pieces (issue #650)', () => {
     expect(packsAndPiecesProblem('2', 'x', 'Piece', 'Carton')).toBe('Type Pieces as a number, with at most three decimals.');
     expect(packsAndPiecesProblem('2', '3', 'Piece', 'Carton')).toBeNull();
   });
-  it('picks the active pack holding the most as the standard pack', () => {
-    expect(standardPack(pen)?.unit).toBe('carton');
-    const more: Product = { ...pen, packs: [...(pen.packs ?? []),
-      { id: 'k3', product_id: 'e1', unit_id: 'u3', unit: 'dozen', factor: '12.000', active: true, version: 1 },
-      { id: 'k4', product_id: 'e1', unit_id: 'u4', unit: 'one', factor: '1.000', active: true, version: 1 }] };
-    expect(standardPack(more)?.unit).toBe('carton');
-    expect(standardPack({ ...pen, packs: [] })).toBeUndefined();
+  it('takes the pack the server marks standard, while it is active and holds more than one', () => {
+    const [carton, box] = (pen.packs ?? []) as [Pack, Pack];
+    expect(standardPack(pen)).toBeUndefined();
+    expect(standardPack({ ...pen, packs: [{ ...carton, standard: true }, box] })?.unit).toBe('carton');
+    expect(standardPack({ ...pen, packs: [carton, { ...box, standard: true }] })).toBeUndefined();
+    expect(standardPack({ ...pen, packs: [{ ...carton, factor: '1.000', standard: true }] })).toBeUndefined();
     expect(standardPack({ ...pen, packs: undefined })).toBeUndefined();
+  });
+  it('tells a pack changed in unit or size from the same one', () => {
+    expect(samePack({ unit: 'Carton', factor: '24' }, { unit: 'Carton', factor: '24.000' })).toBe(true);
+    expect(samePack({ unit: 'Carton', factor: '24.000' }, { unit: 'Carton', factor: '30.000' })).toBe(false);
+    expect(samePack({ unit: 'Carton', factor: '24.000' }, { unit: 'Dozen', factor: '24.000' })).toBe(false);
+    expect(samePack({ unit: 'Carton', factor: '24.000' }, undefined)).toBe(false);
   });
 });

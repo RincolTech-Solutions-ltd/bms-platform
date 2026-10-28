@@ -38,7 +38,7 @@ const to = me.branches?.[1]?.id ?? '';
 const soap: Product = {
   id: 'p1', code: 'TS-1', description: 'Test Soap', unit: 'Piece', sell_minor: 1000, active: true, qty: '130.000',
   packs: [
-    { id: 'k1', product_id: 'p1', unit_id: 'u1', unit: 'Carton', factor: '24.000', active: true, purpose: 'both', version: 1 },
+    { id: 'k1', product_id: 'p1', unit_id: 'u1', unit: 'Carton', factor: '24.000', active: true, purpose: 'both', version: 1, standard: true },
     { id: 'k2', product_id: 'p1', unit_id: 'u2', unit: 'Dozen', factor: '12.000', active: true, purpose: 'sell', version: 1 },
   ],
 };
@@ -74,6 +74,9 @@ describe('Move stock in cartons and pieces', () => {
     expect(document.getElementById('tq-0-total')?.textContent).toBe('Moving 1 Carton (24 Pieces)');
     fireEvent.change(screen.getByRole('textbox', { name: 'Test Soap Cartons' }), { target: { value: '6' } });
     expect(screen.getByRole('alert').textContent).toBe('Only 5 Cartons and 10 Pieces (130 Pieces) in stock at this branch.');
+    // Both boxes say the quantity is refused, as the one box of an item with no pack does.
+    expect(screen.getByRole('textbox', { name: 'Test Soap Cartons' }).getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByRole('textbox', { name: 'Test Soap Pieces' }).getAttribute('aria-invalid')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
     expect(createTransfer).not.toHaveBeenCalled();
   });

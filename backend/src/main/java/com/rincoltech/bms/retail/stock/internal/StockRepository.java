@@ -1,6 +1,7 @@
 package com.rincoltech.bms.retail.stock.internal;
 
 import com.rincoltech.bms.kernel.Search;
+import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.stock.LowStockRule;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.internal.StockApi.Correction;
@@ -153,17 +154,11 @@ class StockRepository {
             StandardPack standardPack) {}
 
     /**
-     * Issue #650: the pack a product's stock is shown in, its standard pack: the active pack holding the most base units, more
-     * than one, a tie going to the unit name first in code order. The PWA picks the same one from an item's packs
-     * ({@code standardPack} in units-state.ts); the service leaves it out while the units capability is off.
+     * Issue #650: the pack a product's stock is shown in, its standard pack, by the catalogue's one rule (ADR-102); the
+     * service leaves it out while the units capability is off.
      */
-    static final String STANDARD_PACK = """
-                  LEFT JOIN LATERAL (SELECT su.name AS pack_unit, k.factor AS pack_factor
-                                       FROM retail_product_units k JOIN retail_units su ON su.id = k.unit_id
-                                      WHERE k.tenant_id = p.tenant_id AND k.product_id = p.id AND k.active AND k.factor > 1
-                                      ORDER BY k.factor DESC, su.name COLLATE "C"
-                                      LIMIT 1) sp ON true
-            """;
+    static final String STANDARD_PACK =
+            "  LEFT JOIN LATERAL (" + RetailCatalogue.standardPackSql("p") + ") sp ON true\n";
 
     private static StandardPack standardPack(ResultSet rs) throws SQLException {
         String unit = rs.getString("pack_unit");

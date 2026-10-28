@@ -120,17 +120,17 @@ export function enteredPriceMinor(line: SaleLine): number {
 export type PackSize = { unit?: string; factor?: string };
 
 /**
- * Issue #650: the pack an item's stock is shown in, as the server picks it for a stock row (`standard_pack`): the active pack
- * holding the most base units, more than one; on a tie the unit name first in plain code order. None while packs are off.
+ * Issue #650 (ADR-102): the pack an item's stock is shown and counted in, the one the server marks `standard` by its one rule
+ * (the shop's usual pack, then for buying and selling, then the biggest), as it sends `standard_pack` on a stock row. None while
+ * packs are off.
  */
 export function standardPack(product: Product): Pack | undefined {
-  return activePacks(product)
-    .filter((k) => (factorMilli(k.factor) ?? 0n) > 1000n)
-    .sort((x, y) => {
-      const d = (factorMilli(y.factor) ?? 0n) - (factorMilli(x.factor) ?? 0n);
-      if (d !== 0n) return d > 0n ? 1 : -1;
-      return (x.unit ?? '') < (y.unit ?? '') ? -1 : (x.unit ?? '') > (y.unit ?? '') ? 1 : 0;
-    })[0];
+  return activePacks(product).find((k) => k.standard === true && (factorMilli(k.factor) ?? 0n) > 1000n);
+}
+
+/** Issue #650: whether two packs are the same unit and size, so a count typed in one is never read in another. */
+export function samePack(a: PackSize | undefined, b: PackSize | undefined): boolean {
+  return a?.unit === b?.unit && sameFactor(a?.factor, b?.factor);
 }
 
 /** "1 Carton", "3 Cartons", "2.5 Kgs": a count with its unit, singular only for exactly one. */
@@ -141,7 +141,7 @@ function counted(milli: bigint, unit: string): string {
 /**
  * Issue #650 (units spec section 3, "Stock is shown both ways"): a stock quantity in the item's standard pack and its base unit,
  * and the total in the base unit when that says more: "5 Cartons and 7 Pieces" with "127 Pieces". Less than one pack reads in the
- * base unit only ("7 Pieces"); below zero says how far short ("1 Carton and 3 Pieces short" with "-27 Pieces"). An item with no
+ * base unit only ("7 Pieces"); below zero says how far short ("1 Carton and 3 Pieces short" with "27 Pieces short"). An item with no
  * pack reads as it always did ("127 Piece").
  */
 export function packsAndPiecesParts(qty: string, unit: string | undefined, pack: PackSize | undefined): { inPacks: string; total?: string } {
@@ -153,7 +153,7 @@ export function packsAndPiecesParts(qty: string, unit: string | undefined, pack:
   const rest = size - packs * f;
   const parts = [packs > 0n ? counted(packs * 1000n, pack.unit) : '', rest > 0n || packs === 0n ? counted(rest, unit) : ''].filter(Boolean).join(' and ');
   const inPacks = milli < 0n ? `${parts} short` : parts;
-  return packs > 0n ? { inPacks, total: `${showQty(qty)} ${plural(unit)}` } : { inPacks };
+  return packs > 0n ? { inPacks, total: `${showQty(qtyString(Number(size)))} ${plural(unit)}${milli < 0n ? ' short' : ''}` } : { inPacks };
 }
 
 /** Issue #650: the same in one line, the one every screen says: "5 Cartons and 7 Pieces (127 Pieces)". */

@@ -15134,6 +15134,10 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "standard" : {
+            "description" : "Issue #650 (ADR-102): true for the item's standard pack, the one its stock is shown and counted in; at most one pack of an item",
+            "type" : "boolean"
+          },
           "suggested_sell_minor" : {
             "description" : "The piece price times the size, rounded half up once: what the pack sells at without its own price, and the price the app suggests (issue #624)",
             "format" : "int64",

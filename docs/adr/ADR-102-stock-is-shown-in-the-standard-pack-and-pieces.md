@@ -15,19 +15,24 @@ carry any pack: a stock row had the unit and the quantity only.
 
 ## Decision
 
-1. **The standard pack is the item's biggest active pack.** Of the item's active packs holding more than one base unit, the
-   one holding the most; on a tie, the unit name first in plain code order. Its purpose does not matter: a carton bought and
-   sold, or only bought, is how the shelf is counted. An item with no such pack, or a shop with the units capability off,
+1. **The standard pack is the item's usual pack for buying or selling.** Of the item's active packs holding more than one
+   base unit, in this order: the shop's usual pack for that unit in the item's own unit (ADR-100: Dozen usually holds 12
+   Pieces); then a pack used for both buying and selling, then one for selling, then one only for buying (ADR-099); then
+   the biggest; then the unit name in byte order. So a Bale of 100 that is only bought is never how the shelf is counted
+   while the item has a Dozen or a Carton it sells. An item with no such pack, or a shop with the units capability off,
    shows its stock in the base unit, as before.
-2. **The stock lists send it.** `GET /retail/stock` and `GET /retail/stock/all-branches` carry `standard_pack: {unit,
-   factor}` on each row while the units capability is on (`StockRepository.STANDARD_PACK`, one lateral read on the unique
-   index of `retail_product_units`). The item picker of Move stock already has the item's packs and picks the same one in
-   the app (`standardPack` in `units-state.ts`); both rules are tested.
+2. **One rule, on the server.** The rule is one SQL subquery, `RetailCatalogue.standardPackSql`. `GET /retail/stock` and
+   `GET /retail/stock/all-branches` carry `standard_pack: {unit, factor}` on each row while the units capability is on,
+   and every pack of an item carries `standard`, true for that one pack, which Move stock reads from the item it picked
+   (`standardPack` in `units-state.ts` only reads the flag).
 3. **One formatter and one parser.** `packsAndPieces` writes "5 Cartons and 7 Pieces (127 Pieces)"; less than a pack reads
-   in pieces only ("7 Pieces"); below zero reads "1 Carton and 3 Pieces short (-27 Pieces)". `packsAndPiecesMilli` reads a
+   in pieces only ("7 Pieces"); below zero reads "1 Carton and 3 Pieces short (27 Pieces short)". `packsAndPiecesMilli` reads a
    count or a move typed as whole packs and pieces, or pieces alone, into pieces. Stock, Count stock (its total, and the
    words of a big drop, issue #635) and Move stock use only these.
-4. **Storage and the API stay in pieces.** A count and a move still send `counted_qty` and `qty` in the base unit. Nothing
+4. **A count keeps the pack it was typed in.** Count stock keeps the pack with the cartons typed, so a pack switched off,
+   resized or gone while the sheet is open never reads the same number in another size; the line says the pack has
+   changed since.
+5. **Storage and the API stay in pieces.** A count and a move still send `counted_qty` and `qty` in the base unit. Nothing
    stored changes.
 
 ## Consequences
@@ -35,5 +40,5 @@ carry any pack: a stock row had the unit and the quantity only.
 **Better:** the shelf is read and counted the way it is packed, the same words on all three screens, and the total in
 pieces is always shown before a count is reviewed or a move is saved.
 
-**Worse:** the rule lives in SQL and in TypeScript; a change to it must change both (each has a test). A pack switched off
-or resized changes how stock reads at once, by design.
+**Worse:** a pack switched off or resized changes how stock reads at once, by design; only a count already typed keeps its
+pack. The owner may still choose another rule (issue #650 review): it is one subquery and one test to change.
