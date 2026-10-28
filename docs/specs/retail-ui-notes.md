@@ -1413,7 +1413,8 @@ the items show only while you search, and go away once one is picked. Every item
   the sale (a draft not yet committed is discarded, a commit that landed stands), and a commit whose answer is lost is sent once
   more on the same draft; still lost, the draft is kept for a later discard and Sell says the count may not be committed. The
   later discard never takes a draft whose commit is still on its way, so a connection that comes back between the two tries
-  leaves the count to be sent again (issue #664). A sale cleared or a screen left before the lost answer hears nothing of it.
+  leaves the count to be sent again, and Sell opened again (the screen left and come back to, or a branch switch) leaves the
+  commit of the Sell it replaced to land and stand (issue #664). A sale cleared or a screen left before the lost answer hears nothing of it.
   Count stock shows a discarded count as cancelled, never as committed, with no tick and no Commit the count; the refusal of
   a commit on it (409 `stocktake_discarded`) says cancelled too, so the owner reads one word for it (issue #664).
 - **Scan box.** Unchanged (ADR-070 decision 11, owner decision D7): a scanner types only into the Scan box, which adds the item or one more.
