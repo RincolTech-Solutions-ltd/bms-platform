@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
@@ -8,6 +9,8 @@ import { mockMe } from '../../../api/retail-mock';
 import { IDEMPOTENCY_UNSURE_CODES } from '../../../api/retail-errors';
 import { readFileSync } from 'node:fs';
 import { branchLabel } from '../../../auth/branch';
+import { router as appRouter } from '../../../app/router';
+import { TourProvider } from '../../../tour/host';
 import { StaffContext } from '../context';
 
 // Quick add (issue #632): one form and one tap for an item, its prices and how many there are. Add sends one request with the
@@ -314,6 +317,39 @@ describe('quick add', () => {
     expect(quickAdd).not.toHaveBeenCalled();
     expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe('Test Lamp');
     online.mockRestore();
+  });
+});
+
+describe('with the tour on (issue #642)', () => {
+  // The live page after sign-in: the first-run tour starts by itself over Quick add, takes the focus and is closed. Before the fix
+  // Quick add had focused Name on opening, so the tour's taking the focus was a blur of Name and its error showed at once.
+  it('opens with no error when the tour starts and is closed, and still shows it once the person leaves Name', async () => {
+    vi.stubGlobal('CSS', { escape: (value: string) => value });
+    Element.prototype.scrollIntoView = vi.fn();
+    const fresh = { ...owner, tours: {} } as Me;
+    const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/retail/quick-add'] }) });
+    render(
+      <RouterContextProvider router={router}>
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <StaffContext.Provider value={{ me: fresh, branch: branch?.id ?? '', chooseBranch: () => undefined }}>
+            <TourProvider me={fresh} saveProgress={false}>
+              <QuickAddForm />
+            </TourProvider>
+          </StaffContext.Provider>
+        </QueryClientProvider>
+      </RouterContextProvider>,
+    );
+    const name = screen.getByLabelText(/^Name/) as HTMLInputElement;
+    fireEvent.click(await screen.findByRole('button', { name: 'Close the tour' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Close the tour' })).toBeNull());
+    await new Promise((done) => setTimeout(done, 10));
+    expect(screen.queryByText('Type what the item is.')).toBeNull();
+    expect(name.getAttribute('aria-invalid')).toBe('false');
+    // Rule 10 is untouched: the person going into Name and leaving it empty sees the error.
+    name.focus();
+    fireEvent.blur(name);
+    expect(screen.getByText('Type what the item is.')).toBeTruthy();
+    vi.unstubAllGlobals();
   });
 });
 
