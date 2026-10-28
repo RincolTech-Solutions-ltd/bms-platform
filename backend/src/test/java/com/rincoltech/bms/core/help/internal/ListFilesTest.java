@@ -94,6 +94,42 @@ class ListFilesTest {
                 .isEqualTo("Test Salt");
     }
 
+    /**
+     * A cell reference past Excel's last column (ZZZZZZ1 would be column 321 million) is dropped, never a row of millions
+     * of tabs; a sheet that would still become more text than the cap is refused in plain words.
+     */
+    @Test
+    void aCellPastTheLastColumnIsDroppedAndAHugeSheetRefused() throws IOException {
+        assertThat(ListFiles.column("XFD1")).isEqualTo(ListFiles.MAX_COLUMNS - 1);
+        assertThat(ListFiles.column("ZZZZZZ1")).isEqualTo(-1);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
+            part(
+                    zip,
+                    "xl/worksheets/sheet1.xml",
+                    "<worksheet><sheetData><row r=\"1\">"
+                            + "<c r=\"A1\" t=\"inlineStr\"><is><t>Test Salt</t></is></c><c r=\"ZZZZZZ1\"><v>1</v></c>"
+                            + "</row></sheetData></worksheet>");
+        }
+        assertThat(ListFiles.read(upload("crafted.xlsx", bytes.toByteArray())).text())
+                .isEqualTo("Test Salt");
+
+        StringBuilder wide = new StringBuilder("<worksheet><sheetData>");
+        for (int r = 1; r <= 200; r++) {
+            wide.append("<row r=\"").append(r).append("\"><c r=\"XFD").append(r).append("\"><v>1</v></c></row>");
+        }
+        ByteArrayOutputStream big = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(big)) {
+            part(
+                    zip,
+                    "xl/worksheets/sheet1.xml",
+                    wide.append("</sheetData></worksheet>").toString());
+        }
+        assertThatThrownBy(() -> ListFiles.read(upload("wide.xlsx", big.toByteArray())))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("too big");
+    }
+
     static void part(ZipOutputStream zip, String name, String xml) throws IOException {
         zip.putNextEntry(new ZipEntry(name));
         zip.write(xml.getBytes(StandardCharsets.UTF_8));

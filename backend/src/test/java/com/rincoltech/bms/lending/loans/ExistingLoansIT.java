@@ -1382,12 +1382,10 @@ class ExistingLoansIT extends LoanFixtures {
         assertThat(messages(noBranch).get("REG-302")).isEqualTo("error:Choose the branch the new members join.");
         assertThat(messages(noBranch).get("REG-301"))
                 .as("a member already holding the phone needs no branch")
-                .startsWith("ready:")
-                .endsWith("Member " + known
-                        + ", Test Borrower Known, has this phone. The file says Someone Else. Record this loan only"
-                        + " if it is the same person; if not, remove it from the file")
-                .doesNotContain("tick")
-                .doesNotContain("fix the phone");
+                // The whole row, nothing between its parts: the plan's position, then the match and the one warning.
+                .matches("ready:0 repayment\\(s\\); \\d+ day\\(s\\) past due\\. Member " + known
+                        + ", Test Borrower Known, has this phone\\. The file says Someone Else\\. Record this loan only"
+                        + " if it is the same person; if not, remove it from the file");
 
         ResponseEntity<JsonNode> checked = importCsv(csv, true, adminPerms, t.headOffice());
         assertThat(checked.getBody().get("errors").asInt())

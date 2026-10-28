@@ -114,6 +114,18 @@ describe('the setup helper on Import items', () => {
     expect(importProducts).not.toHaveBeenCalled();
   });
 
+  it('shows a draft field\'s problem only once the field is left (docs/ui-rules.md rule 10)', async () => {
+    const noPrice: ItemDraft = { ...twoItems, rows: [{ ...twoItems.rows[1]!, sell_price_minor: null }] };
+    draw(<ImportPage helperApi={helper({ draftItems: vi.fn().mockResolvedValue(noPrice) })} />);
+    fireEvent.change(await screen.findByLabelText('Your items, one on each line'), { target: { value: 'padlock' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Read my list' }));
+    const price = (await screen.findByLabelText('Selling price')) as HTMLInputElement;
+    expect(price.value).toBe('');
+    expect(screen.queryByText('Add the selling price.')).toBeNull();
+    fireEvent.blur(price);
+    expect(await screen.findByText('Add the selling price.')).toBeTruthy();
+  });
+
   it('offers a photo only when a provider reads pictures', async () => {
     draw(<ImportPage helperApi={helper({ status: () => Promise.resolve({ enabled: true, photos: false }) })} />);
     expect(await screen.findByRole('radio', { name: 'File' })).toBeTruthy();

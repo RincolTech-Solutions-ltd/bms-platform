@@ -65,6 +65,10 @@ final class ListFiles {
     static final int MAX_PDF_PAGES = 10;
     static final long MAX_UNPACKED_BYTES = 20L * 1024 * 1024;
     static final int MAX_CELLS = 50_000;
+    /** Excel's last column, XFD. */
+    static final int MAX_COLUMNS = 16_384;
+    /** The most text a sheet becomes, tabs included; far more than the helper sends (BMS_SETUP_AI_MAX_TEXT_CHARS). */
+    static final int MAX_SHEET_CHARS = 2_000_000;
 
     /**
      * How many pictures the server decodes at once, whatever the number of drafts in flight: each may briefly hold tens of
@@ -390,7 +394,11 @@ final class ListFiles {
                         }
                         text = text.replaceAll("[\\t\\r\\n]+", " ").strip();
                         if (!text.isEmpty()) {
-                            rows.computeIfAbsent(rowNo, k -> new TreeMap<>()).put(column(ref), text);
+                            int col = column(ref);
+                            if (col >= 0) {
+                                rows.computeIfAbsent(rowNo, k -> new TreeMap<>())
+                                        .put(col, text);
+                            }
                         }
                         value = null;
                     }
@@ -406,6 +414,9 @@ final class ListFiles {
                     out.append('\t');
                 }
                 out.append(row.getOrDefault(c, ""));
+                if (out.length() > MAX_SHEET_CHARS) {
+                    throw notRead("This sheet is too big. Split it into smaller files.");
+                }
             }
             out.append('\n');
         }
@@ -413,7 +424,7 @@ final class ListFiles {
     }
 
     /** The column index of a cell reference such as {@code C12}; 0 when it has none. */
-    private static int column(String ref) {
+    static int column(String ref) {
         if (ref == null) {
             return 0;
         }
@@ -423,6 +434,10 @@ final class ListFiles {
                 break;
             }
             col = col * 26 + (ch - 'A' + 1);
+            if (col > MAX_COLUMNS) {
+                // Past Excel's last column (XFD): a crafted reference, whose empty cells before it would be millions.
+                return -1;
+            }
         }
         return Math.max(0, col - 1);
     }

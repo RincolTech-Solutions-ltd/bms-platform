@@ -76,16 +76,10 @@ class MemberService implements MemberLookup, MemberIntake {
     @Transactional
     MemberResponse create(CreateMemberRequest request) {
         Principal principal = CurrentPrincipal.require();
-        if (!principal.may("lending.members.create", request.branchId())
-                || branches.findActive(request.branchId()).isEmpty()) {
-            throw ApiException.validation(
-                    List.of(new FieldProblem("branch_id", "unknown_branch", "No such active branch in your scope.")));
-        }
-        String phone = PhoneNumbers.normaliseUganda(request.phone()).orElseThrow(() -> invalidPhone("phone"));
-        String altPhone = request.altPhone() == null || request.altPhone().isBlank()
-                ? null
-                : PhoneNumbers.normaliseUganda(request.altPhone()).orElseThrow(() -> invalidPhone("alt_phone"));
-        String nin = checkIdentity(request.idType(), request.nationalId(), request.otherIdNumber(), null);
+        Validated valid = validateNew(request, principal);
+        String phone = valid.phone();
+        String altPhone = valid.altPhone();
+        String nin = valid.nin();
         checkPhoneShared(phone, null, request.confirmedNotDuplicate());
         planLimits.checkRoomFor(PlanLimits.MAX_ACTIVE_MEMBERS, members.countActive());
 
@@ -451,24 +445,54 @@ class MemberService implements MemberLookup, MemberIntake {
 
     @Override
     public Optional<String> problemAdding(UUID branchId, String fullName, String phone) {
-        CreateMemberRequest r = registerRequest(branchId, fullName, phone);
-        Principal principal = CurrentPrincipal.require();
-        // create()'s own checks in its order, and the form's bean rules on the name (@NotBlank, @Size(max = 200)).
-        if (!principal.may("lending.members.create", r.branchId())
-                || branches.findActive(r.branchId()).isEmpty()) {
+        // The very validation create() runs, on the very request addFromRegister sends; only whether the phone is held
+        // and the plan's member limit are left, the import's to check on the whole file. A refusal is said in words
+        // that
+        // name no member; nothing is thrown, so the caller's check goes on (validateNew writes nothing).
+        try {
+            validateNew(registerRequest(branchId, fullName, phone), CurrentPrincipal.require());
+            return Optional.empty();
+        } catch (ApiException e) {
+            String field = e.errors().isEmpty() ? "" : e.errors().getFirst().field();
             return Optional.of(
-                    "You may not add members in this branch. Choose another branch, or add the member first.");
+                    switch (field) {
+                        case "branch_id" ->
+                            "You may not add members in this branch. Choose another branch, or add the member first.";
+                        case "full_name" -> "The member's name is empty or longer than 200 characters.";
+                        case "phone" ->
+                            "The member's phone must be a Uganda number, for example 0772 123456. A new member needs one.";
+                        default -> "The member cannot be added from this row. Add the member first in Members.";
+                    });
         }
-        if (r.fullName() == null || r.fullName().isBlank() || r.fullName().length() > 200) {
-            return Optional.of("The member's name is empty or longer than 200 characters.");
+    }
+
+    /** What validateNew read from a request: the phones in E.164 and the national ID, if any. */
+    private record Validated(String phone, String altPhone, String nin) {}
+
+    /**
+     * Every rule of a new member that needs no write and no other member's phone: the caller's scope in an active branch,
+     * the name the form takes (its {@code @NotBlank @Size(max = 200)}, checked here too since a register's request does
+     * not pass the controller), the phones and the identity. Shared by {@link #create} and an import's check (issue #626),
+     * so the check runs exactly what the form does.
+     */
+    private Validated validateNew(CreateMemberRequest request, Principal principal) {
+        if (!principal.may("lending.members.create", request.branchId())
+                || branches.findActive(request.branchId()).isEmpty()) {
+            throw ApiException.validation(
+                    List.of(new FieldProblem("branch_id", "unknown_branch", "No such active branch in your scope.")));
         }
-        if (PhoneNumbers.normaliseUganda(r.phone()).isEmpty()) {
-            return Optional.of(
-                    "The member's phone must be a Uganda number, for example 0772 123456. A new member needs one.");
+        if (request.fullName() == null
+                || request.fullName().isBlank()
+                || request.fullName().length() > 200) {
+            throw ApiException.validation(List.of(
+                    new FieldProblem("full_name", "invalid", "The name is empty or longer than 200 characters.")));
         }
-        // id_type none needs no number (checkIdentity); whether the phone is held, and the plan's member limit, are the
-        // import's to check on the whole file.
-        return Optional.empty();
+        String phone = PhoneNumbers.normaliseUganda(request.phone()).orElseThrow(() -> invalidPhone("phone"));
+        String altPhone = request.altPhone() == null || request.altPhone().isBlank()
+                ? null
+                : PhoneNumbers.normaliseUganda(request.altPhone()).orElseThrow(() -> invalidPhone("alt_phone"));
+        String nin = checkIdentity(request.idType(), request.nationalId(), request.otherIdNumber(), null);
+        return new Validated(phone, altPhone, nin);
     }
 
     @Override
