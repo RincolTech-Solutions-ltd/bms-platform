@@ -98,18 +98,20 @@ export function itemsCsv(rows: ItemEdit[], withCost: boolean): string {
 /** The columns of the loans file the helper writes: the import's own, and a new member's name and phone. */
 export const DRAFT_LOAN_COLUMNS = [...IMPORT_COLUMNS.slice(0, 3), 'member_name', 'member_phone', ...IMPORT_COLUMNS.slice(3)];
 
-/** The existing loans import file of the drafted loans: a loan row each, then a repayment row for each payment, in cash. */
+/**
+ * The existing loans import file of the drafted loans: a loan row each, then a repayment row for each payment, in cash. A
+ * drafted borrower always goes by the register's name and phone, never by a member number, so the import's check makes the
+ * match itself and warns when the member who has the phone is called something else.
+ */
 export function loansCsv(loans: LoanEdit[], productCode: string): string {
   const row = (values: Record<string, string>) => line(DRAFT_LOAN_COLUMNS.map((c) => values[c] ?? ''));
   const out = [line(DRAFT_LOAN_COLUMNS)];
   for (const l of loans) {
-    const known = l.memberNo.trim() !== '';
     out.push(row({
       kind: 'loan',
       ref: l.ref,
-      member_no: l.memberNo,
-      member_name: known ? '' : l.memberName,
-      member_phone: known ? '' : l.memberPhone,
+      member_name: l.memberName || l.memberFullName,
+      member_phone: l.memberPhone,
       product_code: productCode,
       principal: l.principal,
       disbursement_date: l.date,
@@ -122,6 +124,12 @@ export function loansCsv(loans: LoanEdit[], productCode: string): string {
     }
   }
   return out.join('\n') + '\n';
+}
+
+/** The same name ignoring case and runs of spaces. */
+export function sameName(a: string, b: string): boolean {
+  const norm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+  return norm(a) === norm(b);
 }
 
 /** Why there are no rows, in plain words, always with the way on: type it or import a file. */

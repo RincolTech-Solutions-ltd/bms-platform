@@ -47,10 +47,10 @@ const fresh: LoanDraftRow = {
 };
 
 describe('the existing loans import file', () => {
-  it('names a member in the app by number and a new one by name and phone, with a cash row for each payment', () => {
+  it('names every borrower by the register\'s name and phone, so the check matches and warns, with a cash row for each payment', () => {
     const csv = loansCsv(fromLoanDraft([known, fresh], 0), 'LOAN1').split('\n');
     expect(csv[0]).toBe('kind,ref,member_no,member_name,member_phone,product_code,principal,disbursement_date,term,agreed_total,purpose,repayment_date,amount,method,note');
-    expect(csv[1]).toBe('loan,Y-01,M000001,,,LOAN1,400000,2026-08-01,2,480000,,,,,');
+    expect(csv[1]).toBe('loan,Y-01,,T. Known,+256700000201,LOAN1,400000,2026-08-01,2,480000,,,,,');
     expect(csv[2]).toBe('repayment,Y-01,,,,,,,,,,2026-09-01,240000,cash,');
     expect(csv[3]).toBe('loan,R261027-01,,Test Member New,+256700000202,LOAN1,200000,,,,,,,,');
     expect(csv).toHaveLength(5);

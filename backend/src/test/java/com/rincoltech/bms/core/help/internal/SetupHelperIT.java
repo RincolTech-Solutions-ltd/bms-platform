@@ -421,5 +421,32 @@ class SetupHelperIT extends IntegrationTest {
                 .get(0);
         assertThat(loan.get("member_no").isNull()).isTrue();
         assertThat(loan.get("member_full_name").isNull()).isTrue();
+
+        // The row the screen then sends to the import's check is refused in words that name no member and no branch.
+        String elsewhere = created.getBody().get("member_no").asString();
+        String csv = "kind,ref,member_no,member_name,member_phone,product_code,principal,disbursement_date\n"
+                + "loan,Y-09,,Someone,+256700000203,LOAN1,100000,2026-08-01\n";
+        ResponseEntity<JsonNode> checked = api.post(
+                "/api/v1/lending/existing-loans/import?dry_run=true",
+                Map.of("csv", csv, "branch_id", t.headOffice().toString()),
+                manager);
+        assertThat(checked.getStatusCode()).as("%s", checked.getBody()).isEqualTo(HttpStatus.OK);
+        String message = checked.getBody().get("rows").get(0).get("message").asString();
+        assertThat(message).startsWith("This phone is already a member's in the app.");
+        assertThat(checked.getBody().toString()).doesNotContain(elsewhere).doesNotContain("Test Member Elsewhere");
+    }
+
+    /**
+     * A file just under the 5 MB the screen allows passes the server's upload limit (spring.servlet.multipart, 5 MB a file)
+     * and is answered in the helper's own plain words, here that the list is longer than it reads at once.
+     */
+    @Test
+    void aFileJustUnderFiveMegabytesReachesTheHelper() {
+        byte[] big = ("Test Item,1000\n".repeat(340_000)).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(big.length).isBetween(4_900_000, 5 * 1024 * 1024);
+        ResponseEntity<JsonNode> r = send(api, ITEMS, admin, null, big);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().get("code").asString()).isEqualTo("setup_list_too_long");
+        assertThat(GEMINI.requests()).isEmpty();
     }
 }

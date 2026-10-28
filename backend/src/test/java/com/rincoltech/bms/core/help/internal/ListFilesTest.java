@@ -138,6 +138,58 @@ class ListFilesTest {
                 .hasMessageContaining("too big to read");
     }
 
+    /** A small progressive JPEG, its frame header then rewritten to declare {@code width} by {@code height}. */
+    static byte[] progressiveJpeg(int width, int height) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        javax.imageio.ImageWriter writer =
+                ImageIO.getImageWritersByFormatName("jpeg").next();
+        javax.imageio.ImageWriteParam param = writer.getDefaultWriteParam();
+        param.setProgressiveMode(javax.imageio.ImageWriteParam.MODE_DEFAULT);
+        try (javax.imageio.stream.ImageOutputStream ios = ImageIO.createImageOutputStream(out)) {
+            writer.setOutput(ios);
+            writer.write(
+                    null,
+                    new javax.imageio.IIOImage(new BufferedImage(16, 16, BufferedImage.TYPE_INT_RGB), null, null),
+                    param);
+        } finally {
+            writer.dispose();
+        }
+        byte[] b = out.toByteArray();
+        for (int i = 0; i + 8 < b.length; i++) {
+            // SOF2, the progressive frame header: marker, length (2), precision (1), height (2), width (2).
+            if ((b[i] & 0xFF) == 0xFF && (b[i + 1] & 0xFF) == 0xC2) {
+                b[i + 5] = (byte) (height >> 8);
+                b[i + 6] = (byte) height;
+                b[i + 7] = (byte) (width >> 8);
+                b[i + 8] = (byte) width;
+                return b;
+            }
+        }
+        throw new IllegalStateException("the JDK wrote no progressive frame");
+    }
+
+    /**
+     * A progressive JPEG keeps the whole picture's coefficients while it decodes, so the cap is read from its frame header:
+     * a small one is read, one declaring 8000 by 7000 is refused before decoding.
+     */
+    @Test
+    void aProgressiveJpegIsBoundedByTheSizeItDeclares() throws IOException {
+        byte[] small = progressiveJpeg(16, 16);
+        assertThat(ListFiles.read(upload("p.jpg", small)).pictureDataUrl()).startsWith("data:image/jpeg;base64,");
+        assertThatThrownBy(() -> ListFiles.read(upload("p.jpg", progressiveJpeg(8000, 7000))))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("too big to read");
+    }
+
+    /** WebP is read by the TwelveMonkeys plugin on the classpath (the item photos use it): a 1 by 1 picture is a photo. */
+    @Test
+    void aWebpPhotoIsRead() {
+        byte[] webp = Base64.getDecoder().decode("UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoBAAEAAwA0JaQAA3AA/vuUAAA=");
+        ListFiles.Read read = ListFiles.read(upload("p.webp", webp));
+        assertThat(read.source()).isEqualTo("photo");
+        assertThat(read.pictureDataUrl()).startsWith("data:image/jpeg;base64,");
+    }
+
     /** A page declaring 200 inches a side is drawn no larger than the longest side that is sent. */
     @Test
     void aScannedPageOfAnySizeIsDrawnSmall() throws IOException {

@@ -141,6 +141,27 @@ function loansApi(importCsv: ExistingLoansApi['importCsv']): ExistingLoansApi {
 }
 
 describe('the setup helper on Import existing loans', () => {
+  it('sends no branch while none is in use, so the server asks for one', async () => {
+    const result: ExistingLoanImportResult = { dry_run: true, rows_read: 1, loans: 1, repayments: 0, added: 0, skipped: 0, errors: 1, members_added: 0, rows: [] };
+    const importCsv = vi.fn().mockResolvedValue(result);
+    draw(<ExistingLoansImport api={loansApi(importCsv)} helperApi={helper({ draftLoans: vi.fn().mockResolvedValue(register) })} />, null);
+    fireEvent.change(await screen.findByLabelText('The loans, one on each line'), { target: { value: 'Y-01 Test Member New 400000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Read my list' }));
+    expect(await screen.findByText('New members join the branch in use; choose one at the top.')).toBeTruthy();
+    fireEvent.change(await screen.findByLabelText(/Loan product for these loans/), { target: { value: 'LOAN1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Check these loans' }));
+    await waitFor(() => expect(importCsv).toHaveBeenCalledTimes(1));
+    expect(importCsv.mock.calls[0]?.[2]).toBeUndefined();
+  });
+
+  it('warns when the member who has the phone is called something else in the register', async () => {
+    const known = { ...register, loans: [{ ...register.loans[0]!, member_no: 'M000001', member_full_name: 'Test Member Known', member_name: 'T. Other' }] };
+    draw(<ExistingLoansImport api={loansApi(vi.fn())} helperApi={helper({ draftLoans: vi.fn().mockResolvedValue(known) })} />);
+    fireEvent.change(await screen.findByLabelText('The loans, one on each line'), { target: { value: 'Y-01 T. Other 400000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Read my list' }));
+    expect(await screen.findByText('Member M000001, Test Member Known, has this phone already. The register says T. Other: check it is the same person, or fix the phone.')).toBeTruthy();
+  });
+
   it('reads a register into loans with a new member by name and phone, checked by the import in the branch in use', async () => {
     const result: ExistingLoanImportResult = { dry_run: true, rows_read: 2, loans: 1, repayments: 1, added: 1, skipped: 0, errors: 0, members_added: 1, rows: [] };
     const importCsv = vi.fn().mockResolvedValue(result);

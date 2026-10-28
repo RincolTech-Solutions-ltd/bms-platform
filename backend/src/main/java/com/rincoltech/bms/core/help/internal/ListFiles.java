@@ -50,8 +50,11 @@ final class ListFiles {
     static final int MAX_BYTES = 5 * 1024 * 1024;
     /** The longest side of a picture that is sent: ample to read a stock book, small to send. */
     static final int MAX_SIDE = 2000;
-    /** The most pixels a photo may declare: a 100 megapixel camera is far below it; a crafted header is not. */
-    static final long MAX_PIXELS = 120_000_000L;
+    /**
+     * The most pixels a photo may declare: a phone's 12 to 50 megapixel camera fits, and a progressive JPEG, whose decoder
+     * holds the whole picture's coefficients in native memory whatever the subsampling, stays bounded.
+     */
+    static final long MAX_PIXELS = 50_000_000L;
 
     static final int MAX_PDF_PAGES = 10;
     static final long MAX_UNPACKED_BYTES = 20L * 1024 * 1024;

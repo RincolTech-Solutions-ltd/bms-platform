@@ -98,6 +98,9 @@ class SetupDraftService implements SetupDrafts {
         if (typed == (request.upload() != null)) {
             throw ApiException.rule("setup_list_missing", "Type your list, or choose one photo or file.");
         }
+        if (typed && request.text().strip().length() > properties.maxTextChars()) {
+            throw tooLong();
+        }
         Instant start = clock.now();
         Instant dayStart = LocalDate.ofInstant(start, tenant.profile().timezone())
                 .atStartOfDay(tenant.profile().timezone())
@@ -217,11 +220,15 @@ class SetupDraftService implements SetupDrafts {
         ListFiles.Read read =
                 typed ? new ListFiles.Read(request.text().strip(), null, "text") : ListFiles.read(request.upload());
         if (read.text() != null && read.text().length() > properties.maxTextChars()) {
-            throw ApiException.rule(
-                    "setup_list_too_long",
-                    "This list is longer than the app reads at once. Split it in two, or import it as a file.");
+            throw tooLong();
         }
         return read;
+    }
+
+    private static ApiException tooLong() {
+        return ApiException.rule(
+                "setup_list_too_long",
+                "This list is longer than the app reads at once. Split it in two, or import it as a file.");
     }
 
     private LlmClient.Request prompt(Request request, ListFiles.Read given) {

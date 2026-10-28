@@ -495,14 +495,11 @@ class ExistingLoanImport {
             return "The member's phone must be a Uganda number, for example 0772 123456. A new member needs one.";
         }
         List<MemberSummary> holders = members.findByPhone(e164.get());
-        if (holders.size() > 1) {
-            return "More than one member has this phone. Put the member number in member_no.";
-        }
-        if (holders.size() == 1) {
+        boolean oneInScope = holders.size() == 1
+                && principal.may(
+                        ExistingLoanService.PERMISSION, holders.getFirst().branchId());
+        if (oneInScope) {
             MemberSummary m = holders.getFirst();
-            if (!principal.may(ExistingLoanService.PERMISSION, m.branchId())) {
-                return "Member " + m.memberNo() + " has this phone, in a branch outside yours.";
-            }
             p.member = m;
             p.matchedNote = "Member " + m.memberNo() + ", " + m.fullName() + ", has this phone"
                     + (sameName(m.fullName(), name)
@@ -510,6 +507,14 @@ class ExistingLoanImport {
                             : ". The file says " + name + ": check it is the same person before you record, or fix the"
                                     + " phone");
             return null;
+        }
+        if (!holders.isEmpty()) {
+            // Two holders, or one in a branch outside the caller's: one plain refusal that names no member and no
+            // branch,
+            // so a check cannot be used to learn who holds a phone elsewhere. A new member could not take the phone
+            // anyway.
+            return "This phone is already a member's in the app. Put that member's number in member_no, or ask an"
+                    + " administrator.";
         }
         NewMember known = intake.byPhone.get(e164.get());
         if (known != null) {

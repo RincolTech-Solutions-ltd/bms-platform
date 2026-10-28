@@ -87,8 +87,8 @@ class LoanRegisterDraftService {
                     List<MemberSummary> holders =
                             l.memberPhone() == null ? List.of() : members.findByPhone(l.memberPhone());
                     // Only a member in a branch the caller may bring loans into is named; any other stays a new row,
-                    // which
-                    // the import refuses with its own words, so a draft never tells another branch's members by phone.
+                    // which the import refuses in words that name no member, so neither tells who holds a phone
+                    // elsewhere.
                     MemberSummary member = holders.size() == 1
                                     && principal.may(
                                             ExistingLoanService.PERMISSION,
