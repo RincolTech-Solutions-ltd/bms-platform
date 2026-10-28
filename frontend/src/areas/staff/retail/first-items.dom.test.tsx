@@ -267,7 +267,15 @@ describe('a Sell search that finds nothing', () => {
     expect(screen.queryByText(/its count is not/)).toBeNull();
   });
 
-  it('never sends a big drop to be refused, nor leaves its draft open: the line asks its tick on Sell (issues #636, #656)', async () => {
+  // Issue #656: the records already hold 10 of the item just made, so a count of 4 is a big drop, asked before any draft exists.
+  const holdsTen = () => listProducts.mockImplementation(({ query }: { query?: string }) => Promise.resolve(query === 'DUV-0001' ? [{ ...made, qty: '10.000' }] : []));
+  const tickAndCommit = (ask: HTMLElement) => {
+    fireEvent.click(within(ask).getByRole('checkbox', { name: 'Yes, Test duvet cover is right' }));
+    fireEvent.click(within(ask).getByRole('button', { name: 'Commit the count' }));
+  };
+
+  it('asks the tick of a big drop before any draft is made, then makes and commits it acknowledged (issues #636, #656)', async () => {
+    holdsTen();
     createProduct.mockResolvedValue(made);
     createStocktake.mockResolvedValue(draftOf('10.000'));
     commitStocktake.mockImplementation(serverCommit(draftOf('10.000')));
@@ -275,31 +283,87 @@ describe('a Sell search that finds nothing', () => {
     await fill('4');
     const ask = await screen.findByTestId('sale-count-drop');
     expect(ask.textContent).toContain('The records show 10 of Test duvet cover here, and you counted 4. This removes 6. Is that right?');
-    expect(screen.queryByText(/its count is not/)).toBeNull();
-    expect(commitStocktake).not.toHaveBeenCalled();
+    expect(createStocktake).not.toHaveBeenCalled();
     // Commit the count waits for the tick.
     fireEvent.click(within(ask).getByRole('button', { name: 'Commit the count' }));
-    expect(commitStocktake).not.toHaveBeenCalled();
-    fireEvent.click(within(ask).getByRole('checkbox', { name: 'Yes, Test duvet cover is right' }));
-    fireEvent.click(within(ask).getByRole('button', { name: 'Commit the count' }));
+    expect(createStocktake).not.toHaveBeenCalled();
+    tickAndCommit(ask);
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('s1', ['p9']));
+    expect(createStocktake).toHaveBeenCalledTimes(1);
     expect(await screen.findByRole('button', { name: 'Remove Test duvet cover' })).toBeTruthy();
     expect(screen.queryByTestId('sale-count-drop')).toBeNull();
   });
 
-  it('keeps the tick on Sell when the commit fails, so the count can be sent again (issue #656)', async () => {
+  it('leaves no draft when the screen is left or Not now is pressed while the tick is asked (issue #656)', async () => {
+    holdsTen();
+    createProduct.mockResolvedValue(made);
+    open(<RecordSale />, owner);
+    await fill('4');
+    fireEvent.click(within(await screen.findByTestId('sale-count-drop')).getByRole('button', { name: 'Not now' }));
+    expect(await screen.findByText('Test duvet cover is saved. It is not on the sale: count it on Count stock, then sell it.')).toBeTruthy();
+    expect(screen.queryByTestId('sale-count-drop')).toBeNull();
+    cleanup();
+    // Leaving the screen while the tick is asked.
+    open(<RecordSale />, owner);
+    await fill('4');
+    expect(await screen.findByTestId('sale-count-drop')).toBeTruthy();
+    cleanup();
+    expect(createStocktake).not.toHaveBeenCalled();
+    expect(commitStocktake).not.toHaveBeenCalled();
+  });
+
+  it('asks one tick at a time: a second big drop never replaces the first or inherits its tick (issue #656)', async () => {
+    holdsTen();
+    createProduct.mockResolvedValueOnce(made).mockResolvedValueOnce({ ...made, id: 'p10', code: 'DUV-0002' });
+    open(<RecordSale />, owner);
+    await fill('4');
+    const ask = await screen.findByTestId('sale-count-drop');
+    fireEvent.click(within(ask).getByRole('checkbox', { name: 'Yes, Test duvet cover is right' }));
+    await fill('2');
+    expect(await screen.findByText('Test duvet cover is saved. Answer the count of Test duvet cover first, then count Test duvet cover on Count stock.')).toBeTruthy();
+    expect(screen.getAllByTestId('sale-count-drop')).toHaveLength(1);
+    expect(screen.getByTestId('sale-count-drop').textContent).toContain('you counted 4');
+    expect(createStocktake).not.toHaveBeenCalled();
+  });
+
+  it('sends the same draft again after a lost commit, never a second one (issue #656)', async () => {
+    holdsTen();
     createProduct.mockResolvedValue(made);
     createStocktake.mockResolvedValue(draftOf('10.000'));
     commitStocktake.mockRejectedValueOnce(new RetailError('Offline', 503, 'unavailable')).mockImplementation(serverCommit(draftOf('10.000')));
     open(<RecordSale />, owner);
     await fill('4');
-    const ask = await screen.findByTestId('sale-count-drop');
-    fireEvent.click(within(ask).getByRole('checkbox', { name: 'Yes, Test duvet cover is right' }));
-    fireEvent.click(within(ask).getByRole('button', { name: 'Commit the count' }));
-    expect(await screen.findByText('The count of Test duvet cover is not committed. Try again, or use Count stock.')).toBeTruthy();
+    tickAndCommit(await screen.findByTestId('sale-count-drop'));
+    expect(await screen.findByText('The count of Test duvet cover is not committed. Try again.')).toBeTruthy();
+    // A draft now exists, so Not now is gone: the count is sent, not left behind.
+    expect(within(screen.getByTestId('sale-count-drop')).queryByRole('button', { name: 'Not now' })).toBeNull();
     fireEvent.click(within(screen.getByTestId('sale-count-drop')).getByRole('button', { name: 'Commit the count' }));
     expect(await screen.findByRole('button', { name: 'Remove Test duvet cover' })).toBeTruthy();
-    expect(commitStocktake).toHaveBeenCalledTimes(2);
+    expect(createStocktake).toHaveBeenCalledTimes(1);
+    expect(commitStocktake.mock.calls).toEqual([['s1', ['p9']], ['s1', ['p9']]]);
+  });
+
+  it('shows the server words of a refusal and stops asking, since a second press never passes (issue #656)', async () => {
+    holdsTen();
+    createProduct.mockResolvedValue(made);
+    createStocktake.mockResolvedValue(draftOf('10.000'));
+    commitStocktake.mockRejectedValue(new RetailError('Count it again', 409, 'stock_moved_since_count', { detail: 'Stock of Test duvet cover moved since the count. Count it again.' }));
+    open(<RecordSale />, owner);
+    await fill('4');
+    tickAndCommit(await screen.findByTestId('sale-count-drop'));
+    expect(await screen.findByText('Stock of Test duvet cover moved since the count. Count it again. Test duvet cover is not on the sale: use Count stock, then sell it.')).toBeTruthy();
+    expect(screen.queryByTestId('sale-count-drop')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
+  });
+
+  it('never sends a draft that turned into a big drop after the balance was read (issue #636)', async () => {
+    createProduct.mockResolvedValue(made);
+    createStocktake.mockResolvedValue(draftOf('10.000'));
+    commitStocktake.mockImplementation(serverCommit(draftOf('10.000')));
+    open(<RecordSale />, owner);
+    await fill('4');
+    expect(await screen.findByText('Test duvet cover is saved, but its count is not. Count it on Count stock, then sell it.')).toBeTruthy();
+    expect(commitStocktake).not.toHaveBeenCalled();
   });
 
   it('keeps an open Add it here with what was typed when a later search finds something (review of #616)', async () => {
