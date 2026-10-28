@@ -291,7 +291,8 @@ const SHOTS = {
         await ((await confirm.isVisible()) ? confirm : tour(page, 'count-review')).click();
         await page.waitForTimeout(900);
       }
-      await shoot(page, 'count-stock-3.webp', anyway);
+      // The question shows Review the difference anyway; the ring stays on Review the difference, the button the caption names.
+      await shoot(page, 'count-stock-3.webp', tour(page, 'count-review'));
       const commit = button(page, 'Commit the count');
       for (let i = 0; i < 6 && !(await commit.isVisible()); i++) {
         const next = ['Confirm', 'Review the difference anyway'].map((name) => button(page, name));

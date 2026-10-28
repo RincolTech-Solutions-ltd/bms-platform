@@ -368,7 +368,7 @@ class StockService {
         Set<UUID> ticked = new HashSet<>(acknowledged);
         List<String> unticked = s.lines().stream()
                 .filter(l -> bigDrop(l) && !ticked.contains(l.productId()))
-                .map(StocktakeLine::code)
+                .map(l -> l.description() == null ? l.code() : l.description())
                 .toList();
         if (!unticked.isEmpty()) {
             throw new ApiException(
@@ -376,7 +376,7 @@ class StockService {
                     "big_drop_not_acknowledged",
                     "Tick the lines marked before you commit",
                     "The count of " + String.join(", ", unticked)
-                            + " takes most of its stock away. Review the difference again and tick each line marked"
+                            + " removes more than half of what was there. Review the difference again and tick each line marked"
                             + " before you commit the count.");
         }
         List<StocktakeLine> lines = new ArrayList<>(s.lines());

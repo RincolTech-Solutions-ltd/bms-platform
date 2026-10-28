@@ -280,8 +280,7 @@ describe('a count that wipes or halves stock', () => {
     const commit = screen.getByRole('button', { name: 'Commit the count' });
     expect(screen.getByText('Tick the 2 lines marked above before you commit the count.')).toBeTruthy();
     // Issue #636: the hint is the button's description, so a screen reader hears why a press goes to a tick.
-    expect(commit.getAttribute('aria-describedby')).toBe('count-commit-hint');
-    expect(document.getElementById('count-commit-hint')?.textContent).toBe('Tick the 2 lines marked above before you commit the count.');
+    expect(document.getElementById(commit.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Tick the 2 lines marked above before you commit the count.');
     fireEvent.click(commit);
     expect(commitStocktake).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Yes, Test Plug Four Way is right' }));

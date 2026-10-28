@@ -205,7 +205,8 @@ class RetailStockIT extends IntegrationTest {
             assertThat(refused.getStatusCode()).as("%s", refused.getBody()).isEqualTo(HttpStatus.CONFLICT);
             assertThat(refused.getBody().get("code").asString()).isEqualTo("big_drop_not_acknowledged");
             assertThat(refused.getBody().get("detail").asString())
-                    .contains("SKT-14B")
+                    .contains("Test Product SKT-14B")
+                    .contains("more than half")
                     .contains("commit the count")
                     .doesNotContainIgnoringCase("finish");
         }
