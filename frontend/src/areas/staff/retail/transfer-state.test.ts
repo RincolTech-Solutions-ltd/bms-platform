@@ -19,11 +19,13 @@ describe('stock move form (FR-RET-16)', () => {
       packs: [{ id: 'k1', product_id: 'p1', unit_id: 'u1', unit: 'Carton', factor: '24.000', active: true, version: 1, standard: true }],
     };
     const tooMany = 'That is more than BMS can move at once. Check the number.';
+    const tooManyPieces = 'That is more pieces than BMS can move at once. Check the number.';
     const tooFew = 'Enter a quantity above zero.';
-    // Too many pieces, alone or after whole cartons.
-    expect(transferLineHint({ product: cable, qty: '99999999999999' })).toBe(tooMany);
-    expect(transferLineHint({ product: soap, qty: '99999999999999', packs: '1' })).toBe(tooMany);
+    // Too many pieces, alone or after whole cartons; too many cartons, or cartons and pieces that add up to too many.
+    expect(transferLineHint({ product: cable, qty: '99999999999999' })).toBe(tooManyPieces);
+    expect(transferLineHint({ product: soap, qty: '99999999999999', packs: '1' })).toBe(tooManyPieces);
     expect(transferLineHint({ product: soap, qty: '', packs: '99999999999999' })).toBe(tooMany);
+    expect(transferLineHint({ product: soap, qty: '90000000000', packs: '1000000000' })).toBe(tooMany);
     // Cartons typed for an item with no pack, or no unit, never read as too many.
     expect(transferLineHint({ product: cable, qty: '', packs: '2' })).toBe(tooFew);
     expect(transferLineHint({ product: { ...soap, unit: undefined }, qty: '', packs: 'abc' })).toBe(tooFew);
