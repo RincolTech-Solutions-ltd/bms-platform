@@ -14,8 +14,8 @@ const messageOf = (e: unknown) => (e instanceof Error ? e.message : 'Your referr
 
 function When({ iso }: { iso?: string | null }) {
   if (!iso) return null;
-  const d = new Date(iso); // business-day-ok:a moment shown on this phone's clock, never sent
-  return <>{Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</>;
+  const d = new Date(iso);
+  return <>{Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</>; // business-day-ok: a moment shown on this phone's clock, never sent
 }
 
 export function ShareLink({ link, code, business }: { link: string; code: string; business: string }) {

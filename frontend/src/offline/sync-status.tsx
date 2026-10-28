@@ -40,8 +40,8 @@ function closeSheet(d: HTMLDialogElement | null) {
 }
 
 function when(iso: string): string {
-  const at = new Date(iso); // business-day-ok:a moment shown on this phone's clock, never sent
-  return `${at.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+  const at = new Date(iso);
+  return `${at.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`; // business-day-ok: a moment shown on this phone's clock, never sent
 }
 
 const METHOD_WORDS: Record<string, string> = { cash: 'Cash', mobile_money: 'Mobile money', bank: 'Bank', credit: 'Credit' };

@@ -89,8 +89,11 @@ totals shown while typing are a preview; the server's response is the receipt.
   passes to `setBusinessZone` once the profile loads (Africa/Kampala until then, or for an unknown zone).
   `src/api/business-today.test.ts` pins that boundary and guards the app against the device's calendar day: a
   local date part (`getDate()` and the like), a UTC day cut from an instant (`toISOString().slice(0, 10)`,
-  `split('T')[0]`), a date or time formatted without a `timeZone`, and date-fns on now. A line that means it (a
-  calendar sum on a UTC midnight, a moment shown on the phone's own clock) carries `business-day-ok: <why>`.
+  `split('T')[0]`, also split across lines), `toDateString()`, a date or time formatted without a `timeZone`,
+  and date-fns on now. A hit that means it (a calendar sum on a UTC midnight, a moment shown on the phone's own
+  clock) carries `business-day-ok: <reason>` on a line the hit spans; an empty reason does not count.
+  `business-zone.dom.test.tsx` draws the real staff shell for a business in Africa/Lagos at 22:30 UTC and checks
+  that Insights' To is the 28th.
 - **Stock moves (#112 item 1).** A row reads the date ("6 Oct 2026", on one line), "From X to Y", the item
   count with the first two item names, and "by you" for the user's own moves; tapping it opens the move. The
   API gives a transfer no number of its own and `created_by` is an id, so no number or other name is shown.
