@@ -45,7 +45,8 @@ export function dropWords(l: StocktakeLine, unit: string | undefined): string {
 
 export function StocktakeReview({ stocktake, onCommit, busy, units }: {
   stocktake: Stocktake;
-  onCommit?: () => void;
+  /** Called with the product ids of the big drops ticked as right, which the server checks too (issue #636). */
+  onCommit?: (acknowledged: string[]) => void;
   busy?: boolean;
   /** Each item's unit by product id, for the words of a big drop. */
   units?: ReadonlyMap<string, string | undefined>;
@@ -112,7 +113,7 @@ export function StocktakeReview({ stocktake, onCommit, busy, units }: {
       {draft && onCommit && (
         <>
           {open > 0 && <p className="hint">{open === 1 ? 'Tick the line marked above before you commit the count.' : `Tick the ${open} lines marked above before you commit the count.`}</p>}
-          <BusyButton type="button" className="rt-primary" busy={busy === true} notReady={open > 0} onClick={onCommit}>
+          <BusyButton type="button" className="rt-primary" busy={busy === true} notReady={open > 0} onClick={() => onCommit(asked.filter((id) => ticked.has(id)))}>
             Commit the count
           </BusyButton>
         </>
@@ -223,7 +224,7 @@ function CountSheet({ branchId }: { branchId: string }) {
   });
   const entry = useEntryChecks('count', branchId, warnings, () => review.mutate(), counts);
   const commit = useMutation({
-    mutationFn: () => retail.commitStocktake(draft?.id ?? ''),
+    mutationFn: (acknowledged: string[]) => retail.commitStocktake(draft?.id ?? '', acknowledged),
     onSuccess: (st) => {
       // Issue #353: a count is saved when it is committed, so that is when its confirmed warnings are recorded.
       entry.saved();
@@ -235,7 +236,7 @@ function CountSheet({ branchId }: { branchId: string }) {
   if (draft) {
     return (
       <>
-        <StocktakeReview key={draft.id} stocktake={draft} onCommit={() => commit.mutate()} busy={commit.isPending} units={new Map((stock.data ?? []).map((r) => [r.product_id ?? '', r.unit]))} />
+        <StocktakeReview key={draft.id} stocktake={draft} onCommit={(acknowledged) => commit.mutate(acknowledged)} busy={commit.isPending} units={new Map((stock.data ?? []).map((r) => [r.product_id ?? '', r.unit]))} />
         <Problem error={commit.error} />
         {draft.status === 'draft' && <button type="button" onClick={() => setDraft(null)}>Back to the count</button>}
         {draft.status === 'committed' && <button type="button" onClick={() => { setDraft(null); setCounts({}); setListed([]); setDone([]); setConfirming(false); }}>Start another count</button>}

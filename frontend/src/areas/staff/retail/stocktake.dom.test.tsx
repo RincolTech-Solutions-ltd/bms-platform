@@ -289,7 +289,8 @@ describe('a count that wipes or halves stock', () => {
     expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Yes, Test Plug Two Way is right' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Two Way is right' }));
     fireEvent.click(commit);
-    await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('st1'));
+    // Issue #636: the commit names the ticked lines, so the server can refuse a big drop nobody ticked.
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('st1', ['A-1', 'A-2']));
   });
 
   it('asks again after Back to the count, since the review is a new one', async () => {
