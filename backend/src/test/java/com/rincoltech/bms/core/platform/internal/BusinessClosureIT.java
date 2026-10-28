@@ -680,17 +680,18 @@ class BusinessClosureIT extends IntegrationTest {
         // Ask BMS (ADR-096): the factory's cached answer and limit ticket go with the removal; the question log and the
         // spend
         // rows (a user id, hashes and counts) stay for the purge, which deletes every row of the business below.
-        assertThat(removed.getBody().get("erased").get("help").asInt()).isEqualTo(2);
+        assertThat(removed.getBody().get("erased").get("help").asInt())
+                .as("the cached answer, the limit ticket and the setup helper's draft row")
+                .isEqualTo(3);
         assertThat(count("SELECT count(*) FROM help_ask_answers WHERE tenant_id = ?", t.tenantId()))
                 .isZero();
         assertThat(count("SELECT count(*) FROM help_ask_tickets WHERE tenant_id = ?", t.tenantId()))
                 .isZero();
         assertThat(count("SELECT count(*) FROM help_ask_questions WHERE tenant_id = ?", t.tenantId()))
                 .isEqualTo(1);
-        // The setup helper's draft log (V112, ADR-102) holds a user id and counts only, like the question log: it stays
-        // for the purge, and the removal does not stumble on its foreign keys to tenants and users.
+        // The setup helper's draft log (V112, ADR-102) is deleted by the removal itself (help_erase_personal_data).
         assertThat(count("SELECT count(*) FROM help_setup_drafts WHERE tenant_id = ?", t.tenantId()))
-                .isEqualTo(1);
+                .isZero();
         assertThat(withPersonalData(t.tenantId()))
                 .as("tables still holding personal data")
                 .isEmpty();
@@ -734,7 +735,7 @@ class BusinessClosureIT extends IntegrationTest {
         assertThat(count("SELECT count(*) FROM help_ask_spend WHERE tenant_id = ?", t.tenantId()))
                 .isZero();
         assertThat(count("SELECT count(*) FROM help_setup_drafts WHERE tenant_id = ?", t.tenantId()))
-                .as("the purge deletes the setup helper's draft log with the business's other rows")
+                .as("and the purge leaves none")
                 .isZero();
         assertThat(count(
                         "SELECT count(*) FROM tenant_closures WHERE id = ? AND status = 'purged' AND purged_at IS NOT NULL",

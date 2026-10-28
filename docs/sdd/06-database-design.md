@@ -703,7 +703,7 @@ reported nothing keeps its reservation. Index `(provider, reserved_at)`. Grants 
 `SECURITY DEFINER` function `help_ask_platform_spend(provider, currency, from)` sums it across every business in the cap's
 currency, one number and no row. An answer with no usage is settled at its reservation.
 The removal of a closed business (ADR-090) calls `help_erase_personal_data()` (SECURITY DEFINER, only inside a confirmed
-removal, through `bms_removing_tenant`), which deletes the business's `help_ask_answers` and `help_ask_tickets`; the question
+removal, through `bms_removing_tenant`), which deletes the business's `help_ask_answers`, `help_ask_tickets` and (since `V112`) `help_setup_drafts`; the question
 log and the spend rows go with the purge.
 
 ### `help_ask_answers` (RLS)
@@ -724,8 +724,9 @@ under the business's advisory lock, so the person's hourly limit and the busines
 `daily_cap` or `unreadable`), `provider` (`gemini`, `groq` or `deepseek`, set exactly when `drafted`), `model`, `failures
 text[]` (`name:reason`), `rows_drafted`, `input_tokens`, `output_tokens`, `cost_micro`, `cost_currency`, `latency_ms`. Never the
 list, the file, the picture or the draft. Indexes on `(tenant_id, user_id, asked_at)` and `(tenant_id, asked_at)`. Grants
-`SELECT, INSERT, UPDATE`: the update finishes a `started` row. Each provider call is a row of `help_ask_spend` too. The purge of
-a closed business deletes the rows.
+`SELECT, INSERT, UPDATE`: the update finishes a `started` row. Each provider call is a row of `help_ask_spend` too. The removal of
+a closed business (ADR-090) deletes the rows through `help_erase_personal_data` (replaced in `V112` with this table added); the
+generic purge after it would reach them too.
 ### `subscription_module_requests` (RLS)
 
 (ADR-073; migration `V90`, issue #472) One row per module the Owner asked for. `module_key text NOT NULL` (`^[a-z]{2,30}$`),

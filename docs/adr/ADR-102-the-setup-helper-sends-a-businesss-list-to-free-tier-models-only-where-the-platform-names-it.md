@@ -33,7 +33,7 @@ read. So what is sent, what is kept and who it is sent for has to be decided, an
 3. **What is sent.** To the one provider being tried, over https to its allow-listed host: the fixed instructions; the list as
    typed, or the text of the file (a CSV or text file as UTF-8, the cells of the first sheet of an Excel workbook, the text of a
    PDF), or one picture (a photo, or the first page of a scanned PDF) drawn again on the server as a JPEG at most 2000 pixels on its
-   longest side, so its metadata, a phone's location among it, never leaves (its size is read from its header first: more than 50 megapixels is refused, which also bounds the coefficient buffers of a progressive JPEG, and it is decoded skipping rows and columns, so no file can make the server hold a huge picture; a scanned page is drawn no larger than 2000 pixels whatever size it declares); and a short context. For a shop the context is the
+   longest side, so its metadata, a phone's location among it, never leaves (its size is read from its header first: more than 40 megapixels is refused, which also bounds the coefficient buffers of a progressive JPEG, and it is decoded skipping rows and columns, so no file can make the server hold a huge picture; a scanned page is drawn no larger than 2000 pixels whatever size it declares); and a short context. For a shop the context is the
    kind of shop, its active category and unit names with their usual packs, and up to 300 item names with their units, so names
    are matched and not drafted twice. For a lender it is the currency and today's date only: the member list is never sent, and a
    drafted borrower is matched to a member by phone on the server (`MemberLookup.findByPhone`), and named only to someone who may bring loans into that member's branch. Buying prices are neither asked for
@@ -43,7 +43,10 @@ read. So what is sent, what is kept and who it is sent for has to be decided, an
    lending, typed, photo or file, the outcome, the provider and model, the providers that failed before it as `name:reason`, how
    many rows came back, tokens and the estimated cost. Every provider call reserves and settles its cost in Ask BMS's
    `help_ask_spend`, so the DeepSeek monthly cap (`BMS_HELP_ASK_DEEPSEEK_MONTHLY_COST_MICRO`) counts both features together. The
-   purge of a closed business (ADR-090) deletes the rows with its others.
+   removal of a closed business (ADR-090) deletes them explicitly with the module's other help rows
+   (`help_erase_personal_data`, replaced in `V112`); the purge after it is generic, deleting every row of every table that has a
+   `tenant_id`, so it would reach them too. There is no erasure of one person apart from the business: users are anonymised,
+   never deleted, and a row names its user by id only.
 5. **The chain is Ask BMS's.** The same providers, keys (`BMS_HELP_ASK_*_API_KEY`, environment only), prices, allow-list and
    never-Claude checks (`AskProviders`), built a second time with the helper's own budget (25 seconds a provider by default, at
    most 30, `BMS_SETUP_AI_BUDGET_SECONDS`) and output allowance (8000 tokens). A photo goes to a chain of its own: Gemini (its Ask
@@ -90,5 +93,5 @@ read. So what is sent, what is kept and who it is sent for has to be decided, an
 
 - The vision model names: Groq retires models often; an unset `BMS_SETUP_AI_GROQ_PHOTO_MODEL` simply leaves Groq out of photos.
 - A provider whose free tier starts training on inputs: take the business out of `BMS_SETUP_AI_TENANTS` until it is replaced.
-- `help_setup_drafts` has no retention beyond the purge; a nightly job may delete rows older than a day once the counts are not
+- `help_setup_drafts` has no retention beyond the removal of the business; a nightly job may delete rows older than a day once the counts are not
   wanted for the review of spend.
