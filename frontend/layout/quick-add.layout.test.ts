@@ -45,19 +45,12 @@ describe.each([360, 390, 412])('Quick add at %ipx wide', (width) => {
       );
       expect(parts.length).toBeGreaterThan(10);
       for (const part of parts) expect(part.right, `${part.what}, ${step}`).toBeLessThanOrEqual(form + 0.5);
-      // No hint text runs out of its own box: it wraps, or it is a one-line Hint cut on purpose with the info button beside it.
+      // Every hint's text fits its own box (issue #642 review): it wraps rather than running out sideways.
       const hints = await page.evaluate(() =>
-        [...document.querySelectorAll<HTMLElement>('form .hint')].map((e) => ({
-          text: e.textContent ?? '',
-          over: e.scrollWidth - e.clientWidth,
-          more: Boolean(e.parentElement?.querySelector('.hint-more')),
-        })),
+        [...document.querySelectorAll<HTMLElement>('form .hint')].map((e) => ({ text: e.textContent ?? '', over: e.scrollWidth - e.clientWidth })),
       );
       expect(hints.some((h) => h.text.startsWith('A PNG, JPEG or WebP'))).toBe(true);
-      for (const hint of hints) {
-        if (hint.text.startsWith('A PNG, JPEG or WebP')) expect(hint.over, `photo hint, ${step}`).toBeLessThanOrEqual(0);
-        else expect(hint.over <= 0 || hint.more, `${hint.text}, ${step}`).toBe(true);
-      }
+      for (const hint of hints) expect(hint.over, `${hint.text}, ${step}`).toBeLessThanOrEqual(0);
     }
     await page.close();
   });
