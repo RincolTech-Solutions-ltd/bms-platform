@@ -366,8 +366,10 @@ class StockService {
         // ADR-041).
         branches.requireStocks(s.branchId(), "branch_id");
         Set<UUID> ticked = new HashSet<>(acknowledged);
+        // Issue #656: sorted by item code, so a refusal capped at five names the same five every time.
         List<String> unticked = s.lines().stream()
                 .filter(l -> bigDrop(l) && !ticked.contains(l.productId()))
+                .sorted(Comparator.comparing(StocktakeLine::code, Comparator.nullsLast(Comparator.naturalOrder())))
                 .map(l -> l.description() == null ? l.code() : l.description())
                 .toList();
         if (!unticked.isEmpty()) {

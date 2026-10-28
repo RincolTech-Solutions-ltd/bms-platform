@@ -220,7 +220,7 @@ class RetailStockIT extends IntegrationTest {
     @Test
     void theBigDropRefusalNamesAtMostFiveItems() {
         List<Map<String, Object>> lines = new ArrayList<>();
-        for (int i = 1; i <= 7; i++) {
+        for (int i = 7; i >= 1; i--) {
             UUID p = api.product("SKT-15" + i, 400, 600);
             api.stockUp(t.headOffice(), p, "6");
             lines.add(Map.of("product_id", p, "counted_qty", "0"));
@@ -230,6 +230,11 @@ class RetailStockIT extends IntegrationTest {
         String detail = refused(id, Map.of()).get("detail").asString();
         assertThat(detail).contains(" and 2 more removes more than half");
         assertThat(detail.split("SKT-15", -1)).hasSize(6);
+        // The first five by item code, the same on every refusal.
+        assertThat(detail)
+                .contains(
+                        "SKT-151, Test Product SKT-152, Test Product SKT-153, Test Product SKT-154, Test Product SKT-155 and");
+        assertThat(refused(id, Map.of()).get("detail").asString()).isEqualTo(detail);
         assertThat(api.get("/stocktakes/" + id, ADMIN).getBody().get("status").asString())
                 .isEqualTo("draft");
     }
