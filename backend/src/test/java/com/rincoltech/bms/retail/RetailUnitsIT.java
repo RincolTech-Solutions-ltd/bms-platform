@@ -752,4 +752,53 @@ class RetailUnitsIT extends IntegrationTest {
                 ADMINISTRATOR);
         assertThat(plain.getBody().get("added").asInt()).isEqualTo(1);
     }
+
+    // ---- stock in packs and pieces (issue #650) ---------------------------------------------
+
+    /** The stock lists carry the standard pack, the active pack holding the most, only while the capability is on. */
+    @Test
+    void stockRowsCarryTheStandardPack() {
+        switchUnits(true);
+        UUID dozen = api.unit("dozen");
+        UUID pair = api.unit("pair");
+        pack(pen, dozen, "12");
+        pack(pen, carton, "24");
+        pack(pen, pair, "1");
+        api.stockUp(t.headOffice(), pen, "127");
+        JsonNode row =
+                rowOf(api.get("/stock?branch_id=" + t.headOffice(), ADMIN).getBody(), pen);
+        assertThat(row.get("qty").asString()).isEqualTo("127.000");
+        assertThat(row.get("standard_pack").get("unit").asString()).isEqualTo("carton");
+        assertThat(row.get("standard_pack").get("factor").asString()).isEqualTo("24.000");
+        JsonNode all = rowOf(api.get("/stock/all-branches", ADMIN).getBody(), pen);
+        assertThat(all.get("standard_pack").get("unit").asString()).isEqualTo("carton");
+
+        // A pack switched off is never the standard one; an item with no pack has none.
+        TestDatabase.owner()
+                .sql(
+                        "UPDATE retail_product_units SET active = false WHERE tenant_id = ? AND product_id = ? AND unit_id = ?")
+                .params(t.tenantId(), pen, carton)
+                .update();
+        row = rowOf(api.get("/stock?branch_id=" + t.headOffice(), ADMIN).getBody(), pen);
+        assertThat(row.get("standard_pack").get("unit").asString()).isEqualTo("dozen");
+        UUID plain = api.product("UNIT-PLAIN", 50, 60);
+        assertThat(rowOf(api.get("/stock?branch_id=" + t.headOffice(), ADMIN).getBody(), plain)
+                        .has("standard_pack"))
+                .isFalse();
+
+        switchUnits(false);
+        row = rowOf(api.get("/stock?branch_id=" + t.headOffice(), ADMIN).getBody(), pen);
+        assertThat(row.has("standard_pack")).isFalse();
+        assertThat(rowOf(api.get("/stock/all-branches", ADMIN).getBody(), pen).has("standard_pack"))
+                .isFalse();
+    }
+
+    static JsonNode rowOf(JsonNode page, UUID product) {
+        for (JsonNode r : page.get("items")) {
+            if (r.get("product_id").asString().equals(product.toString())) {
+                return r;
+            }
+        }
+        throw new AssertionError("no row for " + product + " in " + page);
+    }
 }

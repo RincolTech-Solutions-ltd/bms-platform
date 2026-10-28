@@ -9392,6 +9392,9 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "standard_pack" : {
+            "$ref" : "#/components/schemas/RetailStandardPack"
+          },
           "total_qty" : {
             "description" : "The sum over the branches of the page",
             "type" : "string"
@@ -18958,6 +18961,18 @@
           }
         }
       },
+      "RetailStandardPack" : {
+        "description" : "An item's standard pack: its unit and the base units one holds",
+        "properties" : {
+          "factor" : {
+            "description" : "Base units in one pack, three places, for example 24.000",
+            "type" : "string"
+          },
+          "unit" : {
+            "type" : "string"
+          }
+        }
+      },
       "RetailStatementBeforeSystemStart" : {
         "description" : "Imported credit sales. They were never posted to the ledger (issue #96), so the statement lists them apart and the ledger-supported closing balance leaves them out",
         "properties" : {
@@ -19410,6 +19425,9 @@
             "description" : "Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)",
             "format" : "int64",
             "type" : "integer"
+          },
+          "standard_pack" : {
+            "$ref" : "#/components/schemas/RetailStandardPack"
           },
           "unit" : {
             "type" : "string"

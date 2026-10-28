@@ -11935,6 +11935,7 @@ export interface components {
              * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
              */
             sell_minor?: number;
+            standard_pack?: components["schemas"]["RetailStandardPack"];
             /** @description The sum over the branches of the page */
             total_qty?: string;
             unit?: string;
@@ -17073,6 +17074,12 @@ export interface components {
              */
             value_at_cost_minor?: number;
         };
+        /** @description An item's standard pack: its unit and the base units one holds */
+        RetailStandardPack: {
+            /** @description Base units in one pack, three places, for example 24.000 */
+            factor?: string;
+            unit?: string;
+        };
         /** @description Imported credit sales. They were never posted to the ledger (issue #96), so the statement lists them apart and the ledger-supported closing balance leaves them out */
         RetailStatementBeforeSystemStart: {
             sales?: components["schemas"]["RetailStatementHistoricalSale"][];
@@ -17282,6 +17289,7 @@ export interface components {
              * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
              */
             sell_minor?: number;
+            standard_pack?: components["schemas"]["RetailStandardPack"];
             unit?: string;
         };
         RetailStockSummary: {
