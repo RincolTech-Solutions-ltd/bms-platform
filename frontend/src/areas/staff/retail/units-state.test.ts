@@ -190,6 +190,14 @@ describe('stock in packs and pieces (issue #650)', () => {
     expect(standardPack({ ...pen, packs: [{ ...carton, factor: '1.000', standard: true }] })).toBeUndefined();
     expect(standardPack({ ...pen, packs: undefined })).toBeUndefined();
   });
+  it('follows the server on a usual pack of another unit, never ranking the packs itself (#660)', () => {
+    const box: Pack = { id: 'k2', product_id: 'e1', unit_id: BOX, unit: 'box', factor: '10.000', active: true, version: 1, purpose: 'both' };
+    const carton: Pack = { id: 'k1', product_id: 'e1', unit_id: CARTON, unit: 'carton', factor: '24.000', active: true, version: 1, purpose: 'both' };
+    // The box's usual pack is 50 metres, or pieces only bought: the server marks the bigger carton, as RetailUnitsIT shows.
+    expect(standardPack({ ...pen, packs: [box, { ...carton, standard: true }] })?.unit).toBe('carton');
+    // The box's usual pack is of pieces and for selling: the server promotes the smaller box.
+    expect(standardPack({ ...pen, packs: [{ ...box, standard: true }, carton] })?.unit).toBe('box');
+  });
   it('tells a pack changed in unit or size from the same one', () => {
     expect(samePack({ unit: 'Carton', factor: '24' }, { unit: 'Carton', factor: '24.000' })).toBe(true);
     expect(samePack({ unit: 'Carton', factor: '24.000' }, { unit: 'Carton', factor: '30.000' })).toBe(false);
