@@ -9,6 +9,8 @@ import com.rincoltech.bms.core.notifications.internal.RecordingNotifier;
 import com.rincoltech.bms.testsupport.Api;
 import com.rincoltech.bms.testsupport.Api.Role;
 import com.rincoltech.bms.testsupport.Api.Session;
+import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -381,51 +383,79 @@ class StaffAuthIT extends IntegrationTest {
                 .update();
     }
 
-    /** Issue #644: a phone opened again 13 hours after its last use still refreshes, within the same week. */
+    /** The idle and absolute expiry of the user's one live session. */
+    Map<String, Object> liveSession(UUID userId) {
+        return TestDatabase.owner()
+                .sql("SELECT created_at, expires_at, idle_expires_at FROM auth_sessions"
+                        + " WHERE user_id = ? AND rotated_at IS NULL AND revoked_at IS NULL")
+                .param(userId)
+                .query()
+                .singleRow();
+    }
+
+    static Instant at(Map<String, Object> row, String column) {
+        return ((Timestamp) row.get(column)).toInstant();
+    }
+
+    /**
+     * Issue #647: a phone that opens BMS 29 days after its last use still refreshes, and the refresh gives it another 30
+     * idle days but never moves the 90 days from sign-in.
+     */
     @Test
-    void aSessionUsedAgainAfterThirteenHoursStillRefreshes() {
+    void aSessionUsedWithinThirtyDaysStaysSignedIn() {
         String email = Api.email("phone");
         UUID seller = Api.staff(t, email, new Role("cashier", t.headOffice()));
         Session session = api.signIn(seller, email, Api.PASSWORD, null);
-        Map<String, Object> signedIn = TestDatabase.owner()
-                .sql("SELECT expires_at, idle_expires_at FROM auth_sessions WHERE user_id = ?")
-                .param(seller)
-                .query()
-                .singleRow();
-        // Idle and absolute are both seven days, so the idle limit is the absolute one.
-        assertThat(signedIn.get("idle_expires_at")).isEqualTo(signedIn.get("expires_at"));
+        Map<String, Object> signedIn = liveSession(seller);
+        assertThat(Duration.between(at(signedIn, "created_at"), at(signedIn, "idle_expires_at")))
+                .isBetween(
+                        Duration.ofDays(30).minusMinutes(1), Duration.ofDays(30).plusMinutes(1));
+        assertThat(Duration.between(at(signedIn, "created_at"), at(signedIn, "expires_at")))
+                .isBetween(
+                        Duration.ofDays(90).minusMinutes(1), Duration.ofDays(90).plusMinutes(1));
 
-        ageSessions(seller, "13 hours");
+        ageSessions(seller, "29 days");
         ResponseEntity<JsonNode> refreshed = api.refresh(session.refreshToken());
         assertThat(refreshed.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(api.get("/api/v1/me", refreshed.getBody().get("access_token").asString())
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
+        // The cookie lives as long as the absolute limit, so the phone keeps it for the 90 days.
+        assertThat(refreshed.getHeaders().getFirst(org.springframework.http.HttpHeaders.SET_COOKIE))
+                .contains("Max-Age=" + Duration.ofDays(90).toSeconds());
 
-        // The refresh never moves the week on: the new session ends when the first one would have.
-        java.sql.Timestamp weekEnds = TestDatabase.owner()
-                .sql("SELECT expires_at FROM auth_sessions WHERE user_id = ? AND rotated_at IS NULL")
-                .param(seller)
-                .query(java.sql.Timestamp.class)
-                .single();
-        assertThat(weekEnds.toInstant())
-                .isEqualTo(((java.sql.Timestamp) signedIn.get("expires_at"))
-                        .toInstant()
-                        .minus(java.time.Duration.ofHours(13)));
+        Map<String, Object> used = liveSession(seller);
+        assertThat(at(used, "expires_at")).isEqualTo(at(signedIn, "expires_at").minus(Duration.ofDays(29)));
+        assertThat(at(used, "idle_expires_at")).isAfter(at(signedIn, "idle_expires_at"));
     }
 
-    /** Issue #644: a session past its seven days absolute is refused, however recently it was used. */
+    /** Issue #647: a session not used for 30 days is refused, well inside its 90 days. */
     @Test
-    void aSessionPastSevenDaysAbsoluteIsRefused() {
-        String email = Api.email("week");
+    void aSessionIdleForThirtyDaysIsRefused() {
+        String email = Api.email("idle30");
         UUID seller = Api.staff(t, email, new Role("cashier", t.headOffice()));
         Session session = api.signIn(seller, email, Api.PASSWORD, null);
-        ageSessions(seller, "6 days 12 hours");
-        ResponseEntity<JsonNode> refreshed = api.refresh(session.refreshToken());
-        assertThat(refreshed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        ageSessions(seller, "30 days 1 minute");
+        ResponseEntity<JsonNode> expired = api.refresh(session.refreshToken());
+        assertThat(expired.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(expired.getBody().get("code").asString()).isEqualTo("session_expired");
+    }
 
-        ageSessions(seller, "12 hours 1 minute");
-        ResponseEntity<JsonNode> expired = api.refresh(api.refreshCookie(refreshed));
+    /** Issue #647: a session past its 90 days absolute is refused, however recently it was used. */
+    @Test
+    void aSessionPastNinetyDaysAbsoluteIsRefused() {
+        String email = Api.email("quarter");
+        UUID seller = Api.staff(t, email, new Role("cashier", t.headOffice()));
+        String refresh = api.signIn(seller, email, Api.PASSWORD, null).refreshToken();
+        for (int month = 0; month < 3; month++) {
+            ageSessions(seller, "29 days");
+            ResponseEntity<JsonNode> refreshed = api.refresh(refresh);
+            assertThat(refreshed.getStatusCode()).isEqualTo(HttpStatus.OK);
+            refresh = api.refreshCookie(refreshed);
+        }
+
+        ageSessions(seller, "3 days 1 minute");
+        ResponseEntity<JsonNode> expired = api.refresh(refresh);
         assertThat(expired.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(expired.getBody().get("code").asString()).isEqualTo("session_expired");
     }
