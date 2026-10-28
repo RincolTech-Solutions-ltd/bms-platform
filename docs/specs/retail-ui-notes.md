@@ -1405,7 +1405,8 @@ the items show only while you search, and go away once one is picked. Every item
   branch switched is ignored when its answer comes, and its draft discarded, so the item never lands on another sale. Offline,
   Not now, Clear this sale and the branch switch wait, with the line "A count on this sale is not committed. Connect to the
   internet, then commit the count or press Not now, before you clear the sale or switch branch."; a discard lost to leaving the
-  screen offline or a reload is sent again the next time Sell is open and online. A refusal shows the server's words, discards
+  screen offline or a reload is sent again the next time Sell is open and online. A branch taken away from the person while the
+  sale holds it is left once the hold lifts (issue #664). A refusal shows the server's words, discards
   the draft and leaves the item for Count stock. Stock that arrives between the read and the count, or a balance the search did
   not return, is never sent to be refused: that draft is discarded and the line has its tick on Count stock. The usual count of
   a new item (no tick asked) follows the same rules: an answer after **Clear this sale** or leaving the screen puts nothing on

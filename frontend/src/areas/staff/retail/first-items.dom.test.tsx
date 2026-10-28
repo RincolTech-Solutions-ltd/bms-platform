@@ -508,6 +508,36 @@ describe('a Sell search that finds nothing', () => {
     await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
   });
 
+  it('moves off a branch taken away while offline once the connection comes back and the hold lifts (issue #664)', async () => {
+    lostCommit();
+    const network = testConnectivity(true);
+    const offline = { scope: 'test', connectivity: network, catalogue: null, engine: { subscribe: () => () => undefined, snapshot: () => ({ items: [], syncing: false, needsSignIn: false }) } } as unknown as Offline;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    function Shell({ me }: { me: Me }) {
+      const { branch } = useActiveBranch(me);
+      if (!branch) return null;
+      return (
+        <StaffContext.Provider value={{ me, branch, chooseBranch }}>
+          <p data-testid="branch-in-use">{branch}</p>
+          <SaleForm key={branch} branchId={branch} />
+        </StaffContext.Provider>
+      );
+    }
+    const at = (me: Me) => <QueryClientProvider client={client}><OfflineProvider value={offline}><Shell me={me} /></OfflineProvider></QueryClientProvider>;
+    const { rerender } = render(at(owner));
+    const started = (await screen.findByTestId('branch-in-use')).textContent;
+    await toLostCommit();
+    act(() => network.set(false));
+    // The profile read again no longer lists the branch in use: offline the sale holds it, with its draft.
+    rerender(at({ ...owner, branches: (owner.branches ?? []).filter((b) => b.id !== started) }));
+    await act(async () => undefined);
+    expect(screen.getByTestId('branch-in-use').textContent).toBe(started);
+    expect(discardStocktake).not.toHaveBeenCalled();
+    act(() => network.set(true));
+    await waitFor(() => expect(screen.getByTestId('branch-in-use').textContent).not.toBe(started));
+    await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
+  });
+
   it('sends a discard lost to leaving the screen again the next time Sell opens online (issue #656)', async () => {
     sessionStorage.setItem('sale-held-counts', JSON.stringify(['s-left']));
     open(<RecordSale />, owner);
