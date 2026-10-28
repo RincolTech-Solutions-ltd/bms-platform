@@ -1414,7 +1414,8 @@ the items show only while you search, and go away once one is picked. Every item
   more on the same draft; still lost, the draft is kept for a later discard and Sell says the count may not be committed. The
   later discard never takes a draft whose commit is still on its way, so a connection that comes back between the two tries
   leaves the count to be sent again (issue #664). A sale cleared or a screen left before the lost answer hears nothing of it.
-  Count stock shows a discarded count as cancelled, never as committed.
+  Count stock shows a discarded count as cancelled, never as committed, with no tick and no Commit the count; the refusal of
+  a commit on it (409 `stocktake_discarded`) says cancelled too, so the owner reads one word for it (issue #664).
 - **Scan box.** Unchanged (ADR-070 decision 11, owner decision D7): a scanner types only into the Scan box, which adds the item or one more.
 - **Tours.** `retail-sales` version 16, `page-stocktake` 3 (the search on top and the list Not counted yet), `page-restock` 3, `page-usage` 2, `page-transfer` 3,
   `page-sizes-join` 2 and `page-labels` 2 word their search steps for the list that shows while you type.
