@@ -371,15 +371,7 @@ class CatalogueService {
     @Transactional
     Product create(CreateProductRequest r) {
         requireCategoryAndUnit(r.categoryId(), r.unitId(), null, null);
-        Unit smallest = repo.unit(r.unitId()).orElseThrow();
-        if (smallest.isPackage()) {
-            String word = smallest.name().trim().toLowerCase(Locale.ROOT);
-            throw ApiException.validation(List.of(new FieldProblem(
-                    "unit_id",
-                    "unit_is_package",
-                    "A " + word + " is a package. Choose the smallest unit, like piece, then add the " + word
-                            + " below.")));
-        }
+        refusePackageUnit(r.unitId());
         List<PackRequest> packs = r.packs() == null ? List.of() : r.packs();
         if (!packs.isEmpty()) {
             requireUnits();
@@ -441,9 +433,36 @@ class CatalogueService {
         audit.record(AuditLog.Entry.created("retail.product.created", PRODUCT, p.id(), null, after));
         for (int i = 0; i < packs.size(); i++) {
             PackRequest k = packs.get(i);
-            createPack(p, k.unitId(), k.factor(), purposes.get(i), k.sellMinor(), by, null);
+            try {
+                createPack(p, k.unitId(), k.factor(), purposes.get(i), k.sellMinor(), by, null);
+            } catch (ApiException e) {
+                throw ofPack(e, i);
+            }
         }
         return withPacks(visible(repo.find(p.id()).orElseThrow()));
+    }
+
+    /** Issue #689 (ADR-106): a new item is never counted in a package (422 unit_is_package on unit_id). */
+    // JUSTIFICATION-A3: the review of #692 asks the same refusal on POST /product-families, so create shares it.
+    void refusePackageUnit(UUID unitId) {
+        Unit unit = repo.unit(unitId).orElseThrow();
+        if (unit.isPackage()) {
+            throw ApiException.validation(List.of(
+                    new FieldProblem("unit_id", "unit_is_package", RetailCatalogue.packageAsUnit(unit.name()))));
+        }
+    }
+
+    /**
+     * Review of #692: a refusal of the new item's package {@code i} names it, its fields as {@code packs[i].unit_id} and the
+     * problem with {@code pack_index}, so the form shows it on that package and never on the item's own unit.
+     */
+    private static ApiException ofPack(ApiException e, int i) {
+        Map<String, Object> extensions = new LinkedHashMap<>(e.extensions());
+        extensions.put("pack_index", i);
+        List<FieldProblem> errors = e.errors().stream()
+                .map(f -> new FieldProblem("packs[" + i + "]." + f.field(), f.code(), f.message()))
+                .toList();
+        return new ApiException(e.status(), e.code(), e.title(), e.getMessage(), errors, extensions);
     }
 
     /**

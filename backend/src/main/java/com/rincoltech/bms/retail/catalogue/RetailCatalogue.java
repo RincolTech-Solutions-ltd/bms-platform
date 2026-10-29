@@ -37,12 +37,28 @@ public interface RetailCatalogue {
      * it, which the PWA reads, so the screens and the server cannot disagree.
      */
     Pattern PACKAGE_WORDS = Pattern.compile(
-            "(box|carton|dozen|pack|packet|bag|sack|crate|case|tray|bundle|bale)(e?s)?( of \\d+.*)?|sets? of \\d+.*",
+            "(box|carton|ctn|dozen|pack|packet|bag|sack|crate|case|tray|bundle|bale)(e?s)?( of \\d+.*)?|sets? of \\d+.*",
             Pattern.CASE_INSENSITIVE);
 
     /** True when the unit's name is a package word of {@link #PACKAGE_WORDS}. */
     static boolean isPackageWord(String unitName) {
         return unitName != null && PACKAGE_WORDS.matcher(unitName.trim()).matches();
+    }
+
+    /**
+     * Issue #689: the refusal of a package as a new item's unit, the unit named in the singular ("Boxes" reads "a box"), as
+     * the PWA words it ({@code packageAsUnit} in new-item-packs.tsx).
+     */
+    static String packageAsUnit(String unitName) {
+        String word = unitName.trim().toLowerCase(java.util.Locale.ROOT);
+        int of = word.indexOf(" of ");
+        String head = of < 0 ? word : word.substring(0, of);
+        String tail = of < 0 ? "" : word.substring(of);
+        head = head.endsWith("xes")
+                ? head.substring(0, head.length() - 2)
+                : head.endsWith("s") && !head.endsWith("ss") ? head.substring(0, head.length() - 1) : head;
+        word = head + tail;
+        return "A " + word + " is a package. Choose the smallest unit, like piece, then add the " + word + " below.";
     }
 
     /**
