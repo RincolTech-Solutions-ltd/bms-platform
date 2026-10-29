@@ -306,11 +306,16 @@ export function CategoryPicker({ id, label = 'Category', thing = 'category', cat
   const startAdd = (name: string) => { setAddName(name); setOpen(false); document.getElementById(id)?.focus(); add.open(); };
   const things = thing === 'category' ? 'categories' : `${thing}s`;
   // Issue #619: with no category to choose, the field says so and adds the first one in the sheet, or says who to ask.
-  // The add sheet keeps its place whichever way the field is drawn, so a list that arrives while it is open never resets it:
-  // the {null} stands where the other branch draws its live region, keeping the sheet third in both.
   if (choicesList.length === 0 && noneLabel === undefined && (all.data !== undefined || all.isError)) {
     const addFirst = canAdd ? { label: addChoice(thing), onClick: () => startAdd('') } : null;
-    return <><EmptyChoice id={id} label={label} required={required} load={all} text={`No ${things} yet.`} ask={`Ask the owner to add a ${thing} first.`} add={addFirst} />{null}{add.sheet}</>;
+    return (
+      <>
+        <EmptyChoice id={id} label={label} required={required} load={all} text={`No ${things} yet.`} ask={`Ask the owner to add a ${thing} first.`} add={addFirst} />
+        {/* A Save with none chosen says why under the field, as the list's own field does (Quick add's "Choose a group."). */}
+        {showError && error && <span className="field-error" role="alert" data-testid={`${id}-error`}>{icons.error}{error}</span>}
+        {add.sheet}
+      </>
+    );
   }
   const choices = <Choices id={id} thing={thing} categories={choicesList} value={value} noneLabel={noneLabel} canAdd={canAdd} onPick={pick} onAdd={startAdd} />;
 

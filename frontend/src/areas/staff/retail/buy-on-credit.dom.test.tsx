@@ -28,7 +28,7 @@ vi.mock('../../../api/retail', async (original) => {
 let suppliers: Record<string, unknown>[] = [];
 const createSupplier = vi.fn();
 
-const { METHODS, RestockForm, buildPurchase, creditNeedsSupplier } = await import('./restock');
+const { METHODS, RestockForm, buildPurchase, creditNeedsSupplier, withoutTypedSupplier } = await import('./restock');
 const { OwedList, PayablesReport } = await import('./supplier-payables');
 const { Money } = await import('./ui');
 const { moneyLinks } = await import('../tabs');
@@ -104,11 +104,18 @@ describe('Paid how on Buy stock', () => {
     expect(screen.getByTestId('restock-total').querySelector('.num')?.textContent).toBe('UGX 5,000');
   });
 
-  it('never makes a supplier from a typed name kept in a draft from before #688', () => {
-    screenOf(<RestockForm initial={{ ...restockDraft('credit'), newSupplier: 'Test Supplier 05' } as never} />);
+  it('drops a typed new supplier from a draft kept before #688, so nothing is made that the form does not show', async () => {
+    const name = `retail-draft:restock:${owner.user_id ?? ''}`;
+    sessionStorage.setItem(name, JSON.stringify({ key: 'k-old', draft: { ...restockDraft('credit'), newSupplier: 'Test Supplier 05' } }));
+    screenOf(<RestockForm />);
     expect(screen.getByTestId('credit-needs-supplier')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Save the purchase' }).getAttribute('data-not-ready')).toBe('true');
+    // The draft kept in the tab is written back without it.
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem(name) ?? '{}').draft).not.toHaveProperty('newSupplier'));
+    expect(JSON.parse(sessionStorage.getItem(name) ?? '{}').draft.method).toBe('credit');
     expect(createSupplier).not.toHaveBeenCalled();
+    const kept = restockDraft('cash');
+    expect(withoutTypedSupplier(kept)).toBe(kept);
   });
 
   it('draws the total cost in tabular figures', () => {

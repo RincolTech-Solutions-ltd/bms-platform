@@ -18,10 +18,7 @@ import '../src/app/ui/index.css';
 const query = new URLSearchParams(window.location.search);
 document.documentElement.style.fontSize = `${16 * Number(query.get('font') ?? '1')}px`;
 
-// ?packs=1 lays it out with cartons switched on, so Comes in cartons of shows (issue #688, D76).
-const admin = mockMe('admin');
-const packs = query.get('packs') === '1' ? { module_capabilities: { ...admin.module_capabilities, retail: [...(admin.module_capabilities?.retail ?? []), 'units'] } } : {};
-const me = { ...admin, ...packs, tours: { 'tours-off': { status: 'dismissed', version: 1 } } } as unknown as Me;
+const me = { ...mockMe('admin'), tours: { 'tours-off': { status: 'dismissed', version: 1 } } } as unknown as Me;
 const branch = me.branches?.[0]?.id ?? null;
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
 client.setQueryData(['retail', 'catalogue', 'categories'], [{ id: 'c1', name: 'Test Bulbs', active: true, product_count: 0, version: 1 }]);

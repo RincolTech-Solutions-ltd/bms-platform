@@ -24,8 +24,9 @@ export function CustomerPicker({ id, label, placeholder, customers, value, onCha
   onChange: (customerId: string) => void;
   hint?: ReactNode;
   /**
-   * The customer is optional and a typed name is enough (an order, a quotation): with no customers and no way to add one, the
-   * field is left out, as before #688, rather than an empty line about a field nobody needs. It is never marked needed.
+   * The customer is optional and a typed name is enough (an order, a quotation): with no customers the select offers only
+   * "+ Add a customer", never the empty line, and with no way to add one the field is left out, as before #688. It is never
+   * marked needed, so Save never goes to it.
    */
   quietWhenEmpty?: boolean;
 }) {
@@ -44,6 +45,7 @@ export function CustomerPicker({ id, label, placeholder, customers, value, onCha
       onChange={onChange}
       placeholder={placeholder}
       canAdd={canAdd}
+      addOnlyWhenEmpty={quietWhenEmpty}
       hint={hint}
       loading={customers.data === undefined}
       load={customers}

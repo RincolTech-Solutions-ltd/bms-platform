@@ -131,15 +131,22 @@ export function creditNeedsSupplier(method: PurchasePayment, supplierId: string)
   return method === 'credit' && supplierId === '' ? 'On credit needs a supplier. Choose one above, or + Add a supplier.' : null;
 }
 
-/**
- * What the restock form keeps with its key in this tab until saved or cleared (#77). A draft kept before issue #688 may still
- * carry a typed `newSupplier`; it is never read, so nothing is made that the form does not show.
- */
+/** What the restock form keeps with its key in this tab until saved or cleared (#77). */
 export interface RestockDraft {
   supplierId: string;
   purchasedOn: string;
   method: PurchasePayment;
   lines: RestockLine[];
+}
+
+/**
+ * A draft kept before issue #688 may carry a typed `newSupplier`, which the form no longer shows: it is dropped when the draft is
+ * restored, so nothing is made that the form does not show. A draft without one is given back as it was.
+ */
+export function withoutTypedSupplier(draft: RestockDraft): RestockDraft {
+  if (!('newSupplier' in draft)) return draft;
+  const { newSupplier: _dropped, ...rest } = draft as RestockDraft & { newSupplier?: string };
+  return rest;
 }
 
 /** What the confirmation needs besides the server's answer: who supplied it and the prices before. */
@@ -165,9 +172,9 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
   const queryClient = useQueryClient();
   const branches = (me.branches ?? []).filter((b) => b.id && b.stocks_goods !== false);
   // A restock entered again after a void (issue #351) has a draft of its own, so a restock in progress is never overwritten.
-  const { key, draft, setDraft, finish, discard } = usePersistedDraft<RestockDraft>(draftName ?? `restock:${me.user_id ?? ''}`, initial ?? {
+  const { key, draft, setDraft, finish, discard } = usePersistedDraft<RestockDraft>(draftName ?? `restock:${me.user_id ?? ''}`, initial ? withoutTypedSupplier(initial) : {
     supplierId: '', purchasedOn: businessToday(), method: 'cash', lines: [],
-  });
+  }, withoutTypedSupplier);
   const { supplierId, purchasedOn, method, lines } = draft;
   const field = <K extends keyof RestockDraft>(k: K) => (v: RestockDraft[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const setSupplierId = field('supplierId');

@@ -37,8 +37,10 @@ export function useAddInPlace({ thing, form, onAdded }: {
     setOpen(false);
     onAdded(row);
   };
+  // Keyed, so a picker that draws its field another way once its list arrives (an empty list, then a list) keeps the sheet and
+  // what is typed in it, wherever it stands among the picker's parts.
   const sheet = (
-    <Sheet open={open} onClose={() => setOpen(false)} title={`Add a ${thing}`}>
+    <Sheet key="add-in-place" open={open} onClose={() => setOpen(false)} title={`Add a ${thing}`}>
       {open && form(done, () => setOpen(false))}
     </Sheet>
   );
@@ -50,7 +52,7 @@ export function useAddInPlace({ thing, form, onAdded }: {
  * suppliers yet." and only "+ Add a supplier", or who to ask ("Ask the owner to add a supplier first."). A record added here is
  * named at once, before the screen's own list has read it again.
  */
-export function PickerWithAdd({ id, label, thing, options, value, onChange, placeholder, canAdd, form, required = false, error = null, showError = false, hint, disabled = false, loading = false, load, empty, ask }: {
+export function PickerWithAdd({ id, label, thing, options, value, onChange, placeholder, canAdd, form, required = false, error = null, showError = false, hint, disabled = false, addOnlyWhenEmpty = false, loading = false, load, empty, ask }: {
   id: string;
   label: ReactNode;
   /** The record in a few plain words, such as "supplier": the option says "+ Add a supplier". */
@@ -68,6 +70,8 @@ export function PickerWithAdd({ id, label, thing, options, value, onChange, plac
   hint?: ReactNode;
   /** The choice is fixed (an order already sent): no change and no add. */
   disabled?: boolean;
+  /** With no records, the select offers only "+ Add a <thing>" rather than the EmptyChoice line (an optional choice). */
+  addOnlyWhenEmpty?: boolean;
   /** The list is on its way: the select shows, never "No suppliers yet." */
   loading?: boolean;
   load?: { isError: boolean; refetch: () => unknown };
@@ -82,8 +86,8 @@ export function PickerWithAdd({ id, label, thing, options, value, onChange, plac
   const arrowing = useRef(false);
   const add = useAddInPlace({ thing, form, onAdded: (row) => { setKept(row); onChange(row.value); } });
   const list = kept && !options.some((o) => o.value === kept.value) ? [...options, kept] : options;
-  // Both ways of drawing the field keep the sheet second, so a list that arrives while it is open never resets it.
-  if (load?.isError || (list.length === 0 && !loading)) {
+  // An optional choice whose list may well be empty (the customer of an order) keeps its select with only the add option.
+  if (load?.isError || (list.length === 0 && !loading && !(addOnlyWhenEmpty && canAdd))) {
     const addFirst = canAdd ? { label: addChoice(thing), onClick: add.open } : null;
     return <><EmptyChoice id={id} label={label} required={required} load={load} text={empty} ask={ask} add={addFirst} />{add.sheet}</>;
   }

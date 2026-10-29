@@ -794,13 +794,11 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   unit use it; `AddByName` draws no heading without a `title`. `design-guard.test.ts` fails a hand-built select of records
   unless `ADD_IN_PLACE_EXEMPT` names it with a reason (branches, a line's pack, the expense category, the credit buyer). Quick add's Category is needed and right under the Name ("Choose a group", Add refuses with "Choose a
   group." and focuses it, "+ Add a group"), starts with the group this person last chose at that shop (`readLastGroup`,
-  `bms.quickAddGroup.*`, written once an item is added), and is never left out, so nothing goes under General unasked; tour
-  `page-quick-add` version 2. Comes in cartons of (D76, packs on): the size gives the new item its own carton pack through
-  `addPack` (the Carton unit made in place when missing), How many takes full cartons and loose pieces sent as pieces, and the
-  line says "3 cartons and 5 pieces"; `layout/quick-add.layout.test.ts` checks it at 412 and 1280px. Rule 26
+  `bms.quickAddGroup.*`, written once an item is added), and is never left out, so nothing goes under General unasked; tour `page-quick-add` version 2. Rule 26
   of `docs/ui-rules.md`; notes in `docs/specs/retail-ui-notes.md` (Add it in place). Tests: `quick-add.dom.test.tsx`,
   `category-picker.dom.test.tsx`, `unit-picker.dom.test.tsx`, `buy-on-credit.dom.test.tsx`, `supplier-field.dom.test.tsx`,
-  `customer-picker.dom.test.tsx`, `usual-pack.dom.test.tsx`, `design-guard.test.ts`.
+  `customer-picker.dom.test.tsx`, `order-quotation-customer.dom.test.tsx`, `usual-pack.dom.test.tsx`, `design-guard.test.ts`.
+  D76 (Comes in cartons of on Quick add) moved to issue #695.
 - **Built (Set up your shop, issue #625, ADR-100, FR-RET-01, units spec section 9 step 5):** migration `V111` (directly after
   `V110`, #624, PR #627): `retail_units` gains `pack_size`, `pack_of_unit_id` and `pack_purpose`, the usual size of a
   unit that is a pack in a smaller unit and what it is for (`buy`, `sell` or `both`, the values and Used for words of a pack's
