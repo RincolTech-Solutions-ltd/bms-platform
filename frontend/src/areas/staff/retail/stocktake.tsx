@@ -222,6 +222,7 @@ function CountSheet({ branchId }: { branchId: string }) {
   };
   const entered = Object.entries(totals).filter(([, v]) => v.trim() !== '');
   const bad = entered.some(([, v]) => parseCount(v) === null);
+  // toast-exempt: success screen, the review of the count replaces the form
   const review = useMutation({
     mutationFn: () => retail.createStocktake({ branch_id: branchId, lines: entered.map(([productId, countedQty]) => ({ product_id: productId, counted_qty: qtyString(parseCount(countedQty) ?? 0) })) }),
     onSuccess: setDraft,

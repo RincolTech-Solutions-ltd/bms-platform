@@ -23,7 +23,7 @@ import { UnitPicker } from './unit-picker';
 import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
 import { CategoryPicker } from './category-picker';
 import { ScreenToast } from './toast';
-import { Gate, Problem, Success, money, useProfitAccess, useToast } from './ui';
+import { Gate, Problem, money, useProfitAccess, useToast } from './ui';
 import { WORDS } from '../../../app/glossary';
 import { Hint } from '../../../app/ui/Hint';
 
@@ -482,15 +482,13 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
 
 export function ProductsPage() {
   const [view, setView] = useState<View>({ mode: 'list' });
-  const [message, setMessage] = useState<string | null>(null);
   const { show, toast } = useToast();
   const back = () => setView({ mode: 'list' });
-  const open = (id: string) => { setMessage(null); setView({ mode: 'edit', id }); };
-  const saved = (text: string) => { setMessage(text); show(text, 'success'); back(); };
+  const open = (id: string) => setView({ mode: 'edit', id });
+  const saved = (text: string) => { show(text, 'success'); back(); };
   return (
     <Gate screen="products" title="Items">
-      {message && view.mode === 'list' && <Success>{message}</Success>}
-      {view.mode === 'list' && <ProductList onAdd={() => { setMessage(null); setView({ mode: 'new' }); }} onEdit={(id) => { setMessage(null); setView({ mode: 'edit', id }); }} onPrice={(id) => { setMessage(null); setView({ mode: 'price', id }); }} />}
+      {view.mode === 'list' && <ProductList onAdd={() => setView({ mode: 'new' })} onEdit={open} onPrice={(id) => setView({ mode: 'price', id })} />}
       <ScreenToast.Provider value={show}>
         {view.mode === 'new' && <ProductForm onSaved={saved} onCancel={back} onOpen={open} />}
         {(view.mode === 'edit' || view.mode === 'price') && <Editing id={view.id} mode={view.mode} onSaved={saved} onCancel={back} onOpen={open} />}

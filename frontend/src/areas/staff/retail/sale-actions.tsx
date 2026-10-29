@@ -189,7 +189,7 @@ export function VoidSaleAction({ sale, branchName }: { sale: Sale; branchName?: 
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   // Voided, or found already voided: the button stays away until the reloaded sale says Voided.
-  const [done, setDone] = useState(false);
+  const [voided, setVoided] = useState(false);
   // ADR-091: the void waits for an administrator; the sale stays as it is until then, and the button stays away.
   const [waiting, setWaiting] = useState(false);
   const sending = useRef(false);
@@ -197,14 +197,14 @@ export function VoidSaleAction({ sale, branchName }: { sale: Sale; branchName?: 
     mutationFn: (reason: string) => retail.voidSale(sale.id ?? '', reason),
     onSuccess: (outcome) => {
       if (isWaiting(outcome)) setWaiting(true);
-      else setDone(true);
+      else setVoided(true);
       setOpen(false);
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
     onError: (error) => {
       // A void that already went through (a lost answer, a second person) is done, not an error.
       if (error instanceof RetailError && error.code === 'sale_voided') {
-        setDone(true);
+        setVoided(true);
         setOpen(false);
       }
       if (error instanceof RetailError && ['sale_voided', 'sale_has_payments', 'sale_has_returns'].includes(error.code ?? '')) void queryClient.invalidateQueries({ queryKey: ['retail'] });
@@ -213,7 +213,7 @@ export function VoidSaleAction({ sale, branchName }: { sale: Sale; branchName?: 
     meta: { success: (outcome: object) => (isWaiting(outcome) ? null : 'Sale voided') },
   });
   if (waiting) return <WaitingForApproval what="The void of this sale waits for an administrator." />;
-  if (sale.status !== 'completed' || done || !holdsAt(me, SALE_VOID, sale.branch_id)) return null;
+  if (sale.status !== 'completed' || voided || !holdsAt(me, SALE_VOID, sale.branch_id)) return null;
   const blocked = voidBlocked(sale);
   if (blocked) return <p className="hint" data-testid="void-blocked">{blocked}</p>;
   if (!open) return <p><button type="button" className="btn-sm" onClick={() => { send.reset(); setOpen(true); }}>Void this sale</button></p>;

@@ -74,7 +74,7 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
   const [form, setForm] = useState<ConvertForm>(blankConvert());
   const [key, setKey] = useState(newIdempotencyKey);
   const [reason, setReason] = useState('');
-  const [done, setDone] = useState<Converted | null>(null);
+  const [converted, setConverted] = useState<Converted | null>(null);
   const customers = useQuery({ queryKey: ['retail', 'customers'], queryFn: () => retail.listCustomers(), enabled: panel === 'convert' && q.customer_id !== undefined });
   const hasTerms = (customers.data ?? []).find((c) => c.id === q.customer_id)?.terms_days !== undefined;
   const refresh = () => {
@@ -84,7 +84,7 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
   const convert = useMutation({
     mutationFn: () => retail.convertQuotation(q.id ?? '', buildConvertRequest(form), key),
     onSuccess: (r) => {
-      setDone(r);
+      setConverted(r);
       setPanel(null);
       setKey(newIdempotencyKey());
       void queryClient.invalidateQueries({ queryKey: ['retail', 'products'] });
@@ -140,10 +140,10 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
         </fieldset>
       )}
       <Problem error={convert.error ?? cancel.error} />
-      {done && (done.note || done.invoice) && (
+      {converted && (converted.note || converted.invoice) && (
         <div data-testid="converted">
-          {done.note && <p className="hint" data-testid="convert-note">{done.note}</p>}
-          {done.invoice && <button type="button" className="btn-sm" onClick={() => void openDocumentPdf(done.invoice ?? {})}>Open invoice {done.invoice.number}</button>}
+          {converted.note && <p className="hint" data-testid="convert-note">{converted.note}</p>}
+          {converted.invoice && <button type="button" className="btn-sm" onClick={() => void openDocumentPdf(converted.invoice ?? {})}>Open invoice {converted.invoice.number}</button>}
         </div>
       )}
     </li>
