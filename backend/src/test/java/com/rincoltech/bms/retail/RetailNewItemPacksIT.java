@@ -243,6 +243,37 @@ class RetailNewItemPacksIT extends IntegrationTest {
         assertThat(packRows()).isZero();
     }
 
+    /**
+     * Review of #692, round 5: the shape of every refusal of {@code packs}. A missing package names its row; more than ten
+     * (the form offers no more) is a 422 on {@code packs}; a size that is not a number is the 400 of any unreadable body.
+     */
+    // JUSTIFICATION-A3: the round 5 review asks for an IT pinning these shapes.
+    @Test
+    void everyRefusalOfThePackagesHasAKnownShape() {
+        List<Map<String, Object>> withNull = new java.util.ArrayList<>();
+        withNull.add(pack(carton, "10", "both", null));
+        withNull.add(null);
+        ResponseEntity<JsonNode> missing = api.post("/products", item("Test Bulb 60W", bulb, withNull), ADMIN);
+        assertThat(missing.getStatusCode()).as("%s", missing.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(missing.getBody().get("pack_index").asInt()).isEqualTo(1);
+        assertThat(missing.getBody().toString()).contains("packs[1].unit_id");
+
+        List<Map<String, Object>> eleven = new java.util.ArrayList<>();
+        for (int i = 0; i < 11; i++) {
+            eleven.add(pack(carton, "10", "both", null));
+        }
+        ResponseEntity<JsonNode> tooMany = api.post("/products", item("Test Bulb 60W", bulb, eleven), ADMIN);
+        assertThat(tooMany.getStatusCode()).as("%s", tooMany.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(tooMany.getBody().toString()).contains("\"field\":\"packs\"");
+
+        ResponseEntity<JsonNode> notANumber =
+                api.post("/products", item("Test Bulb 60W", bulb, List.of(pack(carton, "ten", "both", null))), ADMIN);
+        assertThat(notANumber.getStatusCode()).as("%s", notANumber.getBody()).isEqualTo(HttpStatus.BAD_REQUEST);
+
+        assertThat(products("Test Bulb 60W")).isZero();
+        assertThat(packRows()).isZero();
+    }
+
     /** Review of #692, round 4: Quick add makes items too, and never in a package. */
     @Test
     void quickAddNeverCountsAnItemInAPackage() {

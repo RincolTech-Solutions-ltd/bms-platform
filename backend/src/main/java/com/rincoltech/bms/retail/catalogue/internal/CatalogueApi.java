@@ -176,7 +176,7 @@ final class CatalogueApi {
                             + " POST /products/{id}/units checks them; all are saved with the item or none is")
             // Review of #692: each pack is validated by the service, so its problems carry pack_index and packs[i]
             // names.
-            List<@NotNull PackRequest> packs) {}
+            List<PackRequest> packs) {}
 
     @Schema(
             name = "UpdateRetailProductRequest",

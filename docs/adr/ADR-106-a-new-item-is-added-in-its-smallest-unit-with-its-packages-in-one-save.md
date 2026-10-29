@@ -41,7 +41,11 @@ sold in packages and give them, all in one form and one save.
    price of one carton". Add another package adds a row. A package unit's usual pack fills in the size and Used for, as on
    Edit item, and a size filled in that way follows a new smallest unit or empties; one the owner typed stays. The prices read
    "Buying price of one bulb" and "Selling price of one bulb". The toast says "60W bulb added as LGH-0001, with carton of 10",
-   keeping the item code the app gave, and the new item leads the Items list.
+   keeping the item code the app gave, and the new item leads the Items list. A form holds at most ten packages, the most the
+   request takes.
+5. **Used for in the owner's order everywhere.** The one list of what a pack is for (`PURPOSES` in `catalogue-packs.tsx`)
+   now reads Both, Buying, Selling, so Edit item, shop setup and this form show the same order. This amends the order
+   ADR-100 decision 1 names (Both, Selling, Buying); ADR-100 itself is left as accepted. The values are unchanged.
 
 ## Consequences
 

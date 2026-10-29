@@ -81,6 +81,8 @@ describe('the words of Add an item', () => {
     expect(packageAsUnit({ ...units[2]!, name: 'Boxes' })).toMatch(/^Boxes is a package\./);
     expect(packageAsUnit(units[0])).toBeNull();
     expect(packageAsUnit(undefined)).toBeNull();
+    // A short code reads in the shop's words, as the rest of the form names it (review of #692).
+    expect(packageAsUnit({ name: 'Ctn', is_package: true })).toBe('A carton is a package. Choose the smallest unit, like piece, then add the carton below.');
   });
 
   it('refills a size the app filled when the smallest unit changes, and keeps one the owner typed (review of #692)', () => {
@@ -272,6 +274,17 @@ describe('Add an item (issue #689)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     expect(await within(row).findByText('Type a number up to 100,000.')).toBeTruthy();
     expect(createProduct).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers Add another package up to ten packages, the most the request takes', async () => {
+    open();
+    await fill('u1');
+    fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
+    for (let n = 1; n < 10; n++) fireEvent.click(screen.getByRole('button', { name: 'Add another package' }));
+    expect(screen.getAllByTestId('package-row')).toHaveLength(10);
+    expect(screen.queryByRole('button', { name: 'Add another package' })).toBeNull();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Remove the/ })[0]!);
+    expect(screen.getByRole('button', { name: 'Add another package' })).toBeTruthy();
   });
 
   it('shows no package question while packs are off', async () => {

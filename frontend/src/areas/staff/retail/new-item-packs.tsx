@@ -50,8 +50,9 @@ export function manyOf(unit: Unit | undefined, none: string): string {
  */
 export function packageAsUnit(unit: Unit | undefined): string | null {
   if (!unit?.is_package) return null;
-  // The unit's own name, not its shop word, so the sentence is the server's word for word.
-  const word = (unit.name ?? '').trim().toLowerCase();
+  // Review of #692: in the shop's words (#680), as the rest of the form names units, so "Ctn" reads "a carton". The server's
+  // sentence names the unit as it is spelt; this one is what the form shows before anything is sent.
+  const word = unitWord((unit.name ?? '').trim()).toLowerCase();
   const head = word.split(' ')[0] ?? '';
   const named = head.endsWith('s') && !head.endsWith('ss') ? word.charAt(0).toUpperCase() + word.slice(1) : `A ${word}`;
   return `${named} is a package. Choose the smallest unit, like piece, then add the ${word} below.`;
@@ -76,6 +77,9 @@ export function sizeProblem(factor: string): string | null {
   // Review of #692, round 4: no package holds more than this, so a slip of the finger never reaches the server.
   return Number(factor.trim()) > MAX_PACK_SIZE ? 'Type a number up to 100,000.' : null;
 }
+
+/** The most packages one new item takes (`packs`, @Size(max = 10) on the server). */
+export const MAX_PACKAGES = 10;
 
 /** The most of the smallest unit one package may hold on this form. */
 export const MAX_PACK_SIZE = 100_000;
@@ -206,10 +210,12 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
               </fieldset>
             );
           })}
-          <button type="button" className="btn-ghost" onClick={() => onRows([...rows, newPackageRow(Math.max(0, ...rows.map((r) => r.key)) + 1)])}>
-            {icons.plus}
-            <span>Add another package</span>
-          </button>
+          {rows.length < MAX_PACKAGES && (
+            <button type="button" className="btn-ghost" onClick={() => onRows([...rows, newPackageRow(Math.max(0, ...rows.map((r) => r.key)) + 1)])}>
+              {icons.plus}
+              <span>Add another package</span>
+            </button>
+          )}
         </>
       )}
     </div>

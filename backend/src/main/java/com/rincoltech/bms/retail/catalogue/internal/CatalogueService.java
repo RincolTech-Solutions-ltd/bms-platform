@@ -385,6 +385,12 @@ class CatalogueService {
         // written; a refusal names the pack (pack_index, packs[i].factor), never the item's own fields.
         List<String> purposes = new ArrayList<>();
         for (int i = 0; i < packs.size(); i++) {
+            if (packs.get(i) == null) {
+                throw ofPack(
+                        ApiException.validation(
+                                List.of(new FieldProblem("unit_id", "required", "Choose the package."))),
+                        i);
+            }
             List<FieldProblem> bad = validator.validate(packs.get(i)).stream()
                     .map(v -> new FieldProblem(
                             v.getPropertyPath()
