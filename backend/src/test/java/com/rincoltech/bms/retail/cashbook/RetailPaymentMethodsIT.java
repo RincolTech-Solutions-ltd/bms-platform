@@ -60,7 +60,15 @@ class RetailPaymentMethodsIT extends LoanFixtures {
                         HttpMethod.POST,
                         "/api/v1/lending/savings-products",
                         as(UUID.randomUUID(), adminPerms, "*", null),
-                        Map.of("code", "SAV" + UUID.randomUUID().toString().substring(0, 4), "terms", terms))
+                        Map.of(
+                                "code",
+                                "SAV"
+                                        + UUID.randomUUID()
+                                                .toString()
+                                                .substring(0, 4)
+                                                .toUpperCase(java.util.Locale.ROOT),
+                                "terms",
+                                terms))
                 .getBody()
                 .get("id")
                 .asString();
