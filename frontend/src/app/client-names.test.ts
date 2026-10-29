@@ -13,10 +13,14 @@ import { describe, expect, it } from 'vitest';
 const FRONTEND = fileURLToPath(new URL('../../', import.meta.url));
 const ROOTS = [join(FRONTEND, 'src'), join(FRONTEND, 'layout'), join(FRONTEND, '../docs')];
 
-// SHA-256 of each real shop or client name, normalised. When a review or an issue turns up another real name, add its hash:
-//   node -e "console.log(require('crypto').createHash('sha256').update('<name normalised>').digest('hex'))"
-const DENYLIST = new Set(['44c455b9f3c22f8b028ced92623032c4d9d820161dff13c4aed799fb8011b217']);
-const MOST_WORDS = 4;
+// Each real shop or client name as its length and the SHA-256 of the name normalised (lower case, letters and digits only).
+// The length says almost nothing, and the hash cannot be read back. Every text file is normalised the same way and each
+// stretch of it of a listed length is hashed, so a name is caught however it is spelt or glued ("my-bulb shop", "XMLBulbShop",
+// "info@mybulbshop.com", "bulbshops"). When a review or an issue turns up another real name, add an entry:
+//   node -e "const n='<name normalised>';console.log(n.length, require('crypto').createHash('sha256').update(n).digest('hex'))"
+const DENYLIST: ReadonlyArray<{ length: number; hash: string }> = [
+  { length: 9, hash: '44c455b9f3c22f8b028ced92623032c4d9d820161dff13c4aed799fb8011b217' },
+];
 
 const TEXT = /\.(?:tsx?|css|html|json|md|dsl|txt|ya?ml|csv|sql)$/;
 const THIS_FILE = fileURLToPath(import.meta.url);
@@ -27,20 +31,26 @@ export function normalised(text: string): string {
 
 const hash = (name: string) => createHash('sha256').update(name).digest('hex');
 
-/** True when some run of one to four words in the text, normalised, hashes to a listed name. `seen` skips runs already checked. */
-export function namesAClient(text: string, listed: ReadonlySet<string> = DENYLIST, seen: Set<string> = new Set()): boolean {
-  // Words are also split where a capital or a digit starts inside one, so a name glued into code ("testBulbShop", "shop2Name")
-  // is still a run of words (review of #706).
-  // Zero-width splits consume nothing, so back-to-back boundaries ("item2Shop") are all split.
-  const split = text.replace(/(?<=\p{Ll})(?=\p{Lu})|(?<=\p{L})(?=\p{N})|(?<=\p{N})(?=\p{L})/gu, ' ');
-  const words = split.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-  for (let i = 0; i < words.length; i++) {
-    let joined = '';
-    for (let n = 0; n < MOST_WORDS && i + n < words.length; n++) {
-      joined += words[i + n];
-      if (seen.has(joined)) continue;
-      seen.add(joined);
-      if (listed.has(hash(joined))) return true;
+/**
+ * True when some stretch of the text, normalised, of a listed length hashes to a listed name. `known` keeps the answer for each
+ * stretch already hashed, so a stretch is hashed once across all files and every file that holds a name is still reported.
+ */
+export function namesAClient(
+  text: string,
+  listed: ReadonlyArray<{ length: number; hash: string }> = DENYLIST,
+  known: Map<string, boolean> = new Map(),
+): boolean {
+  const flat = normalised(text);
+  const hashes = new Set(listed.map((e) => e.hash));
+  for (const length of new Set(listed.map((e) => e.length))) {
+    for (let i = 0; i + length <= flat.length; i++) {
+      const piece = flat.slice(i, i + length);
+      let hit = known.get(piece);
+      if (hit === undefined) {
+        hit = hashes.has(hash(piece));
+        known.set(piece, hit);
+      }
+      if (hit) return true;
     }
   }
   return false;
@@ -57,22 +67,31 @@ function files(dir: string): string[] {
 describe('no real client names (issue #680)', () => {
   it('normalises a name the way the list hashes it, and finds it in any spelling', () => {
     expect(normalised('Test  Shop-One (HQ)')).toBe('testshoponehq');
-    const invented = new Set([hash('testshopone')]);
+    const invented = [{ length: 11, hash: hash('testshopone') }];
     expect(namesAClient('Sold at TEST SHOP-ONE today', invented)).toBe(true);
     expect(namesAClient('Sold at test shop two', invented)).toBe(false);
     expect(namesAClient('const testShopOne = 1;', invented)).toBe(true);
-    expect(namesAClient('render(<TestShopOne2 />)', invented)).toBe(true);
     expect(namesAClient('const item2TestShopOne = 1;', invented)).toBe(true);
-    expect(namesAClient('a1b2TestShopOne', invented)).toBe(true);
-    expect([...DENYLIST].every((h) => /^[0-9a-f]{64}$/.test(h))).toBe(true);
+    // Letters glued on either side, plurals, acronyms in front and email addresses are caught too (review of #706).
+    expect(namesAClient('orders@mytestshopone.com', invented)).toBe(true);
+    expect(namesAClient('the TestShopOnes page', invented)).toBe(true);
+    expect(namesAClient('XMLTestShopOneFeed', invented)).toBe(true);
+    expect(namesAClient('testshoponeapi', invented)).toBe(true);
+    expect(DENYLIST.every((e) => /^[0-9a-f]{64}$/.test(e.hash) && e.length > 0)).toBe(true);
+  });
+
+  it('reports every file that holds a name, not only the first', () => {
+    const invented = [{ length: 11, hash: hash('testshopone') }];
+    const known = new Map<string, boolean>();
+    expect(['a Test Shop One', 'b TestShopOne', 'c nothing'].filter((t) => namesAClient(t, invented, known))).toHaveLength(2);
   });
 
   it('finds none in frontend/src, frontend/layout, the docs or the help articles', () => {
     const all = ROOTS.flatMap(files);
     expect(all.some((f) => f.includes(join('help', 'articles')))).toBe(true);
-    // A run checked clean in one file is clean in every file, so it is hashed once.
-    const seen = new Set<string>();
-    const found = all.filter((f) => namesAClient(readFileSync(f, 'utf8'), DENYLIST, seen));
+    // Each stretch is hashed once across all files; its answer is kept, so every file holding a name is reported.
+    const known = new Map<string, boolean>();
+    const found = all.filter((f) => namesAClient(readFileSync(f, 'utf8'), DENYLIST, known));
     expect(found.map((f) => relative(FRONTEND, f))).toEqual([]);
   }, 60_000);
 });
