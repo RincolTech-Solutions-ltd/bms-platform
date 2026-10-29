@@ -252,6 +252,7 @@ export function ShareReceipt({ sale, madeHere = false }: { sale: Sale; madeHere?
     let held = file.current?.key === key ? file.current : null;
     try {
       if (!held) {
+        // toast-exempt: fetching the receipt PDF saves nothing; the share sheet or the downloaded note says what happened
         setBusy(true);
         held = await pdf();
       }
@@ -333,7 +334,6 @@ export function ShareReceipt({ sale, madeHere = false }: { sale: Sale; madeHere?
 
           </p>
           <p className="field-hint">{WHATSAPP_HINT}</p>
-          {save.isSuccess && <p role="status" className="alert alert-success">Number saved for {f.buyer_name ?? 'the buyer'}.</p>}
           <Problem error={save.error} />
         </>
       )}

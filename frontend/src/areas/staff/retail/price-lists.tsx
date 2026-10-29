@@ -8,7 +8,7 @@ import { formatMinor } from '../../../components/money';
 import { useStaff } from '../context';
 import { AddPanel } from './catalogue';
 import { STATUS_LABEL, belowCostHint, buildItemRequest, emptyItemForm, fromQty, itemProblem, unitChoices, withProduct, type ItemForm } from './price-list-state';
-import { Gate, Note, ProductPicker, Problem, Success, changeFailureText, requireVersion } from './ui';
+import { Gate, Note, ProductPicker, Problem, changeFailureText, requireVersion } from './ui';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { useComeBack } from '../../../app/ui/EmptyChoice';
 
@@ -137,7 +137,6 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
   const search = useLiveSearch();
   const [ended, setEnded] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const query = search.term;
   const today = businessToday();
@@ -153,19 +152,18 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ['retail'] });
   const add = useMutation({
     mutationFn: (form: ItemForm) => retail.addPriceListItem(list.id ?? '', buildItemRequest(form)),
-    onSuccess: (item) => {
+    onSuccess: () => {
       setAdding(false);
-      setMessage(`Saved the price of ${item.description} in ${item.unit}.${item.status === 'scheduled' ? ` It starts on ${item.valid_from}.` : ''}`);
       refresh();
     },
-    meta: { success: 'Price saved' },
+    meta: { success: (item: PriceListItem) => (item.description ? `Price saved for ${item.description}` : 'Price saved') },
   });
   const end = useMutation({
     mutationFn: (item: PriceListItem) => retail.endPriceListItem(list.id ?? '', item.id ?? '', today),
-    onMutate: () => { setMessage(null); setFailure(null); },
-    onSuccess: (item) => { setMessage(`The price of ${item.description} in ${item.unit} ends today.`); refresh(); },
+    onMutate: () => setFailure(null),
+    onSuccess: () => refresh(),
     onError: (error) => setFailure(changeFailureText(error, queryClient)),
-    meta: { success: 'Price ended' },
+    meta: { success: (item: PriceListItem) => (item.description ? `Price ended for ${item.description}` : 'Price ended') },
   });
   return (
     <section aria-label={`Prices in ${list.name}`} data-tour="price-list-items">
@@ -174,9 +172,8 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
       {adding ? (
         <AddPriceForm today={today} busy={add.isPending} error={add.error} onSubmit={(f) => add.mutate(f)} onCancel={() => { setAdding(false); add.reset(); }} />
       ) : (
-        <p><button type="button" onClick={() => { setAdding(true); setMessage(null); }}>Add a price</button></p>
+        <p><button type="button" onClick={() => setAdding(true)}>Add a price</button></p>
       )}
-      {message && <Success>{message}</Success>}
       <Problem error={failure && new Error(failure)} />
       <SearchBox id="price-search" label="Search prices by item name or code" search={search} fetching={finding} count={rows.data ? items.length : undefined} more={rows.hasNextPage} />
       <label><input type="checkbox" checked={ended} onChange={(e) => setEnded(e.target.checked)} /> Show ended prices</label>
