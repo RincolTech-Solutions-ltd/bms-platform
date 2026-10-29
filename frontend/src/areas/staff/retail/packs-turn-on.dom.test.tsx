@@ -60,11 +60,12 @@ function Staffed({ children }: { children: React.ReactNode }) {
 }
 
 function screenOf(me: Me, product?: typeof water) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } }, mutationCache: doneToasts() });
   client.setQueryData(['me', 't'], me);
   return render(
     <QueryClientProvider client={client}>
       <Staffed><ProductForm product={product} onSaved={() => undefined} onCancel={() => undefined} /></Staffed>
+      <DoneToast />
     </QueryClientProvider>,
   );
 }

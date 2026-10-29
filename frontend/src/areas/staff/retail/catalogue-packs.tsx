@@ -380,7 +380,7 @@ export function PacksTurnOn() {
       queryClient.setQueriesData<Me>({ queryKey: ['me'] }, (was) => (was ? withPacksOn(was) : was));
       void queryClient.invalidateQueries({ queryKey: ['me'] });
     },
-    meta: { success: 'Packs switched on' },
+    meta: { success: adding ? PACKS_ON_ADDING : 'Cartons are on' },
   });
   if (!holds(me, 'retail.catalogue.manage')) return null;
   if (capabilityOn(me, 'retail', UNITS)) return null;

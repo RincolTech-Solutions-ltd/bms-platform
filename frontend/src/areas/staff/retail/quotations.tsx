@@ -81,6 +81,7 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
     void queryClient.invalidateQueries({ queryKey: ['retail', 'quotations'] });
     void queryClient.invalidateQueries({ queryKey: ['retail', 'documents'] });
   };
+  // toast-exempt: success screen, the quotation then shows the sale made and its invoice in place of its buttons
   const convert = useMutation({
     mutationFn: () => retail.convertQuotation(q.id ?? '', buildConvertRequest(form), key),
     onSuccess: (r) => {

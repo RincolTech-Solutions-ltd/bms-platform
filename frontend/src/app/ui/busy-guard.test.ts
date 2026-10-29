@@ -441,6 +441,17 @@ describe('success toast guard on fixtures', () => {
     expect(silent(`${hook}\nconst save = useSave();`, ['useSave'])).toEqual([]);
   });
 
+  it('fails a meta.success toast beside a success state or note of the same write, and passes it alone or with a failure message', () => {
+    const toast = `meta: { success: 'Saved' }`;
+    expect(doubled(`const save = useMutation({ mutationFn: send, onSuccess: () => setDone('Saved.'), ${toast} });${press}`)).toEqual(['1 save']);
+    expect(doubled(`const save = useMutation({ mutationFn: send, onSuccess: () => setSaved(true), ${toast} });${press}`)).toEqual(['1 save']);
+    expect(doubled(`const save = useMutation({ mutationFn: send, ${toast} });${press}\n{save.isSuccess && <p className="alert alert-success">Saved.</p>}`)).toEqual(['1 save']);
+    expect(doubled(`const save = useMutation({ mutationFn: send, ${toast} });\nif (save.data) return <Waiting done="Funded." />;`)).toEqual(['1 save']);
+    expect(doubled(`const save = useMutation({ mutationFn: send, onSuccess: () => close(), ${toast} });${press}`)).toEqual([]);
+    expect(doubled(`const save = useMutation({ mutationFn: send, onMutate: () => setMessage(null), onError: (e) => setMessage(e.message), ${toast} });${press}`)).toEqual([]);
+    expect(doubled(`// toast-exempt: success screen\nconst save = useMutation({ mutationFn: send, onSuccess: (r) => setOutcome(r) });${press}`)).toEqual([]);
+  });
+
   it('honours a toast-exempt comment with a reason directly above the mutation, and nothing else', () => {
     const save = `const save = useMutation({ mutationFn: send });`;
     expect(silent(`// toast-exempt: the receipt screen that opens says it\n${save}`)).toEqual([]);

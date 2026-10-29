@@ -43,6 +43,7 @@ const { SmsSettingsScreen } = await import('./settings');
 const { WordingScreen } = await import('./wording');
 const { OptOutsScreen } = await import('./opt-outs');
 const { MemberSmsControl } = await import('../lending/member-sms');
+const { DoneToast, doneToasts } = await import('../retail/toast');
 
 const saved: SmsSettings = {
   enabled: false,

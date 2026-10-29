@@ -63,8 +63,9 @@ const refusal = (code: string, detail: string, status = 422) => new RetailError(
 
 function screenOf(me: ReturnType<typeof mockMe>, node: ReactElement) {
   return render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } }, mutationCache: doneToasts() })}>
       <StaffContext.Provider value={{ me, branch }}>{node}</StaffContext.Provider>
+      <DoneToast />
     </QueryClientProvider>,
   );
 }
