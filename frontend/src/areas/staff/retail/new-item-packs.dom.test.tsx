@@ -20,6 +20,7 @@ const units: Unit[] = [
   { id: 'u1', name: 'Bulb', active: true, product_count: 0, version: 1, is_package: false },
   { id: 'u2', name: 'Carton', active: true, product_count: 0, version: 1, is_package: true },
   { id: 'u3', name: 'Box', active: true, product_count: 0, version: 1, is_package: true, usual_pack: { size: '100.000', of_unit_id: 'u1', of_unit: 'Bulb', purpose: 'buy' } },
+  { id: 'u4', name: 'Piece', active: true, product_count: 0, version: 1, is_package: false },
 ];
 const made: Product = { id: 'p1', code: 'TLG-0001', description: 'Test bulb 60W', category_id: 'c1', category: 'Test lighting', unit_id: 'u1', unit: 'Bulb', sell_minor: 5000, active: true, version: 1 };
 
@@ -182,6 +183,22 @@ describe('Add an item (issue #689)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     expect(await screen.findByText('Type a whole number, 2 or more.')).toBeTruthy();
     expect(createProduct).not.toHaveBeenCalled();
+  });
+
+  it('fills a usual pack size again when the smallest unit changes, and keeps a typed one', async () => {
+    open();
+    await fill('u1');
+    fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
+    fireEvent.change(within(screen.getByTestId('package-row')).getByLabelText(/^Package/), { target: { value: 'u3' } });
+    expect((screen.getByLabelText(/^How many bulbs in one box/) as HTMLInputElement).value).toBe('100');
+    // The box's usual pack is 100 bulbs, not 100 pieces.
+    fireEvent.change(screen.getByLabelText(/^Smallest unit you sell/), { target: { value: 'u4' } });
+    expect((screen.getByLabelText(/^How many pieces in one box/) as HTMLInputElement).value).toBe('');
+    fireEvent.change(screen.getByLabelText(/^Smallest unit you sell/), { target: { value: 'u1' } });
+    expect((screen.getByLabelText(/^How many bulbs in one box/) as HTMLInputElement).value).toBe('100');
+    fireEvent.change(screen.getByLabelText(/^How many bulbs in one box/), { target: { value: '50' } });
+    fireEvent.change(screen.getByLabelText(/^Smallest unit you sell/), { target: { value: 'u4' } });
+    expect((screen.getByLabelText(/^How many pieces in one box/) as HTMLInputElement).value).toBe('50');
   });
 
   it('shows a refused package on its own row, not on the smallest unit', async () => {

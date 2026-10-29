@@ -18,7 +18,7 @@ import { MakeFamilyPanel, SIZES_JOIN, SIZES_NEW, VariantNote } from './catalogue
 import { ItemPhoto, PhotoChoice, PhotoEditor, sendNewPhoto, shownPhoto } from './item-photo';
 import { ScreenLink } from './screen-link';
 import { UNITS, canUse, capabilityOn, holds } from './permissions';
-import { NewItemPackages, newPackageRow, packErrorOf, packageAsUnit, packsToSend, rowProblem, unitWord, withPackages, type PackageRow } from './new-item-packs';
+import { NewItemPackages, forSmallest, newPackageRow, packErrorOf, packageAsUnit, packsToSend, rowProblem, unitWord, withPackages, type PackageRow } from './new-item-packs';
 import { StockMinimumEditor } from './stock-minimum';
 import { UnitPicker } from './unit-picker';
 import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
@@ -277,7 +277,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
             units={unitChoices}
             loading={units.data === undefined} load={units}
             value={unitId}
-            onChange={(next) => { setUnitId(next); forget(); setPackRows((rows) => rows.map((r) => (r.unitId === next ? { ...r, unitId: '' } : r))); }}
+            onChange={(next) => { setUnitId(next); forget(); setPackRows((rows) => forSmallest(rows, units.data ?? [], next)); }}
             error={unitProblem}
             showError={showErrors || (smallest?.is_package === true && !product)}
           />

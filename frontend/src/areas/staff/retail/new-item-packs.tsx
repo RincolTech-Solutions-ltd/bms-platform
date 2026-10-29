@@ -43,6 +43,19 @@ export function packageAsUnit(unit: Unit | undefined): string | null {
   return `A ${word} is a package. Choose the smallest unit, like piece, then add the ${word} below.`;
 }
 
+/**
+ * Review of #692: another smallest unit is never offered as its own package, and a size filled in from a package's usual pack
+ * is filled in again for it (100 bulbs is no box of pieces), or cleared when the unit's usual pack counts something else. A
+ * typed size stays.
+ */
+export function forSmallest(rows: PackageRow[], units: Unit[], smallestId: string): PackageRow[] {
+  return rows.map((r) => {
+    const row = r.unitId === smallestId ? { ...r, unitId: '' } : r;
+    const factor = factorForUnit(row.factor, row.filled.factor, usualFactor(units.find((u) => u.id === row.unitId), { unit_id: smallestId }));
+    return factor === row.factor ? row : { ...row, factor, filled: { ...row.filled, factor } };
+  });
+}
+
 /** A package holds a whole number of the smallest unit, 2 or more. */
 export function sizeProblem(factor: string): string | null {
   return /^\d+$/.test(factor.trim()) && Number(factor.trim()) >= 2 ? null : 'Type a whole number, 2 or more.';
