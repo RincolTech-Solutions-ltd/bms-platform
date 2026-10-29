@@ -80,7 +80,7 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
     }
 
     @Test
-    void theMigrationMovesTheStoreRoleIntoTheFlagAndStrandsNoCreditSale() throws Exception {
+    void theMigrationFoldsCleanStoresSkipsBlockedOnesAndCompletes() throws Exception {
         Migration v = migration();
         String database = "store_fold_replay_" + UUID.randomUUID().toString().replace("-", "");
         try {
@@ -95,13 +95,18 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
             JdbcClient owner = JdbcClient.create(ds);
 
             // Retail on and branch roles on: the role is in force. A store that keeps goods; a store with a credit sale
-            // still
-            // owing; a store that keeps no goods; a store already flagged; a shop; a branch with no row.
+            // still owing; an open and a closed store that keep no goods; a store already flagged; a shop; a branch
+            // with
+            // no row.
             UUID on = tenant(owner, "fold-on", ROLES_ON, true);
             UUID store = branch(owner, on, "STA", true, true, "store");
             UUID owing = branch(owner, on, "STO", true, true, "store");
             creditSaleOwing(owner, on, owing);
             UUID noGoods = branch(owner, on, "STB", false, true, "store");
+            UUID closedNoGoods = branch(owner, on, "STG", false, true, "store");
+            owner.sql("UPDATE branches SET status = 'inactive' WHERE id = ?")
+                    .param(closedNoGoods)
+                    .update();
             UUID flagged = branch(owner, on, "STC", true, false, "store");
             UUID shop = branch(owner, on, "SHA", true, true, "shop");
             UUID plain = branch(owner, on, "PLA", true, true, null);
@@ -117,9 +122,12 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
             long branchesBefore = count(owner, "SELECT count(*) FROM branches");
             long rolesBefore = count(owner, "SELECT count(*) FROM retail_branch_roles");
 
-            DatabaseMigrator.configure(url, "bms_owner", TestDatabase.OWNER_PASSWORD)
-                    .load()
-                    .migrate();
+            // The migration completes: a branch with a blocker is skipped, never a reason to stop the deploy.
+            assertThat(DatabaseMigrator.configure(url, "bms_owner", TestDatabase.OWNER_PASSWORD)
+                            .load()
+                            .migrate()
+                            .success)
+                    .isTrue();
 
             // Nothing is lost: every branch and every role row is still there.
             assertThat(count(owner, "SELECT count(*) FROM branches")).isEqualTo(branchesBefore);
@@ -132,6 +140,7 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
             // that
             // was not in force, retail off included.
             assertThat(flags(owner, noGoods)).isEqualTo(Map.of("sells", true, "stocks", false, "version", 1));
+            assertThat(flags(owner, closedNoGoods)).isEqualTo(Map.of("sells", true, "stocks", false, "version", 1));
             assertThat(flags(owner, flagged)).isEqualTo(Map.of("sells", false, "stocks", true, "version", 1));
             assertThat(flags(owner, shop)).isEqualTo(Map.of("sells", true, "stocks", true, "version", 1));
             assertThat(flags(owner, plain)).isEqualTo(Map.of("sells", true, "stocks", true, "version", 1));
@@ -139,7 +148,7 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
             assertThat(flags(owner, neverStore)).isEqualTo(Map.of("sells", true, "stocks", true, "version", 1));
             assertThat(flags(owner, retailOffStore)).isEqualTo(Map.of("sells", true, "stocks", true, "version", 1));
             // The role says only shop or both now; a store is read from the flag.
-            for (UUID b : List.of(store, owing, noGoods, flagged, dormant, neverStore, retailOffStore)) {
+            for (UUID b : List.of(store, owing, noGoods, closedNoGoods, flagged, dormant, neverStore, retailOffStore)) {
                 assertThat(role(owner, b)).as("role of %s", b).isEqualTo("both");
             }
             assertThat(role(owner, shop)).isEqualTo("shop");
@@ -152,15 +161,21 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
                             store + ":store>both",
                             owing + ":store>both",
                             noGoods + ":store>both",
+                            closedNoGoods + ":store>both",
                             flagged + ":store>both",
                             dormant + ":store>both",
                             neverStore + ":store>both",
                             retailOffStore + ":store>both");
             assertThat(reason(owner, store)).contains("is now a Store");
+            // A skipped branch's audit row names its blockers, so an administrator can settle it and mark it a Store.
             assertThat(reason(owner, owing))
-                    .contains("credit sales made here still owe")
+                    .contains("not made a Store because of credit_sales_owing")
                     .contains("keeps selling");
-            assertThat(reason(owner, noGoods)).contains("keeps no goods");
+            assertThat(blockersOf(owner, owing)).isEqualTo("[\"credit_sales_owing\"]");
+            assertThat(reason(owner, noGoods)).contains("not made a Store because of keeps_no_goods");
+            assertThat(blockersOf(owner, noGoods)).isEqualTo("[\"keeps_no_goods\"]");
+            assertThat(reason(owner, closedNoGoods)).contains("keeps no goods, so it cannot be a Store");
+            assertThat(blockersOf(owner, store)).isEqualTo("[]");
             assertThat(reason(owner, flagged)).contains("already a Store");
             for (UUID b : List.of(dormant, neverStore, retailOffStore)) {
                 assertThat(reason(owner, b)).as("reason of %s", b).contains("was not in force");
@@ -187,6 +202,137 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
         } finally {
             TestDatabase.dropScratchDatabase(database);
         }
+    }
+
+    // JUSTIFICATION-A3: the two tests the review of #676 asks for (a mixed business in one run, the blockers against
+    // real
+    // till activity), each with the request helpers only they use.
+    /** One business with a clean store and a store with credit owing migrates in a single run: one folded, one skipped. */
+    @Test
+    void aMixedBusinessMigratesInOneRun() throws Exception {
+        Migration v = migration();
+        String database = "store_fold_mixed_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            String url = TestDatabase.scratchDatabase(database);
+            DataSource ds = new DriverManagerDataSource(url, "bms_owner", TestDatabase.OWNER_PASSWORD);
+            DatabaseMigrator.configure(url, "bms_owner", TestDatabase.OWNER_PASSWORD)
+                    .target(String.valueOf(v.previous()))
+                    .load()
+                    .migrate();
+            JdbcClient owner = JdbcClient.create(ds);
+            UUID mixed = tenant(owner, "fold-mixed", ROLES_ON, true);
+            UUID clean = branch(owner, mixed, "CLN", true, true, "store");
+            UUID owing = branch(owner, mixed, "OWE", true, true, "store");
+            creditSaleOwing(owner, mixed, owing);
+
+            assertThat(DatabaseMigrator.configure(url, "bms_owner", TestDatabase.OWNER_PASSWORD)
+                            .load()
+                            .migrate()
+                            .success)
+                    .isTrue();
+
+            assertThat(flags(owner, clean)).isEqualTo(Map.of("sells", false, "stocks", true, "version", 2));
+            assertThat(flags(owner, owing)).isEqualTo(Map.of("sells", true, "stocks", true, "version", 1));
+            assertThat(role(owner, clean)).isEqualTo("both");
+            assertThat(role(owner, owing)).isEqualTo("both");
+            assertThat(audited(owner, "core.branch.updated")).containsExactly(clean + ":true>false");
+            assertThat(blockersOf(owner, owing)).isEqualTo("[\"credit_sales_owing\"]");
+            assertThat(reason(owner, clean)).contains("is now a Store");
+        } finally {
+            TestDatabase.dropScratchDatabase(database);
+        }
+    }
+
+    /**
+     * The blockers against real till activity: a credit sale owing, a later payment on a credit sale, a banking and a refund taken
+     * at a branch since its role was set each make V115 skip it; a credit sale written off (#349) no longer counts as owing, a cash
+     * sale's own payment is not a later payment, and what came before the role was set does not count.
+     */
+    @Test
+    void theBlockersSeeEveryTillUseSinceTheRoleWasSetAndNotAWrittenOffSale() {
+        TestDatabase.Fixture t = TestDatabase.tenant("fold-blockers", false, true);
+        CashbookTestSupport cb = new CashbookTestSupport(http, t);
+        RetailTestSupport api = cb.api;
+        UUID branch = t.secondBranch();
+        UUID product = api.product("FOLD-WIRE", 1_000, 1_500);
+        api.stockUp(branch, product, "20");
+        capability(api, "returns");
+        LocalDate today = CashbookTestSupport.daysAgo(0);
+        String since = now();
+        assertThat(blockers(t, branch, since)).isEmpty();
+
+        UUID owing = RetailTestSupport.id(cb.sale(branch, "credit", product, "1", today));
+        assertThat(blockers(t, branch, since)).containsExactly("credit_sales_owing");
+        ResponseEntity<JsonNode> written = api.postKeyed(
+                "/sales/" + owing + "/write-off",
+                Map.of("reason", "Test buyer left town"),
+                ADMIN + ",retail.credit.write_off,retail.credit.manage",
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(written.getStatusCode()).as("%s", written.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(blockers(t, branch, since)).isEmpty();
+
+        UUID paidInPart = RetailTestSupport.id(cb.sale(branch, "credit", product, "1", today));
+        assertThat(cb.pay(paidInPart, 500, "cash", today).getStatusCode().is2xxSuccessful())
+                .isTrue();
+        assertThat(blockers(t, branch, since)).containsExactlyInAnyOrder("credit_sales_owing", "credit_payments");
+        assertThat(cb.sale(branch, "cash", product, "1", today).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(blockers(t, branch, since)).containsExactlyInAnyOrder("credit_sales_owing", "credit_payments");
+        Map<String, Object> banking = new LinkedHashMap<>();
+        banking.put("branch_id", branch);
+        banking.put("business_date", today.toString());
+        banking.put("amount_minor", 1_500);
+        ResponseEntity<JsonNode> banked = cb.post("/bankings", banking, CashbookTestSupport.ALL);
+        assertThat(banked.getStatusCode()).as("%s", banked.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID cash = RetailTestSupport.id(api.sell(branch, "cash", product, "1"));
+        ResponseEntity<JsonNode> refunded = api.postKeyed(
+                "/sales/" + cash + "/returns",
+                refund(api, cash, branch),
+                RETURNER,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(refunded.getStatusCode()).as("%s", refunded.getBody()).isEqualTo(HttpStatus.CREATED);
+
+        assertThat(blockers(t, branch, since))
+                .containsExactlyInAnyOrder("credit_sales_owing", "credit_payments", "bankings", "refunds");
+        // Only what happened since the role was set counts; a credit sale owing counts whenever it was made.
+        assertThat(blockers(t, branch, now())).containsExactly("credit_sales_owing");
+        assertThat(blockers(t, t.headOffice(), since)).isEmpty();
+    }
+
+    static Map<String, Object> refund(RetailTestSupport api, UUID sale, UUID branch) {
+        String saleLine = api.get("/sales/" + sale, ADMIN)
+                .getBody()
+                .get("lines")
+                .get(0)
+                .get("id")
+                .asString();
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("sale_line_id", saleLine);
+        line.put("qty", "1");
+        line.put("reason", "defective");
+        line.put("disposition", "restock");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("lines", List.of(line));
+        body.put("refund_method", "cash");
+        body.put("refund_branch_id", branch);
+        return body;
+    }
+
+    static String now() {
+        return TestDatabase.owner()
+                .sql("SELECT clock_timestamp()::text")
+                .query(String.class)
+                .single();
+    }
+
+    static List<String> blockers(TestDatabase.Fixture t, UUID branch, String since) {
+        String joined = TestDatabase.owner()
+                .sql("SELECT array_to_string(retail_store_fold_blockers(?, ?, ?::timestamptz), ',')")
+                .params(t.tenantId(), branch, since)
+                .query(String.class)
+                .single();
+        return joined.isEmpty() ? List.of() : List.of(joined.split(","));
     }
 
     /**
@@ -343,6 +489,15 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
                 .param(branch)
                 .query(String.class)
                 .single();
+    }
+
+    static String blockersOf(JdbcClient owner, UUID branch) {
+        return owner.sql(
+                        "SELECT data -> 'blockers' FROM audit_log WHERE action = 'retail.branch_role.changed' AND entity_id = ?")
+                .param(branch)
+                .query(String.class)
+                .single()
+                .replace(" ", "");
     }
 
     static long count(JdbcClient owner, String sql) {
