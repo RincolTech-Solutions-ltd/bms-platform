@@ -30,9 +30,11 @@ export function looksLikeBarcode(term: string): boolean {
 export type NoItemCase = { kind: 'barcode' } | { kind: 'category'; category: string } | { kind: 'filtered' } | { kind: 'add' };
 
 export function noItemCase(term: string, category: string | undefined, filtered: boolean): NoItemCase {
-  if (looksLikeBarcode(term)) return { kind: 'barcode' };
+  // A chip or a filter first, so a known item or barcode hidden by it is offered with Search all (review of #703).
   if (category) return { kind: 'category', category };
   if (filtered) return { kind: 'filtered' };
+  // Digits only, of any length, are a code or a label, never a name to add.
+  if (/^\d+$/.test(term.trim())) return { kind: 'barcode' };
   return { kind: 'add' };
 }
 
