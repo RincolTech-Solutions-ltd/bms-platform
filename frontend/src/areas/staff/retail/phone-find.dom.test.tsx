@@ -160,13 +160,18 @@ describe('My stock', () => {
     expect(chip('All').getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('with Out of stock chosen says the filters hid it, never Add it', async () => {
+  it('with Out of stock chosen says the filters hid it, never Add it, and Search all categories clears them', async () => {
     stockRows = [];
     show(<StockPage />);
     fireEvent.click(screen.getByRole('radio', { name: 'Out of stock' }));
     type('bulb');
     expect(await screen.findByText('No item called "bulb" with these filters.')).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'Add bulb' })).toBeNull();
+    stockRows = [{ product_id: 'p2', code: 'LG-0001', description: 'Test bulb 9W', category: 'Test Lighting', unit: 'pc', qty: '3.000', sell_minor: 6000 }];
+    fireEvent.click(screen.getByRole('button', { name: 'Search all categories' }));
+    await waitFor(() => expect(lastQuery(listStock)).toMatchObject({ query: 'bulb', categoryId: '', level: undefined, negativeOnly: false }));
+    expect(await screen.findByText('Test bulb 9W')).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'All items' }).getAttribute('aria-checked')).toBe('true');
   });
 
   it('finds an item by its barcode, through its code', async () => {

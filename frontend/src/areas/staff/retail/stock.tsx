@@ -372,7 +372,7 @@ export function StockPage() {
           term={search.term}
           onClear={search.clear}
           category={(categories.data ?? []).find((c) => c.id === categoryId)?.name}
-          onAllCategories={() => setCategoryId('')}
+          onSearchAll={() => { setCategoryId(''); setLevel(''); setNegativeOnly(false); }}
           filtered={level !== '' || negativeOnly}
         />
       )}

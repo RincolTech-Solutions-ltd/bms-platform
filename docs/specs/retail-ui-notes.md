@@ -1408,8 +1408,9 @@ The owner, 29 Oct 2026: "On mobile I can't easily find items and categories. It 
 - **Nothing found.** Add it shows only when nothing narrowed the search, so an item a chip or a filter hid is never added
   twice. Nothing narrowed: `No item called "bulb".` with Add it, which opens Quick add with the name typed through its `name`
   route parameter (Quick add is the add form that takes a name from the link; Add an item has none; Quick add needs what
-  Items and My stock need), and Clear search. A chip chosen: `No item called "bulb" in Cables.` with Search all categories.
-  Another filter on (Out of stock, Low stock, negative only, Inactive): `No item called "bulb" with these filters.` Digits
+  Items and My stock need), and Clear search; the owner accepted Quick add here (round 2 of the #703 review). A chip chosen:
+  `No item called "bulb" in Cables.` Another filter on (Out of stock, Low stock, negative only, Inactive): `No item called
+  "bulb" with these filters.` Both offer Search all categories, which clears the chip and the filters and searches again. Digits
   that are no known barcode: `No item with the code or barcode "6001234567890".`
 - **On a phone** the Items list follows the search, Quick add and Add an item; the sizes and colours ways to add come after it.
 - **Layout check.** `layout/phone-find.layout.test.ts` at 360, 390 and 412px, at both font scales.

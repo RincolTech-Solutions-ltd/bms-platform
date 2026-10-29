@@ -488,7 +488,7 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
           term={search.term}
           onClear={search.clear}
           category={chosenName}
-          onAllCategories={() => setCategoryId('')}
+          onSearchAll={() => { setCategoryId(''); setActiveFilter('active'); }}
           filtered={activeFilter === 'off'}
         />
       ) : <p className="empty-state">No items found.</p>)}

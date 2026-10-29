@@ -91,15 +91,17 @@ export function CategoryChips({ categories, value, onChange }: { categories: Cat
 }
 
 /**
- * A search that found nothing. With a chip chosen it says so and searches all categories; with another filter on it says the
- * filters hid it; digits that are no known barcode say that; only a search nothing narrowed offers Add it.
+ * A search that found nothing. With a chip chosen it says so, with another filter on it says the filters hid it, and both offer
+ * Search all categories, which clears the chip and the filters and searches again; digits that are no known barcode say that;
+ * only a search nothing narrowed offers Add it.
  */
-export function NoItem({ term, onClear, category, onAllCategories, filtered = false }: {
+export function NoItem({ term, onClear, category, onSearchAll, filtered = false }: {
   term: string;
   onClear: () => void;
   /** The name of the chosen chip's category, when one is chosen. */
   category?: string;
-  onAllCategories?: () => void;
+  /** Clears the chip and every filter, keeping the search. */
+  onSearchAll?: () => void;
   /** Another filter narrowed the search: a level, negative only, inactive items only. */
   filtered?: boolean;
 }) {
@@ -109,7 +111,7 @@ export function NoItem({ term, onClear, category, onAllCategories, filtered = fa
     <div className="empty-state find-none">
       <p>{noItemText(term, why)}</p>
       <p className="cluster">
-        {why.kind === 'category' && onAllCategories && <button type="button" className="rt-primary" onClick={onAllCategories}>Search all categories</button>}
+        {(why.kind === 'category' || why.kind === 'filtered') && onSearchAll && <button type="button" className="rt-primary" onClick={onSearchAll}>Search all categories</button>}
         {why.kind === 'add' && <ScreenLink screen="quickAdd" to="/staff/retail/quick-add" search={{ name }} label={`Add ${name}`} action>Add it</ScreenLink>}
         <button type="button" onClick={onClear}>Clear search</button>
       </p>
