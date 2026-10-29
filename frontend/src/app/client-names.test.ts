@@ -29,7 +29,10 @@ const hash = (name: string) => createHash('sha256').update(name).digest('hex');
 
 /** True when some run of one to four words in the text, normalised, hashes to a listed name. `seen` skips runs already checked. */
 export function namesAClient(text: string, listed: ReadonlySet<string> = DENYLIST, seen: Set<string> = new Set()): boolean {
-  const words = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  // Words are also split where a capital or a digit starts inside one, so a name glued into code ("testBulbShop", "shop2Name")
+  // is still a run of words (review of #706).
+  const split = text.replace(/(\p{Ll})(\p{Lu})/gu, '$1 $2').replace(/(\p{L})(\p{N})|(\p{N})(\p{L})/gu, '$1$3 $2$4');
+  const words = split.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
   for (let i = 0; i < words.length; i++) {
     let joined = '';
     for (let n = 0; n < MOST_WORDS && i + n < words.length; n++) {
@@ -56,6 +59,8 @@ describe('no real client names (issue #680)', () => {
     const invented = new Set([hash('testshopone')]);
     expect(namesAClient('Sold at TEST SHOP-ONE today', invented)).toBe(true);
     expect(namesAClient('Sold at test shop two', invented)).toBe(false);
+    expect(namesAClient('const testShopOne = 1;', invented)).toBe(true);
+    expect(namesAClient('render(<TestShopOne2 />)', invented)).toBe(true);
     expect([...DENYLIST].every((h) => /^[0-9a-f]{64}$/.test(h))).toBe(true);
   });
 
