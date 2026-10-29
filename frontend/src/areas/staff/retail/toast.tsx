@@ -3,6 +3,7 @@ import { createContext, useCallback, useEffect, useRef, useState, type ReactNode
 import { createPortal } from 'react-dom';
 import { icons } from '../../../components/icons';
 import { announceToSheet } from '../../../app/ui/announce';
+import { BusyButton } from '../../../app/ui/BusyButton';
 
 // A toast (the .toast class of app/ui/feedback.css, docs/ui-rules.md rule 15): a dark neutral pill at the bottom with a leading
 // icon for its kind, raised on top of the on-screen success message and gone after four seconds. A screen calls `useToast()`,
@@ -30,7 +31,7 @@ const TONE_ICON = { success: icons.check, error: icons.error, info: icons.info }
  * the page then, but never a live region) still lets it be heard.
  */
 /** The one action a toast may carry (rule 15), such as Undo (#682). */
-export type ToastAction = { label: string; run: () => void };
+export type ToastAction = { label: string; run: () => void; busy?: boolean };
 
 export function Toast({ message, tone, silent = false, action }: { message: string; tone: ToastTone; silent?: boolean; action?: ToastAction }) {
   const announce = silent ? { 'aria-hidden': true } : tone === 'error' ? { role: 'alert', 'aria-live': 'assertive' as const } : { role: 'status', 'aria-live': 'polite' as const };
@@ -43,9 +44,9 @@ export function Toast({ message, tone, silent = false, action }: { message: stri
       <span className="toast-icon">{TONE_ICON[tone]}</span>
       <span>{message}</span>
       {action && (
-        <button type="button" className="toast-action" onClick={action.run}>
+        <BusyButton type="button" className="toast-action" busy={action.busy === true} onClick={action.run}>
           {action.label}
-        </button>
+        </BusyButton>
       )}
     </p>
   );
@@ -149,6 +150,8 @@ export function DoneToast() {
       const run = () => {
         if (pressed || !undo) return;
         pressed = true;
+        // The Undo button shows it is working while the request runs, and re-showing the toast keeps it up until it answers.
+        show(message, 'success', { label: 'Undo', run, busy: true });
         undo()
           .then(
             () => show('Undone', 'success'),
