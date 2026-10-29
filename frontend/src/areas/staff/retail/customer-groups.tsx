@@ -92,7 +92,12 @@ export function CustomerGroups() {
     onMutate: () => setFailure(null),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['retail'] }),
     onError: (error) => setFailure(changeFailureText(error, queryClient)),
-    meta: { success: (_: unknown, v: { group: CustomerGroup; body: { active: boolean } }) => (v.body.active === (v.group.active !== false) ? 'Changes saved' : v.body.active ? 'Group switched on' : 'Group switched off') },
+    meta: {
+      success: (_: unknown, v: { group: CustomerGroup; body: { active: boolean } }) => (v.body.active === (v.group.active !== false) ? 'Changes saved' : v.body.active ? 'Group switched on' : 'Group switched off'),
+      // A switch on or off can be taken back from the toast (#682): the same change the other way, on the version it made.
+      undo: (r: CustomerGroup, v: { group: CustomerGroup; body: { name: string; price_list_id?: string; active: boolean } }) =>
+        v.body.active === (v.group.active !== false) ? null : () => retail.updateCustomerGroup(r.id ?? '', requireVersion(r.version), { ...v.body, active: !v.body.active }),
+    },
   });
   return (
     <Gate screen="customerGroups" title="Customer groups">

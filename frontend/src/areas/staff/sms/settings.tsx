@@ -136,7 +136,12 @@ function Editor({ saved, canManage, notice, setNotice }: { saved: SmsSettings; c
       if (error instanceof SmsError && error.code === 'version_conflict') setNotice({ kind: 'warning', text: error.message });
       void queryClient.invalidateQueries({ queryKey: ['sms', 'settings'] });
     },
-    meta: { success: (_: unknown, c: SmsSettingsChange) => (c.enabled === true ? 'SMS turned on' : c.enabled === false ? 'SMS turned off' : 'Settings saved') },
+    meta: {
+      success: (_: unknown, c: SmsSettingsChange) => (c.enabled === true ? 'SMS turned on' : c.enabled === false ? 'SMS turned off' : 'Settings saved'),
+      // Turning SMS on or off can be taken back from the toast (#682), on the version the change made.
+      undo: (next: { version?: number }, c: SmsSettingsChange) =>
+        typeof c.enabled === 'boolean' ? () => sms.changeSettings(next.version ?? 0, { enabled: !c.enabled }) : null,
+    },
   });
   const failure = failureOf(save.error);
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => {

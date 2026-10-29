@@ -223,7 +223,12 @@ export function PriceLists() {
     onMutate: () => setFailure(null),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['retail'] }),
     onError: (error) => setFailure(changeFailureText(error, queryClient)),
-    meta: { success: (_: unknown, v: { body: { active?: boolean } }) => (v.body.active === false ? 'Price list switched off' : v.body.active === true ? 'Price list switched on' : 'Changes saved') },
+    meta: {
+      success: (_: unknown, v: { body: { active?: boolean } }) => (v.body.active === false ? 'Price list switched off' : v.body.active === true ? 'Price list switched on' : 'Changes saved'),
+      // A switch on or off can be taken back from the toast (#682): the same change the other way, on the version it made.
+      undo: (r: PriceList, v: { body: { active?: boolean } }) =>
+        v.body.active === undefined ? null : () => retail.updatePriceList(r.id ?? '', requireVersion(r.version), { active: !v.body.active }),
+    },
   });
   const selected = (lists.data ?? []).find((l) => l.id === open);
   return (

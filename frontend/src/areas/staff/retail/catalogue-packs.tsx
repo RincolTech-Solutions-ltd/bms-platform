@@ -101,7 +101,12 @@ function PackSheet({ product, pack, mayPrice, onClose }: { product: Product; pac
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onClose();
     },
-    meta: { success: (_r: unknown, v: Parameters<typeof retail.updatePack>[3]) => (v?.active === false ? 'Pack switched off' : v?.active === true ? 'Pack switched on' : 'Pack saved') },
+    meta: {
+      success: (_r: unknown, v: Parameters<typeof retail.updatePack>[3]) => (v?.active === false ? 'Pack switched off' : v?.active === true ? 'Pack switched on' : 'Pack saved'),
+      // A switch on or off can be taken back from the toast (#682): the same change the other way, on the version it made.
+      undo: (r: Awaited<ReturnType<typeof retail.updatePack>>, v: Parameters<typeof retail.updatePack>[3]) =>
+        v?.active === undefined ? null : () => retail.updatePack(product.id ?? '', pack.unit_id ?? '', r.version ?? 1, { active: !v.active }),
+    },
   });
   const problem = factorProblem(factor);
   const body = packChange(pack, { factor, purpose, priceMinor }, mayPrice);
