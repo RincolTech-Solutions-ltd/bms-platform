@@ -12,7 +12,7 @@ import { newIdempotencyKey } from './idempotency';
 import { SALE_RETURN, canOpenAccount, canUse, holdsAt } from './permissions';
 import { DISPOSITION_WORDS, reasonWords, returnedWords, settledWords, type Disposition } from './returns-state';
 import { showDate } from './transfers';
-import { Problem, Success, money, useBranchName, useToast } from './ui';
+import { Note, Problem, money, useBranchName, useToast } from './ui';
 import { NoAccess } from '../../../app/ui/EmptyState';
 import { Hint } from '../../../app/ui/Hint';
 
@@ -136,7 +136,7 @@ export function CreditNotePage() {
       <h1>{note.data?.credit_note_no ?? 'Credit note'}</h1>
       {note.isPending && <SkeletonList label="Loading the credit note" />}
       <Problem error={note.error} />
-      {voided.data && !voided.data.executed && <Success>{VOID_WAITS}</Success>}
+      {voided.data && !voided.data.executed && <Note>{VOID_WAITS}</Note>}
       {note.data && <CreditNoteView note={note.data} nameOf={nameOf} buyerOpens={canOpenAccount(me)} />}
       {note.data && <CreditNotePdf returnId={returnId} branchId={note.data.branch_id} />}
       {note.data && note.data.status === 'completed' && holdsAt(me, SALE_RETURN, note.data.branch_id) && (

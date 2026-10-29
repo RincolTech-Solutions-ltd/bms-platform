@@ -350,13 +350,23 @@ function withoutOnError(code: string): string {
   return out;
 }
 
-/** The mutations of one file whose success path both shows a toast and sets a success note. */
+/**
+ * True when the mutation's own component draws a success note straight off its result (`save.isSuccess && <Success>`,
+ * `if (save.data) return <p className="alert alert-success">`), with no state set: its `isSuccess` or `data`, then a note close by.
+ */
+function notesItself(text: string, m: Mutation): boolean {
+  const rest = text.slice(m.index);
+  const own = rest.slice(0, rest.search(/\n(?:export )?function |$/));
+  return [...own.matchAll(new RegExp(`\\b${m.name}\\.(?:isSuccess|data)\\b`, 'g'))].some((use) => /alert-success|<Success\b/.test(own.slice(use.index, use.index + 300)));
+}
+
+/** The mutations of one file whose success path both shows a toast and sets, or draws, a success note. */
 function doubled(text: string, hooks: string[] = mutationHooks(text), hookOpts = new Map(hookOptions(text))): string[] {
   return mutations(text, hooks)
     .filter((m) => !exempted(text, m.index, TOAST_EXEMPT))
     .filter((m) => {
       const code = successCode(text, m, hookOpts, true);
-      return SAYS_DONE.test(code) && SUCCESS_NOTE.test(code);
+      return SAYS_DONE.test(code) && (SUCCESS_NOTE.test(code) || notesItself(text, m));
     })
     .map((m) => `${m.line} ${m.name}`);
 }
@@ -410,6 +420,7 @@ describe('success toast guard on fixtures', () => {
     expect(doubled(`const save = useMutation({ mutationFn: send, onSuccess: () => setMessage(null), meta: { success: 'Saved' } });`)).toEqual([]);
     expect(doubled(`const save = useMutation({ mutationFn: send, onError: (e) => setMessage(e.message), meta: { success: 'Saved' } });`)).toEqual([]);
     expect(doubled(`// toast-exempt: success screen, the receipt replaces the form\nconst save = useMutation({ mutationFn: send, onSuccess: () => setDone(r) });`)).toEqual([]);
+    expect(doubled(`const save = useMutation({ mutationFn: send, meta: { success: 'Saved' } });\nreturn save.isSuccess && <Success>Saved.</Success>;`)).toEqual(['1 save']);
   });
 
   it('fails a write by hand that says nothing, and passes sayDone or a toast-exempt reason above it', () => {
