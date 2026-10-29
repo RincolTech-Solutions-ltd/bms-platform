@@ -20,6 +20,7 @@ import { showSavings } from './savings-permissions';
 import { MembersGate } from './member-ui';
 import { LOANS_CREATE, mayApply } from './permissions';
 import { BusyButton } from '../../../app/ui/BusyButton';
+import { HelpTip } from '../../../app/ui/HelpTip';
 
 // A member's page (FR-MEM-05, FR-MEM-08, FR-MEM-09, FR-MEM-10): who they are, what is missing before their details can be
 // checked, the check itself for staff who may do it, next of kin, documents, the relationship panel, their loans, savings and
@@ -126,7 +127,7 @@ function MemberCollateral({ memberId, currency, canAdd }: { memberId: string; cu
   const items = useQuery({ queryKey: ['collateral', 'member', memberId], queryFn: () => api.list({ memberId }) });
   return (
     <section className="rt-card stack" aria-labelledby="col-title">
-      <h2 id="col-title">Collateral</h2>
+      <h2 id="col-title">Collateral <HelpTip tip="collateral" /></h2>
       {items.isPending && <p className="loading">Loading collateral</p>}
       <Problem error={items.error} />
       {items.data && (items.data.items ?? []).length === 0 && <p className="empty-state">No collateral registered for this member.</p>}

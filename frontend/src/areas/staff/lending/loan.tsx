@@ -3,6 +3,7 @@ import { Link, createLazyRoute, getRouteApi } from '@tanstack/react-router';
 import { useState } from 'react';
 import { lending, type Loan, type LoanSchedule, type LoanScheduleRow, type LoanTransaction, type RepaymentResult } from '../../../api/lending';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
+import { HelpTip } from '../../../app/ui/HelpTip';
 import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
 import { APPLICATION_STATUSES, ApplicationPanel } from './application-view';
@@ -126,7 +127,7 @@ export function ScheduleTable({ schedule, currency, onWaive }: { schedule: LoanS
             <th className="num">Fees</th>
             <th className="num">Total due</th>
             <th className="num">Paid</th>
-            <th className="num">Outstanding</th>
+            <th className="num">Outstanding <HelpTip tip="outstanding" /></th>
             <th>Status</th>
           </tr>
         </thead>

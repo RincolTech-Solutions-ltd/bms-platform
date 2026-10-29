@@ -149,13 +149,13 @@ describe('the stock list in groups', () => {
   it('opens every group of a long list while a search is on', () => {
     const many = Array.from({ length: 40 }, (_, i) => row(i, i % 2 ? 'Pipes' : 'Bulbs'));
     const out = page(<StockTable showCost={false} rows={many} searching filterKey="pipe" />);
-    expect(out).not.toContain('aria-expanded="false"');
+    expect(out).not.toContain('class="cat-head" aria-expanded="false"');
     expect(out).toContain('Test item 39');
   });
 
   it('shows the cost column in grouped mode too', () => {
     const out = page(<StockTable showCost rows={[{ ...row(1, 'Pipes'), cost_minor: 700 }]} />);
-    expect(out).toContain('<th class="num">Average buying price</th>');
+    expect(out).toContain('<th class="num">Average buying price <span class="help-tip">');
     expect(out).toContain('UGX 700');
   });
 });

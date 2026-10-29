@@ -187,7 +187,7 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
           hint="Leave empty for the day it is sent for appraisal. The schedule starts from this day." />
       </Group>
 
-      <Group title="Guarantors" tourId="application-guarantors">
+      <Group title="Guarantors" tip="guarantor" tourId="application-guarantors">
         {draft.guarantors.length === 0 && <p className="empty-state">No guarantor yet.</p>}
         <ul className="ln-list">
           {draft.guarantors.map((g, i) => (

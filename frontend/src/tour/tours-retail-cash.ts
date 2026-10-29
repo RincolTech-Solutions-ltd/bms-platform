@@ -77,16 +77,17 @@ export const sizesJoinPage: Tour = {
   id: 'page-sizes-join',
   // Version 2 words the Pick step for the picker that lists items only while you type (issue #534).
   // Version 3 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
-  version: 3,
-  title: 'This page: join items as sizes',
+  // Version 4 follows the three steps: pick the items, name the item, check the sizes (issue #707).
+  version: 4,
+  title: 'This page: put items together as sizes',
   audience: (me) => held(me, CATALOGUE) && held(me, STOCK_READ),
   autoStart: false,
   page: '/staff/retail/catalogue/products/sizes/join',
   steps: [
-    step({ id: 'name', target: 'join-name', title: 'Name the item', body: 'Type what the item is called, such as Twin cable. Each size gets this name with its size.' }),
-    step({ id: 'pick', target: 'join-pick', title: 'Pick the items', body: 'Type the name of each item that is one size or colour. Tap it in the list under the box.' }),
-    step({ id: 'list', target: 'join-list', title: 'Say which size', body: 'Type the size or the colour of each one. They keep their codes, prices and stock.' }),
-    step({ id: 'save', target: 'join-save', title: 'Join them', body: 'Tap here. They now show together as one item, and sell and buy as before.' }),
+    step({ id: 'pick', target: 'join-pick', title: '1. Pick the items', body: 'Type part of a name and tick each item that is one size. Tick 2 or more.' }),
+    step({ id: 'name', target: 'join-name', title: '2. Name the item', body: 'The app suggests the words the items share, such as Twin cable. Change it if customers call it something else.' }),
+    step({ id: 'list', target: 'join-list', title: '3. Check the sizes', body: 'Each item shows the size the app found in its name. Change any that are wrong.' }),
+    step({ id: 'save', target: 'join-save', title: 'Put them together', body: 'Tap here. They now show together as one item, and sell and buy as before.' }),
   ],
 };
 

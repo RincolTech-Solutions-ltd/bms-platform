@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { type StockMinimum, type StockMinimumBranch, parseLevel, showLevel, stockMinimumApi } from '../../../api/stock-minimum';
 import { Problem } from './ui';
 import { BusyButton } from '../../../app/ui/BusyButton';
+import { HelpTip } from '../../../app/ui/HelpTip';
 
 // "Warn me when stock is below" on an item's page (issue #412, ADR-057). One level for every shop and store, and a different one for a
 // chosen shop or store. With no level an item is still watched by the pace it sells at (lead days of cover), so nothing goes silent;
@@ -38,7 +39,7 @@ export function StockMinimumEditor({ productId, unit }: { productId: string; uni
   const per = unit ? ` ${unit}` : '';
   return (
     <fieldset className="stack" data-tour="stock-minimum">
-      <legend>Warn me when stock is below</legend>
+      <legend>Warn me when stock is below <HelpTip tip="lowStockLevel" /></legend>
       <p className="hint">
         You are told when this item falls below the level at a shop or store. Without a level, you are still told when it would run out within{' '}
         {data.lead_days ?? 14} days at the pace it sells.

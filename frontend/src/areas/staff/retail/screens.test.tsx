@@ -106,18 +106,22 @@ describe('stock screen', () => {
   it('says Selling price and puts the average buying price before it (issues #330, #680), and only Selling price without the permission', () => {
     const admin = renderToString(<StockTable rows={rows} showCost />);
     // ADR-079: the cost of stock is the shop's average buying price.
-    expect(admin.indexOf('>Average buying price<')).toBeGreaterThan(-1);
-    expect(admin.indexOf('>Average buying price<')).toBeLessThan(admin.indexOf('>Selling price<'));
+    // Issue #707: each header carries its help tip after the words.
+    expect(admin.indexOf('>Average buying price <')).toBeGreaterThan(-1);
+    expect(admin.indexOf('>Average buying price <')).toBeLessThan(admin.indexOf('>Selling price <'));
+    expect(admin).toContain('aria-label="More about Average buying price"');
     expect(admin.indexOf('UGX 3,500')).toBeLessThan(admin.indexOf('UGX 6,000'));
     const sales = renderToString(<StockTable rows={rows} showCost={false} />);
-    expect(sales).toContain('>Selling price<');
+    expect(sales).toContain('>Selling price <');
+    expect(sales).toContain('aria-label="More about Selling price"');
     expect(sales).not.toContain('Buying');
   });
 
   it('shows cost then price on the all-branches table and the phone cards', () => {
     const data = { branches: [{ id: 'b1', code: 'BR1', name: 'Test Branch A' }], items: [{ product_id: 'p1', description: 'Test Item 01', unit: 'piece', total_qty: '3.000', sell_minor: 6000, cost_minor: 3500, balances: [{ branch_id: 'b1', qty: '3.000' }] }] } as AllBranchesStock;
     const table = renderToString(<AllBranchesTable data={data} showCost />);
-    expect(table.indexOf('>Average buying price<')).toBeLessThan(table.indexOf('>Selling price<'));
+    expect(table.indexOf('>Average buying price <')).toBeGreaterThan(-1);
+    expect(table.indexOf('>Average buying price <')).toBeLessThan(table.indexOf('>Selling price <'));
     expect(renderToString(<AllBranchesList data={data} showCost />)).toContain('Buying price <span class="num">UGX 3,500</span> · Selling price <span class="num">UGX 6,000</span>');
     const sales = renderToString(<AllBranchesList data={data} showCost={false} />);
     expect(sales).toContain('Selling price <span class="num">UGX 6,000</span>');
