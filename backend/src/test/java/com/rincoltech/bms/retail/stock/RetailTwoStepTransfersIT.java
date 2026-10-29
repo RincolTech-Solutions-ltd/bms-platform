@@ -639,6 +639,67 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         assertThat(qty(t.secondBranch(), product)).isEqualTo("1.000");
     }
 
+    // JUSTIFICATION-A3: the two tests #239 item 7 asks for; no existing test covers either.
+    /** Issue #239: a receipt and a sale of the same item at the destination at once both land, and the books agree. */
+    @Test
+    void aReceiptWhileTheDestinationSellsTheItemKeepsBothAndTheBooksAgree() throws Exception {
+        switchOn();
+        api.stockUp(t.headOffice(), product, "10");
+        api.stockUp(t.secondBranch(), product, "5");
+        UUID id = dispatched("4");
+
+        CompletableFuture<ResponseEntity<JsonNode>> receipt = CompletableFuture.supplyAsync(() -> receiveAll(id));
+        CompletableFuture<ResponseEntity<JsonNode>> sale =
+                CompletableFuture.supplyAsync(() -> api.sell(t.secondBranch(), "cash", product, "2"));
+
+        assertThat(receipt.get(30, TimeUnit.SECONDS).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(sale.get(30, TimeUnit.SECONDS).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(qty(t.secondBranch(), product))
+                .as("5 held, 4 received, 2 sold")
+                .isEqualTo("7.000");
+        assertThat(qty(t.headOffice(), product)).isEqualTo("6.000");
+        assertThat(net(id, t.secondBranch(), "inventory")).isEqualTo(4_000);
+        assertThat(net(id, t.headOffice(), "interbranch_clearing") + net(id, t.secondBranch(), "interbranch_clearing"))
+                .isZero();
+        assertThat(inFlight(ADMIN).get("reconciled").asBoolean()).isTrue();
+    }
+
+    /**
+     * Issue #239: a one-step transfer from before V38 (completed, both entries, no receipt columns, no received_qty)
+     * voids through the API after the two-step move is switched on.
+     */
+    @Test
+    void aCompletedTransferFromBeforeTheTwoStepMoveVoidsThroughTheApi() {
+        api.stockUp(t.headOffice(), product, "10");
+        ResponseEntity<JsonNode> before = dispatch("4");
+        assertThat(before.getBody().get("status").asString()).isEqualTo("completed");
+        UUID id = RetailTestSupport.id(before);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM retail_transfer_lines WHERE tenant_id = ? AND transfer_id = ?"
+                                + " AND received_qty IS NULL")
+                        .params(t.tenantId(), id)
+                        .query(Long.class)
+                        .single())
+                .as("a one-step line, as every line before V38")
+                .isEqualTo(1);
+        switchOn();
+
+        ResponseEntity<JsonNode> voided =
+                api.post("/transfers/" + id + "/void", Map.of("reason", "Test wrong branch"), ADMIN);
+
+        assertThat(voided.getStatusCode()).as("%s", voided.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(voided.getBody().get("status").asString()).isEqualTo("voided");
+        assertThat(voided.getBody().get("received_at").isNull()).isTrue();
+        assertThat(qty(t.headOffice(), product)).isEqualTo("10.000");
+        assertThat(qty(t.secondBranch(), product)).isEqualTo("0.000");
+        assertThat(entryCount(id)).as("two entries and their two reversals").isEqualTo(4);
+        for (UUID branch : List.of(t.headOffice(), t.secondBranch())) {
+            for (String key : List.of("inventory", "interbranch_clearing")) {
+                assertThat(net(id, branch, key)).as("%s %s", branch, key).isZero();
+            }
+        }
+    }
+
     // ------------------------------------------------------------------------- switching it off
 
     /** Acceptance 6: switching the capability off is refused while any transfer is in transit. */
