@@ -101,10 +101,9 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
                     .isEqualTo(String.valueOf(v.previous()));
             JdbcClient owner = JdbcClient.create(ds);
 
-            // Retail on and branch roles on: the role is in force. A store that keeps goods; a store with a credit sale
-            // still owing; an open and a closed store that keep no goods; a store already flagged; a shop; a branch
-            // with
-            // no row.
+            // Retail on and branch roles on: the role is in force. A store that keeps goods;
+            // a store with a credit sale still owing; an open and a closed store that keep no goods;
+            // a store already flagged; a shop; a branch with no row.
             UUID on = tenant(owner, "fold-on", ROLES_ON, true);
             UUID store = branch(owner, on, "STA", true, true, "store");
             UUID owing = branch(owner, on, "STO", true, true, "store");
@@ -143,9 +142,8 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
             assertThat(flags(owner, store)).isEqualTo(Map.of("sells", false, "stocks", true, "version", 2));
             // The store with a credit sale owing keeps selling, so the payments on it can still be taken at its till.
             assertThat(flags(owner, owing)).isEqualTo(Map.of("sells", true, "stocks", true, "version", 1));
-            // The rest keep their flags: no goods (cannot be a Store), already a Store, a shop, no row, and every role
-            // that
-            // was not in force, retail off included.
+            // The rest keep their flags: no goods (cannot be a Store), already a Store, a shop,
+            // no row, and every role that was not in force, retail off included.
             assertThat(flags(owner, noGoods)).isEqualTo(Map.of("sells", true, "stocks", false, "version", 1));
             assertThat(flags(owner, closedNoGoods)).isEqualTo(Map.of("sells", true, "stocks", false, "version", 1));
             assertThat(flags(owner, flagged)).isEqualTo(Map.of("sells", false, "stocks", true, "version", 1));
@@ -188,25 +186,31 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
                 assertThat(reason(owner, b)).as("reason of %s", b).contains("was not in force");
             }
 
-            // A second run of the fold changes nothing. It runs as an owner that bypasses row level security, so it
-            // sees
-            // every business's rows and the check is not empty by accident.
+            // The fold run again, on a store written as the previous release would (the old check
+            // put back for it), folds that one only; a third run changes nothing. It runs as an
+            // owner that bypasses row level security, so it sees every business's rows.
             assertThat(owner.sql("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user")
                             .query(Boolean.class)
                             .single())
                     .isTrue();
-            assertThat(count(owner, "SELECT count(*) FROM retail_branch_roles")).isPositive();
-            String sql = Files.readString(v.file());
-            int from = sql.indexOf("-- store-fold:begin") + "-- store-fold:begin".length();
-            String fold = sql.substring(from, sql.indexOf("-- store-fold:end"));
+            String fold = between(Files.readString(v.file()), "store-fold");
             assertThat(fold).contains("UPDATE branches").contains("UPDATE retail_branch_roles");
+            owner.sql("ALTER TABLE retail_branch_roles DROP CONSTRAINT retail_branch_roles_role_check, ADD CONSTRAINT"
+                            + " retail_branch_roles_role_check CHECK (role IN ('store', 'shop', 'both'))")
+                    .update();
+            UUID late = branch(owner, on, "STL", true, true, "store");
             long audits = count(owner, "SELECT count(*) FROM audit_log");
-            try (Connection c = ds.getConnection();
-                    Statement s = c.createStatement()) {
-                s.execute(fold);
-            }
-            assertThat(count(owner, "SELECT count(*) FROM audit_log")).isEqualTo(audits);
+            runAs(ds, fold);
+            assertThat(flags(owner, late)).isEqualTo(Map.of("sells", false, "stocks", true, "version", 2));
+            assertThat(role(owner, late)).isEqualTo("both");
+            assertThat(count(owner, "SELECT count(*) FROM audit_log")).isEqualTo(audits + 2);
+            runAs(ds, fold);
+            assertThat(count(owner, "SELECT count(*) FROM audit_log")).isEqualTo(audits + 2);
             assertThat(flags(owner, store)).isEqualTo(Map.of("sells", false, "stocks", true, "version", 2));
+            assertThat(flags(owner, late)).isEqualTo(Map.of("sells", false, "stocks", true, "version", 2));
+            owner.sql("ALTER TABLE retail_branch_roles DROP CONSTRAINT retail_branch_roles_role_check, ADD CONSTRAINT"
+                            + " retail_branch_roles_role_check CHECK (role IN ('shop', 'both'))")
+                    .update();
 
             // The role and the flag can never disagree again: the role table refuses store.
             assertThatThrownBy(() -> owner.sql("UPDATE retail_branch_roles SET role = 'store' WHERE branch_id = ?")
@@ -218,9 +222,119 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
         }
     }
 
-    // JUSTIFICATION-A3: the two tests the review of #676 asks for (a mixed business in one run, the blockers against
-    // real
-    // till activity), each with the request helpers only they use.
+    /**
+     * The lock step of V115, run on its own on a migrated scratch database under live traffic. A sale of the previous release
+     * holding a branch row FOR SHARE makes an attempt time out, a notice says so and the next attempt gets the locks. The sale
+     * then reading the role table is never blocked behind the migration, because the migration takes branches first, as the
+     * sale does. With the attempts used up it stops with its message and changes nothing.
+     */
+    @Test
+    void theLockStepRetriesKeepsTheSaleOrderAndStopsClearly() throws Exception {
+        String database = "store_fold_locks_" + UUID.randomUUID().toString().replace("-", "");
+        try {
+            String url = TestDatabase.scratchDatabase(database);
+            DataSource ds = new DriverManagerDataSource(url, "bms_owner", TestDatabase.OWNER_PASSWORD);
+            DatabaseMigrator.configure(url, "bms_owner", TestDatabase.OWNER_PASSWORD)
+                    .load()
+                    .migrate();
+            JdbcClient owner = JdbcClient.create(ds);
+            UUID business = tenant(owner, "fold-locks", ROLES_ON, true);
+            UUID shop = branch(owner, business, "SHL", true, true, "shop");
+            String lock = between(Files.readString(migration().file()), "store-lock");
+
+            // A sale holds its branch row past one attempt; the migration retries, then gets the locks.
+            try (Connection sale = ds.getConnection();
+                    Connection migration = ds.getConnection()) {
+                sale.setAutoCommit(false);
+                migration.setAutoCommit(false);
+                holdBranchRow(sale, shop);
+                CompletableFuture<List<String>> notices = CompletableFuture.supplyAsync(() -> run(migration, lock));
+                awaitWaiting(owner, "branches");
+                // The sale now reads the role table, as the previous release's sale does next: it is not blocked.
+                long started = System.nanoTime();
+                try (Statement s = sale.createStatement()) {
+                    s.execute("SELECT count(*) FROM retail_branch_roles");
+                }
+                assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(1));
+                Thread.sleep(2_500);
+                sale.commit();
+                assertThat(notices.get(30, TimeUnit.SECONDS))
+                        .anySatisfy(n -> assertThat(n).contains("lock attempt 1 of 40 did not get the locks"));
+                migration.rollback();
+            }
+
+            // With the attempts used up (two here; 40 in a deploy) it stops with its message.
+            try (Connection sale = ds.getConnection();
+                    Connection migration = ds.getConnection()) {
+                sale.setAutoCommit(false);
+                migration.setAutoCommit(false);
+                holdBranchRow(sale, shop);
+                try (Statement s = migration.createStatement()) {
+                    s.execute("SET bms.store_fold_lock_attempts = 2");
+                }
+                assertThatThrownBy(() -> run(migration, lock))
+                        .hasMessageContaining("held retail_branch_roles or branches for about two minutes")
+                        .hasMessageContaining("Nothing was changed");
+                migration.rollback();
+                sale.rollback();
+            }
+            assertThat(role(owner, shop)).isEqualTo("shop");
+        } finally {
+            TestDatabase.dropScratchDatabase(database);
+        }
+    }
+
+    static void holdBranchRow(Connection sale, UUID branch) throws Exception {
+        try (Statement s = sale.createStatement()) {
+            s.execute("SELECT id FROM branches WHERE id = '" + branch + "' FOR SHARE");
+        }
+    }
+
+    /** Runs SQL on the connection and returns the notices it raised. */
+    static List<String> run(Connection c, String sql) {
+        try (Statement s = c.createStatement()) {
+            s.execute(sql);
+            List<String> notices = new java.util.ArrayList<>();
+            for (java.sql.SQLWarning w = s.getWarnings(); w != null; w = w.getNextWarning()) {
+                notices.add(w.getMessage());
+            }
+            return notices;
+        } catch (java.sql.SQLException e) {
+            throw new IllegalStateException(e.getMessage(), e);
+        }
+    }
+
+    static void runAs(DataSource ds, String sql) throws Exception {
+        try (Connection c = ds.getConnection();
+                Statement s = c.createStatement()) {
+            s.execute(sql);
+        }
+    }
+
+    /** The SQL between {@code -- name:begin} and {@code -- name:end} in the migration. */
+    static String between(String sql, String name) {
+        int from = sql.indexOf("-- " + name + ":begin") + ("-- " + name + ":begin").length();
+        return sql.substring(from, sql.indexOf("-- " + name + ":end"));
+    }
+
+    /** Waits until a backend is waiting for a lock on the table. */
+    static void awaitWaiting(JdbcClient owner, String table) throws InterruptedException {
+        for (int i = 0; i < 100; i++) {
+            long waiting = owner.sql("SELECT count(*) FROM pg_locks l JOIN pg_class c ON c.oid = l.relation"
+                            + " WHERE NOT l.granted AND c.relname = ?")
+                    .param(table)
+                    .query(Long.class)
+                    .single();
+            if (waiting > 0) {
+                return;
+            }
+            Thread.sleep(50);
+        }
+        throw new AssertionError("the migration never waited for " + table);
+    }
+
+    // JUSTIFICATION-A3: the tests the reviews of #676 ask for (a mixed business in one run,
+    // the blockers against real till activity, the lock step under traffic), with their helpers.
     /**
      * One business with a clean store and a store with credit owing migrates in a single run: one folded, one skipped. A
      * transaction of the previous release holds a lock on the role table for longer than one lock attempt (two seconds), so the

@@ -32,30 +32,42 @@
 -- without it drops FORCE for this transaction only.
 --
 -- Locks, all taken in one retried step before anything else. The deploy is zero downtime: the previous release keeps serving
--- while this runs, reads retail_branch_roles on every sale, may write a role, and locks branch rows FOR SHARE. So:
+-- while this runs, locks branch rows FOR SHARE and then reads retail_branch_roles on every sale, and may write a role. So, in
+-- that same order:
+--   - branches in EXCLUSIVE mode, so no transaction holds a branch row lock the fold's updates would wait on (plain reads go on);
 --   - retail_branch_roles in ACCESS EXCLUSIVE mode. SHARE ROW EXCLUSIVE would already keep a role write from landing between
 --     the fold and the narrowed check, but the constraint swap needs ACCESS EXCLUSIVE, and taking that later would be a second
 --     lock step that could wait or deadlock behind traffic; taking it once here covers the fold and the swap, and the check
 --     stays a plain validated constraint (no NOT VALID left for a later migration);
---   - branches in EXCLUSIVE mode, so no transaction holds a branch row lock the fold's updates would wait on (plain reads go on);
 --   - only with an owner that lacks BYPASSRLS, every table whose FORCE is toggled below, in ACCESS EXCLUSIVE mode, so the
 --     NO FORCE and FORCE statements take no lock of their own. Staging and production run as bms_owner with BYPASSRLS (V103),
 --     where no toggle runs.
--- Each attempt waits at most two seconds, so a shop never queues long behind the request. On lock_not_available the attempt's
--- subtransaction is undone (no lock is kept while waiting), the migration sleeps a second and tries again, for about two
--- minutes (40 attempts). Only then does it stop, with a message that says traffic held the locks and nothing was changed.
--- Once the locks are held no statement here waits on another transaction, and lock_timeout is off for the rest.
+-- Each attempt waits at most two seconds, so a shop never queues long behind the request. On lock_not_available or
+-- deadlock_detected the attempt's subtransaction is undone (no lock is kept while waiting), a notice names the attempt, and
+-- the migration sleeps a second and tries again, for about two minutes (40 attempts). Only then does it stop, with a message
+-- that says traffic held the locks and nothing was changed. statement_timeout is off during the loop so it cannot cut it
+-- short; both timeouts go back to the session's own values once the locks are held, and no statement after that waits on
+-- another transaction for these tables.
 
+-- store-lock:begin
 DO $$
 DECLARE
-    bypass  boolean := (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user);
-    attempt integer := 0;
+    bypass      boolean := (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user);
+    -- 40 in a deploy; RetailStoreRoleFoldIT sets a smaller number to reach the end of the loop quickly.
+    attempts    integer := coalesce(nullif(current_setting('bms.store_fold_lock_attempts', true), '')::integer, 40);
+    attempt     integer := 0;
+    prior_lock  text := current_setting('lock_timeout');
+    prior_limit text := current_setting('statement_timeout');
 BEGIN
+    -- The loop may run for about two minutes; a statement_timeout set for the session must not cut it short.
+    PERFORM set_config('statement_timeout', '0', true);
     LOOP
         BEGIN
             PERFORM set_config('lock_timeout', '2s', true);
-            LOCK TABLE retail_branch_roles IN ACCESS EXCLUSIVE MODE;
+            -- branches before retail_branch_roles: the order the previous release's sale takes them (the branch row FOR
+            -- SHARE, then the role read), so the two never wait on each other in a circle.
             LOCK TABLE branches IN EXCLUSIVE MODE;
+            LOCK TABLE retail_branch_roles IN ACCESS EXCLUSIVE MODE;
             IF NOT bypass THEN
                 LOCK TABLE tenant_settings, tenant_modules, branches, audit_log, retail_sales, retail_sale_payments,
                            journal_entries, retail_sale_writeoffs, retail_customer_orders, retail_account_payments,
@@ -64,9 +76,11 @@ BEGIN
                     IN ACCESS EXCLUSIVE MODE;
             END IF;
             EXIT;
-        EXCEPTION WHEN lock_not_available THEN
+        EXCEPTION WHEN lock_not_available OR deadlock_detected THEN
+            -- A deadlock is retried like a timeout: this attempt is undone and its locks released, so the other side goes on.
             attempt := attempt + 1;
-            IF attempt >= 40 THEN
+            RAISE NOTICE 'V115: lock attempt % of % did not get the locks (%), trying again', attempt, attempts, SQLSTATE;
+            IF attempt >= attempts THEN
                 RAISE EXCEPTION USING
                     ERRCODE = '55P03',
                     MESSAGE = 'V115: other transactions held retail_branch_roles or branches for about two minutes, so the'
@@ -76,9 +90,12 @@ BEGIN
             PERFORM pg_sleep(1);
         END;
     END LOOP;
-    PERFORM set_config('lock_timeout', '0', true);
+    -- The locks are held to the end of the transaction; the operator's own timeouts apply again from here.
+    PERFORM set_config('lock_timeout', prior_lock, true);
+    PERFORM set_config('statement_timeout', prior_limit, true);
 END
 $$;
+-- store-lock:end
 
 CREATE FUNCTION retail_store_fold_blockers(p_tenant uuid, p_branch uuid, p_since timestamptz) RETURNS text[]
     LANGUAGE sql STABLE

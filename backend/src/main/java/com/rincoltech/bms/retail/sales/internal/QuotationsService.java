@@ -122,9 +122,8 @@ class QuotationsService {
 
     private Made record(QuotationRequest r) {
         Principal principal = CurrentPrincipal.require();
-        // A branch that keeps no goods has nothing to quote from (ADR-041, ADR-104), and a store never sells (ADR-048),
-        // so it
-        // does not quote either.
+        // A branch that keeps no goods has nothing to quote from (ADR-041, ADR-104), and a store never sells
+        // (ADR-048), so it does not quote either.
         UUID branch = branches.resolveStocking(DocumentsService.ISSUE, r.branchId());
         branches.requireSells(branch, "branch_id");
         LocalDate today = docs.today();
