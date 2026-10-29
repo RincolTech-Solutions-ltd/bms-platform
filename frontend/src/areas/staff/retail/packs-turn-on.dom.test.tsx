@@ -39,6 +39,7 @@ vi.mock('../../../api/retail', async (original) => {
 const { RetailError } = await import('../../../api/retail');
 const { ProductForm } = await import('./catalogue-products');
 const { ASK_OWNER_PACKS, PACKS_ON_ADDING, PACKS_QUESTION, withPacksOn } = await import('./catalogue-packs');
+const { DoneToast, doneToasts } = await import('./toast');
 
 afterEach(() => {
   cleanup();
@@ -59,11 +60,12 @@ function Staffed({ children }: { children: React.ReactNode }) {
 }
 
 function screenOf(me: Me, product?: typeof water) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } }, mutationCache: doneToasts() });
   client.setQueryData(['me', 't'], me);
   return render(
     <QueryClientProvider client={client}>
       <Staffed><ProductForm product={product} onSaved={() => undefined} onCancel={() => undefined} /></Staffed>
+      <DoneToast />
     </QueryClientProvider>,
   );
 }
@@ -96,7 +98,7 @@ describe('the turn-on line on the item form', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Turn on cartons' }));
 
-    expect((await screen.findByTestId('packs-on')).textContent).toBe(PACKS_ON_ADDING);
+    expect((await screen.findByText(PACKS_ON_ADDING)).closest('.toast-success')).not.toBeNull();
     expect(changeCapabilities).toHaveBeenCalledWith({ units: true }, 3);
   });
 

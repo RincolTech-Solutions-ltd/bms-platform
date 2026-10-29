@@ -154,6 +154,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
   // The button that sends the held request again: Add is off while the name panel shows, so then the panel button that sent it.
   const resend = exists === null ? 'Add' : unsure.current?.duplicate_reason ? 'Add anyway' : openLabel;
 
+  // toast-exempt: success screen, the card then says what was added with Add another and Sell it
   const add = useMutation({
     mutationFn: async (extra: { productId?: string; duplicateReason?: string }) => {
       const body: QuickAddRequest = unsure.current ?? {
@@ -206,7 +207,6 @@ export function QuickAddForm({ initialName = '', onSell }: {
       setRefused(!found);
       if (found) setExists({ ...found, mayAddAnyway: found.mayAddAnyway && canAddAnyway });
     },
-    meta: { success: (r: { added: QuickAdd }) => (r?.added?.item_made === false ? 'Stock added' : 'Item added') },
   });
 
   const submit = (e?: FormEvent) => {

@@ -197,6 +197,7 @@ export function ReturnNewPage() {
   const usualIsStore = (me.branches ?? []).some((b) => b.id === sale.data?.branch_id && b.sells_goods === false);
   const tills = sellingBranches(branches, undefined);
   const form = usualIsStore && draft.refundBranchId === '' && tills.length === 1 ? { ...draft, refundBranchId: tills[0]?.id ?? '' } : draft;
+  // toast-exempt: success screen, the outcome names the credit note and links to it
   const send = useMutation({
     mutationFn: (s: Sale) => retail.createSaleReturn(saleId, buildReturnRequest(s, form, back), key),
     onSuccess: (r) => {
@@ -204,7 +205,6 @@ export function ReturnNewPage() {
       setOutcome(r);
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
-    meta: { success: (r: ReturnOutcome) => (r.executed === false ? null : 'Goods taken back') },
   });
   if (!allowed) {
     return (

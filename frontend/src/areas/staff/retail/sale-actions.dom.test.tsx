@@ -34,6 +34,7 @@ const { RetailError } = await import('../../../api/retail');
 const { retailMessage } = await import('../../../api/retail-errors');
 const { PayFormView, PaySaleAction, VoidFormView, VoidSaleAction } = await import('./sale-actions');
 const { SaleDetail } = await import('./sales');
+const { DoneToast, doneToasts } = await import('./toast');
 
 afterEach(() => {
   cleanup();
@@ -53,8 +54,9 @@ const refusal = (code: string, status = 422) => new RetailError(retailMessage({ 
 
 function screenOf(me: ReturnType<typeof mockMe>, node: ReactElement) {
   return render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } }, mutationCache: doneToasts() })}>
       <StaffContext.Provider value={{ me, branch }}>{node}</StaffContext.Provider>
+      <DoneToast />
     </QueryClientProvider>,
   );
 }
