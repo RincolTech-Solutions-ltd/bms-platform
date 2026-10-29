@@ -175,7 +175,7 @@ describe('Add an item (issue #689)', () => {
     expect(within(first).getByRole('radio', { name: 'Both' }).getAttribute('aria-checked')).toBe('true');
     fireEvent.change(within(first).getByLabelText(/^Selling price of one carton/), { target: { value: '45000' } });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add another package' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add a bigger package' }));
     const second = screen.getAllByTestId('package-row')[1]!;
     // A unit taken by the first row is not offered again.
     expect(within(second).queryByRole('option', { name: 'Carton' })).toBeNull();
@@ -249,7 +249,7 @@ describe('Add an item (issue #689)', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
     fireEvent.change(within(screen.getByTestId('package-row')).getByLabelText(/^Package/), { target: { value: 'u2' } });
     fireEvent.change(within(screen.getByTestId('package-row')).getByLabelText(/^How many bulbs in one carton/), { target: { value: '10' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add another package' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add a bigger package' }));
     fireEvent.change(within(screen.getAllByTestId('package-row')[1]!).getByLabelText(/^Package/), { target: { value: 'u3' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     const [first, second] = screen.getAllByTestId('package-row');
@@ -257,6 +257,33 @@ describe('Add an item (issue #689)', () => {
     expect(within(first!).queryByText(message)).toBeNull();
     expect(screen.getAllByText(message)).toHaveLength(1);
     expect(screen.queryByText('One or more fields are invalid.')).toBeNull();
+  });
+
+  it('makes a carton of boxes of bulbs: the bigger package holds the box and the bulbs are worked out (issue #699)', async () => {
+    createProduct.mockImplementation(async () => made);
+    open();
+    await fill('u1');
+    fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
+    const first = screen.getByTestId('package-row');
+    fireEvent.change(within(first).getByLabelText(/^Package/), { target: { value: 'u3' } });
+    fireEvent.change(within(first).getByLabelText(/^How many bulbs in one box/), { target: { value: '10' } });
+    expect(within(first).getByTestId('package-pieces').textContent).toBe('So 1 box = 10 bulbs');
+    fireEvent.click(screen.getByRole('button', { name: 'Add a bigger package' }));
+    const second = screen.getAllByTestId('package-row')[1]!;
+    fireEvent.change(within(second).getByLabelText(/^Package/), { target: { value: 'u2' } });
+    expect((within(second).getByLabelText('What is inside one carton') as HTMLSelectElement).value).not.toBe('0');
+    fireEvent.change(within(second).getByLabelText(/^How many boxes in one carton/), { target: { value: '12' } });
+    expect(within(second).getByTestId('package-pieces').textContent).toBe('So 1 carton = 120 bulbs');
+    const ladder = screen.getByTestId('new-item-ladder');
+    expect(within(ladder).getByText(/1 carton → 12 boxes → each 10 bulbs/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    await waitFor(() => expect(createProduct).toHaveBeenCalledTimes(1));
+    expect((createProduct.mock.calls[0]?.[0] as { packs: object[] }).packs).toEqual([
+      { unit_id: 'u3', factor: '10', purpose: 'buy' },
+      { unit_id: 'u2', holds_unit_id: 'u3', holds_qty: 12, purpose: 'both' },
+    ]);
+    expect((await screen.findAllByText('Test bulb 60W added as TLG-0001, with box of 10 and carton of 12 boxes.')).length).toBeGreaterThan(0);
   });
 
   // JUSTIFICATION-A3: round 4 of the #692 review asks for a DOM test of the size branch, client cap and server refusal.
@@ -284,16 +311,16 @@ describe('Add an item (issue #689)', () => {
     expect(createProduct).toHaveBeenCalledTimes(1);
   });
 
-  it('offers Add another package up to ten packages, the most the request takes', async () => {
+  it('offers Add a bigger package up to ten packages, the most the request takes', async () => {
     open();
     await fill('u1');
     fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
-    for (let n = 1; n < 10; n++) fireEvent.click(screen.getByRole('button', { name: 'Add another package' }));
+    for (let n = 1; n < 10; n++) fireEvent.click(screen.getByRole('button', { name: 'Add a bigger package' }));
     expect(screen.getAllByTestId('package-row')).toHaveLength(10);
-    expect(screen.queryByRole('button', { name: 'Add another package' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add a bigger package' })).toBeNull();
     expect(screen.getByText('Up to 10 packages')).toBeTruthy();
     fireEvent.click(screen.getAllByRole('button', { name: /^Remove the/ })[0]!);
-    expect(screen.getByRole('button', { name: 'Add another package' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add a bigger package' })).toBeTruthy();
   });
 
   it('shows no package question while packs are off', async () => {

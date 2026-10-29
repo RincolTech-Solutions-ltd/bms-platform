@@ -153,7 +153,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
   const [packRows, setPackRows] = useState<PackageRow[]>([newPackageRow(1)]);
   const packages = packsOn && inPackages === 'yes' ? packRows : [];
   const complete = description.trim() !== '' && categoryId !== '' && unitProblem === null && (product ? true : sellMinor !== null && costMinor !== null)
-    && (!variant || size.trim() !== '' || colour.trim() !== '') && packages.every((r) => rowProblem(r) === null);
+    && (!variant || size.trim() !== '' || colour.trim() !== '') && packages.every((r) => rowProblem(r, packages) === null);
   const chosen = fixed ?? (categories.data ?? []).find((c) => c.id === categoryId);
   const movedFrom = product && !variant && categoryId !== product.category_id ? product.category : null;
   // The name is kept once per unit (issue #352): a close name is a warning, the same name is refused, an administrator may add it anyway.
