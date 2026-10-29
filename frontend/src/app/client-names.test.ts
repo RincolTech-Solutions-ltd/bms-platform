@@ -1,24 +1,45 @@
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 // The client name guard (issue #680, AGENTS.md: clients are never named). No real shop or client name may appear in the code,
-// the fixtures, the layout pages, the docs or the help articles: every name there is invented ("Test Shop One"). The names are
-// kept here normalised, lower case with spaces and punctuation removed, so this file never spells one out, and every text file
-// is normalised the same way before it is searched, so "Some Name", "some-name" and "SOME NAME" are all caught.
+// the fixtures, the layout pages, the docs or the help articles: every name there is invented ("Test Shop One"). The repository
+// is public, so the names are kept here only as SHA-256 hashes of the name normalised (lower case, spaces and punctuation
+// removed), never in any readable form. Every text file is split into words, and each run of one to four words is normalised
+// and hashed the same way, so "Some Name", "some-name" and "SOME NAME" are all caught.
 
 const FRONTEND = fileURLToPath(new URL('../../', import.meta.url));
 const ROOTS = [join(FRONTEND, 'src'), join(FRONTEND, 'layout'), join(FRONTEND, '../docs')];
 
-// Real shop and client names, normalised. When a review or an issue turns up another real name, add it here.
-const DENYLIST = ['bulbstore'];
+// SHA-256 of each real shop or client name, normalised. When a review or an issue turns up another real name, add its hash:
+//   node -e "console.log(require('crypto').createHash('sha256').update('<name normalised>').digest('hex'))"
+const DENYLIST = new Set(['44c455b9f3c22f8b028ced92623032c4d9d820161dff13c4aed799fb8011b217']);
+const MOST_WORDS = 4;
 
 const TEXT = /\.(?:tsx?|css|html|json|md|dsl|txt|ya?ml|csv|sql)$/;
 const THIS_FILE = fileURLToPath(import.meta.url);
 
 export function normalised(text: string): string {
   return text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+const hash = (name: string) => createHash('sha256').update(name).digest('hex');
+
+/** True when some run of one to four words in the text, normalised, hashes to a listed name. `seen` skips runs already checked. */
+export function namesAClient(text: string, listed: ReadonlySet<string> = DENYLIST, seen: Set<string> = new Set()): boolean {
+  const words = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  for (let i = 0; i < words.length; i++) {
+    let joined = '';
+    for (let n = 0; n < MOST_WORDS && i + n < words.length; n++) {
+      joined += words[i + n];
+      if (seen.has(joined)) continue;
+      seen.add(joined);
+      if (listed.has(hash(joined))) return true;
+    }
+  }
+  return false;
 }
 
 function files(dir: string): string[] {
@@ -30,18 +51,20 @@ function files(dir: string): string[] {
 }
 
 describe('no real client names (issue #680)', () => {
-  it('normalises a name the way the list keeps it', () => {
+  it('normalises a name the way the list hashes it, and finds it in any spelling', () => {
     expect(normalised('Test  Shop-One (HQ)')).toBe('testshoponehq');
-    expect(DENYLIST.every((name) => name === normalised(name))).toBe(true);
+    const invented = new Set([hash('testshopone')]);
+    expect(namesAClient('Sold at TEST SHOP-ONE today', invented)).toBe(true);
+    expect(namesAClient('Sold at test shop two', invented)).toBe(false);
+    expect([...DENYLIST].every((h) => /^[0-9a-f]{64}$/.test(h))).toBe(true);
   });
 
   it('finds none in frontend/src, frontend/layout, the docs or the help articles', () => {
     const all = ROOTS.flatMap(files);
     expect(all.some((f) => f.includes(join('help', 'articles')))).toBe(true);
-    const found = all.filter((f) => {
-      const text = normalised(readFileSync(f, 'utf8'));
-      return DENYLIST.some((name) => text.includes(name));
-    });
+    // A run checked clean in one file is clean in every file, so it is hashed once.
+    const seen = new Set<string>();
+    const found = all.filter((f) => namesAClient(readFileSync(f, 'utf8'), DENYLIST, seen));
     expect(found.map((f) => relative(FRONTEND, f))).toEqual([]);
-  });
+  }, 60_000);
 });
