@@ -311,6 +311,22 @@ describe('the end of a count', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Commit the count' })).toBeNull());
     expect(commitStocktake).not.toHaveBeenCalled();
+    // Round 7: the missed commit is taken in, so the count that went in there leaves this sheet and cannot be reviewed again.
+    expect(countBox('A-1').value).toBe('');
+    expect(screen.queryByRole('button', { name: 'Review the difference (1 counted)' })).toBeNull();
+  });
+
+  it('takes in a commit it missed before making a review, so counts that went in elsewhere are never reviewed again (round 7)', async () => {
+    await ready();
+    fireEvent.change(countBox('A-1'), { target: { value: '7' } });
+    // Committed in another tab before this one taps Review, with no storage event heard here.
+    const later = Date.now() + 1000;
+    localStorage.setItem(keyOf(branchA), JSON.stringify({ counts: {}, packCounts: {}, listed: [], done: [], at: { 'A-1': later }, committed: later }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review the difference (1 counted)' }));
+    const anyway = screen.queryByRole('button', { name: 'Review the difference anyway' });
+    if (anyway) fireEvent.click(anyway);
+    await waitFor(() => expect(countBox('A-1').value).toBe(''));
+    expect(createStocktake).not.toHaveBeenCalled();
   });
 });
 

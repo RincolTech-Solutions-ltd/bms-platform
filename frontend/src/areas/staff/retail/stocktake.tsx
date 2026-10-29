@@ -241,17 +241,21 @@ function CountSheet({ branchId }: { branchId: string }) {
   const entered = Object.entries(totals).filter(([id, v]) => v.trim() !== '' && (!onSheet || onSheet.has(id)));
   const bad = entered.some(([, v]) => parseCount(v) === null);
   const valid = entered.flatMap(([productId, v]) => { const c = parseCount(v); return c === null ? [] : [{ product_id: productId, counted_qty: qtyString(c) }]; });
-  // The last commit of this count when the review was asked for (review of #686): a review that comes back after another tab
-  // committed, or a Commit pressed after it, would take the same difference again, so both check the mark has not moved.
+  // The last commit of this count that this tab had taken in when the review was asked for (review of #686), never the one in
+  // storage: a tab that missed another tab's commit would otherwise review and commit counts that already went in. A review that
+  // comes back after the mark moved, or a Commit pressed after it, would take the same difference again, so both check it.
   const reviewMark = useRef(0);
   const markMoved = () => (readCount(saveKey)?.committed ?? 0) > reviewMark.current;
   // toast-exempt: success screen, the review of the count replaces the form
   const review = useMutation({
-    mutationFn: () => {
-      reviewMark.current = readCount(saveKey)?.committed ?? 0;
+    mutationFn: async () => {
+      // Storage holds a commit this tab missed: it is taken in first, so the sheet drops what went in, and no review is made.
+      if (saving.catchUp()) return null;
+      reviewMark.current = saving.heardCommit();
       return retail.createStocktake({ branch_id: branchId, lines: valid });
     },
     onSuccess: (st) => {
+      if (!st) return show(CHANGED_ELSEWHERE, 'info');
       if (!markMoved()) return setDraft(st);
       // Committed in another tab while this review was on its way: the review is thrown away, never shown.
       void retail.discardStocktake(st.id ?? '').catch(() => undefined);
@@ -352,7 +356,9 @@ function CountSheet({ branchId }: { branchId: string }) {
       <>
         <StocktakeReview key={draft.id} stocktake={draft} onCommit={(acknowledged) => {
           if (!markMoved()) return commit.mutate(acknowledged);
-          // Another tab committed since this review was made, and this tab has not heard yet: the review ends instead.
+          // Another tab committed since this review was made, and this tab has not heard yet: that commit is taken in, so the
+          // sheet drops what went in, and the review ends instead.
+          saving.catchUp();
           setDraft(null);
           show(CHANGED_ELSEWHERE, 'info');
         }} busy={commit.isPending} units={units} packs={packOf} />

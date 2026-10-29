@@ -218,6 +218,10 @@ export function useCountSave({ saveKey, restored, saved, apply, hold }: {
       setOnDevice(true);
       return setStored(here);
     }
+    // A commit in another tab this tab never heard of is taken in, never written over (review of #686, round 7): writing this
+    // sheet as it is would put back counts that already went in and wipe the commit mark.
+    const kept = readCount(saveKey);
+    if (kept && (kept.committed ?? 0) > (commitAt.current ?? 0)) return takeIn.current(kept);
     const ok = writeCount(saveKey, { counts, packCounts, listed, done, at: at.current, ...(commitAt.current ? { committed: commitAt.current } : {}) });
     setOnDevice(ok);
     setStored(ok ? here : null);
@@ -226,17 +230,10 @@ export function useCountSave({ saveKey, restored, saved, apply, hold }: {
   useEffect(() => () => {
     if (quiet.current !== null) clearTimeout(quiet.current);
   }, []);
-  useEffect(() => {
-    const seen = (e: StorageEvent) => {
-      if (e.key !== saveKey || holding.current) return;
-      if (e.newValue === null) {
-        at.current = {};
-        before.current = { counts: {}, packCounts: {}, listed: [], done: [] };
-        setOther({ kind: 'cleared' });
-        return apply(null);
-      }
-      const theirs = parseSaved(e.newValue);
-      if (!theirs) return;
+  // Takes in another tab's stored count, item by item: from its storage event, or read by this tab itself when it may have
+  // missed one (a phone tab woken late; review of #686).
+  const takeIn = useRef<(theirs: SavedCount) => void>(() => undefined);
+  takeIn.current = (theirs: SavedCount) => {
       const merged = mergeCounts({ ...latest.current, at: at.current, ...(commitAt.current ? { committed: commitAt.current } : {}) }, theirs);
       const fresh = (theirs.committed ?? 0) > (commitAt.current ?? 0);
       at.current = merged.at;
@@ -259,6 +256,18 @@ export function useCountSave({ saveKey, restored, saved, apply, hold }: {
       // Taken as it is, so it is not stamped as typed here.
       before.current = next;
       apply(next);
+  };
+  useEffect(() => {
+    const seen = (e: StorageEvent) => {
+      if (e.key !== saveKey || holding.current) return;
+      if (e.newValue === null) {
+        at.current = {};
+        before.current = { counts: {}, packCounts: {}, listed: [], done: [] };
+        setOther({ kind: 'cleared' });
+        return apply(null);
+      }
+      const theirs = parseSaved(e.newValue);
+      if (theirs) takeIn.current(theirs);
     };
     window.addEventListener('storage', seen);
     return () => window.removeEventListener('storage', seen);
@@ -271,6 +280,19 @@ export function useCountSave({ saveKey, restored, saved, apply, hold }: {
     /** This tab committed: the page then drops the items that went in, and another tab hears which. */
     committed: () => {
       commitAt.current = Date.now();
+    },
+    /** The last commit of this count that this tab has taken in; a review is measured against it, never against storage. */
+    heardCommit: () => commitAt.current ?? 0,
+    /**
+     * Before a review or a commit: when storage holds a commit this tab has not taken in (its storage event was missed), takes
+     * it in now, so the sheet drops what went in there, and says true. The page then does not review or commit this time.
+     */
+    catchUp: () => {
+      if (holding.current) return false;
+      const now = readCount(saveKey);
+      if (!now || (now.committed ?? 0) <= (commitAt.current ?? 0)) return false;
+      takeIn.current(now);
+      return true;
     },
     /**
      * Use them, after the question about an earlier day: the count as stored now, which another tab may have changed since
