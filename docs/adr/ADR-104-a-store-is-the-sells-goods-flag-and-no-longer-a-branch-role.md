@@ -40,25 +40,38 @@ branches are `both`.
   with the role `store`. As `both`, such a branch would have started quoting, so quotations now resolve a stocking branch and
   the offline failure and waiting reports refuse a branch that keeps no goods with `branch_not_stocking`, as the sale already
   does.
-- **Migration V115.** The role was in force while the business had the retail module on and its `branch_roles` switch on.
-  1. **Fold.** A `store` branch in force that keeps goods becomes a Store (`sells_goods = false`). From then on its till takes
-     no money, as a Store's does.
-  2. **Except where credit is owing.** A store branch with a credit sale still owing is not folded. Owing is counted as
-     `BranchTillCheck` counts it: written-off and imported sales are left out, and a delivery fee owed on the account counts.
-     Its payments are taken at that till, so folding it would strand the receivable. It keeps selling. An administrator marks
-     it a Store on Branches once the sales are settled.
-  3. **Other `store` roles.** A branch that keeps no goods cannot be a Store; it was and is refused sales, and now quotations
-     and offline reports, for keeping no goods. A `store` role that was not in force was never read, so that branch keeps
-     selling.
-  4. **Roles and audit.** Every `store` row becomes `both`, and no branch or role row is deleted. Each folded branch gets a
-     system audit row `core.branch.updated`. Each role row gets a system audit row `retail.branch_role.changed` with the value
-     before and the reason: now a Store, credit still owing, keeps no goods, already a Store, or not in force.
-  5. **Check and permission.** The role check is narrowed to `shop` and `both`, and the permission
-     `retail.branch_role.manage` is now described as setting a selling branch as a shop or both.
+- **Migration V115 never stops.** A stopped migration stops the automatic staging and production deploy. The role was in
+  force while the business had the retail module on and its `branch_roles` switch on.
+  1. **Fold a clean store.** A `store` branch in force with no blocker becomes a Store (`sells_goods = false`). From then on
+     its till takes no money, as a Store's does.
+  2. **Skip a store with a blocker.** `retail_store_fold_blockers(tenant, branch, since)` names the blockers:
+     - `keeps_no_goods`: an open branch that keeps no goods, which cannot be a Store;
+     - `credit_sales_owing`: a credit sale still owing, counted as `BranchTillCheck` counts it (written-off and imported sales
+       left out, a delivery fee owed on the account in), whose payments are taken at that till;
+     - till money taken since the role was set: `credit_payments` (a payment made after its sale), `account_payments`,
+       `refunds`, `savings`, `bankings`, `withdrawals`, `advance_repayments`.
 
-  `RetailStoreRoleFoldIT` replays V115 on a scratch database at the migration before it, reading both numbers from the folder,
-  with a fabricated case for each rule (a credit sale owing and retail off included), and checks that a second run changes
-  nothing. It also pins that a folded store refuses a credit payment, a refund and a banking with `branch_does_not_sell`.
+     A branch with any blocker keeps `sells_goods` true and can do everything it does today with its money. A branch that
+     keeps no goods is still refused quotations and offline sale reports by the application, as above, not by the migration.
+     An administrator settles what is open and marks it a Store on Branches later.
+  3. **Other `store` roles.** A `store` role that was not in force was never read, so that branch keeps selling. A closed
+     branch that keeps no goods cannot be a Store and is left as it is.
+  4. **Roles and audit.** Every `store` row becomes `both`, and no branch or role row is deleted. Each folded branch gets a
+     system audit row `core.branch.updated`. Each role row gets one system audit row `retail.branch_role.changed` with the value
+     before, the `blockers` and the reason: now a Store, not made a Store because of the named blockers, already a Store, keeps
+     no goods, or not in force.
+  5. **Check and permission.** The role check is narrowed to `shop` and `both`, and the permission
+     `retail.branch_role.manage` is now described as setting a selling branch as a shop or both. The function stays in the
+     schema for the test and is not granted to the application.
+
+  `RetailStoreRoleFoldIT` covers this in four ways:
+  - it replays V115 on a scratch database at the migration before it, reading both numbers from the folder, with a
+    fabricated case for each rule; the migration completes, a skipped branch is unchanged with its audit row, and a second
+    run changes nothing;
+  - it migrates a mixed business (one clean store, one with credit owing) in one run;
+  - it checks the blockers against a credit sale owing, a written-off one, a later payment, a banking and a refund made
+    through the API;
+  - it pins that a folded store refuses a credit payment, a refund and a banking with `branch_does_not_sell`.
 - **Permission unchanged.** Marking a Store needs `core.branches.manage`; `retail.branch_role.manage` sets shop or both.
 
 ## Consequences
@@ -71,10 +84,11 @@ branches are `both`.
 **Worse, and to watch:**
 - **A folded store branch takes no money at its till any more.** It refuses payments on credit sales and on account, refunds,
   savings, bankings, withdrawals and advance repayments, as an ADR-048 Store does. Under the role only a sale, a quotation, a
-  price resolution, an order and an offline report were refused. This is the chosen meaning. Today it touches the 18 store
-  branches of the demo tenant only. "Sells again" on the Branches screen undoes it for a branch.
-- A store branch with credit owing starts selling again after V115, since it is `both` with the flag unset. Its audit row
-  says why, and the administrator marks it a Store once the credit is settled.
+  price resolution, an order and an offline report were refused. This is the chosen meaning. Only a store whose till took
+  none of that since its role was set is folded. Today the role exists only on the 18 store branches of the demo tenant.
+  "Sells again" on the Branches screen undoes it for a branch.
+- A skipped store branch starts selling again after V115, since it is `both` with the flag unset. Its audit row names the
+  blockers, and the administrator marks it a Store once they are settled.
 - A head office that keeps no goods no longer issues quotations or takes offline sale reports, with or without the old role.
 - A caller that matched `branch_role_forbids_sales` now gets `branch_does_not_sell`; the web app maps both.
 - An administrator of a business with `branch_roles` off who had set a dormant `store` role will find `both` and an audit row,

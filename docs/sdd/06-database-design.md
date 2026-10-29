@@ -2443,8 +2443,9 @@ SELECT, INSERT and UPDATE. A missing row means `both`. The migration backfills `
 of tenants that have the retail module, so a populated database changes in no way; correctness never
 depends on the backfill. `V115` folds the role `store` into `branches.sells_goods` (ADR-048, ADR-104). A `store` row in
 force (the retail module on and `branch_roles` on), on a branch that keeps goods, makes the branch a Store
-(`sells_goods = false`), which takes no money at its till. The exception is a branch with a credit sale still owing (as
-`BranchTillCheck` counts it): it keeps selling. Every `store` row then becomes `both`; each changed branch and row gets a system audit row with the
+(`sells_goods = false`), which takes no money at its till. The migration never stops. A branch with a blocker named by
+`retail_store_fold_blockers` is skipped and keeps selling: an open branch that keeps no goods, a credit sale still owing (as
+`BranchTillCheck` counts it), or till money taken since the role was set. Every `store` row then becomes `both`; each changed branch and row gets a system audit row with the
 value before and the reason; nothing is deleted; the check then refuses `store`. A Store reads as `store` from the flag. The capability flags are not a table: they live in `tenant_settings.settings`
 under `module_groups.retail` (opaque to the core, validated by `retail.manifest`); its `profile` is the kind of business
 (`shops`, `stores_and_shops`, `wholesale`, `wholesale_and_shops`), renamed from `shop` and `trade` by `V103` without changing a
