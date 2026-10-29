@@ -1620,9 +1620,17 @@ class RetailCustomerAccountsIT extends IntegrationTest {
         assertThat(api.call(HttpMethod.PUT, path, Map.of("credit_limit_minor", 1), MANAGER, "*", match)
                         .getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(api.call(HttpMethod.PUT, path, Map.of("terms_days", 1), MANAGER, "*", match)
-                        .getStatusCode())
-                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        ResponseEntity<JsonNode> termsOnly =
+                api.call(HttpMethod.PUT, path, Map.of("terms_days", 1), MANAGER, "*", match);
+        assertThat(termsOnly.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        // Issue #257: the refusal is in a shop owner's words, never an API field name.
+        JsonNode limitProblem = termsOnly.getBody().get("errors").get(0);
+        assertThat(limitProblem.get("field").asString()).isEqualTo("credit_limit_minor");
+        assertThat(limitProblem.get("message").asString())
+                .isEqualTo("Also say how much this buyer may owe, or that they have no credit limit.");
+        empty.getBody()
+                .get("errors")
+                .forEach(e -> assertThat(e.get("message").asString()).doesNotContain("_"));
         // A value and its clear flag together contradict each other.
         assertThat(api.call(
                                 HttpMethod.PUT,
