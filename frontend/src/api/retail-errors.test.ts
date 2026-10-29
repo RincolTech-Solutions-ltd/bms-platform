@@ -11,7 +11,6 @@ describe('retail problem details in plain words', () => {
     ['permission_denied', 403, /do not have permission/i],
     ['module_not_enabled', 404, /not switched on/i],
     ['branch_required', 422, /choose one branch/i],
-    ['unknown_branch', 404, /not one you work in/i],
     ['sale_voided', 409, /already been voided/i],
     ['sale_not_payable', 422, /not voided takes payments/i],
     ['sale_historical', 422, /with your accountant/i],
@@ -88,6 +87,18 @@ describe('retail problem details in plain words', () => {
     const problem = { code: 'validation_failed', detail: 'One or more fields are invalid.', errors: [{ field: 'qty', message: 'Must be above zero.' }, { field: 'x', message: 'Too long.' }] };
     expect(retailMessage(problem, 422)).toBe('Must be above zero. Too long.');
     expect(retailMessage({ code: 'validation_failed', detail: 'One or more fields are invalid.' }, 422)).toBe('One or more fields are invalid.');
+  });
+
+  // Issue #257: one code, three cases, each in its own words; only the 404 says the branch is not the person's.
+  it('words each unknown_branch case for itself', () => {
+    const outside = { code: 'unknown_branch', detail: 'That branch is not one you work in. Choose another branch.', errors: [{ field: 'branch_id', code: 'unknown_branch', message: 'That branch is not one you work in.' }] };
+    expect(retailMessage(outside, 404)).toBe('That branch is not one you work in. Choose another branch in the Branch box.');
+    const closed = { code: 'validation_failed', detail: 'One or more fields are invalid.', errors: [{ field: 'branch_id', code: 'unknown_branch', message: 'That branch is closed.' }] };
+    expect(retailMessage(closed, 422)).toBe('That branch is closed.');
+    const destination = { code: 'validation_failed', detail: 'One or more fields are invalid.', errors: [{ field: 'to_branch_id', code: 'unknown_branch', message: 'Choose an open branch of this business to move the stock to.' }] };
+    expect(retailMessage(destination, 422)).toBe('Choose an open branch of this business to move the stock to.');
+    expect(retailMessage(closed, 422)).not.toMatch(/not one you work in/);
+    expect(retailMessage(destination, 422)).not.toMatch(/not one you work in/);
   });
 
   it('falls back on the status when there is no body', () => {

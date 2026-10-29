@@ -25,8 +25,6 @@ const BY_CODE: Record<string, string> = {
   permission_denied: 'You do not have permission to do this.',
   module_not_enabled: 'Retail is not switched on for this business.',
   branch_required: 'Choose one branch in the Branch box at the top of the page first.',
-  // Issue #257: 404 for a branch outside the caller's scope (trade-capabilities 2.2).
-  unknown_branch: 'That branch is not one you work in. Choose another branch in the Branch box.',
   branch_role_forbids_sales: 'This branch is a store and does not sell. Choose a shop in the Branch box.',
   branch_is_store: 'This branch is a store. Mark it as selling again on Branches before choosing shop or both.',
   branch_has_open_work: 'A stock move to or from this branch is not yet received. Finish it before changing the branch role.',
@@ -179,6 +177,9 @@ const BY_STATUS: Record<number, string> = {
 /** The message to show a person for a failed retail call. */
 export function retailMessage(problem: RetailProblem | undefined, status: number): string {
   const p = problem ?? {};
+  // Issue #257: only the 404 is a branch outside the caller's scope (trade-capabilities 2.2). A closed branch or a transfer's
+  // destination is a 422 whose field message the server words for its own case, shown below.
+  if (p.code === 'unknown_branch' && status === 404) return 'That branch is not one you work in. Choose another branch in the Branch box.';
   const known = p.code ? BY_CODE[p.code] : undefined;
   if (known) return known;
   if (p.code === 'validation_failed') {

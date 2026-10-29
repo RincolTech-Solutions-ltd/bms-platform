@@ -23,8 +23,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 @Component
 public class RetailBranchContext {
 
-    /** The field message a screen may show for a closed or unknown branch, in the shop owner's words (issue #257). */
-    private static final String CLOSED_OR_NOT_YOURS = "That branch is closed or is not one you work in.";
+    /** The field message a screen may show for a closed branch inside the caller's scope, in plain words (issue #257). */
+    private static final String CLOSED = "That branch is closed.";
 
     private final Branches branches;
 
@@ -80,8 +80,7 @@ public class RetailBranchContext {
     /** Refuses a branch that is closed or keeps no goods, reading the branch row under a share lock (see {@link #active}). */
     public void requireStocks(UUID branch, String field) {
         Branches.Branch found = active(branch)
-                .orElseThrow(() -> ApiException.validation(
-                        List.of(new FieldProblem(field, "unknown_branch", CLOSED_OR_NOT_YOURS))));
+                .orElseThrow(() -> ApiException.validation(List.of(new FieldProblem(field, "unknown_branch", CLOSED))));
         refuseIfNotStocking(found, field);
     }
 
@@ -182,7 +181,7 @@ public class RetailBranchContext {
                     List.of(new FieldProblem(field, "unknown_branch", "That branch is not one you work in.")));
         }
         if (active(branch).isEmpty()) {
-            throw ApiException.validation(List.of(new FieldProblem(field, "unknown_branch", CLOSED_OR_NOT_YOURS)));
+            throw ApiException.validation(List.of(new FieldProblem(field, "unknown_branch", CLOSED)));
         }
         return branch;
     }
