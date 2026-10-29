@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactElement } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CollateralItem } from '../../../api/collateral';
 import type { Me } from '../../../api/client';
 import type { Loan, LoanListItem } from '../../../api/lending';
@@ -259,6 +259,21 @@ describe('the loan application form', () => {
 describe('a second start for the same member (issue #704)', () => {
   const older: LoanListItem = { id: 'd1', loan_no: 'LN000901', member_id: borrower.id, status: 'draft', created_at: '2026-10-29T17:48:00Z' };
   const newer: LoanListItem = { ...older, id: 'd2', loan_no: 'LN000902', created_at: '2026-10-29T17:58:00Z' };
+
+  // JUSTIFICATION-A3: the round 2 review of #711 asks that the question is brought into view when it appears.
+  it('brings the question into view when the draft is found, and announces it', async () => {
+    const scroll = vi.fn();
+    const before = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scroll;
+    try {
+      mount(<ApplicationForm memberId={borrower.id} />, { drafts: [newer] });
+      const question = await screen.findByText(/already has a draft loan/);
+      await waitFor(() => expect(scroll).toHaveBeenCalled());
+      expect(question.getAttribute('role')).toBe('status');
+    } finally {
+      Element.prototype.scrollIntoView = before;
+    }
+  });
 
   it('offers to continue the newest draft, as the primary action', async () => {
     mount(<ApplicationForm memberId={borrower.id} />, { drafts: [older, newer] });

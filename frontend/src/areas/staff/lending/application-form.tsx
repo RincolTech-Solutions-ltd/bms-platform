@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute, getRouteApi, useNavigate } from '@tanstack/react-router';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { asFormError, unknownOutcome, type FormError } from '../../../api/lending-forms';
 import { useApplicationsApi, useCollateralApi, useMembersApi } from '../../../api/lending-context';
 import type { Loan, LoanListItem } from '../../../api/lending';
@@ -84,6 +84,12 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
   const asking = !editing && draft.memberId !== '' && startNew !== draft.memberId && (drafts.isPending || open !== undefined);
   const held = guard.blocked ? 'Wait for the check above before sending again.'
     : asking ? (open ? 'Choose one first: continue that draft, or start a new one.' : 'Looking for this member\'s other drafts.') : undefined;
+  // When a draft is found after the person has started (a slow phone), its question is brought into view (review of #711):
+  // Send is held until it is answered, so the two choices must never be off screen.
+  const openId = open?.id;
+  useEffect(() => {
+    if (openId) document.getElementById('af-open-draft')?.scrollIntoView?.({ block: 'center' });
+  }, [openId]);
   const set = <K extends keyof ApplicationDraft>(key: K, value: ApplicationDraft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const inputMode = exponentOf(currency) ? 'decimal' : 'numeric';
 
@@ -162,7 +168,7 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
     <form className="mf" onSubmit={(e) => void submit(e)} noValidate aria-label={editing ? 'Change the application' : 'New loan application'} data-tour="application-form">
       {open && (
         <section className="rt-card stack" aria-labelledby="af-open-draft">
-          <p id="af-open-draft">{draftQuestion(open, today, businessZone())}</p>
+          <p id="af-open-draft" role="status">{draftQuestion(open, today, businessZone())}</p>
           <Link to="/staff/lending/loans/$loanId/edit" params={{ loanId: open.id ?? '' }} className="btn rt-primary btn-block">Continue that draft</Link>
           <button type="button" className="btn btn-block" onClick={() => setStartNew(draft.memberId)}>Start a new one</button>
         </section>
