@@ -24,7 +24,7 @@ as he buys, to be asked at setup how he usually buys the item and for how much, 
    factor = `holds_qty` x the factor of the level held (1 for the item's unit). A pack that holds nothing named keeps its
    factor, as every pack made before did. There is no limit on depth.
 2. **One rule works the ladder out.** `PackLadder.factors` works every level's factor out from what it holds, refusing a
-   level that holds neither the item's unit nor an active pack of it (422 `holds_unknown`), a loop (422 `holds_bigger`)
+   level that holds neither the item's unit nor an active pack of it (422 `holds_unknown`), a loop (422 `would_loop`)
    and a factor past `numeric(14,3)` (422 `too_big`). `POST /retail/products` and `POST /retail/products/{id}/units` take
    `holds_unit_id` and `holds_qty` instead of `factor` (a factor sent as well must agree, else 422 `factor_mismatch`); a new
    item's packages may hold each other in any order in the request, a held one is made first.
@@ -41,9 +41,10 @@ as he buys, to be asked at setup how he usually buys the item and for how much, 
    may not change prices, the delivery keeps its size and the usual one stays (`retail.product_unit.size_kept`, reason
    `not_whole` or `own_price`), as before.
 5. **Stock at every level.** The stock rows' `standard_pack` carries `levels`: every active pack holding a whole number of
-   more than one base unit, biggest first (`RetailCatalogue.packLevelsSql`, the one rule). My stock reads "2 Cartons, 3
-   Boxes and 5 Pieces (275 Pieces)" and Count stock takes a box for each level and adds them up; a count is still sent in
-   pieces. ADR-103 is unchanged for an item with one level.
+   more than one base unit, biggest first (`RetailCatalogue.packLevelsSql`, the one rule). My stock reads "2 cartons, 3
+   boxes and 5 pieces (275 pieces)" and Count stock takes a box for each level and adds them up; a count is still sent in
+   pieces. ADR-103 is unchanged for an item with one level, except that its words, as every stock and count line's, are now
+   lower case in a sentence whatever the unit is named (review of #710: one casing, "1 carton and 3 pieces").
 6. **The usual buying level.** `usual_buy` marks the level Buy stock opens on, at most one per item (a partial unique index)
    and never a pack only for selling; none marked is the smallest unit. A pack made only for selling, or switched off, loses
    it. Add an item asks "How do you usually buy it?" with the levels, then "What do you pay for one carton?", and shows "That
@@ -51,7 +52,7 @@ as he buys, to be asked at setup how he usually buys the item and for how much, 
    do you usually sell it, and at what price?" gives that level its own selling price (ADR-099) and the piece price from it.
 7. **A usual pack may count another pack.** A unit's usual pack (ADR-100) may now be of another pack unit, so the electrical
    and hardware starters offer Box of rolls (2 Roll) and Crate of rolls (10 Roll), for buying only, besides Roll (100
-   Metre). Only a loop is refused (422 `usual_pack_loop`); the codes `unit_is_a_pack` and `unit_counted_by_pack` are gone.
+   Metre). Only a loop is refused (422 `would_loop`); the codes `unit_is_a_pack` and `unit_counted_by_pack` are gone.
    A change of a usual pack takes a transaction lock for the business first, so two changes can never each pass the check
    and store a loop between them, and the check remembers what it has walked, so even a loop written straight to the table
    ends in a refusal (review of #710). A pack's own ladder is changed only under the item's row lock, which every pack

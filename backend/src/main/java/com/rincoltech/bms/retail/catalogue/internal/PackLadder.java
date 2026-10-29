@@ -57,7 +57,7 @@ final class PackLadder {
      * The factor of every level, worked out from what each holds: a level holding the item's unit has that many, a level
      * holding another has that many times its factor, and a level holding nothing named keeps its own. Refuses with
      * {@code too_small} a level holding fewer than 2 (review of #710), and with
-     * {@code holds_unknown} a level that holds neither the item's unit nor a level, {@code holds_bigger} a loop (a box
+     * {@code holds_unknown} a level that holds neither the item's unit nor a level, {@code would_loop} a loop (a box
      * holding the carton that holds it) and {@code too_big} a factor past numeric(14,3).
      */
     static Map<UUID, BigDecimal> factors(UUID baseUnitId, Collection<Level> levels) {
@@ -84,7 +84,7 @@ final class PackLadder {
             throw new Problem("holds_unknown", unitId);
         }
         if (!path.add(unitId)) {
-            throw new Problem("holds_bigger", unitId);
+            throw new Problem("would_loop", unitId);
         }
         BigDecimal factor;
         if (l.holdsUnitId() == null) {

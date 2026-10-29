@@ -66,12 +66,12 @@ describe('the ladder', () => {
 
 describe('stock at every level', () => {
   it('reads 275 pieces as cartons, boxes and pieces', () => {
-    expect(everyLevel('275.000', 'Piece', levels)).toBe('2 Cartons, 3 Boxes and 5 Pieces (275 Pieces)');
-    expect(everyLevel('240.000', 'Piece', levels)).toBe('2 Cartons (240 Pieces)');
-    expect(everyLevel('7.000', 'Piece', levels)).toBe('7 Pieces');
-    expect(everyLevel('0.000', 'Piece', levels)).toBe('0 Pieces');
-    expect(everyLevel('-130.000', 'Piece', levels)).toBe('1 Carton and 1 Box short (130 Pieces short)');
-    expect(everyLevel('12.000', 'Piece', undefined)).toBe('12 Pieces');
+    expect(everyLevel('275.000', 'Piece', levels)).toBe('2 cartons, 3 boxes and 5 pieces (275 pieces)');
+    expect(everyLevel('240.000', 'Piece', levels)).toBe('2 cartons (240 pieces)');
+    expect(everyLevel('7.000', 'Piece', levels)).toBe('7 pieces');
+    expect(everyLevel('0.000', 'Piece', levels)).toBe('0 pieces');
+    expect(everyLevel('-130.000', 'Piece', levels)).toBe('1 carton and 1 box short (130 pieces short)');
+    expect(everyLevel('12.000', 'Piece', undefined)).toBe('12 pieces');
   });
 
   it('splits stock into a box per level and adds a count back up', () => {

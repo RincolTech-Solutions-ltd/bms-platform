@@ -165,6 +165,120 @@ class RetailPackLadderIT extends IntegrationTest {
         assertThat(factor(threeLevels, carton)).isEqualTo("120.000");
     }
 
+    // JUSTIFICATION-A3: round 2 of the review of #710 asks for these: opposing edits at once, one wins, one is refused.
+    /** Runs both at once from a common start and gives both answers. */
+    static List<ResponseEntity<JsonNode>> atOnce(
+            java.util.concurrent.Callable<ResponseEntity<JsonNode>> a,
+            java.util.concurrent.Callable<ResponseEntity<JsonNode>> b)
+            throws Exception {
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        try (var pool = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var first = pool.submit(() -> {
+                start.await();
+                return a.call();
+            });
+            var second = pool.submit(() -> {
+                start.await();
+                return b.call();
+            });
+            start.countDown();
+            return List.of(first.get(), second.get());
+        }
+    }
+
+    @Test
+    void twoOpposingPackEditsAtOnceNeverStoreALoop() throws Exception {
+        // A box of 10 pieces and a carton of 120 pieces; one phone makes the box hold cartons, the other the carton
+        // hold
+        // boxes. The item's row lock lets one through and the other then sees it and is refused.
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("description", "Test Socket Race");
+        body.put("category_id", category);
+        body.put("unit_id", piece);
+        body.put("cost_minor", 5_000);
+        body.put("sell_minor", 6_500);
+        body.put("packs", List.of(level(box, piece, 10, null), level(carton, piece, 120, null)));
+        UUID item = RetailTestSupport.id(api.post("/products", body, ADMIN));
+        String boxVersion = packOf(item, box).get("version").asString();
+        String cartonVersion = packOf(item, carton).get("version").asString();
+        List<ResponseEntity<JsonNode>> both = atOnce(
+                () -> api.call(
+                        HttpMethod.PATCH,
+                        "/products/" + item + "/units/" + box,
+                        Map.of("holds_unit_id", carton, "holds_qty", 2),
+                        ADMIN,
+                        "*",
+                        Map.of("If-Match", boxVersion)),
+                () -> api.call(
+                        HttpMethod.PATCH,
+                        "/products/" + item + "/units/" + carton,
+                        Map.of("holds_unit_id", box, "holds_qty", 12),
+                        ADMIN,
+                        "*",
+                        Map.of("If-Match", cartonVersion)));
+        assertThat(both.stream().filter(r -> r.getStatusCode() == HttpStatus.OK))
+                .hasSize(1);
+        ResponseEntity<JsonNode> refused = both.stream()
+                .filter(r -> r.getStatusCode() != HttpStatus.OK)
+                .findFirst()
+                .orElseThrow();
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(refused)).isEqualTo("would_loop");
+        // What is stored still works out: one of the two holds the other, never both.
+        JsonNode b = packOf(item, box);
+        JsonNode c = packOf(item, carton);
+        assertThat(carton.toString().equals(b.path("holds_unit_id").asString(""))
+                        && box.toString().equals(c.path("holds_unit_id").asString("")))
+                .isFalse();
+    }
+
+    @Test
+    void twoOpposingUsualPacksAtOnceNeverStoreALoop() throws Exception {
+        UUID bag = api.unit("Test Bag");
+        UUID sack = api.unit("Test Sack");
+        List<ResponseEntity<JsonNode>> both = atOnce(
+                () -> api.call(
+                        HttpMethod.PATCH,
+                        "/units/" + bag,
+                        Map.of("usual_pack", Map.of("size", "2", "of_unit_id", sack, "purpose", "buy")),
+                        ADMIN,
+                        "*",
+                        Map.of("If-Match", "1")),
+                () -> api.call(
+                        HttpMethod.PATCH,
+                        "/units/" + sack,
+                        Map.of("usual_pack", Map.of("size", "2", "of_unit_id", bag, "purpose", "buy")),
+                        ADMIN,
+                        "*",
+                        Map.of("If-Match", "1")));
+        assertThat(both.stream().filter(r -> r.getStatusCode().is2xxSuccessful()))
+                .hasSize(1);
+        ResponseEntity<JsonNode> refused = both.stream()
+                .filter(r -> !r.getStatusCode().is2xxSuccessful())
+                .findFirst()
+                .orElseThrow();
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(refused)).isEqualTo("would_loop");
+    }
+
+    @Test
+    void myStockAndCountStockReadEveryLevelBiggestFirst() {
+        // Review of #710: both stock lists (My stock and Count stock read /stock, the all-branches view
+        // /stock/all-branches)
+        // carry every level of the ladder, biggest first, through the one standardPack reader.
+        UUID socket = socket(true);
+        api.stockUp(t.headOffice(), socket, "275");
+        for (String path : List.of("/stock?branch_id=" + t.headOffice(), "/stock/all-branches")) {
+            JsonNode row = RetailUnitsIT.rowOf(api.get(path, ADMIN).getBody(), socket);
+            List<String> levels = new java.util.ArrayList<>();
+            row.get("standard_pack")
+                    .get("levels")
+                    .forEach(l -> levels.add(
+                            l.get("unit").asString() + " " + l.get("factor").asString()));
+            assertThat(levels).as(path).containsExactly("Bale 480.000", "Carton 120.000", "Box 10.000");
+        }
+    }
+
     // JUSTIFICATION-A3: the review of #710 asks that a level holding one be refused; this is its test.
     @Test
     void aLevelHoldingOneOfTheLevelBelowIsRefused() {
@@ -236,7 +350,7 @@ class RetailPackLadderIT extends IntegrationTest {
         assertThat(none.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         ResponseEntity<JsonNode> loop = change(socket, box, Map.of("holds_unit_id", carton, "holds_qty", 2), ADMIN);
         assertThat(loop.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(code(loop)).isEqualTo("holds_bigger");
+        assertThat(code(loop)).isEqualTo("would_loop");
         assertThat(factor(socket, box)).isEqualTo("10.000");
     }
 

@@ -178,8 +178,9 @@ export function unitWord(unit: string | undefined): string {
   return words ? words[0] : (unit ?? '');
 }
 
+/** A count in the words of a sentence: lower case, "2 cartons", "5 pieces" (one casing everywhere, review of #710). */
 function counted(milli: bigint, unit: string): string {
-  return quantityIn(qtyString(Number(milli)), unit);
+  return quantityIn(qtyString(Number(milli)), unit).toLowerCase();
 }
 
 /**
@@ -190,7 +191,7 @@ function counted(milli: bigint, unit: string): string {
  */
 export function packsAndPiecesParts(qty: string, unit: string | undefined, pack: PackSize | undefined): { inPacks: string; total?: string } {
   const f = factorMilli(pack?.factor);
-  if (!unit || !pack?.unit || f === null || f <= 1000n) return { inPacks: unit ? quantityIn(qty, unit) : showQty(qty) };
+  if (!unit || !pack?.unit || f === null || f <= 1000n) return { inPacks: unit ? quantityIn(qty, unit).toLowerCase() : showQty(qty) };
   // Issue #699 (ADR-107): every whole level of the item's ladder, biggest first ("2 Cartons, 3 Boxes and 5 Pieces"); with no
   // levels sent, the standard pack alone as before.
   const levels = wholeLevelsOf(pack);
@@ -208,7 +209,7 @@ export function packsAndPiecesParts(qty: string, unit: string | undefined, pack:
   if (rest > 0n || !packed) said.push(counted(rest, unit));
   const parts = said.length > 1 ? `${said.slice(0, -1).join(', ')} and ${said[said.length - 1]}` : (said[0] ?? '');
   const inPacks = milli < 0n ? `${parts} short` : parts;
-  return packed ? { inPacks, total: `${quantityIn(qtyString(Number(size)), unit)}${milli < 0n ? ' short' : ''}` } : { inPacks };
+  return packed ? { inPacks, total: `${counted(size, unit)}${milli < 0n ? ' short' : ''}` } : { inPacks };
 }
 
 /** Issue #699: the whole levels of a pack's ladder holding more than one, biggest first, one per size. */

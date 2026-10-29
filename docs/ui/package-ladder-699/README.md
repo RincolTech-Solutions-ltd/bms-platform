@@ -14,8 +14,8 @@ buying level) and a bale of 4 cartons (buying only), with 275 pieces counted in.
 | `04-not-whole-refused` | 2.5 typed for the boxes in a carton: "A carton must hold 2 or more whole boxes. Type a whole number like 10." and nothing is saved |
 | `05-add-an-item-ladder` | Add an item: a box of 10 pieces, then Add a bigger package holding the box, "How many boxes in one carton", "So 1 carton = 120 pieces", and the ladder and Look inside under the packages |
 | `06-usually-buy-and-sell` | How do you usually buy it? Carton, What do you pay for one carton? 600,000, "That is UGX 5,000 a piece."; How do you usually sell it, and at what price? Carton, 690,000, "That is UGX 5,750 a piece." |
-| `07-my-stock-every-level` | My stock: "In stock: 2 Cartons, 3 Boxes and 5 pieces (275 pieces)" |
-| `08-count-every-level` | Count stock: a box for bales, cartons, boxes and pieces; 2, 3 and 5 typed add up to "Counted 2 Cartons, 3 Boxes and 5 pieces (275 pieces)" |
+| `07-my-stock-every-level` | My stock: "In stock: 2 cartons, 3 boxes and 5 pieces (275 pieces)" |
+| `08-count-every-level` | Count stock: a box for bales, cartons, boxes and pieces; 2, 3 and 5 typed add up to "Counted 2 cartons, 3 boxes and 5 pieces (275 pieces)" |
 | `09-buy-stock-usual-carton` | Buy stock opens the line on the carton, the usual buying level, with its 120 pieces |
 | `10-sell-a-carton` | Sell by Carton (120 pieces) at its own price, UGX 690,000 |
 
@@ -29,9 +29,9 @@ buying level) and a bale of 4 cartons (buying only), with 275 pieces counted in.
 
 The laptop pictures (`-1366`) show the ladder and Look inside side by side.
 
-Unit names in stock words are written as the shop named the unit (a unit named Carton reads "2 Cartons", one named piece
-reads "5 pieces"), as every stock and count line has since ADR-103; the ladder's sentences ("So 1 carton = 120 pieces") are
-always in lower case.
+One casing everywhere (review of #710): unit words in a sentence are lower case whatever the unit is named, in stock and
+count lines ("2 cartons, 3 boxes and 5 pieces") as in the ladder ("So 1 carton = 120 pieces"). The pictures were taken
+again after that change and after main's phone search (#690) was merged in.
 
 ## Reading it aloud
 

@@ -256,7 +256,7 @@ class CatalogueService {
             if (!seen.add(down.id())) {
                 throw ApiException.validation(List.of(new FieldProblem(
                         "usual_pack.of_unit_id",
-                        "usual_pack_loop",
+                        "would_loop",
                         of.name() + " is itself a pack of this unit. Choose a smaller unit.")));
             }
             down = down.usualPack() == null
@@ -1264,7 +1264,7 @@ class CatalogueService {
                     new UpdatePackRequest(factor, null, null, null, null, null, null, null),
                     before.active());
         } catch (ApiException e) {
-            // Review of #710: the audit names the ladder's own refusal (not_whole, too_small, holds_bigger, too_big).
+            // Review of #710: the audit names the ladder's own refusal (not_whole, too_small, would_loop, too_big).
             ladder = null;
             refused = e.errors().isEmpty() ? e.code() : e.errors().getFirst().code();
         }
@@ -1442,10 +1442,10 @@ class CatalogueService {
     private static ApiException ladderProblem(PackLadder.Problem e, String unit) {
         String pack = unitWord(unit);
         return switch (e.code()) {
-            case "holds_bigger" ->
+            case "would_loop" ->
                 ApiException.validation(List.of(new FieldProblem(
                         "holds_unit_id",
-                        "holds_bigger",
+                        "would_loop",
                         "A " + pack + " cannot hold itself or a package that holds it. Choose a smaller one.")));
             case "too_big" ->
                 ApiException.validation(List.of(
@@ -1469,8 +1469,7 @@ class CatalogueService {
                 "factor",
                 "not_whole",
                 "A " + unitWord(unit) + " must hold 2 or more whole of the level below it, which is " + plain(held)
-                        + " of the item (" + unitWord(product.unit())
-                        + "). Type a size that is a whole number of it.")));
+                        + " " + plural(unitWord(product.unit())) + ". Type a size that is a whole number of it.")));
     }
 
     private static ApiException usualBuyNotBought() {
@@ -1484,6 +1483,14 @@ class CatalogueService {
     private static String unitWord(String name) {
         String lower = name == null ? "" : name.trim().toLowerCase(Locale.ROOT);
         return RetailCatalogue.SHORT_CODE_WORDS.getOrDefault(lower, lower);
+    }
+
+    /** "pieces", "boxes", "metres": a unit's word in the plural for a number other than one (review of #710). */
+    static String plural(String word) {
+        if (word.isEmpty() || word.endsWith("s")) {
+            return word;
+        }
+        return word.matches(".*(x|ch|sh)$") ? word + "es" : word + "s";
     }
 
     /** 120.000 as 120, 12.5 as 12.5. */

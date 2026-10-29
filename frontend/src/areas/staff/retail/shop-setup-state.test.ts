@@ -34,7 +34,7 @@ function fakeShop(start: { categories?: string[]; units?: string[] } = {}) {
       const u = units.find((x) => x.id === id)!;
       if (u.version !== version) throw new RetailError('stale', 409, 'stale');
       // Only a loop is refused, as the server holds it (ADR-107).
-      if (body.usual_pack && units.find((x) => x.id === body.usual_pack?.of_unit_id)?.usual_pack?.of_unit_id === id) throw new RetailError('loop', 422, 'usual_pack_loop');
+      if (body.usual_pack && units.find((x) => x.id === body.usual_pack?.of_unit_id)?.usual_pack?.of_unit_id === id) throw new RetailError('loop', 422, 'would_loop');
       if (body.usual_pack) u.usual_pack = usual(body.usual_pack);
       u.version = (u.version ?? 1) + 1;
       return Promise.resolve(u);

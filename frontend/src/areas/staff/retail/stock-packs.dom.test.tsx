@@ -44,19 +44,19 @@ const rowOf = (name: string) => screen.getByText(name).closest('tr') as HTMLElem
 describe('Stock in packs and pieces', () => {
   it('shows cartons and pieces with the total, part of a carton, a shortage and an item with no pack', () => {
     screenOf(<StockTable rows={rows} showCost={false} />);
-    expect(rowOf('Test soap').textContent).toContain('5 Cartons and 7 Pieces (127 Pieces)');
-    expect(rowOf('Test biscuits').textContent).toContain('7 Pieces');
+    expect(rowOf('Test soap').textContent).toContain('5 cartons and 7 pieces (127 pieces)');
+    expect(rowOf('Test biscuits').textContent).toContain('7 pieces');
     expect(rowOf('Test biscuits').textContent).not.toContain('Carton');
-    expect(rowOf('Test juice').textContent).toContain('1 Carton and 3 Pieces short (27 Pieces short)');
+    expect(rowOf('Test juice').textContent).toContain('1 carton and 3 pieces short (27 pieces short)');
     expect(rowOf('Test juice').textContent).toContain('Negative');
-    expect(rowOf('Test cable').textContent).toContain('40 Metre');
+    expect(rowOf('Test cable').textContent).toContain('40 metres');
   });
 
   it('shows stock at every level of a ladder (issue #699)', () => {
     const levels = [{ unit: 'Carton', factor: '120.000' }, { unit: 'Box', factor: '10.000' }];
     const socket: StockRow = { product_id: 'p5', code: 'TS-5', description: 'Test socket', category: 'Sockets', unit: 'Piece', qty: '275.000', negative: false, standard_pack: { unit: 'Carton', factor: '120.000', levels } };
     screenOf(<StockTable rows={[socket]} showCost={false} />);
-    expect(rowOf('Test socket').textContent).toContain('2 Cartons, 3 Boxes and 5 Pieces (275 Pieces)');
+    expect(rowOf('Test socket').textContent).toContain('2 cartons, 3 boxes and 5 pieces (275 pieces)');
   });
 
   it('shows the total and each branch in packs and pieces on a phone', () => {
@@ -66,9 +66,9 @@ describe('Stock in packs and pieces', () => {
         balances: [{ branch_id: 'b1', qty: '100.000', negative: false }, { branch_id: 'b2', qty: '27.000', negative: false }] }],
     };
     screenOf(<AllBranchesList data={data} showCost={false} />);
-    expect(screen.getByText(/Total/).textContent).toContain('5 Cartons and 7 Pieces (127 Pieces)');
+    expect(screen.getByText(/Total/).textContent).toContain('5 cartons and 7 pieces (127 pieces)');
     fireEvent.click(screen.getByRole('button', { name: 'Show branches' }));
     const branches = [...document.querySelectorAll('.rt-card .rt-row')].slice(1).map((r) => r.textContent);
-    expect(branches).toEqual(['Test Main (HQ)4 Cartons and 4 Pieces (100 Pieces)', 'Test Two (B2)1 Carton and 3 Pieces (27 Pieces)']);
+    expect(branches).toEqual(['Test Main (HQ)4 cartons and 4 pieces (100 pieces)', 'Test Two (B2)1 carton and 3 pieces (27 pieces)']);
   });
 });

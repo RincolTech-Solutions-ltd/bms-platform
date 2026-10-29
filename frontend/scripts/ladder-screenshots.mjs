@@ -88,7 +88,9 @@ for (const width of [412, 1366]) {
   await spa(page, '/staff/retail/catalogue/products');
   await page.getByLabel(/Find|Search/).first().fill('Test 13A');
   await page.waitForTimeout(800);
-  await page.getByRole('button', { name: 'Edit Test 13A Socket' }).first().click();
+  // A phone opens the item from its row (#690), a laptop from the card's Edit.
+  const edit = page.getByRole('button', { name: 'Edit Test 13A Socket' });
+  await ((await edit.count()) > 0 ? edit : page.getByRole('button', { name: /^Test 13A Socket/ })).first().click();
   await page.waitForTimeout(1200);
   await at('[data-testid="item-ladder"]', page, -90);
   await shot(page, '01-item-ladder', width);

@@ -293,7 +293,7 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                 Map.of("usual_pack", Map.of("size", "2", "of_unit_id", roll, "purpose", "both")),
                 ADMIN);
         assertThat(cycle.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(cycle.getBody().get("errors").get(0).get("code").asString()).isEqualTo("usual_pack_loop");
+        assertThat(cycle.getBody().get("errors").get(0).get("code").asString()).isEqualTo("would_loop");
         ResponseEntity<JsonNode> box = api.post(
                 "/units",
                 Map.of(
@@ -317,7 +317,7 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                                 "both")),
                 ADMIN);
         assertThat(deep.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(deep.getBody().get("errors").get(0).get("code").asString()).isEqualTo("usual_pack_loop");
+        assertThat(deep.getBody().get("errors").get(0).get("code").asString()).isEqualTo("would_loop");
 
         // Review of #710: a loop already stored (only a direct write could leave one) ends the check in a refusal at
         // once.
@@ -331,7 +331,7 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                 Map.of("usual_pack", Map.of("size", "3", "of_unit_id", bag, "purpose", "buy")),
                 ADMIN);
         assertThat(stored.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(stored.getBody().get("errors").get(0).get("code").asString()).isEqualTo("usual_pack_loop");
+        assertThat(stored.getBody().get("errors").get(0).get("code").asString()).isEqualTo("would_loop");
     }
 
     @Test

@@ -50,7 +50,7 @@ class PackLadderTest {
                         PIECE, List.of(new Level(BOX, CARTON, 2, n("1")), new Level(CARTON, BOX, 12, n("1")))))
                 .isInstanceOf(PackLadder.Problem.class)
                 .extracting(e -> ((PackLadder.Problem) e).code())
-                .isEqualTo("holds_bigger");
+                .isEqualTo("would_loop");
         assertThatThrownBy(() -> PackLadder.factors(PIECE, List.of(new Level(CARTON, BOX, 12, n("1")))))
                 .extracting(e -> ((PackLadder.Problem) e).code())
                 .isEqualTo("holds_unknown");

@@ -100,7 +100,7 @@ describe('the words', () => {
 
   it('shows the stock in the standard pack and pieces, with full unit words', () => {
     const packs = [{ id: 'k1', unit_id: 'u2', unit: 'Carton', factor: '12.000', active: true, standard: true }];
-    expect(itemStock(item({ qty: '27.000', packs }))).toBe('2 Cartons and 3 pieces (27 pieces)');
+    expect(itemStock(item({ qty: '27.000', packs }))).toBe('2 cartons and 3 pieces (27 pieces)');
     expect(itemStock(item({ qty: '1.000' }))).toBe('1 piece');
   });
 
