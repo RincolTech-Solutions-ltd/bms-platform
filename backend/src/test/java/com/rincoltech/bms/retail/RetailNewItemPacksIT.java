@@ -143,11 +143,12 @@ class RetailNewItemPacksIT extends IntegrationTest {
             assertThat(RetailCatalogue.isPackageWord(word)).as(word).isFalse();
         }
         assertThat(RetailCatalogue.isPackageWord(null)).isFalse();
-        // Review of #692: the unit reads in the singular, whatever its name.
-        assertThat(RetailCatalogue.packageAsUnit("Boxes"))
-                .isEqualTo("A box is a package. Choose the smallest unit, like piece, then add the box below.");
-        assertThat(RetailCatalogue.packageAsUnit("Cases")).startsWith("A case is a package.");
-        assertThat(RetailCatalogue.packageAsUnit("Sets of 4")).startsWith("A set of 4 is a package.");
+        // Review of #692: a unit named in the plural reads right too.
+        assertThat(RetailCatalogue.packageAsUnit("Cartons"))
+                .isEqualTo("Cartons is a package. Choose the smallest unit, like piece, then add the cartons below.");
+        assertThat(RetailCatalogue.packageAsUnit("Boxes")).startsWith("Boxes is a package.");
+        assertThat(RetailCatalogue.packageAsUnit("Sets of 4")).startsWith("Sets of 4 is a package.");
+        assertThat(RetailCatalogue.packageAsUnit("Set of 4")).startsWith("A set of 4 is a package.");
         assertThat(RetailCatalogue.packageAsUnit("Ctn")).startsWith("A ctn is a package.");
     }
 

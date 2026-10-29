@@ -18,10 +18,10 @@ sold in packages and give them, all in one form and one save.
 1. **A package word is never a new item's smallest unit.** A unit named box, carton, dozen, pack, packet, bag, sack, crate,
    case, tray, bundle or bale (one or many, any case, with or without "of N"), its short codes ctn, ctns, pkt, pkts, bx, doz
    and dz, or "set of N", is a package. `POST /retail/products`, and so Quick add, which makes its item through the same call
-   (ADR-101), and `POST /retail/product-families` (Add an item with sizes and colours) refuse it as `unit_id` with 422
-   `unit_is_package`: "A box is a package. Choose the smallest unit, like piece, then add the box below.", the unit named in
-   the singular ("Boxes" reads "a box"). The unit may still be a pack of any item. Items already counted in such a unit, and
-   Edit item, are unchanged.
+   (ADR-101), and `POST /retail/product-families` (an item with sizes) refuse it as `unit_id` with 422
+   `unit_is_package`: "A box is a package. Choose the smallest unit, like piece, then add the box below." (for a unit named in the plural,
+   "Cartons is a package. Choose the smallest unit, like piece, then add the cartons below."). The unit may still be
+   a pack of any item. Items already counted in such a unit, and Edit item, are unchanged.
 2. **One list, on the server.** The words are one pattern, `RetailCatalogue.PACKAGE_WORDS`. Every unit `GET /retail/units`
    sends carries `is_package` from it, and the PWA reads that flag, so the form and the API refuse the same units and a new word
    is one change.

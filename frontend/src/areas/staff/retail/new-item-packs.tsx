@@ -41,16 +41,14 @@ export function unitWord(unit: Unit | undefined, none: string): string {
 
 /**
  * The refusal of a package word as the smallest unit, the same sentence the server sends (422 unit_is_package,
- * RetailCatalogue.packageAsUnit): the unit in the singular, so "Boxes" reads "a box" and "Sets of 4" reads "a set of 4".
+ * RetailCatalogue.packageAsUnit): "A box is a package", or "Cartons is a package" for a unit named in the plural.
  */
 export function packageAsUnit(unit: Unit | undefined): string | null {
   if (!unit?.is_package) return null;
-  const name = unitWord(unit, '');
-  const of = name.indexOf(' of ');
-  const head = of < 0 ? name : name.slice(0, of);
-  const one = head.endsWith('xes') ? head.slice(0, -2) : head.endsWith('s') && !head.endsWith('ss') ? head.slice(0, -1) : head;
-  const word = one + (of < 0 ? '' : name.slice(of));
-  return `A ${word} is a package. Choose the smallest unit, like piece, then add the ${word} below.`;
+  const word = unitWord(unit, '');
+  const head = word.split(' ')[0] ?? '';
+  const named = head.endsWith('s') && !head.endsWith('ss') ? word.charAt(0).toUpperCase() + word.slice(1) : `A ${word}`;
+  return `${named} is a package. Choose the smallest unit, like piece, then add the ${word} below.`;
 }
 
 /**

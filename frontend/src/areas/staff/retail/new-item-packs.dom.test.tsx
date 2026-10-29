@@ -77,11 +77,10 @@ async function fill(unitId: string) {
 describe('the words of Add an item', () => {
   it('names a package as the smallest unit in the words the server uses', () => {
     expect(packageAsUnit(units[2])).toBe('A box is a package. Choose the smallest unit, like piece, then add the box below.');
+    expect(packageAsUnit({ ...units[1]!, name: 'Cartons' })).toBe('Cartons is a package. Choose the smallest unit, like piece, then add the cartons below.');
+    expect(packageAsUnit({ ...units[2]!, name: 'Boxes' })).toMatch(/^Boxes is a package\./);
     expect(packageAsUnit(units[0])).toBeNull();
     expect(packageAsUnit(undefined)).toBeNull();
-    // Review of #692: a unit named in the plural reads in the singular, as the server words it.
-    expect(packageAsUnit({ name: 'Boxes', is_package: true })).toBe('A box is a package. Choose the smallest unit, like piece, then add the box below.');
-    expect(packageAsUnit({ name: 'Sets of 4', is_package: true })).toMatch(/^A set of 4 is a package\./);
   });
 
   it('refills a size the app filled when the smallest unit changes, and keeps one the owner typed (review of #692)', () => {
