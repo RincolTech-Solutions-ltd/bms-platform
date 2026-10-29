@@ -110,7 +110,7 @@ describe('the category page', () => {
     const body = createProduct.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(body).not.toHaveProperty('code');
     expect(body).toMatchObject({ category_id: 'c1', description: 'Test bulb 12W', unit_id: 'u1' });
-    expect(await screen.findByText('Test bulb 12W added.')).toBeTruthy();
+    expect(await screen.findByText('Test bulb 12W added as BLB-0002.')).toBeTruthy();
   });
 
   it('changes the code start under If-Match, and says items made before keep their codes', async () => {

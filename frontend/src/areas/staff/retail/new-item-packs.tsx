@@ -17,6 +17,9 @@ export const PACKAGES_QUESTION = 'Do you buy or sell it in boxes, cartons or oth
 
 const ANSWERS = [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }] as const;
 
+/** Used for in the order the owner asked for on this form (issue #689): Both, Buying, Selling; the values of PURPOSES. */
+const USED_FOR = (['both', 'buy', 'sell'] as const).map((v) => PURPOSES.find((o) => o.value === v)!);
+
 export type PackageRow = {
   key: number;
   unitId: string;
@@ -36,10 +39,17 @@ export function unitWord(unit: Unit | undefined, none: string): string {
   return unit?.name ? unit.name.trim().toLowerCase() : none;
 }
 
-/** The refusal of a package word as the smallest unit, the same sentence the server sends (422 unit_is_package). */
+/**
+ * The refusal of a package word as the smallest unit, the same sentence the server sends (422 unit_is_package,
+ * RetailCatalogue.packageAsUnit): the unit in the singular, so "Boxes" reads "a box" and "Sets of 4" reads "a set of 4".
+ */
 export function packageAsUnit(unit: Unit | undefined): string | null {
   if (!unit?.is_package) return null;
-  const word = unitWord(unit, '');
+  const name = unitWord(unit, '');
+  const of = name.indexOf(' of ');
+  const head = of < 0 ? name : name.slice(0, of);
+  const one = head.endsWith('xes') ? head.slice(0, -2) : head.endsWith('s') && !head.endsWith('ss') ? head.slice(0, -1) : head;
+  const word = one + (of < 0 ? '' : name.slice(of));
   return `A ${word} is a package. Choose the smallest unit, like piece, then add the ${word} below.`;
 }
 
@@ -50,6 +60,20 @@ export function sizeProblem(factor: string): string | null {
 
 export function rowProblem(row: PackageRow): string | null {
   return row.unitId === '' ? 'Choose the package.' : sizeProblem(row.factor);
+}
+
+/**
+ * Review of #692: when the smallest unit changes, a package in that unit is dropped, and a size the app filled in from a
+ * unit's usual pack (never one the owner typed) follows the new smallest unit, or empties when the usual pack does not
+ * count it.
+ */
+export function rowsForSmallest(rows: PackageRow[], units: Unit[], smallestId: string): PackageRow[] {
+  return rows.map((r) => {
+    const unitId = r.unitId === smallestId ? '' : r.unitId;
+    const usual = unitId === '' ? null : usualFactor(units.find((u) => u.id === unitId), { unit_id: smallestId });
+    const factor = factorForUnit(r.factor, r.filled.factor, usual);
+    return { ...r, unitId, factor, filled: { ...r.filled, factor: factor === r.factor ? r.filled.factor : factor } };
+  });
 }
 
 /** The packs the create request sends; a price only from someone who may set one, never on a pack only for buying. */
@@ -69,7 +93,7 @@ export function withPackages(rows: PackageRow[], units: Unit[]): string {
   return `, with ${said.length === 1 ? said[0] : `${said.slice(0, -1).join(', ')} and ${said[said.length - 1]}`}`;
 }
 
-export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows, onRows, mayPrice, showErrors }: {
+export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows, onRows, mayPrice, showErrors, refused }: {
   /** The smallest unit chosen, or none yet. */
   smallest: Unit | undefined;
   /** The switched-on units of the business. */
@@ -81,6 +105,8 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
   onRows: (rows: PackageRow[]) => void;
   mayPrice: boolean;
   showErrors: boolean;
+  /** Review of #692: the server's refusal of one package (its `pack_index`), shown on that package's row. */
+  refused?: { index: number; message: string } | null;
 }) {
   const one = unitWord(smallest, 'item');
   const many = smallest ? plural(one) : 'items';
@@ -112,7 +138,7 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
                 <legend>{rows.length > 1 ? `Package ${i + 1}` : 'Package'}</legend>
                 <UnitPicker
                   id={`item-pack-unit-${row.key}`}
-                  label="Package"
+                  label="Package unit"
                   hint="For example carton, box or dozen."
                   units={choices}
                   loading={false}
@@ -135,7 +161,7 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
                   showError={showErrors}
                 />
                 <p className="field-label">Used for</p>
-                <Segmented label={`Used for, ${pack}`} options={PURPOSES} value={row.purpose} onChange={(purpose) => change(row.key, { purpose })} />
+                <Segmented label={`Used for, ${pack}`} options={USED_FOR} value={row.purpose} onChange={(purpose) => change(row.key, { purpose })} />
                 {row.purpose === 'buy' ? (
                   <Hint>A package only for buying is not offered when selling, so it has no selling price.</Hint>
                 ) : mayPrice ? (
@@ -151,6 +177,7 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
                 ) : (
                   <Hint>It sells at the {one} price times its size until someone who may change prices sets its own.</Hint>
                 )}
+                {refused?.index === i && <p role="alert" className="rt-flag" data-testid="package-refused">{refused.message}</p>}
                 {rows.length > 1 && (
                   <button type="button" className="btn-ghost" onClick={() => onRows(rows.filter((r) => r.key !== row.key))}>
                     Remove the {pack}

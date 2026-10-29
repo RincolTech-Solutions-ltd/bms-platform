@@ -20,6 +20,7 @@ const units: Unit[] = [
   { id: 'u1', name: 'Bulb', active: true, product_count: 0, version: 1, is_package: false },
   { id: 'u2', name: 'Carton', active: true, product_count: 0, version: 1, is_package: true },
   { id: 'u3', name: 'Box', active: true, product_count: 0, version: 1, is_package: true, usual_pack: { size: '100.000', of_unit_id: 'u1', of_unit: 'Bulb', purpose: 'buy' } },
+  { id: 'u4', name: 'Piece', active: true, product_count: 0, version: 1, is_package: false },
 ];
 const made: Product = { id: 'p1', code: 'TLG-0001', description: 'Test bulb 60W', category_id: 'c1', category: 'Test lighting', unit_id: 'u1', unit: 'Bulb', sell_minor: 5000, active: true, version: 1 };
 
@@ -46,7 +47,8 @@ vi.mock('../../../api/retail', async (original) => {
 
 const { ProductsPage } = await import('./catalogue-products');
 const { withPacksOn } = await import('./catalogue-packs');
-const { PACKAGES_QUESTION, packageAsUnit, sizeProblem, withPackages, newPackageRow } = await import('./new-item-packs');
+const { PACKAGES_QUESTION, packageAsUnit, rowsForSmallest, sizeProblem, withPackages, newPackageRow } = await import('./new-item-packs');
+const { RetailError } = await import('../../../api/retail');
 
 const owner = withPacksOn(mockMe('admin'));
 
@@ -78,6 +80,21 @@ describe('the words of Add an item', () => {
     expect(packageAsUnit(units[2])).toBe('A box is a package. Choose the smallest unit, like piece, then add the box below.');
     expect(packageAsUnit(units[0])).toBeNull();
     expect(packageAsUnit(undefined)).toBeNull();
+    // Review of #692: a unit named in the plural reads in the singular, as the server words it.
+    expect(packageAsUnit({ name: 'Boxes', is_package: true })).toBe('A box is a package. Choose the smallest unit, like piece, then add the box below.');
+    expect(packageAsUnit({ name: 'Sets of 4', is_package: true })).toMatch(/^A set of 4 is a package\./);
+  });
+
+  it('refills a size the app filled when the smallest unit changes, and keeps one the owner typed (review of #692)', () => {
+    const filled = { ...newPackageRow(1), unitId: 'u3', factor: '100', purpose: 'buy' as const, filled: { factor: '100', purpose: 'buy' as const } };
+    const typed = { ...newPackageRow(2), unitId: 'u2', factor: '12' };
+    const [box, carton] = rowsForSmallest([filled, typed], units, 'u4');
+    // The box's usual pack counts bulbs, not the new unit, so the 100 goes.
+    expect(box?.factor).toBe('');
+    expect(carton?.factor).toBe('12');
+    // Back to bulbs, the usual size comes again; a package in the new smallest unit is dropped.
+    expect(rowsForSmallest([box!], units, 'u1')[0]?.factor).toBe('100');
+    expect(rowsForSmallest([typed], units, 'u2')[0]?.unitId).toBe('');
   });
 
   it('takes a whole number of 2 or more for a package', () => {
@@ -127,7 +144,7 @@ describe('Add an item (issue #689)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     await waitFor(() => expect(createProduct).toHaveBeenCalledTimes(1));
     expect(createProduct.mock.calls[0]?.[0]).not.toHaveProperty('packs');
-    expect((await screen.findAllByText('Test bulb 60W added.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Test bulb 60W added as TLG-0001.')).length).toBeGreaterThan(0);
   });
 
   it('makes the item and two packages in one request, the words following the units, and shows it on the list', async () => {
@@ -165,7 +182,7 @@ describe('Add an item (issue #689)', () => {
       ],
     });
     expect((createProduct.mock.calls[0]?.[0] as { packs: object[] }).packs[1]).not.toHaveProperty('sell_minor');
-    expect((await screen.findAllByText('Test bulb 60W added, with carton of 10 and box of 100.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Test bulb 60W added as TLG-0001, with carton of 10 and box of 100.')).length).toBeGreaterThan(0);
     // Back on the Items list, the new item is there though the list was read before it was made.
     expect(await screen.findByRole('button', { name: 'Edit Test bulb 60W' })).toBeTruthy();
   });
@@ -182,6 +199,20 @@ describe('Add an item (issue #689)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     expect(await screen.findByText('Type a whole number, 2 or more.')).toBeTruthy();
     expect(createProduct).not.toHaveBeenCalled();
+  });
+
+  it('puts Used for in the order Both, Buying, Selling, and shows the server refusal of one package on its row', async () => {
+    createProduct.mockRejectedValue(new RetailError('This unit is switched off. Choose another one.', 422, 'validation_failed', { pack_index: 0 }));
+    open();
+    await fill('u1');
+    fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
+    const row = screen.getByTestId('package-row');
+    expect(within(row).getAllByRole('radio').map((r) => r.textContent)).toEqual(['Both', 'Buying', 'Selling']);
+    fireEvent.change(within(row).getByLabelText(/^Package unit/), { target: { value: 'u2' } });
+    fireEvent.change(within(row).getByLabelText(/^How many bulbs in one carton/), { target: { value: '10' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    expect((await within(row).findByTestId('package-refused')).textContent).toBe('This unit is switched off. Choose another one.');
+    expect(screen.getAllByText('This unit is switched off. Choose another one.')).toHaveLength(1);
   });
 
   it('shows no package question while packs are off', async () => {

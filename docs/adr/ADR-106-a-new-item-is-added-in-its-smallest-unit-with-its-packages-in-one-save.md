@@ -16,10 +16,12 @@ sold in packages and give them, all in one form and one save.
 ## Decision
 
 1. **A package word is never a new item's smallest unit.** A unit named box, carton, dozen, pack, packet, bag, sack, crate,
-   case, tray, bundle or bale (one or many, any case, with or without "of N"), or "set of N", is a package. `POST
-   /retail/products`, and so Quick add, which makes its item through the same call (ADR-101), refuses it as `unit_id` with 422
-   `unit_is_package`: "A box is a package. Choose the smallest unit, like piece, then add the box below." The unit may still be
-   a pack of any item. Items already counted in such a unit, and Edit item, are unchanged.
+   case, tray, bundle or bale (one or many, any case, with or without "of N"), a short code (ctn, pkt, bx, doz, dz), or "set
+   of N", is a package. `POST /retail/products`, and so Quick add, which makes its item through the same call (ADR-101), and
+   `POST /retail/product-families` (Add an item with sizes and colours) refuse it as `unit_id` with 422 `unit_is_package`: "A
+   box is a package. Choose the smallest unit, like piece, then add the box below.", the unit named in the singular ("Boxes"
+   reads "a box"). The unit may still be a pack of any item. Items already counted in such a unit, and Edit item, are
+   unchanged.
 2. **One list, on the server.** The words are one pattern, `RetailCatalogue.PACKAGE_WORDS`. Every unit `GET /retail/units`
    sends carries `is_package` from it, and the PWA reads that flag, so the form and the API refuse the same units and a new word
    is one change.
@@ -27,16 +29,18 @@ sold in packages and give them, all in one form and one save.
    the body of `POST /retail/products/{id}/units` (`unit_id`, `factor`, `purpose`, `sell_minor`), made after the item through
    the same `createPack`, with the same checks (the units capability, the price permission and a priced pack only for buying
    checked before anything is written; an unknown, switched-off, repeated or own unit after) and the same
-   `retail.product_unit.created` audit. Any refusal rolls the whole request back: no item, no pack, no audit entry. No new
-   table and no new pack model: the packages are rows of `retail_product_units`.
+   `retail.product_unit.created` audit. Any refusal rolls the whole request back: no item, no pack, no audit entry. A refusal
+   of one package carries `pack_index` and names its fields `packs[i].unit_id` and so on, so the form shows it on that
+   package. No new table and no new pack model: the packages are rows of `retail_product_units`.
 4. **The form.** Add an item calls the unit "Smallest unit you sell" with the hint "The single thing a customer can buy. For
    example piece, bulb, metre, litre." Under it, while the units capability is on, "Do you buy or sell it in boxes, cartons or
-   other packages?" No or Yes. Yes shows a package row: the package (the unit picker with Add a new unit), "How many bulbs in one
+   other packages?" No or Yes. Yes shows a package row: the package unit (the add-in-place picker), "How many bulbs in one
    carton" (a whole number, 2 or more, which the form asks for though the API keeps ADR-033's rule of 1 or more), Used for (the
-   one list of ADR-099 and ADR-100: Both, Selling, Buying; Both first) and an optional "Selling price of one carton". Add another
-   package adds a row. A package unit's usual pack fills in the size and Used for, as on Edit item. The prices read "Buying price
-   of one bulb" and "Selling price of one bulb". The toast says "60W bulb added, with carton of 10", and the new item leads the
-   Items list.
+   values of ADR-099 and ADR-100, shown here in the owner's order Both, Buying, Selling; Both first) and an optional "Selling
+   price of one carton". Add another package adds a row. A package unit's usual pack fills in the size and Used for, as on
+   Edit item, and a size filled in that way follows a new smallest unit or empties; one the owner typed stays. The prices read
+   "Buying price of one bulb" and "Selling price of one bulb". The toast says "60W bulb added as LGH-0001, with carton of 10",
+   keeping the item code the app gave, and the new item leads the Items list.
 
 ## Consequences
 
@@ -47,5 +51,7 @@ cartons are added in one go, so stock reads in cartons and pieces (ADR-103) from
 cement" (only "of" and a number makes a size), since "Bag" alone is a package; the owner chose the list with bag and sack in
 it. The word list is English only.
 
-**Watch for:** a new way to make items must go through `POST /retail/products` (or its `create`) to keep the rule; the CSV
-import and Edit item do not apply it yet. Quick add will reuse the package rows once issue #688 lands.
+**Watch for:** a new way to make items must call `refusePackageUnit` (as `create` and the family route do) to keep the rule.
+The CSV import, Edit item and the routes that make sizes of items already made (`POST /retail/product-families/join` and
+`POST /retail/products/{id}/family`, which keep those items' units) do not apply it yet. Quick add reads `is_package` from the units and will reuse the
+package rows in a follow-up.
