@@ -1058,12 +1058,12 @@ posts to its seeded account (`cash` to `cash_on_hand`, `bank` to `bank`, `mtn_mo
 `is_active = false` switches the method off. `core.ledger`'s `PaymentMethods` is the one lookup;
 lending's loans, savings and investments post through it, at the branch of the loan, account or
 investment (request checks included). A correction credits the account its original entry debited.
-Retail uses it too since #236 (ADR-105, `V116`): a retail leg on `cash_on_hand` or `bank` posts to the
+Retail uses it too since #236 (ADR-105, `V117`): a retail leg on `cash_on_hand` or `bank` posts to the
 account `cash` or `bank` is mapped to at the posting's branch, or to the seeded account while the method
 is unmapped or switched off (retail has no switch-off), and the cash book reads that same till and bank.
 Retail's `mobile_money` account has no method here and stays on its system key. The V43 restrictions
 (`account_used_by_retail`, and the check in `platform_set_tenant_modules` that refused to switch retail
-on while cash or bank was mapped elsewhere) are gone; `V116` replaces the function with its V10 body.
+on while cash or bank was mapped elsewhere) are gone; `V117` replaces the function with its V10 body.
 `bms_app` holds SELECT, INSERT, UPDATE and DELETE on the table (a
 mapping is removed to return the method to its default).
 

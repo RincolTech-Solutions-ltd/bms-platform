@@ -233,7 +233,7 @@ class PlatformIT extends IntegrationTest {
 
     /**
      * Issue #236 (ADR-105): retail posts cash and bank through the payment methods mapping, so a tenant whose cash is
-     * mapped to another account switches retail on like any other (V116 dropped the V43 refusal).
+     * mapped to another account switches retail on like any other (V117 dropped the V43 refusal).
      */
     @Test
     void retailIsSwitchedOnWhileCashIsRemapped() {

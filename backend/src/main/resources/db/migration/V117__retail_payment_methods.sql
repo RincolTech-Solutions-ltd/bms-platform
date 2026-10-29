@@ -1,5 +1,5 @@
--- V116: retail posts and reads cash and bank through the payment methods mapping (issue #236, ADR-105), after V114
--- (#127) and V115 (#676).
+-- V117: retail posts and reads cash and bank through the payment methods mapping (issue #236, ADR-105), after V114
+-- (#127), V115 (#676) and V116 (#239, the transfer receipt checks, which does not touch platform_set_tenant_modules).
 --
 -- Retail's till (cash_on_hand) and bank now resolve through core.ledger's PaymentMethods at the posting's branch, as
 -- lending's do, and the cash book reads the same mapped accounts. A tenant that remaps cash or bank therefore keeps all

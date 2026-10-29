@@ -5,7 +5,7 @@
 Proposed (issue #236; FR-GL-08, FR-RET-11). Supersedes the part of ADR-026 that keeps retail on the seeded `cash_on_hand`
 and `bank` accounts and refuses to remap `cash` or `bank` while retail is on (`account_used_by_retail`,
 `payment_methods_remap_blocks_retail`). Builds on ADR-020 decision 7 (retail posts through its books) and ADR-022 (the cash
-book). Migration `V116`, after `V114` (#127) and `V115` (#676).
+book). Migration `V117`, after `V114` (#127), `V115` (#676) and `V116` (#239).
 
 ## Context
 
@@ -32,7 +32,7 @@ mapping.
    the bank balance that the withdrawal check compares read the account `RetailBooks.accountRef` gives for the branch now.
    `LedgerAccounts.balanceByBranch` and `movementByDay` take a reference (`gl:<account id>` or a system key) for this.
    Lending cash on the shared till shows in the cash book as other movements, never hidden (ADR-022 decision 10).
-4. **The restrictions go.** `PUT /ledger/payment-methods` no longer refuses `cash` or `bank` with retail on, and `V116`
+4. **The restrictions go.** `PUT /ledger/payment-methods` no longer refuses `cash` or `bank` with retail on, and `V117`
    replaces `platform_set_tenant_modules` with its V10 body, without the check and the advisory lock that V43 added.
 5. **Mobile money stays on retail's own account.** Retail's `mobile_money` (1035) has no method in `payment_methods`
    (lending's are `mtn_momo` and `airtel_money`), so it stays on its system key.
