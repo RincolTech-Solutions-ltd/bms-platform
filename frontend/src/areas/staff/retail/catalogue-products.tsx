@@ -17,7 +17,8 @@ import { BarcodeEditor } from './catalogue-barcodes';
 import { MakeFamilyPanel, SIZES_JOIN, SIZES_NEW, VariantNote } from './catalogue-variants';
 import { ItemPhoto, PhotoChoice, PhotoEditor, sendNewPhoto, shownPhoto } from './item-photo';
 import { ScreenLink } from './screen-link';
-import { canUse, holdsAt } from './permissions';
+import { UNITS, canUse, capabilityOn, holds, holdsAt } from './permissions';
+import { NewItemPackages, forSmallest, newPackageRow, packErrorOf, packageAsUnit, oneOf, packsToSend, rowProblem, withPackages, type PackageRow } from './new-item-packs';
 import { StockMinimumEditor } from './stock-minimum';
 import { UnitPicker } from './unit-picker';
 import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
@@ -116,7 +117,8 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
   product?: Product;
   /** Issue #493: the category the item is added in; the form then has no category dropdown. */
   category?: Category;
-  onSaved: (text: string) => void;
+  /** Issue #689: a new item comes back too, so the list can show it. */
+  onSaved: (text: string, added?: Product) => void;
   onCancel: () => void;
   onOpen?: (id: string) => void;
 }) {
@@ -144,8 +146,16 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
   // A switched-off category or unit is offered only when it is the item's own.
   const categoryChoices = (categories.data ?? []).filter((c) => c.active !== false || c.id === product?.category_id);
   const unitChoices = (units.data ?? []).filter((u) => u.active !== false || u.id === product?.unit_id);
-  const complete = description.trim() !== '' && categoryId !== '' && unitId !== '' && (product ? true : sellMinor !== null && costMinor !== null)
-    && (!variant || size.trim() !== '' || colour.trim() !== '');
+  // Issue #689 (ADR-106): a new item is added in its smallest unit, never a package, with its packages in the same save.
+  const smallest = (units.data ?? []).find((u) => u.id === unitId);
+  const unitProblem = unitId === '' ? 'Choose a unit.' : product ? null : packageAsUnit(smallest);
+  const packsOn = !product && canManage && capabilityOn(me, 'retail', UNITS);
+  const mayPrice = holds(me, PRICE);
+  const [inPackages, setInPackages] = useState<'no' | 'yes'>('no');
+  const [packRows, setPackRows] = useState<PackageRow[]>([newPackageRow(1)]);
+  const packages = packsOn && inPackages === 'yes' ? packRows : [];
+  const complete = description.trim() !== '' && categoryId !== '' && unitProblem === null && (product ? true : sellMinor !== null && costMinor !== null)
+    && (!variant || size.trim() !== '' || colour.trim() !== '') && packages.every((r) => rowProblem(r) === null);
   const chosen = fixed ?? (categories.data ?? []).find((c) => c.id === categoryId);
   const movedFrom = product && !variant && categoryId !== product.category_id ? product.category : null;
   // The name is kept once per unit (issue #352): a close name is a warning, the same name is refused, an administrator may add it anyway.
@@ -162,13 +172,15 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
       const reason = duplicateReason ? { duplicate_reason: duplicateReason } : {};
       if (product && variant) return { saved: await retail.updateProduct(product.id ?? '', product.version ?? 1, { active, variant_size: size.trim(), variant_colour: colour.trim() }), photoNote: null };
       if (product) return { saved: await retail.updateProduct(product.id ?? '', product.version ?? 1, { description: description.trim(), category_id: categoryId, unit_id: unitId, active, ...reason }), photoNote: null };
-      const saved = await retail.createProduct({ description: description.trim(), category_id: categoryId, unit_id: unitId, sell_minor: sellMinor ?? 0, cost_minor: profit ? (costMinor ?? 0) : 0, ...reason });
+      const packs = packages.length > 0 ? { packs: packsToSend(packages, mayPrice) } : {};
+      const saved = await retail.createProduct({ description: description.trim(), category_id: categoryId, unit_id: unitId, sell_minor: sellMinor ?? 0, cost_minor: profit ? (costMinor ?? 0) : 0, ...reason, ...packs });
       // The item stands whatever happens to its photo: a failed upload only adds a line to the message.
       return { saved, photoNote: await sendNewPhoto(saved.id ?? '', photo) };
     },
     onSuccess: ({ saved, photoNote }) => {
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
-      onSaved(product ? `Saved the changes to "${saved.description}".` : `Added the item "${saved.description}" (${saved.code}).${photoNote ? ` ${photoNote}` : ''}`);
+      if (product) onSaved(`Saved the changes to "${saved.description}".`);
+      else onSaved(`${saved.description} added as ${saved.code}${withPackages(packages, units.data ?? [])}.${photoNote ? ` ${photoNote}` : ''}`, saved);
     },
     onError: (error) => {
       const found = existingOf(error);
@@ -191,6 +203,8 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
     },
     onError: () => { sending.current = false; },
   });
+  // Issue #689: a refused package is shown on its row, not under the form.
+  const packError = packErrorOf(save.error);
   const busy = save.isPending || check.isPending;
   // Issue #353: while a new item's name is typed, the items it may already be and the category of items like it.
   const hints = useNameHints(description, !product && canManage);
@@ -261,13 +275,28 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
           )}
           <UnitPicker
             id="item-unit"
+            {...(product ? {} : { label: WORDS.smallestUnit, hint: 'The single thing a customer can buy. For example piece, bulb, metre, litre.' })}
             units={unitChoices}
             loading={units.data === undefined} load={units}
             value={unitId}
-            onChange={(next) => { setUnitId(next); forget(); }}
-            error={unitId === '' ? 'Choose a unit.' : null}
-            showError={showErrors}
+            onChange={(next) => { setUnitId(next); forget(); setPackRows((rows) => forSmallest(rows, units.data ?? [], next)); }}
+            error={unitProblem}
+            showError={showErrors || (smallest?.is_package === true && !product)}
           />
+          {packsOn && (
+            <NewItemPackages
+              smallest={smallest}
+              units={unitChoices.filter((u) => u.active !== false)}
+              load={units}
+              answer={inPackages}
+              onAnswer={setInPackages}
+              rows={packRows}
+              onRows={(rows) => { setPackRows(rows); save.reset(); }}
+              mayPrice={mayPrice}
+              showErrors={showErrors}
+              refused={packError}
+            />
+          )}
         </>
       )}
       {product ? (
@@ -305,14 +334,14 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
         <>
           {profit ? (
             <>
-              <label htmlFor="item-cost">Buying price ({RETAIL_CURRENCY})</label>
+              <label htmlFor="item-cost">{`Buying price of one ${oneOf(smallest, 'item')} (${RETAIL_CURRENCY})`}</label>
               <input id="item-cost" inputMode="numeric" value={cost} onChange={(e) => setCost(e.target.value)} aria-invalid={costMinor === null} autoComplete="off" />
               <Hint>What you pay the supplier for one. Leave 0 if you do not know it yet; buying stock sets it.</Hint>
             </>
           ) : null}
           <Field
             id="item-sell"
-            label={`Selling price (${RETAIL_CURRENCY})`}
+            label={`Selling price of one ${oneOf(smallest, 'item')} (${RETAIL_CURRENCY})`}
             required
             error={sellMinor === null ? `Type the price you sell one at, in ${RETAIL_CURRENCY}.` : null}
             showError={showErrors}
@@ -345,7 +374,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
           onChangeName={forget}
         />
       )}
-      {!exists && <Problem error={save.error ?? check.error} />}
+      {!exists && !packError && <Problem error={save.error ?? check.error} />}
       <BusyButton busy={busy} type="submit" className="rt-primary" disabled={exists !== null || similar !== null}>{product ? 'Save changes' : 'Add item'}</BusyButton>
       <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
     </form>
@@ -424,7 +453,7 @@ export function Editing({ id, mode, onSaved, onCancel, onOpen }: { id: string; m
   return mode === 'edit' ? <ProductForm key={product.data.id} product={product.data} onSaved={onSaved} onCancel={onCancel} onOpen={onOpen} /> : <PriceForm product={product.data} onSaved={onSaved} onCancel={onCancel} />;
 }
 
-export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) => void; onPrice: (id: string) => void; onAdd: () => void }) {
+export function ProductList({ onEdit, onPrice, onAdd, added }: { onEdit: (id: string) => void; onPrice: (id: string) => void; onAdd: () => void; added?: Product }) {
   const { me } = useStaff();
   const profit = useProfitAccess();
   const search = useLiveSearch();
@@ -447,7 +476,11 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
     placeholderData: keepPreviousData,
   });
   const finding = page.isPlaceholderData || (page.isFetching && !page.isFetchingNextPage);
-  const items = (page.data?.pages ?? []).flatMap((p) => p.items ?? []);
+  const listed = (page.data?.pages ?? []).flatMap((p) => p.items ?? []);
+  // Issue #689: the item just added leads the unfiltered list, wherever it would fall in the pages, as the list last read it.
+  const items = added && page.data && query === '' && categoryId === '' && activeFilter !== 'off'
+    ? [listed.find((p) => p.id === added.id) ?? added, ...listed.filter((p) => p.id !== added.id)]
+    : listed;
   const canPrice = (me.permissions ?? []).includes(PRICE);
   const g = useCategoryGroups({ screen: 'items', items, categoryOf: (p) => p.category, resetKey: [query, categoryId, activeFilter].join('|'), searching: query !== '', pending: page.isPlaceholderData });
   const card = (p: Product) => <ProductCard key={p.id} product={p} showCost={profit} canPrice={canPrice} onEdit={() => onEdit(p.id ?? '')} onPrice={() => onPrice(p.id ?? '')} extra={<ScreenLink screen="stock" to="/staff/retail/stock" label={`See the stock of ${p.description}`}>Stock</ScreenLink>} />;
@@ -514,13 +547,14 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
 export function ProductsPage() {
   const { me } = useStaff();
   const [view, setView] = useState<View>({ mode: 'list' });
+  const [added, setAdded] = useState<Product | undefined>(undefined);
   const { show, toast } = useToast();
   const back = () => setView({ mode: 'list' });
   const open = (id: string) => setView({ mode: 'edit', id });
-  const saved = (text: string) => { show(text, 'success'); back(); };
+  const saved = (text: string, item?: Product) => { setAdded(item); show(text, 'success'); back(); };
   return (
     <Gate screen="products" title="Items">
-      {view.mode === 'list' && <ProductList onAdd={() => setView({ mode: 'new' })} onEdit={open} onPrice={(id) => setView({ mode: 'price', id })} />}
+      {view.mode === 'list' && <ProductList added={added} onAdd={() => setView({ mode: 'new' })} onEdit={open} onPrice={(id) => setView({ mode: 'price', id })} />}
       {/* Issue #690: a phone row opens the item, so its price is changed from here as well as from the list. */}
       {view.mode === 'edit' && (me.permissions ?? []).includes(PRICE) && (
         <p className="cluster"><button type="button" className="btn-sm" onClick={() => setView({ mode: 'price', id: view.id })}>Change price</button></p>

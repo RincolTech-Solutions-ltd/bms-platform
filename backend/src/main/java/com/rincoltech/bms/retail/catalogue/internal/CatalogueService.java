@@ -34,6 +34,7 @@ import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdateProductRe
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdateUnitRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UsualPack;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UsualPackRequest;
+import jakarta.validation.Validator;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -74,18 +75,21 @@ class CatalogueService {
     private final AuditLog audit;
     private final ModuleSettings settings;
     private final BarcodeRepository barcodes;
+    private final Validator validator;
 
     CatalogueService(
             CatalogueRepository repo,
             CurrentTenant currentTenant,
             AuditLog audit,
             ModuleSettings settings,
-            BarcodeRepository barcodes) {
+            BarcodeRepository barcodes,
+            Validator validator) {
         this.repo = repo;
         this.currentTenant = currentTenant;
         this.audit = audit;
         this.settings = settings;
         this.barcodes = barcodes;
+        this.validator = validator;
     }
 
     /**
@@ -364,10 +368,47 @@ class CatalogueService {
 
     // ---- Products ------------------------------------------------------------------------
 
-    /** FR-RET-01, FR-RET-02: the product and its first history row, source {@code initial}. */
+    /**
+     * FR-RET-01, FR-RET-02: the product and its first history row, source {@code initial}. Issue #689 (ADR-106): it is never
+     * counted in a package, and its packs are made in the same transaction, so a refused pack saves nothing.
+     */
     @Transactional
     Product create(CreateProductRequest r) {
         requireCategoryAndUnit(r.categoryId(), r.unitId(), null, null);
+        refusePackageUnit(r.unitId());
+        List<PackRequest> packs = r.packs() == null ? List.of() : r.packs();
+        if (!packs.isEmpty()) {
+            requireUnits();
+        }
+        // Review of #692: each pack's bounds (the rules of POST /products/{id}/units) and price checks, before anything
+        // is
+        // written; a refusal names the pack (pack_index, packs[i].factor), never the item's own fields.
+        List<String> purposes = new ArrayList<>();
+        for (int i = 0; i < packs.size(); i++) {
+            if (packs.get(i) == null) {
+                throw ofPack(
+                        ApiException.validation(
+                                List.of(new FieldProblem("unit_id", "required", "Choose the package."))),
+                        i);
+            }
+            List<FieldProblem> bad = validator.validate(packs.get(i)).stream()
+                    .map(v -> new FieldProblem(
+                            v.getPropertyPath()
+                                    .toString()
+                                    .replaceAll("([a-z0-9])([A-Z])", "$1_$2")
+                                    .toLowerCase(Locale.ROOT),
+                            "invalid",
+                            v.getMessage()))
+                    .toList();
+            try {
+                if (!bad.isEmpty()) {
+                    throw ApiException.validation(bad);
+                }
+                purposes.add(packPurpose(packs.get(i)));
+            } catch (ApiException e) {
+                throw ofPack(e, i);
+            }
+        }
         String duplicateReason = acceptName(r.description().trim(), r.unitId(), null, r.duplicateReason());
         UUID by = CurrentPrincipal.require().userId();
         // Issue #562, ADR-081 as amended: the category always gives the code, such as BLB-0001; a typed one is refused.
@@ -421,7 +462,38 @@ class CatalogueService {
             after.put("duplicate_reason", duplicateReason);
         }
         audit.record(AuditLog.Entry.created("retail.product.created", PRODUCT, p.id(), null, after));
+        for (int i = 0; i < packs.size(); i++) {
+            PackRequest k = packs.get(i);
+            try {
+                createPack(p, k.unitId(), k.factor(), purposes.get(i), k.sellMinor(), by, null);
+            } catch (ApiException e) {
+                throw ofPack(e, i);
+            }
+        }
         return withPacks(visible(repo.find(p.id()).orElseThrow()));
+    }
+
+    /** Issue #689 (ADR-106): a new item is never counted in a package (422 unit_is_package on unit_id). */
+    // JUSTIFICATION-A3: the review of #692 asks the same refusal on POST /product-families, so create shares it.
+    void refusePackageUnit(UUID unitId) {
+        Unit unit = repo.unit(unitId).orElseThrow();
+        if (unit.isPackage()) {
+            throw ApiException.validation(List.of(
+                    new FieldProblem("unit_id", "unit_is_package", RetailCatalogue.packageAsUnit(unit.name()))));
+        }
+    }
+
+    /**
+     * Review of #692: a refusal of the new item's package {@code i} names it, its fields as {@code packs[i].unit_id} and the
+     * problem with {@code pack_index}, so the form shows it on that package and never on the item's own unit.
+     */
+    private static ApiException ofPack(ApiException e, int i) {
+        Map<String, Object> extensions = new LinkedHashMap<>(e.extensions());
+        extensions.put("pack_index", i);
+        List<FieldProblem> errors = e.errors().stream()
+                .map(f -> new FieldProblem("packs[" + i + "]." + f.field(), f.code(), f.message()))
+                .toList();
+        return new ApiException(e.status(), e.code(), e.title(), e.getMessage(), errors, extensions);
     }
 
     /**
@@ -473,8 +545,8 @@ class CatalogueService {
             unitMade = madeForQuickAdd("retail_units", "retail.unit", unit, PIECE, by);
             unit = unitMade ? unit : repo.unitIdsByName().get(PIECE.toLowerCase(Locale.ROOT));
         }
-        Product p = create(
-                new CreateProductRequest(null, description, category, unit, costMinor, sellMinor, duplicateReason));
+        Product p = create(new CreateProductRequest(
+                null, description, category, unit, costMinor, sellMinor, duplicateReason, null));
         // Read again: the answer of create leaves out the cost for someone who may not read it.
         return new RetailCatalogue.NewItem(
                 CatalogueLookup.snapshot(repo.find(p.id()).orElseThrow()), categoryMade, unitMade);
@@ -904,8 +976,23 @@ class CatalogueService {
     Pack addPack(UUID productId, PackRequest r) {
         requireUnits();
         Product product = repo.lock(productId).orElseThrow(ApiException::notFound);
-        // ADR-099: with no purpose sent, a pack is for both, whatever its unit's usual purpose (#637); the screens fill
-        // in the unit's usual purpose themselves (ADR-100).
+        createPack(
+                product,
+                r.unitId(),
+                r.factor(),
+                packPurpose(r),
+                r.sellMinor(),
+                CurrentPrincipal.require().userId(),
+                null);
+        return forCaller(repo.pack(productId, r.unitId()).orElseThrow());
+    }
+
+    /**
+     * The purpose of a pack to add, after its price checks, for POST /products/{id}/units and a new item's packs (#689).
+     * ADR-099: with no purpose sent, a pack is for both, whatever its unit's usual purpose (#637); the screens fill in the
+     * unit's usual purpose themselves (ADR-100).
+     */
+    private static String packPurpose(PackRequest r) {
         String purpose = r.purpose() == null ? RetailCatalogue.PACK_BOTH : r.purpose();
         if (r.sellMinor() != null) {
             requirePriceEdit(
@@ -914,15 +1001,7 @@ class CatalogueService {
                 throw buyOnlyPriced();
             }
         }
-        createPack(
-                product,
-                r.unitId(),
-                r.factor(),
-                purpose,
-                r.sellMinor(),
-                CurrentPrincipal.require().userId(),
-                null);
-        return forCaller(repo.pack(productId, r.unitId()).orElseThrow());
+        return purpose;
     }
 
     /**

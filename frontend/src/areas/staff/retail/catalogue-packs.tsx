@@ -27,8 +27,8 @@ import { Sheet } from '../../../app/ui/Sheet';
 /** What a pack is for, the one list (issue #637): its values, its Used for label and its words in a sentence. The first is the default. */
 export const PURPOSES = [
   { value: 'both', label: 'Both', use: 'for buying and selling' },
-  { value: 'sell', label: 'Selling', use: 'for selling' },
   { value: 'buy', label: 'Buying', use: 'for buying' },
+  { value: 'sell', label: 'Selling', use: 'for selling' },
 ] as const;
 
 export type Purpose = (typeof PURPOSES)[number]['value'];
@@ -169,7 +169,7 @@ function PackSheet({ product, pack, mayPrice, onClose }: { product: Product; pac
 }
 
 /** Issue #625: the unit's usual pack size, when it counts what this item is counted in, as the number to start from. */
-export function usualFactor(unit: Unit | undefined, product: Product): string | null {
+export function usualFactor(unit: Unit | undefined, product: Pick<Product, 'unit_id'>): string | null {
   const pack = unit?.usual_pack;
   return pack?.size && pack.of_unit_id === product.unit_id ? showQty(pack.size) : null;
 }
@@ -363,7 +363,8 @@ export function withPacksOn(me: Me): Me {
 
 /**
  * Issue #630: while packs are off, the item form says in one line that they exist. Someone who manages settings turns them on
- * here, through the capabilities route with its If-Match, and the pack section shows at once; anyone else reads who can.
+ * here, through the capabilities route with its If-Match, and the pack section shows at once (on Add an item, its package
+ * question, issue #689); anyone else reads who can.
  */
 export function PacksTurnOn() {
   const { me } = useStaff();

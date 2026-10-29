@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * The catalogue's public API for the other retail modules: a product's current prices, read in the
@@ -29,6 +30,43 @@ public interface RetailCatalogue {
 
     /** The key of the units-of-measure capability in the tenant's retail.capabilities settings group (ADR-033). */
     String UNITS_CAPABILITY = "units";
+
+    /**
+     * Issue #689 (ADR-106): the names that are a package, never an item's smallest unit, in any case, one or many, with or
+     * without a size ("Box", "cartons", "Pack of 6", "Set of 4"), and their short codes ("Ctn", "pkts", "Bx", "doz"). The
+     * one list: every unit carries {@code is_package} from it, which the PWA reads, so the screens and the server cannot
+     * disagree.
+     */
+    Pattern PACKAGE_WORDS = Pattern.compile(
+            "((box|carton|dozen|pack|packet|bag|sack|crate|case|tray|bundle|bale)(e?s)?|(ctn|pkt)s?|bx|doz|dz)( of \\d+.*)?"
+                    + "|sets? of \\d+.*",
+            Pattern.CASE_INSENSITIVE);
+
+    /** Every short code of {@link #PACKAGE_WORDS} and its word, as {@code UNIT_WORDS} in units-state.ts has them. */
+    java.util.Map<String, String> SHORT_CODE_WORDS = java.util.Map.of(
+            "ctn", "carton", "ctns", "carton", "pkt", "packet", "pkts", "packet", "bx", "box", "doz", "dozen", "dz",
+            "dozen");
+
+    /** True when the unit's name is a package word of {@link #PACKAGE_WORDS}. */
+    static boolean isPackageWord(String unitName) {
+        return unitName != null && PACKAGE_WORDS.matcher(unitName.trim()).matches();
+    }
+
+    /**
+     * Issue #689: the refusal of a package as a new item's unit, as the PWA words it ({@code packageAsUnit} in
+     * new-item-packs.tsx): "A box is a package", or "Cartons is a package" for a unit named in the plural. A short code reads
+     * as its word, as {@code unitWord} in units-state.ts maps it (review of #692): "Ctn" and "Ctns" are "a carton", "Bx" is "a
+     * box", "Doz" and "Dz" are "a dozen". fixtures/retail/package-refusals-689.json holds the sentences both sides must give.
+     */
+    static String packageAsUnit(String unitName) {
+        String name = unitName.trim().toLowerCase(java.util.Locale.ROOT);
+        String word = SHORT_CODE_WORDS.getOrDefault(name, name);
+        String head = word.split(" ")[0];
+        String named = head.endsWith("s") && !head.endsWith("ss")
+                ? Character.toUpperCase(word.charAt(0)) + word.substring(1)
+                : "A " + word;
+        return named + " is a package. Choose the smallest unit, like piece, then add the " + word + " below.";
+    }
 
     /**
      * Issue #650 (ADR-103): the standard pack of the product aliased {@code product}, the one its stock is shown and counted

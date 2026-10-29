@@ -142,7 +142,12 @@ const UNIT_WORDS: Record<string, [string, string]> = {
   kg: ['kilogram', 'kilograms'],
   kgs: ['kilogram', 'kilograms'],
   ctn: ['carton', 'cartons'],
+  ctns: ['carton', 'cartons'],
   pkt: ['packet', 'packets'],
+  pkts: ['packet', 'packets'],
+  bx: ['box', 'boxes'],
+  doz: ['dozen', 'dozens'],
+  dz: ['dozen', 'dozens'],
   mtr: ['metre', 'metres'],
 };
 
