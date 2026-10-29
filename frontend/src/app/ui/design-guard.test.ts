@@ -272,7 +272,7 @@ describe('design guard', () => {
     expect(pressed.length).toBeGreaterThan(4);
     expect(pressed.filter((p) => !/ (transform|opacity)$/.test(p))).toEqual([]);
     const buttons = rulesOf(code('app/ui/buttons.css'));
-    const base = buttons.find(({ selectors }) => selectors.join() === 'button,.btn');
+    const base = buttons.find(({ selectors }) => selectors.length === 2 && selectors.includes('button') && selectors.includes('.btn'));
     expect(transitioned(/transition:\s*([^;]+)/.exec(base?.body ?? '')?.[1] ?? '')).toEqual(['transform', 'opacity']);
     const press = buttons.find(({ selectors }) => selectors[0]?.startsWith('button:active:not('));
     expect(press?.body).toMatch(/transform:\s*scale\(var\(--press-scale\)\)/);

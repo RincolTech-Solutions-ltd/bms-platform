@@ -274,7 +274,21 @@ describe('busy guard on fixtures', () => {
 // JUSTIFICATION-A3: #682 asks for this guard; it reuses the busy guard's mutation parser rather than a second copy.
 
 const TOAST_EXEMPT = /^\/\/\s*toast-exempt:\s*\S/;
-const SAYS_DONE = /\bmeta:\s*\{[^}]*\bsuccess\s*:|\b(?:show|\w*[Tt]oast\w*)\??\.?\(\s*[^;]*?['"]success['"]|\badded\(/;
+// meta.success that is not a bare `() => null`; a toast call whose own parentheses (one level of nesting) hold the 'success'
+// tone; sayDone(; or useItemAdded's added(.
+const SAYS_DONE =
+  /\bmeta:\s*\{[^}]*\bsuccess\s*:(?!\s*\(\s*\)\s*=>\s*null\b)|\b(?:show|\w*[Tt]oast\w*)\??\.?\((?:[^()]|\([^()]*\))*?['"]success['"](?:[^()]|\([^()]*\))*\)|\bsayDone\(|\badded\(/;
+
+// A write by hand: a function that turns a busy flag on (`setBusy(true)`, `setSaving(true)`) and then sends. From that line to the
+// end of its block, with what it calls, it must say done like a mutation, or carry `// toast-exempt: <reason>` directly above it.
+const BUSY_ON = /\bset(?:Busy|Saving|Removing|Sending|Submitting|Posting|Deleting)\(true\)/g;
+
+/** The hand-rolled writes of one file that say nothing when they work and carry no toast-exempt reason. */
+function silentByHand(text: string): string[] {
+  return [...text.matchAll(BUSY_ON)]
+    .filter((m) => !exempted(text, m.index, TOAST_EXEMPT) && !SAYS_DONE.test(follow(text, [restOfBlock(text, m.index)], true)))
+    .map((m) => `${text.slice(0, m.index).split('\n').length} ${m[0]}`);
+}
 
 /** The options of each local hook that returns a mutation, by the hook's name. */
 function hookOptions(text: string): [string, string][] {
@@ -323,6 +337,11 @@ describe('success toast guard', () => {
   it('every staff mutation says in a toast when it worked, or says why not', () => {
     expect(staff.flatMap(({ file, text }) => silent(text, hooks, hookOpts).map((m) => `${file}:${m}`))).toEqual([]);
   });
+
+  it('every staff write by hand says in a toast when it worked, or says why not', () => {
+    expect(staff.flatMap(({ text }) => [...text.matchAll(BUSY_ON)]).length).toBeGreaterThan(20);
+    expect(staff.flatMap(({ file, text }) => silentByHand(text).map((m) => `${file}:${m}`))).toEqual([]);
+  });
 });
 
 describe('success toast guard on fixtures', () => {
@@ -339,8 +358,18 @@ describe('success toast guard on fixtures', () => {
     expect(silent(`const save = useMutation({ mutationFn: send });\nasync function go() { await save.mutateAsync(x); show('Saved', 'success'); }`)).toEqual([]);
   });
 
-  it('never passes an info or error toast as a success', () => {
+  it('never passes an info or error toast as a success, a success tone outside the call, or words that are always null', () => {
     expect(silent(`const save = useMutation({ mutationFn: send, onSuccess: () => show('Sent for approval', 'info') });${press}`)).toEqual(['1 save']);
+    expect(silent(`const save = useMutation({ mutationFn: send, onSuccess: () => show(x, 'info') });\nconst tone = ok ? 'success' : 'info'`)).toEqual(['1 save']);
+    expect(silent(`const save = useMutation({ mutationFn: send, meta: { success: () => null } });${press}`)).toEqual(['1 save']);
+    expect(silent(`const save = useMutation({ mutationFn: send, onSuccess: (r) => show(savedWords(r), r.ok ? 'success' : 'info') });`)).toEqual([]);
+  });
+
+  it('fails a write by hand that says nothing, and passes sayDone or a toast-exempt reason above it', () => {
+    const write = (after: string) => `async function save() {\n  setBusy(true);\n  try {\n    await api.save();${after}\n  } finally {\n    setBusy(false);\n  }\n}`;
+    expect(silentByHand(write(''))).toEqual(['2 setBusy(true)']);
+    expect(silentByHand(write("\n    sayDone('Member saved');"))).toEqual([]);
+    expect(silentByHand(write('').replace('  setBusy(true);', '  // toast-exempt: the welcome screen that opens says it\n  setBusy(true);'))).toEqual([]);
   });
 
   it('follows a local function and a callback prop of the same file', () => {
