@@ -158,6 +158,12 @@ export function quantityIn(qty: string, unit: string): string {
   return `${shown} ${one ? unit : plural(unit)}`;
 }
 
+/** The unit alone in full words, for a label with no number ("Quantity (pieces)", "Stock is counted in pieces"); issue #680. */
+export function unitWords(unit: string): string {
+  const words = UNIT_WORDS[unit.trim().toLowerCase()];
+  return words ? words[1] : plural(unit);
+}
+
 function counted(milli: bigint, unit: string): string {
   return quantityIn(qtyString(Number(milli)), unit);
 }

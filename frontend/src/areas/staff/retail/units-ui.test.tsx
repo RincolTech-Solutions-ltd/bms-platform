@@ -92,14 +92,14 @@ describe('a sale line', () => {
   it('offers the pack as a way to sell when the capability is on', () => {
     const html = card(withPacks, true);
     expect(html).toContain('Sell by');
-    expect(html).toContain('carton (12 piece)');
+    expect(html).toContain('carton (12 pieces)');
     expect(html).toContain('data-tour="sale-unit"');
-    expect(html).toContain('Quantity (piece)');
+    expect(html).toContain('Quantity (pieces)');
   });
 
   it('prices and counts in the pack once it is chosen', () => {
     const html = card(withPacks, true, 'u1');
-    expect(html).toContain('Quantity (carton)');
+    expect(html).toContain('Quantity (cartons)');
     expect(html).toContain('Selling price per carton');
   });
 
@@ -108,7 +108,7 @@ describe('a sale line', () => {
       const html = card(product, false, 'u1');
       expect(html).not.toContain('Sell by');
       expect(html).not.toContain('carton');
-      expect(html).toContain('Quantity (piece)');
+      expect(html).toContain('Quantity (pieces)');
       expect(html).toContain('>Selling price</label>');
     }
   });

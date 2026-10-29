@@ -8,7 +8,7 @@ import { useStaff } from '../context';
 import { showQty } from './maths';
 import { Money, Problem, money } from './ui';
 import { SETTINGS_MANAGE, UNITS, capabilityOn, holds } from './permissions';
-import { factorMilli, hasOwnPrice, packPriceMinor } from './units-state';
+import { factorMilli, hasOwnPrice, packPriceMinor, quantityIn, unitWords } from './units-state';
 import { WORDS } from '../../../app/glossary';
 import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
 import { Hint } from '../../../app/ui/Hint';
@@ -72,7 +72,7 @@ export function packBelowCostHint(product: Product, factor: string, priceMinor: 
   const packCost = packPriceMinor(cost, factor);
   const price = priceMinor ?? packPriceMinor(product.sell_minor ?? 0, factor);
   if (price > packCost) return null;
-  return `This price is not above the buying price of ${showQty(factor)} ${product.unit ?? ''} at the last price paid, ${money(packCost)}. A sale at it is refused unless the seller may sell below the buying price.`;
+  return `This price is not above the buying price of ${quantityIn(factor, product.unit ?? '')} at the last price paid, ${money(packCost)}. A sale at it is refused unless the seller may sell below the buying price.`;
 }
 
 /**
@@ -132,7 +132,7 @@ function PackSheet({ product, pack, mayPrice, onClose }: { product: Product; pac
         </>
       }
     >
-      <label htmlFor={`pack-factor-${id}`}>{`${product.unit ?? 'Items'} in one ${pack.unit}`}</label>
+      <label htmlFor={`pack-factor-${id}`}>{`${product.unit ? unitWords(product.unit) : 'Items'} in one ${pack.unit}`}</label>
       <input
         id={`pack-factor-${id}`}
         inputMode="decimal"
@@ -159,7 +159,7 @@ function PackSheet({ product, pack, mayPrice, onClose }: { product: Product; pac
       {low !== null && <p className="rt-flag">{low}</p>}
       {pack.below_cost === true && purpose !== 'buy' && (
         <p role="note" className="alert alert-warning">
-          {`This price is not above the average buying price of ${showQty(pack.factor ?? '')} ${product.unit ?? ''}. A sale at it needs permission to sell below the buying price.`}
+          {`This price is not above the average buying price of ${quantityIn(pack.factor ?? '', product.unit ?? '')}. A sale at it needs permission to sell below the buying price.`}
         </p>
       )}
       <Problem error={change.error} />
@@ -244,7 +244,7 @@ export function PackEditor({ product }: { product: Product }) {
   return (
     <fieldset data-testid="pack-editor" onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}>
       <legend>{WORDS.packs}</legend>
-      <Hint>Sell or buy this item by the pack, each with its own price. Stock is always counted in {product.unit}.</Hint>
+      <Hint>Sell or buy this item by the pack, each with its own price. Stock is always counted in {unitWords(product.unit ?? '')}.</Hint>
       {packs.isPending && <p className="loading">Loading</p>}
       <Problem error={packs.error} />
       {packs.data && rows.length === 0 && <p className="empty-state">No cartons, boxes or other packs yet.</p>}
@@ -277,7 +277,7 @@ export function PackEditor({ product }: { product: Product }) {
                       {purposeOf(k) === 'buy' && <> <span className="badge">Buying only</span></>}
                       {purposeOf(k) === 'sell' && <> <span className="badge">Selling only</span></>}
                     </th>
-                    <td className="num">{`${showQty(k.factor ?? '')} ${product.unit ?? ''}`}</td>
+                    <td className="num">{quantityIn(k.factor ?? '', product.unit ?? '')}</td>
                     <td className="num">
                       {price === null ? 'Not sold' : (
                         <>

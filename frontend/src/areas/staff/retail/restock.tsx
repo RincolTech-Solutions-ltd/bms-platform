@@ -13,7 +13,7 @@ import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne, scanInto, touchedLine } from './barcode-state';
 import { ScreenToast, useItemAdded } from './toast';
 import { UNITS, capabilityOn } from './permissions';
-import { OWN_PRICE_KEEPS_SIZE, baseCostMinor, baseQtyMilli, buyingPacks, chosenPack, deliveredFactor, mayKeepSize, packPriceMinor, sameFactor } from './units-state';
+import { OWN_PRICE_KEEPS_SIZE, baseCostMinor, baseQtyMilli, buyingPacks, chosenPack, deliveredFactor, mayKeepSize, packPriceMinor, quantityIn, sameFactor } from './units-state';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Field, FieldsNeededNote } from '../../../app/ui/Field';
 import { WORDS, howManyInEach, plural, useFromNowOn } from '../../../app/glossary';
@@ -324,7 +324,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
                 {/* empty: drawn only when the item has packs; its own unit is always there. */}
                 <select id={`unit-${i}`} value={pack?.unit_id ?? ''} onChange={(e) => patchWhole(i, withUnit(l, e.target.value))}>
                   <option value="">{l.product.unit}</option>
-                  {packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{k.unit} ({showQty(k.factor ?? '')} {l.product.unit})</option>)}
+                  {packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{k.unit} ({quantityIn(k.factor ?? '', l.product.unit ?? '')})</option>)}
                 </select>
               </div>
             )}
