@@ -19,6 +19,64 @@
   margin-bottom: var(--space-4);
 }
 
+/* Issue #680: the shop the page works in, drawn by the staff layout above every page's content, a 48px target that opens the
+   branch picker in one tap. */
+.shop-here {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  min-height: var(--tap);
+  margin: 0 0 var(--space-4);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: var(--weight-semibold);
+}
+
+.shop-here:has(.shop-here-select:focus-visible) {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.shop-here-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shop-here-icon,
+.shop-here-chevron {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+.shop-here-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.shop-here-chevron svg {
+  width: 16px;
+  height: 16px;
+  transform: rotate(90deg);
+}
+
+.shop-here-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
 .rt label {
   margin: var(--space-4) 0 6px;
 }
@@ -71,6 +129,36 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
+}
+
+/* Issue #680: one shop's stock on a phone, a card per item with the quantity large and the prices small under it. */
+.stock-cards {
+  list-style: none;
+  padding: 0;
+}
+
+.stock-card p {
+  margin: var(--space-1) 0;
+}
+
+.stock-card-qty {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* The quantity reads from the left under the name, and the total in pieces wraps with a large font instead of widening the page. */
+.stock-card-qty .num {
+  text-align: start;
+}
+
+.stock-card-qty .qty-packs .qty-total {
+  white-space: normal;
+}
+
+.stock-card .hint .num {
+  font-variant-numeric: tabular-nums;
 }
 
 .rt-card > strong:first-child {

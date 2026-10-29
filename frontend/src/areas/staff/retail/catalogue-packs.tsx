@@ -8,7 +8,7 @@ import { useStaff } from '../context';
 import { showQty } from './maths';
 import { Money, Problem, money } from './ui';
 import { SETTINGS_MANAGE, UNITS, capabilityOn, holds } from './permissions';
-import { factorMilli, hasOwnPrice, packPriceMinor } from './units-state';
+import { factorMilli, hasOwnPrice, packPriceMinor, quantityIn, unitWord, unitWords } from './units-state';
 import { WORDS } from '../../../app/glossary';
 import { AddByName } from '../../../app/ui/EmptyChoice';
 import { PickerWithAdd } from '../../../app/ui/PickerWithAdd';
@@ -73,7 +73,7 @@ export function packBelowCostHint(product: Product, factor: string, priceMinor: 
   const packCost = packPriceMinor(cost, factor);
   const price = priceMinor ?? packPriceMinor(product.sell_minor ?? 0, factor);
   if (price > packCost) return null;
-  return `This price is not above what ${showQty(factor)} ${product.unit ?? ''} cost at the last price paid, ${money(packCost)}. A sale at it is refused unless the seller may sell below cost.`;
+  return `This price is not above the buying price of ${quantityIn(factor, product.unit ?? '')} at the last price paid, ${money(packCost)}. A sale at it is refused unless the seller may sell below the buying price.`;
 }
 
 /**
@@ -120,20 +120,20 @@ function PackSheet({ product, pack, mayPrice, onClose }: { product: Product; pac
     <Sheet
       open
       onClose={onClose}
-      title={`${pack.unit} of ${product.description}`}
+      title={`${unitWord(pack.unit)} of ${product.description}`}
       actions={
         <>
           <BusyButton busy={change.isPending && change.variables?.active === undefined} type="button" className="rt-primary" disabled={problem !== null || change.isPending || Object.keys(body).length === 0} onClick={() => change.mutate(body)}>
             Save
           </BusyButton>
           {/* Switching on again confirms the number: the item's unit may have changed while the pack was off. */}
-          <BusyButton busy={change.isPending && change.variables?.active !== undefined} type="button" aria-label={`${pack.active === false ? 'Switch on' : 'Switch off'} the ${pack.unit} pack`} disabled={change.isPending || (pack.active === false && problem !== null)} onClick={() => change.mutate(pack.active === false ? { active: true, factor: factor.trim() } : { active: false })}>
+          <BusyButton busy={change.isPending && change.variables?.active !== undefined} type="button" aria-label={`${pack.active === false ? 'Switch on' : 'Switch off'} the ${unitWord(pack.unit)} pack`} disabled={change.isPending || (pack.active === false && problem !== null)} onClick={() => change.mutate(pack.active === false ? { active: true, factor: factor.trim() } : { active: false })}>
             {pack.active === false ? 'Switch on' : 'Switch off'}
           </BusyButton>
         </>
       }
     >
-      <label htmlFor={`pack-factor-${id}`}>{`${product.unit ?? 'Items'} in one ${pack.unit}`}</label>
+      <label htmlFor={`pack-factor-${id}`}>{`${product.unit ? unitWords(product.unit) : 'Items'} in one ${unitWord(pack.unit)}`}</label>
       <input
         id={`pack-factor-${id}`}
         inputMode="decimal"
@@ -149,7 +149,7 @@ function PackSheet({ product, pack, mayPrice, onClose }: { product: Product; pac
       {purpose === 'buy' ? (
         <Hint>A pack only for buying is not offered when selling, so it has no selling price.</Hint>
       ) : mayPrice ? (
-        <MoneyInput id={`pack-price-${id}`} label={`Selling price of one ${pack.unit}`} valueMinor={priceMinor} onChange={setPriceMinor} hint={suggestedHint(product, factor) ?? undefined} />
+        <MoneyInput id={`pack-price-${id}`} label={`Selling price of one ${unitWord(pack.unit)}`} valueMinor={priceMinor} onChange={setPriceMinor} hint={suggestedHint(product, factor) ?? undefined} />
       ) : (
         <Hint full>
           {locked
@@ -160,7 +160,7 @@ function PackSheet({ product, pack, mayPrice, onClose }: { product: Product; pac
       {low !== null && <p className="rt-flag">{low}</p>}
       {pack.below_cost === true && purpose !== 'buy' && (
         <p role="note" className="alert alert-warning">
-          {`This price is not above what ${showQty(pack.factor ?? '')} ${product.unit ?? ''} cost you on average. A sale at it needs permission to sell below cost.`}
+          {`This price is not above the average buying price of ${quantityIn(pack.factor ?? '', product.unit ?? '')}. A sale at it needs permission to sell below the buying price.`}
         </p>
       )}
       <Problem error={change.error} />
@@ -245,7 +245,7 @@ export function PackEditor({ product }: { product: Product }) {
   return (
     <fieldset data-testid="pack-editor" onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}>
       <legend>{WORDS.packs}</legend>
-      <Hint>Sell or buy this item by the pack, each with its own price. Stock is always counted in {product.unit}.</Hint>
+      <Hint>Sell or buy this item by the pack, each with its own price. Stock is always counted in {unitWords(product.unit ?? '')}.</Hint>
       {packs.isPending && <p className="loading">Loading</p>}
       <Problem error={packs.error} />
       {packs.data && rows.length === 0 && <p className="empty-state">No cartons, boxes or other packs yet.</p>}
@@ -263,7 +263,7 @@ export function PackEditor({ product }: { product: Product }) {
             </thead>
             <tbody>
               <tr>
-                <th scope="row">{product.unit}</th>
+                <th scope="row">{unitWord(product.unit)}</th>
                 <td className="num">1</td>
                 <td className="num">{product.sell_minor === undefined ? '' : <Money minor={product.sell_minor} />}</td>
                 <td />
@@ -273,23 +273,23 @@ export function PackEditor({ product }: { product: Product }) {
                 return (
                   <tr key={`${k.unit_id}-${k.version}`}>
                     <th scope="row">
-                      {k.unit}
+                      {unitWord(k.unit)}
                       {k.active === false && <> <span className="badge badge-warning">Switched off</span></>}
                       {purposeOf(k) === 'buy' && <> <span className="badge">Buying only</span></>}
                       {purposeOf(k) === 'sell' && <> <span className="badge">Selling only</span></>}
                     </th>
-                    <td className="num">{`${showQty(k.factor ?? '')} ${product.unit ?? ''}`}</td>
+                    <td className="num">{quantityIn(k.factor ?? '', product.unit ?? '')}</td>
                     <td className="num">
                       {price === null ? 'Not sold' : (
                         <>
                           <Money minor={price.minor} />
                           {!price.own && <span className="hint"> suggested</span>}
-                          {k.below_cost === true && <> <span className="badge badge-warning">Below cost</span></>}
+                          {k.below_cost === true && <> <span className="badge badge-warning">Below buying price</span></>}
                         </>
                       )}
                     </td>
                     <td>
-                      <button type="button" className="btn-sm" aria-label={`Change the ${k.unit} pack`} onClick={() => setEditing(k.unit_id ?? null)}>
+                      <button type="button" className="btn-sm" aria-label={`Change the ${unitWord(k.unit)} pack`} onClick={() => setEditing(k.unit_id ?? null)}>
                         Change
                       </button>
                     </td>

@@ -53,6 +53,10 @@ export function Toast({ message, tone, silent = false, action }: { message: stri
   );
 }
 
+// Issue #680: one toast at a time on the whole page. Each mounted toast registers how to hide it, and a toast that shows hides
+// every other, so "You are now in <shop>." from the layout replaces a screen's toast, and a screen's next toast replaces it.
+const mounted = new Set<() => void>();
+
 export function useToast(ms: number = TOAST_MS, silent = false): { show: (message: string, tone: ToastTone, action?: ToastAction) => void; toast: ReactNode } {
   // `error` is the error a later info was said after, so a second info replaces the first instead of piling up.
   const [shown, setShown] = useState<{ message: string; tone: ToastTone; error?: string; action?: ToastAction } | null>(null);
@@ -61,9 +65,20 @@ export function useToast(ms: number = TOAST_MS, silent = false): { show: (messag
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
   };
-  useEffect(() => clear, []);
+  const hide = useCallback(() => {
+    clear();
+    setShown(null);
+  }, []);
+  useEffect(() => {
+    mounted.add(hide);
+    return () => {
+      mounted.delete(hide);
+      clear();
+    };
+  }, [hide]);
   const show = useCallback(
     (message: string, tone: ToastTone, action?: ToastAction) => {
+      for (const other of mounted) if (other !== hide) other();
       clear();
       // An info never hides an error still showing (review of #616: a photo not saved after a count not saved): it is said after
       // the error, in the error's toast, so the one toast a screen shows keeps what went wrong.
@@ -75,7 +90,7 @@ export function useToast(ms: number = TOAST_MS, silent = false): { show: (messag
       // A toast with an action stays a little longer, so there is time to reach it, and stays up while its action works.
       if (!action?.busy) timer.current = setTimeout(() => setShown(null), action ? ms * 2 : ms);
     },
-    [ms],
+    [ms, hide],
   );
   return { show, toast: shown ? <Toast message={shown.message} tone={shown.tone} silent={silent} action={shown.action} /> : null };
 }

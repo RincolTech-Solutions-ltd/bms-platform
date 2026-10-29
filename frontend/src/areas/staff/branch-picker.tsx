@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import type { Me } from '../../api/client';
 import { PLATFORM_BRAND, useBusinessName, useLogo, useLogoSrc, useShellBrand } from '../../app/branding';
 import { icons } from '../../components/icons';
 import { retail } from '../../api/retail';
 import { ALL_BRANCHES, branchLabel, initialBranch, loadBranch, saveBranch } from '../../auth/branch';
+import { useToast } from './retail/toast';
 
 // The branch picker in the staff bar (FR-BR-03) and the branch it starts on (#103). A user with a
 // stored choice gets it back; anyone else starts on a branch that trades rather than an empty head
@@ -44,8 +45,23 @@ export function useBranchHold(holds: () => boolean): void {
   });
 }
 
-/** The active branch, a way to choose it (remembered per tenant and user), and whether it is known yet. */
-export function useActiveBranch(me: Me | undefined): { branch: string | null; choose: (selection: string) => void; ready: boolean } {
+/** What the toast says once the branch in use changes (issue #680): "You are now in Test Shop One." */
+export function switchedTo(me: Me, selection: string): string {
+  if (selection === ALL_BRANCHES) return 'You now see all branches.';
+  return `You are now in ${branchLabel((me.branches ?? []).find((b) => b.id === selection)) || 'that branch'}.`;
+}
+
+/** Issue #680: every change of branch, from the bar, the menu or a page, says where the person now is in the house toast. */
+export function useBranchSwitch(me: Me | undefined, branch: string | null, choose: (selection: string) => boolean): { choose: (selection: string) => void; toast: ReactNode } {
+  const { show, toast } = useToast();
+  const switchTo = (selection: string) => {
+    if (me && selection !== branch && choose(selection)) show(switchedTo(me, selection), 'info');
+  };
+  return { choose: switchTo, toast };
+}
+
+/** The active branch, a way to choose it (remembered per tenant and user; false when a screen holds the branch), and whether it is known yet. */
+export function useActiveBranch(me: Me | undefined): { branch: string | null; choose: (selection: string) => boolean; ready: boolean } {
   const [branch, setBranch] = useState<string | null>(null);
   const shown = useRef(branch);
   shown.current = branch;
@@ -80,9 +96,10 @@ export function useActiveBranch(me: Me | undefined): { branch: string | null; ch
   }, [me, waiting, stocked.data, retry]);
 
   const choose = (selection: string) => {
-    if ([...branchHolds].some((holds) => holds())) return;
+    if ([...branchHolds].some((holds) => holds())) return false;
     setBranch(selection);
     if (me) saveBranch(me.user_id ?? '', selection);
+    return true;
   };
   return { branch, choose, ready };
 }
@@ -118,6 +135,46 @@ export function CurrentShop({ me, branch }: { me: Me; branch: string | null }) {
       {loading ? <span className="current-shop-logo" aria-hidden="true" /> : src && <img className="current-shop-logo" src={src} alt={`Logo of ${name}`} onError={() => broke(src)} />}
       <span className="current-shop-name">{name}</span>
     </div>
+  );
+}
+
+/** The choices of a branch switcher: All branches when the session may see them, then each branch with what it does not do. */
+export function BranchOptions({ me }: { me: Me }) {
+  return (
+    <>
+      {me.all_branches && <option value={ALL_BRANCHES}>All branches</option>}
+      {(me.branches ?? []).map((b) => (
+        <option key={b.id} value={b.id}>
+          {branchLabel(b)}
+          {b.stocks_goods === false ? ' (no stock)' : b.sells_goods === false ? ' (store)' : ''}
+        </option>
+      ))}
+    </>
+  );
+}
+
+/**
+ * The shop the page works in (issue #680): "Test Shop One (HQ)", or "All branches". The staff layout draws it once above every
+ * page's content, phone and laptop. With more than one to choose, a native select laid over it opens the phone's own picker in
+ * one tap, as the top bar's title does. JUSTIFICATION-A3: the component the issue asks for, moved to the layout.
+ */
+export function ShopHere({ me, branch, onChoose }: { me: Me; branch: string | null; onChoose: (selection: string) => void }) {
+  const active = (me.branches ?? []).find((b) => b.id === branch);
+  const choices = (me.branches ?? []).length + (me.all_branches ? 1 : 0);
+  const name = active ? branchLabel(active) : branch === ALL_BRANCHES ? 'All branches' : choices > 1 ? 'Choose a shop' : '';
+  if (!name) return null;
+  return (
+    <p className="shop-here" data-testid="shop-here">
+      <span className="shop-here-icon" aria-hidden="true">{icons.shop}</span>
+      <span className="shop-here-name">{name}</span>
+      {choices > 1 && <span className="shop-here-chevron" aria-hidden="true">{icons.chevron}</span>}
+      {choices > 1 && (
+        <select className="shop-here-select" aria-label={`Shop: ${name}. Switch shop`} value={branch ?? ''} onChange={(e) => onChoose(e.target.value)}>
+          {!active && branch !== ALL_BRANCHES && <option value="">Choose a shop</option>}
+          <BranchOptions me={me} />
+        </select>
+      )}
+    </p>
   );
 }
 
@@ -167,15 +224,8 @@ export function MenuShop({ me, branch, role, onChoose, tour }: { me: Me; branch:
           <span className="menu-shop-branch-name">{name}</span>
           {choices > 1 && <span className="menu-shop-chevron" aria-hidden="true">{icons.chevron}</span>}
           {choices > 1 && (
-            // empty: drawn only with two branches or more to switch between.
             <select className="menu-shop-select" aria-label="Switch branch" value={branch ?? ''} onChange={(e) => onChoose(e.target.value)}>
-              {me.all_branches && <option value={ALL_BRANCHES}>All branches</option>}
-              {branches.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {branchLabel(b)}
-                  {b.stocks_goods === false ? ' (no stock)' : b.sells_goods === false ? ' (store)' : ''}
-                </option>
-              ))}
+              <BranchOptions me={me} />
             </select>
           )}
         </span>

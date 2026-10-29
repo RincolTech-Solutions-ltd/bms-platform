@@ -20,7 +20,7 @@ import { RefreshButton } from '../../app/refresh-button';
 import { useHelpSheet } from '../../tour/host';
 import { BrandLoader } from '../../components/states';
 import { BillingBanner } from './billing/banner';
-import { MenuShop, initials, useActiveBranch } from './branch-picker';
+import { MenuShop, ShopHere, initials, useActiveBranch, useBranchSwitch } from './branch-picker';
 import { BranchTitle, OfflineBanner, SignOutEverywhere, TopMenu } from './top-bar';
 import { StaffContext, useOptionalStaff } from './context';
 import { FeatureSearch } from './feature-search';
@@ -97,7 +97,9 @@ function StaffLayout() {
   });
   const profileNow = me.data ?? offlineMe ?? undefined;
   useBusinessZone(profileNow?.tenant_timezone);
-  const { branch, choose, ready } = useActiveBranch(profileNow);
+  const active = useActiveBranch(profileNow);
+  const { branch, ready } = active;
+  const { choose, toast: switchToast } = useBranchSwitch(profileNow, branch, active.choose);
   const signedIn = me.data !== undefined;
   const offline = useOfflineSupport(mock ? undefined : profileNow, signedIn);
   useEffect(() => {
@@ -210,9 +212,11 @@ function StaffLayout() {
                 <StaffBreadcrumbs />
                 {!mustSetUp(profile) && <HowDoILink pathname={pathname} me={profile} />}
               </div>
+              {!mustSetUp(profile) && <ShopHere me={profile} branch={branch} onChoose={choose} />}
               {mustSetUp(profile) ? <OwnTwoStep blocking /> : <Outlet />}
               <SignOutWarning ask={askSignOut} onSignOut={() => void signOut(true)} />
               <SignOutEverywhere open={askEverywhere} waiting={waitingNow(offline)} busy={signingOut} onConfirm={() => void signOut(true, true)} onClose={() => setAskEverywhere(false)} />
+              {switchToast}
             </div>
             {!mustSetUp(profile) && <StaffTabBar me={profile} />}
           </div>

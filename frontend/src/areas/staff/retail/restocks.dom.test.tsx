@@ -118,14 +118,16 @@ describe('the restock card', () => {
   it('hints when a line was entered in a unit that is not the item\'s usual one', () => {
     const metres: Purchase = { ...restock, lines: [{ ...(restock.lines?.[0] ?? {}), unit_id: 'u2', unit: 'metre', unit_qty_total: '200.000', base_unit: 'roll' }] };
     screenOf(admin, <ul><RestockCard purchase={metres} onDone={() => undefined} /></ul>);
-    expect(screen.getByTestId('unit-hint').textContent).toContain('Entered in metre but this item is kept in roll?');
+    expect(screen.getByTestId('unit-hint').textContent).toContain('Entered in metres but this item is kept in rolls?');
     expect(screen.getByText(/200 metre/)).toBeTruthy();
     expect(unitHint({ unit: 'roll', base_unit: 'roll' })).toBeNull();
     expect(unitHint({ base_unit: 'roll' })).toBeNull();
     // The same words on the restock form, where the unit is the one chosen for the line.
-    expect(chosenUnitHint('metre', 'roll')).toBe('Entered in metre but this item is kept in roll? If that is wrong, correct this purchase and enter it again in the right unit.');
+    expect(chosenUnitHint('metre', 'roll')).toBe('Entered in metres but this item is kept in rolls? If that is wrong, correct this purchase and enter it again in the right unit.');
     expect(chosenUnitHint(undefined, 'roll')).toBeNull();
     expect(chosenUnitHint('roll', 'roll')).toBeNull();
+    // Review of #687: a short code a shop typed reads as its full word.
+    expect(chosenUnitHint('ctn', 'pc')).toBe('Entered in cartons but this item is kept in pieces? If that is wrong, correct this purchase and enter it again in the right unit.');
   });
 });
 

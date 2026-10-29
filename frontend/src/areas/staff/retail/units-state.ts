@@ -133,27 +133,64 @@ export function samePack(a: PackSize | undefined, b: PackSize | undefined): bool
   return a?.unit === b?.unit && sameFactor(a?.factor, b?.factor);
 }
 
-/** "1 Carton", "3 Cartons", "2.5 Kgs": a count with its unit, singular only for exactly one. */
+/** Issue #680: the full words of the short codes shops give their units, singular and plural. Add a code here when one turns up. */
+const UNIT_WORDS: Record<string, [string, string]> = {
+  pc: ['piece', 'pieces'],
+  pcs: ['piece', 'pieces'],
+  ltr: ['litre', 'litres'],
+  ltrs: ['litre', 'litres'],
+  kg: ['kilogram', 'kilograms'],
+  kgs: ['kilogram', 'kilograms'],
+  ctn: ['carton', 'cartons'],
+  pkt: ['packet', 'packets'],
+  mtr: ['metre', 'metres'],
+};
+
+/**
+ * Issue #680: a quantity with its unit in full words, as a person says it: "1 piece", "8 pieces", "1 Carton", "3 Cartons". A
+ * known short code reads as its word ("8 pc" is "8 pieces"); any other name takes a plural unless the count is exactly one.
+ */
+export function quantityIn(qty: string, unit: string): string {
+  const shown = showQty(qty);
+  const one = shown.replace(/^-/, '') === '1';
+  const words = UNIT_WORDS[unit.trim().toLowerCase()];
+  if (words) return `${shown} ${words[one ? 0 : 1]}`;
+  return `${shown} ${one ? unit : plural(unit)}`;
+}
+
+/** The unit alone in full words, for a label with no number ("Quantity (pieces)", "Stock is counted in pieces"); issue #680. */
+export function unitWords(unit: string | undefined): string {
+  const words = UNIT_WORDS[(unit ?? '').trim().toLowerCase()];
+  if (words) return words[1];
+  return unit?.trim() ? plural(unit) : '';
+}
+
+/** One of the unit in full words, for a choice or "per" ("piece", "Selling price per carton"); a short code reads as its word. */
+export function unitWord(unit: string | undefined): string {
+  const words = UNIT_WORDS[(unit ?? '').trim().toLowerCase()];
+  return words ? words[0] : (unit ?? '');
+}
+
 function counted(milli: bigint, unit: string): string {
-  return `${showQty(qtyString(Number(milli)))} ${milli === 1000n ? unit : plural(unit)}`;
+  return quantityIn(qtyString(Number(milli)), unit);
 }
 
 /**
  * Issue #650 (units spec section 3, "Stock is shown both ways"): a stock quantity in the item's standard pack and its base unit,
  * and the total in the base unit when that says more: "5 Cartons and 7 Pieces" with "127 Pieces". Less than one pack reads in the
  * base unit only ("7 Pieces"); below zero says how far short ("1 Carton and 3 Pieces short" with "27 Pieces short"). An item with no
- * pack reads as it always did ("127 Piece").
+ * pack reads in its unit with a correct plural ("127 Pieces", "1 Piece", "8 pieces" for "pc"; issue #680).
  */
 export function packsAndPiecesParts(qty: string, unit: string | undefined, pack: PackSize | undefined): { inPacks: string; total?: string } {
   const f = factorMilli(pack?.factor);
-  if (!unit || !pack?.unit || f === null || f <= 1000n) return { inPacks: `${showQty(qty)}${unit ? ` ${unit}` : ''}` };
+  if (!unit || !pack?.unit || f === null || f <= 1000n) return { inPacks: unit ? quantityIn(qty, unit) : showQty(qty) };
   const milli = BigInt(milliOf(qty));
   const size = milli < 0n ? -milli : milli;
   const packs = size / f;
   const rest = size - packs * f;
   const parts = [packs > 0n ? counted(packs * 1000n, pack.unit) : '', rest > 0n || packs === 0n ? counted(rest, unit) : ''].filter(Boolean).join(' and ');
   const inPacks = milli < 0n ? `${parts} short` : parts;
-  return packs > 0n ? { inPacks, total: `${showQty(qtyString(Number(size)))} ${plural(unit)}${milli < 0n ? ' short' : ''}` } : { inPacks };
+  return packs > 0n ? { inPacks, total: `${quantityIn(qtyString(Number(size)), unit)}${milli < 0n ? ' short' : ''}` } : { inPacks };
 }
 
 /** Issue #650: the same in one line, the one every screen says: "5 Cartons and 7 Pieces (127 Pieces)". */

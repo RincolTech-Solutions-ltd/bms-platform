@@ -21,6 +21,7 @@ import { GroupedStock, type StockFilter } from './stock-grouped';
 import { keptWords } from './orders-state';
 import { CategoryPicker } from './category-picker';
 import { Hint } from '../../../app/ui/Hint';
+import { WORDS } from '../../../app/glossary';
 
 // Stock per branch (FR-RET-03): balances with a negative flag and a search box. The cost column
 // exists only for a session holding retail.profit.read: showCost is the screen's choice and the server
@@ -37,7 +38,17 @@ function stockSubtotal(rows: { qty?: string; unit?: string; sell_minor?: number 
   // ADR-055: no price came back (a storekeeper), so no value is shown either.
   if (rows.every((r) => r.sell_minor === undefined)) return sameUnitQty(rows) ?? '';
   const value = rows.reduce((sum, r) => sum + lineTotalMinor(r.sell_minor ?? 0, milliOf(r.qty ?? '0')), 0);
-  return [sameUnitQty(rows), `${money(value)} at price`].filter(Boolean).join(', ');
+  return [sameUnitQty(rows), `worth ${money(value)} at selling price`].filter(Boolean).join(', ');
+}
+
+/** Issue #680: the two prices of an item in plain words, the buying price only for a reader of costs. */
+function PriceLine({ cost, sell }: { cost?: number; sell?: number }) {
+  return (
+    <>
+      {cost !== undefined && <>{WORDS.buyingPrice} <span className="num">{money(cost)}</span> · </>}
+      {sell !== undefined && <>{WORDS.sellingPrice} <span className="num">{money(sell)}</span></>}
+    </>
+  );
 }
 
 export function StockTable({ rows, showCost, searching = false, filterKey = '', pending = false, flat = false, correctable }: { rows: StockRow[]; showCost: boolean; correctable?: Correctable } & Narrowing) {
@@ -48,17 +59,38 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
   const grouping = g.active && !flat;
   if (rows.length === 0) return <EmptyState title="No items found.">Try another name or code, or buy stock to add items.</EmptyState>;
   const showCategory = !grouping && phone;
+  const correct = (r: StockRow) => (
+    <button type="button" className="btn-sm" aria-expanded={corrected === r.product_id} aria-label={`Correct ${r.description}`} onClick={() => setCorrected(corrected === r.product_id ? null : (r.product_id ?? null))}>Correct</button>
+  );
+  // Issue #680: on a phone each item is a card, the quantity large and the two prices in plain words under it; the table stays wide.
+  // JUSTIFICATION-A3: the phone card list the issue asks for; no card of one shop's stock existed to reuse.
+  if (phone) {
+    const card = (r: StockRow) => (
+      <li key={r.product_id} className="rt-card stock-card">
+        <strong>{r.description}</strong>
+        {showCategory && r.category && <CategoryLabel category={r.category} />}
+        <p className="stock-card-qty">In stock: <span className={r.standard_pack ? 'num qty-packs' : 'num'}><InPacks qty={r.qty ?? '0'} unit={r.unit} pack={r.standard_pack} /></span></p>
+        {r.negative && <p className="rt-flag">Negative</p>}
+        {keptWords(r.qty, r.reserved_qty) && <p className="hint">{keptWords(r.qty, r.reserved_qty)}</p>}
+        {(r.sell_minor !== undefined || (showCost && r.cost_minor !== undefined)) && <p className="hint"><PriceLine cost={showCost ? r.cost_minor : undefined} sell={r.sell_minor} /></p>}
+        {correctable && correct(r)}
+        {correctable && corrected === r.product_id && <CorrectItem row={r} branchId={correctable.branchId} onClose={() => setCorrected(null)} />}
+      </li>
+    );
+    return (
+      <>
+        {!flat && <GroupControls state={g} />}
+        {grouping ? <GroupedCards state={g} renderItem={card} /> : <ul className="stock-cards">{rows.map(card)}</ul>}
+      </>
+    );
+  }
   const columns = 3 + (!phone && !grouping ? 1 : 0) + (showCost ? 1 : 0);
   const row = (r: StockRow) => (
     <Fragment key={r.product_id}>
       <tr>
         <td>
           {r.description}{showCategory && r.category && <><br /><CategoryLabel category={r.category} /></>}
-          {correctable && (
-            <div>
-              <button type="button" className="btn-sm" aria-expanded={corrected === r.product_id} aria-label={`Correct ${r.description}`} onClick={() => setCorrected(corrected === r.product_id ? null : (r.product_id ?? null))}>Correct</button>
-            </div>
-          )}
+          {correctable && <div>{correct(r)}</div>}
         </td>
         {!phone && !grouping && <td>{r.category}</td>}
         <td className={r.standard_pack ? 'num qty-packs' : 'num'}>
@@ -83,8 +115,8 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
           <th>Item</th>
           {!phone && !grouping && <th>Category</th>}
           <th className="num">In stock</th>
-          {showCost && <th className="num">Average cost</th>}
-          <th className="num">Price</th>
+          {showCost && <th className="num">Average buying price</th>}
+          <th className="num">{WORDS.sellingPrice}</th>
         </tr>
       </thead>
       {grouping ? <GroupedBodies state={g} colSpan={3 + (showCost ? 1 : 0)} renderRow={row} /> : <tbody>{rows.map(row)}</tbody>}
@@ -143,8 +175,8 @@ export function AllBranchesTable({ data, showCost: mayCost, searching = false, f
           <th>Item</th>
           <th className="num">Total</th>
           {data.branches.map((b) => <th key={b.id} className="num">{branchName(b)}</th>)}
-          {showCost && <th className="num">Average cost</th>}
-          <th className="num">Price</th>
+          {showCost && <th className="num">Average buying price</th>}
+          <th className="num">{WORDS.sellingPrice}</th>
         </tr>
       </thead>
       {grouping ? <GroupedBodies state={g} colSpan={3 + data.branches.length + (showCost ? 1 : 0)} renderRow={row} /> : <tbody>{data.items.map(row)}</tbody>}
@@ -172,7 +204,7 @@ export function AllBranchesList({ data, showCost, searching = false, filterKey =
               </span>
               <span className="num"><strong>Total <Qty qty={r.total_qty ?? '0'} unit={r.unit} negative={r.negative} pack={r.standard_pack} /></strong></span>
             </div>
-            {r.sell_minor !== undefined && <p className="hint">{showCost && r.cost_minor !== undefined ? `Average cost ${money(r.cost_minor)}, price` : 'Price'} {money(r.sell_minor)} each</p>}
+            {r.sell_minor !== undefined && <p className="hint"><PriceLine cost={showCost ? r.cost_minor : undefined} sell={r.sell_minor} /></p>}
             <button type="button" className="btn-sm" aria-expanded={expanded} onClick={() => setOpen({ ...open, [id]: !expanded })}>
               {expanded ? 'Hide branches' : 'Show branches'}
             </button>

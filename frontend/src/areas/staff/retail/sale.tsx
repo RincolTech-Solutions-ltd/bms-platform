@@ -15,7 +15,7 @@ import { usePersistedDraft } from './idempotency';
 import { bigDrop, parseQty, qtyString, showQty } from './maths';
 import { buildSaleRequest, defaultPrice, draftProblem, draftTotal, lineFigures, lineHint, newLine, resolveRequestOf, withUnit, type Accounts, type Draft, type DraftLine, type Pricing } from './sale-state';
 import { MIN_REASON, hasNoPrice, isOverride, pricedLines, receiptNote, reasonOk, sourceNote } from './price-state';
-import { chosenPack, enteredPriceMinor, enteredQty, sellingPacks } from './units-state';
+import { chosenPack, enteredPriceMinor, enteredQty, quantityIn, sellingPacks, unitWord, unitWords } from './units-state';
 import { EmptyState } from '../../../components/states';
 import { BranchRequired, Gate, NoStockHere, Note, ProductPicker, Problem, money, useBranchRoles, useProfitAccess, useStockingBranch } from './ui';
 import { branchLabel } from '../../../auth/branch';
@@ -84,7 +84,7 @@ export function Receipt({ sale, received }: { sale: Sale; /** Cash the customer 
           <tr>
             <th>Item</th>
             <th className="num">Qty</th>
-            <th className="num">Price</th>
+            <th className="num">Selling price</th>
             <th className="num">Total</th>
           </tr>
         </thead>
@@ -176,15 +176,15 @@ export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, fresh,
           <label htmlFor={`unit-${i}`}>Sell by</label>
           {/* empty: drawn only when the item has packs; its own unit is always there. */}
           <select id={`unit-${i}`} data-tour="sale-unit" value={pack?.unit_id ?? ''} onChange={(e) => onUnit(e.target.value)}>
-            <option value="">{line.product.unit}</option>
-            {packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{k.unit} ({showQty(k.factor ?? '')} {line.product.unit})</option>)}
+            <option value="">{unitWord(line.product.unit)}</option>
+            {packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{unitWord(k.unit)} ({quantityIn(k.factor ?? '', line.product.unit ?? '')})</option>)}
           </select>
         </div>
       )}
       <div className="rt-row">
-        <Stepper id={`qty-${i}`} label={`Quantity (${pack?.unit ?? line.product.unit})`} name={line.product.description} value={line.qty} onChange={onQty} min={1} inputMode="decimal" invalid={f === null || hint !== null} />
+        <Stepper id={`qty-${i}`} label={`Quantity (${unitWords(pack?.unit ?? line.product.unit ?? '')})`} name={line.product.description} value={line.qty} onChange={onQty} min={1} inputMode="decimal" invalid={f === null || hint !== null} />
         <div>
-          <label htmlFor={`price-${i}`}>{pack ? `Price per ${pack.unit}` : 'Unit price'}</label>
+          <label htmlFor={`price-${i}`}>{pack ? `${WORDS.sellingPrice} per ${unitWord(pack.unit)}` : WORDS.sellingPrice}</label>
           <input id={`price-${i}`} inputMode="numeric" value={line.price} onChange={(e) => onPrice(e.target.value)} aria-invalid={f === null} readOnly={price ? !price.canOverride : offlinePrice ? !offlinePrice.canType : false} />
         </div>
       </div>

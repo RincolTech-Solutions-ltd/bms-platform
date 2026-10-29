@@ -17,7 +17,7 @@ draft: names are snake_case and the client is typed by the generated `src/api/sc
 | `/staff/retail/credit-sales` | Credit sales, grouped by a chain of levels the user chooses (issues #328, #341): buyer, date, amount, due date, state; open a sale | `retail.sale.read` |
 | `/staff/retail/sales` | All sales, grouped by a chain of levels the user chooses (issues #328, #341): filters by dates, buyer, paid by and item; open a sale | `retail.sale.read` |
 | `/staff/retail/stock` | Stock per branch or All branches, search, category filter, Out of stock and Low stock tabs, negative flag | `retail.stock.read` |
-| `/staff/retail/stocktake` | Count stock: count, review the difference, commit; the same Add it here as Buy stock, for a first count, with How many you counted (the buying price only with `retail.profit.read`) (issue #505) | `retail.stocktake.commit` and `retail.stock.read` (Add it here: `retail.catalogue.manage`) |
+| `/staff/retail/stocktake` | Count stock: count (each count saved as it is typed and restored after a reload, issue #681), review the difference, commit, then Stock updated for N items; the same Add it here as Buy stock, for a first count, with How many you counted (the buying price only with `retail.profit.read`) (issue #505) | `retail.stocktake.commit` and `retail.stock.read` (Add it here: `retail.catalogue.manage`) |
 | `/staff/retail/quick-add` | Quick add (issue #632, ADR-101): Name, Selling price, Buying price (optional, with `retail.profit.read`), How many do you have here now?, Where (the branch in use first, stores too; the kit's EmptyChoice when there is no branch to add stock at), Category (needed, right under the Name, the last group chosen at this shop chosen again, + Add a group in a sheet; issue #688), the unit (the shop's piece unit; needed while Piece is switched off) and Photo, one Add; it opens with no field focused, so a tour over it never shows an error before the person types (issue #642); then the line "Test bulb added: 600 pc at Test Store" with Add another (category and where kept) and Sell it (the sale opens at the branch the stock was added at; when another branch is in use it says so, with Switch to that branch and Sell here without it; an item the branch's list does not return says "Search for it to add it", never dropped in silence, issue #641); while an Add is not confirmed every field is locked and Add sends exactly the same again (the line names the button that sends again: Add, or the name panel's button while the panel shows, issue #641), and Start again shows only after a certain refusal; a repeated name offers Use the existing one and just add stock, which adds the number typed ("8 pc added at Test Store, 58 pc now"), or Keep the existing one for someone who may not add stock; offline it says it needs the internet. I just bought these, take the money from cash (off by default, for whoever holds `retail.purchase.create` at Where and may see the buying price; issue #646): the Buying price is then needed, Cash or Mobile money is the kit's Segmented (rule 11), a one line note shows the total that comes out and of which account ("UGX 30,000 comes out of Cash at Test Shop") before Add (rule 8, `money()`), and the answer names the purchase; moved to a place where they may not buy, the tick stays with a line saying so and Add sends nothing. Reached from the Stock menu and More, the first-run card (Quick add an item, its first action), the catalogue home, the Items page and Sell's not-found line (with what was typed) | `retail.catalogue.manage` and `retail.stock.read` (the stock: `retail.stocktake.commit` at the branch, without which the item is added with no stock; paid from cash: also `retail.purchase.create` there) |
 | `/staff/retail/transfer` | Move stock: to which branch, items with the source's stock, date and note | `retail.stock.transfer` and `retail.stock.read` |
 | `/staff/retail/transfers` | Stock moves from or to the branch; open one; cancel it | `retail.stock.read` (cancel: `retail.stock.transfer`) |
@@ -1465,6 +1465,36 @@ the items show only while you search, and go away once one is picked. Every item
   `page-stocktake` tour (version 6) say both, and name the button **Commit the count**, never Finish; the question before the
   review names the button it leads to, Review the difference anyway; the server's refusals that
   told a person to finish a count now say to commit it.
+- **Count stock: every count is kept as it is typed (issue #681, owner 29 Oct 2026).** Each change is written at once to the
+  device's local storage under `bms.count.<host>.<branch>.<user>` (the counts, the cartons with their pack, the lines found
+  and done, and when each item's count last changed), written before the screen is drawn, and the page restores it when it
+  opens again. Nothing goes to the server while counting (owner, round 2 of the review): the draft is made at **Review the
+  difference** and committed only by **Commit the count**, as before. Each valid count shows **Saved** under its box once it
+  is stored, and a polite status line at the top says **Saved on this phone, N items**, or **Not saved on this phone. Keep
+  this page open.** when the device cannot store it. Two tabs of the same count hear each other through the `storage`
+  event and merge item by item, the newer count of each item winning; the page then says "This count is also open in
+  another tab" until that tab has been quiet for a minute. A commit takes away only the counts that went in (an item
+  whose count still equals the committed line); a count changed or added since the review, here or in another tab, stays.
+  The removal is stamped like any change and the stored count carries the commit time, so another tab drops exactly those
+  items and says "Counted and saved in another tab" when nothing is left, or "2 counts were saved from another tab; your
+  other counts are still here" when some of its counts did not go in, or "A count was saved from another tab; your newer
+  counts on this page are kept" when none of its counts went in (each changed here after the other tab's review). Two
+  counts of the same moment go to the greater value and the stored counts compare whatever their order, so two tabs settle
+  after one write each. The page is keyed by branch, so a branch switch
+  opens that branch's own saved count. An item found but not typed yet is kept too. A restored count of an item no longer
+  on the sheet is dropped once the sheet is read. A count saved earlier the same business day (the business's time zone)
+  is filled in with the line "Counted today at 14:05" ("Counted on Monday at 14:05" for an earlier day's count taken
+  with Use them) and **Start again**, which asks "Clear all N
+  counts? Your stock does not change." with **Clear the counts** and **Keep them**, and then removes the saved count (the
+  other tab says "This count was cleared in another tab"). A count from an earlier business day is not filled in
+  silently: the page shows only the question "You have counts from Monday. Use them or start again?" with **Use them** and
+  **Start again**, so nothing is typed before it is answered, and keeps the saved count as it is until then. **Use them**
+  takes the count as stored at that moment, with anything another tab added since the page opened, dates the line from it
+  and drops its items no longer on the sheet; a count committed or cleared in another tab meanwhile starts empty with "Those
+  counts were committed or cleared in another tab, so this count starts empty." A tab that merges a
+  change from another tab writes the merge back when it holds more than that tab stored, so a reload anywhere keeps it. After Commit the count a success screen (the kit's
+  `SuccessScreen`) says **Stock updated for N items** with how many went up, went down and matched and the first five
+  changes in words ("Test Lamp: 2 pieces more"), with **Start another count** and **Back to My stock**, and a success toast.
 - **Count stock: the server checks big drops too (issue #636).** **Commit the count** sends the product ids of the ticked lines,
   and the server refuses a commit that leaves out a big drop with 409 `big_drop_not_acknowledged`, naming the lines, so a draft
   committed from another tab or the API never writes one unasked. The screen shows the server's words under the button.
