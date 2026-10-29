@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
-import { changeWords, countKey, mergeCounts, otherTabWords, readCount, savedAt, saveWords, whenSaved, writeCount, type SavedCount } from './count-save-state';
+import { changeWords, countKey, mergeCounts, otherTabWords, readCount, savedAt, sameStored, saveWords, whenSaved, writeCount, type SavedCount } from './count-save-state';
 
 // Issue #681: the rules of a count kept on the device as it is typed, the merge of two tabs, the words that say where it is
 // kept, and the words of the success screen. Fabricated names and amounts.
@@ -52,6 +52,8 @@ describe('the count kept on the device', () => {
     expect(otherTabWords({ kind: 'partly', n: 2 })).toBe('2 counts were saved from another tab; your other counts are still here');
     expect(otherTabWords({ kind: 'partly', n: 1 })).toBe('1 count was saved from another tab; your other counts are still here');
     expect(otherTabWords({ kind: 'committed' })).toBe('Counted and saved in another tab');
+    // Review of #686, round 4: a commit there that took none of this tab's counts (they are newer here) says so plainly, never "0 counts".
+    expect(otherTabWords({ kind: 'partly', n: 0 })).toBe('A count was saved from another tab; your newer counts on this page are kept');
   });
 });
 
@@ -78,6 +80,14 @@ describe('two tabs of one count', () => {
     const a = tab({ 'A-1': '4', 'A-2': '6' }, { 'A-1': 300, 'A-2': 100 });
     const b = tab({ 'A-1': '5', 'A-2': '7' }, { 'A-1': 200, 'A-2': 400 });
     expect(mergeCounts(a, b).counts).toEqual(mergeCounts(b, a).counts);
+  });
+
+  // Review of #686, round 4: two tabs that merge in different orders, or on the same millisecond, agree, so neither writes back for ever.
+  it('agrees from either side on a tie and in any order, so the write back settles', () => {
+    const a = tab({ 'A-1': '4', 'A-2': '6' }, { 'A-1': 300, 'A-2': 300 });
+    const b = tab({ 'A-2': '7', 'A-1': '5' }, { 'A-2': 300, 'A-1': 300 });
+    expect(mergeCounts(a, b).counts).toEqual(mergeCounts(b, a).counts);
+    expect(sameStored(mergeCounts(a, b), mergeCounts(b, a))).toBe(true);
   });
 
   // Review of #686, round 3: a commit in one tab drops only the items it committed from the other.

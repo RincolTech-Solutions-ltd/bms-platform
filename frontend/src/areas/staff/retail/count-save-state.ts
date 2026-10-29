@@ -80,6 +80,12 @@ const itemOf = (s: CountState, id: string) => JSON.stringify([s.counts[id] ?? ''
 const filled = (s: CountState, id: string) => (s.counts[id] ?? '').trim() !== '' || (s.packCounts[id]?.text ?? '').trim() !== '';
 export const sameCount = (a: CountState, b: CountState) =>
   JSON.stringify([a.counts, a.packCounts, a.listed, a.done]) === JSON.stringify([b.counts, b.packCounts, b.listed, b.done]);
+// The same count whatever the order of its items or keys: two tabs that merge in different orders agree, so neither writes
+// back to the other for ever (review of #686).
+const sorted = <T>(o: Record<string, T>) => Object.keys(o).sort().map((k) => [k, o[k]]);
+export const sameStored = (a: SavedCount, b: SavedCount) =>
+  JSON.stringify([sorted(a.counts), sorted(a.packCounts), [...a.listed].sort(), [...a.done].sort(), sorted(a.at), a.committed ?? 0]) ===
+  JSON.stringify([sorted(b.counts), sorted(b.packCounts), [...b.listed].sort(), [...b.done].sort(), sorted(b.at), b.committed ?? 0]);
 
 /**
  * Two tabs counting the same branch (review of #681): each item takes the newer of the two counts, never the whole sheet of one
@@ -88,8 +94,14 @@ export const sameCount = (a: CountState, b: CountState) =>
  */
 export function mergeCounts(mine: SavedCount, theirs: SavedCount): SavedCount {
   const out: SavedCount = { counts: {}, packCounts: {}, listed: [], done: [], at: {} };
+  // The newer count of the item; on the same millisecond both tabs pick the same one, by its words.
+  const newer = (id: string) => {
+    const t = theirs.at[id] ?? 0;
+    const m = mine.at[id] ?? 0;
+    return t > m || (t === m && itemOf(theirs, id) > itemOf(mine, id)) ? theirs : mine;
+  };
   for (const id of idsOf(mine, theirs)) {
-    const pick = (theirs.at[id] ?? 0) > (mine.at[id] ?? 0) ? theirs : mine;
+    const pick = newer(id);
     if (pick.counts[id] !== undefined) out.counts[id] = pick.counts[id];
     const pack = pick.packCounts[id];
     if (pack) out.packCounts[id] = pack;
@@ -97,7 +109,6 @@ export function mergeCounts(mine: SavedCount, theirs: SavedCount): SavedCount {
     if (at !== undefined) out.at[id] = at;
   }
   // An item whose newer side no longer lists it (committed or emptied there) leaves the list of found items too.
-  const newer = (id: string) => ((theirs.at[id] ?? 0) > (mine.at[id] ?? 0) ? theirs : mine);
   const stays = (id: string) => (mine.at[id] === undefined && theirs.at[id] === undefined) || newer(id).listed.includes(id) || filled(out, id);
   out.listed = [...mine.listed, ...theirs.listed.filter((id) => !mine.listed.includes(id))].filter(stays);
   out.done = [...mine.done, ...theirs.done.filter((id) => !mine.done.includes(id))].filter((id) => filled(out, id));
@@ -142,6 +153,7 @@ export type OtherTab = { kind: 'open' | 'committed' | 'cleared' } | { kind: 'par
 
 /** The words for what another tab did. */
 export function otherTabWords(other: Exclude<OtherTab, null>): string {
+  if (other.kind === 'partly' && other.n === 0) return 'A count was saved from another tab; your newer counts on this page are kept';
   if (other.kind === 'partly') return `${other.n} ${other.n === 1 ? 'count was' : 'counts were'} saved from another tab; your other counts are still here`;
   if (other.kind === 'open') return 'This count is also open in another tab';
   return other.kind === 'committed' ? 'Counted and saved in another tab' : 'This count was cleared in another tab';
@@ -236,7 +248,7 @@ export function useCountSave({ saveKey, restored, saved, apply, hold }: {
         quiet.current = setTimeout(() => setOther((o) => (o?.kind === 'open' ? null : o)), OTHER_TAB_MS);
       }
       // What this tab holds that the other did not store goes back to storage, so a reload there or here keeps it (review of #686).
-      if (!sameCount(next, theirs) || JSON.stringify(merged.at) !== JSON.stringify(theirs.at)) writeCount(saveKey, merged);
+      if (!sameStored(merged, theirs)) writeCount(saveKey, merged);
       if (sameCount(next, latest.current)) return;
       // Taken as it is, so it is not stamped as typed here.
       before.current = next;
