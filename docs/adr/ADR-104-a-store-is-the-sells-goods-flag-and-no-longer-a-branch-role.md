@@ -40,14 +40,21 @@ branches are `both`.
   with the role `store`. As `both`, such a branch would have started quoting, so quotations now resolve a stocking branch and
   the offline failure and waiting reports refuse a branch that keeps no goods with `branch_not_stocking`, as the sale already
   does.
-- **Migration V115 never stops.** A stopped migration stops the automatic staging and production deploy. The role was in
+- **Migration V115 never stops for the data.** A stopped migration stops the automatic staging and production deploy, so no
+  branch's state stops it; only locks held by traffic for about two minutes do (step 0). The role was in
   force while the business had the retail module on and its `branch_roles` switch on.
-  0. **Locks first, never a failure.** The previous release keeps serving during the deploy. Before anything else V115 locks
-     `retail_branch_roles` (ACCESS EXCLUSIVE), so no role is written between the fold and the narrowed check, and `branches`
-     (EXCLUSIVE), so the fold never waits on a branch row lock. With an owner that lacks BYPASSRLS it also locks every table
-     whose FORCE it drops. Each attempt waits at most two seconds; on a timeout it is undone and retried after a second, and
-     after 120 attempts V115 waits without a timeout. A shop never queues long behind it, and a lock timeout never fails
-     the deploy.
+  0. **Locks first, retried under live traffic.** The deploy is zero downtime, so the previous release keeps serving. Before
+     anything else, in one retried step, V115 takes three kinds of lock:
+     - `retail_branch_roles` in ACCESS EXCLUSIVE mode. No role is written between the fold and the narrowed check. The
+       constraint swap needs this mode anyway, so taking it once avoids a second lock step; SHARE ROW EXCLUSIVE or a NOT VALID
+       check validated later would both need one.
+     - `branches` in EXCLUSIVE mode, so the fold never waits on a branch row lock.
+     - With an owner that lacks BYPASSRLS, every table whose FORCE it toggles. Staging and production run as `bms_owner`
+       with BYPASSRLS, so no toggle runs there.
+
+     Each attempt waits at most two seconds, so a shop never queues long behind it. On a timeout the attempt is undone and
+     retried after a second, for about two minutes (40 attempts). Only then does V115 stop, with a message that traffic held
+     the locks and nothing was changed.
   1. **Fold a clean store.** A `store` branch in force with no blocker becomes a Store (`sells_goods = false`). From then on
      its till takes no money, as a Store's does.
   2. **Skip a store with a blocker.** `retail_store_fold_blockers(tenant, branch, since)` names the blockers:
