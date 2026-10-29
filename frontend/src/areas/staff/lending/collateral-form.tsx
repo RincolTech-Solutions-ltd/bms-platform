@@ -7,6 +7,7 @@ import { useCollateralApi, useMembersApi } from '../../../api/lending-context';
 import { useStaff } from '../context';
 import { newIdempotencyKey } from '../retail/idempotency';
 import { Problem } from '../retail/ui';
+import { sayDone } from '../retail/toast';
 import { blankCollateral, collateralProblems, createBody, CUSTODY, draftOf, OWNERS, referenceLabel, TYPES, updateBody, type CollateralDraft } from './collateral-state';
 import { CollateralGate } from './member-ui';
 import { Group, SaveBar, SelectField, TextField, useFormErrors } from './form-fields';
@@ -56,6 +57,7 @@ export function CollateralForm({ item: loaded, memberId }: { item?: CollateralIt
 
   const sender = (id: string): Sender<unknown> => (p, o) => api.uploadDocument(id, p.blob, p.fileName, o);
   const done = (c: CollateralItem) => {
+    sayDone(item ? 'Collateral saved' : 'Collateral registered');
     void queryClient.invalidateQueries({ queryKey: ['collateral'] });
     void navigate({ to: '/staff/lending/collateral/$collateralId', params: { collateralId: c.id ?? '' } });
   };

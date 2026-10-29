@@ -8,6 +8,7 @@ import { branchLabel } from '../../../auth/branch';
 import { useStaff } from '../context';
 import { newIdempotencyKey } from '../retail/idempotency';
 import { Problem } from '../retail/ui';
+import { sayDone } from '../retail/toast';
 import { Group, SaveBar, SelectField, TextField, useFormErrors } from './form-fields';
 import { FieldsNeededNote } from '../../../app/ui/Field';
 import { businessToday } from '../../../api/retail';
@@ -144,6 +145,7 @@ export function MemberForm({ member: loaded, onSaved }: { member?: MemberRecord;
 
   const back = useComeBack();
   const finish = (m: MemberRecord) => {
+    sayDone(editing ? 'Member saved' : 'Member added');
     void queryClient.invalidateQueries({ queryKey: ['members'] });
     if (onSaved) onSaved(m);
     // Opened from a member search that found nobody (issue #619): the new member takes the person back to the form that needed one.

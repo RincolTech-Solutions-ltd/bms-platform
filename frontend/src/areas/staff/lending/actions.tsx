@@ -120,6 +120,7 @@ export function RepaymentForm({ loan, onDone }: { loan: Loan; onDone: (r: Repaym
   const update = (patch: Partial<RepayDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const amountMinor = parseAmount(draft.amount, loan.currency);
   const valid = amountMinor !== null && isIsoDate(draft.valueDate);
+  // toast-exempt: success screen, the loan page shows the repayment receipt card instead of the form through onDone
   const save = useMutation({
     mutationFn: () => {
       sending();
@@ -134,7 +135,6 @@ export function RepaymentForm({ loan, onDone }: { loan: Loan; onDone: (r: Repaym
       refresh();
       onDone(r);
     },
-    meta: { success: (r: RepaymentResult) => (r.transaction?.txn_type === 'recovery' ? 'Recovery recorded' : 'Repayment recorded') },
   });
   return (
     <form aria-label="Record a repayment" onSubmit={(e) => { e.preventDefault(); if (valid && !save.isPending) save.mutate(); }}>
@@ -176,6 +176,7 @@ export function DisburseForm({ loan }: { loan: Loan }) {
     startedOn: today,
   }, (d) => onToday(d, 'date', today));
   const update = (patch: Partial<DisburseDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  // toast-exempt: success screen, the Disbursed screen replaces the form
   const save = useMutation({
     mutationFn: () => {
       sending();
@@ -185,7 +186,6 @@ export function DisburseForm({ loan }: { loan: Loan }) {
       finish();
       refresh();
     },
-    meta: { success: (r: { executed: boolean }) => (r.executed ? 'Loan disbursed' : null) },
   });
   if (save.data) {
     return save.data.executed ? (
@@ -260,9 +260,7 @@ function ReasonForm({ id, label, submit, draftName, send }: {
   const { key, draft, setDraft, finish } = usePersistedDraft<string>(draftName, '');
   const save = useMutation({ mutationFn: () => send(draft.trim(), key), onSuccess: finish, meta: { success: (r: { executed: boolean }) => (r.executed ? 'Change saved' : null) } });
   if (save.data) {
-    return save.data.executed ? (
-      <p role="status" className="alert alert-success">Done.</p>
-    ) : (
+    return save.data.executed ? null : (
       <p role="status" className="alert alert-info">Sent for approval. It is waiting for a checker in the approvals inbox.</p>
     );
   }
