@@ -28,7 +28,6 @@ const { retailMessage } = await import('../../../api/retail-errors');
 const { WriteOffFormView, WriteOffSaleAction } = await import('./sale-actions');
 const { WRITE_OFF_CHECKER, canWriteOff, writeOffWarning, writeOffWords } = await import('./sale-actions-state');
 const { saleState, SaleDetail } = await import('./sales');
-const { DoneToast, doneToasts } = await import('./toast');
 
 afterEach(() => {
   cleanup();
@@ -45,9 +44,8 @@ const refusal = (code: string, status = 422) => new RetailError(retailMessage({ 
 
 function screenOf(me: ReturnType<typeof mockMe>, node: ReactElement) {
   return render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } }, mutationCache: doneToasts() })}>
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <StaffContext.Provider value={{ me, branch }}>{node}</StaffContext.Provider>
-      <DoneToast />
     </QueryClientProvider>,
   );
 }
@@ -115,7 +113,7 @@ describe('the form', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Write off' }));
     fireEvent.change(screen.getByLabelText(/Why will this buyer not pay/), { target: { value: 'Buyer left town' } });
     fireEvent.click(screen.getByRole('button', { name: 'Write off' }));
-    expect(await screen.findByText(/waiting for a second administrator to approve/)).toBeTruthy();
+    expect(await screen.findByText(/Sent to a second administrator to approve/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Write off' })).toBeNull();
   });
 

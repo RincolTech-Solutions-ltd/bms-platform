@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { RetailError, isWaiting, retail, type Sale, type WriteOffOutcome } from '../../../api/retail';
+import { RetailError, isWaiting, retail, type Sale } from '../../../api/retail';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
@@ -9,7 +9,7 @@ import {
   IMPORTED_FULL, IMPORTED_SHORT, MIN_REASON, PAY_METHODS, blankPay, buildPayRequest, fullPay, importedAndOwing, keyReused, owedMinor, payFailureWords, payProblem,
   saleMovedOn, settledDate, takesPayment, typedAmount, voidBlocked, voidReasonOf, type PayForm,
   WRITE_OFF_CHECKER, WRITE_OFF_PENDING, canWriteOff, writeOffAlreadyPending, writeOffFailureWords, writeOffMovedOn, writeOffReasonOf, writeOffAmount, writeOffWarning, writeOffWords, } from './sale-actions-state';
-import { Problem, WaitingForApproval, money } from './ui';
+import { Problem, Success, WaitingForApproval, money } from './ui';
 
 // Two actions on a sale, for a shop owner (issues #326 and #327): take a payment on a credit sale, from the credit sales list and from
 // the sale itself, and void a sale from the sale itself. The API checks every rule again under the sale's lock; the screens only save a
@@ -268,6 +268,7 @@ export function WriteOffSaleAction({ sale }: { sale: Sale }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
   // A write-off waiting for a second administrator: the button stays away, so the same debt is not asked for twice.
   const [pending, setPending] = useState(false);
   const saleId = sale.id ?? '';
@@ -279,6 +280,7 @@ export function WriteOffSaleAction({ sale }: { sale: Sale }) {
     onSuccess: (outcome) => {
       discard();
       setOpen(false);
+      setMessage(writeOffWords(outcome));
       if (outcome.executed !== true) setPending(true);
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
@@ -292,6 +294,7 @@ export function WriteOffSaleAction({ sale }: { sale: Sale }) {
     onSettled: () => { sending.current = false; },
   });
   if (!holdsAt(me, CREDIT_WRITE_OFF, sale.branch_id)) return null;
+  if (message) return <Success>{message}</Success>;
   if (pending) return <p className="hint" data-testid="write-off-pending">{WRITE_OFF_PENDING}</p>;
   if (!canWriteOff(sale)) return null;
   if (!open) return <p><button type="button" className="btn-sm" onClick={() => { send.reset(); setOpen(true); }}>Write off</button></p>;

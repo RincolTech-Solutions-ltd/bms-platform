@@ -116,7 +116,7 @@ export function SwitchPanel({ saved, canManage, busy, error, onChange }: {
   );
 }
 
-export interface Notice { kind: 'warning'; text: string }
+export interface Notice { kind: 'success' | 'warning'; text: string }
 
 function Editor({ saved, canManage, notice, setNotice }: { saved: SmsSettings; canManage: boolean; notice: Notice | null; setNotice: (notice: Notice | null) => void }) {
   const queryClient = useQueryClient();
@@ -162,7 +162,7 @@ function Editor({ saved, canManage, notice, setNotice }: { saved: SmsSettings; c
         error={failure.fields.acknowledged_text_version ? failure.fields.acknowledged_text_version : failure.message}
         onChange={(c) => { setNotice(null); save.mutate(c); }}
       />
-      {notice && <p role="alert" className="alert alert-warning">{notice.text}</p>}
+      {notice && <p role={notice.kind === 'warning' ? 'alert' : 'status'} className={notice.kind === 'warning' ? 'alert alert-warning' : 'alert alert-success'}>{notice.text}</p>}
 
       <form
         aria-label="SMS settings"

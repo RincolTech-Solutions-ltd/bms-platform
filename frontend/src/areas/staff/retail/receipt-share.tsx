@@ -196,7 +196,7 @@ export function ShareReceipt({ sale, madeHere = false }: { sale: Sale; madeHere?
       void queryClient.invalidateQueries({ queryKey: ['retail', 'sale-receipt'] });
       void queryClient.invalidateQueries({ queryKey: ['retail', 'customers'] });
     },
-    meta: { success: `Number saved for ${facts.data?.buyer_name ?? 'the buyer'}.` },
+    meta: { success: 'Number saved' },
   });
   if (!allowed) return null;
   const f = facts.data;
