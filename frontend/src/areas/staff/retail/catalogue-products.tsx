@@ -293,7 +293,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
             </>
           )}
           <p className="hint">To change the price, use Change price on the list.</p>
-          <PacksTurnOn adding={false} />
+          <PacksTurnOn />
           <PackEditor product={product} />
           <BarcodeEditor product={product} />
           <StockMinimumEditor productId={product.id ?? ''} unit={product.unit} />
@@ -321,7 +321,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
           />
           {!profit && <p className="hint">The buying price is set when you buy stock.</p>}
           <PhotoChoice id="item-photo" file={photo} onChange={setPhoto} />
-          <PacksTurnOn adding />
+          <PacksTurnOn />
         </>
       )}
       {exists && (

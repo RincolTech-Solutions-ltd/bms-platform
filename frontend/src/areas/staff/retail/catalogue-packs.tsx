@@ -353,7 +353,7 @@ export function withPacksOn(me: Me): Me {
  * Issue #630: while packs are off, the item form says in one line that they exist. Someone who manages settings turns them on
  * here, through the capabilities route with its If-Match, and the pack section shows at once; anyone else reads who can.
  */
-export function PacksTurnOn(_props: { adding: boolean }) {
+export function PacksTurnOn() {
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const turnOn = useMutation({
