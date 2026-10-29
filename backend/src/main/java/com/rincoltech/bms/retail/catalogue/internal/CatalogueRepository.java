@@ -144,6 +144,16 @@ class CatalogueRepository {
     }
 
     /**
+     * Review of #710 (ADR-107): one change of a usual pack at a time in the business, held to the end of the transaction, so
+     * two changes cannot each pass the loop check and store a loop between them.
+     */
+    void lockUsualPacks() {
+        jdbc.sql(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(current_setting('app.tenant_id') || ':retail.usual_pack', 0))")
+                .query(rs -> {});
+    }
+
+    /**
      * Issue #625, ADR-100: the usual size of a pack and what it is for; the V111 check keeps all three or none. A null
      * {@code pack} clears it (issue #637).
      */
@@ -753,18 +763,24 @@ class CatalogueRepository {
                         """).params(factor, holdsUnitId, holdsQty, id).update();
     }
 
-    /** Issue #699: the level Buy stock opens on; every other pack of the item is cleared first (one per item, V118). */
-    void setUsualBuy(UUID productId, UUID packId, boolean usual) {
-        jdbc.sql("""
+    /**
+     * Issue #699: the level Buy stock opens on; every other pack of the item is cleared first (one per item, V118). Returns
+     * the other packs cleared, so each is audited (review of #710).
+     */
+    List<UUID> setUsualBuy(UUID productId, UUID packId, boolean usual) {
+        List<UUID> cleared =
+                jdbc.sql("""
                         UPDATE retail_product_units SET usual_buy = false, updated_at = now(), version = version + 1
                          WHERE product_id = ? AND usual_buy AND (id <> ? OR NOT ?)
-                        """).params(productId, packId, usual).update();
+                        RETURNING id
+                        """).params(productId, packId, usual).query(UUID.class).list();
         if (usual) {
             jdbc.sql("""
                             UPDATE retail_product_units SET usual_buy = true, updated_at = now(), version = version + 1
                              WHERE id = ? AND NOT usual_buy
                             """).param(packId).update();
         }
+        return cleared.stream().filter(id -> !id.equals(packId)).toList();
     }
 
     /** Active packs only: a pack that was switched off no longer ties the product's unit or the pack's unit down. */

@@ -15364,10 +15364,10 @@
             "type" : "string"
           },
           "holds_qty" : {
-            "description" : "Issue #699: how many of holds_unit_id are in one pack, a whole number",
+            "description" : "Issue #699: how many of holds_unit_id are in one pack, a whole number of 2 or more",
             "format" : "int32",
             "maximum" : 1000000,
-            "minimum" : 1,
+            "minimum" : 2,
             "type" : "integer"
           },
           "holds_unit_id" : {
@@ -15413,10 +15413,10 @@
             "type" : "string"
           },
           "holds_qty" : {
-            "description" : "Issue #699: how many of the level held are in one pack, a whole number. With factor alone, a pack that holds another level must stay a whole number of it (422 not_whole)",
+            "description" : "Issue #699: how many of the level held are in one pack, a whole number of 2 or more. With factor alone, a pack that holds another level must stay a whole number of it (422 not_whole)",
             "format" : "int32",
             "maximum" : 1000000,
-            "minimum" : 1,
+            "minimum" : 2,
             "type" : "integer"
           },
           "holds_unit_id" : {

@@ -66,5 +66,10 @@ class PackLadderTest {
         assertThat(PackLadder.wholeOf(n("120"), n("10"))).isEqualTo(12);
         assertThat(PackLadder.wholeOf(n("125"), n("10"))).isNull();
         assertThat(PackLadder.wholeOf(n("5"), n("10"))).isNull();
+        // Review of #710: one of the level below is no level of its own.
+        assertThat(PackLadder.wholeOf(n("10"), n("10"))).isNull();
+        assertThatThrownBy(() -> PackLadder.factors(PIECE, List.of(new Level(BOX, PIECE, 1, n("1")))))
+                .extracting(e -> ((PackLadder.Problem) e).code())
+                .isEqualTo("too_small");
     }
 }

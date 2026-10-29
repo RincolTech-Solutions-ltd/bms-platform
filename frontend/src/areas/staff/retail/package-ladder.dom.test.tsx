@@ -39,7 +39,7 @@ vi.mock('../../../api/retail', async (original) => {
   };
 });
 
-const { ItemLadder, lookInsideWords } = await import('./package-ladder');
+const { ItemLadder, drawPackage, lookInsideWords } = await import('./package-ladder');
 const { ladderOf } = await import('./ladder-state');
 const owner = { ...mockMe('admin'), module_capabilities: { retail: ['units'] } };
 const branch = owner.branches?.[0]?.id ?? '';
@@ -109,6 +109,37 @@ describe('the package ladder on the item page (issue #699)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove the biggest' }));
     await waitFor(() => expect(updatePack).toHaveBeenCalledWith('p-1', 'u-ctn', 5, { active: false }));
+  });
+
+  // JUSTIFICATION-A3: the review of #710 asks for the drawing cap and the price warning; these are their tests.
+  it('draws at most 60 of what a package holds and 1,500 marks in all, saying how many more (review of #710)', () => {
+    const huge: Pack[] = [
+      { unit_id: 'u-box', unit: 'Box', factor: '100000.000', active: true, version: 1, purpose: 'both', holds_unit_id: 'u-pc', holds_unit: 'Piece', holds_qty: 100_000 },
+      { unit_id: 'u-ctn', unit: 'Carton', factor: '200000.000', active: true, version: 1, purpose: 'both', holds_unit_id: 'u-box', holds_unit: 'Box', holds_qty: 2 },
+    ];
+    const calls = { arc: 0, text: [] as string[] };
+    const ctx = new Proxy({}, {
+      get: (_t, key) => {
+        if (key === 'arc') return () => { calls.arc += 1; };
+        if (key === 'fillText') return (t: string) => { calls.text.push(t); };
+        return () => undefined;
+      },
+      set: () => true,
+    });
+    const canvas = Object.assign(document.createElement('canvas'), { width: 960, height: 560 });
+    canvas.getContext = (() => ctx) as unknown as HTMLCanvasElement['getContext'];
+    drawPackage(canvas, ladderOf(socket, huge), 3);
+    expect(calls.arc).toBeLessThanOrEqual(1_500);
+    expect(calls.text).toContain('+99,941');
+  });
+
+  it('says before saving that a level with its own price needs someone who may change prices (review of #710)', () => {
+    const priced = packs.map((k) => (k.unit_id === 'u-ctn' ? { ...k, has_own_price: true } : k));
+    draw(<ItemLadder product={socket} packs={priced} mayManage mayPrice={false} />);
+    fireEvent.click(screen.getByRole('button', { name: 'One more piece in a box' }));
+    fireEvent.click(screen.getByRole('button', { name: 'One more piece in a box' }));
+    expect(screen.getByTestId('ladder-priced').textContent).toContain('The carton has its own price');
+    expect(within(screen.getByTestId('ladder-check')).getByRole('button', { name: 'OK, save' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('says what one package holds when it is opened up', () => {

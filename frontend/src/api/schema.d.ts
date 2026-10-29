@@ -15220,7 +15220,7 @@ export interface components {
             factor?: string;
             /**
              * Format: int32
-             * @description Issue #699: how many of holds_unit_id are in one pack, a whole number
+             * @description Issue #699: how many of holds_unit_id are in one pack, a whole number of 2 or more
              */
             holds_qty?: number;
             /**
@@ -15249,7 +15249,7 @@ export interface components {
             factor?: string;
             /**
              * Format: int32
-             * @description Issue #699: how many of the level held are in one pack, a whole number. With factor alone, a pack that holds another level must stay a whole number of it (422 not_whole)
+             * @description Issue #699: how many of the level held are in one pack, a whole number of 2 or more. With factor alone, a pack that holds another level must stay a whole number of it (422 not_whole)
              */
             holds_qty?: number;
             /**

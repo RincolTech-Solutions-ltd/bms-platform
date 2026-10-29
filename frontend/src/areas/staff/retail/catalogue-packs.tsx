@@ -251,7 +251,8 @@ export function PackEditor({ product }: { product: Product }) {
       <Problem error={packs.error} />
       {packs.data && rows.length === 0 && <p className="empty-state">No cartons, boxes or other packs yet.</p>}
       {/* Issue #699 (ADR-107): the packs as a ladder, biggest first, each saying what it holds. */}
-      {packs.data && <ItemLadder product={product} packs={rows} mayManage />}
+      {/* Only someone who manages the catalogue reaches this editor (`allowed` above), so the ladder is editable here. */}
+      {packs.data && <ItemLadder product={product} packs={rows} mayManage={allowed} mayPrice={mayPrice} />}
       {rows.length > 0 && (
         <div className="table-wrap" tabIndex={0}>
           <table data-testid="pack-table">

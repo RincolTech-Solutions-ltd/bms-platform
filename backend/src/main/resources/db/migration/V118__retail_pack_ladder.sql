@@ -26,10 +26,10 @@ ALTER TABLE retail_product_units ADD COLUMN holds_unit_id uuid;
 ALTER TABLE retail_product_units ADD COLUMN holds_qty integer;
 ALTER TABLE retail_product_units ADD COLUMN usual_buy boolean NOT NULL DEFAULT false;
 
--- Both or neither; a pack holds at least one of a level other than itself.
+-- Both or neither; a pack holds 2 or more of a level other than itself (one would be the same size as the level below).
 ALTER TABLE retail_product_units ADD CONSTRAINT retail_product_units_holds_chk CHECK (
     (holds_unit_id IS NULL AND holds_qty IS NULL)
-    OR (holds_unit_id IS NOT NULL AND holds_unit_id <> unit_id AND holds_qty >= 1)) NOT VALID;
+    OR (holds_unit_id IS NOT NULL AND holds_unit_id <> unit_id AND holds_qty >= 2)) NOT VALID;
 ALTER TABLE retail_product_units VALIDATE CONSTRAINT retail_product_units_holds_chk;
 
 ALTER TABLE retail_product_units ADD CONSTRAINT retail_product_units_usual_buy_chk

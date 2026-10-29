@@ -18,7 +18,8 @@ as he buys, to be asked at setup how he usually buys the item and for how much, 
 ## Decision
 
 1. **A pack may say what it holds, one level down.** `retail_product_units` gains `holds_unit_id` (the item's own unit or
-   another pack's unit of the same item) and `holds_qty` (how many, a whole number of 1 or more), both or neither. The factor
+   another pack's unit of the same item) and `holds_qty` (how many, a whole number of 2 or more: a level holding one would be the size of the level below; 422 `too_small`),
+   both or neither. The factor
    stays on every row and is still the only thing stock, sales, purchases, transfers and counts read; the catalogue keeps
    factor = `holds_qty` x the factor of the level held (1 for the item's unit). A pack that holds nothing named keeps its
    factor, as every pack made before did. There is no limit on depth.
@@ -51,6 +52,10 @@ as he buys, to be asked at setup how he usually buys the item and for how much, 
 7. **A usual pack may count another pack.** A unit's usual pack (ADR-100) may now be of another pack unit, so the electrical
    and hardware starters offer Box of rolls (2 Roll) and Crate of rolls (10 Roll), for buying only, besides Roll (100
    Metre). Only a loop is refused (422 `usual_pack_loop`); the codes `unit_is_a_pack` and `unit_counted_by_pack` are gone.
+   A change of a usual pack takes a transaction lock for the business first, so two changes can never each pass the check
+   and store a loop between them, and the check remembers what it has walked, so even a loop written straight to the table
+   ends in a refusal (review of #710). A pack's own ladder is changed only under the item's row lock, which every pack
+   write takes, so two edits of one item never cross either.
 8. **One picture everywhere.** The ladder is shown biggest first, one level per line, with the pieces worked out in words
    ("So 1 carton = 120 pieces") and a chain ("1 carton, 12 boxes, each 10 pieces"), on the item page and on Add an item, with
    a Look inside drawing of one package and what it holds. A change on the item page shows a check sheet with the before and

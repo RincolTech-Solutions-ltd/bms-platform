@@ -318,6 +318,20 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                 ADMIN);
         assertThat(deep.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(deep.getBody().get("errors").get(0).get("code").asString()).isEqualTo("usual_pack_loop");
+
+        // Review of #710: a loop already stored (only a direct write could leave one) ends the check in a refusal at
+        // once.
+        UUID bag = api.unit("test-bag");
+        UUID sack = api.unit("test-sack");
+        String loop = "UPDATE retail_units SET pack_size = 2, pack_of_unit_id = ?, pack_purpose = 'buy' WHERE id = ?";
+        TestDatabase.owner().sql(loop).params(sack, bag).update();
+        TestDatabase.owner().sql(loop).params(bag, sack).update();
+        ResponseEntity<JsonNode> stored = patch(
+                "/units/" + api.unit("test-bundle"),
+                Map.of("usual_pack", Map.of("size", "3", "of_unit_id", bag, "purpose", "buy")),
+                ADMIN);
+        assertThat(stored.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(stored.getBody().get("errors").get(0).get("code").asString()).isEqualTo("usual_pack_loop");
     }
 
     @Test

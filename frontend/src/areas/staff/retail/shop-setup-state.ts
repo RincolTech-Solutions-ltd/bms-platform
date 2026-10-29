@@ -87,8 +87,13 @@ export async function applySetup(api: Pick<RetailApi, 'createCategory' | 'create
   const chosen = items.filter((i) => i.status !== 'there' && ticked.has(key(i.kind, i.name)));
   const order: ItemKind[] = ['category', 'unit', 'pack'];
   // Issue #699: a pack of another pack of the set (a Box of rolls) comes after the pack it holds.
-  const ofPack = (i: SetupItem) => (i.kind === 'pack' && chosen.some((x) => x.kind === 'pack' && same(x.name, i.of ?? '')) ? 1 : 0);
-  chosen.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || ofPack(a) - ofPack(b));
+  // Review of #710: by how deep it sits, any depth (a pallet of boxes of rolls after the box after the roll); a loop stops.
+  const depth = (i: SetupItem, seen: Set<string> = new Set()): number => {
+    const held = i.kind === 'pack' ? chosen.find((x) => x.kind === 'pack' && same(x.name, i.of ?? '')) : undefined;
+    if (!held || seen.has(held.name)) return 0;
+    return 1 + depth(held, new Set([...seen, i.name]));
+  };
+  chosen.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || depth(a) - depth(b));
   for (const item of chosen) {
     try {
       if (item.kind === 'category') {

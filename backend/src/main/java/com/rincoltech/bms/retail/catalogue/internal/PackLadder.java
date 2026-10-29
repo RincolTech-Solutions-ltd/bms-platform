@@ -24,6 +24,12 @@ final class PackLadder {
     /** The most of a level one pack may hold. */
     static final long MAX_HOLDS = 1_000_000;
 
+    /**
+     * The fewest of a level one pack may hold (review of #710, FR-RET-81): a level holding 1 is the same size as the level
+     * below, two rungs that read alike and one that stock and counting would drop.
+     */
+    static final long MIN_HOLDS = 2;
+
     /** One pack: its unit, what it holds and how many (both null: its factor of the item's unit), and its factor. */
     record Level(UUID unitId, UUID holdsUnitId, Integer holdsQty, BigDecimal factor) {}
 
@@ -50,6 +56,7 @@ final class PackLadder {
     /**
      * The factor of every level, worked out from what each holds: a level holding the item's unit has that many, a level
      * holding another has that many times its factor, and a level holding nothing named keeps its own. Refuses with
+     * {@code too_small} a level holding fewer than 2 (review of #710), and with
      * {@code holds_unknown} a level that holds neither the item's unit nor a level, {@code holds_bigger} a loop (a box
      * holding the carton that holds it) and {@code too_big} a factor past numeric(14,3).
      */
@@ -86,6 +93,9 @@ final class PackLadder {
             if (!l.holdsUnitId().equals(baseUnitId) && !byUnit.containsKey(l.holdsUnitId())) {
                 throw new Problem("holds_unknown", unitId);
             }
+            if (l.holdsQty() < MIN_HOLDS) {
+                throw new Problem("too_small", unitId);
+            }
             factor = factorOf(l.holdsUnitId(), baseUnitId, byUnit, done, path)
                     .multiply(BigDecimal.valueOf(l.holdsQty()));
         }
@@ -98,7 +108,7 @@ final class PackLadder {
     }
 
     /**
-     * How many of a level of {@code heldFactor} make {@code factor}: a whole number of 1 or more, or null when it is not
+     * How many of a level of {@code heldFactor} make {@code factor}: a whole number of 2 or more, or null when it is not
      * whole (a carton of 125 pieces is not a whole number of boxes of 10).
      */
     static Integer wholeOf(BigDecimal factor, BigDecimal heldFactor) {
@@ -106,7 +116,9 @@ final class PackLadder {
             return null;
         }
         BigDecimal[] qr = factor.divideAndRemainder(heldFactor);
-        if (qr[1].signum() != 0 || qr[0].signum() <= 0 || qr[0].compareTo(BigDecimal.valueOf(Integer.MAX_VALUE)) > 0) {
+        if (qr[1].signum() != 0
+                || qr[0].compareTo(BigDecimal.valueOf(MIN_HOLDS)) < 0
+                || qr[0].compareTo(BigDecimal.valueOf(Integer.MAX_VALUE)) > 0) {
             return null;
         }
         return qr[0].intValueExact();

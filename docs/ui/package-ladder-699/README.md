@@ -29,6 +29,10 @@ buying level) and a bale of 4 cartons (buying only), with 275 pieces counted in.
 
 The laptop pictures (`-1366`) show the ladder and Look inside side by side.
 
+Unit names in stock words are written as the shop named the unit (a unit named Carton reads "2 Cartons", one named piece
+reads "5 pieces"), as every stock and count line has since ADR-103; the ladder's sentences ("So 1 carton = 120 pieces") are
+always in lower case.
+
 ## Reading it aloud
 
 The issue asks that the words be read aloud to someone who does not read and understood without help. That has not been done

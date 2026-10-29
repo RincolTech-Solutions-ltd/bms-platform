@@ -165,6 +165,19 @@ class RetailPackLadderIT extends IntegrationTest {
         assertThat(factor(threeLevels, carton)).isEqualTo("120.000");
     }
 
+    // JUSTIFICATION-A3: the review of #710 asks that a level holding one be refused; this is its test.
+    @Test
+    void aLevelHoldingOneOfTheLevelBelowIsRefused() {
+        UUID socket = socket(false);
+        ResponseEntity<JsonNode> one = change(socket, box, Map.of("holds_qty", 1), ADMIN);
+        assertThat(one.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        // A factor equal to the box's, on the carton that holds boxes, is one box: refused as well.
+        ResponseEntity<JsonNode> same = change(socket, carton, Map.of("factor", "10"), ADMIN);
+        assertThat(same.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(same)).isEqualTo("not_whole");
+        assertThat(factor(socket, carton)).isEqualTo("120.000");
+    }
+
     @Test
     void aLevelThatHoldsNothingOfTheItemIsRefusedOnItsRow() {
         Map<String, Object> body = new LinkedHashMap<>();

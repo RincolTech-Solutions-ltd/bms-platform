@@ -10,7 +10,7 @@ import { chain, changeWords, changesOf, holdsProblem, ladderOf, many, one, shown
 import { Problem } from './ui';
 import { UnitPicker } from './unit-picker';
 import { showQty } from './maths';
-import { unitWord } from './units-state';
+import { hasOwnPrice, unitWord } from './units-state';
 
 // Issue #699 (ADR-107): the package ladder, the same on the item page and on Add an item. Biggest first, one line per level,
 // a dot with its number down a plain line, what one holds, and the pieces worked out in words under it: "So 1 carton = 120
@@ -119,7 +119,7 @@ function roleColour(el: HTMLElement, role: string): string {
 }
 
 /** Draws one of level `open` as nested boxes, down to three levels inside, then dots. */
-function draw(canvas: HTMLCanvasElement, rungs: Rung[], open: number) {
+export function drawPackage(canvas: HTMLCanvasElement, rungs: Rung[], open: number) {
   const ctx = canvas.getContext?.('2d');
   if (!ctx) return;
   const W = canvas.width;
@@ -127,6 +127,9 @@ function draw(canvas: HTMLCanvasElement, rungs: Rung[], open: number) {
   ctx.clearRect(0, 0, W, H);
   // Levels by number: 1 is the smallest unit, then the rungs from the smallest up.
   const up = [...rungs].reverse();
+  const CAP = 60;
+  const BUDGET = 1500;
+  let marks = 0;
   const holds = (level: number) => {
     const r = up[level - 2];
     return r ? Math.max(1, Math.round(Number(r.holdsQty))) : 0;
@@ -145,7 +148,10 @@ function draw(canvas: HTMLCanvasElement, rungs: Rung[], open: number) {
     else ctx.rect(x, y, w, h);
     ctx.stroke();
     if (level <= 1) return;
-    const n = holds(level);
+    const held = holds(level);
+    // Review of #710: at most CAP of what a package holds are drawn, the last cell saying how many more ("+9,941"), and
+    // no more than BUDGET marks in all, so a package of 100,000 never stalls the phone.
+    const n = Math.min(held, CAP);
     const child = inside(level);
     const pad = Math.max(2, Math.min(10, w / 30));
     const iw = w - pad * 2;
@@ -156,10 +162,17 @@ function draw(canvas: HTMLCanvasElement, rungs: Rung[], open: number) {
     const gw = iw / cols;
     const gh = ih / rows;
     const tiny = gw < 14 || gh < 14 || depth >= 3 || child <= 1;
-    for (let k = 0; k < n; k++) {
+    for (let k = 0; k < n && marks < BUDGET; k++) {
       const cx = x + pad + (k % cols) * gw;
       const cy = y + pad + Math.floor(k / cols) * gh;
-      if (tiny) {
+      marks += 1;
+      if (held > CAP && k === n - 1) {
+        ctx.fillStyle = roleColour(canvas, '--color-text');
+        ctx.font = `600 ${Math.max(10, Math.min(28, gh / 2.5))}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`+${(held - n + 1).toLocaleString('en-GB')}`, cx + gw / 2, cy + gh / 2, gw - 4);
+      } else if (tiny) {
         ctx.fillStyle = roleColour(canvas, colourOf(child - 1));
         ctx.beginPath();
         ctx.arc(cx + gw / 2, cy + gh / 2, Math.max(1.2, Math.min(gw, gh) / 2.8), 0, Math.PI * 2);
@@ -192,7 +205,7 @@ export function LookInside({ rungs, smallest }: { rungs: Rung[]; smallest: strin
   const chosen = rungs.find((r) => r.unitId === open) ?? rungs[0];
   const level = chosen ? levelOf(rungs, chosen.unitId) : 0;
   useEffect(() => {
-    if (canvas.current && chosen) draw(canvas.current, rungs, level);
+    if (canvas.current && chosen) drawPackage(canvas.current, rungs, level);
   }, [rungs, chosen, level, theme]);
   if (!chosen) return <p className="hint">Add a bigger package to see what it holds.</p>;
   const words = lookInsideWords(rungs, chosen.unitId, smallest);
@@ -227,7 +240,13 @@ type Pending = { rung: Rung; holdsUnitId: string; value: string };
  * The item page's ladder (issue #699): the item's packages, biggest first, each number with a stepper, a check sheet before a
  * change is saved, Add a bigger package and Remove the biggest. Shown with the item's packs while the units capability is on.
  */
-export function ItemLadder({ product, packs, mayManage }: { product: Product; packs: Pack[]; mayManage: boolean }) {
+export function ItemLadder({ product, packs, mayManage, mayPrice = true }: {
+  product: Product;
+  packs: Pack[];
+  mayManage: boolean;
+  /** retail.price.edit: a level with its own price is resized only by someone who may change prices (review of #710). */
+  mayPrice?: boolean;
+}) {
   const queryClient = useQueryClient();
   const smallest = product.unit ?? '';
   const smallestId = product.unit_id ?? '';
@@ -256,6 +275,8 @@ export function ItemLadder({ product, packs, mayManage }: { product: Product; pa
     ? changesOf(rungs, pending.rung.unitId, { unitId: pending.holdsUnitId, qty: pending.value.trim() }, smallestId)
     : [];
   const problem = pending ? holdsProblem(pending.value, pending.rung) : null;
+  // A level the change resizes that has its own price: said before saving, not refused after it.
+  const priced = mayPrice ? [] : changes.filter((c) => hasOwnPrice(rungs.find((r) => r.unitId === c.unitId)?.pack));
   const top = rungs[0];
   return (
     <section className="ladder-panel stack" data-testid="item-ladder" aria-labelledby={`ladder-${id}`}>
@@ -285,9 +306,14 @@ export function ItemLadder({ product, packs, mayManage }: { product: Product; pa
           <p id={`ladder-check-${id}`}><strong>Check before saving</strong></p>
           <ul>{changes.map((c) => <li key={c.unit}>{changeWords(c, smallest)}</li>)}</ul>
           <p>{product.stock_on_hand !== undefined ? `Your stock stays ${shown(BigInt(Math.round(Number(product.stock_on_hand) * 1000)))} ${many(smallest)}.` : 'Your stock stays as it is.'} Only how it is shown changes. Past sales keep the size they had.</p>
+          {priced.length > 0 && (
+            <p role="note" className="alert alert-warning" data-testid="ladder-priced">
+              {`The ${priced.map((c) => one(c.unit)).join(' and the ')} ${priced.length > 1 ? 'have their own prices, so their sizes change' : 'has its own price, so its size changes'} what its pieces sell for. Ask someone who may change prices to save this.`}
+            </p>
+          )}
           <Problem error={save.error} />
           <div className="ladder-actions">
-            <BusyButton busy={save.isPending} type="button" className="rt-primary" onClick={() => save.mutate(pending)}>OK, save</BusyButton>
+            <BusyButton busy={save.isPending} type="button" className="rt-primary" disabled={priced.length > 0} onClick={() => save.mutate(pending)}>OK, save</BusyButton>
             <button type="button" className="btn" onClick={() => { setPending(null); save.reset(); }}>Keep it as it was</button>
           </div>
         </div>

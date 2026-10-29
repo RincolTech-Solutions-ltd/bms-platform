@@ -213,6 +213,18 @@ describe('Set up your shop', () => {
     expect(shop.units.find((u) => u.name === 'Crate of rolls')?.usual_pack).toMatchObject({ size: '10.000', of_unit: 'Roll', purpose: 'buy' });
   });
 
+  it('adds a pack of a pack of a pack after what it holds, any depth (review of #710)', async () => {
+    const shop = fakeShop();
+    const items: SetupItem[] = [
+      { kind: 'pack', name: 'Pallet', size: 4, of: 'Box of rolls', purpose: 'buy', status: 'add' },
+      { kind: 'pack', name: 'Box of rolls', size: 2, of: 'Roll', purpose: 'buy', status: 'add' },
+      { kind: 'pack', name: 'Roll', size: 100, of: 'Metre', purpose: 'both', status: 'add' },
+    ];
+    const result = await applySetup(shop.api, items, allTicked(items), [...shop.units]);
+    expect(result.error).toBeNull();
+    expect(result.added.map((a) => a.name)).toEqual(['Roll', 'Box of rolls', 'Pallet']);
+  });
+
   it('leaves out only a pack that would loop (issue #699)', async () => {
     const shop = fakeShop();
     const metre = shop.units.find((u) => u.name === 'Metre')!;

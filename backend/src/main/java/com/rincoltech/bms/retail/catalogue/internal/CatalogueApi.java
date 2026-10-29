@@ -1229,9 +1229,9 @@ final class CatalogueApi {
                                     + " unit of the item (in a new item's packs, one of its other packs); sent with holds_qty")
             UUID holdsUnitId,
 
-            @Min(1)
+            @Min(PackLadder.MIN_HOLDS)
             @Max(PackLadder.MAX_HOLDS)
-            @Schema(description = "Issue #699: how many of holds_unit_id are in one pack, a whole number")
+            @Schema(description = "Issue #699: how many of holds_unit_id are in one pack, a whole number of 2 or more")
             Integer holdsQty,
 
             @Schema(
@@ -1274,10 +1274,11 @@ final class CatalogueApi {
                                     + " worked out again; stock, kept in the item's unit, never changes")
             UUID holdsUnitId,
 
-            @Min(1)
+            @Min(PackLadder.MIN_HOLDS)
             @Max(PackLadder.MAX_HOLDS)
             @Schema(
-                    description = "Issue #699: how many of the level held are in one pack, a whole number. With factor"
+                    description = "Issue #699: how many of the level held are in one pack, a whole number of 2 or more."
+                            + " With factor"
                             + " alone, a pack that holds another level must stay a whole number of it (422 not_whole)")
             Integer holdsQty,
 
