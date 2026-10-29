@@ -31,11 +31,12 @@ sold in packages and give them, all in one form and one save.
    checked before anything is written; an unknown, switched-off, repeated or own unit after) and the same
    `retail.product_unit.created` audit. Any refusal rolls the whole request back: no item, no pack, no audit entry. A refusal
    of one package carries `pack_index` and names its fields `packs[i].unit_id` and so on, so the form shows it on that
-   package. No new table and no new pack model: the packages are rows of `retail_product_units`.
+   package, in that field's own words; this holds for a pack's bounds too (a size out of range), which the service checks
+   with the same rules as `POST /retail/products/{id}/units` rather than leaving them to request binding. No new table and no new pack model: the packages are rows of `retail_product_units`.
 4. **The form.** Add an item calls the unit "Smallest unit you sell" with the hint "The single thing a customer can buy. For
    example piece, bulb, metre, litre." Under it, while the units capability is on, "Do you buy or sell it in boxes, cartons or
    other packages?" No or Yes. Yes shows a package row: the package unit (the add-in-place picker), "How many bulbs in one
-   carton" (a whole number, 2 or more, which the form asks for though the API keeps ADR-033's rule of 1 or more), Used for (the
+   carton" (a whole number from 2 to 100,000, which the form asks for though the API keeps ADR-033's rule of 1 or more), Used for (the
    values of ADR-099 and ADR-100, shown here in the owner's order Both, Buying, Selling; Both first) and an optional "Selling
    price of one carton". Add another package adds a row. A package unit's usual pack fills in the size and Used for, as on
    Edit item, and a size filled in that way follows a new smallest unit or empties; one the owner typed stays. The prices read

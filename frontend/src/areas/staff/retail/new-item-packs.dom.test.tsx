@@ -98,6 +98,8 @@ describe('the words of Add an item', () => {
   it('takes a whole number of 2 or more for a package', () => {
     for (const ok of ['2', '10', ' 100 ']) expect(sizeProblem(ok)).toBeNull();
     for (const bad of ['', '1', '0', '2.5', '-4', 'ten']) expect(sizeProblem(bad)).toBe('Type a whole number, 2 or more.');
+    expect(sizeProblem('100000')).toBeNull();
+    for (const big of ['100001', '1000000000000']) expect(sizeProblem(big)).toBe('Type a number up to 100,000.');
   });
 
   it('says the packages after the item in the toast', () => {
@@ -227,7 +229,8 @@ describe('Add an item (issue #689)', () => {
   it('shows a refused package on its own row, not on the smallest unit', async () => {
     const { RetailError } = await import('../../../api/retail');
     const message = 'This unit is switched off. Choose another one.';
-    createProduct.mockRejectedValue(new RetailError(message, 422, 'validation_failed', { pack_index: 1, errors: [{ field: 'packs[1].unit_id', code: 'inactive_unit', message }] }));
+    // The problem's detail is the API's generic line; the reason is the package's own field problem (round 4 of the review).
+    createProduct.mockRejectedValue(new RetailError('One or more fields are invalid.', 422, 'validation_failed', { pack_index: 1, errors: [{ field: 'packs[1].unit_id', code: 'inactive_unit', message }] }));
     open();
     await fill('u1');
     fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
@@ -240,6 +243,32 @@ describe('Add an item (issue #689)', () => {
     expect(await within(second!).findByText(message)).toBeTruthy();
     expect(within(first!).queryByText(message)).toBeNull();
     expect(screen.getAllByText(message)).toHaveLength(1);
+    expect(screen.queryByText('One or more fields are invalid.')).toBeNull();
+  });
+
+  // JUSTIFICATION-A3: round 4 of the #692 review asks for a DOM test of the size branch, client cap and server refusal.
+  it('caps a package at 100,000 in the form, and shows the server\'s size refusal under that row\'s size (round 4)', async () => {
+    const { RetailError } = await import('../../../api/retail');
+    const said = 'numeric value out of bounds (<11 digits>.<3 digits> expected)';
+    createProduct.mockRejectedValue(new RetailError('One or more fields are invalid.', 422, 'validation_failed', { pack_index: 0, errors: [{ field: 'packs[0].factor', code: 'invalid', message: said }] }));
+    open();
+    await fill('u1');
+    fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
+    const row = screen.getByTestId('package-row');
+    fireEvent.change(within(row).getByLabelText(/^Package unit/), { target: { value: 'u2' } });
+    const size = within(row).getByLabelText(/^How many bulbs in one carton/);
+    // At the cap the form sends it; a refusal of the size lands on that size field, once.
+    fireEvent.change(size, { target: { value: '100000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    await waitFor(() => expect(createProduct).toHaveBeenCalledTimes(1));
+    expect(await within(row).findByText(said)).toBeTruthy();
+    expect(size.getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getAllByText(said)).toHaveLength(1);
+    // Above the cap the row says so in its own words, and nothing more is sent.
+    fireEvent.change(size, { target: { value: '100001' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    expect(await within(row).findByText('Type a number up to 100,000.')).toBeTruthy();
+    expect(createProduct).toHaveBeenCalledTimes(1);
   });
 
   it('shows no package question while packs are off', async () => {

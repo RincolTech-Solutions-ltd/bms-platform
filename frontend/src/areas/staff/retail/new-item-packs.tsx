@@ -66,8 +66,13 @@ export function forSmallest(rows: PackageRow[], units: Unit[], smallestId: strin
 
 /** A package holds a whole number of the smallest unit, 2 or more. */
 export function sizeProblem(factor: string): string | null {
-  return /^\d+$/.test(factor.trim()) && Number(factor.trim()) >= 2 ? null : 'Type a whole number, 2 or more.';
+  if (!/^\d+$/.test(factor.trim()) || Number(factor.trim()) < 2) return 'Type a whole number, 2 or more.';
+  // Review of #692, round 4: no package holds more than this, so a slip of the finger never reaches the server.
+  return Number(factor.trim()) > MAX_PACK_SIZE ? 'Type a number up to 100,000.' : null;
 }
+
+/** The most of the smallest unit one package may hold on this form. */
+export const MAX_PACK_SIZE = 100_000;
 
 export function rowProblem(row: PackageRow): string | null {
   return row.unitId === '' ? 'Choose the package.' : sizeProblem(row.factor);
@@ -88,8 +93,11 @@ export type PackError = { index: number; onSize: boolean; message: string };
 
 export function packErrorOf(error: unknown): PackError | null {
   if (!(error instanceof RetailError) || typeof error.problem?.pack_index !== 'number') return null;
-  const fields = (error.problem.errors as { field?: string }[] | undefined) ?? [];
-  return { index: error.problem.pack_index, onSize: fields.some((f) => f.field?.endsWith('.factor') === true), message: error.message };
+  // Review of #692, round 4: the reason is the package's own field problem; the problem's detail is only "invalid fields".
+  const index = error.problem.pack_index;
+  const fields = ((error.problem.errors as { field?: string; message?: string }[] | undefined) ?? []).filter((f) => f.field?.startsWith(`packs[${index}].`));
+  const own = fields.find((f) => f.message)?.message;
+  return { index, onSize: fields.some((f) => f.field?.endsWith('.factor') === true), message: own ?? error.message };
 }
 
 /** ", with carton of 10 and box of 100", or nothing without packages: the end of "60W bulb added". */
