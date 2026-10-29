@@ -56,9 +56,7 @@ class PackLadderTest {
                 .isEqualTo("holds_unknown");
         assertThatThrownBy(() -> PackLadder.factors(
                         PIECE,
-                        List.of(
-                                new Level(BOX, PIECE, 1_000_000, n("1")),
-                                new Level(CARTON, BOX, 1_000_000, n("1")))))
+                        List.of(new Level(BOX, PIECE, 1_000_000, n("1")), new Level(CARTON, BOX, 1_000_000, n("1")))))
                 .extracting(e -> ((PackLadder.Problem) e).code())
                 .isEqualTo("too_big");
     }

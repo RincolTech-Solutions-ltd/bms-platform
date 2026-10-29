@@ -14,8 +14,10 @@
 -- Expand only, safe on a populated database. Every existing pack reads holds null (it holds its factor in the item's unit, as
 -- before) and usual_buy false. ADD COLUMN with no default, or a constant one, is a catalogue change in PostgreSQL 16 with no
 -- table rewrite; the checks are added NOT VALID and validated in the same file, one scan of a table of a few rows per item.
--- The foreign key stays NOT VALID as in V111: every existing row has a null holds_unit_id, and validating it would read
--- retail_units through its forced row-level security with no tenant bound. bms_app keeps SELECT, INSERT and UPDATE (V39) and
+-- No foreign key on holds_unit_id: the rule is narrower than any key could say (the item's own unit or an active pack of the
+-- same item), so the catalogue service checks it on every write, and a NOT VALID key would leave retail_product_units with a
+-- constraint never validated (MigrationOrderIT), while validating one would read retail_units through its forced row-level
+-- security with no tenant bound, as V111 notes. bms_app keeps SELECT, INSERT and UPDATE (V39) and
 -- the table's forced row-level security. lock_timeout is five seconds as in V110 and V111.
 
 SET LOCAL lock_timeout = '5s';
@@ -33,9 +35,6 @@ ALTER TABLE retail_product_units VALIDATE CONSTRAINT retail_product_units_holds_
 ALTER TABLE retail_product_units ADD CONSTRAINT retail_product_units_usual_buy_chk
     CHECK (NOT usual_buy OR purpose <> 'sell') NOT VALID;
 ALTER TABLE retail_product_units VALIDATE CONSTRAINT retail_product_units_usual_buy_chk;
-
-ALTER TABLE retail_product_units ADD CONSTRAINT retail_product_units_holds_fk
-    FOREIGN KEY (tenant_id, holds_unit_id) REFERENCES retail_units (tenant_id, id) NOT VALID;
 
 CREATE UNIQUE INDEX retail_product_units_usual_buy ON retail_product_units (tenant_id, product_id) WHERE usual_buy;
 
