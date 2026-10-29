@@ -117,13 +117,29 @@ class RetailNewItemPacksIT extends IntegrationTest {
                 "Set of 6",
                 "sets of 12",
                 "Carton of 24",
+                "  box  ",
                 "Ctn",
                 "ctns",
-                "  box  ")) {
+                "PKT",
+                "Pkts",
+                "bx",
+                "Doz",
+                "dz")) {
             assertThat(RetailCatalogue.isPackageWord(word)).as(word).isTrue();
         }
-        for (String word :
-                List.of("Piece", "Bulb", "Metre", "Litre", "Set", "Boxer", "Kg", "Packing tape", "Bag of cement", "")) {
+        for (String word : List.of(
+                "Piece",
+                "pc",
+                "pcs",
+                "Bulb",
+                "Metre",
+                "Litre",
+                "Set",
+                "Boxer",
+                "Kg",
+                "Packing tape",
+                "Bag of cement",
+                "")) {
             assertThat(RetailCatalogue.isPackageWord(word)).as(word).isFalse();
         }
         assertThat(RetailCatalogue.isPackageWord(null)).isFalse();
