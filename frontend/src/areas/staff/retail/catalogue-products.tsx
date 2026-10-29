@@ -23,7 +23,7 @@ import { StockMinimumEditor } from './stock-minimum';
 import { UnitPicker } from './unit-picker';
 import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
 import { CategoryPicker } from './category-picker';
-import { CategoryChips, FindBar, ItemRow, NoItem, useChosenChip, useFindTerm } from './phone-find';
+import { CategoryChips, FindBar, ItemRow, NoItem, onlyMatch, useChosenChip, useFindTerm } from './phone-find';
 import { RowList } from '../../../app/ui/ListRow';
 import { ScreenToast } from './toast';
 import { Gate, Problem, money, useBranchView, useIsPhone, useProfitAccess, useToast } from './ui';
@@ -458,7 +458,7 @@ export function ProductList({ onEdit, onPrice, onAdd, added }: { onEdit: (id: st
   const profit = useProfitAccess();
   const search = useLiveSearch();
   // Issue #690: digits that are a known barcode search by that item's code.
-  const { query, looking } = useFindTerm(search.term);
+  const { query, match, looking } = useFindTerm(search.term);
   const phone = useIsPhone();
   // Issue #690: the stock of each item in the branch in use, so a phone row shows it in packs and pieces.
   // The server refuses branch_id to a session that may not read stock there, so it is asked only then.
@@ -466,7 +466,7 @@ export function ProductList({ onEdit, onPrice, onAdd, added }: { onEdit: (id: st
   const stockAt = !all && branchId && holdsAt(me, 'retail.stock.read', branchId) ? branchId : '';
   const [activeFilter, setActiveFilter] = useState<'active' | 'off' | 'all'>('active');
   const categories = useQuery({ queryKey: ['retail', 'catalogue', 'categories'], queryFn: () => retail.listCategories() });
-  const [categoryId, setCategoryId] = useChosenChip('items', categories.data);
+  const [categoryId, setCategoryId, chipReady] = useChosenChip('items', categories.data);
   const active = activeFilter === 'all' ? undefined : activeFilter === 'active';
   const page = useInfiniteQuery({
     queryKey: ['retail', 'catalogue', 'products', query, categoryId, activeFilter, stockAt],
@@ -474,9 +474,10 @@ export function ProductList({ onEdit, onPrice, onAdd, added }: { onEdit: (id: st
     initialPageParam: '',
     getNextPageParam: (last) => last.next_cursor || undefined,
     placeholderData: keepPreviousData,
+    enabled: chipReady,
   });
   const finding = page.isPlaceholderData || (page.isFetching && !page.isFetchingNextPage);
-  const listed = (page.data?.pages ?? []).flatMap((p) => p.items ?? []);
+  const listed = onlyMatch((page.data?.pages ?? []).flatMap((p) => p.items ?? []), match, (p) => p.id) ?? [];
   // Issue #689: the item just added leads the unfiltered list, wherever it would fall in the pages, as the list last read it.
   const items = added && page.data && query === '' && categoryId === '' && activeFilter !== 'off'
     ? [listed.find((p) => p.id === added.id) ?? added, ...listed.filter((p) => p.id !== added.id)]
@@ -521,7 +522,7 @@ export function ProductList({ onEdit, onPrice, onAdd, added }: { onEdit: (id: st
           term={search.term}
           onClear={search.clear}
           category={chosenName}
-          onSearchAll={() => { setCategoryId(''); setActiveFilter('active'); }}
+          onSearchAll={() => { setCategoryId(''); setActiveFilter('all'); }}
           filtered={activeFilter === 'off'}
         />
       ) : <p className="empty-state">No items found.</p>)}

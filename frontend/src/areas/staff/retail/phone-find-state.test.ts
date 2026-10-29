@@ -72,16 +72,19 @@ describe('a search that finds nothing', () => {
     expect(noItemCase('bulb', undefined, false)).toEqual({ kind: 'add' });
     expect(noItemCase('bulb', 'Test Cables', false)).toEqual({ kind: 'category', category: 'Test Cables' });
     expect(noItemCase('bulb', undefined, true)).toEqual({ kind: 'filtered' });
-    // Digits that are no known barcode are never a name to add, whatever else is set.
-    expect(noItemCase('6001234567890', undefined, false)).toEqual({ kind: 'barcode' });
-    expect(noItemCase('6001234567890', 'Test Cables', true)).toEqual({ kind: 'barcode' });
+    // Digits of any length are a code or a barcode, never a name to add.
+    for (const digits of ['1234567', '6001234567890', '123456789012345']) expect(noItemCase(digits, undefined, false)).toEqual({ kind: 'digits' });
+    // A chip or a filter may hide what the digits name, so they still offer Search all categories.
+    expect(noItemCase('6001234567890', 'Test Cables', true)).toEqual({ kind: 'category', category: 'Test Cables' });
+    expect(noItemCase('1234567', undefined, true)).toEqual({ kind: 'filtered' });
   });
 
   it('names what was typed, and where it looked', () => {
     expect(noItemText(' bulb ')).toBe('No item called "bulb".');
     expect(noItemText('bulb', { kind: 'category', category: 'Test Cables' })).toBe('No item called "bulb" in Test Cables.');
     expect(noItemText('bulb', { kind: 'filtered' })).toBe('No item called "bulb" with these filters.');
-    expect(noItemText('6001234567890', { kind: 'barcode' })).toBe('No item with the code or barcode "6001234567890".');
+    expect(noItemText('6001234567890', { kind: 'digits' })).toBe('No item with the code or barcode "6001234567890".');
+    expect(noItemText('1234567', { kind: 'category', category: 'Test Cables' })).toBe('No item with the code or barcode "1234567" in Test Cables.');
   });
 
   it('takes 8 to 14 digits as a barcode, and nothing else', () => {

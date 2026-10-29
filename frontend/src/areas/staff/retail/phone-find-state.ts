@@ -18,21 +18,25 @@ export function chipsOf(categories: Category[], chosen: string): Chip[] {
   return [{ id: '', name: 'All' }, ...shown.map((c) => ({ id: c.id ?? '', name: c.name ?? '', count: c.product_count ?? 0 }))];
 }
 
-/** A search of digits only, 8 to 14 of them, is a barcode first (EAN-8 to the 14 of a carton's GTIN). */
+/** A search of digits only, 8 to 14 of them, is looked up as a barcode first (EAN-8 to the 14 of a carton's GTIN). */
 export function looksLikeBarcode(term: string): boolean {
   return /^\d{8,14}$/.test(term.trim());
 }
 
+/** Digits only, of any length: a code or a barcode, never a name to add. */
+const digitsOnly = (term: string) => /^\d+$/.test(term.trim());
+
 /**
- * What an empty answer offers. Add it only when nothing narrowed the search: with a chip chosen the item may be in another
- * category, with another filter on it may be hidden, and digits that are no known barcode are not a name to add.
+ * What an empty answer offers. With a chip chosen the item may be in another category and with another filter on it may be
+ * hidden, so both offer Search all categories, whatever was typed; digits are a code or a barcode, never a name to add; Add it
+ * only for a name that nothing narrowed.
  */
-export type NoItemCase = { kind: 'barcode' } | { kind: 'category'; category: string } | { kind: 'filtered' } | { kind: 'add' };
+export type NoItemCase = { kind: 'category'; category: string } | { kind: 'filtered' } | { kind: 'digits' } | { kind: 'add' };
 
 export function noItemCase(term: string, category: string | undefined, filtered: boolean): NoItemCase {
-  if (looksLikeBarcode(term)) return { kind: 'barcode' };
   if (category) return { kind: 'category', category };
   if (filtered) return { kind: 'filtered' };
+  if (digitsOnly(term)) return { kind: 'digits' };
   return { kind: 'add' };
 }
 
@@ -65,10 +69,10 @@ export function knownChip(id: string, categories: Category[] | undefined): strin
 /** The empty answer to a search, with the name as typed: No item called "bulb", in a category or with filters when they narrowed it. */
 export function noItemText(term: string, why: NoItemCase = { kind: 'add' }): string {
   const t = term.trim();
-  if (why.kind === 'barcode') return `No item with the code or barcode "${t}".`;
-  if (why.kind === 'category') return `No item called "${t}" in ${why.category}.`;
-  if (why.kind === 'filtered') return `No item called "${t}" with these filters.`;
-  return `No item called "${t}".`;
+  const what = digitsOnly(t) ? `with the code or barcode "${t}"` : `called "${t}"`;
+  if (why.kind === 'category') return `No item ${what} in ${why.category}.`;
+  if (why.kind === 'filtered') return `No item ${what} with these filters.`;
+  return `No item ${what}.`;
 }
 
 /** An item's stock in the branch in use, in its standard pack and pieces; empty when no branch was asked for. */

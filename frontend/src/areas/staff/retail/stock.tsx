@@ -19,7 +19,7 @@ import { ListGroupBy, ViewSwitch, useListView } from './list-chain';
 import { STOCK_NAMES, STOCK_ORDER, listUser, withoutShop, type ListSelection } from './list-chain-state';
 import { GroupedStock, type StockFilter } from './stock-grouped';
 import { keptWords } from './orders-state';
-import { CategoryChips, FindBar, NoItem, useChosenChip, useFindTerm } from './phone-find';
+import { CategoryChips, FindBar, NoItem, onlyMatch, useChosenChip, useFindTerm } from './phone-find';
 import { ScreenLink } from './screen-link';
 import { Hint } from '../../../app/ui/Hint';
 import { WORDS } from '../../../app/glossary';
@@ -289,7 +289,7 @@ export function StockPage() {
   const grouped = list.view === 'grouped';
   const search = useLiveSearch();
   // Issue #690: digits that are a known barcode search by that item's code.
-  const { query, looking } = useFindTerm(search.term);
+  const { query, match, looking } = useFindTerm(search.term);
   const [negativeOnly, setNegativeOnly] = useState(false);
   const [level, setLevel] = useState<StockLevel | ''>('');
   // Closed branches that still hold stock are left out of the whole-business list unless asked for (#329).
@@ -297,22 +297,25 @@ export function StockPage() {
   // An inactive item (issue #342) leaves the list unless asked for; its history and the reports keep it.
   const [showInactive, setShowInactive] = useState(false);
   const categories = useQuery({ queryKey: ['retail', 'categories'], queryFn: () => retail.listCategories() });
-  const [categoryId, setCategoryId] = useChosenChip('stock', categories.data);
+  const [categoryId, setCategoryId, chipReady] = useChosenChip('stock', categories.data);
   const one = useQuery({
     queryKey: ['retail', 'stock', branchId, query, categoryId, negativeOnly, level, showInactive],
     queryFn: ({ signal }) => retail.listStock({ branchId: branchId ?? '', query, categoryId, negativeOnly, level: level || undefined, includeInactive: showInactive, signal }),
-    enabled: !all && branchId !== null && !grouped,
+    enabled: !all && branchId !== null && !grouped && chipReady,
     placeholderData: keepPreviousData,
   });
   const many = useQuery({
     queryKey: ['retail', 'stock', 'all-branches', query, categoryId, negativeOnly, level, showClosed, showInactive],
     queryFn: ({ signal }) => retail.listStockAllBranches({ query, categoryId, negativeOnly, level: level || undefined, includeClosed: showClosed, includeInactive: showInactive, signal }),
-    enabled: all && !grouped,
+    enabled: all && !grouped && chipReady,
     placeholderData: keepPreviousData,
   });
   const result = all ? many : one;
   const finding = result.isPlaceholderData || (result.isFetching && result.fetchStatus !== 'idle');
-  const shown = all ? many.data?.items.length : one.data?.length;
+  // A known barcode shows its own item alone, not the items whose code only begins the same.
+  const oneRows = onlyMatch(one.data, match, (r) => r.product_id);
+  const manyData = many.data && { ...many.data, items: onlyMatch(many.data.items, match, (r) => r.product_id) ?? [] };
+  const shown = all ? manyData?.items.length : oneRows?.length;
   // The whole-business view is the stock "by location": a last crumb says so (components/breadcrumbs.tsx).
   useCrumbTail(all ? 'By location' : undefined);
   const stockFilter: StockFilter = { query, categoryId, negativeOnly, level, includeClosed: showClosed, includeInactive: showInactive };
@@ -372,15 +375,15 @@ export function StockPage() {
           term={search.term}
           onClear={search.clear}
           category={(categories.data ?? []).find((c) => c.id === categoryId)?.name}
-          onSearchAll={() => { setCategoryId(''); setLevel(''); setNegativeOnly(false); }}
+          onSearchAll={() => { setCategoryId(''); setLevel(''); setNegativeOnly(false); setShowInactive(true); }}
           filtered={level !== '' || negativeOnly}
         />
       )}
       {!grouped && (
       <div data-tour="stock-list">
       <SearchResults fetching={finding}>
-        {!all && one.data && <StockTable rows={one.data} showCost={canProfit} correctable={mayCorrect(me, branchId) && branchId !== null ? { branchId } : undefined} {...narrowing} />}
-        {all && many.data && (phone ? <AllBranchesList data={many.data} showCost={canProfit} {...narrowing} /> : <AllBranchesTable data={many.data} showCost={canProfit} {...narrowing} />)}
+        {!all && oneRows && <StockTable rows={oneRows} showCost={canProfit} correctable={mayCorrect(me, branchId) && branchId !== null ? { branchId } : undefined} {...narrowing} />}
+        {all && manyData && (phone ? <AllBranchesList data={manyData} showCost={canProfit} {...narrowing} /> : <AllBranchesTable data={manyData} showCost={canProfit} {...narrowing} />)}
       </SearchResults>
       </div>
       )}

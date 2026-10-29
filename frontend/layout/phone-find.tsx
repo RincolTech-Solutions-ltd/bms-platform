@@ -36,6 +36,11 @@ function Page() {
       <div className="nav-layout-main">
         <header className="staff-bar"><div className="staff-bar-top"><strong>Test Shop Ntinda</strong></div></header>
         <h1>Items</h1>
+        {/* My stock's two entries above its find bar, as stock.tsx draws them. */}
+        <nav className="find-entries" aria-label="Items and categories">
+          <a className="link-row" href="#items">Items</a>
+          <a className="link-row" href="#categories">Categories</a>
+        </nav>
         <FindBar>
           <SearchBox id="items-search" label="Search by name, code, barcode or category" search={search} fetching={false} count={items.length} />
           <CategoryChips categories={categories} value={chosen} onChange={setChosen} />

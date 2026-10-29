@@ -249,12 +249,16 @@
   justify-content: center;
 }
 
-/* Items and Categories, the first two entries of My stock, side by side. */
+/* Items and Categories, the first two entries of My stock, side by side; one under the other when a large font needs the width. */
 .find-entries {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
+}
+
+.find-entries > * {
+  flex: 1 1 140px;
 }
 
 .find-entries:empty {

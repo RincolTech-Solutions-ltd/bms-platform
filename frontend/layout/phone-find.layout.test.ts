@@ -3,7 +3,8 @@ import { chromium, type Browser, type Page } from 'playwright';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// Finding items on a phone (issue #690) laid out in Chromium at 360, 390 and 412 wide, at the default and a large font size: the
+// Finding items on a phone (issue #690) laid out in Chromium at 360, 390 and 412 wide, at the default and a large font size, with My
+// stock's Items and Categories entries above the find bar: the
 // page never scrolls sideways while the chip row does, inside itself; every chip is a 48px target and every item row at least
 // 56px; scrolled, the search and the chips stay right under the staff bar, never under it; a chosen chip far along the row is
 // brought into the row's view without the page moving sideways. The page is layout/phone-find.html under the app's stylesheets.
@@ -51,6 +52,12 @@ describe.each([360, 390, 412])('Items find bar at %ipx wide', (width) => {
 
     it('makes every chip a 48px target and every item row at least 56px', async () => {
       const page = await open(width, font);
+      // My stock's Items and Categories entries: 48px targets that fit the width.
+      for (const entry of await page.locator('.find-entries .link-row').all()) {
+        const b = (await entry.boundingBox()) as Box;
+        expect(b.height).toBeGreaterThanOrEqual(48);
+        expect(b.x + b.width).toBeLessThanOrEqual(width);
+      }
       for (const chip of await page.locator('.find-chip').all()) expect(((await chip.boundingBox()) as Box).height).toBeGreaterThanOrEqual(48);
       for (const row of (await page.locator('.list-row').all()).slice(0, 5)) expect(((await row.boundingBox()) as Box).height).toBeGreaterThanOrEqual(56);
       await page.close();

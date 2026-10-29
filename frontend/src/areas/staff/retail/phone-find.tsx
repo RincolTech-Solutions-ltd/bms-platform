@@ -12,21 +12,29 @@ import { chipsOf, itemStock, knownChip, looksLikeBarcode, noItemCase, noItemText
 // Add it only when nothing narrowed it. Add it opens Quick add with the name typed (its `name` route param), the add form that
 // takes a name from the link. Quick add needs what Items and My stock need, so whoever sees these pages may use it.
 
-/** The page's chosen chip, remembered per page; a remembered category that has gone reads as All. */
-export function useChosenChip(page: FindPage, categories: Category[] | undefined): [string, (id: string) => void] {
+/**
+ * The page's chosen chip, remembered per page. `ready` is false while a remembered chip waits for the categories, so the list
+ * never asks with a category that has gone; one that has gone reads as All and is forgotten.
+ */
+export function useChosenChip(page: FindPage, categories: Category[] | undefined): [string, (id: string) => void, boolean] {
   const [id, setId] = useState(() => readChip(page));
   const choose = (next: string) => {
     setId(next);
     writeChip(page, next);
   };
-  return [knownChip(id, categories), choose];
+  const known = knownChip(id, categories);
+  useEffect(() => {
+    if (categories && id && !known) writeChip(page, '');
+  }, [categories, id, known, page]);
+  return [known, choose, id === '' || categories !== undefined];
 }
 
 /**
  * The query a list asks with: digits that are a known barcode become that item's code, which the server search matches, so a
- * barcode typed or scanned into the box finds its item. `looking` is true while the barcode is being looked up.
+ * barcode typed or scanned into the box finds its item. `match` is that item's id, so a list shows it alone and not the items
+ * whose code only begins the same. `looking` is true while the barcode is being looked up.
  */
-export function useFindTerm(term: string): { query: string; looking: boolean } {
+export function useFindTerm(term: string): { query: string; match?: string; looking: boolean } {
   const code = looksLikeBarcode(term) ? term.trim() : '';
   const found = useQuery({
     queryKey: ['retail', 'by-barcode', code],
@@ -35,7 +43,13 @@ export function useFindTerm(term: string): { query: string; looking: boolean } {
     staleTime: 60_000,
     retry: false,
   });
-  return { query: found.data?.product?.code ?? term, looking: code !== '' && found.isPending };
+  const product = found.data?.product;
+  return { query: product?.code ?? term, match: product?.id, looking: code !== '' && found.isPending };
+}
+
+/** The rows of a list, only the barcode's own item when the search was a known barcode. */
+export function onlyMatch<T>(rows: T[] | undefined, match: string | undefined, idOf: (row: T) => string | undefined): T[] | undefined {
+  return rows && match ? rows.filter((r) => idOf(r) === match) : rows;
 }
 
 /**
@@ -92,8 +106,8 @@ export function CategoryChips({ categories, value, onChange }: { categories: Cat
 
 /**
  * A search that found nothing. With a chip chosen it says so, with another filter on it says the filters hid it, and both offer
- * Search all categories, which clears the chip and the filters and searches again; digits that are no known barcode say that;
- * only a search nothing narrowed offers Add it.
+ * Search all categories, which clears the chip and the filters, shows inactive items too and searches again, whatever was typed;
+ * digits are a code or a barcode and never offer Add it; only a name that nothing narrowed offers Add it.
  */
 export function NoItem({ term, onClear, category, onSearchAll, filtered = false }: {
   term: string;

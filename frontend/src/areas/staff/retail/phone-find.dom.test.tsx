@@ -125,12 +125,51 @@ describe('My stock', () => {
     expect(localStorage.getItem('bms.findChip.stock')).toBeNull();
   });
 
-  it('forgets a remembered category that has gone', async () => {
+  it('forgets a remembered category that has gone, and never asks the list with it', async () => {
     localStorage.setItem('bms.findChip.stock', 'gone');
     show(<StockPage />);
     await waitFor(() => expect(chip('Test Cables')).toBeTruthy());
     expect(chip('All').getAttribute('aria-pressed')).toBe('true');
     await waitFor(() => expect(lastQuery(listStock).categoryId).toBe(''));
+    expect(listStock.mock.calls.map((c) => (c[0] as { categoryId?: string }).categoryId)).not.toContain('gone');
+    expect(localStorage.getItem('bms.findChip.stock')).toBeNull();
+  });
+
+  // JUSTIFICATION-A3: new cases the round 2 review of #703 asked for (digits of any length, a barcode under a chip, exact match).
+  it.each(['1234567', '123456789012345'])('never offers Add it for digits that match nothing (%s)', async (digits) => {
+    stockRows = [];
+    show(<StockPage />);
+    type(digits);
+    expect(await screen.findByText(`No item with the code or barcode "${digits}".`)).toBeTruthy();
+    expect(screen.queryByText(/Add it/)).toBeNull();
+  });
+
+  it('with a remembered chip, a known barcode of another category says where it looked and Search all categories finds it', async () => {
+    localStorage.setItem('bms.findChip.stock', 'c1');
+    findByBarcode.mockResolvedValue({ product: { id: 'p2', code: 'LG-0001', description: 'Test bulb 9W' } });
+    stockRows = [];
+    show(<StockPage />);
+    await waitFor(() => expect(chip('Test Cables').getAttribute('aria-pressed')).toBe('true'));
+    type('6001234567890');
+    expect(await screen.findByText('No item with the code or barcode "6001234567890" in Test Cables.')).toBeTruthy();
+    expect(screen.queryByText(/Add it/)).toBeNull();
+    stockRows = [{ product_id: 'p2', code: 'LG-0001', description: 'Test bulb 9W', category: 'Test Lighting', unit: 'pc', qty: '3.000', sell_minor: 6000 }];
+    fireEvent.click(screen.getByRole('button', { name: 'Search all categories' }));
+    await waitFor(() => expect(lastQuery(listStock)).toMatchObject({ query: 'LG-0001', categoryId: '', includeInactive: true }));
+    expect(await screen.findByText('Test bulb 9W')).toBeTruthy();
+  });
+
+  it('shows a found barcode\'s own item alone, not the items whose code only begins the same', async () => {
+    findByBarcode.mockResolvedValue({ product: { id: 'p1', code: 'CB-0001', description: 'Test cable 2.5mm' } });
+    stockRows = [
+      { product_id: 'p1', code: 'CB-0001', description: 'Test cable 2.5mm', category: 'Test Cables', unit: 'roll', qty: '4.000', sell_minor: 230000 },
+      { product_id: 'p10', code: 'CB-00010', description: 'Test cable 10mm', category: 'Test Cables', unit: 'roll', qty: '1.000', sell_minor: 900000 },
+    ];
+    show(<StockPage />);
+    type('6001234567890');
+    await waitFor(() => expect(lastQuery(listStock).query).toBe('CB-0001'));
+    await waitFor(() => expect(screen.queryByText('Test cable 10mm')).toBeNull());
+    expect(screen.getByText('Test cable 2.5mm')).toBeTruthy();
   });
 
   it('offers Add it with the name typed when a search nothing narrowed finds nothing', async () => {
@@ -169,7 +208,7 @@ describe('My stock', () => {
     expect(screen.queryByRole('link', { name: 'Add bulb' })).toBeNull();
     stockRows = [{ product_id: 'p2', code: 'LG-0001', description: 'Test bulb 9W', category: 'Test Lighting', unit: 'pc', qty: '3.000', sell_minor: 6000 }];
     fireEvent.click(screen.getByRole('button', { name: 'Search all categories' }));
-    await waitFor(() => expect(lastQuery(listStock)).toMatchObject({ query: 'bulb', categoryId: '', level: undefined, negativeOnly: false }));
+    await waitFor(() => expect(lastQuery(listStock)).toMatchObject({ query: 'bulb', categoryId: '', level: undefined, negativeOnly: false, includeInactive: true }));
     expect(await screen.findByText('Test bulb 9W')).toBeTruthy();
     expect(screen.getByRole('radio', { name: 'All items' }).getAttribute('aria-checked')).toBe('true');
   });
@@ -240,6 +279,33 @@ describe('Items', () => {
     phoneWidth(false);
     show(<ProductsPage />);
     expect(await screen.findByRole('button', { name: 'Edit Test cable 2.5mm' })).toBeTruthy();
+  });
+
+  // JUSTIFICATION-A3: the Items half of the chip and filter cases the round 2 review of #703 asked for.
+  it('with a chip on says where it looked, never Add it, and Search all categories finds the item in another', async () => {
+    localStorage.setItem('bms.findChip.items', 'c1');
+    catalogue = [];
+    show(<ProductsPage />);
+    await waitFor(() => expect(chip('Test Cables').getAttribute('aria-pressed')).toBe('true'));
+    type('bulb');
+    expect(await screen.findByText('No item called "bulb" in Test Cables.')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Add bulb' })).toBeNull();
+    catalogue = [{ id: 'p2', code: 'LG-0001', description: 'Test bulb 9W', category: 'Test Lighting', category_id: 'c2', unit: 'pc', sell_minor: 6000, active: true }];
+    fireEvent.click(screen.getByRole('button', { name: 'Search all categories' }));
+    await waitFor(() => expect(lastQuery(listCatalogue)).toMatchObject({ query: 'bulb', categoryId: '' }));
+    expect(await screen.findByText('Test bulb 9W')).toBeTruthy();
+  });
+
+  it('with Inactive shown, Search all categories looks at active and inactive items alike', async () => {
+    catalogue = [];
+    show(<ProductsPage />);
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'off' } });
+    type('bulb');
+    expect(await screen.findByText('No item called "bulb" with these filters.')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Add bulb' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Search all categories' }));
+    await waitFor(() => expect((screen.getByLabelText('Show') as HTMLSelectElement).value).toBe('all'));
+    await waitFor(() => expect(lastQuery(listCatalogue).active).toBeUndefined());
   });
 
   it('offers Add it when a search nothing narrowed finds nothing', async () => {

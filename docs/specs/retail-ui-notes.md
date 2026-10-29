@@ -1410,8 +1410,14 @@ The owner, 29 Oct 2026: "On mobile I can't easily find items and categories. It 
   route parameter (Quick add is the add form that takes a name from the link; Add an item has none; Quick add needs what
   Items and My stock need), and Clear search; the owner accepted Quick add here (round 2 of the #703 review). A chip chosen:
   `No item called "bulb" in Cables.` Another filter on (Out of stock, Low stock, negative only, Inactive): `No item called
-  "bulb" with these filters.` Both offer Search all categories, which clears the chip and the filters and searches again. Digits
-  that are no known barcode: `No item with the code or barcode "6001234567890".`
+  "bulb" with these filters.` Both offer Search all categories, whatever was typed, digits included: it clears the chip and the
+  filters, shows inactive items too, and searches again. Digits of any length are a code or a barcode, never a name to add:
+  `No item with the code or barcode "6001234567890".`, with ` in Cables` under a chip. A known barcode lists its own item alone
+  (`onlyMatch`), not the items whose code only begins the same. The default of hiding inactive items is not a filter here:
+  the server refuses a new item with the same name and unit as any item, switched off or not, so Quick add shows the one that
+  exists instead of making a second.
+- **A remembered chip** holds the list query until the categories arrive, so a category that has gone is never asked for;
+  it then reads as All and its stored key is removed.
 - **On a phone** the Items list follows the search, Quick add and Add an item; the sizes and colours ways to add come after it.
 - **Layout check.** `layout/phone-find.layout.test.ts` at 360, 390 and 412px, at both font scales.
 
