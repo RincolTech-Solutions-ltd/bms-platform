@@ -14,11 +14,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.Statement;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -49,6 +52,10 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
     static final Pattern VERSION = Pattern.compile("V(\\d+)__.*\\.sql");
     static final String ROLES_ON = "{\"module_groups\": {\"retail\": {\"branch_roles\": true}}}";
     static final String RETURNER = ADMIN + ",retail.sale.return,retail.cashbook.read";
+    /** The role row and flags V115 leaves on a folded store. */
+    static final String FOLDED_ROLE = "both";
+
+    static final Map<String, Object> FOLDED_FLAGS = Map.of("sells", false, "stocks", true);
 
     @Autowired
     TestRestTemplate http;
@@ -181,7 +188,14 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
                 assertThat(reason(owner, b)).as("reason of %s", b).contains("was not in force");
             }
 
-            // A second run of the fold changes nothing.
+            // A second run of the fold changes nothing. It runs as an owner that bypasses row level security, so it
+            // sees
+            // every business's rows and the check is not empty by accident.
+            assertThat(owner.sql("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user")
+                            .query(Boolean.class)
+                            .single())
+                    .isTrue();
+            assertThat(count(owner, "SELECT count(*) FROM retail_branch_roles")).isPositive();
             String sql = Files.readString(v.file());
             int from = sql.indexOf("-- store-fold:begin") + "-- store-fold:begin".length();
             String fold = sql.substring(from, sql.indexOf("-- store-fold:end"));
@@ -207,7 +221,11 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
     // JUSTIFICATION-A3: the two tests the review of #676 asks for (a mixed business in one run, the blockers against
     // real
     // till activity), each with the request helpers only they use.
-    /** One business with a clean store and a store with credit owing migrates in a single run: one folded, one skipped. */
+    /**
+     * One business with a clean store and a store with credit owing migrates in a single run: one folded, one skipped. A
+     * transaction of the previous release holds a lock on the role table for longer than one lock attempt (two seconds), so the
+     * migration's lock times out at least once, retries and completes instead of failing the deploy.
+     */
     @Test
     void aMixedBusinessMigratesInOneRun() throws Exception {
         Migration v = migration();
@@ -225,15 +243,36 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
             UUID owing = branch(owner, mixed, "OWE", true, true, "store");
             creditSaleOwing(owner, mixed, owing);
 
+            Connection sale = ds.getConnection();
+            sale.setAutoCommit(false);
+            try (Statement s = sale.createStatement()) {
+                s.execute("SELECT count(*) FROM retail_branch_roles");
+            }
+            CompletableFuture<Void> released = CompletableFuture.runAsync(() -> {
+                try {
+                    Thread.sleep(3_500);
+                    sale.commit();
+                    sale.close();
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            });
+            long started = System.nanoTime();
             assertThat(DatabaseMigrator.configure(url, "bms_owner", TestDatabase.OWNER_PASSWORD)
                             .load()
                             .migrate()
                             .success)
                     .isTrue();
+            released.get(30, TimeUnit.SECONDS);
+            assertThat(Duration.ofNanos(System.nanoTime() - started))
+                    .as("the migration waited for the lock past one attempt")
+                    .isGreaterThan(Duration.ofSeconds(2));
 
             assertThat(flags(owner, clean)).isEqualTo(Map.of("sells", false, "stocks", true, "version", 2));
             assertThat(flags(owner, owing)).isEqualTo(Map.of("sells", true, "stocks", true, "version", 1));
-            assertThat(role(owner, clean)).isEqualTo("both");
+            // The state aFoldedStoreTakesNoMoneyAtItsTill writes by hand is the one V115 produces.
+            assertThat(role(owner, clean)).isEqualTo(FOLDED_ROLE);
+            assertThat(flags(owner, clean)).containsAllEntriesOf(FOLDED_FLAGS);
             assertThat(role(owner, owing)).isEqualTo("both");
             assertThat(audited(owner, "core.branch.updated")).containsExactly(clean + ":true>false");
             assertThat(blockersOf(owner, owing)).isEqualTo("[\"credit_sales_owing\"]");
@@ -361,14 +400,14 @@ class RetailStoreRoleFoldIT extends IntegrationTest {
                 .get("id")
                 .asString();
 
-        // What V115 leaves for a folded store.
+        // What V115 leaves for a folded store, as aMixedBusinessMigratesInOneRun checks against the migration itself.
         TestDatabase.owner()
-                .sql("INSERT INTO retail_branch_roles (tenant_id, branch_id, role) VALUES (?, ?, 'both')")
-                .params(t.tenantId(), branch)
+                .sql("INSERT INTO retail_branch_roles (tenant_id, branch_id, role) VALUES (?, ?, ?)")
+                .params(t.tenantId(), branch, FOLDED_ROLE)
                 .update();
         TestDatabase.owner()
-                .sql("UPDATE branches SET sells_goods = false WHERE id = ?")
-                .param(branch)
+                .sql("UPDATE branches SET sells_goods = ?, stocks_goods = ? WHERE id = ?")
+                .params(FOLDED_FLAGS.get("sells"), FOLDED_FLAGS.get("stocks"), branch)
                 .update();
 
         for (JsonNode i : api.get("/branch-roles", ADMIN).getBody().get("items")) {

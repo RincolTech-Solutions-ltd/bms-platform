@@ -1232,6 +1232,22 @@ class RetailOfflineSalesIT extends IntegrationTest {
         assertThat(waitingRows()).isZero();
     }
 
+    /** The stocking check of #371 does not refuse a closed branch: a refusal reported for a just-closed shop is still kept. */
+    @Test
+    void aReportForAClosedBranchIsStillTaken() {
+        TestDatabase.owner()
+                .sql("UPDATE branches SET status = 'inactive' WHERE id = ?")
+                .param(t.headOffice())
+                .update();
+        UUID client = UUID.randomUUID();
+        ResponseEntity<JsonNode> reported = api.post(
+                "/offline-failures", failureReport(client, offlineSale(client, Instant.now(), "1", 2_000)), SALES);
+        assertThat(reported.getStatusCode().is2xxSuccessful())
+                .as("%s", reported.getBody())
+                .isTrue();
+        assertThat(reported.getBody().get("status").asString()).isEqualTo("open");
+    }
+
     /** A summary of a sale waiting on a phone is taken only for a branch the reporter sells at, as a report is. */
     @Test
     void aWaitingSummaryIsOnlyForABranchTheReporterSellsAt() {

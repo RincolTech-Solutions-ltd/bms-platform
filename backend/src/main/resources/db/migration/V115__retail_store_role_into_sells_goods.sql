@@ -12,8 +12,8 @@
 --   1. A 'store' branch in force with no blocker becomes a Store (sells_goods = false). retail_store_fold_blockers(tenant,
 --      branch, since) names the blockers: an open branch that keeps no goods (it cannot be a Store), a credit sale still owing
 --      (counted as BranchTillCheck counts it: written-off and imported sales left out, a delivery fee owed on the account in),
---      and any till money taken since the role was set (a later payment on a credit sale, a payment on account, a refund paid
---      out, savings, a banking, a withdrawal, an advance repayment).
+--      and any till money taken since the role was set (a later payment on a credit sale booked at that branch, a payment on
+--      account, a refund paid out, savings, a banking, a withdrawal, an advance repayment).
 --   2. A branch with any blocker is skipped: it keeps sells_goods true and can do everything it does today with its money. A
 --      branch that keeps no goods is still refused quotations and offline sale reports by the application (ADR-104), as it is
 --      refused sales. An administrator settles what is open and marks it a Store on Branches later.
@@ -31,10 +31,42 @@
 -- The tables have FORCE ROW LEVEL SECURITY and no app.tenant_id is bound here: as in V103, bms_owner has BYPASSRLS, and an owner
 -- without it drops FORCE for this transaction only.
 --
--- lock_timeout: the check takes an ACCESS EXCLUSIVE lock on retail_branch_roles, which the previous release reads on every sale.
--- If the lock cannot be had within five seconds the migration fails and is retried, and no shop waits behind it (as V65).
+-- Locks, taken first and never a reason to fail. The previous release keeps serving during the deploy: it reads
+-- retail_branch_roles on every sale, may write a role, and locks branch rows FOR SHARE. So, before anything else:
+--   - retail_branch_roles in ACCESS EXCLUSIVE mode, so no role can be written between the fold and the narrowed check, and the
+--     check needs no further lock;
+--   - branches in EXCLUSIVE mode, so no transaction holds a branch row lock the fold's updates would wait on (plain reads go on);
+--   - with an owner that lacks BYPASSRLS, every table whose FORCE is dropped, in ACCESS EXCLUSIVE mode.
+-- Each attempt waits at most two seconds, so a shop never queues long behind the request; on a timeout the attempt is undone,
+-- the migration sleeps a second and tries again. After 120 attempts it waits for the locks without a timeout. Once they are
+-- held no statement here waits on another transaction, and lock_timeout is off for the rest.
 
-SET LOCAL lock_timeout = '5s';
+DO $$
+DECLARE
+    bypass  boolean := (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user);
+    attempt integer := 0;
+BEGIN
+    LOOP
+        BEGIN
+            PERFORM set_config('lock_timeout', CASE WHEN attempt < 120 THEN '2s' ELSE '0' END, true);
+            LOCK TABLE retail_branch_roles IN ACCESS EXCLUSIVE MODE;
+            LOCK TABLE branches IN EXCLUSIVE MODE;
+            IF NOT bypass THEN
+                LOCK TABLE tenant_settings, tenant_modules, branches, audit_log, retail_sales, retail_sale_payments,
+                           journal_entries, retail_sale_writeoffs, retail_customer_orders, retail_account_payments,
+                           retail_sale_returns, retail_daily_savings, retail_cash_bankings, retail_cash_withdrawals,
+                           retail_advance_repayments
+                    IN ACCESS EXCLUSIVE MODE;
+            END IF;
+            EXIT;
+        EXCEPTION WHEN lock_not_available THEN
+            attempt := attempt + 1;
+            PERFORM pg_sleep(1);
+        END;
+    END LOOP;
+    PERFORM set_config('lock_timeout', '0', true);
+END
+$$;
 
 CREATE FUNCTION retail_store_fold_blockers(p_tenant uuid, p_branch uuid, p_since timestamptz) RETURNS text[]
     LANGUAGE sql STABLE
@@ -49,8 +81,10 @@ AS $$
                                   OR EXISTS (SELECT 1 FROM retail_customer_orders o WHERE o.sale_id = s.id
                                               AND o.fee_method = 'account' AND o.fee_paid_at IS NULL)))
              THEN 'credit_sales_owing' END,
-        CASE WHEN EXISTS (SELECT 1 FROM retail_sale_payments p JOIN retail_sales s ON s.tenant_id = p.tenant_id AND s.id = p.sale_id
-                           WHERE s.tenant_id = b.tenant_id AND s.branch_id = b.id AND p.created_at >= p_since
+        CASE WHEN EXISTS (SELECT 1 FROM retail_sale_payments p
+                            JOIN retail_sales s ON s.tenant_id = p.tenant_id AND s.id = p.sale_id
+                            JOIN journal_entries j ON j.tenant_id = p.tenant_id AND j.id = p.journal_entry_id
+                           WHERE p.tenant_id = b.tenant_id AND j.branch_id = b.id AND p.created_at >= p_since
                              AND p.created_at > s.created_at)
              THEN 'credit_payments' END,
         CASE WHEN EXISTS (SELECT 1 FROM retail_account_payments x
@@ -85,9 +119,10 @@ DECLARE
 BEGIN
     IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
         FOREACH t IN ARRAY ARRAY['tenant_settings', 'tenant_modules', 'branches', 'retail_branch_roles', 'audit_log',
-                                 'retail_sales', 'retail_sale_payments', 'retail_sale_writeoffs', 'retail_customer_orders',
-                                 'retail_account_payments', 'retail_sale_returns', 'retail_daily_savings',
-                                 'retail_cash_bankings', 'retail_cash_withdrawals', 'retail_advance_repayments'] LOOP
+                                 'retail_sales', 'retail_sale_payments', 'journal_entries', 'retail_sale_writeoffs',
+                                 'retail_customer_orders', 'retail_account_payments', 'retail_sale_returns',
+                                 'retail_daily_savings', 'retail_cash_bankings', 'retail_cash_withdrawals',
+                                 'retail_advance_repayments'] LOOP
             EXECUTE format('ALTER TABLE %I NO FORCE ROW LEVEL SECURITY', t);
         END LOOP;
     END IF;
@@ -151,9 +186,10 @@ DECLARE
 BEGIN
     IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
         FOREACH t IN ARRAY ARRAY['tenant_settings', 'tenant_modules', 'branches', 'retail_branch_roles', 'audit_log',
-                                 'retail_sales', 'retail_sale_payments', 'retail_sale_writeoffs', 'retail_customer_orders',
-                                 'retail_account_payments', 'retail_sale_returns', 'retail_daily_savings',
-                                 'retail_cash_bankings', 'retail_cash_withdrawals', 'retail_advance_repayments'] LOOP
+                                 'retail_sales', 'retail_sale_payments', 'journal_entries', 'retail_sale_writeoffs',
+                                 'retail_customer_orders', 'retail_account_payments', 'retail_sale_returns',
+                                 'retail_daily_savings', 'retail_cash_bankings', 'retail_cash_withdrawals',
+                                 'retail_advance_repayments'] LOOP
             EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
         END LOOP;
     END IF;
