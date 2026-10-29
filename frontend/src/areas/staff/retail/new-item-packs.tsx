@@ -36,11 +36,16 @@ export function unitWord(unit: Unit | undefined, none: string): string {
   return unit?.name ? unit.name.trim().toLowerCase() : none;
 }
 
-/** The refusal of a package word as the smallest unit, the same sentence the server sends (422 unit_is_package). */
+/**
+ * The refusal of a package word as the smallest unit, the same sentence the server sends (422 unit_is_package,
+ * RetailCatalogue.packageAsUnit): "A box is a package", or "Cartons is a package" for a unit named in the plural.
+ */
 export function packageAsUnit(unit: Unit | undefined): string | null {
   if (!unit?.is_package) return null;
   const word = unitWord(unit, '');
-  return `A ${word} is a package. Choose the smallest unit, like piece, then add the ${word} below.`;
+  const head = word.split(' ')[0] ?? '';
+  const named = head.endsWith('s') && !head.endsWith('ss') ? word.charAt(0).toUpperCase() + word.slice(1) : `A ${word}`;
+  return `${named} is a package. Choose the smallest unit, like piece, then add the ${word} below.`;
 }
 
 /**

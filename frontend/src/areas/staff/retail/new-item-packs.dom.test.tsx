@@ -77,6 +77,8 @@ async function fill(unitId: string) {
 describe('the words of Add an item', () => {
   it('names a package as the smallest unit in the words the server uses', () => {
     expect(packageAsUnit(units[2])).toBe('A box is a package. Choose the smallest unit, like piece, then add the box below.');
+    expect(packageAsUnit({ ...units[1]!, name: 'Cartons' })).toBe('Cartons is a package. Choose the smallest unit, like piece, then add the cartons below.');
+    expect(packageAsUnit({ ...units[2]!, name: 'Boxes' })).toMatch(/^Boxes is a package\./);
     expect(packageAsUnit(units[0])).toBeNull();
     expect(packageAsUnit(undefined)).toBeNull();
   });
