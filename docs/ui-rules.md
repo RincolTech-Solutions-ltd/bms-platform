@@ -75,7 +75,7 @@ back to what opened it.
 ## Feedback
 
 14. A page load shows a skeleton, and nothing at all for under 1 second.
-15. Toasts are dark and neutral, at the bottom, with an icon, for about 4 seconds, with at most one action. An error is never
+15. Toasts are dark and neutral, at the bottom, with an icon, for 6 seconds (12 with an Undo), with at most one action. An error is never
     a blocking dialog.
     Every toast names its tone: the check of `success` only where a write succeeded, `info` for a refusal (an item already on
     the sale) or a change that waits for approval, `error` for a failure. `show()` has no default tone.
@@ -138,4 +138,13 @@ back to what opened it.
     guard fails a `<select>` of a list read at run time that has no `EmptyChoice` near it and no `empty:` comment saying why it
     is never empty (a filter with its "All", a select drawn only when it has choices). The help article is
     `frontend/src/help/articles/empty-list.md`.
+
+## Add it in place (issue #688)
+
+26. Every picker that chooses a record ends its list with "+ Add a <thing>" for whoever may add one (the permission of the
+    full add screen; hidden from anyone else). It opens a small Sheet over the form with only the fields that record needs; on
+    save the record is chosen and the person is back on the same form with everything typed still there, and on cancel
+    nothing is lost. Nothing navigates away. It is one component, `PickerWithAdd` (a select) or its hook `useAddInPlace` (a
+    picker that draws its own list, as the category picker does), in `frontend/src/app/ui/PickerWithAdd.tsx`. The design
+    guard fails a record picker built without it unless the guard lists it as exempt with a reason.
 
