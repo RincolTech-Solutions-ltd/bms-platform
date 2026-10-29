@@ -232,12 +232,11 @@ class PlatformIT extends IntegrationTest {
     }
 
     /**
-     * Review of #206: retail posts cash and bank to the seeded accounts, so it is not switched on for
-     * a tenant whose cash or bank is mapped elsewhere (the lending cash would leave the balance the
-     * retail cash book reads). Clearing the mapping, or an inactive one, lets it through.
+     * Issue #236 (ADR-105): retail posts cash and bank through the payment methods mapping, so a tenant whose cash is
+     * mapped to another account switches retail on like any other (V116 dropped the V43 refusal).
      */
     @Test
-    void retailIsNotSwitchedOnWhileCashOrBankIsRemapped() {
+    void retailIsSwitchedOnWhileCashIsRemapped() {
         ResponseEntity<JsonNode> created = create(slug(), List.of("lending"));
         UUID tenantId =
                 UUID.fromString(created.getBody().get("tenant").get("id").asString());
@@ -256,19 +255,8 @@ class PlatformIT extends IntegrationTest {
         Map<String, Object> both =
                 Map.of("modules", List.of("lending", "retail"), "reason", "Test: modules for a test");
 
-        ResponseEntity<JsonNode> refused = platform.call(HttpMethod.PUT, path, both, operator.accessToken());
-        assertThat(refused.getStatusCode().value()).as("%s", refused.getBody()).isEqualTo(422);
-        assertThat(refused.getBody().get("code").asString()).isEqualTo("payment_methods_remap_blocks_retail");
-        assertThat(JdbcCheck.moduleTenants("retail")).doesNotContain(tenantId);
-
-        TestDatabase.owner()
-                .sql("UPDATE payment_methods SET is_active = false WHERE id = ?")
-                .param(mapping)
-                .update();
-        assertThat(platform.call(HttpMethod.PUT, path, both, operator.accessToken())
-                        .getStatusCode())
-                .as("an inactive mapping does not move any cash")
-                .isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> switched = platform.call(HttpMethod.PUT, path, both, operator.accessToken());
+        assertThat(switched.getStatusCode()).as("%s", switched.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(JdbcCheck.moduleTenants("retail")).contains(tenantId);
     }
 

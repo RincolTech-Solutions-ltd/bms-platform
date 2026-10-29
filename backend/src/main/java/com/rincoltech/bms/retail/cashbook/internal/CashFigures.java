@@ -5,6 +5,7 @@ import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.retail.cashbook.internal.CashbookRepository.Agg;
 import com.rincoltech.bms.retail.purchasing.CashPurchases;
 import com.rincoltech.bms.retail.sales.CashSales;
+import com.rincoltech.bms.retail.stock.RetailBooks;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Map;
@@ -29,6 +30,7 @@ class CashFigures {
     private final CashSales sales;
     private final CashPurchases purchases;
     private final LedgerAccounts ledger;
+    private final RetailBooks books;
     private final CurrentTenant tenant;
 
     CashFigures(
@@ -36,11 +38,13 @@ class CashFigures {
             CashSales sales,
             CashPurchases purchases,
             LedgerAccounts ledger,
+            RetailBooks books,
             CurrentTenant tenant) {
         this.repo = repo;
         this.sales = sales;
         this.purchases = purchases;
         this.ledger = ledger;
+        this.books = books;
         this.tenant = tenant;
     }
 
@@ -200,11 +204,13 @@ class CashFigures {
      * The ledger's cash on hand for the branch around each of the given days: opening is the
      * balance at the end of the previous day, closing is the listed movements added to it, and
      * the remainder to the balance at the end of the day is {@code otherMovements} (a manual
-     * journal or an unlisted source), never hidden.
+     * journal or an unlisted source), never hidden. The till is the account the branch's cash is
+     * mapped to now (ADR-105), the account retail and lending both post their cash to.
      */
     Map<LocalDate, Position> positions(UUID branch, NavigableMap<LocalDate, Day> days, LocalDate from, LocalDate to) {
-        long base = ledger.balanceByBranch("cash_on_hand", from.minusDays(1)).getOrDefault(branch, 0L);
-        Map<LocalDate, Long> movement = ledger.movementByDay("cash_on_hand", branch, from, to);
+        String till = books.accountRef("cash_on_hand", branch);
+        long base = ledger.balanceByBranch(till, from.minusDays(1)).getOrDefault(branch, 0L);
+        Map<LocalDate, Long> movement = ledger.movementByDay(till, branch, from, to);
         Map<LocalDate, Position> out = new TreeMap<>();
         long running = base;
         for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
@@ -238,14 +244,15 @@ class CashFigures {
         return out;
     }
 
-    /** The cash on hand now, from the ledger, for one branch. */
+    /** The cash on hand now, from the ledger, for one branch: its mapped till (ADR-105). */
     long cashOnHand(UUID branch, LocalDate asOf) {
-        return ledger.balanceByBranch("cash_on_hand", asOf).getOrDefault(branch, 0L);
+        return ledger.balanceByBranch(books.accountRef("cash_on_hand", branch), asOf)
+                .getOrDefault(branch, 0L);
     }
 
-    /** The bank balance across every branch, from the ledger. */
-    long bankBalance(LocalDate asOf) {
-        return ledger.balanceByBranch("bank", asOf).values().stream()
+    /** The balance across every branch, from the ledger, of the bank account the branch banks into (ADR-105). */
+    long bankBalance(UUID branch, LocalDate asOf) {
+        return ledger.balanceByBranch(books.accountRef("bank", branch), asOf).values().stream()
                 .mapToLong(Long::longValue)
                 .sum();
     }
