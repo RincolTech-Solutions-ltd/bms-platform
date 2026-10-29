@@ -44,6 +44,7 @@ const { RetailError } = await import('../../../api/retail');
 const { retailMessage } = await import('../../../api/retail-errors');
 const { StockTable } = await import('./stock');
 const { CorrectItem } = await import('./stock-correct');
+const { DoneToast, doneToasts } = await import('./toast');
 const { correctionWords, differenceWords, movementTitle, quantityProblem, signedQty } = await import('./stock-correct-state');
 
 afterEach(() => {
@@ -63,8 +64,9 @@ const refusal = (code: string, detail: string) => new RetailError(retailMessage(
 
 function screenOf(me: ReturnType<typeof mockMe>, node: ReactElement) {
   return render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } }, mutationCache: doneToasts() })}>
       <StaffContext.Provider value={{ me, branch }}>{node}</StaffContext.Provider>
+      <DoneToast />
     </QueryClientProvider>,
   );
 }
@@ -146,6 +148,9 @@ describe('the right quantity', () => {
 
     expect(done.textContent).toContain('Cable 2.5mm is now 6 roll (it was 10)');
     expect(done.textContent).toContain('does not count as lost or damaged stock');
+    expect(done.className).toBe('toast toast-success');
+    expect(document.querySelectorAll('.toast')).toHaveLength(1);
+    expect(document.querySelector('.alert-success')).toBeNull();
   });
 
   it('says a refusal in plain words and a retry keeps the same key', async () => {
@@ -373,6 +378,9 @@ describe('the category', () => {
     await waitFor(() => expect(updateProduct).toHaveBeenCalledTimes(1));
     expect(updateProduct).toHaveBeenCalledWith('p1', 4, { category_id: 'c2' });
     expect((await screen.findByRole('status')).textContent).toContain('Cable 2.5mm is now in Fittings. It was in Cables.');
+    // One success signal (#682): the toast, and no success note in the panel beside it.
+    expect(document.querySelectorAll('.toast')).toHaveLength(1);
+    expect(document.querySelector('.alert-success')).toBeNull();
   });
 });
 

@@ -74,7 +74,8 @@ export function useToast(ms: number = TOAST_MS, silent = false): { show: (messag
  * purchase and payment answers with a short toast in plain words, such as 'Sale saved' or 'Payment recorded'. A mutation names
  * its words in `meta: { success }`, a sentence or a function of the result and what was sent (null says nothing, for an
  * outcome that is not a success); `doneToasts` raises them in the one `DoneToast` the app mounts beside the router. A screen
- * that already shows its own success toast keeps doing so and sets no `meta.success`. `busy-guard.test.ts` fails a staff
+ * that already shows its own success toast keeps doing so and sets no `meta.success`. One signal per action: the toast replaces
+ * a small success note, and a full success screen shows no toast (`// toast-exempt: success screen`). `busy-guard.test.ts` fails a staff
  * mutation that says neither, unless a `// toast-exempt: <reason>` line sits above it.
  */
 export type DoneWords = string | ((data: never, variables: never) => string | null);

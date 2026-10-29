@@ -241,6 +241,7 @@ function CountSheet({ branchId }: { branchId: string }) {
     return entryWarnings(usual, { screen: 'count', product, lineKey: id, qtyMilli: parseCount(v), qtyFieldId: `count-${id}`, recordedMilli: here });
   });
   const entry = useEntryChecks('count', branchId, warnings, () => review.mutate(), totals);
+  // toast-exempt: success screen, the review then reads Stock count committed with Start another count
   const commit = useMutation({
     mutationFn: (acknowledged: string[]) => retail.commitStocktake(draft?.id ?? '', acknowledged),
     onSuccess: (st) => {
@@ -249,7 +250,6 @@ function CountSheet({ branchId }: { branchId: string }) {
       setDraft(st);
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
-    meta: { success: 'Count saved' },
   });
 
   if (draft) {

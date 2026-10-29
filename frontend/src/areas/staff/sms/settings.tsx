@@ -116,7 +116,7 @@ export function SwitchPanel({ saved, canManage, busy, error, onChange }: {
   );
 }
 
-export interface Notice { kind: 'success' | 'warning'; text: string }
+export interface Notice { kind: 'warning'; text: string }
 
 function Editor({ saved, canManage, notice, setNotice }: { saved: SmsSettings; canManage: boolean; notice: Notice | null; setNotice: (notice: Notice | null) => void }) {
   const queryClient = useQueryClient();
@@ -126,17 +126,16 @@ function Editor({ saved, canManage, notice, setNotice }: { saved: SmsSettings; c
 
   const save = useMutation({
     mutationFn: (c: SmsSettingsChange) => sms.changeSettings(saved.version, c),
-    onSuccess: (next, c) => {
+    onSuccess: (next) => {
       queryClient.setQueryData(['sms', 'settings'], next);
       void queryClient.invalidateQueries({ queryKey: ['sms', 'templates'] });
-      setNotice({ kind: 'success', text: c.enabled === true ? 'SMS is on.' : c.enabled === false ? 'SMS is off.' : 'Saved.' });
     },
     // Someone else's change (or a rule the screen could not see): read it again so the next try carries the right version.
     onError: (error) => {
       if (error instanceof SmsError && error.code === 'version_conflict') setNotice({ kind: 'warning', text: error.message });
       void queryClient.invalidateQueries({ queryKey: ['sms', 'settings'] });
     },
-    meta: { success: (_: unknown, c: SmsSettingsChange) => (c.enabled === true ? 'SMS turned on' : c.enabled === false ? 'SMS turned off' : 'Settings saved') },
+    meta: { success: (_: unknown, c: SmsSettingsChange) => (c.enabled === true ? 'SMS is on.' : c.enabled === false ? 'SMS is off.' : 'Saved.') },
   });
   const failure = failureOf(save.error);
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => {
@@ -157,7 +156,7 @@ function Editor({ saved, canManage, notice, setNotice }: { saved: SmsSettings; c
         error={failure.fields.acknowledged_text_version ? failure.fields.acknowledged_text_version : failure.message}
         onChange={(c) => { setNotice(null); save.mutate(c); }}
       />
-      {notice && <p role={notice.kind === 'warning' ? 'alert' : 'status'} className={notice.kind === 'warning' ? 'alert alert-warning' : 'alert alert-success'}>{notice.text}</p>}
+      {notice && <p role="alert" className="alert alert-warning">{notice.text}</p>}
 
       <form
         aria-label="SMS settings"

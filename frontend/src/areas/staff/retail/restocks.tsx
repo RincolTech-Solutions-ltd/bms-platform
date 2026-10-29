@@ -30,7 +30,8 @@ function branchesOf(purchase: Purchase): string[] {
 }
 
 /** The void form: why, what it will do, and the two ways to go on. */
-export function CorrectPanel({ purchase, onDone, onCancel }: { purchase: Purchase; onDone: (message: string) => void; onCancel: () => void }) {
+/** `onDone` gets null after a void (its toast says so, #682) and the words for a purchase found voided already. */
+export function CorrectPanel({ purchase, onDone, onCancel }: { purchase: Purchase; onDone: (message: string | null) => void; onCancel: () => void }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -45,14 +46,14 @@ export function CorrectPanel({ purchase, onDone, onCancel }: { purchase: Purchas
       discard();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       if (again) void navigate({ to: '/staff/retail/restock', search: { again: id } as never });
-      else onDone(`Purchase ${purchase.purchase_no ?? ''} is voided. Its stock, its entries and its prices are back as they were.`);
+      else onDone(null);
     },
     onError: (error) => {
       if (listIsStale(error)) void queryClient.invalidateQueries({ queryKey: ['retail'] });
       if (alreadyVoided(error)) onDone(`Purchase ${purchase.purchase_no ?? ''} was voided already.`);
     },
     onSettled: () => { sending.current = false; },
-    meta: { success: 'Purchase voided' },
+    meta: { success: `Purchase ${purchase.purchase_no ?? ''} is voided. Its stock, its entries and its prices are back as they were.` },
   });
   const press = (again: boolean) => {
     if (!ready || sending.current) return;
@@ -78,7 +79,7 @@ export function CorrectPanel({ purchase, onDone, onCancel }: { purchase: Purchas
   );
 }
 
-export function RestockCard({ purchase, supplier, onDone }: { purchase: Purchase; supplier?: string; onDone: (message: string) => void }) {
+export function RestockCard({ purchase, supplier, onDone }: { purchase: Purchase; supplier?: string; onDone: (message: string | null) => void }) {
   const { me } = useStaff();
   const [open, setOpen] = useState(false);
   const voided = purchase.status === 'voided';

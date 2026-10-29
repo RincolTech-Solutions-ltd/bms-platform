@@ -78,7 +78,7 @@ function PayPanel({ sale, today, full, onDone }: { sale: Sale; today: string; fu
   const sending = useRef(false);
   const send = useMutation({
     mutationFn: () => retail.paySale(saleId, buildPayRequest(settledDate(full ? fullPay(draft, sale) : draft, todayOnly, today)), key),
-    onSuccess: (result) => {
+    onSuccess: () => {
       discard();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onDone();

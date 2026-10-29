@@ -368,6 +368,10 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
    `//` lines directly above its `const ... = useMutation(` line. The success toast guard in `busy-guard.test.ts` fails a
    staff mutation whose options, hook, sends with the rest of their block, and the local functions and same-file callback
    props they call hold neither `meta.success`, a toast call with the `'success'` tone, nor that comment.
+   Each write says it worked once: a small success note beside the form goes, and its words become the toast; a full
+   success screen in place of the form (sale complete, a receipt, a voucher, the return outcome) stays and says no toast,
+   with `// toast-exempt: success screen`. The guard also fails a `meta.success` mutation that sets a success state
+   (`setDone`, `setSaved`, `setMessage`) or renders a success note off its own result.
 7. Give the main controls of a new screen `data-tour` ids and add the screen's steps to
    `frontend/src/tour/tours.ts` (a page tour at least), with plain, short sentences.
 

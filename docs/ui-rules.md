@@ -83,6 +83,10 @@ back to what opened it.
     of a few plain words, because most people read very little (issue #682): the screen's own `show(text, 'success')`, or
     the words in the mutation's `meta: { success }` that the app's one `DoneToast` says. The success toast guard in
     `busy-guard.test.ts` fails a staff mutation that says neither, unless `// toast-exempt: <reason>` sits above it.
+    One success signal per action: a small inline success note ('Saved.', 'Done.') is never shown beside the toast, its
+    words go into the toast; a full success screen that replaces the form (the sale complete screen, a receipt, the
+    return outcome) stays, shows no toast and carries `// toast-exempt: success screen`. The guard fails a mutation whose
+    `meta.success` toast also sets a success state or renders a success note.
     A press shows at once: every button, tile, link card and row sinks to `--press-scale` and dims to `--press-opacity`,
     by transform and opacity only, in `--motion-fast` (100 to 160ms); under reduced motion it only dims. A busy button
     is the `BusyButton` (rule 6 of the design system) and a disabled one is flat grey, never only faded.

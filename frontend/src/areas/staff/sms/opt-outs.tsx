@@ -121,7 +121,6 @@ function AddNumber({ onAdded }: { onAdded: () => void }) {
       <input id="sms-oo-reason" autoComplete="off" maxLength={200} value={reason} onChange={(e) => { setReason(e.target.value); add.reset(); }} aria-invalid={error !== null && error.fields.reason !== undefined} />
       <p className="field-hint">Needed only when the number is already stopped for every message and you choose reminders only. Words about why, not names or numbers.</p>
       {error?.fields.reason && <p role="alert" className="field-error">{error.fields.reason}</p>}
-      {add.isSuccess && <p role="status" className="alert alert-success">Added.</p>}
       <p>
         <BusyButton type="submit" className="rt-primary" busy={add.isPending} notReady={phone.trim() === ''}>
           Add to the list
@@ -212,7 +211,7 @@ export function OptOutsScreen() {
       return refresh();
     },
     onError: refresh,
-    meta: { success: 'Opt-out lifted' },
+    meta: { success: 'Number taken off the list' },
   });
   if (!allowed) return <NoAccess what="the opt-out list" />;
   const canManage = mayManageSettings(me);

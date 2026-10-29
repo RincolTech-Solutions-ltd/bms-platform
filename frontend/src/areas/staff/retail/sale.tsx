@@ -270,6 +270,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
 
   // The client sale id is the draft's key, so a sale whose answer was lost and that is kept to send later is never twice.
   // The request is kept with the draft once sent: until the server answers, the same request is all that can go again.
+  // toast-exempt: success screen, the sale complete screen (#520) follows
   const save = useMutation({
     mutationFn: (body: SaleRequest) => retail.createSale(body, key),
     onError: (e) => {
@@ -285,7 +286,6 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       void queryClient.invalidateQueries({ queryKey: ['retail', 'home'] });
       onSaved?.(sale, receivedFor(draft.method, sale.total_minor ?? 0, received));
     },
-    meta: { success: 'Sale saved' },
   });
 
   const addBuyer = useMutation({
@@ -571,6 +571,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
   };
   const entry = useEntryChecks('sell', branchId, warnings, send, draft.lines);
   const lost = locked && !save.isPending && !(save.error instanceof RetailError);
+  // toast-exempt: success screen, the provisional receipt says the sale is kept on this phone
   const keep = useMutation({
     mutationFn: async () => {
       if (!offline) throw new Error('Offline sales are not available');
@@ -594,7 +595,6 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       if (offline?.connectivity.online()) void offline.engine.sync();
       onQueued?.(item);
     },
-    meta: { success: 'Sale saved on this phone, it will send later' },
   });
   const clear = () => {
     // Issue #656: a tick still asked goes with the sale, and a draft made for it is discarded; offline the sale waits.

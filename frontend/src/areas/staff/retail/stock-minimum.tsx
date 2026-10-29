@@ -14,18 +14,14 @@ export function StockMinimumEditor({ productId, unit }: { productId: string; uni
   const key = ['retail', 'stock-minimum', productId];
   const level = useQuery({ queryKey: key, queryFn: () => stockMinimumApi.get(productId) });
   const [every, setEvery] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const done = (next: StockMinimum, words: string) => {
-    queryClient.setQueryData(key, next);
-    setMessage(words);
-  };
+  const done = (next: StockMinimum) => queryClient.setQueryData(key, next);
   const saveEvery = useMutation({
     mutationFn: (qty: string | null) => stockMinimumApi.setEveryBranch(productId, qty),
-    onSuccess: (next, qty) => {
+    onSuccess: (next) => {
       setEvery(null);
-      done(next, qty === null ? 'No level for every branch now.' : `Every shop and store warns below ${showLevel(qty)}.`);
+      done(next);
     },
-    meta: { success: 'Level saved' },
+    meta: { success: (_: unknown, qty: string | null) => (qty === null ? 'No level for every branch now.' : `Every shop and store warns below ${showLevel(qty)}.`) },
   });
   if (level.isPending) return <p className="loading">Loading</p>;
   if (!level.data) return <Problem error={level.error} />;
@@ -71,23 +67,22 @@ export function StockMinimumEditor({ productId, unit }: { productId: string; uni
           ))}
         </ul>
       )}
-      {message && <p role="status">{message}</p>}
     </fieldset>
   );
 }
 
-function BranchLevel({ productId, branch, per, onSaved }: { productId: string; branch: StockMinimumBranch; per: string; onSaved: (next: StockMinimum, words: string) => void }) {
+function BranchLevel({ productId, branch, per, onSaved }: { productId: string; branch: StockMinimumBranch; per: string; onSaved: (next: StockMinimum) => void }) {
   const [typed, setTyped] = useState<string | null>(null);
   const shown = typed ?? showLevel(branch.min_qty);
   const parsed = parseLevel(shown);
   const name = `${branch.branch_name ?? ''}${branch.store ? ' (store)' : ''}`;
   const save = useMutation({
     mutationFn: (qty: string | null) => stockMinimumApi.setBranch(productId, branch.branch_id ?? '', qty),
-    onSuccess: (next, qty) => {
+    onSuccess: (next) => {
       setTyped(null);
-      onSaved(next, qty === null ? `${name} follows the level for every branch now.` : `${name} warns below ${showLevel(qty)}.`);
+      onSaved(next);
     },
-    meta: { success: 'Level saved' },
+    meta: { success: (_: unknown, qty: string | null) => (qty === null ? `${name} follows the level for every branch now.` : `${name} warns below ${showLevel(qty)}.`) },
   });
   const applies = branch.applies_qty ? `warns below ${showLevel(branch.applies_qty)}${per}` : 'no level, watched by its pace';
   return (

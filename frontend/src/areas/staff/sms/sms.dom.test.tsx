@@ -42,6 +42,7 @@ const { SmsSettingsScreen } = await import('./settings');
 const { WordingScreen } = await import('./wording');
 const { OptOutsScreen } = await import('./opt-outs');
 const { MemberSmsControl } = await import('../lending/member-sms');
+const { DoneToast, doneToasts } = await import('../retail/toast');
 
 const saved: SmsSettings = {
   enabled: false,
@@ -78,11 +79,12 @@ const ADMIN = ['core.settings.read', 'core.settings.manage', 'core.notifications
 function shell(node: ReactElement, permissions: string[] = ADMIN) {
   const me = { ...mockMe('admin'), permissions };
   const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/sms'] }) });
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } }, mutationCache: doneToasts() });
   return render(
     <RouterContextProvider router={router}>
       <QueryClientProvider client={client}>
         <StaffContext.Provider value={{ me, branch: null }}>{node}</StaffContext.Provider>
+        <DoneToast />
       </QueryClientProvider>
     </RouterContextProvider>,
   );
@@ -397,7 +399,7 @@ describe('the opt-out list', () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve)); await new Promise((resolve) => setTimeout(resolve)); });
     fireEvent.click(screen.getByRole('button', { name: 'Add to the list' }));
     await waitFor(() => expect(api.addOptOut).toHaveBeenLastCalledWith('0700000601', 'all', undefined));
-    expect(await screen.findByText('Added.')).toBeTruthy();
+    expect(await screen.findByText('Number added')).toBeTruthy();
   });
 
   it('checks a pasted list first and adds it only on the second click, naming the lines it could not read', async () => {

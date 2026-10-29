@@ -41,6 +41,7 @@ const { RetailError } = await import('../../../api/retail');
 const { retailMessage } = await import('../../../api/retail-errors');
 const { CorrectPanel, RestockCard } = await import('./restocks');
 const { RestockForm } = await import('./restock');
+const { DoneToast, doneToasts } = await import('./toast');
 const { chosenUnitHint, redraftOf, unitHint, voidReasonOf } = await import('./restock-correct-state');
 
 afterEach(() => {
@@ -62,8 +63,9 @@ const refusal = (code: string, detail: string, status = 422) => new RetailError(
 
 function screenOf(me: ReturnType<typeof mockMe>, node: ReactElement) {
   return render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } }, mutationCache: doneToasts() })}>
       <StaffContext.Provider value={{ me, branch }}>{node}</StaffContext.Provider>
+      <DoneToast />
     </QueryClientProvider>,
   );
 }
@@ -144,7 +146,10 @@ describe('correcting a restock', () => {
     const firstKey = voidPurchase.mock.calls[0]?.[2];
     expect(typeof firstKey).toBe('string');
     finish({ ...restock, status: 'voided' });
-    await waitFor(() => expect(done).toHaveBeenCalledWith(expect.stringContaining('RP00000001 is voided')));
+    // One success signal (#682): the toast says it, and the page is handed no message to show beside it.
+    expect((await screen.findByText(/RP00000001 is voided/)).closest('.toast-success')).not.toBeNull();
+    expect(done).toHaveBeenCalledWith(null);
+    expect(document.querySelectorAll('.toast')).toHaveLength(1);
     expect(navigate).not.toHaveBeenCalled();
   });
 

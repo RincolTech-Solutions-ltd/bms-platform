@@ -35,6 +35,7 @@ export function UsageForm({ branchId, onSaved }: { branchId: string; onSaved?: (
   const setKind = (k: 'used' | 'damaged') => setDraft((d) => ({ ...d, kind: k }));
   const setReason = (r: string) => setDraft((d) => ({ ...d, reason: r }));
   const setLines = (f: (ls: Line[]) => Line[]) => setDraft((d) => ({ ...d, lines: f(d.lines) }));
+  // toast-exempt: success screen, the page then says Saved with Record another
   const save = useMutation({
     mutationFn: () => retail.createUsage(buildUsage({ branchId, kind, reason, lines }), key),
     onSuccess: (u) => {
@@ -42,7 +43,6 @@ export function UsageForm({ branchId, onSaved }: { branchId: string; onSaved?: (
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onSaved?.(u);
     },
-    meta: { success: (u: Usage) => (u?.kind === 'damaged' ? 'Damage recorded' : 'Usage recorded') },
   });
   const valid = lines.length > 0 && reason.trim() !== '' && lines.every((l) => parseQty(l.qty) !== null);
 
