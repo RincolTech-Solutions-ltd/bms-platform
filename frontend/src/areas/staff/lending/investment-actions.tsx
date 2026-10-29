@@ -7,7 +7,7 @@ import { usePersistedDraft } from '../retail/idempotency';
 import { Problem } from '../retail/ui';
 import { instructionWords, investmentTxnWords, percent } from './investment-state';
 import { businessToday } from '../../../api/retail';
-import { isIsoDate, money, words } from './loan-state';
+import { isIsoDate, money, onToday, words } from './loan-state';
 import { BusyButton } from '../../../app/ui/BusyButton';
 
 // The forms of the investment page: funding, return payout, maturity payout, rollover, early
@@ -46,17 +46,19 @@ function Waiting({ executed, done }: { executed: boolean; done: string }) {
   );
 }
 
-interface FundDraft { date: string; method: PaymentMethod; reference: string }
+interface FundDraft { date: string; method: PaymentMethod; reference: string; startedOn: string }
 
 export function FundForm({ inv }: { inv: Investment }) {
   const { me } = useStaff();
   const id = inv.id ?? '';
   const refresh = useRefresh(id);
+  const today = businessToday();
   const { key, draft, setDraft, finish } = usePersistedDraft<FundDraft>(`invest-fund:${me.user_id ?? ''}:${id}`, {
-    date: businessToday(),
+    date: today,
     method: 'cash',
     reference: '',
-  });
+    startedOn: today,
+  }, (d) => onToday(d, 'date', today));
   const update = (patch: Partial<FundDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const save = useMutation({
     mutationFn: () =>

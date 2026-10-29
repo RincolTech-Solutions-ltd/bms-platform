@@ -65,15 +65,20 @@ export function dropDraft(store: DraftStore | null, name: string): void {
  * same entry posts once. `discard` drops the draft and starts a fresh one with a fresh key. Mount a
  * new form (a new `key` prop) for the next record. A draft other than `initial` is unsaved work (#576): the app does not update
  * itself under it until it is finished, discarded or the form closes. A change after `finish` (a form kept on screen for the next
- * record) starts the next record: a fresh key, kept in the tab again and unsaved work again.
+ * record) starts the next record: a fresh key, kept in the tab again and unsaved work again. `restore`, when given, mends a
+ * draft read back from the tab before the form shows it, keeping its key (a date from an earlier day, #670).
  */
 export function usePersistedDraft<T>(
   name: string,
   initial: T,
+  restore?: (saved: T) => T,
 ): { key: string; draft: T; setDraft: Dispatch<SetStateAction<T>>; finish: () => void; discard: () => void } {
   const store = useRef(tabStore()).current;
   const blank = useRef(initial).current;
-  const [saved, setSaved] = useState(() => loadDraft(store, name, blank));
+  const [saved, setSaved] = useState(() => {
+    const s = loadDraft(store, name, blank);
+    return restore ? { key: s.key, draft: restore(s.draft) } : s;
+  });
   const done = useRef(false);
   const [finished, setFinished] = useState(false);
   const changed = useMemo(() => JSON.stringify(saved.draft) !== JSON.stringify(blank), [saved.draft, blank]);

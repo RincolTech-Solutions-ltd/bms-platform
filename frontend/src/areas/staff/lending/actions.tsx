@@ -5,7 +5,7 @@ import { useStaff } from '../context';
 import { usePersistedDraft } from '../retail/idempotency';
 import { Problem } from '../retail/ui';
 import { businessToday } from '../../../api/retail';
-import { allocationSummary, isIsoDate, money, parseAmount, words } from './loan-state';
+import { allocationSummary, isIsoDate, money, onToday, parseAmount, words } from './loan-state';
 import { BusyButton } from '../../../app/ui/BusyButton';
 
 // The money-moving forms of the loan page: repayment, disbursement, reversal and write-off, plus
@@ -45,7 +45,7 @@ function ReferenceInput({ id, value, onChange }: { id: string; value: string; on
   );
 }
 
-interface RepayDraft { amount: string; valueDate: string; method: PaymentMethod; reference: string }
+interface RepayDraft { amount: string; valueDate: string; method: PaymentMethod; reference: string; startedOn: string }
 
 /** What the server answered for a repayment: the receipt and where the money went. */
 export function RepaymentReceipt({ result, currency, onNew }: { result: RepaymentResult; currency: string | undefined; onNew?: () => void }) {
@@ -92,12 +92,14 @@ export function RepaymentForm({ loan, onDone }: { loan: Loan; onDone: (r: Repaym
   const { me } = useStaff();
   const loanId = loan.id ?? '';
   const refresh = useRefreshLoan(loanId);
+  const today = businessToday();
   const { key, draft, setDraft, finish, discard } = usePersistedDraft<RepayDraft>(`lending-repay:${me.user_id ?? ''}:${loanId}`, {
     amount: '',
-    valueDate: businessToday(),
+    valueDate: today,
     method: 'cash',
     reference: '',
-  });
+    startedOn: today,
+  }, (d) => onToday(d, 'valueDate', today));
   const update = (patch: Partial<RepayDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const amountMinor = parseAmount(draft.amount, loan.currency);
   const valid = amountMinor !== null && isIsoDate(draft.valueDate);
@@ -138,17 +140,19 @@ export function RepaymentForm({ loan, onDone }: { loan: Loan; onDone: (r: Repaym
   );
 }
 
-interface DisburseDraft { date: string; method: PaymentMethod; reference: string }
+interface DisburseDraft { date: string; method: PaymentMethod; reference: string; startedOn: string }
 
 export function DisburseForm({ loan }: { loan: Loan }) {
   const { me } = useStaff();
   const loanId = loan.id ?? '';
   const refresh = useRefreshLoan(loanId);
+  const today = businessToday();
   const { key, draft, setDraft, finish } = usePersistedDraft<DisburseDraft>(`lending-disburse:${me.user_id ?? ''}:${loanId}`, {
-    date: businessToday(),
+    date: today,
     method: 'cash',
     reference: '',
-  });
+    startedOn: today,
+  }, (d) => onToday(d, 'date', today));
   const update = (patch: Partial<DisburseDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const save = useMutation({
     mutationFn: () =>
