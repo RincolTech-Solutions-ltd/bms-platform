@@ -33,11 +33,13 @@ public interface RetailCatalogue {
 
     /**
      * Issue #689 (ADR-106): the names that are a package, never an item's smallest unit, in any case, one or many, with or
-     * without a size ("Box", "cartons", "Pack of 6", "Set of 4"). The one list: every unit carries {@code is_package} from
-     * it, which the PWA reads, so the screens and the server cannot disagree.
+     * without a size ("Box", "cartons", "Pack of 6", "Set of 4"), and their short codes ("Ctn", "pkts", "Bx", "doz"). The
+     * one list: every unit carries {@code is_package} from it, which the PWA reads, so the screens and the server cannot
+     * disagree.
      */
     Pattern PACKAGE_WORDS = Pattern.compile(
-            "(box|carton|dozen|pack|packet|bag|sack|crate|case|tray|bundle|bale)(e?s)?( of \\d+.*)?|sets? of \\d+.*",
+            "((box|carton|dozen|pack|packet|bag|sack|crate|case|tray|bundle|bale)(e?s)?|(ctn|pkt)s?|bx|doz|dz)( of \\d+.*)?"
+                    + "|sets? of \\d+.*",
             Pattern.CASE_INSENSITIVE);
 
     /** True when the unit's name is a package word of {@link #PACKAGE_WORDS}. */
