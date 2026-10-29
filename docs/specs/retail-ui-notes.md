@@ -1381,6 +1381,30 @@ and showed the sheet of their old AppSheet app: Search, New, the list and Done. 
   is a combobox over the listbox "Categories": Up, Down, Home and End move the highlight (aria-activedescendant), Enter
   chooses it (or the only match), Escape closes, and the focus goes back to the field. The number found is announced.
 
+## Find items on a phone (issue #690, FR-UXN-13)
+
+The owner, 29 Oct 2026: "On mobile I can't easily find items and categories. It doesn't feel natural."
+
+- **Search first.** On Items and My stock the search box and the category chips sit in `FindBar`
+  (`frontend/src/areas/staff/retail/phone-find.tsx`). Below 720px it is sticky under the 56px top bar on the page's background
+  with a hairline under it, so the list passes under it; from 720px it is in the flow.
+- **Chips.** `CategoryChips`: All, then each category in the server's order with its item count (`product_count`), in one row
+  that scrolls sideways inside itself (the page never does). A switched-off category shows only while it still holds items or
+  is chosen. Each chip is a 48px button with `aria-pressed`; the chosen one is filled. A chip sets the page's own category
+  filter, so the list asks the server as the picker did; the chips replace the category picker of these two filters
+  (FR-UXN-10). Each page remembers its chip on the device (`bms.findChip.items`, `bms.findChip.stock`, read and written
+  inside try and catch); a remembered category that has gone reads as All.
+- **One tap to Categories.** My stock starts with Items and Categories, two 48px rows side by side, for whoever may open
+  them. The My stock tab stays current on Items and Categories.
+- **Rows.** On a phone an item of Items is a `ListRow` (64px): the name, the category and the stock in the branch in use in
+  packs and pieces (`packsAndPieces`, with the unit words of `quantityIn`), and the selling price at the right under the
+  words Selling price. The row opens the item; the opened item has Change price above its form. The laptop keeps the cards.
+  My stock on a phone is one plain list of its cards with the category under each name; the chips stand for the groups.
+  Items asks `GET /retail/products` with `branch_id` only for a session that may read stock at that branch.
+- **Nothing found.** `No item called "bulb".` with Add it, which opens Quick add with the name typed through its `name`
+  route parameter (Quick add is the add form that takes a name from the link; Add an item has none), and Clear search.
+- **Not yet.** The server search matches the name, the code and the category, not a barcode; a barcode is found by Scan.
+
 ## Add it in place (issue #688, FR-UXN-12)
 
 The owner, 29 Oct 2026 (D75): "if something is not there you have the option to add it in place and then continue with the
