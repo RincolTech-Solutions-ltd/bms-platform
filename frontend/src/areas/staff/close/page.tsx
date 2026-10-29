@@ -58,8 +58,9 @@ export function CloseScreen() {
       await refresh(saved);
     },
     onError: () => setTyped(''),
+    meta: { success: 'Closing requested' },
   });
-  const cancel = useMutation({ mutationFn: cancelClosure, onSuccess: refresh });
+  const cancel = useMutation({ mutationFn: cancelClosure, onSuccess: refresh, meta: { success: 'Closing cancelled' } });
 
   if (closure.isError) {
     return (

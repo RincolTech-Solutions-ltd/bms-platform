@@ -134,6 +134,7 @@ export function RepaymentForm({ loan, onDone }: { loan: Loan; onDone: (r: Repaym
       refresh();
       onDone(r);
     },
+    meta: { success: (r: RepaymentResult) => (r.transaction?.txn_type === 'recovery' ? 'Recovery recorded' : 'Repayment recorded') },
   });
   return (
     <form aria-label="Record a repayment" onSubmit={(e) => { e.preventDefault(); if (valid && !save.isPending) save.mutate(); }}>
@@ -184,6 +185,7 @@ export function DisburseForm({ loan }: { loan: Loan }) {
       finish();
       refresh();
     },
+    meta: { success: (r: { executed: boolean }) => (r.executed ? 'Loan disbursed' : null) },
   });
   if (save.data) {
     return save.data.executed ? (
@@ -256,7 +258,7 @@ function ReasonForm({ id, label, submit, draftName, send }: {
   send: (reason: string, key: string) => Promise<{ executed: boolean }>;
 }) {
   const { key, draft, setDraft, finish } = usePersistedDraft<string>(draftName, '');
-  const save = useMutation({ mutationFn: () => send(draft.trim(), key), onSuccess: finish });
+  const save = useMutation({ mutationFn: () => send(draft.trim(), key), onSuccess: finish, meta: { success: (r: { executed: boolean }) => (r.executed ? 'Change saved' : null) } });
   if (save.data) {
     return save.data.executed ? (
       <p role="status" className="alert alert-success">Done.</p>

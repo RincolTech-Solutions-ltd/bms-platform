@@ -51,6 +51,7 @@ export function FeedbackForm({ send = sendFeedback, from = pageBeforeFeedback, a
       if (fileInput.current) fileInput.current.value = '';
       void queryClient.invalidateQueries({ queryKey: ['feedback', 'mine'] });
     },
+    meta: { success: 'Feedback sent' },
   });
   const kindProblem = kind === null ? 'Choose what it is: an idea, a problem or a question.' : null;
   const textProblem = messageProblem(message);

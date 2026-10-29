@@ -53,6 +53,7 @@ export function BillingContactCard({ view }: { view: BillingView }) {
       setEditing(false);
       setDone('Saved. The next reminder and receipt go to this person.');
     },
+    meta: { success: 'Billing contact saved' },
   });
   const remove = useMutation({
     mutationFn: clearBillingContact,
@@ -63,6 +64,7 @@ export function BillingContactCard({ view }: { view: BillingView }) {
       setPhone('');
       setDone('Removed. Reminders and receipts go to the owner again.');
     },
+    meta: { success: 'Billing contact removed' },
   });
 
   const problems = { name: nameProblem(name), email: emailProblem(email), phone: phoneProblem(phone) };

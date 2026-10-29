@@ -47,6 +47,7 @@ export function WaiveItemSheet({ loan, row, memberName, onClose }: {
       finish();
       void queryClient.invalidateQueries({ queryKey: ['lending', 'loan', loanId] });
     },
+    meta: { success: (r: { executed: boolean }) => (r.executed ? 'Amount waived' : null) },
   });
   const borrower = memberName ? `${memberName} (${loan.member_no ?? ''})` : `Member ${loan.member_no ?? ''}`;
   const title = `Waive fee or interest on item ${row.no ?? ''}`;

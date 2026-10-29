@@ -113,7 +113,10 @@ function Placeholders({ list, disabled, onInsert }: { list: SmsPlaceholder[]; di
 
 function TestMessage({ eventKey, text, canSend }: { eventKey: string; text: string; canSend: boolean }) {
   const [to, setTo] = useState('');
-  const send = useMutation({ mutationFn: () => sms.testMessage(eventKey, text, to) });
+  const send = useMutation({
+    mutationFn: () => sms.testMessage(eventKey, text, to),
+    meta: { success: (r: SmsTestResult) => (r.outcome === 'sent' || r.outcome === 'sunk' ? 'Test message sent' : null) },
+  });
   if (!canSend) return null;
   const error = send.error instanceof SmsError ? send.error : null;
   return (
@@ -167,11 +170,13 @@ export function TemplateEditor({ template, canManage, onNotice, tour = false }: 
     mutationFn: () => sms.saveTemplate(template.event_key, version, text),
     onSuccess: () => { onNotice(null); return refresh(); },
     onError: (error) => { if (error instanceof SmsError && error.code === 'version_conflict') onNotice(error.message); return refresh(); },
+    meta: { success: 'Wording saved' },
   });
   const revert = useMutation({
     mutationFn: () => sms.revertTemplate(template.event_key, version),
     onSuccess: () => { onNotice(null); return refresh(); },
     onError: (error) => { if (error instanceof SmsError && error.code === 'version_conflict') onNotice(error.message); return refresh(); },
+    meta: { success: 'Default wording restored' },
   });
   const saveError = save.error instanceof SmsError ? save.error : null;
   const dirty = text !== saved;

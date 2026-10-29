@@ -98,6 +98,7 @@ function AddNumber({ onAdded }: { onAdded: () => void }) {
   const add = useMutation({
     mutationFn: () => sms.addOptOut(phone, scope, reason.trim() === '' ? undefined : reason.trim()),
     onSuccess: () => { setPhone(''); setReason(''); onAdded(); },
+    meta: { success: 'Number added' },
   });
   const error = add.error instanceof SmsError ? add.error : null;
   return (
@@ -143,6 +144,7 @@ function PasteList({ onAdded }: { onAdded: () => void }) {
         onAdded();
       }
     },
+    meta: { success: (result: SmsImportResult) => (result.dry_run ? null : 'Numbers added') },
   });
   const error = run.error instanceof SmsError ? run.error : null;
   const invalid = checked?.rows.filter((r) => r.outcome === 'invalid_phone') ?? [];
@@ -210,6 +212,7 @@ export function OptOutsScreen() {
       return refresh();
     },
     onError: refresh,
+    meta: { success: 'Opt-out lifted' },
   });
   if (!allowed) return <NoAccess what="the opt-out list" />;
   const canManage = mayManageSettings(me);

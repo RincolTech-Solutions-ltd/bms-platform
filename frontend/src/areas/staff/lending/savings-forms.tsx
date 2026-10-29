@@ -103,6 +103,7 @@ export function MoneyForm({ account, kind, onDone }: { account: SavingsAccount; 
       refresh();
       onDone?.();
     },
+    meta: { success: (r: { executed: boolean }) => (!r.executed ? null : kind === 'deposit' ? 'Deposit recorded' : 'Withdrawal paid out') },
   });
 
   if (save.data) {
@@ -182,6 +183,7 @@ export function CloseForm({ account }: { account: SavingsAccount }) {
       finish();
       refresh();
     },
+    meta: { success: (r: { executed: boolean }) => (r.executed ? 'Account closed' : null) },
   });
   if (save.data) {
     return save.data.executed ? (
@@ -236,7 +238,11 @@ export function StatusForm({ account, change }: { account: SavingsAccount; chang
   const refresh = useRefreshAccount(accountId);
   const [reason, setReason] = useState('');
   const words = STATUS_WORDS[change];
-  const save = useMutation({ mutationFn: () => savings.setStatus(accountId, change, reason.trim()), onSuccess: refresh });
+  const save = useMutation({
+    mutationFn: () => savings.setStatus(accountId, change, reason.trim()),
+    onSuccess: refresh,
+    meta: { success: { freeze: 'Account frozen', unfreeze: 'Account unfrozen', reactivate: 'Account reactivated' }[change] },
+  });
   if (save.data) return <p role="status" className="alert alert-success">{words.done}</p>;
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (reason.trim() !== '' && !save.isPending) save.mutate(); }}>
@@ -255,6 +261,7 @@ export function ReverseSavingsForm({ account, txn }: { account: SavingsAccount; 
   const accountId = account.id ?? '';
   const refresh = useRefreshAccount(accountId);
   const { key, draft, setDraft, finish } = usePersistedDraft<string>(`savings-reverse:${me.user_id ?? ''}:${txn.id ?? ''}`, '');
+  // toast-exempt: a reversal waits for a checker, and this form then says it is sent for approval
   const save = useMutation({
     mutationFn: () => savings.reverse(accountId, txn.id ?? '', draft.trim(), key),
     onSuccess: () => {

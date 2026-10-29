@@ -70,6 +70,7 @@ export function FundForm({ inv }: { inv: Investment }) {
       finish();
       refresh();
     },
+    meta: { success: (r: { executed: boolean }) => (r.executed ? 'Funding recorded' : null) },
   });
   if (save.data) return <Waiting executed={save.data.executed} done="Funded. The investment is active and its schedule is below." />;
   return (
@@ -115,6 +116,7 @@ export function PayForm({ inv, kind }: { inv: Investment; kind: 'pay_return' | '
       finish();
       refresh();
     },
+    meta: { success: kind === 'pay_return' ? 'Return paid' : 'Investment paid out' },
   });
   if (save.data) {
     const t = save.data.transaction ?? {};
@@ -156,6 +158,7 @@ export function RolloverForm({ inv, onDone }: { inv: Investment; onDone: (nextId
       refresh();
       if (r.next?.id) onDone(r.next.id);
     },
+    meta: { success: 'Investment rolled over' },
   });
   return (
     <form aria-label="Roll over" onSubmit={(e) => { e.preventDefault(); if (!save.isPending) save.mutate(); }}>
@@ -193,6 +196,7 @@ export function EarlyWithdrawalForm({ inv }: { inv: Investment }) {
       finish();
       refresh();
     },
+    meta: { success: (r: { executed: boolean }) => (r.executed ? 'Investment withdrawn' : null) },
   });
   if (save.data) return <Waiting executed={save.data.executed} done="Withdrawn." />;
   const q = quote.data;
@@ -235,7 +239,7 @@ export function InstructionForm({ inv }: { inv: Investment }) {
   const id = inv.id ?? '';
   const refresh = useRefresh(id);
   const [choice, setChoice] = useState<string>(inv.maturity_instruction ?? 'payout');
-  const save = useMutation({ mutationFn: () => investments.instruct(id, choice), onSuccess: refresh });
+  const save = useMutation({ mutationFn: () => investments.instruct(id, choice), onSuccess: refresh, meta: { success: 'Choice saved' } });
   return (
     <form aria-label="Maturity instruction" onSubmit={(e) => { e.preventDefault(); if (!save.isPending) save.mutate(); }}>
       <fieldset>
@@ -268,6 +272,7 @@ export function ReverseForm({ inv, txn }: { inv: Investment; txn: InvestmentTran
       finish();
       refresh();
     },
+    meta: { success: (r: { executed: boolean }) => (r.executed ? 'Transaction reversed' : null) },
   });
   if (save.data) return <Waiting executed={save.data.executed} done="Reversed." />;
   return (

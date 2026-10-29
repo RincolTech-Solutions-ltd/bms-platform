@@ -174,6 +174,7 @@ export function ReceivePaymentsPage() {
     mutationFn: payments.test,
     onSuccess: keep,
     onError: () => void queryClient.invalidateQueries({ queryKey: ['payments', 'account'] }),
+    meta: { success: (r: MerchantAccount) => (r.status === 'verified' ? 'Connection works' : null) },
   });
   async function save(key: string, secret: string, code: string) {
     setSaving(true);

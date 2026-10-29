@@ -610,6 +610,7 @@ function DrillPanel({ target, filter, exportable, onClose }: {
     queryFn: () => insights.table(target.table, filter, target.params),
     refetchInterval: REFRESH_MS,
   });
+  // toast-exempt: the browser downloads the CSV file itself, nothing is saved
   const download = useMutation({ mutationFn: () => insights.exportCsv(target.table, filter, target.params) });
   const ref = useRef<HTMLElement>(null);
   // The panel opens below the page: bring it into view and give it focus for keyboard users.
@@ -665,6 +666,7 @@ function DigestSettings() {
       queryClient.setQueryData(['insights', 'digest'], data);
       setDraft(null);
     },
+    meta: { success: 'Digest settings saved' },
   });
   const s = settings.data;
   if (!s) return <>{settings.error ? <Problem error={settings.error} /> : <p className="loading">Loading</p>}</>;
