@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.retail.RetailTestSupport;
 import com.rincoltech.bms.testsupport.Api;
 import java.sql.Connection;
@@ -42,6 +43,9 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
 
     @Autowired
     TestRestTemplate http;
+
+    @Autowired
+    BusinessClock clock;
 
     TestDatabase.Fixture t;
     RetailTestSupport api;
@@ -965,5 +969,40 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         ResponseEntity<JsonNode> r = receiveAll(id);
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(qty(t.secondBranch(), product)).isEqualTo("4.000");
+    }
+
+    // JUSTIFICATION-A3: the two report fixes of #239 (items 3 and 4); no existing test covers either.
+    /** Issue #239: an inactive item whose stock is all on its way keeps its row, so the combined total does not lose it. */
+    @Test
+    void anInactiveItemWithAllItsStockOnTheWayStaysInStockByLocation() {
+        switchOn();
+        api.stockUp(t.headOffice(), product, "4");
+        dispatched("4");
+        switchOff(product);
+
+        JsonNode r = row(byLocation(ADMIN), product);
+
+        assertThat(r.get("in_transit_qty").asString()).isEqualTo("4.000");
+        assertThat(r.get("combined_qty").asString()).isEqualTo("4.000");
+        assertThat(r.get("combined_value_minor").asLong()).isEqualTo(4_000);
+    }
+
+    /** Issue #239: the age of a transfer on its way counts from when it was sent, not from a transfer date set in the past. */
+    @Test
+    void theAgeInFlightCountsFromWhenItWasSent() {
+        switchOn();
+        api.stockUp(t.headOffice(), product, "10");
+        Map<String, Object> backdated = body(t.headOffice(), t.secondBranch(), product, "4");
+        backdated.put(
+                "transfer_date",
+                clock.today(BusinessClock.DEFAULT_ZONE).minusDays(5).toString());
+        ResponseEntity<JsonNode> sent = api.postKeyed(
+                "/transfers", backdated, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(sent.getStatusCode()).as("%s", sent.getBody()).isEqualTo(HttpStatus.CREATED);
+
+        JsonNode item = inFlight(ADMIN).get("items").get(0);
+
+        assertThat(item.get("transfer_date").asString()).isEqualTo(backdated.get("transfer_date"));
+        assertThat(item.get("age_days").asInt()).isZero();
     }
 }
