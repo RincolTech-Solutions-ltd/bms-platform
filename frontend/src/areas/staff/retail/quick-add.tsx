@@ -209,7 +209,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
     meta: { success: (r: { added: QuickAdd }) => (r?.added?.item_made === false ? 'Stock added' : 'Item added') },
   });
 
-  const submit =(e?: FormEvent) => {
+  const submit = (e?: FormEvent) => {
     e?.preventDefault();
     if (add.isPending || exists !== null) return;
     setKept(null);

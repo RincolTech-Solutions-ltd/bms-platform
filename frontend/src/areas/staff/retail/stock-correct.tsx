@@ -96,7 +96,7 @@ function QuantityForm({ row, branchId, onDone, onWaiting }: { row: StockRow; bra
     onSettled: () => { sending.current = false; },
     meta: { success: (r: Awaited<ReturnType<typeof retail.correctStock>>) => (r && isWaiting(r) ? null : 'Stock corrected') },
   });
-  const difference =differenceWords(draft.qty, shown, row.unit);
+  const difference = differenceWords(draft.qty, shown, row.unit);
   const press = () => {
     if (!ready || sending.current) return;
     sending.current = true;
