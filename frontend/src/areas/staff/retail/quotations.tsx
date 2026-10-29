@@ -91,6 +91,7 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
       void queryClient.invalidateQueries({ queryKey: ['retail', 'stock'] });
       refresh();
     },
+    meta: { success: 'Sale made' },
   });
   const cancel = useMutation({
     mutationFn: () => retail.cancelQuotation(q.id ?? '', reason),
@@ -98,6 +99,7 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
       setPanel(null);
       refresh();
     },
+    meta: { success: 'Quotation cancelled' },
   });
   const open = q.status === 'open' && !q.expired;
   // A store never sells (ADR-048), so a quotation made there cannot be turned into a sale.
@@ -162,6 +164,7 @@ export function QuotationForm({ branchId, onSaved }: { branchId: string; onSaved
       finish();
       onSaved(q);
     },
+    meta: { success: 'Quotation saved' },
   });
   const update = (patch: Partial<QuotationDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const setLine = (i: number, patch: { qty?: string; price?: string }) => setDraft((d) => ({ ...d, lines: d.lines.map((l, n) => (n === i ? { ...l, ...patch } : l)) }));

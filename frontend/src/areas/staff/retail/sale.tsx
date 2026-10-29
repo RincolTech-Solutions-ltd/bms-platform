@@ -285,6 +285,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       void queryClient.invalidateQueries({ queryKey: ['retail', 'home'] });
       onSaved?.(sale, receivedFor(draft.method, sale.total_minor ?? 0, received));
     },
+    meta: { success: 'Sale saved' },
   });
 
   const addBuyer = useMutation({
@@ -294,6 +295,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       setDraft((d) => ({ ...d, customerId: c.id ?? '', newBuyerName: '', newBuyerContact: '' }));
       setAddingBuyer(false);
     },
+    meta: { success: 'Customer added' },
   });
   const update = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const setLine = (i: number, patch: { qty?: string; price?: string; typed?: boolean; reason?: string }) =>
@@ -592,6 +594,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       if (offline?.connectivity.online()) void offline.engine.sync();
       onQueued?.(item);
     },
+    meta: { success: 'Sale saved on this phone, it will send later' },
   });
   const clear = () => {
     // Issue #656: a tick still asked goes with the sale, and a draft made for it is discarded; offline the sale waits.

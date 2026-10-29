@@ -158,12 +158,14 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
       setMessage(`Saved the price of ${item.description} in ${item.unit}.${item.status === 'scheduled' ? ` It starts on ${item.valid_from}.` : ''}`);
       refresh();
     },
+    meta: { success: 'Price saved' },
   });
   const end = useMutation({
     mutationFn: (item: PriceListItem) => retail.endPriceListItem(list.id ?? '', item.id ?? '', today),
     onMutate: () => { setMessage(null); setFailure(null); },
     onSuccess: (item) => { setMessage(`The price of ${item.description} in ${item.unit} ends today.`); refresh(); },
     onError: (error) => setFailure(changeFailureText(error, queryClient)),
+    meta: { success: 'Price ended' },
   });
   return (
     <section aria-label={`Prices in ${list.name}`} data-tour="price-list-items">
@@ -217,12 +219,14 @@ export function PriceLists() {
       // Opened from an empty list on a form (issue #619): what was added takes the person back to that form.
       back?.();
     },
+    meta: { success: 'Price list added' },
   });
   const change = useMutation({
     mutationFn: (v: { list: PriceList; body: { name?: string; strict?: boolean; active?: boolean } }) => retail.updatePriceList(v.list.id ?? '', requireVersion(v.list.version), v.body),
     onMutate: () => setFailure(null),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['retail'] }),
     onError: (error) => setFailure(changeFailureText(error, queryClient)),
+    meta: { success: (_: unknown, v: { body: { active?: boolean } }) => (v.body.active === false ? 'Price list switched off' : v.body.active === true ? 'Price list switched on' : 'Changes saved') },
   });
   const selected = (lists.data ?? []).find((l) => l.id === open);
   return (

@@ -204,6 +204,7 @@ export function ReturnNewPage() {
       setOutcome(r);
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
+    meta: { success: (r: ReturnOutcome) => (r.executed === false ? null : 'Goods taken back') },
   });
   if (!allowed) {
     return (

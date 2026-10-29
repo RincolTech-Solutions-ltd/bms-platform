@@ -48,6 +48,7 @@ export function DeliverPanel({ order, onDone }: { order: Order; onDone: (d: Deli
       void client.invalidateQueries({ queryKey: ['retail', 'sales'] });
       onDone(d);
     },
+    meta: { success: 'Order delivered' },
   });
   const problem = deliverProblem(order, form);
   const fig = deliverFigures(order, form);
@@ -108,9 +109,9 @@ export function OrderActions({ order, onDelivered }: { order: Order; onDelivered
     setPanel(null);
     invalidate(client);
   };
-  const pack = useMutation({ mutationFn: () => retailOrders.pack(order.id ?? ''), onSuccess: after });
-  const send = useMutation({ mutationFn: () => retailOrders.send(order.id ?? '', rider.trim()), onSuccess: after });
-  const cancel = useMutation({ mutationFn: () => retailOrders.cancel(order.id ?? '', reason.trim()), onSuccess: after });
+  const pack = useMutation({ mutationFn: () => retailOrders.pack(order.id ?? ''), onSuccess: after, meta: { success: 'Order packed' } });
+  const send = useMutation({ mutationFn: () => retailOrders.send(order.id ?? '', rider.trim()), onSuccess: after, meta: { success: 'Order out for delivery' } });
+  const cancel = useMutation({ mutationFn: () => retailOrders.cancel(order.id ?? '', reason.trim()), onSuccess: after, meta: { success: 'Order cancelled' } });
   const steps = nextSteps(order);
   // Delivering records a sale, so it is offered to whoever may sell at the order's shop.
   const maySell = holdsAt(me, 'retail.sale.create', order.branch_id);
@@ -214,6 +215,7 @@ export function OrderForm({ branchId, onSaved }: { branchId: string; onSaved: (o
       finish();
       onSaved(o);
     },
+    meta: { success: 'Order saved' },
   });
   const update = (patch: Partial<OrderDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const setLine = (i: number, patch: { qty?: string; price?: string }) => setDraft((d) => ({ ...d, lines: d.lines.map((l, n) => (n === i ? { ...l, ...patch } : l)) }));

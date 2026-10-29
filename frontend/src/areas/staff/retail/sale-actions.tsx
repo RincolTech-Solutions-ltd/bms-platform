@@ -88,6 +88,7 @@ function PayPanel({ sale, today, full, onDone }: { sale: Sale; today: string; fu
       if (keyReused(error)) discard();
     },
     onSettled: () => { sending.current = false; },
+    meta: { success: 'Payment recorded' },
   });
   // The balance changed under the form (someone else took a payment): a typed amount above the new balance goes back to the balance.
   const owed = owedMinor(sale);
@@ -211,6 +212,7 @@ export function VoidSaleAction({ sale, branchName }: { sale: Sale; branchName?: 
       if (error instanceof RetailError && ['sale_voided', 'sale_has_payments', 'sale_has_returns'].includes(error.code ?? '')) void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
     onSettled: () => { sending.current = false; },
+    meta: { success: (outcome: object) => (isWaiting(outcome) ? null : 'Sale voided') },
   });
   if (waiting) return <WaitingForApproval what="The void of this sale waits for an administrator." />;
   if (sale.status !== 'completed' || done || !holdsAt(me, SALE_VOID, sale.branch_id)) return null;
@@ -291,6 +293,7 @@ export function WriteOffSaleAction({ sale }: { sale: Sale }) {
       if (writeOffMovedOn(error)) void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
     onSettled: () => { sending.current = false; },
+    meta: { success: (outcome: { executed?: boolean }) => (outcome.executed === true ? 'Debt written off' : null) },
   });
   if (!holdsAt(me, CREDIT_WRITE_OFF, sale.branch_id)) return null;
   if (message) return <Success>{message}</Success>;
