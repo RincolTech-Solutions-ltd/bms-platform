@@ -16,7 +16,7 @@ import { chipsOf, itemStock, knownChip, looksLikeBarcode, noItemCase, noItemText
  * The page's chosen chip, remembered per page. `ready` is false while a remembered chip waits for the categories, so the list
  * never asks with a category that has gone; one that has gone reads as All and is forgotten.
  */
-export function useChosenChip(page: FindPage, categories: Category[] | undefined): [string, (id: string) => void, boolean] {
+export function useChosenChip(page: FindPage, categories: Category[] | undefined, failed = false): [string, (id: string) => void, boolean] {
   const [id, setId] = useState(() => readChip(page));
   const choose = (next: string) => {
     setId(next);
@@ -26,6 +26,8 @@ export function useChosenChip(page: FindPage, categories: Category[] | undefined
   useEffect(() => {
     if (categories && id && !known) writeChip(page, '');
   }, [categories, id, known, page]);
+  // Categories that cannot load (offline, a server error) never hold the list back: it shows All (review of #703).
+  if (failed && categories === undefined) return ['', choose, true];
   return [known, choose, id === '' || categories !== undefined];
 }
 

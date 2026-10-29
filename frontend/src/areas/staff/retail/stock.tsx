@@ -297,7 +297,7 @@ export function StockPage() {
   // An inactive item (issue #342) leaves the list unless asked for; its history and the reports keep it.
   const [showInactive, setShowInactive] = useState(false);
   const categories = useQuery({ queryKey: ['retail', 'categories'], queryFn: () => retail.listCategories() });
-  const [categoryId, setCategoryId, chipReady] = useChosenChip('stock', categories.data);
+  const [categoryId, setCategoryId, chipReady] = useChosenChip('stock', categories.data, categories.isError);
   const one = useQuery({
     queryKey: ['retail', 'stock', branchId, query, categoryId, negativeOnly, level, showInactive],
     queryFn: ({ signal }) => retail.listStock({ branchId: branchId ?? '', query, categoryId, negativeOnly, level: level || undefined, includeInactive: showInactive, signal }),

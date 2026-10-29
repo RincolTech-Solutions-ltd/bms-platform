@@ -21,6 +21,7 @@ const listStock = vi.fn();
 const listCatalogue = vi.fn();
 const getProduct = vi.fn();
 const findByBarcode = vi.fn<(code: string) => Promise<BarcodeMatch | null>>();
+const categoriesFail = { on: false };
 let stockRows: StockRow[] = [];
 let catalogue: Product[] = [];
 
@@ -46,10 +47,10 @@ vi.mock('../../../api/retail', async (original) => {
       getProduct: (id: string) => getProduct(id),
       findByBarcode: (code: string) => findByBarcode(code),
       listUnits: () => Promise.resolve([]),
-      listCategories: () => Promise.resolve([
+      listCategories: () => (categoriesFail.on ? Promise.reject(new Error('offline')) : Promise.resolve([
         { id: 'c1', name: 'Test Cables', active: true, product_count: 2, code_prefix: 'CBL', next_code: 'CBL-0003', version: 1 },
         { id: 'c2', name: 'Test Lighting', active: true, product_count: 1, code_prefix: 'LGT', next_code: 'LGT-0002', version: 1 },
-      ]),
+      ])),
     },
   };
 });
@@ -133,6 +134,19 @@ describe('My stock', () => {
     await waitFor(() => expect(lastQuery(listStock).categoryId).toBe(''));
     expect(listStock.mock.calls.map((c) => (c[0] as { categoryId?: string }).categoryId)).not.toContain('gone');
     expect(localStorage.getItem('bms.findChip.stock')).toBeNull();
+  });
+
+  // JUSTIFICATION-A3: the round 3 review of #703 asks for this case (a remembered chip with categories that cannot load).
+  it('shows the list under All when the categories cannot load, never a list waiting for ever', async () => {
+    localStorage.setItem('bms.findChip.stock', 'c1');
+    categoriesFail.on = true;
+    try {
+      show(<StockPage />);
+      await waitFor(() => expect(listStock).toHaveBeenCalled());
+      expect(lastQuery(listStock).categoryId).toBe('');
+    } finally {
+      categoriesFail.on = false;
+    }
   });
 
   // JUSTIFICATION-A3: new cases the round 2 review of #703 asked for (digits of any length, a barcode under a chip, exact match).

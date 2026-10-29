@@ -466,7 +466,7 @@ export function ProductList({ onEdit, onPrice, onAdd, added }: { onEdit: (id: st
   const stockAt = !all && branchId && holdsAt(me, 'retail.stock.read', branchId) ? branchId : '';
   const [activeFilter, setActiveFilter] = useState<'active' | 'off' | 'all'>('active');
   const categories = useQuery({ queryKey: ['retail', 'catalogue', 'categories'], queryFn: () => retail.listCategories() });
-  const [categoryId, setCategoryId, chipReady] = useChosenChip('items', categories.data);
+  const [categoryId, setCategoryId, chipReady] = useChosenChip('items', categories.data, categories.isError);
   const active = activeFilter === 'all' ? undefined : activeFilter === 'active';
   const page = useInfiniteQuery({
     queryKey: ['retail', 'catalogue', 'products', query, categoryId, activeFilter, stockAt],
