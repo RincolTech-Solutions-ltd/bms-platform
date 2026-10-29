@@ -11,14 +11,14 @@ import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
 import { sayDone } from '../retail/toast';
 import {
-  applicationOrder, applicationProblems, blankApplication, createBody, draftOf, guarantorsBody, partiesChanged, pledgeable, pledgesBody,
+  applicationOrder, applicationProblems, blankApplication, createBody, draftOf, draftQuestion, guarantorsBody, partiesChanged, pledgeable, pledgesBody,
   PURPOSES, rateWords, termsOf, termWords, updateBody, type ApplicationDraft, type GuarantorDraft,
 } from './application-state';
 import { typeWords } from './collateral-state';
 import { Group, SaveBar, SelectField, TextField, useFormErrors, type FormErrors } from './form-fields';
 import { LendingGate } from './loans';
-import { businessToday } from '../../../api/retail';
-import { amountText, currencyOf, money, tenantCurrency } from './loan-state';
+import { businessToday, businessZone } from '../../../api/retail';
+import { amountText, currencyOf, draftsFirst, money, tenantCurrency } from './loan-state';
 import { mayManageCollateral } from './member-permissions';
 import { MemberPicker } from './member-picker';
 import { applicationSteps, mayApply } from './permissions';
@@ -74,6 +74,10 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
     queryFn: () => collateralApi.list({ memberId: draft.memberId }),
     enabled: draft.memberId !== '',
   });
+  // A member who already has a draft (issue #704): the newest one is offered first, until "Start a new one" is chosen for them.
+  const [startNew, setStartNew] = useState('');
+  const drafts = useQuery({ queryKey: ['lending', 'loans', 'drafts', draft.memberId], queryFn: () => api.drafts(draft.memberId), enabled: !editing && draft.memberId !== '' });
+  const open = editing || startNew === draft.memberId ? undefined : draftsFirst(drafts.data ?? [])[0];
   const set = <K extends keyof ApplicationDraft>(key: K, value: ApplicationDraft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const inputMode = exponentOf(currency) ? 'decimal' : 'numeric';
 
@@ -150,6 +154,13 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
 
   return (
     <form className="mf" onSubmit={(e) => void submit(e)} noValidate aria-label={editing ? 'Change the application' : 'New loan application'} data-tour="application-form">
+      {open && (
+        <section className="rt-card stack" aria-labelledby="af-open-draft">
+          <p id="af-open-draft">{draftQuestion(open, today, businessZone())}</p>
+          <Link to="/staff/lending/loans/$loanId/edit" params={{ loanId: open.id ?? '' }} className="btn rt-primary btn-block">Continue that draft</Link>
+          <button type="button" className="btn-block" onClick={() => setStartNew(draft.memberId)}>Start a new one</button>
+        </section>
+      )}
       <FieldsNeededNote />
       {tried && form.count(order) > 0 && <p role="alert" className="alert alert-danger">Some entries need a look. They are marked below.</p>}
       <SaveGuardNotice guard={guard} what="application" found={(l) => <Link to="/staff/lending/loans/$loanId" params={{ loanId: l.id ?? '' }}>Open draft {l.loan_no}</Link>} />

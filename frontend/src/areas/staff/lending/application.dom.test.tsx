@@ -8,7 +8,7 @@ import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CollateralItem } from '../../../api/collateral';
 import type { Me } from '../../../api/client';
-import type { Loan } from '../../../api/lending';
+import type { Loan, LoanListItem } from '../../../api/lending';
 import { LendingApiContext } from '../../../api/lending-context';
 import { FormError } from '../../../api/lending-forms';
 import type { ApplicationsApi, LoanAppraisal, LoanProduct } from '../../../api/loan-applications';
@@ -71,7 +71,7 @@ const appraisal: LoanAppraisal = {
 };
 
 /** An in-memory application client that records each call, the server's version rule included. */
-function createApplicationsMock(start?: Loan, tightened = false) {
+function createApplicationsMock(start?: Loan, tightened = false, drafts: LoanListItem[] = []) {
   let current: Loan | undefined = start;
   const calls: { name: string; version?: number; body?: unknown }[] = [];
   let failOnce: { name: string; error: FormError } | null = null;
@@ -101,7 +101,7 @@ function createApplicationsMock(start?: Loan, tightened = false) {
       return { ...(id === 'p2' ? strict : product), current_version: { ...v1, id: 'v2', max_principal_minor: 500_000 }, versions: [{ ...v1, id: 'v2', max_principal_minor: 500_000 }, v1] };
     },
     async get() { if (!current) throw new FormError('Not found.', 404, 'not_found'); return { ...current }; },
-    async drafts() { return []; },
+    async drafts() { return drafts; },
     async history() { return []; },
     async create(body) {
       calls.push({ name: 'create', body });
@@ -122,8 +122,8 @@ function createApplicationsMock(start?: Loan, tightened = false) {
   return { api, calls, failNext: (name: string, error: FormError) => { failOnce = { name, error }; }, loseNext: (name: string) => { loseOnce = name; } };
 }
 
-function mount(node: ReactElement, opts: { me?: Me; loan?: Loan; items?: CollateralItem[]; tightened?: boolean } = {}) {
-  const applications = createApplicationsMock(opts.loan, opts.tightened);
+function mount(node: ReactElement, opts: { me?: Me; loan?: Loan; items?: CollateralItem[]; tightened?: boolean; drafts?: LoanListItem[] } = {}) {
+  const applications = createApplicationsMock(opts.loan, opts.tightened, opts.drafts);
   const members = createMembersMock([borrower, guarantor]);
   const collateral = createCollateralMock(opts.items ?? [plot, unvalued]);
   render(
@@ -252,6 +252,32 @@ describe('the loan application form', () => {
     send();
     await waitFor(() => expect(api.calls.map((c) => c.name)).toEqual(['create', 'guarantors', 'submit']));
     expect(api.calls[1]?.body).toEqual([{ member_id: guarantor.id, guaranteed_amount_minor: 400_000, relationship: undefined }]);
+  });
+});
+
+// JUSTIFICATION-A3: the two tests issue #704 asks for; no existing test covers a member who already has a draft.
+describe('a second start for the same member (issue #704)', () => {
+  const older: LoanListItem = { id: 'd1', loan_no: 'LN000901', member_id: borrower.id, status: 'draft', created_at: '2026-10-29T17:48:00Z' };
+  const newer: LoanListItem = { ...older, id: 'd2', loan_no: 'LN000902', created_at: '2026-10-29T17:58:00Z' };
+
+  it('offers to continue the newest draft, as the primary action', async () => {
+    mount(<ApplicationForm memberId={borrower.id} />, { drafts: [older, newer] });
+    expect(await screen.findByText(/^This member already has a draft loan, LN000902, started .*at \d\d:\d\d\. Continue it\?$/)).toBeTruthy();
+    const go = screen.getByRole('link', { name: 'Continue that draft' });
+    expect(go.getAttribute('href')).toBe('/staff/lending/loans/d2/edit');
+    expect(go.className).toMatch(/rt-primary/);
+  });
+
+  it('still starts a new one when asked, and sends it', async () => {
+    const api = mount(<ApplicationForm memberId={borrower.id} />, { drafts: [newer] });
+    fireEvent.click(await screen.findByRole('button', { name: 'Start a new one' }));
+    expect(screen.queryByText(/already has a draft loan/)).toBeNull();
+    await screen.findByRole('option', { name: /Test monthly loan/ });
+    type(/^Loan product/, 'p1');
+    type(/^Amount asked for/, '1,000,000');
+    type(/^What the loan is for/, 'business');
+    send();
+    await waitFor(() => expect(api.calls.map((c) => c.name)).toEqual(['create', 'submit']));
   });
 });
 

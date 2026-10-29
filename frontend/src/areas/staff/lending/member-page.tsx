@@ -9,7 +9,7 @@ import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
 import { LoanRows } from './loans';
-import { money, words } from './loan-state';
+import { draftsFirst, money, words } from './loan-state';
 import { MemberSmsControl } from './member-sms';
 import { DocumentsSection } from './member-documents';
 import { NextOfKinSection } from './member-kin';
@@ -115,7 +115,7 @@ function MemberLoans({ memberId, canApply }: { memberId: string; canApply: boole
       <h2 id="loans-title">Loans</h2>
       {loans.isPending && <p className="loading">Loading loans</p>}
       <Problem error={loans.error} />
-      {loans.data && ((loans.data.items ?? []).length === 0 ? <p className="empty-state">No loans yet.</p> : <LoanRows items={loans.data.items ?? []} />)}
+      {loans.data && ((loans.data.items ?? []).length === 0 ? <p className="empty-state">No loans yet.</p> : <LoanRows items={draftsFirst(loans.data.items ?? [])} />)}
       {canApply && <Link to="/staff/lending/applications/new" search={{ memberId }} className="btn btn-block" data-tour="member-apply">Start a loan application</Link>}
     </section>
   );

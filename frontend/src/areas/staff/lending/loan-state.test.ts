@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { allocationSummary, money, onToday, parseAmount, statusBadge, txnWords, words } from './loan-state';
+import { allocationSummary, draftsFirst, loanStatusWords, money, onToday, parseAmount, statusBadge, txnWords, words } from './loan-state';
+
+// Issue #704: on a member's Loans list a draft says it was not sent, and the newest draft is first.
+describe('a member\'s drafts', () => {
+  it('says a draft is not sent yet and puts drafts first, newest first', () => {
+    expect(loanStatusWords('draft')).toBe('Draft, not sent yet');
+    expect(loanStatusWords('written_off')).toBe('Written off');
+    const items = [
+      { id: 'a', status: 'active', created_at: '2026-10-01T08:00:00Z' },
+      { id: 'b', status: 'draft', created_at: '2026-10-29T17:48:00Z' },
+      { id: 'c', status: 'draft', created_at: '2026-10-29T17:58:00Z' },
+    ];
+    expect(draftsFirst(items).map((l) => l.id)).toEqual(['c', 'b', 'a']);
+  });
+});
 
 // Issue #670: a money form's draft read back on a later day does not keep that day's date.
 describe('a restored draft date', () => {

@@ -95,6 +95,16 @@ export function statusBadge(status: string | undefined): string {
   }
 }
 
+/** A loan status in plain words; a draft says it has not gone anywhere yet (issue #704). */
+export const loanStatusWords = (status: string | undefined): string => (status === 'draft' ? 'Draft, not sent yet' : words(status));
+
+/** A member's loans with the drafts on top, newest first, and the rest in the server's order (issue #704). */
+export function draftsFirst<T extends { status?: string; created_at?: string }>(items: T[]): T[] {
+  const at = (l: T) => Date.parse(l.created_at ?? '') || 0;
+  const drafts = items.filter((l) => l.status === 'draft').sort((a, b) => at(b) - at(a));
+  return [...drafts, ...items.filter((l) => l.status !== 'draft')];
+}
+
 export type Component = 'penalty' | 'fee' | 'interest' | 'principal' | 'overpayment';
 
 const COMPONENTS: { component: Component; label: string }[] = [
