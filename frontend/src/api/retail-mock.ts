@@ -313,8 +313,37 @@ export function createMockRetail(): RetailApi {
     const f = p.familyId ? families.get(p.familyId) : undefined;
     return f ? { variant: { family_id: f.id, family_name: f.name, ...(p.size ? { size: p.size } : {}), ...(p.colour ? { colour: p.colour } : {}), position: p.position ?? 0 } } : {};
   };
+  // Issue #699: an item with packs carries its active ones, as the API does while the units capability is on.
+  // JUSTIFICATION-A3: the mock must answer as the server now does: packs on items, the ladder's sizes and the stock levels.
+  const packsOf = (id: string) => {
+    const own = (packs.get(id) ?? []).filter((k) => k.active);
+    return own.length > 0 ? { packs: own } : {};
+  };
   const asProduct = (p: MockProduct): Product =>
-    cost({ id: p.id, code: p.code, description: p.description, category_id: categoryId(p.category), category: p.category, unit: p.unit, unit_id: unitRows.find((u) => u.name === p.unit)?.id, sell_minor: p.sellMinor, currency: 'UGX', active: p.active !== false, version: p.version ?? 1, ...variantOf(p), ...photoOf(p), ...barcodesOf(p.id) }, { cost_minor: p.costMinor });
+    cost({ id: p.id, code: p.code, description: p.description, category_id: categoryId(p.category), category: p.category, unit: p.unit, unit_id: unitRows.find((u) => u.name === p.unit)?.id, sell_minor: p.sellMinor, currency: 'UGX', active: p.active !== false, version: p.version ?? 1, ...variantOf(p), ...photoOf(p), ...barcodesOf(p.id), ...packsOf(p.id) }, { cost_minor: p.costMinor });
+  /**
+   * Issue #699 (ADR-107): every level that holds another worked out again from what it holds, as PackLadder does on the server,
+   * and the stock row's levels (every active whole pack holding more than one, biggest first) and standard pack.
+   */
+  const reladder = (productId: string, rows: Pack[]): Pack[] => {
+    const base = unitRows.find((u) => u.name === products.get(productId)?.unit)?.id;
+    let next = rows;
+    for (let pass = 0; pass < rows.length; pass++) {
+      next = next.map((k) => {
+        if (!k.holds_unit_id || k.holds_qty === undefined) return k;
+        const held = k.holds_unit_id === base ? 1 : Number(next.find((x) => x.unit_id === k.holds_unit_id && x.active)?.factor ?? 0);
+        const factor = (held * k.holds_qty).toFixed(3);
+        return factor === k.factor ? k : { ...k, factor, version: (k.version ?? 1) + 1 };
+      });
+    }
+    return next;
+  };
+  const stockPack = (id: string) => {
+    const own = (packs.get(id) ?? []).filter((k) => k.active && Number(k.factor) > 1).sort((a, b) => Number(b.factor) - Number(a.factor));
+    const top = own.find((k) => k.purpose !== 'buy') ?? own[0];
+    const levels = own.filter((k) => Number.isInteger(Number(k.factor))).map((k) => ({ unit: k.unit, factor: k.factor }));
+    return top ? { standard_pack: { unit: top.unit, factor: top.factor, levels } } : {};
+  };
   const clash = (list: { id: string; name: string }[], id: string, name: string, code: string, what: string) => {
     if (list.some((x) => x.id !== id && x.name.toLowerCase() === name.trim().toLowerCase())) refuse(409, code, `A ${what} with this name exists.`);
   };
@@ -514,7 +543,7 @@ export function createMockRetail(): RetailApi {
     listProducts: ({ query, branchId }) =>
       delay([...products.values()].filter((p) => p.active !== false && matches(p, query)).map((p): Product => {
         const row: Product = {
-          id: p.id, code: p.code, description: p.description, category_id: categoryId(p.category), category: p.category, unit: p.unit, unit_id: unitRows.find((u) => u.name === p.unit)?.id, sell_minor: p.sellMinor, currency: 'UGX', active: true, ...photoOf(p), ...barcodesOf(p.id),
+          id: p.id, code: p.code, description: p.description, category_id: categoryId(p.category), category: p.category, unit: p.unit, unit_id: unitRows.find((u) => u.name === p.unit)?.id, sell_minor: p.sellMinor, currency: 'UGX', active: true, ...photoOf(p), ...barcodesOf(p.id), ...packsOf(p.id),
         };
         if (branchId) {
           row.qty = fromMilli(bal(branchId, p.id));
@@ -793,9 +822,13 @@ export function createMockRetail(): RetailApi {
         const rows = packs.get(p.id) ?? [];
         if (rows.some((k) => k.unit_id === body.unit_id)) refuse(409, 'duplicate_pack', 'The item has a pack of this unit already.');
         const sell = body.purpose === 'buy' ? undefined : body.sell_minor;
-        const pack: Pack = { id: nextId('k'), product_id: p.id, unit_id: body.unit_id, unit: unit?.name ?? '', factor: body.factor, active: true, version: 1, purpose: body.purpose ?? 'both', ...(sell === undefined ? {} : { sell_minor: sell }), suggested_sell_minor: Math.round(p.sellMinor * Number(body.factor)) };
-        packs.set(p.id, [...rows, pack]);
-        return pack;
+        // Issue #699: a pack may hold another level; its size is worked out from it.
+        const heldUnit = body.holds_unit_id ? unitRows.find((u) => u.id === body.holds_unit_id) : undefined;
+        const holds = heldUnit && body.holds_qty !== undefined ? { holds_unit_id: heldUnit.id, holds_unit: heldUnit.name, holds_qty: body.holds_qty } : {};
+        const pack: Pack = { id: nextId('k'), product_id: p.id, unit_id: body.unit_id, unit: unit?.name ?? '', factor: body.factor ?? '1.000', active: true, version: 1, purpose: body.purpose ?? 'both', ...(sell === undefined ? {} : { sell_minor: sell }), ...holds, usual_buy: body.usual_buy === true, suggested_sell_minor: 0 };
+        const next = reladder(p.id, [...rows.map((k) => (body.usual_buy ? { ...k, usual_buy: false } : k)), pack]).map((k) => ({ ...k, suggested_sell_minor: Math.round(p.sellMinor * Number(k.factor)) }));
+        packs.set(p.id, next);
+        return next.find((k) => k.unit_id === body.unit_id) as Pack;
       }),
 
     updatePack: (productId, unitId, version, body) =>
@@ -809,9 +842,13 @@ export function createMockRetail(): RetailApi {
         // Issue #624: a pack made buy only, or whose own price is dropped, sells at the piece price times the size again.
         const sell = purpose === 'buy' || body.clear_sell_minor ? undefined : (body.sell_minor ?? was.sell_minor);
         const { sell_minor: _dropped, ...rest } = was;
-        const next: Pack = { ...rest, ...(body.factor === undefined ? {} : { factor: body.factor }), ...(body.active === undefined ? {} : { active: body.active }), purpose, ...(sell === undefined ? {} : { sell_minor: sell }), version: (pack?.version ?? 0) + 1 };
-        packs.set(productId, rows.map((k) => (k.unit_id === unitId ? next : k)));
-        return next;
+        // Issue #699: a new number held, or a new level held, and the levels above follow.
+        const heldUnit = body.holds_unit_id ? unitRows.find((u) => u.id === body.holds_unit_id) : undefined;
+        const holds = body.holds_qty !== undefined ? { holds_unit_id: heldUnit?.id ?? was.holds_unit_id, holds_unit: heldUnit?.name ?? was.holds_unit, holds_qty: body.holds_qty } : {};
+        const next: Pack = { ...rest, ...(body.factor === undefined ? {} : { factor: body.factor }), ...(body.active === undefined ? {} : { active: body.active }), purpose, ...(sell === undefined ? {} : { sell_minor: sell }), ...holds, ...(body.usual_buy === undefined ? {} : { usual_buy: body.usual_buy }), version: (pack?.version ?? 0) + 1 };
+        const all = reladder(find(productId).id, rows.map((k) => (k.unit_id === unitId ? next : body.usual_buy ? { ...k, usual_buy: false } : k)));
+        packs.set(productId, all);
+        return all.find((k) => k.unit_id === unitId) as Pack;
       }),
 
     findByBarcode: (code, branchId) =>
@@ -977,7 +1014,7 @@ export function createMockRetail(): RetailApi {
     listStock: ({ branchId, query, categoryId: category, negativeOnly, level, includeInactive }) =>
       delay([...products.values()].filter((p) => (includeInactive || p.active !== false) && matches(p, query) && (!category || categoryId(p.category) === category)).map((p): StockRow => {
         const milli = bal(branchId, p.id);
-        return cost({ product_id: p.id, code: p.code, description: p.description, category_id: categoryId(p.category), category: p.category, unit: p.unit, qty: fromMilli(milli), negative: milli < 0, sell_minor: p.sellMinor }, { cost_minor: p.costMinor });
+        return cost({ product_id: p.id, code: p.code, description: p.description, category_id: categoryId(p.category), category: p.category, unit: p.unit, qty: fromMilli(milli), negative: milli < 0, sell_minor: p.sellMinor, ...stockPack(p.id) }, { cost_minor: p.costMinor });
       }).filter((r) => (!negativeOnly || r.negative) && atLevel(Number(r.qty), level))),
 
     listSales: ({ cursor, ...q }) => {

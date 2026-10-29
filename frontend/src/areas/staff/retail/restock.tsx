@@ -13,6 +13,7 @@ import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne, scanInto, touchedLine } from './barcode-state';
 import { ScreenToast, useItemAdded } from './toast';
 import { UNITS, canUse, capabilityOn } from './permissions';
+import { usualBuyingPack } from './ladder-state';
 import { OWN_PRICE_KEEPS_SIZE, baseCostMinor, baseQtyMilli, buyingPacks, chosenPack, deliveredFactor, mayKeepSize, packPriceMinor, quantityIn, sameFactor, unitWord, unitWords } from './units-state';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Field, FieldsNeededNote } from '../../../app/ui/Field';
@@ -221,7 +222,9 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
       already(`${p.description} is already on the purchase. Change its quantity below.`);
       return;
     }
-    land(p, [...current.current, lineOf(p, '')]);
+    // Issue #699 (ADR-107): the line opens on the level the shop usually buys the item in, with its price per that level.
+    const usual = unitsOn ? usualBuyingPack(p) : undefined;
+    land(p, [...current.current, usual?.unit_id ? withUnit(lineOf(p, ''), usual.unit_id) : lineOf(p, '')]);
   };
   const scanAdd = (p: Product, unitId?: string) => {
     const unit = unitsOn && buyingPacks(p).some((k) => k.unit_id === unitId) ? unitId : undefined;
