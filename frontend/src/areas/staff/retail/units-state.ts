@@ -159,9 +159,16 @@ export function quantityIn(qty: string, unit: string): string {
 }
 
 /** The unit alone in full words, for a label with no number ("Quantity (pieces)", "Stock is counted in pieces"); issue #680. */
-export function unitWords(unit: string): string {
-  const words = UNIT_WORDS[unit.trim().toLowerCase()];
-  return words ? words[1] : plural(unit);
+export function unitWords(unit: string | undefined): string {
+  const words = UNIT_WORDS[(unit ?? '').trim().toLowerCase()];
+  if (words) return words[1];
+  return unit?.trim() ? plural(unit) : '';
+}
+
+/** One of the unit in full words, for a choice or "per" ("piece", "Selling price per carton"); a short code reads as its word. */
+export function unitWord(unit: string | undefined): string {
+  const words = UNIT_WORDS[(unit ?? '').trim().toLowerCase()];
+  return words ? words[0] : (unit ?? '');
 }
 
 function counted(milli: bigint, unit: string): string {

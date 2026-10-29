@@ -13,10 +13,10 @@ import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne, scanInto, touchedLine } from './barcode-state';
 import { ScreenToast, useItemAdded } from './toast';
 import { UNITS, canUse, capabilityOn } from './permissions';
-import { OWN_PRICE_KEEPS_SIZE, baseCostMinor, baseQtyMilli, buyingPacks, chosenPack, deliveredFactor, mayKeepSize, packPriceMinor, quantityIn, sameFactor } from './units-state';
+import { OWN_PRICE_KEEPS_SIZE, baseCostMinor, baseQtyMilli, buyingPacks, chosenPack, deliveredFactor, mayKeepSize, packPriceMinor, quantityIn, sameFactor, unitWord, unitWords } from './units-state';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Field, FieldsNeededNote } from '../../../app/ui/Field';
-import { WORDS, howManyInEach, plural, useFromNowOn } from '../../../app/glossary';
+import { WORDS, howManyInEach, useFromNowOn } from '../../../app/glossary';
 import { NewItemHere, type AddedItem } from './new-item-here';
 import { RowChevron } from '../../../app/ui/ListRow';
 import { entryWarnings, type EntryWarning } from './entry-checks-state';
@@ -77,7 +77,7 @@ export function restockLineProblem(l: RestockLine): string | null {
   if (!qtys.some((q) => q !== null && q > 0)) return 'Enter a quantity for at least one branch.';
   const pack = chosenPack(l.product, l.unitId);
   const factor = lineFactor(l);
-  if (pack && factor === null) return `Enter how many ${plural(l.product.unit ?? 'item')} were in each ${pack.unit}: 1 or more.`;
+  if (pack && factor === null) return `Enter how many ${unitWords(l.product.unit ?? 'item')} were in each ${unitWord(pack.unit)}: 1 or more.`;
   if (pack && qtys.some((q) => q !== null && baseQtyMilli(q, factor ?? undefined) === null)) {
     return `A quantity does not convert exactly to ${l.product.unit ?? 'items'}. Change it.`;
   }
@@ -338,8 +338,8 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
                 <label htmlFor={`unit-${i}`}>Bought by</label>
                 {/* empty: drawn only when the item has packs; its own unit is always there. */}
                 <select id={`unit-${i}`} value={pack?.unit_id ?? ''} onChange={(e) => patchWhole(i, withUnit(l, e.target.value))}>
-                  <option value="">{l.product.unit}</option>
-                  {packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{k.unit} ({quantityIn(k.factor ?? '', l.product.unit ?? '')})</option>)}
+                  <option value="">{unitWord(l.product.unit)}</option>
+                  {packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{unitWord(k.unit)} ({quantityIn(k.factor ?? '', l.product.unit ?? '')})</option>)}
                 </select>
               </div>
             )}
@@ -347,7 +347,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
             {pack && (
               <div data-testid={`pack-size-${i}`}>
                 <Field id={`size-${i}`} required inputMode="decimal" label={howManyInEach(l.product.unit ?? 'item', pack.unit ?? 'pack')}
-                  hint={`Usually ${showQty(pack.factor ?? '')}. Change it when this delivery's ${pack.unit} held a different number.`}
+                  hint={`Usually ${showQty(pack.factor ?? '')}. Change it when this delivery's ${unitWord(pack.unit)} held a different number.`}
                   error={factor === null ? 'Enter 1 or more, with at most three decimals.' : null}
                   value={l.packSize ?? showQty(pack.factor ?? '')} onChange={(e) => patch(i, { packSize: e.target.value })} />
                 {sizeDiffers && canManageItems && !mayKeepSize(pack, canManageItems, canChangePrices) && <p className="hint">{OWN_PRICE_KEEPS_SIZE}</p>}
@@ -360,19 +360,19 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
                 {sizeDiffers && (
                   <p className="hint" data-testid={`pack-size-note-${i}`}>
                     {l.fromNowOn && mayKeepSize(pack, canManageItems, canChangePrices)
-                      ? `Every ${pack.unit} bought or sold after this one counts as ${showQty(factor ?? '')}.`
-                      : `Only this delivery counts as ${showQty(factor ?? '')} in each ${pack.unit}. A ${pack.unit} sold is still ${showQty(pack.factor ?? '')}.`}
+                      ? `Every ${unitWord(pack.unit)} bought or sold after this one counts as ${showQty(factor ?? '')}.`
+                      : `Only this delivery counts as ${showQty(factor ?? '')} in each ${unitWord(pack.unit)}. A ${unitWord(pack.unit)} sold is still ${showQty(pack.factor ?? '')}.`}
                   </p>
                 )}
               </div>
             )}
             <div className="rt-row">
-              <Field id={`cost-${i}`} required inputMode="numeric" label={`${WORDS.buyingPrice} each${pack ? ` (per ${pack.unit})` : ''}`} value={l.cost} onChange={(e) => patch(i, { cost: e.target.value })} />
-              <Field id={`sell-${i}`} required={canPrice} inputMode="numeric" label={`${WORDS.sellingPrice} each${pack ? ` (per ${l.product.unit})` : ''}`} value={l.sell} disabled={!canPrice}
+              <Field id={`cost-${i}`} required inputMode="numeric" label={`${WORDS.buyingPrice} each${pack ? ` (per ${unitWord(pack.unit)})` : ''}`} value={l.cost} onChange={(e) => patch(i, { cost: e.target.value })} />
+              <Field id={`sell-${i}`} required={canPrice} inputMode="numeric" label={`${WORDS.sellingPrice} each${pack ? ` (per ${unitWord(l.product.unit)})` : ''}`} value={l.sell} disabled={!canPrice}
                 hint={canPrice ? undefined : 'Only the owner changes selling prices.'} onChange={(e) => patch(i, { sell: e.target.value })} />
             </div>
             <fieldset>
-              <legend>Quantity bought per branch ({pack?.unit ?? l.product.unit})</legend>
+              <legend>Quantity bought per branch ({unitWords(pack?.unit ?? l.product.unit)})</legend>
               {branches.map((b) => (
                 <div key={b.id}>
                   <label htmlFor={`q-${i}-${b.id}`}>{branchLabel(b)}</label>

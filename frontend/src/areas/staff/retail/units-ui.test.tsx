@@ -113,6 +113,17 @@ describe('a sale line', () => {
     }
   });
 
+  // Review of #687: a shop whose units are stored as short codes reads full words on Sell, never "pc" or "per ctn".
+  it('says a short code unit and pack in full words', () => {
+    const short: Product = { ...pen, unit: 'pc', packs: [{ id: 'k2', product_id: 'p1', unit_id: 'u2', unit: 'ctn', factor: '24.000', active: true, version: 1 }] };
+    const html = card(short, true, 'u2');
+    expect(html).toContain('>piece</option>');
+    expect(html).toContain('carton (24 pieces)');
+    expect(html).toContain('Quantity (cartons)');
+    expect(html).toContain('Selling price per carton');
+    expect(html).not.toMatch(/\bpc\b|\bctn\b/);
+  });
+
   it('is the old line for an item without packs even when the capability is on', () => {
     const html = card(pen, true);
     expect(html).not.toContain('Sell by');

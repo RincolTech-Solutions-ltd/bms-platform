@@ -3,7 +3,7 @@ import type { Pack, Product, SaleLine } from '../../../api/retail';
 import { buildPurchase, restockLineProblem, restockTotal, withUnit as restockWithUnit, type RestockLine } from './restock';
 import { buildSaleRequest, defaultPrice, draftTotal, lineHint, newLine, withUnit, type Draft } from './sale-state';
 import { factorProblem } from './catalogue-packs';
-import { baseCostMinor, baseQtyMilli, enteredPriceMinor, enteredQty, packPriceMinor, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, quantityIn, samePack, standardPack } from './units-state';
+import { baseCostMinor, baseQtyMilli, enteredPriceMinor, enteredQty, packPriceMinor, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, quantityIn, samePack, standardPack, unitWord, unitWords } from './units-state';
 
 // Units of measure (ADR-033, issue #194): the forms convert with the same rules as the server
 // (Quantities.java) so a line is judged before it is sent. Names and amounts are fabricated.
@@ -175,6 +175,12 @@ describe('stock in packs and pieces (issue #650)', () => {
     expect(quantityIn('2.000', 'ltr')).toBe('2 litres');
     expect(quantityIn('1.000', 'Kg')).toBe('1 kilogram');
     expect(quantityIn('3.000', 'ctn')).toBe('3 cartons');
+    // The unit alone, as Sell, Buy stock and the packs page show it (review of #687).
+    expect(unitWord('pc')).toBe('piece');
+    expect(unitWord('ctn')).toBe('carton');
+    expect(unitWord('Bulb')).toBe('Bulb');
+    expect(unitWords('pc')).toBe('pieces');
+    expect(unitWords(undefined)).toBe('');
   });
   it('works with a pack of a decimal size', () => {
     expect(packsAndPieces('26.000', 'Kilogram', { unit: 'Sack', factor: '12.500' })).toBe('2 Sacks and 1 Kilogram (26 Kilograms)');
