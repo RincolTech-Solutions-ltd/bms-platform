@@ -86,7 +86,7 @@ export function holdsProblem(value: string, rung: Pick<Rung, 'unit' | 'holdsUnit
 }
 
 /** One line of the check sheet: a level, the pieces in one before and after. */
-export type LevelChange = { unit: string; before: bigint; after: bigint };
+export type LevelChange = { unitId: string; unit: string; before: bigint; after: bigint };
 
 /**
  * The levels a new number held changes, the one changed first, then every level holding it, any depth: "1 carton will be
@@ -108,7 +108,7 @@ export function changesOf(rungs: Rung[], unitId: string, holds: { unitId: string
     return value;
   };
   return rungs
-    .map((r) => ({ unit: r.unit, before: r.pieces, after: pieces(r.unitId, new Set()) }))
+    .map((r) => ({ unitId: r.unitId, unit: r.unit, before: r.pieces, after: pieces(r.unitId, new Set()) }))
     .filter((c) => c.after !== c.before)
     .sort((a, b) => (a.before < b.before ? -1 : 1));
 }

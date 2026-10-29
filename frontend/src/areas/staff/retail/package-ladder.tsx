@@ -35,11 +35,19 @@ export type RungEdit = {
 };
 
 /** The rungs, biggest first, ending with the smallest unit. With `edit`, each number has a stepper. */
-export function LadderRungs({ rungs, smallest, edit, changed }: { rungs: Rung[]; smallest: string; edit?: RungEdit; changed?: string | null }) {
+export function LadderRungs({ rungs, smallest, edit, changed, after }: {
+  rungs: Rung[];
+  smallest: string;
+  edit?: RungEdit;
+  changed?: string | null;
+  /** The pieces each level will hold once a change is saved, by unit id, shown while it is checked. */
+  after?: Record<string, bigint>;
+}) {
   const id = useId();
   return (
     <ol className="ladder" aria-label="What one package holds, biggest first">
-      {rungs.map((r) => {
+      {rungs.map((r0) => {
+        const r = after?.[r0.unitId] !== undefined ? { ...r0, pieces: after[r0.unitId] as bigint } : r0;
         const level = levelOf(rungs, r.unitId);
         const value = edit?.values[r.unitId] ?? r.holdsQty;
         return (
@@ -257,6 +265,7 @@ export function ItemLadder({ product, packs, mayManage }: { product: Product; pa
         rungs={rungs}
         smallest={smallest}
         changed={pending?.rung.unitId ?? null}
+        after={Object.fromEntries(changes.map((c) => [c.unitId, c.after]))}
         edit={mayManage ? {
           values: pending ? { [pending.rung.unitId]: pending.value } : {},
           onChange: (rung, value) => {

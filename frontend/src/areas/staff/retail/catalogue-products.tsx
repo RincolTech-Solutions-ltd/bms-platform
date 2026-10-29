@@ -302,6 +302,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
               mayPrice={mayPrice}
               showErrors={showErrors}
               refused={packError}
+              soldAt={sellPieces !== null ? sellAt.key : 0}
             />
           )}
         </>

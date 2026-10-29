@@ -1436,6 +1436,7 @@ td.num.qty-packs {
   margin: 0;
   padding: 0;
   list-style: none;
+  margin-bottom: var(--space-4);
   color: var(--color-text-muted);
   font-size: var(--text-sm);
 }

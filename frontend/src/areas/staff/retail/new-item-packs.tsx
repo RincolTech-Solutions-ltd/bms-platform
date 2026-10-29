@@ -248,7 +248,9 @@ export function UsualLevel({ id, use, on, rows, units, smallest, answer, onAnswe
   );
 }
 
-export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows, onRows, mayPrice, showErrors, refused = null }: {
+export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows, onRows, mayPrice, showErrors, refused = null, soldAt = 0 }: {
+  /** Issue #699: the row the item is usually sold by, whose price the selling question below asks; 0 for none. */
+  soldAt?: number;
   /** The smallest unit chosen, or none yet. */
   smallest: Unit | undefined;
   /** The switched-on units of the business. */
@@ -354,6 +356,8 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
                 <Segmented label={`Used for, ${pack}`} options={USED_FOR} value={row.purpose} onChange={(purpose) => change(row.key, { purpose })} />
                 {row.purpose === 'buy' ? (
                   <Hint>A package only for buying is not offered when selling, so it has no selling price.</Hint>
+                ) : row.key === soldAt ? (
+                  <Hint>Its selling price is asked below, under How do you usually sell it.</Hint>
                 ) : mayPrice ? (
                   <MoneyInput
                     id={`item-pack-price-${row.key}`}
