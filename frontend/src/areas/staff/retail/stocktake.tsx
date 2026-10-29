@@ -28,6 +28,8 @@ import { changeWords, clearCount, countKey, otherTabWords, readCount, savedAt, s
 
 /** The variance written at commit once committed, otherwise the draft's (counted less expected). */
 const variance = (l: StocktakeLine): string => l.committed_variance_qty ?? l.variance_qty ?? '0';
+/** Said when another tab committed this count while this tab's review was on its way or open (review of #686). */
+export const CHANGED_ELSEWHERE = 'This count was just saved in another tab. Check what is left here, then review again.';
 
 /**
  * "This removes 8 pieces. Is that right?" for a big drop, in the item's unit when the sheet gives it, and in its standard pack
@@ -239,10 +241,22 @@ function CountSheet({ branchId }: { branchId: string }) {
   const entered = Object.entries(totals).filter(([id, v]) => v.trim() !== '' && (!onSheet || onSheet.has(id)));
   const bad = entered.some(([, v]) => parseCount(v) === null);
   const valid = entered.flatMap(([productId, v]) => { const c = parseCount(v); return c === null ? [] : [{ product_id: productId, counted_qty: qtyString(c) }]; });
+  // The last commit of this count when the review was asked for (review of #686): a review that comes back after another tab
+  // committed, or a Commit pressed after it, would take the same difference again, so both check the mark has not moved.
+  const reviewMark = useRef(0);
+  const markMoved = () => (readCount(saveKey)?.committed ?? 0) > reviewMark.current;
   // toast-exempt: success screen, the review of the count replaces the form
   const review = useMutation({
-    mutationFn: () => retail.createStocktake({ branch_id: branchId, lines: valid }),
-    onSuccess: setDraft,
+    mutationFn: () => {
+      reviewMark.current = readCount(saveKey)?.committed ?? 0;
+      return retail.createStocktake({ branch_id: branchId, lines: valid });
+    },
+    onSuccess: (st) => {
+      if (!markMoved()) return setDraft(st);
+      // Committed in another tab while this review was on its way: the review is thrown away, never shown.
+      void retail.discardStocktake(st.id ?? '').catch(() => undefined);
+      show(CHANGED_ELSEWHERE, 'info');
+    },
   });
   // Issue #681: the same count changed in another tab is merged in item by item; committed there, this one starts empty.
   const apply = useCallback((next: CountState | null) => {
@@ -336,7 +350,12 @@ function CountSheet({ branchId }: { branchId: string }) {
   if (draft) {
     return (
       <>
-        <StocktakeReview key={draft.id} stocktake={draft} onCommit={(acknowledged) => commit.mutate(acknowledged)} busy={commit.isPending} units={units} packs={packOf} />
+        <StocktakeReview key={draft.id} stocktake={draft} onCommit={(acknowledged) => {
+          if (!markMoved()) return commit.mutate(acknowledged);
+          // Another tab committed since this review was made, and this tab has not heard yet: the review ends instead.
+          setDraft(null);
+          show(CHANGED_ELSEWHERE, 'info');
+        }} busy={commit.isPending} units={units} packs={packOf} />
         <Problem error={commit.error} />
         {draft.status === 'draft' && <button type="button" onClick={() => setDraft(null)}>Back to the count</button>}
       </>

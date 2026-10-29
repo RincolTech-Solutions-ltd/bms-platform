@@ -275,6 +275,42 @@ describe('the end of a count', () => {
     expect(screen.getByTestId('count-other-tab').textContent).toBe('Counted and saved in another tab');
     expect(commitStocktake).not.toHaveBeenCalled();
     expect(mine.counts['A-1']).toBe('7');
+    // The count that went in there has left this sheet too.
+    expect(countBox('A-1').value).toBe('');
+  });
+
+  // JUSTIFICATION-A3: the round 6 review of #686 asks for these two tests (a late review, a Commit before the event is heard).
+  it('throws away a review that comes back after another tab committed the count', async () => {
+    let answer: (v: unknown) => void = () => undefined;
+    createStocktake.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    discardStocktake.mockResolvedValue({ id: 'st-r', status: 'discarded', lines: [] });
+    await ready();
+    fireEvent.change(countBox('A-1'), { target: { value: '7' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Review the difference (1 counted)' }));
+    const anyway = screen.queryByRole('button', { name: 'Review the difference anyway' });
+    if (anyway) fireEvent.click(anyway);
+    await waitFor(() => expect(createStocktake).toHaveBeenCalledTimes(1));
+    const later = Date.now() + 1000;
+    const committed: SavedCount = { counts: {}, packCounts: {}, listed: [], done: [], at: { 'A-1': later }, committed: later };
+    localStorage.setItem(keyOf(branchA), JSON.stringify(committed));
+    otherTab(keyOf(branchA), committed);
+    await act(async () => answer({ id: 'st-r', status: 'draft', lines: [lines[0]] }));
+    await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('st-r'));
+    expect(screen.queryByRole('button', { name: 'Commit the count' })).toBeNull();
+    expect(commitStocktake).not.toHaveBeenCalled();
+  });
+
+  it('refuses Commit the count when another tab committed since the review and this tab has not heard yet', async () => {
+    createStocktake.mockResolvedValue({ id: 'st-r', status: 'draft', lines: [lines[0]] });
+    await ready();
+    fireEvent.change(countBox('A-1'), { target: { value: '7' } });
+    await reviewIt(1);
+    // Written by the other tab, with no storage event heard here yet (a phone tab woken late).
+    const later = Date.now() + 1000;
+    localStorage.setItem(keyOf(branchA), JSON.stringify({ counts: {}, packCounts: {}, listed: [], done: [], at: { 'A-1': later }, committed: later }));
+    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Commit the count' })).toBeNull());
+    expect(commitStocktake).not.toHaveBeenCalled();
   });
 });
 
