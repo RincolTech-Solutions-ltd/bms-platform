@@ -41,7 +41,7 @@ describe('the count kept on the device', () => {
   // Owner, round 3 of the review of #686: the day in the business's zone, so a count saved late last night is an earlier day.
   it('says the day and time a count was saved, and whether it is from an earlier business day', () => {
     const now = Date.parse('2026-10-29T10:00:00Z'); // Thursday 13:00 in Kampala.
-    expect(whenSaved(Date.parse('2026-10-29T06:05:00Z'), 'Africa/Kampala', now)).toEqual({ day: 'Thursday', time: '09:05', earlier: false });
+    expect(whenSaved(Date.parse('2026-10-29T06:05:00Z'), 'Africa/Kampala', now)).toEqual({ day: 'today', time: '09:05', earlier: false });
     expect(whenSaved(Date.parse('2026-10-26T11:05:00Z'), 'Africa/Kampala', now)).toEqual({ day: 'Monday', time: '14:05', earlier: true });
     // 23:30 on Wednesday in UTC is already Thursday in Kampala.
     expect(whenSaved(Date.parse('2026-10-28T23:30:00Z'), 'Africa/Kampala', now).earlier).toBe(false);

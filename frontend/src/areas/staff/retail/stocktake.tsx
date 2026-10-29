@@ -252,7 +252,7 @@ function CountSheet({ branchId }: { branchId: string }) {
   const saving = useCountSave({ saveKey, restored, saved: { counts, packCounts, listed, done }, apply, hold: asking });
   /** Takes in the counts of an earlier day the person chose to use. */
   const useThem = () => {
-    if (restored) apply(restored);
+    saving.takeStored();
     setAsking(false);
     setKeptLine(true);
   };
@@ -328,6 +328,18 @@ function CountSheet({ branchId }: { branchId: string }) {
         <Problem error={commit.error} />
         {draft.status === 'draft' && <button type="button" onClick={() => setDraft(null)}>Back to the count</button>}
       </>
+    );
+  }
+  // Review of #686, round 4: the question about an earlier day stands alone, so nothing is typed, unsaved, before it is answered.
+  if (asking && kept) {
+    return (
+      <div className="alert alert-warning" role="alert" data-testid="count-earlier">
+        <p>{`You have counts from ${kept.day}. Use them or start again?`}</p>
+        <p className="cluster">
+          <button type="button" className="btn-sm" onClick={useThem}>Use them</button>
+          <button type="button" className="btn-sm" onClick={startAgain}>Start again</button>
+        </p>
+      </div>
     );
   }
   // The whole sheet is loaded, so the matches are found in the browser, on the settled term, ignoring case and accents.
@@ -415,15 +427,6 @@ function CountSheet({ branchId }: { branchId: string }) {
       {/* Issue #681: the person counting always sees that their work is kept, and where. */}
       <p className="hint count-saved-all" role="status" data-testid="count-saved-all">{savedWords}</p>
       {saving.other && <p className="hint" data-testid="count-other-tab">{otherTabWords(saving.other)}</p>}
-      {asking && kept && (
-        <div className="alert alert-warning" role="alert" data-testid="count-earlier">
-          <p>{`You have counts from ${kept.day}. Use them or start again?`}</p>
-          <p className="cluster">
-            <button type="button" className="btn-sm" onClick={useThem}>Use them</button>
-            <button type="button" className="btn-sm" onClick={startAgain}>Start again</button>
-          </p>
-        </div>
-      )}
       {keptLine && kept && valid.length > 0 && (
         <div className="alert alert-info" data-testid="count-kept">
           <p>{`Counts from ${kept.day} ${kept.time} are filled in.`}</p>

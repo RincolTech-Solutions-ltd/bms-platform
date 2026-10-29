@@ -317,7 +317,7 @@ describe('a commit and an old count', () => {
     await ready();
     expect(countBox('A-1').value).toBe('10');
     expect(screen.queryByTestId('count-earlier')).toBeNull();
-    expect(screen.getByTestId('count-kept').textContent).toMatch(/^Counts from \w+day \d{2}:\d{2} are filled in\.Start again$/);
+    expect(screen.getByTestId('count-kept').textContent).toMatch(/^Counts from today \d{2}:\d{2} are filled in\.Start again$/);
     fireEvent.click(screen.getByRole('button', { name: 'Start again' }));
     expect(screen.getByText('Clear all 2 counts? Your stock does not change.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Keep them' }));
@@ -331,26 +331,68 @@ describe('a commit and an old count', () => {
     expect(createStocktake).not.toHaveBeenCalled();
   });
 
-  it('asks before using a count of an earlier day, and fills it in on Use them', async () => {
-    keep({ 'A-1': '10' }, Date.now() - 4 * 24 * 60 * 60 * 1000);
-    await ready();
-    expect(screen.getByTestId('count-earlier').textContent).toMatch(/^You have counts from \w+day\. Use them or start again\?/);
-    expect(countBox('A-1').value).toBe('');
-    // Asking keeps the saved count as it is.
+  /** Opens the page on a count of an earlier day, which asks before anything else shows. */
+  async function asked() {
+    listStock.mockResolvedValue(sheet);
+    render(page());
+    return screen.findByTestId('count-earlier');
+  }
+  const daysAgo = (n: number) => Date.now() - n * 24 * 60 * 60 * 1000;
+
+  // Review of #686, round 4: nothing can be typed, and so said Saved without being stored, while the question shows.
+  it('asks before using a count of an earlier day, with no count box, no Saved line and no review until it is answered', async () => {
+    keep({ 'A-1': '10' }, daysAgo(4));
+    const question = await asked();
+    expect(question.textContent).toMatch(/^You have counts from \w+day\. Use them or start again\?/);
+    expect(document.getElementById('count-A-1')).toBeNull();
+    expect(screen.queryByTestId('count-saved-all')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Review the difference/ })).toBeNull();
     expect(readStored(branchA).counts).toEqual({ 'A-1': '10' });
     fireEvent.click(screen.getByRole('button', { name: 'Use them' }));
+    await screen.findByText(/^Not counted yet/);
     expect(countBox('A-1').value).toBe('10');
     expect(screen.queryByTestId('count-earlier')).toBeNull();
     expect(screen.getByTestId('count-kept').textContent).toMatch(/^Counts from \w+day \d{2}:\d{2} are filled in\./);
+    expect(status()).toBe('Saved on this phone, 1 item');
+  });
+
+  // Review of #686, round 4: Use them takes the count as stored now, with what another tab added after this page opened.
+  it('uses the count as stored now when another tab changed it while this one asked', async () => {
+    keep({ 'A-1': '10' }, daysAgo(4));
+    await asked();
+    // The other tab used them too, and counted Test Plug 7.
+    const stored = readStored(branchA);
+    localStorage.setItem(keyOf(branchA), JSON.stringify({ ...stored, counts: { ...stored.counts, 'A-2': '7' }, listed: ['A-1', 'A-2'], done: ['A-1', 'A-2'], at: { ...stored.at, 'A-2': Date.now() } }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use them' }));
+    await screen.findByText(/^Not counted yet/);
+    expect(countBox('A-1').value).toBe('10');
+    expect(countBox('A-2').value).toBe('7');
+    expect(readStored(branchA).counts).toEqual({ 'A-1': '10', 'A-2': '7' });
   });
 
   it('starts again from the question about an earlier day, clearing the saved count', async () => {
-    keep({ 'A-1': '10' }, Date.now() - 4 * 24 * 60 * 60 * 1000);
-    await ready();
+    keep({ 'A-1': '10' }, daysAgo(4));
+    await asked();
     fireEvent.click(screen.getByRole('button', { name: 'Start again' }));
+    await screen.findByText(/^Not counted yet/);
     expect(countBox('A-1').value).toBe('');
     expect(screen.queryByTestId('count-earlier')).toBeNull();
     expect(localStorage.getItem(keyOf(branchA))).toBeNull();
+  });
+
+  // Review of #686, round 4: a tab whose merge holds more than the other tab stored writes it back, so a reload keeps it.
+  it('writes back a count the other tab did not store, so a reload there keeps it', async () => {
+    await ready();
+    fireEvent.change(countBox('A-1'), { target: { value: '4' } });
+    fireEvent.change(countBox('A-2'), { target: { value: '6' } });
+    const mine = readStored(branchA);
+    // The other tab stored a stale sheet with Test Plug 6 only, over this tab's count. Nothing changes on this page, so only
+    // the write back keeps Test Lamp 4 on the device.
+    const theirs: SavedCount = { counts: { 'A-2': '6' }, packCounts: {}, listed: mine.listed, done: mine.done, at: { 'A-2': mine.at['A-2'] ?? 0 } };
+    localStorage.setItem(keyOf(branchA), JSON.stringify(theirs));
+    otherTab(keyOf(branchA), theirs);
+    expect(countBox('A-1').value).toBe('4');
+    expect(readStored(branchA).counts).toEqual({ 'A-1': '4', 'A-2': '6' });
   });
 
   it('keeps an item found but not counted yet', async () => {

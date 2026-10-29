@@ -116,14 +116,16 @@ export function savedAt(saved: SavedCount | null): number | null {
 const dayOf = (t: number, zone: string) => new Date(t).toLocaleDateString('en-CA', { timeZone: zone });
 
 /**
- * When a kept count was saved, in the business's time zone (owner, round 3 of #686): "Monday" within the last week, else
- * "26 Oct"; the time as "14:05"; and whether it is from an earlier business day than `now`, which the page asks about.
+ * When a kept count was saved, in the business's time zone (owner, round 3 of #686): "today" for the same business day,
+ * "Monday" within the last week, else "26 Oct"; the time as "14:05"; and whether it is from an earlier business day than
+ * `now`, which the page asks about.
  */
 export function whenSaved(t: number, zone: string, now: number = Date.now()): { day: string; time: string; earlier: boolean } {
   const recent = now - t < 6 * 24 * 60 * 60 * 1000;
   const day = new Intl.DateTimeFormat('en-GB', recent ? { timeZone: zone, weekday: 'long' } : { timeZone: zone, day: 'numeric', month: 'short' }).format(t);
   const time = new Intl.DateTimeFormat('en-GB', { timeZone: zone, hour: '2-digit', minute: '2-digit', hour12: false }).format(t);
-  return { day, time, earlier: dayOf(t, zone) < dayOf(now, zone) };
+  const earlier = dayOf(t, zone) < dayOf(now, zone);
+  return { day: earlier ? day : 'today', time, earlier };
 }
 
 /** The line at the top of the count (owner, round 2 of #681): plain words for where the counts are kept. Empty before a count. */
@@ -233,6 +235,8 @@ export function useCountSave({ saveKey, restored, saved, apply, hold }: {
         if (quiet.current !== null) clearTimeout(quiet.current);
         quiet.current = setTimeout(() => setOther((o) => (o?.kind === 'open' ? null : o)), OTHER_TAB_MS);
       }
+      // What this tab holds that the other did not store goes back to storage, so a reload there or here keeps it (review of #686).
+      if (!sameCount(next, theirs) || JSON.stringify(merged.at) !== JSON.stringify(theirs.at)) writeCount(saveKey, merged);
       if (sameCount(next, latest.current)) return;
       // Taken as it is, so it is not stamped as typed here.
       before.current = next;
@@ -249,6 +253,19 @@ export function useCountSave({ saveKey, restored, saved, apply, hold }: {
     /** This tab committed: the page then drops the items that went in, and another tab hears which. */
     committed: () => {
       commitAt.current = Date.now();
+    },
+    /**
+     * Use them, after the question about an earlier day: the count as stored now, which another tab may have changed since
+     * this page opened, taken in with its own times so nothing is stamped as typed here.
+     */
+    takeStored: () => {
+      const now = readCount(saveKey);
+      if (!now) return;
+      at.current = now.at;
+      commitAt.current = now.committed;
+      const { at: _at, committed: _committed, ...next } = now;
+      before.current = next;
+      apply(next);
     },
   };
 }

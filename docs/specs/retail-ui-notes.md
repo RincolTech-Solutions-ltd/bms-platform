@@ -1440,11 +1440,13 @@ the items show only while you search, and go away once one is picked. Every item
   other counts are still here" when some of its counts did not go in. The page is keyed by branch, so a branch switch
   opens that branch's own saved count. An item found but not typed yet is kept too. A restored count of an item no longer
   on the sheet is dropped once the sheet is read. A count saved earlier the same business day (the business's time zone)
-  is filled in with the line "Counts from Monday 14:05 are filled in." and **Start again**, which asks "Clear all N
+  is filled in with the line "Counts from today 14:05 are filled in." and **Start again**, which asks "Clear all N
   counts? Your stock does not change." with **Clear the counts** and **Keep them**, and then removes the saved count (the
   other tab says "This count was cleared in another tab"). A count from an earlier business day is not filled in
-  silently: the page asks "You have counts from Monday. Use them or start again?" with **Use them** and **Start again**,
-  and keeps the saved count as it is until then. After Commit the count a success screen (the kit's
+  silently: the page shows only the question "You have counts from Monday. Use them or start again?" with **Use them** and
+  **Start again**, so nothing is typed before it is answered, and keeps the saved count as it is until then. **Use them**
+  takes the count as stored at that moment, with anything another tab added since the page opened. A tab that merges a
+  change from another tab writes the merge back when it holds more than that tab stored, so a reload anywhere keeps it. After Commit the count a success screen (the kit's
   `SuccessScreen`) says **Stock updated for N items** with how many went up, went down and matched and the first five
   changes in words ("Test Lamp: 2 pieces more"), with **Start another count** and **Back to My stock**, and a success toast.
 - **Count stock: the server checks big drops too (issue #636).** **Commit the count** sends the product ids of the ticked lines,
