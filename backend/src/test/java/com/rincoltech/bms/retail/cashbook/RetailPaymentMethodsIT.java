@@ -210,9 +210,15 @@ class RetailPaymentMethodsIT extends LoanFixtures {
         String till = assetAccount("1094", "Test new till");
         assertThat(mapMethod("cash", null, till, null).getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(cb.sale(hq, "cash", item, "2", today).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        JsonNode todayWas = cashDay(hq);
+        // A second remap, away from the till that took today's sale: no figure moves.
+        assertThat(mapMethod("cash", null, assetAccount("1096", "Test newer till"), null)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
 
-        assertThat(cashDay(hq, before)).as("the day before the remap").isEqualTo(was);
+        assertThat(cashDay(hq, before)).as("the day before the remaps").isEqualTo(was);
         JsonNode day = cashDay(hq);
+        assertThat(day).as("today after the second remap").isEqualTo(todayWas);
         assertThat(day.get("opening_minor").asLong()).isEqualTo(6_000);
         assertThat(day.get("closing_minor").asLong()).isEqualTo(9_000);
         assertThat(day.get("other_movements_minor").asLong()).isZero();

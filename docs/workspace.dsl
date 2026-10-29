@@ -298,7 +298,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
         bms.api.retailCashbook -> bms.api.retailReports "Reads the daily profit (only for callers with retail.profit.read)"
         bms.api.retailCashbook -> bms.api.retailPurchasing "Reads the day's cash restocks and cash supplier payments, which leave the till"
         bms.api.retailCashbook -> bms.api.retailStock "Reuses the retail posting helpers"
-        bms.api.retailCashbook -> bms.api.ledger "Posts and reverses one entry per event in the record's branch; reads the cash on hand and bank balances of the seeded accounts and the ones cash and bank are mapped to (ADR-105)"
+        bms.api.retailCashbook -> bms.api.ledger "Posts and reverses one entry per event in the record's branch; reads the cash on hand and bank balances of the seeded accounts and every account cash and bank were ever mapped to (ADR-105)"
         bms.api.retailCashbook -> bms.api.audit "Writes audit rows; a savings create carries only flags, never the amount or the profit"
         bms.api.retailCashbook -> bms.api.tenancy "Resolves the branch and the tenant time zone; reads the savings rate and tolerance settings"
         bms.api.retailCashbook -> bms.api.documents "Links an optional receipt photo to an expense"

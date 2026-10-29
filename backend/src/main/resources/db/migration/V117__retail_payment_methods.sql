@@ -13,6 +13,8 @@
 -- and nothing later is lost. What happens after a module is switched on that the function does not do (the default units
 -- of V109, the packs switched on at start) runs in core.tenancy's ModuleSetUp from PlatformService, which this leaves
 -- alone; PlatformIT.retailIsSwitchedOnWhileCashIsRemapped asserts both halves.
+-- Checked against V2, V10, V43, V114 (#127, not merged), V115 (#676) and V116 (#678): none of the later ones touches it.
+-- PlatformIT.platformSetTenantModulesIsStillTheBodyOfV117 fails if a later migration replaces it without redoing this check.
 --
 -- A function replaced in place: no table is touched, no lock is held beyond the catalogue row, safe on a populated
 -- database. Its owner and the grants from V2 stay.

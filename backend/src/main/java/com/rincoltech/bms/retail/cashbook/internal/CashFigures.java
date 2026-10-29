@@ -1,11 +1,11 @@
 package com.rincoltech.bms.retail.cashbook.internal;
 
 import com.rincoltech.bms.core.ledger.LedgerAccounts;
+import com.rincoltech.bms.core.ledger.PaymentMethods;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.retail.cashbook.internal.CashbookRepository.Agg;
 import com.rincoltech.bms.retail.purchasing.CashPurchases;
 import com.rincoltech.bms.retail.sales.CashSales;
-import com.rincoltech.bms.retail.stock.RetailBooks;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Map;
@@ -30,7 +30,7 @@ class CashFigures {
     private final CashSales sales;
     private final CashPurchases purchases;
     private final LedgerAccounts ledger;
-    private final RetailBooks books;
+    private final PaymentMethods methods;
     private final CurrentTenant tenant;
 
     CashFigures(
@@ -38,13 +38,13 @@ class CashFigures {
             CashSales sales,
             CashPurchases purchases,
             LedgerAccounts ledger,
-            RetailBooks books,
+            PaymentMethods methods,
             CurrentTenant tenant) {
         this.repo = repo;
         this.sales = sales;
         this.purchases = purchases;
         this.ledger = ledger;
-        this.books = books;
+        this.methods = methods;
         this.tenant = tenant;
     }
 
@@ -263,10 +263,10 @@ class CashFigures {
     }
 
     /**
-     * ADR-105: the seeded account and, when the method is mapped elsewhere at the branch, that account too. Money posted
-     * before a remap stays on the seeded account until the business moves it with a journal, which then nets to nothing.
+     * ADR-105: the seeded account and every account the method was ever mapped to at the branch, so a remap moves no past
+     * figure. Money left on an earlier till keeps counting until the business moves it with a journal, which nets to nothing.
      */
     private Set<String> accounts(String seededKey, UUID branch) {
-        return new TreeSet<>(java.util.List.of(seededKey, books.accountRef(seededKey, branch)));
+        return methods.accountRefsEverUsed(seededKey.equals("bank") ? "bank" : "cash", branch);
     }
 }

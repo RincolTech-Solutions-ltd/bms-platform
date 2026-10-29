@@ -272,6 +272,21 @@ class PlatformIT extends IntegrationTest {
                 .isTrue();
     }
 
+    /** Review of #677: a later migration that replaces the function fails here until V117's check is redone. */
+    @Test
+    void platformSetTenantModulesIsStillTheBodyOfV117() throws Exception {
+        String file = new String(
+                PlatformIT.class
+                        .getResourceAsStream("/db/migration/V117__retail_payment_methods.sql")
+                        .readAllBytes(),
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT prosrc FROM pg_proc WHERE proname = 'platform_set_tenant_modules'")
+                        .query(String.class)
+                        .single())
+                .isEqualTo(file.substring(file.indexOf("AS $$") + "AS $$".length(), file.lastIndexOf("$$;")));
+    }
+
     /** FR-TEN-05, FR-TEN-06: subscription moves are audited; suspension makes the tenant read only. */
     @Test
     void subscriptionMovesAndSuspension() {
