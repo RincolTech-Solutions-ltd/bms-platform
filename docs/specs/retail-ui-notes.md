@@ -1386,9 +1386,13 @@ and showed the sheet of their old AppSheet app: Search, New, the list and Done. 
 The owner, 29 Oct 2026: "On mobile I can't easily find items and categories. It doesn't feel natural."
 
 - **Search first.** On Items and My stock the search box and the category chips sit in `FindBar`
-  (`frontend/src/areas/staff/retail/phone-find.tsx`). Below 720px it is sticky under the 56px top bar on the page's background
-  with a hairline under it, so the list passes under it; from 720px it is in the flow.
-- **Chips.** `CategoryChips`: All, then each category in the server's order with its item count (`product_count`), in one row
+  (`frontend/src/areas/staff/retail/phone-find.tsx`). Below 720px it is sticky under the top bar on the page's background
+  with a hairline under it, so the list passes under it; its offset is the staff bar's measured height (`--find-top`, 56px
+  until measured), so a bar that grows with a large font never covers it. From 720px it is in the flow.
+- **Barcodes.** Digits only, 8 to 14 of them, are looked up first (`GET /retail/products/by-barcode/{code}`); a known barcode
+  searches the list by its item's code, so typing or scanning a label finds the item. No server change.
+- **Chips.** `CategoryChips`: All (no count: no list shows every item), then each category in the server's order with its item
+  count (`product_count`, every item filed in it, inactive ones too, as the Categories page counts), in one row
   that scrolls sideways inside itself (the page never does). A switched-off category shows only while it still holds items or
   is chosen. Each chip is a 48px button with `aria-pressed`; the chosen one is filled. A chip sets the page's own category
   filter, so the list asks the server as the picker did; the chips replace the category picker of these two filters
@@ -1401,9 +1405,14 @@ The owner, 29 Oct 2026: "On mobile I can't easily find items and categories. It 
   words Selling price. The row opens the item; the opened item has Change price above its form. The laptop keeps the cards.
   My stock on a phone is one plain list of its cards with the category under each name; the chips stand for the groups.
   Items asks `GET /retail/products` with `branch_id` only for a session that may read stock at that branch.
-- **Nothing found.** `No item called "bulb".` with Add it, which opens Quick add with the name typed through its `name`
-  route parameter (Quick add is the add form that takes a name from the link; Add an item has none), and Clear search.
-- **Not yet.** The server search matches the name, the code and the category, not a barcode; a barcode is found by Scan.
+- **Nothing found.** Add it shows only when nothing narrowed the search, so an item a chip or a filter hid is never added
+  twice. Nothing narrowed: `No item called "bulb".` with Add it, which opens Quick add with the name typed through its `name`
+  route parameter (Quick add is the add form that takes a name from the link; Add an item has none; Quick add needs what
+  Items and My stock need), and Clear search. A chip chosen: `No item called "bulb" in Cables.` with Search all categories.
+  Another filter on (Out of stock, Low stock, negative only, Inactive): `No item called "bulb" with these filters.` Digits
+  that are no known barcode: `No item with the code or barcode "6001234567890".`
+- **On a phone** the Items list follows the search, Quick add and Add an item; the sizes and colours ways to add come after it.
+- **Layout check.** `layout/phone-find.layout.test.ts` at 360, 390 and 412px, at both font scales.
 
 ## Add it in place (issue #688, FR-UXN-12)
 

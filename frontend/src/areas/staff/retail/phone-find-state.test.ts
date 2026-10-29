@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Category, Product } from '../../../api/retail';
-import { chipsOf, itemStock, knownChip, noItemText, readChip, writeChip } from './phone-find-state';
+import { chipsOf, itemStock, knownChip, looksLikeBarcode, noItemCase, noItemText, readChip, writeChip } from './phone-find-state';
 
 // Issue #690: the category chips of Items and My stock, the chip each page remembers, and the words of an item's row and of a
 // search that finds nothing. Fabricated categories and items.
@@ -14,9 +14,9 @@ const cats: Category[] = [
 ];
 
 describe('chipsOf', () => {
-  it('starts with All and every item, then each category with its count in the server order', () => {
+  it('starts with All, with no count since no list shows every item, then each category with its count in the server order', () => {
     expect(chipsOf(cats, '')).toEqual([
-      { id: '', name: 'All', count: 5 },
+      { id: '', name: 'All' },
       { id: 'c1', name: 'Test Cables', count: 3 },
       { id: 'c2', name: 'Test Lighting', count: 0 },
       { id: 'c3', name: 'Test Old stock', count: 2 },
@@ -29,7 +29,7 @@ describe('chipsOf', () => {
   });
 
   it('is All alone before the categories arrive', () => {
-    expect(chipsOf([], '')).toEqual([{ id: '', name: 'All', count: 0 }]);
+    expect(chipsOf([], '')).toEqual([{ id: '', name: 'All' }]);
   });
 });
 
@@ -66,10 +66,31 @@ describe('the remembered chip', () => {
   });
 });
 
-describe('the words', () => {
-  it('names what was typed when a search finds nothing', () => {
-    expect(noItemText(' bulb ')).toBe('No item called "bulb".');
+// JUSTIFICATION-A3: new test cases the review of #703 asked for (Add it only for an unnarrowed search, barcodes).
+describe('a search that finds nothing', () => {
+  it('offers Add it only when nothing narrowed the search', () => {
+    expect(noItemCase('bulb', undefined, false)).toEqual({ kind: 'add' });
+    expect(noItemCase('bulb', 'Test Cables', false)).toEqual({ kind: 'category', category: 'Test Cables' });
+    expect(noItemCase('bulb', undefined, true)).toEqual({ kind: 'filtered' });
+    // Digits that are no known barcode are never a name to add, whatever else is set.
+    expect(noItemCase('6001234567890', undefined, false)).toEqual({ kind: 'barcode' });
+    expect(noItemCase('6001234567890', 'Test Cables', true)).toEqual({ kind: 'barcode' });
   });
+
+  it('names what was typed, and where it looked', () => {
+    expect(noItemText(' bulb ')).toBe('No item called "bulb".');
+    expect(noItemText('bulb', { kind: 'category', category: 'Test Cables' })).toBe('No item called "bulb" in Test Cables.');
+    expect(noItemText('bulb', { kind: 'filtered' })).toBe('No item called "bulb" with these filters.');
+    expect(noItemText('6001234567890', { kind: 'barcode' })).toBe('No item with the code or barcode "6001234567890".');
+  });
+
+  it('takes 8 to 14 digits as a barcode, and nothing else', () => {
+    expect(['12345678', ' 6001234567890 ', '10061234567890'].every(looksLikeBarcode)).toBe(true);
+    expect(['1234567', '123456789012345', 'BLB-0001', '60012 34567', 'bulb 9W'].some(looksLikeBarcode)).toBe(false);
+  });
+});
+
+describe('the words', () => {
 
   const item = (over: Partial<Product>): Product => ({ id: 'p1', description: 'Test bulb', unit: 'pc', ...over });
 

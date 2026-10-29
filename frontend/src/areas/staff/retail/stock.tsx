@@ -19,7 +19,7 @@ import { ListGroupBy, ViewSwitch, useListView } from './list-chain';
 import { STOCK_NAMES, STOCK_ORDER, listUser, withoutShop, type ListSelection } from './list-chain-state';
 import { GroupedStock, type StockFilter } from './stock-grouped';
 import { keptWords } from './orders-state';
-import { CategoryChips, FindBar, NoItem, useChosenChip } from './phone-find';
+import { CategoryChips, FindBar, NoItem, useChosenChip, useFindTerm } from './phone-find';
 import { ScreenLink } from './screen-link';
 import { Hint } from '../../../app/ui/Hint';
 import { WORDS } from '../../../app/glossary';
@@ -288,7 +288,8 @@ export function StockPage() {
   const list = useListView(listUser(me), 'stock', STOCK_ORDER);
   const grouped = list.view === 'grouped';
   const search = useLiveSearch();
-  const query = search.term;
+  // Issue #690: digits that are a known barcode search by that item's code.
+  const { query, looking } = useFindTerm(search.term);
   const [negativeOnly, setNegativeOnly] = useState(false);
   const [level, setLevel] = useState<StockLevel | ''>('');
   // Closed branches that still hold stock are left out of the whole-business list unless asked for (#329).
@@ -326,7 +327,7 @@ export function StockPage() {
         <ScreenLink screen="categories" to="/staff/retail/catalogue/categories">Categories</ScreenLink>
       </nav>
       <FindBar tour="stock-search">
-        <SearchBox id="stock-search" label="Search by name, code or category" search={search} fetching={finding} count={shown} />
+        <SearchBox id="stock-search" label="Search by name, code, barcode or category" search={search} fetching={finding} count={shown} />
         <CategoryChips categories={categories.data ?? []} value={categoryId} onChange={setCategoryId} />
       </FindBar>
       {!all && branchId !== null && <NoStockHere branchId={branchId} />}
@@ -366,7 +367,15 @@ export function StockPage() {
       )}
       {!grouped && result.isPending && (all || branchId !== null) && <SkeletonList label="Loading stock" />}
       {!grouped && <Problem error={result.error} />}
-      {!grouped && shown === 0 && query && <NoItem term={query} onClear={search.clear} />}
+      {!grouped && shown === 0 && search.term && !looking && (
+        <NoItem
+          term={search.term}
+          onClear={search.clear}
+          category={(categories.data ?? []).find((c) => c.id === categoryId)?.name}
+          onAllCategories={() => setCategoryId('')}
+          filtered={level !== '' || negativeOnly}
+        />
+      )}
       {!grouped && (
       <div data-tour="stock-list">
       <SearchResults fetching={finding}>

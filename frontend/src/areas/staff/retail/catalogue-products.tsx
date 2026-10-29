@@ -22,7 +22,7 @@ import { StockMinimumEditor } from './stock-minimum';
 import { UnitPicker } from './unit-picker';
 import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
 import { CategoryPicker } from './category-picker';
-import { CategoryChips, FindBar, ItemRow, NoItem, useChosenChip } from './phone-find';
+import { CategoryChips, FindBar, ItemRow, NoItem, useChosenChip, useFindTerm } from './phone-find';
 import { RowList } from '../../../app/ui/ListRow';
 import { ScreenToast } from './toast';
 import { Gate, Problem, money, useBranchView, useIsPhone, useProfitAccess, useToast } from './ui';
@@ -428,7 +428,8 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
   const { me } = useStaff();
   const profit = useProfitAccess();
   const search = useLiveSearch();
-  const query = search.term;
+  // Issue #690: digits that are a known barcode search by that item's code.
+  const { query, looking } = useFindTerm(search.term);
   const phone = useIsPhone();
   // Issue #690: the stock of each item in the branch in use, so a phone row shows it in packs and pieces.
   // The server refuses branch_id to a session that may not read stock there, so it is asked only then.
@@ -450,19 +451,25 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
   const canPrice = (me.permissions ?? []).includes(PRICE);
   const g = useCategoryGroups({ screen: 'items', items, categoryOf: (p) => p.category, resetKey: [query, categoryId, activeFilter].join('|'), searching: query !== '', pending: page.isPlaceholderData });
   const card = (p: Product) => <ProductCard key={p.id} product={p} showCost={profit} canPrice={canPrice} onEdit={() => onEdit(p.id ?? '')} onPrice={() => onPrice(p.id ?? '')} extra={<ScreenLink screen="stock" to="/staff/retail/stock" label={`See the stock of ${p.description}`}>Stock</ScreenLink>} />;
+  const chosenName = (categories.data ?? []).find((c) => c.id === categoryId)?.name;
+  const sizes = (
+    <>
+      <Link className="btn" to={SIZES_NEW as never} data-tour="product-add-sizes">Add an item with sizes and colours</Link>
+      <Link className="btn" to={SIZES_JOIN as never} data-tour="product-join-sizes">Join items as sizes of one item</Link>
+    </>
+  );
   // Issue #690: search first, the category chips under it, both kept at the top on a phone, where each item is one row that opens it.
   return (
     <>
       <FindBar>
-        <div data-tour="product-search"><SearchBox id="items-search" label="Search by name, code or category" search={search} fetching={finding} count={page.data ? items.length : undefined} more={page.hasNextPage} /></div>
+        <div data-tour="product-search"><SearchBox id="items-search" label="Search by name, code, barcode or category" search={search} fetching={finding} count={page.data ? items.length : undefined} more={page.hasNextPage} /></div>
         <CategoryChips categories={categories.data ?? []} value={categoryId} onChange={setCategoryId} />
       </FindBar>
       <p className="cluster">
         {/* Not a second primary action (rule 6): Quick add sits with the other ways to add, as a plain button. */}
         {canUse(me, 'quickAdd') && <Link className="btn" to={'/staff/retail/quick-add' as never}>Quick add</Link>}
         <button type="button" onClick={onAdd} data-tour="product-add">Add an item</button>
-        <Link className="btn" to={SIZES_NEW as never} data-tour="product-add-sizes">Add an item with sizes and colours</Link>
-        <Link className="btn" to={SIZES_JOIN as never} data-tour="product-join-sizes">Join items as sizes of one item</Link>
+        {!phone && sizes}
       </p>
       <div className="rt-row" data-tour="product-filters">
         <div>
@@ -476,7 +483,15 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
       </div>
       {page.isPending && <p className="loading">Loading</p>}
       <Problem error={page.error} />
-      {page.data && items.length === 0 && (query ? <NoItem term={query} onClear={search.clear} /> : <p className="empty-state">No items found.</p>)}
+      {page.data && items.length === 0 && !looking && (search.term ? (
+        <NoItem
+          term={search.term}
+          onClear={search.clear}
+          category={chosenName}
+          onAllCategories={() => setCategoryId('')}
+          filtered={activeFilter === 'off'}
+        />
+      ) : <p className="empty-state">No items found.</p>)}
       <div data-tour="product-list">
         <SearchResults fetching={finding}>
           {phone ? (
@@ -490,6 +505,8 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
         </SearchResults>
       </div>
       {page.hasNextPage && <button type="button" onClick={() => void page.fetchNextPage()} disabled={page.isFetchingNextPage || page.isPlaceholderData}>{page.isFetchingNextPage ? 'Loading' : 'Show more items'}</button>}
+      {/* On a phone the list comes right after the search; the sizes and colours ways to add follow it. */}
+      {phone && <p className="cluster">{sizes}</p>}
     </>
   );
 }

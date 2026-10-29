@@ -1,14 +1,16 @@
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { Category, Product } from '../../../api/retail';
+import { retail, type Category, type Product } from '../../../api/retail';
 import { WORDS } from '../../../app/glossary';
 import { ListRow } from '../../../app/ui/ListRow';
 import { ScreenLink } from './screen-link';
 import { money } from './ui';
-import { chipsOf, itemStock, knownChip, noItemText, readChip, writeChip, type FindPage } from './phone-find-state';
+import { chipsOf, itemStock, knownChip, looksLikeBarcode, noItemCase, noItemText, readChip, writeChip, type FindPage } from './phone-find-state';
 
 // Finding items on a phone (issue #690): the search box and the category chips stay at the top while the list scrolls, the
 // chips scroll sideways inside their own row, an item is one big row that opens it, and a search that finds nothing offers
-// Add it, which opens Quick add with the name typed (its `name` route param), the add form that takes a name from the link.
+// Add it only when nothing narrowed it. Add it opens Quick add with the name typed (its `name` route param), the add form that
+// takes a name from the link. Quick add needs what Items and My stock need, so whoever sees these pages may use it.
 
 /** The page's chosen chip, remembered per page; a remembered category that has gone reads as All. */
 export function useChosenChip(page: FindPage, categories: Category[] | undefined): [string, (id: string) => void] {
@@ -20,40 +22,95 @@ export function useChosenChip(page: FindPage, categories: Category[] | undefined
   return [knownChip(id, categories), choose];
 }
 
-/** The search and the chips: sticky under the top bar on a phone (`.find-bar` in retail.css). */
-export function FindBar({ children, tour }: { children: ReactNode; tour?: string }) {
-  return <div className="find-bar" data-tour={tour}>{children}</div>;
+/**
+ * The query a list asks with: digits that are a known barcode become that item's code, which the server search matches, so a
+ * barcode typed or scanned into the box finds its item. `looking` is true while the barcode is being looked up.
+ */
+export function useFindTerm(term: string): { query: string; looking: boolean } {
+  const code = looksLikeBarcode(term) ? term.trim() : '';
+  const found = useQuery({
+    queryKey: ['retail', 'by-barcode', code],
+    queryFn: ({ signal }) => retail.findByBarcode(code, undefined, signal),
+    enabled: code !== '',
+    staleTime: 60_000,
+    retry: false,
+  });
+  return { query: found.data?.product?.code ?? term, looking: code !== '' && found.isPending };
 }
 
-/** One row of chips, All first, each with its item count; the chosen one is pressed and scrolled into the row's view. */
+/**
+ * The search and the chips: sticky under the top bar on a phone (`.find-bar` in retail.css). The top bar's measured height is
+ * the offset, so a bar that grows with a large font never covers the search.
+ */
+export function FindBar({ children, tour }: { children: ReactNode; tour?: string }) {
+  const bar = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = bar.current;
+    const top = document.querySelector<HTMLElement>('.staff-bar');
+    if (!el || !top) return;
+    const measure = () => {
+      const height = Math.ceil(top.getBoundingClientRect().height);
+      if (height > 0) el.style.setProperty('--find-top', `${height}px`);
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(top);
+    return () => observer?.disconnect();
+  }, []);
+  return <div className="find-bar" ref={bar} data-tour={tour}>{children}</div>;
+}
+
+/** One row of chips, All first, each category with its item count; the chosen one is pressed and scrolled into the row's view. */
 export function CategoryChips({ categories, value, onChange }: { categories: Category[]; value: string; onChange: (id: string) => void }) {
   const row = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const box = row.current;
-    const chosen = box?.querySelector<HTMLElement>('[aria-pressed="true"]');
-    // Only the row scrolls, never the page: the chip is brought in by the row's own scroll position.
-    if (box && chosen && (chosen.offsetLeft < box.scrollLeft || chosen.offsetLeft + chosen.offsetWidth > box.scrollLeft + box.clientWidth)) {
-      box.scrollLeft = chosen.offsetLeft - 16;
-    }
+    let live = true;
+    const bring = () => {
+      const box = row.current;
+      const chosen = box?.querySelector<HTMLElement>('[aria-pressed="true"]');
+      if (!live || !box || !chosen) return;
+      // Measured against the row itself, whatever its offset parent: only the row scrolls, never the page.
+      const edge = box.getBoundingClientRect();
+      const chip = chosen.getBoundingClientRect();
+      if (chip.left < edge.left || chip.right > edge.right) box.scrollLeft += chip.left - edge.left - 16;
+    };
+    bring();
+    // The web font widens the chips when it arrives, which can push the chosen one out again.
+    void document.fonts?.ready.then(bring);
+    return () => { live = false; };
   }, [value, categories.length]);
   return (
     <div className="find-chips" ref={row} role="group" aria-label="Categories">
       {chipsOf(categories, value).map((c) => (
         <button key={c.id || 'all'} type="button" className="find-chip" aria-pressed={c.id === value} onClick={() => onChange(c.id)}>
-          {c.name} <span className="find-chip-count num">{c.count}</span>
+          {c.name}{c.count !== undefined && <> <span className="find-chip-count num">{c.count}</span></>}
         </button>
       ))}
     </div>
   );
 }
 
-/** A search that found nothing: the name as typed, Add it for whoever may use Quick add, and the way back. */
-export function NoItem({ term, onClear }: { term: string; onClear: () => void }) {
+/**
+ * A search that found nothing. With a chip chosen it says so and searches all categories; with another filter on it says the
+ * filters hid it; digits that are no known barcode say that; only a search nothing narrowed offers Add it.
+ */
+export function NoItem({ term, onClear, category, onAllCategories, filtered = false }: {
+  term: string;
+  onClear: () => void;
+  /** The name of the chosen chip's category, when one is chosen. */
+  category?: string;
+  onAllCategories?: () => void;
+  /** Another filter narrowed the search: a level, negative only, inactive items only. */
+  filtered?: boolean;
+}) {
+  const why = noItemCase(term, category, filtered);
+  const name = term.trim();
   return (
     <div className="empty-state find-none">
-      <p>{noItemText(term)}</p>
+      <p>{noItemText(term, why)}</p>
       <p className="cluster">
-        <ScreenLink screen="quickAdd" to="/staff/retail/quick-add" search={{ name: term.trim() }} label={`Add ${term.trim()}`} action>Add it</ScreenLink>
+        {why.kind === 'category' && onAllCategories && <button type="button" className="rt-primary" onClick={onAllCategories}>Search all categories</button>}
+        {why.kind === 'add' && <ScreenLink screen="quickAdd" to="/staff/retail/quick-add" search={{ name }} label={`Add ${name}`} action>Add it</ScreenLink>}
         <button type="button" onClick={onClear}>Clear search</button>
       </p>
     </div>

@@ -6,16 +6,34 @@ import { packsAndPieces, standardPack } from './units-state';
 
 export type FindPage = 'items' | 'stock';
 
-export type Chip = { id: string; name: string; count: number };
+/** `count` is every item filed in the category, as the Categories page counts them; All has none, since a list never shows them all. */
+export type Chip = { id: string; name: string; count?: number };
 
 /**
- * All, with every item, then each category in the server's order with its item count. A switched-off category shows only while
- * it still holds items or is the one chosen, so a chip never leads to a list that cannot be reached.
+ * All, then each category in the server's order with its item count. A switched-off category shows only while it still holds
+ * items or is the one chosen, so a chip never leads to a list that cannot be reached.
  */
 export function chipsOf(categories: Category[], chosen: string): Chip[] {
   const shown = categories.filter((c) => c.active !== false || (c.product_count ?? 0) > 0 || c.id === chosen);
-  const all = categories.reduce((sum, c) => sum + (c.product_count ?? 0), 0);
-  return [{ id: '', name: 'All', count: all }, ...shown.map((c) => ({ id: c.id ?? '', name: c.name ?? '', count: c.product_count ?? 0 }))];
+  return [{ id: '', name: 'All' }, ...shown.map((c) => ({ id: c.id ?? '', name: c.name ?? '', count: c.product_count ?? 0 }))];
+}
+
+/** A search of digits only, 8 to 14 of them, is a barcode first (EAN-8 to the 14 of a carton's GTIN). */
+export function looksLikeBarcode(term: string): boolean {
+  return /^\d{8,14}$/.test(term.trim());
+}
+
+/**
+ * What an empty answer offers. Add it only when nothing narrowed the search: with a chip chosen the item may be in another
+ * category, with another filter on it may be hidden, and digits that are no known barcode are not a name to add.
+ */
+export type NoItemCase = { kind: 'barcode' } | { kind: 'category'; category: string } | { kind: 'filtered' } | { kind: 'add' };
+
+export function noItemCase(term: string, category: string | undefined, filtered: boolean): NoItemCase {
+  if (looksLikeBarcode(term)) return { kind: 'barcode' };
+  if (category) return { kind: 'category', category };
+  if (filtered) return { kind: 'filtered' };
+  return { kind: 'add' };
 }
 
 const chipKey = (page: FindPage) => `bms.findChip.${page}`;
@@ -44,9 +62,13 @@ export function knownChip(id: string, categories: Category[] | undefined): strin
   return categories.some((c) => c.id === id) ? id : '';
 }
 
-/** The empty answer to a search, with the name as typed: No item called "bulb". */
-export function noItemText(term: string): string {
-  return `No item called "${term.trim()}".`;
+/** The empty answer to a search, with the name as typed: No item called "bulb", in a category or with filters when they narrowed it. */
+export function noItemText(term: string, why: NoItemCase = { kind: 'add' }): string {
+  const t = term.trim();
+  if (why.kind === 'barcode') return `No item with the code or barcode "${t}".`;
+  if (why.kind === 'category') return `No item called "${t}" in ${why.category}.`;
+  if (why.kind === 'filtered') return `No item called "${t}" with these filters.`;
+  return `No item called "${t}".`;
 }
 
 /** An item's stock in the branch in use, in its standard pack and pieces; empty when no branch was asked for. */

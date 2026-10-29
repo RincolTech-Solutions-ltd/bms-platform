@@ -132,12 +132,12 @@ describe('stock screen', () => {
     vi.unstubAllGlobals();
   });
 
-  it('offers the category chips, All first, each with its item count (#690, which replaces the picker of #578 here)', () => {
+  it('offers the category chips, All first, each category with its item count (#690, which replaces the picker of #578 here)', () => {
     const client = new QueryClient();
     client.setQueryData(['retail', 'categories'], [{ id: 'c1', name: 'Cables', product_count: 3 }, { id: 'c2', name: 'Lighting', product_count: 2 }]);
     const html = page('sales', <StockPage />, client);
     expect(html).toContain('role="group" aria-label="Categories"');
-    expect(html).toContain('aria-pressed="true">All <span class="find-chip-count num">5</span>');
+    expect(html).toContain('aria-pressed="true">All</button>');
     expect(html).toContain('Cables <span class="find-chip-count num">3</span>');
     expect(html).not.toContain('id="stock-category"');
   });

@@ -171,7 +171,8 @@
 @media (max-width: 719px) {
   .find-bar {
     position: sticky;
-    top: 56px;
+    /* The top bar's measured height (FindBar sets it), 56px until it is measured. */
+    top: var(--find-top, 56px);
     z-index: calc(var(--z-nav) - 1);
     margin-inline: calc(-1 * var(--space-4));
     padding: var(--space-2) var(--space-4) var(--space-2);
@@ -185,6 +186,7 @@
 }
 
 .find-chips {
+  position: relative;
   display: flex;
   gap: var(--space-2);
   overflow-x: auto;
