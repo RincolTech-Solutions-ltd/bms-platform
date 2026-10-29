@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
 import type { Customer } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
+import { focusFirstMissing } from '../../../app/ui/Field';
 import { ADD_CHOICE } from '../../../app/ui/PickerWithAdd';
 import { StaffContext } from '../context';
 
@@ -90,5 +91,26 @@ describe('the customer picker (issue #688)', () => {
     open(list, withoutCustomers());
     const select = screen.getByLabelText(/^Customer/) as HTMLSelectElement;
     expect([...select.options].map((o) => o.text)).toEqual(['No customer', 'Test Customer 01']);
+  });
+
+  // JUSTIFICATION-A3: the review of #691 asks for proof that an order with no customers saves with the name alone.
+  it('on an order or a quotation never stands in the way: never needed, and left out for a seller when there are none', () => {
+    const quiet = (me: Me) => render(
+      <QueryClientProvider client={new QueryClient()}>
+        <StaffContext.Provider value={{ me, branch: '' }}>
+          <form data-testid="order">
+            <CustomerPicker id="order-buyer" label="Customer from the list" placeholder="Not on the list" customers={{ data: [], isError: false, refetch: () => undefined }} value="" onChange={() => undefined} quietWhenEmpty />
+          </form>
+        </StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    quiet(withoutCustomers());
+    expect(screen.queryByText(/No customers yet/)).toBeNull();
+    expect(screen.queryByText(/Customer from the list/)).toBeNull();
+    cleanup();
+    // Whoever may add one still sees + Add a customer, but Save never goes to it: the typed name is enough.
+    quiet(mockMe('admin'));
+    expect(screen.getByRole('button', { name: '+ Add a customer' }).hasAttribute('data-needed')).toBe(false);
+    expect(focusFirstMissing(screen.getByTestId('order'))).toBe(false);
   });
 });

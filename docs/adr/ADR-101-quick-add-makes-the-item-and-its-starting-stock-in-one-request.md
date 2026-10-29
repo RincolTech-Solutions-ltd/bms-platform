@@ -98,5 +98,11 @@ a group" adds one in a sheet over the form without losing what was typed (FR-UXN
 stays optional on `POST /retail/quick-add`, and General is still made for a caller that leaves it out, so the API and its
 tests keep their contract and no migration is needed. Items already in General stay there.
 
+The same issue adds "Comes in cartons of" (owner decision D76): with packs on, a size typed under the unit gives the new item
+its own carton pack, for selling and buying, through the pack route `POST /retail/products/{product_id}/units` once Quick add has answered, making the
+Carton unit through `POST /retail/units` when the shop has none. How many then takes full cartons and loose ones, and the screen
+sends their total in pieces as `qty`, so the route is unchanged. The pack is a second request: a pack that fails leaves the
+item and its stock, and the line says to add the pack on the item's page, as a failed photo does.
+
 **Watch for:** another caller of the route that leaves the category out still files under General; a screen that adds an item
-should ask for the category as Quick add does.
+should ask for the category as Quick add does. A carton pack that failed is said once; nothing retries it.

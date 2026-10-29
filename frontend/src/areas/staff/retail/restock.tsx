@@ -126,15 +126,17 @@ export const METHODS: { value: PurchasePayment; label: string }[] = [
   { value: 'credit', label: `${WORDS.onCredit} (owed to the supplier)` },
 ];
 
-/** On credit is owed to someone, so it needs a supplier: one chosen or a new one typed. */
-export function creditNeedsSupplier(method: PurchasePayment, supplierId: string, newSupplier: string): string | null {
-  return method === 'credit' && supplierId === '' && newSupplier.trim() === '' ? 'On credit needs a supplier. Choose one above, or + Add a supplier.' : null;
+/** On credit is owed to someone, so it needs a supplier chosen in the list (+ Add a supplier adds one there, issue #688). */
+export function creditNeedsSupplier(method: PurchasePayment, supplierId: string): string | null {
+  return method === 'credit' && supplierId === '' ? 'On credit needs a supplier. Choose one above, or + Add a supplier.' : null;
 }
 
-/** What the restock form keeps with its key in this tab until saved or cleared (#77). */
+/**
+ * What the restock form keeps with its key in this tab until saved or cleared (#77). A draft kept before issue #688 may still
+ * carry a typed `newSupplier`; it is never read, so nothing is made that the form does not show.
+ */
 export interface RestockDraft {
   supplierId: string;
-  newSupplier: string;
   purchasedOn: string;
   method: PurchasePayment;
   lines: RestockLine[];
@@ -164,12 +166,11 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
   const branches = (me.branches ?? []).filter((b) => b.id && b.stocks_goods !== false);
   // A restock entered again after a void (issue #351) has a draft of its own, so a restock in progress is never overwritten.
   const { key, draft, setDraft, finish, discard } = usePersistedDraft<RestockDraft>(draftName ?? `restock:${me.user_id ?? ''}`, initial ?? {
-    supplierId: '', newSupplier: '', purchasedOn: businessToday(), method: 'cash', lines: [],
+    supplierId: '', purchasedOn: businessToday(), method: 'cash', lines: [],
   });
-  const { supplierId, newSupplier, purchasedOn, method, lines } = draft;
+  const { supplierId, purchasedOn, method, lines } = draft;
   const field = <K extends keyof RestockDraft>(k: K) => (v: RestockDraft[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const setSupplierId = field('supplierId');
-  const setNewSupplier = field('newSupplier');
   const setPurchasedOn = field('purchasedOn');
   const setMethod = field('method');
   const setLines = (f: (ls: RestockLine[]) => RestockLine[]) => setDraft((d) => ({ ...d, lines: f(d.lines) }));
@@ -178,17 +179,9 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
   // toast-exempt: success screen, the purchase saved screen that replaces the form
   const save = useMutation({
     mutationFn: async () => {
-      let id = supplierId;
-      let supplierName = (suppliers.data ?? []).find((x) => x.id === supplierId)?.name ?? '';
+      const supplierName = (suppliers.data ?? []).find((x) => x.id === supplierId)?.name ?? '';
       const before = Object.fromEntries(lines.map((l) => [l.product.id ?? '', { sell: l.product.sell_minor, cost: l.product.cost_minor }]));
-      if (!id && newSupplier.trim()) {
-        const created = await retail.createSupplier({ name: newSupplier.trim() });
-        id = created.id ?? '';
-        supplierName = created.name ?? newSupplier.trim();
-        // Kept in the draft, so a retry after a failed restock does not add the supplier twice.
-        setDraft((d) => ({ ...d, supplierId: id, newSupplier: '' }));
-      }
-      const saved = await retail.createPurchase(buildPurchase({ supplierId: id, purchasedOn, method, lines }), key);
+      const saved = await retail.createPurchase(buildPurchase({ supplierId, purchasedOn, method, lines }), key);
       return { saved, context: { supplierName, before } };
     },
     onSuccess: ({ saved, context }) => {
@@ -244,7 +237,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
   const patchWhole = (i: number, line: RestockLine) => setLines((ls) => ls.map((l, n) => (n === i ? line : l)));
 
   const problems = lines.map(restockLineProblem);
-  const supplierProblem = creditNeedsSupplier(method, supplierId, newSupplier);
+  const supplierProblem = creditNeedsSupplier(method, supplierId);
   const blocked = lines.length === 0 || problems.some((p) => p !== null) || supplierProblem !== null;
   // Issue #353: each line against the item's own purchases, said before saving, never blocking.
   const norms = useEntryNorms(lines.map((l) => l.product.id));
@@ -274,7 +267,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
         placeholder="No supplier"
         options={supplierOptions(suppliers.data ?? [], supplierId).map((s) => ({ value: s.id ?? '', label: s.active === false ? `${s.name ?? ''} (switched off)` : s.name ?? '' }))}
         value={supplierId}
-        onChange={(id) => { setSupplierId(id); setNewSupplier(''); }}
+        onChange={setSupplierId}
         canAdd={canUse(me, 'suppliers')}
         required={method === 'credit'}
         loading={suppliers.data === undefined}
@@ -289,6 +282,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
               label: 'Add a supplier',
               name: 'Name of the new supplier',
               send: 'Add supplier',
+              maxLength: 120,
               create: (name) => retail.createSupplier({ name }),
               onAdded: (s: Supplier) => {
                 queryClient.setQueryData<Supplier[]>(['retail', 'suppliers'], (was) => was && [...was.filter((x) => x.id !== s.id), s]);

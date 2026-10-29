@@ -85,6 +85,20 @@ describe('Counted in (issue #619)', () => {
     expect((screen.getByLabelText(/^Counted in/) as HTMLSelectElement).selectedOptions[0]?.text).toBe('dozen');
   });
 
+  it('never opens the add sheet when an arrow key on the closed list lands on + Add a unit (review of #691)', async () => {
+    open([piece]);
+    const select = screen.getByLabelText(/^Counted in/) as HTMLSelectElement;
+    fireEvent.keyDown(select, { key: 'ArrowDown' });
+    fireEvent.change(select, { target: { value: ADD_CHOICE } });
+    fireEvent.keyUp(select, { key: 'ArrowDown' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByTestId('chosen').textContent).toBe('');
+    // Enter in the open list, or a click, still opens it.
+    fireEvent.keyDown(select, { key: 'Enter' });
+    fireEvent.change(select, { target: { value: ADD_CHOICE } });
+    expect(await screen.findByRole('dialog', { name: 'Add a unit' })).toBeTruthy();
+  });
+
   it('keeps the form open with the server words when the unit cannot be added', async () => {
     createUnit.mockRejectedValue(new Error('A unit with this name already exists.'));
     open([]);

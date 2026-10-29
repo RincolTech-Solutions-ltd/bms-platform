@@ -559,15 +559,22 @@ const ADD_IN_PLACE_EXEMPT: Record<string, string> = {
   'areas/staff/retail/purchase-order-form.tsx line.packs': ITEM_PACK,
   'areas/staff/retail/restock.tsx packs': ITEM_PACK,
   'areas/staff/retail/sale.tsx packs': ITEM_PACK,
+  'areas/staff/retail/unit-usual-pack.tsx choices': 'It holds sits in the Usual pack sheet of the Units page, so a second sheet is not opened over it; with no unit to hold it adds one in place',
   'areas/staff/retail/price-lists.tsx units': "the item's own unit and its packs, not the list of units; a pack is added on the item's page",
   'areas/staff/retail/expenses.tsx activeCategories(list)': 'expense categories hold the items an expense is booked to; the empty list opens their screen and comes back (rule 25); moves onto PickerWithAdd next',
   'areas/staff/retail/sale.tsx (customers.data ?? [])': 'the credit buyer already adds a buyer in place with a name and a phone, saved with the sale and kept in the draft; moves onto PickerWithAdd next',
   'areas/staff/retail/sale.tsx (offline?.catalogue?.customers ?? [])': 'the offline sale reads the customers kept on the phone, and adding one needs the internet',
 };
 
+// A list under a plain name (choices, options, rows) is a record list too in a file that works with records (review of #691:
+// the pack form's unit select mapped `choices`).
+const PLAIN_LIST = /^\(?(?:choices|options|rows|list|items)\b/;
+const RECORD_TYPES = /\btype (?:Unit|Supplier|Customer|Category|Branch)\b|: (?:Unit|Supplier|Customer|Category)\[\]/;
+
 /** The hand-built record pickers of `source`, as `list` (the list the options map). */
 export function recordSelects(source: string): string[] {
-  return runtimeSelects(source).map(({ list }) => list).filter((list) => RECORD_LIST.test(list));
+  const records = RECORD_TYPES.test(source);
+  return runtimeSelects(source).map(({ list }) => list).filter((list) => RECORD_LIST.test(list) || (records && PLAIN_LIST.test(list)));
 }
 
 describe('design guard, a record picker adds what is missing in place (issue #688)', () => {
@@ -578,6 +585,8 @@ describe('design guard, a record picker adds what is missing in place (issue #68
     expect(recordSelects('<select>{(customers.data ?? []).map((c) => <option />)}</select>')).toEqual(['(customers.data ?? [])']);
     expect(recordSelects('<select>{periods.map((p) => <option />)}</select>')).toEqual([]);
     expect(recordSelects('<select>{PACKS.map((p) => <option />)}</select>')).toEqual([]);
+    expect(recordSelects("import { type Unit } from 'x';\n<select>{choices.map((u) => <option />)}</select>")).toEqual(['choices']);
+    expect(recordSelects('<select>{choices.map((c) => <option />)}</select>')).toEqual([]);
   });
 
   it.each(sources)('%s builds every record picker on PickerWithAdd, or is exempt with a reason', (file) => {

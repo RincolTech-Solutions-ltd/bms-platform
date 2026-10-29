@@ -180,7 +180,7 @@ export function QuotationForm({ branchId, onSaved }: { branchId: string; onSaved
       <fieldset data-tour="quotation-buyer">
         <legend>Who is it for?</legend>
         <CustomerPicker id="quote-customer" label="Customer from the list" placeholder="Not on the list: type their name" customers={customers}
-          value={draft.customerId} onChange={(customerId) => update({ customerId, buyerName: '', buyerContact: '' })} />
+          value={draft.customerId} onChange={(customerId) => update({ customerId, buyerName: '', buyerContact: '' })} quietWhenEmpty />
         {draft.customerId === '' && (
           <>
             <label htmlFor="quote-name">Buyer name</label>

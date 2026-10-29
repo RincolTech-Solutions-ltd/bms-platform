@@ -250,7 +250,7 @@ export function OrderForm({ branchId, onSaved }: { branchId: string; onSaved: (o
         <label htmlFor="order-name">Name</label>
         <input id="order-name" value={draft.name} maxLength={200} onChange={(e) => update({ name: e.target.value })} />
         <CustomerPicker id="order-buyer" label="Customer from the list (optional, needed to sell to them on credit when customer accounts are on)"
-          placeholder="Not on the list" customers={customers} value={draft.customerId} onChange={(customerId) => update({ customerId })} />
+          placeholder="Not on the list" customers={customers} value={draft.customerId} onChange={(customerId) => update({ customerId })} quietWhenEmpty />
         <p id="order-source-label">Where did the order come from?</p>
         <div className="rt-row" role="radiogroup" aria-labelledby="order-source-label" data-tour="order-source">
           {SOURCES.map((s) => (

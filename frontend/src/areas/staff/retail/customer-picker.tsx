@@ -13,7 +13,7 @@ import { ScreenToast } from './toast';
 
 const CUSTOMERS = ['retail', 'customers'];
 
-export function CustomerPicker({ id, label, placeholder, customers, value, onChange, hint }: {
+export function CustomerPicker({ id, label, placeholder, customers, value, onChange, hint, quietWhenEmpty = false }: {
   id: string;
   label: ReactNode;
   /** The empty first choice, such as "No customer: retail prices". */
@@ -23,10 +23,17 @@ export function CustomerPicker({ id, label, placeholder, customers, value, onCha
   value: string;
   onChange: (customerId: string) => void;
   hint?: ReactNode;
+  /**
+   * The customer is optional and a typed name is enough (an order, a quotation): with no customers and no way to add one, the
+   * field is left out, as before #688, rather than an empty line about a field nobody needs. It is never marked needed.
+   */
+  quietWhenEmpty?: boolean;
 }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const screenToast = useContext(ScreenToast);
+  const canAdd = canUse(me, 'buyers');
+  if (quietWhenEmpty && !canAdd && customers.data !== undefined && customers.data.length === 0) return null;
   return (
     <PickerWithAdd
       id={id}
@@ -36,7 +43,7 @@ export function CustomerPicker({ id, label, placeholder, customers, value, onCha
       value={value}
       onChange={onChange}
       placeholder={placeholder}
-      canAdd={canUse(me, 'buyers')}
+      canAdd={canAdd}
       hint={hint}
       loading={customers.data === undefined}
       load={customers}

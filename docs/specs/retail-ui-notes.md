@@ -1408,7 +1408,13 @@ form you were on. That is how AppSheet works."
 - **Quick add (Part 1).** Category sits right under the Name and is needed: the red star, "Choose a group" in the box, and
   Add refuses with "Choose a group." and puts the focus on it. The group this person last chose at this shop is chosen for
   them (kept on the device per business, person and shop, `bms.quickAddGroup.*`). With no groups yet the field offers only +
-  Add a group. The screen never leaves it out, so an item is never filed under General unasked; items already in General stay.
+  Add a group. The screen never leaves it out, so an item is never filed under General unasked; items already in General stay. The
+  group is remembered once an item is added with it, at the shop the stock went to.
+- **Comes in cartons of (D76).** With packs on, an optional field under the unit: "Comes in cartons of how many pieces?". Filled,
+  How many becomes How many full cartons (a whole number) and And how many loose pieces (optional), sent as their total in
+  pieces; once the item is made it gets its own carton pack at that size for selling and buying (`addPack`), the Carton unit
+  made first when the shop has none, and the line says "Test bulb added: 3 cartons and 5 pieces at Test Shop One". A pack that
+  failed leaves the item and says to add it on the item's page. With packs off the field is the Turn on cartons line.
 
 ## Item pickers (issue #534, FR-UXN-07)
 

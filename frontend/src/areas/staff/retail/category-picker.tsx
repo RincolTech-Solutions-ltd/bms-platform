@@ -60,7 +60,8 @@ function AddCategory({ id, thing, initial, existing, onAdded, onChoose, onCancel
   onChoose: (row: Category, on: boolean) => void;
   onCancel: () => void;
 }) {
-  const [name, setName] = useState(initial);  const [suggested, setSuggested] = useState('');
+  const [name, setName] = useState(initial);
+  const [suggested, setSuggested] = useState('');
   const [showErrors, setShowErrors] = useState(false);
   const trimmed = name.trim();
   // The code start the app will make, asked for a moment after the typing stops, so it shows without leaving the field.
@@ -263,7 +264,8 @@ export function CategoryPicker({ id, label = 'Category', thing = 'category', cat
   const screenToast = useContext(ScreenToast);
   // What the last add or switch on said, for a screen reader; the screen's toast may be silent, as its saves have a line too.
   const [said, setSaid] = useState('');
-  const [open, setOpen] = useState(false);  // The name typed in the search when "+ Add" was tapped, which the add sheet starts with.
+  const [open, setOpen] = useState(false);
+  // The name typed in the search when "+ Add" was tapped, which the add sheet starts with.
   const [addName, setAddName] = useState('');
   const canAdd = allowAdd && (me.permissions ?? []).includes(MANAGE);
   // Every category, switched-off ones too, for the taken-name check; the catalogue's own list, so no second request. Its answer
@@ -304,7 +306,8 @@ export function CategoryPicker({ id, label = 'Category', thing = 'category', cat
   const startAdd = (name: string) => { setAddName(name); setOpen(false); document.getElementById(id)?.focus(); add.open(); };
   const things = thing === 'category' ? 'categories' : `${thing}s`;
   // Issue #619: with no category to choose, the field says so and adds the first one in the sheet, or says who to ask.
-  // The add sheet keeps its place whichever way the field is drawn, so a list that arrives while it is open never resets it.
+  // The add sheet keeps its place whichever way the field is drawn, so a list that arrives while it is open never resets it:
+  // the {null} stands where the other branch draws its live region, keeping the sheet third in both.
   if (choicesList.length === 0 && noneLabel === undefined && (all.data !== undefined || all.isError)) {
     const addFirst = canAdd ? { label: addChoice(thing), onClick: () => startAdd('') } : null;
     return <><EmptyChoice id={id} label={label} required={required} load={all} text={`No ${things} yet.`} ask={`Ask the owner to add a ${thing} first.`} add={addFirst} />{null}{add.sheet}</>;

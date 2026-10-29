@@ -58,7 +58,7 @@ function screenOf(node: ReactElement) {
 }
 
 const restockDraft = (method: 'cash' | 'mobile_money' | 'bank' | 'credit') => ({
-  supplierId: '', newSupplier: '', purchasedOn: businessToday(), method, lines: [{ product: item, cost: '1000', sell: '1500', qtyByBranch: { [branch]: '5' } }],
+  supplierId: '', purchasedOn: businessToday(), method, lines: [{ product: item, cost: '1000', sell: '1500', qtyByBranch: { [branch]: '5' } }],
 });
 
 describe('Paid how on Buy stock', () => {
@@ -104,6 +104,13 @@ describe('Paid how on Buy stock', () => {
     expect(screen.getByTestId('restock-total').querySelector('.num')?.textContent).toBe('UGX 5,000');
   });
 
+  it('never makes a supplier from a typed name kept in a draft from before #688', () => {
+    screenOf(<RestockForm initial={{ ...restockDraft('credit'), newSupplier: 'Test Supplier 05' } as never} />);
+    expect(screen.getByTestId('credit-needs-supplier')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save the purchase' }).getAttribute('data-not-ready')).toBe('true');
+    expect(createSupplier).not.toHaveBeenCalled();
+  });
+
   it('draws the total cost in tabular figures', () => {
     screenOf(<RestockForm initial={restockDraft('cash')} />);
     const total = screen.getByTestId('restock-total');
@@ -111,8 +118,8 @@ describe('Paid how on Buy stock', () => {
   });
 
   it('needs no supplier for cash, mobile money or bank, and sends the method as chosen', () => {
-    for (const m of ['cash', 'mobile_money', 'bank'] as const) expect(creditNeedsSupplier(m, '', '')).toBeNull();
-    expect(creditNeedsSupplier('credit', 's1', '')).toBeNull();
+    for (const m of ['cash', 'mobile_money', 'bank'] as const) expect(creditNeedsSupplier(m, '')).toBeNull();
+    expect(creditNeedsSupplier('credit', 's1')).toBeNull();
     expect(buildPurchase({ supplierId: 's1', purchasedOn: '2026-10-08', method: 'mobile_money', lines: restockDraft('cash').lines }).payment_method).toBe('mobile_money');
   });
 });

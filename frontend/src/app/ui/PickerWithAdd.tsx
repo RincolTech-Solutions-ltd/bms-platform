@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { EmptyChoice } from './EmptyChoice';
 import { Field } from './Field';
 import { Sheet } from './Sheet';
@@ -32,7 +32,8 @@ export function useAddInPlace({ thing, form, onAdded }: {
   form: (done: (row: Picked) => void, cancel: () => void) => ReactNode;
   onAdded: (row: Picked) => void;
 }): { open: () => void; sheet: ReactNode } {
-  const [open, setOpen] = useState(false);  const done = (row: Picked) => {
+  const [open, setOpen] = useState(false);
+  const done = (row: Picked) => {
     setOpen(false);
     onAdded(row);
   };
@@ -76,6 +77,9 @@ export function PickerWithAdd({ id, label, thing, options, value, onChange, plac
   ask?: string;
 }) {
   const [kept, setKept] = useState<Picked | null>(null);
+  // On a laptop an arrow key on a closed select changes its value at once: arrowing past the last record must not open the add
+  // sheet by accident (review of #691). The add opens from a click, a tap, or Enter in the open list.
+  const arrowing = useRef(false);
   const add = useAddInPlace({ thing, form, onAdded: (row) => { setKept(row); onChange(row.value); } });
   const list = kept && !options.some((o) => o.value === kept.value) ? [...options, kept] : options;
   // Both ways of drawing the field keep the sheet second, so a list that arrives while it is open never resets it.
@@ -94,7 +98,17 @@ export function PickerWithAdd({ id, label, thing, options, value, onChange, plac
         hint={hint}
         control={(props) => (
           // empty: drawn only while the list has records or is on its way; with none, the EmptyChoice above stands in.
-          <select {...props} value={value} disabled={disabled} onChange={(e) => (e.target.value === ADD_CHOICE ? add.open() : onChange(e.target.value))}>
+          <select
+            {...props}
+            value={value}
+            disabled={disabled}
+            onKeyDown={(e) => { arrowing.current = /^(Arrow|Page|Home$|End$)/.test(e.key); }}
+            onKeyUp={() => { arrowing.current = false; }}
+            onChange={(e) => {
+              if (e.target.value !== ADD_CHOICE) onChange(e.target.value);
+              else if (!arrowing.current) add.open();
+            }}
+          >
             <option value="">{placeholder}</option>
             {list.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             {canAdd && !disabled && <option value={ADD_CHOICE}>{addChoice(thing)}</option>}
