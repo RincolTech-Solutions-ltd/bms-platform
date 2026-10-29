@@ -44,17 +44,19 @@ branches are `both`.
   branch's state stops it; only locks held by traffic for about two minutes do (step 0). The role was in
   force while the business had the retail module on and its `branch_roles` switch on.
   0. **Locks first, retried under live traffic.** The deploy is zero downtime, so the previous release keeps serving. Before
-     anything else, in one retried step, V115 takes three kinds of lock:
+     anything else, in one retried step, V115 takes three kinds of lock. It takes them in the order the previous release's
+     sale does (the branch row, then the role table), so the two never wait on each other in a circle:
+     - `branches` in EXCLUSIVE mode, so the fold never waits on a branch row lock.
      - `retail_branch_roles` in ACCESS EXCLUSIVE mode. No role is written between the fold and the narrowed check. The
        constraint swap needs this mode anyway, so taking it once avoids a second lock step; SHARE ROW EXCLUSIVE or a NOT VALID
        check validated later would both need one.
-     - `branches` in EXCLUSIVE mode, so the fold never waits on a branch row lock.
      - With an owner that lacks BYPASSRLS, every table whose FORCE it toggles. Staging and production run as `bms_owner`
        with BYPASSRLS, so no toggle runs there.
 
-     Each attempt waits at most two seconds, so a shop never queues long behind it. On a timeout the attempt is undone and
-     retried after a second, for about two minutes (40 attempts). Only then does V115 stop, with a message that traffic held
-     the locks and nothing was changed.
+     Each attempt waits at most two seconds, so a shop never queues long behind it. On a timeout or a deadlock the attempt
+     is undone, a notice names it, and it is retried after a second, for about two minutes (40 attempts). Only then does V115
+     stop, with a message that traffic held the locks and nothing was changed. `statement_timeout` is off during the loop,
+     and both timeouts go back to the session's own values once the locks are held.
   1. **Fold a clean store.** A `store` branch in force with no blocker becomes a Store (`sells_goods = false`). From then on
      its till takes no money, as a Store's does.
   2. **Skip a store with a blocker.** `retail_store_fold_blockers(tenant, branch, since)` names the blockers:
@@ -78,7 +80,9 @@ branches are `both`.
      `retail.branch_role.manage` is now described as setting a selling branch as a shop or both. The function stays in the
      schema for the test and is not granted to the application.
 
-  `RetailStoreRoleFoldIT` covers this in four ways:
+  `RetailStoreRoleFoldIT` covers this in five ways:
+  - it runs the lock step under a sale holding a branch row: a notice shows the retry, the sale's role read is not
+    blocked, and with the attempts used up the step stops with its message;
   - it replays V115 on a scratch database at the migration before it, reading both numbers from the folder, with a
     fabricated case for each rule; the migration completes, a skipped branch is unchanged with its audit row, and a second
     run changes nothing;
