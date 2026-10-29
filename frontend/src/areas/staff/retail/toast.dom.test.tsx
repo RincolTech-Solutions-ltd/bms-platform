@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DoneToast, type DoneWords, TOAST_MS, Toast, doneToasts, useToast } from './toast';
+import { DoneToast, type DoneWords, TOAST_MS, Toast, doneToasts, sayDone, useToast } from './toast';
 
 // The dark toast (#508, docs/ui-rules.md rule 15): a leading icon for its kind, announced by kind, gone after about four seconds.
 
@@ -100,5 +100,41 @@ describe('DoneToast (#682)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  // JUSTIFICATION-A3: the review of #685 asks for Undo, sayDone and words that throw; these are their tests.
+  it('keeps a write the server took a success when its words throw, and says nothing', async () => {
+    const after = vi.fn();
+    function Throws() {
+      const save = useMutation({ mutationFn: () => Promise.resolve(undefined), onSuccess: after, meta: { success: (r: { name: string }) => `${r.name} added` } });
+      return <button type="button" onClick={() => save.mutate()}>Save</button>;
+    }
+    app(<Throws />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('carries Undo when the write names how to take it back, runs it once and says Undone', async () => {
+    const back = vi.fn(() => Promise.resolve());
+    function Toggle() {
+      const save = useMutation({ mutationFn: () => Promise.resolve({ name: 'Test Pack', executed: true }), meta: { success: 'Pack switched off', undo: () => back } });
+      return <button type="button" onClick={() => save.mutate()}>Switch off</button>;
+    }
+    app(<Toggle />);
+    fireEvent.click(screen.getByRole('button', { name: 'Switch off' }));
+    const undo = await screen.findByRole('button', { name: 'Undo' });
+    expect(undo.closest('.toast')?.textContent).toBe('Pack switched offUndo');
+    fireEvent.click(undo);
+    fireEvent.click(undo);
+    expect(back).toHaveBeenCalledTimes(1);
+    expect((await screen.findByText('Undone')).closest('.toast')?.className).toBe('toast toast-success');
+  });
+
+  it('says a write by hand with sayDone', () => {
+    app(<></>);
+    act(() => sayDone('Member saved'));
+    expect(screen.getByRole('status').textContent).toBe('Member saved');
   });
 });
