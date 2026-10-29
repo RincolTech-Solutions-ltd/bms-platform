@@ -47,7 +47,7 @@ describe('businessToday', () => {
 // line the hit spans; an empty reason does not count. The mock server stands in for the backend and is left out (its today
 // is businessToday too). The repository has no ESLint (its lint is tsc), so this scan, like the design guard, is the rule.
 const SRC = fileURLToPath(new URL('../', import.meta.url));
-const ALLOW = /business-day-ok:[ \t]*\S/;
+const ALLOW = /business-day-ok:[ \t]*(?!\*\/)\S/;
 const DEVICE_DAY = [
   /\.get(?:FullYear|Month|Date|Day)\(\)/g,
   /toISOString\(\)\s*\.\s*(?:slice|substring|substr)\(\s*0\s*,\s*10\s*\)/g,
@@ -82,7 +82,7 @@ function closeOf(text: string, open: number): number {
 export function deviceDays(text: string): number[] {
   const lines = text.split('\n');
   const lineOf = (at: number) => text.slice(0, at).split('\n').length;
-  const commentOnly = (line: string) => /^\s*(?:\/\/|\/\*|\{\/\*)/.test(line);
+  const commentOnly = (line: string) => /^\s*(?:\/\/.*|\/\*.*\*\/|\{\/\*.*\*\/\})\s*$/.test(line);
   const hits = new Set<number>();
   const hit = (start: number, end: number) => {
     const first = lineOf(start);
@@ -157,6 +157,10 @@ describe('the business date guard', () => {
     expect(deviceDays(`// business-day-ok: a calendar sum on a UTC midnight\n${cut}\n${cut}`)).toEqual([3]);
     expect(deviceDays(`${cut} // business-day-ok: this one\n${cut}`)).toEqual([2]);
     expect(deviceDays(`{/* business-day-ok: shown on this phone's clock */}\n<td>{d.toLocaleDateString()}</td>`)).toEqual([]);
+    // An empty reason inside a block or JSX comment does not count, and a comment followed by code on its line is not alone.
+    expect(deviceDays(`<td>{d.toLocaleDateString()}</td> {/* business-day-ok: */}`)).toEqual([1]);
+    expect(deviceDays(`/* business-day-ok: */\n${cut}`)).toEqual([2]);
+    expect(deviceDays(`{/* business-day-ok: x */}<td>{a.toLocaleDateString()}</td>\n<td>{b.toLocaleDateString()}</td>`)).toEqual([2]);
     expect(deviceDays('const day = d\n  .toISOString() // business-day-ok: a calendar sum\n  .slice(0, 10);')).toEqual([]);
   });
 });
