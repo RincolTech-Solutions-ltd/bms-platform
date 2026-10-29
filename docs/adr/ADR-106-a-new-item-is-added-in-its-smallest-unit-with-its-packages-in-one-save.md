@@ -34,7 +34,7 @@ sold in packages and give them, all in one form and one save.
    example piece, bulb, metre, litre." Under it, while the units capability is on, "Do you buy or sell it in boxes, cartons or
    other packages?" No or Yes. Yes shows a package row: the package (the unit picker with Add a new unit), "How many bulbs in one
    carton" (a whole number, 2 or more, which the form asks for though the API keeps ADR-033's rule of 1 or more), Used for (the
-   one list of ADR-099 and ADR-100: Both, Selling, Buying; Both first) and an optional "Selling price of one carton". Add another
+   one list of ADR-099 and ADR-100, in the order the issue asks: Both, Buying, Selling; Both first) and an optional "Selling price of one carton". Add another
    package adds a row. A package unit's usual pack fills in the size and Used for, as on Edit item, and fills the size in
    again (or clears it) when the smallest unit changes; a typed size stays. The prices read "Buying price
    of one bulb" and "Selling price of one bulb". The toast says "60W bulb added, with carton of 10", and the new item leads the
