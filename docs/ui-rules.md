@@ -81,8 +81,10 @@ back to what opened it.
     the sale) or a change that waits for approval, `error` for a failure. `show()` has no default tone.
     Every successful save, sale, add, edit, delete, move, purchase and payment in the staff area says so in a success toast
     of a few plain words, because most people read very little (issue #682): the screen's own `show(text, 'success')`, or
-    the words in the mutation's `meta: { success }` that the app's one `DoneToast` says. The success toast guard in
-    `busy-guard.test.ts` fails a staff mutation that says neither, unless `// toast-exempt: <reason>` sits above it.
+    the words in the mutation's `meta: { success }` (or `sayDone` for a write by hand) that the app's one `DoneToast` says,
+    with Undo where `meta.undo` can take it back. Success is never said twice: a screen that already shows a success note
+    or screen keeps that and is exempt. The success toast guard in `busy-guard.test.ts` fails a staff write that says
+    nothing, unless `// toast-exempt: <reason>` sits above it.
     A press shows at once: every button, tile, link card and row sinks to `--press-scale` and dims to `--press-opacity`,
     by transform and opacity only, in `--motion-fast` (100 to 160ms); under reduced motion it only dims. A busy button
     is the `BusyButton` (rule 6 of the design system) and a disabled one is flat grey, never only faded.

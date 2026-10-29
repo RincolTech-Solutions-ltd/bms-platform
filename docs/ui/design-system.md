@@ -362,12 +362,18 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
    words ('Sale saved', 'Item added', 'Stock moved to Test Store', 'Payment recorded'). Put the words in the mutation's
    `meta: { success: ... }`, a sentence or a function of the result and the variables that returns null for an outcome
    that is not a success (it waits for approval); the app's `DoneToast` (`areas/staff/retail/toast.tsx`, mounted once in
-   `main.tsx` beside the router) says them, and it stays up across a change of page. A screen that already shows its own
-   success toast with `show(text, 'success')` keeps it and sets no `meta.success`, so one toast shows. A mutation that is
-   not such a write (a question to the assistant, a preview that saves nothing) has `// toast-exempt: <reason>` in the
-   `//` lines directly above its `const ... = useMutation(` line. The success toast guard in `busy-guard.test.ts` fails a
-   staff mutation whose options, hook, sends with the rest of their block, and the local functions and same-file callback
-   props they call hold neither `meta.success`, a toast call with the `'success'` tone, nor that comment.
+   `main.tsx` beside the router, drawn inside an open modal dialog or the side menu layout) says them, and it stays up
+   across a change of page. A write that can be taken back (a switch turned on or off) names the request that undoes it in
+   `meta.undo`, and the toast then carries Undo, stays eight seconds, runs it once, says Undone and reads every list again.
+   A write by hand (a `setBusy(true)` with try and catch) calls `sayDone(words)` once the request has worked. Success is
+   never said twice: a screen that already says it, in its own success toast, a success note or alert, or a success or
+   receipt screen (directly or through a parent's callback), sets no `meta.success` and carries `// toast-exempt: <where it
+   is said>`; so does a write a person would not expect a toast for (a question to the assistant, a preview that saves
+   nothing). The comment sits in the `//` lines directly above the `const ... = useMutation(` or `setBusy(true)` line. The
+   success toast guard in `busy-guard.test.ts` fails a staff mutation or write by hand whose success path (options, hook,
+   each send to the end of its block, and the local functions and same-file callback props they call) holds none of
+   `meta.success` (not a bare `() => null`), a toast call with the `'success'` tone in its own parentheses, `sayDone(`, or
+   that comment.
 7. Give the main controls of a new screen `data-tour` ids and add the screen's steps to
    `frontend/src/tour/tours.ts` (a page tour at least), with plain, short sentences.
 
