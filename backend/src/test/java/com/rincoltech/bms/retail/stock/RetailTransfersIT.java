@@ -432,7 +432,9 @@ class RetailTransfersIT extends IntegrationTest {
         String two = t.secondBranch().toString();
 
         ResponseEntity<JsonNode> outside = transfer(body(t.headOffice(), third, product, "1"), ADMIN, two);
-        assertThat(outside.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        // Spec section 2.2 (issue #257): a source outside the scope is 404 unknown_branch, still naming the field.
+        assertThat(outside.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(outside.getBody().get("code").asString()).isEqualTo("unknown_branch");
         assertThat(outside.getBody().get("errors").get(0).get("field").asString())
                 .isEqualTo("from_branch_id");
         assertThat(qty(t.headOffice(), product)).isEqualTo("10.000");

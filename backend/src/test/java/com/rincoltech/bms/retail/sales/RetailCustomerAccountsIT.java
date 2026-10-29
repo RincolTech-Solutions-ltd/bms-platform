@@ -817,7 +817,7 @@ class RetailCustomerAccountsIT extends IntegrationTest {
                 UUID.randomUUID().toString());
         assertThat(code(more)).isEqualTo("payment_exceeds_allocatable");
         assertThat(more.getBody().get("allocatable_minor").asLong()).isZero();
-        // Receiving at a branch outside the scope is refused.
+        // Receiving at a branch outside the scope is refused: 404 unknown_branch (spec section 2.2, issue #257).
         ResponseEntity<JsonNode> wrongBranch = pay(
                 c,
                 br2,
@@ -828,7 +828,8 @@ class RetailCustomerAccountsIT extends IntegrationTest {
                 CLERK,
                 hq.toString(),
                 UUID.randomUUID().toString());
-        assertThat(wrongBranch.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(wrongBranch.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(code(wrongBranch)).isEqualTo("unknown_branch");
         // Naming the other branch's sale by hand is refused as unknown.
         ResponseEntity<JsonNode> named = pay(
                 c,
