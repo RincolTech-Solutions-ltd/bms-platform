@@ -31,7 +31,8 @@ const hash = (name: string) => createHash('sha256').update(name).digest('hex');
 export function namesAClient(text: string, listed: ReadonlySet<string> = DENYLIST, seen: Set<string> = new Set()): boolean {
   // Words are also split where a capital or a digit starts inside one, so a name glued into code ("testBulbShop", "shop2Name")
   // is still a run of words (review of #706).
-  const split = text.replace(/(\p{Ll})(\p{Lu})/gu, '$1 $2').replace(/(\p{L})(\p{N})|(\p{N})(\p{L})/gu, '$1$3 $2$4');
+  // Zero-width splits consume nothing, so back-to-back boundaries ("item2Shop") are all split.
+  const split = text.replace(/(?<=\p{Ll})(?=\p{Lu})|(?<=\p{L})(?=\p{N})|(?<=\p{N})(?=\p{L})/gu, ' ');
   const words = split.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
   for (let i = 0; i < words.length; i++) {
     let joined = '';
@@ -61,6 +62,8 @@ describe('no real client names (issue #680)', () => {
     expect(namesAClient('Sold at test shop two', invented)).toBe(false);
     expect(namesAClient('const testShopOne = 1;', invented)).toBe(true);
     expect(namesAClient('render(<TestShopOne2 />)', invented)).toBe(true);
+    expect(namesAClient('const item2TestShopOne = 1;', invented)).toBe(true);
+    expect(namesAClient('a1b2TestShopOne', invented)).toBe(true);
     expect([...DENYLIST].every((h) => /^[0-9a-f]{64}$/.test(h))).toBe(true);
   });
 
