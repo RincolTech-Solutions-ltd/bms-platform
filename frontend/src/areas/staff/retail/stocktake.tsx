@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
-import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Highlight } from '../../../app/ui/SearchBox';
 import { ItemCombobox } from '../../../app/ui/ItemCombobox';
 import { matchesSearch, useLiveSearch } from '../../../app/ui/useLiveSearch';
-import { retail, type Product, type StockRow, type Stocktake, type StocktakeLine } from '../../../api/retail';
+import { businessZone, retail, type Product, type StockRow, type Stocktake, type StocktakeLine } from '../../../api/retail';
 import { bigDrop, milliOf, parseCount, parseQty, qtyString, showQty } from './maths';
 import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne } from './barcode-state';
@@ -20,12 +20,16 @@ import { NewItemHere, type AddedItem } from './new-item-here';
 import { ScreenToast, useItemAdded } from './toast';
 import { entryWarnings } from './entry-checks-state';
 import { useEntryChecks, useEntryNorms } from './entry-checks';
+import { SuccessScreen } from '../../../app/ui/SuccessScreen';
+import { changeWords, clearCount, countKey, otherTabWords, readCount, savedAt, saveWords, useCountSave, whenSaved, type CountState } from './count-save-state';
 
 // Stock-take (FR-RET-08): count the products of a branch, review the variance the server works
 // out, then commit to write the adjustments. Only counted rows are sent.
 
 /** The variance written at commit once committed, otherwise the draft's (counted less expected). */
 const variance = (l: StocktakeLine): string => l.committed_variance_qty ?? l.variance_qty ?? '0';
+/** Said when another tab committed this count while this tab's review was on its way or open (review of #686). */
+export const CHANGED_ELSEWHERE = 'This count was just saved in another tab. Check what is left here, then review again.';
 
 /**
  * "This removes 8 pieces. Is that right?" for a big drop, in the item's unit when the sheet gives it, and in its standard pack
@@ -138,12 +142,24 @@ export async function countableStock(branchId: string, api: Pick<typeof retail, 
 function CountSheet({ branchId }: { branchId: string }) {
   const queryClient = useQueryClient();
   const { me } = useStaff();
+  // Issue #681: a count in progress is kept on this device for this business, branch and person, and comes back on a reload.
+  const saveKey = countKey(typeof window === 'undefined' ? '' : window.location.host, branchId, me.user_id ?? me.email ?? 'staff');
   const unitsOn = capabilityOn(me, 'retail', UNITS);
   const search = useLiveSearch();
-  const [counts, setCounts] = useState<Record<string, string>>({});
+  // Issue #681: a count in progress is kept on this device for this business, branch and person, and comes back on a reload.
+  const [restored] = useState(() => readCount(saveKey));
+  // Owner, round 3 of the review of #686: counts brought back on opening say when they were saved, in the business's zone.
+  // Those of the same business day are filled in with a line saying so; those of an earlier day wait for Use them.
+  const [kept, setKept] = useState(() => { const t = savedAt(restored); return t === null ? null : whenSaved(t, businessZone()); });
+  const [goneElsewhere, setGoneElsewhere] = useState(false);
+  const [asking, setAsking] = useState(() => kept?.earlier === true);
+  const [keptLine, setKeptLine] = useState(() => kept !== null && !kept.earlier);
+  const [clearing, setClearing] = useState(false);
+  const [first] = useState(() => (kept?.earlier ? null : restored));
+  const [counts, setCounts] = useState<Record<string, string>>(first?.counts ?? {});
   // Issue #650: the cartons typed for an item with a standard pack, with the pack they were typed in, so a pack changed or
   // removed while counting never reads the same number in another size; its pieces stay in counts, the total is what is sent.
-  const [packCounts, setPackCounts] = useState<Record<string, { text: string; pack: PackSize }>>({});
+  const [packCounts, setPackCounts] = useState<Record<string, { text: string; pack: PackSize }>>(first?.packCounts ?? {});
   // Every pick, scan or new item says so (issue #498): a short toast with the count it now has, and the line flashes once.
   // The counts as of the last add are kept, as on the sale, so a scan answered after a render sees the latest.
   const { added, flashOf, show, toast } = useItemAdded();
@@ -161,10 +177,10 @@ function CountSheet({ branchId }: { branchId: string }) {
   // The line the last scan counted, marked so the counter sees which one went up; the cursor stays in the Scan box.
   const [scanned, setScanned] = useState<string | null>(null);
   // The items on the count, in the order they were picked or scanned (issue #534): the sheet is searched, not shown whole.
-  const [listed, setListed] = useState<string[]>([]);
+  const [listed, setListed] = useState<string[]>(first?.listed ?? []);
   const list = (id: string) => setListed((l) => (l.includes(id) ? l : [...l, id]));
   // The lines whose count is entered, in the order they were done; and the question asked before a count with lines left.
-  const [done, setDone] = useState<string[]>([]);
+  const [done, setDone] = useState<string[]>(first?.done ?? []);
   // The question answers the counts it was asked about: it shows only while the counts are those it was asked on, so any
   // change to a count withdraws it in the same render and Review the difference anyway never sends counts it was not asked about (#535).
   const [askedOn, setAskedOn] = useState<Record<string, string> | null>(null);
@@ -220,13 +236,71 @@ function CountSheet({ branchId }: { branchId: string }) {
     setScanned(id);
     return undefined;
   };
-  const entered = Object.entries(totals).filter(([, v]) => v.trim() !== '');
+  // A count restored for an item no longer on the sheet is left out (issue #681), so it is never sent out of sight.
+  const onSheet = useMemo(() => (stock.data ? new Set(stock.data.map((r) => r.product_id ?? '')) : null), [stock.data]);
+  const entered = Object.entries(totals).filter(([id, v]) => v.trim() !== '' && (!onSheet || onSheet.has(id)));
   const bad = entered.some(([, v]) => parseCount(v) === null);
+  const valid = entered.flatMap(([productId, v]) => { const c = parseCount(v); return c === null ? [] : [{ product_id: productId, counted_qty: qtyString(c) }]; });
+  // The last commit of this count that this tab had taken in when the review was asked for (review of #686), never the one in
+  // storage: a tab that missed another tab's commit would otherwise review and commit counts that already went in. A review that
+  // comes back after the mark moved, or a Commit pressed after it, would take the same difference again, so both check it.
+  const reviewMark = useRef(0);
+  const markMoved = () => (readCount(saveKey)?.committed ?? 0) > reviewMark.current;
   // toast-exempt: success screen, the review of the count replaces the form
   const review = useMutation({
-    mutationFn: () => retail.createStocktake({ branch_id: branchId, lines: entered.map(([productId, countedQty]) => ({ product_id: productId, counted_qty: qtyString(parseCount(countedQty) ?? 0) })) }),
-    onSuccess: setDraft,
+    mutationFn: async () => {
+      // Storage holds a commit this tab missed: it is taken in first, so the sheet drops what went in, and no review is made.
+      if (saving.catchUp()) return null;
+      reviewMark.current = saving.heardCommit();
+      return retail.createStocktake({ branch_id: branchId, lines: valid });
+    },
+    onSuccess: (st) => {
+      if (!st) return show(CHANGED_ELSEWHERE, 'info');
+      if (!markMoved()) return setDraft(st);
+      // Committed in another tab while this review was on its way: the review is thrown away, never shown.
+      void retail.discardStocktake(st.id ?? '').catch(() => undefined);
+      show(CHANGED_ELSEWHERE, 'info');
+    },
   });
+  // Issue #681: the same count changed in another tab is merged in item by item; committed there, this one starts empty.
+  const apply = useCallback((next: CountState | null) => {
+    current.current = next?.counts ?? {};
+    setCounts(next?.counts ?? {}); setPackCounts(next?.packCounts ?? {}); setListed(next?.listed ?? []); setDone(next?.done ?? []);
+    if (!next) setDraft((d) => (d?.status === 'draft' ? null : d));
+  }, []);
+  const saving = useCountSave({ saveKey, restored, saved: { counts, packCounts, listed, done }, apply, hold: asking });
+  // A commit in another tab ends a review here (review of #686): its expected stock is gone, so committing it would take the
+  // same difference again. Back on the sheet the person sees what went in there and reviews what is left afresh.
+  const otherKind = saving.other?.kind;
+  useEffect(() => {
+    if (otherKind === 'committed' || otherKind === 'partly') setDraft((d) => (d?.status === 'draft' ? null : d));
+  }, [otherKind, saving.other]);
+  /** Takes in the counts of an earlier day the person chose to use. */
+  const useThem = () => {
+    const taken = saving.takeStored();
+    const t = savedAt(taken);
+    // Dated from the count as taken now, which another tab may have added to today; gone, the page says so.
+    setKept(t === null ? null : whenSaved(t, businessZone()));
+    setGoneElsewhere(t === null);
+    setAsking(false);
+    setKeptLine(t !== null);
+  };
+  /** Clears this sheet and its saved count (Start again), here and in another tab of it; stock does not change. */
+  const startAgain = () => {
+    clearCount(saveKey);
+    apply(null);
+    setConfirming(false); setAsking(false); setKeptLine(false); setClearing(false);
+  };
+  const savedWords = saveWords(valid.length, saving.onDevice);
+  // A restored count for an item no longer on the sheet is dropped once the sheet is read, so the device never keeps it.
+  const pruned = useRef(restored === null);
+  useEffect(() => {
+    // A count taken with Use them is pruned once the question is answered.
+    if (pruned.current || !onSheet || asking) return;
+    pruned.current = true;
+    const keep = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).filter(([id]) => onSheet.has(id)));
+    setCounts((c) => keep(c)); setPackCounts((c) => keep(c)); setListed((l) => l.filter((id) => onSheet.has(id))); setDone((d) => d.filter((id) => onSheet.has(id)));
+  }, [onSheet, asking]);
   // Issue #353: each count against what the records hold here, or, where they hold nothing, against the item's usual purchase;
   // said before the review, never blocking. Only the counts whose records hold nothing read the item's history.
   const sheet = new Map((stock.data ?? []).map((r) => [r.product_id ?? '', r]));
@@ -242,25 +316,67 @@ function CountSheet({ branchId }: { branchId: string }) {
     return entryWarnings(usual, { screen: 'count', product, lineKey: id, qtyMilli: parseCount(v), qtyFieldId: `count-${id}`, recordedMilli: here });
   });
   const entry = useEntryChecks('count', branchId, warnings, () => review.mutate(), totals);
-  // toast-exempt: success screen, the review turns into the Stock count committed screen
+  // toast-exempt: success screen, the review turns into Stock updated for N items, with the toast issue #681 asks for too;
+  // setDone there is the list of counted items, not a success note
   const commit = useMutation({
     mutationFn: (acknowledged: string[]) => retail.commitStocktake(draft?.id ?? '', acknowledged),
     onSuccess: (st) => {
       // Issue #353: a count is saved when it is committed, so that is when its confirmed warnings are recorded.
       entry.saved();
       setDraft(st);
+      // Issue #681: the count is done, so this device keeps nothing more of it, another tab of it hears so, and the screen says so.
+      // Only the counts that went in leave the page; one changed or added since the review, here or in another tab, stays.
+      saving.committed();
+      const sent = new Map((st.lines ?? []).map((l) => [l.product_id ?? '', milliOf(l.counted_qty ?? '0')]));
+      const left = (id: string) => !sent.has(id) || parseCount(totals[id] ?? '') !== sent.get(id);
+      const keep = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).filter(([id]) => left(id)));
+      setCounts(keep(counts)); setPackCounts(keep(packCounts)); setListed(listed.filter(left)); setDone(done.filter(left)); setConfirming(false);
+      setKeptLine(false);
+      const n = st.lines?.length ?? 0;
+      show(`Stock updated for ${n} ${n === 1 ? 'item' : 'items'}`, 'success');
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
   });
+  const units = new Map((stock.data ?? []).map((r) => [r.product_id ?? '', r.unit]));
 
+  if (draft?.status === 'committed') {
+    const n = draft.lines?.length ?? 0;
+    const { summary, changes } = changeWords(draft.lines ?? [], units);
+    return (
+      <>
+        <SuccessScreen level={2} title={`Stock updated for ${n} ${n === 1 ? 'item' : 'items'}`}
+          detail={<>{summary}{changes.map((c, i) => <Fragment key={i}><br />{c}</Fragment>)}</>}
+          actions={[{ label: 'Start another count', onClick: () => setDraft(null) }, { label: 'Back to My stock', to: '/staff/retail/stock' }]} />
+        {toast}
+      </>
+    );
+  }
   if (draft) {
     return (
       <>
-        <StocktakeReview key={draft.id} stocktake={draft} onCommit={(acknowledged) => commit.mutate(acknowledged)} busy={commit.isPending} units={new Map((stock.data ?? []).map((r) => [r.product_id ?? '', r.unit]))} packs={packOf} />
+        <StocktakeReview key={draft.id} stocktake={draft} onCommit={(acknowledged) => {
+          if (!markMoved()) return commit.mutate(acknowledged);
+          // Another tab committed since this review was made, and this tab has not heard yet: that commit is taken in, so the
+          // sheet drops what went in, and the review ends instead.
+          saving.catchUp();
+          setDraft(null);
+          show(CHANGED_ELSEWHERE, 'info');
+        }} busy={commit.isPending} units={units} packs={packOf} />
         <Problem error={commit.error} />
         {draft.status === 'draft' && <button type="button" onClick={() => setDraft(null)}>Back to the count</button>}
-        {draft.status === 'committed' && <button type="button" onClick={() => { setDraft(null); setCounts({}); setPackCounts({}); setListed([]); setDone([]); setConfirming(false); }}>Start another count</button>}
       </>
+    );
+  }
+  // Review of #686, round 4: the question about an earlier day stands alone, so nothing is typed, unsaved, before it is answered.
+  if (asking && kept) {
+    return (
+      <div className="alert alert-warning" role="group" aria-label="Counts from an earlier day" data-testid="count-earlier">
+        <p>{`You have counts from ${kept.day}. Use them or start again?`}</p>
+        <p className="cluster">
+          <button type="button" className="btn-sm" onClick={useThem}>Use them</button>
+          <button type="button" className="btn-sm" onClick={startAgain}>Start again</button>
+        </p>
+      </div>
     );
   }
   // The whole sheet is loaded, so the matches are found in the browser, on the settled term, ignoring case and accents.
@@ -283,6 +399,9 @@ function CountSheet({ branchId }: { branchId: string }) {
     setConfirming(false);
     entry.check();
   };
+  // Issue #681: each count kept on this device says so under its box, the moment it is stored.
+  const savedOn = new Set(saving.savedHere ? valid.map((l) => l.product_id) : []);
+  const savedMark = (id: string) => savedOn.has(id) && <p className="hint count-saved" data-testid={`count-saved-${id}`}>Saved</p>;
   const line = (r: StockRow, waiting: boolean) => {
     const id = r.product_id ?? '';
     // The pack the cartons were typed in, while any are typed; else the item's standard pack now.
@@ -316,6 +435,7 @@ function CountSheet({ branchId }: { branchId: string }) {
             <p className="hint">{`Counted in ${plural(pack.unit ?? '')} of ${showQty(pack.factor ?? '')}, as when you started. This item's pack has changed since.`}</p>
           )}
           {entry.notes(id)}
+          {savedMark(id)}
         </div>
       );
     }
@@ -334,12 +454,31 @@ function CountSheet({ branchId }: { branchId: string }) {
           {zero}
         </div>
         {entry.notes(id)}
+        {savedMark(id)}
       </div>
     );
   };
   return (
     <>
       <Note>Find or scan each item you count, or work down the list Not counted yet. Type how many you counted, or 0 for an item that is gone. An item kept in cartons takes cartons and pieces, or pieces alone. Leave an item empty if you did not count it.</Note>
+      {/* Issue #681: the person counting always sees that their work is kept, and where. */}
+      <p className="hint count-saved-all" role="status" data-testid="count-saved-all">{savedWords}</p>
+      {saving.other && <p className="hint" data-testid="count-other-tab">{otherTabWords(saving.other)}</p>}
+      {goneElsewhere && valid.length === 0 && <p className="hint" data-testid="count-gone">Those counts were committed or cleared in another tab, so this count starts empty.</p>}
+      {keptLine && kept && valid.length > 0 && (
+        <div className="alert alert-info" data-testid="count-kept">
+          <p>{kept.earlier ? `Counted on ${kept.day} at ${kept.time}` : `Counted today at ${kept.time}`}</p>
+          {clearing ? (
+            <p className="cluster">
+              <span>{`Clear all ${valid.length} ${valid.length === 1 ? 'count' : 'counts'}? Your stock does not change.`}</span>
+              <button type="button" className="btn-sm" onClick={startAgain}>Clear the counts</button>
+              <button type="button" className="btn-sm" onClick={() => setClearing(false)}>Keep them</button>
+            </p>
+          ) : (
+            <button type="button" className="btn-sm" onClick={() => setClearing(true)}>Start again</button>
+          )}
+        </div>
+      )}
       <div data-tour="count-search">
         <ItemCombobox
           id="count-search"
@@ -403,6 +542,7 @@ export function StocktakePage() {
         <BranchRequired permissions={needsOf('stocktake')} stocking />
       ) : (
         <>
+          {/* Keyed by branch, so a branch switch starts afresh from that branch's own saved count (review of #681). */}
           <CountSheet key={branchId} branchId={branchId} />
         </>
       )}
