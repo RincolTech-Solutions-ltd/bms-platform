@@ -42,6 +42,17 @@ describe('Toast', () => {
     expect(result.current.toast).toBeNull();
   });
 
+  it('stays twice as long, 12 seconds, when it carries an Undo (D79)', () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useToast());
+    act(() => result.current.show('Pack switched off', 'success', { label: 'Undo', run: () => undefined }));
+    act(() => vi.advanceTimersByTime(TOAST_MS * 2 - 1));
+    expect(result.current.toast).not.toBeNull();
+    act(() => vi.advanceTimersByTime(1));
+    expect(result.current.toast).toBeNull();
+    vi.useRealTimers();
+  });
+
   it('has no default tone, so a refusal can never draw the success check by omission', () => {
     const { result } = renderHook(() => useToast());
     // @ts-expect-error the tone is required
