@@ -152,7 +152,8 @@ export function DoneToast() {
         if (pressed || !undo) return;
         pressed = true;
         show(message, 'success', { label: 'Undo', run, busy: true });
-        undo()
+        // Inside a promise, so an Undo that throws at once still ends on its error words, never stuck on Working.
+        new Promise((resolve) => resolve(undo()))
           .then(
             () => show('Undone', 'success'),
             () => show('Could not undo. Try again from the screen.', 'error'),
@@ -166,7 +167,18 @@ export function DoneToast() {
       doneListeners.delete(hear);
     };
   }, [show, client]);
-  return toast ? createPortal(toast, toastHome()) : null;
+  // The home is found again after every change to the page while the toast shows: a sheet that closes on save does so in the
+  // same render that raises the toast, and would take the toast away with it (review of #685).
+  const [home, setHome] = useState<Element>(() => toastHome());
+  useEffect(() => {
+    if (!toast) return;
+    const look = () => setHome((was) => (toastHome() === was ? was : toastHome()));
+    look();
+    const watch = new MutationObserver(look);
+    watch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['open'] });
+    return () => watch.disconnect();
+  }, [toast]);
+  return toast ? createPortal(toast, home.isConnected ? home : toastHome()) : null;
 }
 
 /** What the toast says when an item goes on a form's lines (issue #498): the quantity it now has, or that one is still to type. */

@@ -149,6 +149,32 @@ describe('DoneToast (#682)', () => {
     expect(back).toHaveBeenCalledTimes(1);
   });
 
+  // JUSTIFICATION-A3: two tests the round 3 review of #685 asks for (a sheet that closes on save, an Undo that throws).
+  it('moves to its new home when the page changes under it, so a sheet that closes on save does not take it away (review of #685)', async () => {
+    app(<></>);
+    act(() => sayDone('Pack switched off'));
+    expect(screen.getByRole('status').parentElement).toBe(document.body);
+    const layout = document.createElement('div');
+    layout.className = 'nav-layout';
+    await act(async () => {
+      document.body.append(layout);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.getByRole('status').parentElement).toBe(layout);
+    layout.remove();
+  });
+
+  it('ends an Undo that throws at once on its error words, never stuck on Working (review of #685)', async () => {
+    app(<></>);
+    act(() =>
+      sayDone('Price list saved', () => {
+        throw new Error('no version');
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect((await screen.findByText('Could not undo. Try again from the screen.')).closest('.toast')?.className).toBe('toast toast-error');
+  });
+
   it('says a write by hand with sayDone', () => {
     app(<></>);
     act(() => sayDone('Member saved'));
