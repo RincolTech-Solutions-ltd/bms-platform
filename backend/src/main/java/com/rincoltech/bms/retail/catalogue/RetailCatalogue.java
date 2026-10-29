@@ -54,7 +54,10 @@ public interface RetailCatalogue {
      */
     static String packageAsUnit(String unitName) {
         String name = unitName.trim().toLowerCase(java.util.Locale.ROOT);
-        String word = java.util.Map.of("ctn", "carton", "pkt", "packet").getOrDefault(name, name);
+        String word = java.util.Map.of(
+                        "ctn", "carton", "ctns", "carton", "pkt", "packet", "pkts", "packet", "bx", "box", "doz",
+                        "dozen", "dz", "dozen")
+                .getOrDefault(name, name);
         String head = word.split(" ")[0];
         String named = head.endsWith("s") && !head.endsWith("ss")
                 ? Character.toUpperCase(word.charAt(0)) + word.substring(1)

@@ -152,6 +152,15 @@ class RetailNewItemPacksIT extends IntegrationTest {
         assertThat(RetailCatalogue.packageAsUnit("Ctn"))
                 .isEqualTo("A carton is a package. Choose the smallest unit, like piece, then add the carton below.");
         assertThat(RetailCatalogue.packageAsUnit("PKT")).startsWith("A packet is a package.");
+        // Every short code the word list refuses reads as its word, as unitWord says it in the PWA (round 4 review of
+        // #692).
+        for (String[] code :
+                new String[][] {{"Ctns", "carton"}, {"pkts", "packet"}, {"Bx", "box"}, {"DOZ", "dozen"}, {"dz", "dozen"}
+                }) {
+            assertThat(RetailCatalogue.packageAsUnit(code[0]))
+                    .as(code[0])
+                    .startsWith("A " + code[1] + " is a package.");
+        }
     }
 
     /** Review of #692: Add an item with sizes and colours makes items too, and never in a package. */
