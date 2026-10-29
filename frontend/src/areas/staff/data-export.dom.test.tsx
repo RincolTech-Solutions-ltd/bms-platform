@@ -34,12 +34,14 @@ vi.mock('../../api/client', async (original) => ({
 }));
 
 const { DataExportCard, exportWording, when } = await import('./data-export');
+const { DoneToast, doneToasts } = await import('./retail/toast');
 
 function show() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } }, mutationCache: doneToasts() });
   render(
     <QueryClientProvider client={queryClient}>
       <DataExportCard />
+      <DoneToast />
     </QueryClientProvider>,
   );
 }

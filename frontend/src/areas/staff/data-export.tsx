@@ -55,12 +55,9 @@ export function DataExportCard({ modules, zone }: { modules?: string[] | null; z
   const weekly = useMutation({
     mutationFn: dataExport.setWeeklyEmail,
     onMutate: () => setMessage(null),
-    onSuccess: (next) => {
-      set(next);
-      setMessage(next.weekly_email ? 'The Owner will get a copy by email every Monday.' : 'The weekly email is off.');
-    },
+    onSuccess: set,
     onError: fail,
-    meta: { success: (next: DataExportStatus) => (next.weekly_email ? 'Weekly email on' : 'Weekly email off') },
+    meta: { success: (next: DataExportStatus) => (next.weekly_email ? 'The Owner will get a copy by email every Monday.' : 'The weekly email is off.') },
   });
   // toast-exempt: only fetches a link and opens the file download, nothing is saved
   const download = useMutation({

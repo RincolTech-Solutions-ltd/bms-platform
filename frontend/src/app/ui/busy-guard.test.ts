@@ -296,19 +296,57 @@ function restOfBlock(text: string, from: number): string {
 }
 
 /** The code that runs when a mutation works: its options, its hook's, each send to the end of its block, and what they call. */
-function successCode(text: string, m: Mutation, hookOpts: Map<string, string>): string {
+function successCode(text: string, m: Mutation, hookOpts: Map<string, string>, clean = (part: string) => part): string {
   const callee = /=\s*(\w+)/.exec(text.slice(m.index))?.[1] ?? '';
   const parts = [balanced(text, text.indexOf('(', m.index)), hookOpts.get(callee) ?? ''];
   for (const send of m.sends) {
     for (const call of text.matchAll(new RegExp(`(^|[^\\w.])${send.replace('.', '\\.')}\\s*\\(`, 'g'))) parts.push(restOfBlock(text, call.index + call[0].length - 1));
   }
-  return follow(text, parts, true);
+  return follow(text, parts.map(clean), true);
 }
 
 /** The mutations of one file that say nothing when they work and carry no toast-exempt reason. */
 function silent(text: string, hooks: string[] = mutationHooks(text), hookOpts = new Map(hookOptions(text))): string[] {
   return mutations(text, hooks)
     .filter((m) => !exempted(text, m.index, TOAST_EXEMPT) && !SAYS_DONE.test(successCode(text, m, hookOpts)))
+    .map((m) => `${m.line} ${m.name}`);
+}
+
+// One success signal per action (round 2 of #682): a mutation whose success path both shows a success toast and sets a success
+// state (`setDone(...)`, `setSaved(true)`, `setMessage('Saved...')`) or renders a success note off its own result
+// (`save.isSuccess && <p className="alert alert-success">`, `if (save.data) return <Success>`) says the same thing twice. A
+// small note goes and the toast stays; a full success screen stays, says no toast and carries `// toast-exempt: success screen`.
+// It checks the DoneToast of `meta.success`; a screen's own `show(text, 'success')` beside its message is the older silent
+// toast of rule 15, which the screen hides from assistive technology.
+// JUSTIFICATION-A3: round 2 of #682 asks to extend this guard; it reuses successCode and SAYS_DONE above.
+const SUCCESS_STATE = /\bset(?:Done|Saved|Message|Outcome|Success|Notice)\(\s*(?!null\b|false\b|undefined\b|''|""|\))/;
+const SUCCESS_NOTE = /alert-success|<Success\b|<Waiting\b/;
+const DONE_TOAST = /\bmeta:\s*\{[^}]*\bsuccess\s*:/;
+
+/** True when the mutation's component renders a success note off its result: its `isSuccess` or `data`, then a note close by. */
+function notesItself(text: string, m: Mutation): boolean {
+  const rest = text.slice(m.index);
+  const own = rest.slice(0, rest.search(/\n(?:export )?function |$/));
+  return [...own.matchAll(new RegExp(`\\b${m.name}\\.(?:isSuccess|data)\\b`, 'g'))].some((use) => SUCCESS_NOTE.test(own.slice(use.index, use.index + 300)));
+}
+
+/** `code` without its `onError` handlers, which set the message of a failure, not of a success. */
+function withoutErrors(code: string): string {
+  const at = code.search(/\bonError\s*:/);
+  if (at < 0) return code;
+  const line = code.indexOf('\n', at) < 0 ? code.length : code.indexOf('\n', at);
+  const brace = code.indexOf('{', at);
+  const end = brace >= 0 && brace < line ? brace + balanced(code, brace).length : line;
+  return code.slice(0, at) + withoutErrors(code.slice(end));
+}
+
+/** The mutations of one file that say they worked twice: a success toast and a success state or note. */
+function doubled(text: string, hooks: string[] = mutationHooks(text), hookOpts = new Map(hookOptions(text))): string[] {
+  return mutations(text, hooks)
+    .filter((m) => {
+      const code = successCode(text, m, hookOpts, withoutErrors);
+      return DONE_TOAST.test(code) && (SUCCESS_STATE.test(code) || notesItself(text, m));
+    })
     .map((m) => `${m.line} ${m.name}`);
 }
 
@@ -322,6 +360,10 @@ describe('success toast guard', () => {
 
   it('every staff mutation says in a toast when it worked, or says why not', () => {
     expect(staff.flatMap(({ file, text }) => silent(text, hooks, hookOpts).map((m) => `${file}:${m}`))).toEqual([]);
+  });
+
+  it('no staff mutation says it worked twice, in a toast and in a success note', () => {
+    expect(staff.flatMap(({ file, text }) => doubled(text, hooks, hookOpts).map((m) => `${file}:${m}`))).toEqual([]);
   });
 });
 

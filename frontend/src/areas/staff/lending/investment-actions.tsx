@@ -61,6 +61,7 @@ export function FundForm({ inv }: { inv: Investment }) {
     startedOn: today,
   }, (d) => onToday(d, 'date', today));
   const update = (patch: Partial<FundDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  // toast-exempt: success screen, Waiting says it was funded in place of this form
   const save = useMutation({
     mutationFn: () => {
       sending();
@@ -70,7 +71,6 @@ export function FundForm({ inv }: { inv: Investment }) {
       finish();
       refresh();
     },
-    meta: { success: (r: { executed: boolean }) => (r.executed ? 'Funding recorded' : null) },
   });
   if (save.data) return <Waiting executed={save.data.executed} done="Funded. The investment is active and its schedule is below." />;
   return (
@@ -107,6 +107,7 @@ export function PayForm({ inv, kind }: { inv: Investment; kind: 'pay_return' | '
     kind === 'pay_return'
       ? inv.return_available_minor ?? 0
       : (inv.principal_held_minor ?? 0) + (inv.return_accrued_minor ?? 0) - (inv.return_paid_minor ?? 0);
+  // toast-exempt: success screen, the amount and voucher show in place of this form
   const save = useMutation<TransactionResult>({
     mutationFn: () => {
       const body = { payment_method_key: draft.method, external_reference: draft.reference.trim() || undefined };
@@ -116,7 +117,6 @@ export function PayForm({ inv, kind }: { inv: Investment; kind: 'pay_return' | '
       finish();
       refresh();
     },
-    meta: { success: kind === 'pay_return' ? 'Return paid' : 'Investment paid out' },
   });
   if (save.data) {
     const t = save.data.transaction ?? {};
@@ -190,13 +190,13 @@ export function EarlyWithdrawalForm({ inv }: { inv: Investment }) {
   const refresh = useRefresh(id);
   const quote = useQuery({ queryKey: ['lending', 'investment', id, 'early-quote'], queryFn: () => investments.earlyQuote(id) });
   const { key, draft, setDraft, finish } = usePersistedDraft<EarlyDraft>(`invest-early:${me.user_id ?? ''}:${id}`, { method: 'cash', reason: '' });
+  // toast-exempt: success screen, Waiting says it was withdrawn in place of this form
   const save = useMutation({
     mutationFn: () => investments.earlyWithdraw(id, { payment_method_key: draft.method, reason: draft.reason.trim() }, key),
     onSuccess: () => {
       finish();
       refresh();
     },
-    meta: { success: (r: { executed: boolean }) => (r.executed ? 'Investment withdrawn' : null) },
   });
   if (save.data) return <Waiting executed={save.data.executed} done="Withdrawn." />;
   const q = quote.data;
@@ -253,7 +253,6 @@ export function InstructionForm({ inv }: { inv: Investment }) {
       </fieldset>
       {inv.product_type === 'recurring' && <p className="field-hint">A recurring deposit renews with its return when no choice is given.</p>}
       <Problem error={save.error} />
-      {save.isSuccess && <p role="status" className="alert alert-success">Saved.</p>}
       <BusyButton busy={save.isPending} type="submit" className="rt-primary">
         Save the choice
       </BusyButton>
@@ -266,13 +265,13 @@ export function ReverseForm({ inv, txn }: { inv: Investment; txn: InvestmentTran
   const id = inv.id ?? '';
   const refresh = useRefresh(id);
   const { key, draft, setDraft, finish } = usePersistedDraft<string>(`invest-reverse:${me.user_id ?? ''}:${txn.id ?? ''}`, '');
+  // toast-exempt: success screen, Waiting says it was reversed in place of this form
   const save = useMutation({
     mutationFn: () => investments.reverse(id, txn.id ?? '', draft.trim(), key),
     onSuccess: () => {
       finish();
       refresh();
     },
-    meta: { success: (r: { executed: boolean }) => (r.executed ? 'Transaction reversed' : null) },
   });
   if (save.data) return <Waiting executed={save.data.executed} done="Reversed." />;
   return (

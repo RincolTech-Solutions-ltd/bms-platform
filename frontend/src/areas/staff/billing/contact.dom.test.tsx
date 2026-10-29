@@ -25,11 +25,13 @@ vi.mock('../../../api/billing', async (original) => ({
 }));
 
 const { BillingContactCard, goesToSentence, phoneProblem } = await import('./contact');
+const { DoneToast, doneToasts } = await import('../retail/toast');
 
 function show(view: BillingView) {
   render(
-    <QueryClientProvider client={new QueryClient()}>
+    <QueryClientProvider client={new QueryClient({ mutationCache: doneToasts() })}>
       <BillingContactCard view={view} />
+      <DoneToast />
     </QueryClientProvider>,
   );
 }

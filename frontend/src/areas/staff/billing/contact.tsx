@@ -43,7 +43,6 @@ export function BillingContactCard({ view }: { view: BillingView }) {
   const [email, setEmail] = useState(contact?.email ?? '');
   const [phone, setPhone] = useState(contact?.phone ?? '');
   const [sent, setSent] = useState(false);
-  const [done, setDone] = useState<string | null>(null);
   const form = useRef<HTMLFormElement>(null);
 
   const save = useMutation({
@@ -51,9 +50,8 @@ export function BillingContactCard({ view }: { view: BillingView }) {
     onSuccess: (saved) => {
       queryClient.setQueryData(['billing'], saved);
       setEditing(false);
-      setDone('Saved. The next reminder and receipt go to this person.');
     },
-    meta: { success: 'Billing contact saved' },
+    meta: { success: 'Saved. The next reminder and receipt go to this person.' },
   });
   const remove = useMutation({
     mutationFn: clearBillingContact,
@@ -62,9 +60,8 @@ export function BillingContactCard({ view }: { view: BillingView }) {
       setName('');
       setEmail('');
       setPhone('');
-      setDone('Removed. Reminders and receipts go to the owner again.');
     },
-    meta: { success: 'Billing contact removed' },
+    meta: { success: 'Removed. Reminders and receipts go to the owner again.' },
   });
 
   const problems = { name: nameProblem(name), email: emailProblem(email), phone: phoneProblem(phone) };
@@ -73,7 +70,6 @@ export function BillingContactCard({ view }: { view: BillingView }) {
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSent(true);
-    setDone(null);
     if (!ready) {
       if (form.current) focusFirstMissing(form.current);
       return;
@@ -95,7 +91,6 @@ export function BillingContactCard({ view }: { view: BillingView }) {
           {failure instanceof Error ? failure.message : 'That did not work. Try again.'}
         </p>
       )}
-      {done && <p role="status">{done}</p>}
 
       {view.can_change_contact && !editing && (
         <div className="cluster">
@@ -103,7 +98,6 @@ export function BillingContactCard({ view }: { view: BillingView }) {
             type="button" /* busy-exempt: opens the form, sends nothing */
             onClick={() => {
               setEditing(true);
-              setDone(null);
               setSent(false);
             }}
           >

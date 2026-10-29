@@ -120,6 +120,7 @@ export function RepaymentForm({ loan, onDone }: { loan: Loan; onDone: (r: Repaym
   const update = (patch: Partial<RepayDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const amountMinor = parseAmount(draft.amount, loan.currency);
   const valid = amountMinor !== null && isIsoDate(draft.valueDate);
+  // toast-exempt: success screen, the loan page shows the repayment receipt in place of this form
   const save = useMutation({
     mutationFn: () => {
       sending();
@@ -134,7 +135,6 @@ export function RepaymentForm({ loan, onDone }: { loan: Loan; onDone: (r: Repaym
       refresh();
       onDone(r);
     },
-    meta: { success: (r: RepaymentResult) => (r.transaction?.txn_type === 'recovery' ? 'Recovery recorded' : 'Repayment recorded') },
   });
   return (
     <form aria-label="Record a repayment" onSubmit={(e) => { e.preventDefault(); if (valid && !save.isPending) save.mutate(); }}>
@@ -185,12 +185,10 @@ export function DisburseForm({ loan }: { loan: Loan }) {
       finish();
       refresh();
     },
-    meta: { success: (r: { executed: boolean }) => (r.executed ? 'Loan disbursed' : null) },
+    meta: { success: (r: { executed: boolean }) => (r.executed ? 'Loan disbursed. Its schedule is below.' : null) },
   });
   if (save.data) {
-    return save.data.executed ? (
-      <p role="status" className="alert alert-success">Disbursed. The loan is now active and its schedule is below.</p>
-    ) : (
+    return save.data.executed ? null : (
       <p role="status" className="alert alert-info">Sent for approval. A checker must approve it in the approvals inbox before the money goes out.</p>
     );
   }
@@ -258,11 +256,9 @@ function ReasonForm({ id, label, submit, draftName, send }: {
   send: (reason: string, key: string) => Promise<{ executed: boolean }>;
 }) {
   const { key, draft, setDraft, finish } = usePersistedDraft<string>(draftName, '');
-  const save = useMutation({ mutationFn: () => send(draft.trim(), key), onSuccess: finish, meta: { success: (r: { executed: boolean }) => (r.executed ? 'Change saved' : null) } });
+  const save = useMutation({ mutationFn: () => send(draft.trim(), key), onSuccess: finish, meta: { success: (r: { executed: boolean }) => (r.executed ? 'Done' : null) } });
   if (save.data) {
-    return save.data.executed ? (
-      <p role="status" className="alert alert-success">Done.</p>
-    ) : (
+    return save.data.executed ? null : (
       <p role="status" className="alert alert-info">Sent for approval. It is waiting for a checker in the approvals inbox.</p>
     );
   }

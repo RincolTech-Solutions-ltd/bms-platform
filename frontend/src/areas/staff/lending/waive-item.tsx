@@ -41,13 +41,13 @@ export function WaiveItemSheet({ loan, row, memberName, onClose }: {
     reason: '',
   });
   const step = waiveStep(draft, row, c);
+  // toast-exempt: success screen, the sheet then says what was waived and offers Done
   const save = useMutation({
     mutationFn: (sent: { component: WaiveComponent; amount_minor: number; reason: string }) => lending.waiveItem(loanId, row.no ?? 0, sent, key),
     onSuccess: () => {
       finish();
       void queryClient.invalidateQueries({ queryKey: ['lending', 'loan', loanId] });
     },
-    meta: { success: (r: { executed: boolean }) => (r.executed ? 'Amount waived' : null) },
   });
   const borrower = memberName ? `${memberName} (${loan.member_no ?? ''})` : `Member ${loan.member_no ?? ''}`;
   const title = `Waive fee or interest on item ${row.no ?? ''}`;
