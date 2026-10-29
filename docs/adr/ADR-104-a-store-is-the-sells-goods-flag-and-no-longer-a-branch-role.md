@@ -42,13 +42,20 @@ branches are `both`.
   does.
 - **Migration V115 never stops.** A stopped migration stops the automatic staging and production deploy. The role was in
   force while the business had the retail module on and its `branch_roles` switch on.
+  0. **Locks first, never a failure.** The previous release keeps serving during the deploy. Before anything else V115 locks
+     `retail_branch_roles` (ACCESS EXCLUSIVE), so no role is written between the fold and the narrowed check, and `branches`
+     (EXCLUSIVE), so the fold never waits on a branch row lock. With an owner that lacks BYPASSRLS it also locks every table
+     whose FORCE it drops. Each attempt waits at most two seconds; on a timeout it is undone and retried after a second, and
+     after 120 attempts V115 waits without a timeout. A shop never queues long behind it, and a lock timeout never fails
+     the deploy.
   1. **Fold a clean store.** A `store` branch in force with no blocker becomes a Store (`sells_goods = false`). From then on
      its till takes no money, as a Store's does.
   2. **Skip a store with a blocker.** `retail_store_fold_blockers(tenant, branch, since)` names the blockers:
      - `keeps_no_goods`: an open branch that keeps no goods, which cannot be a Store;
      - `credit_sales_owing`: a credit sale still owing, counted as `BranchTillCheck` counts it (written-off and imported sales
        left out, a delivery fee owed on the account in), whose payments are taken at that till;
-     - till money taken since the role was set: `credit_payments` (a payment made after its sale), `account_payments`,
+     - till money taken since the role was set: `credit_payments` (a payment made after its sale and booked at that branch),
+       `account_payments`,
        `refunds`, `savings`, `bankings`, `withdrawals`, `advance_repayments`.
 
      A branch with any blocker keeps `sells_goods` true and can do everything it does today with its money. A branch that
@@ -68,7 +75,8 @@ branches are `both`.
   - it replays V115 on a scratch database at the migration before it, reading both numbers from the folder, with a
     fabricated case for each rule; the migration completes, a skipped branch is unchanged with its audit row, and a second
     run changes nothing;
-  - it migrates a mixed business (one clean store, one with credit owing) in one run;
+  - it migrates a mixed business (one clean store, one with credit owing) in one run while another transaction holds a lock
+    on the role table past one attempt;
   - it checks the blockers against a credit sale owing, a written-off one, a later payment, a banking and a refund made
     through the API;
   - it pins that a folded store refuses a credit payment, a refund and a banking with `branch_does_not_sell`.
