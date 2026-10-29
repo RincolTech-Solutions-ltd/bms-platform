@@ -390,7 +390,11 @@ class RetailQuickAddIT extends IntegrationTest {
     void addingStockNeedsStockCountPermissionAndNothingIsMadeWithoutIt() {
         // The route's permission is held but not the one RetailBranchContext.resolve checks for the stock: 403
         // permission_denied (spec trade-capabilities section 2.2, issue #257).
-        ResponseEntity<JsonNode> refused = quickAdd(item("Test Pen Blue", 500, "30", hq), CATALOGUE_ONLY, "*", "k-1");
+        ResponseEntity<JsonNode> refused = quickAdd(
+                item("Test Pen Blue", 500, "30", hq),
+                CATALOGUE_ONLY,
+                "*",
+                UUID.randomUUID().toString());
         assertThat(refused.getStatusCode()).as("%s", refused.getBody()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(refused.getBody().get("code").asString()).isEqualTo("permission_denied");
         assertThat(scalar(
