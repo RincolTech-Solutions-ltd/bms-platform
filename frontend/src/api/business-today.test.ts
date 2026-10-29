@@ -50,7 +50,8 @@ describe('businessToday', () => {
 //
 // Known limits (#670). The scan reads text, not types, so it lets through: toLocaleString with no date options on a Date the
 // file does not declare as one (`x = new Date(...)` or `x: Date`), such as a record's field, a function's result or another
-// name for the same Date; date-fns format on a date other than new Date(), Date.now() or a value named now; and a reason or a
+// name for the same Date. A declared name counts across the whole file, so the same name used for a number in another
+// function is taken for a Date too (a hit, not a miss); date-fns format on a date other than new Date(), Date.now() or a value named now; and a reason or a
 // bracket in a template literal with `${...}`, or in a string that a quote mark in JSX text or a regex literal threw off,
 // since those are read as code.
 const SRC = fileURLToPath(new URL('../', import.meta.url));
@@ -71,7 +72,8 @@ const NAMES_A_ZONE = /\btimeZone\s*:\s*(?!undefined\b)[^\s,}]/;
 const DATE_OPTIONS = /\b(?:dateStyle|timeStyle|weekday|era|year|month|day|hour|minute|second)\s*:/;
 const ON_A_NEW_DATE = /new Date\([^()]*(?:\([^()]*\)[^()]*)*\)\s*$/;
 const DATE_NAMES = /\b([A-Za-z_$][\w$]*)\s*=\s*new Date\(|\b([A-Za-z_$][\w$]*)\s*\??:\s*Date\b(?![\w$.])/g;
-const RECEIVER = /([A-Za-z_$][\w$]*)\s*\??\s*$/;
+// The variable a call is made on; a field (`row.at`) is not one, whatever the file declares by that name.
+const RECEIVER = /(?<![\w$.])([A-Za-z_$][\w$]*)\s*\??\s*$/;
 const COMMENTS = /\/\*[\s\S]*?\*\/|\/\/.*$/gm;
 // A comment, kept as it is, or a string, whose inside is blanked so a bracket, a `//` or a reason in it is neither code nor a
 // comment: a quoted string on one line, or a template literal. One with `${` is kept, since its holes are code.
@@ -100,7 +102,7 @@ export function deviceDays(text: string): number[] {
   const code = blankStrings(text);
   const lines = code.split('\n');
   const lineOf = (at: number) => text.slice(0, at).split('\n').length;
-  const commentOnly = (line: string) => /^\s*(?:\/\/.*|\/\*[^*]*\*\/|\{\/\*[^*]*\*\/\})\s*$/.test(line);
+  const commentOnly = (line: string) => /^\s*(?:\/\/.*|\/\*(?:[^*]|\*(?!\/))*\*\/|\{\/\*(?:[^*]|\*(?!\/))*\*\/\})\s*$/.test(line);
   const dates = new Set([...code.matchAll(DATE_NAMES)].map((m) => m[1] ?? m[2]));
   const hits = new Set<number>();
   const hit = (start: number, end: number) => {
@@ -167,6 +169,8 @@ describe('the business date guard', () => {
     expect(deviceDays('function show(at: Date) {\n  return at.toLocaleString();\n}')).toEqual([2]);
     expect(deviceDays('let at: Date | null = null;\nconst when = at?.toLocaleString();')).toEqual([2]);
     expect(deviceDays('const n = 5;\nconst shown = n.toLocaleString();')).toEqual([]);
+    // A field of the same name is not the declared variable.
+    expect(deviceDays('function show(at: Date) {}\nconst shown = row.at.toLocaleString();\nconst more = row?.at?.toLocaleString();')).toEqual([]);
     // date-fns on now, but not Intl's own format with a zone.
     expect(deviceDays("const day = format(Date.now(), 'yyyy-MM-dd');")).toEqual([1]);
     expect(deviceDays("const day = format(now, 'yyyy-MM-dd');")).toEqual([1]);
@@ -209,5 +213,9 @@ describe('the business date guard', () => {
     // Code between two block comments: the line is not a comment alone, so it excuses nothing below.
     expect(deviceDays(`/* business-day-ok: a calendar sum */ const a = 1; /* b */\n${cut}`)).toEqual([2]);
     expect(deviceDays(`/* business-day-ok: a calendar sum */\n${cut}`)).toEqual([]);
+    // A star inside a comment alone on its line does not stop it being alone.
+    expect(deviceDays(`/** business-day-ok: a calendar sum */\n${cut}`)).toEqual([]);
+    expect(deviceDays(`/* business-day-ok: a sum of 5 * 24h on a UTC midnight */\n${cut}`)).toEqual([]);
+    expect(deviceDays(`{/* business-day-ok: 5 * 24h */}\n${cut}`)).toEqual([]);
   });
 });

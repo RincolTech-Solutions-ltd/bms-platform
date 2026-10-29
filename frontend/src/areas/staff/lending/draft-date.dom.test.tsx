@@ -1,33 +1,46 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
-import type { Loan } from '../../../api/lending';
+import { investments, type Investment } from '../../../api/investments';
+import { lending, type Loan } from '../../../api/lending';
 import { StaffContext } from '../context';
-import { RepaymentForm } from './actions';
+import { DisburseForm, RepaymentForm } from './actions';
+import { FundForm } from './investment-actions';
 
-// Issue #670: a repayment draft kept in the tab is restored as it was, but its date was the day it was started. Read back on a
-// later business day the date starts again from today; the amount and the Idempotency-Key stay. Every name is invented.
+// Issue #670: a money form's draft kept in the tab is restored as it was, but its date was the day it was started. Read back on a
+// later business day, with its key never sent, the date starts again from today (a date after today becomes today) and the form
+// says so; the rest and the Idempotency-Key stay. A key that was sent keeps the body it went with, so a retry posts the same
+// thing once. Every name is invented.
 
-const LOAN_ID = '00000000-0000-4000-8000-0000000000a1';
-const me = { user_id: '00000000-0000-4000-8000-0000000000f2', full_name: 'Test Officer 01', kind: 'staff', permissions: ['lending.repayments.create'] } as unknown as Me;
-const loan: Loan = { id: LOAN_ID, loan_no: 'LN-BR1-000001', status: 'active', currency: 'UGX' };
-const name = `retail-draft:lending-repay:${me.user_id}:${LOAN_ID}`;
+const ID = '00000000-0000-4000-8000-0000000000a1';
+const me = { user_id: '00000000-0000-4000-8000-0000000000f2', full_name: 'Test Officer 01', kind: 'staff', permissions: [] } as unknown as Me;
+const loan: Loan = { id: ID, loan_no: 'LN-BR1-000001', status: 'approved', currency: 'UGX', approved_principal_minor: 1000000 };
+const inv = { id: ID, principal_minor: 1000000, currency: 'UGX' } as unknown as Investment;
+const NOTE = /started on an earlier day, so its date is now today/;
 
-function formWith(draft: Record<string, string>) {
-  sessionStorage.setItem(name, JSON.stringify({ key: 'test-key-670', draft }));
+const FORMS: { name: string; draftName: string; field: string; label: string; form: ReactElement }[] = [
+  { name: 'repayment', draftName: `lending-repay:${me.user_id}:${ID}`, field: 'valueDate', label: 'Date paid', form: <RepaymentForm loan={{ ...loan, status: 'active' }} onDone={() => undefined} /> },
+  { name: 'disbursement', draftName: `lending-disburse:${me.user_id}:${ID}`, field: 'date', label: 'Disbursement date', form: <DisburseForm loan={loan} /> },
+  { name: 'investment funding', draftName: `invest-fund:${me.user_id}:${ID}`, field: 'date', label: 'Date received', form: <FundForm inv={inv} /> },
+];
+
+function show(f: (typeof FORMS)[number], saved?: { draft: Record<string, string>; sent?: true }): HTMLInputElement {
+  if (saved) sessionStorage.setItem(`retail-draft:${f.draftName}`, JSON.stringify({ key: 'test-key-670', ...saved }));
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <StaffContext.Provider value={{ me, branch: null }}>
-        <RepaymentForm loan={loan} onDone={() => undefined} />
-      </StaffContext.Provider>
+      <StaffContext.Provider value={{ me, branch: null }}>{f.form}</StaffContext.Provider>
     </QueryClientProvider>,
   );
-  return { date: screen.getByLabelText('Date paid') as HTMLInputElement, amount: screen.getByLabelText('Amount (UGX)') as HTMLInputElement };
+  return screen.getByLabelText(f.label) as HTMLInputElement;
 }
 
-const kept = () => JSON.parse(sessionStorage.getItem(name) ?? '{}') as { key?: string; draft?: Record<string, string> };
+const kept = (f: (typeof FORMS)[number]) => JSON.parse(sessionStorage.getItem(`retail-draft:${f.draftName}`) ?? '{}') as { key?: string; draft?: Record<string, string>; sent?: boolean };
+const draftOn = (f: (typeof FORMS)[number], date: string, startedOn?: string) => ({
+  method: 'cash', reference: 'TEST-REF-01', [f.field]: date, ...(f.name === 'repayment' ? { amount: '50000' } : {}), ...(startedOn ? { startedOn } : {}),
+});
 
 beforeEach(() => {
   sessionStorage.clear();
@@ -37,23 +50,63 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.useRealTimers();
   sessionStorage.clear();
 });
 
-describe('a repayment draft restored on a later day', () => {
-  it('starts its date again from today and keeps the amount and the key', () => {
-    const { date, amount } = formWith({ amount: '50000', valueDate: '2026-10-28', method: 'cash', reference: '', startedOn: '2026-10-28' });
+describe.each(FORMS)('a $name draft restored from the tab', (f) => {
+  it('opens fresh on today, with no note', () => {
+    expect(show(f).value).toBe('2026-10-29');
+    expect(screen.queryByText(NOTE)).toBeNull();
+  });
+
+  it('from an earlier day, starts its date again from today, says so, and keeps the rest and the key', () => {
+    const date = show(f, { draft: draftOn(f, '2026-10-27', '2026-10-28') });
     expect(date.value).toBe('2026-10-29');
-    expect(amount.value).toBe('50000');
-    expect(kept()).toEqual({ key: 'test-key-670', draft: { amount: '50000', valueDate: '2026-10-29', method: 'cash', reference: '', startedOn: '2026-10-29' } });
+    expect(screen.getByText(NOTE)).toBeTruthy();
+    expect(kept(f)).toEqual({ key: 'test-key-670', draft: draftOn(f, '2026-10-29', '2026-10-29') });
   });
 
-  it('starts the date of a draft kept before #670, without startedOn, from today', () => {
-    expect(formWith({ amount: '50000', valueDate: '2026-10-20', method: 'cash', reference: '' }).date.value).toBe('2026-10-29');
+  it('kept before #670, without startedOn, starts its date from today too', () => {
+    expect(show(f, { draft: draftOn(f, '2026-10-20') }).value).toBe('2026-10-29');
   });
 
-  it('keeps an earlier date chosen today', () => {
-    expect(formWith({ amount: '50000', valueDate: '2026-10-20', method: 'cash', reference: '', startedOn: '2026-10-29' }).date.value).toBe('2026-10-20');
+  it('with a date after today (a zone ahead of this one), clamps it to today', () => {
+    expect(show(f, { draft: draftOn(f, '2026-10-30', '2026-10-29') }).value).toBe('2026-10-29');
+    expect(screen.getByText(NOTE)).toBeTruthy();
+  });
+
+  it('keeps an earlier date chosen today, with no note', () => {
+    expect(show(f, { draft: draftOn(f, '2026-10-20', '2026-10-29') }).value).toBe('2026-10-20');
+    expect(screen.queryByText(NOTE)).toBeNull();
+  });
+
+  it('whose key was already sent, keeps the body it went with, earlier day or not', () => {
+    const date = show(f, { draft: draftOn(f, '2026-10-28', '2026-10-28'), sent: true });
+    expect(date.value).toBe('2026-10-28');
+    expect(screen.queryByText(NOTE)).toBeNull();
+    expect(kept(f)).toEqual({ key: 'test-key-670', draft: draftOn(f, '2026-10-28', '2026-10-28'), sent: true });
+  });
+});
+
+describe('sending a money form', () => {
+  it('marks its key as sent in the tab before the answer comes, so a later day leaves the date alone', () => {
+    const repay = vi.spyOn(lending, 'repay').mockImplementation(() => new Promise(() => undefined));
+    const f = FORMS[0]!;
+    show(f, { draft: draftOn(f, '2026-10-29', '2026-10-29') });
+    fireEvent.submit(screen.getByRole('form', { name: 'Record a repayment' }));
+    return vi.waitFor(() => {
+      expect(repay).toHaveBeenCalledWith(ID, expect.objectContaining({ value_date: '2026-10-29' }), 'test-key-670');
+      expect(kept(f).sent).toBe(true);
+    });
+  });
+
+  it('does the same for a funding', () => {
+    vi.spyOn(investments, 'fund').mockImplementation(() => new Promise(() => undefined));
+    const f = FORMS[2]!;
+    show(f, { draft: draftOn(f, '2026-10-29', '2026-10-29') });
+    fireEvent.submit(screen.getByRole('form', { name: 'Record funding' }));
+    return vi.waitFor(() => expect(kept(f).sent).toBe(true));
   });
 });

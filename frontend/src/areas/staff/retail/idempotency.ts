@@ -26,7 +26,8 @@ function tabStore(): DraftStore | null {
   }
 }
 
-interface Saved<T> { key: string; draft: T }
+/** `sent`: the key has gone to the server at least once, so its body must not change under it (#670). */
+interface Saved<T> { key: string; draft: T; sent?: true }
 
 /** The saved draft and key under `name`, or a fresh key and `initial` when none is readable. */
 export function loadDraft<T>(store: DraftStore | null, name: string, initial: T): Saved<T> {
@@ -34,7 +35,9 @@ export function loadDraft<T>(store: DraftStore | null, name: string, initial: T)
     const raw = store?.getItem(`retail-draft:${name}`);
     if (raw) {
       const saved = JSON.parse(raw) as Partial<Saved<T>>;
-      if (typeof saved.key === 'string' && saved.key !== '' && saved.draft !== undefined) return { key: saved.key, draft: saved.draft };
+      if (typeof saved.key === 'string' && saved.key !== '' && saved.draft !== undefined) {
+        return { key: saved.key, draft: saved.draft, ...(saved.sent === true ? { sent: true as const } : {}) };
+      }
     }
   } catch {
     // Unreadable or blocked storage: start a fresh form.
@@ -66,19 +69,25 @@ export function dropDraft(store: DraftStore | null, name: string): void {
  * new form (a new `key` prop) for the next record. A draft other than `initial` is unsaved work (#576): the app does not update
  * itself under it until it is finished, discarded or the form closes. A change after `finish` (a form kept on screen for the next
  * record) starts the next record: a fresh key, kept in the tab again and unsaved work again. `restore`, when given, mends a
- * draft read back from the tab before the form shows it, keeping its key (a date from an earlier day, #670).
+ * draft read back from the tab before the form shows it (a date from an earlier day, #670), but only one whose key was never
+ * sent: the form calls `sending` as it posts, and a retry of a sent key keeps the body it went with. `mended` says restore
+ * changed the draft.
  */
 export function usePersistedDraft<T>(
   name: string,
   initial: T,
   restore?: (saved: T) => T,
-): { key: string; draft: T; setDraft: Dispatch<SetStateAction<T>>; finish: () => void; discard: () => void } {
+): { key: string; draft: T; setDraft: Dispatch<SetStateAction<T>>; finish: () => void; discard: () => void; sending: () => void; mended: boolean } {
   const store = useRef(tabStore()).current;
   const blank = useRef(initial).current;
-  const [saved, setSaved] = useState(() => {
+  const [start] = useState(() => {
     const s = loadDraft(store, name, blank);
-    return restore ? { key: s.key, draft: restore(s.draft) } : s;
+    const draft = restore && !s.sent ? restore(s.draft) : s.draft;
+    return { saved: { ...s, draft }, mended: draft !== s.draft };
   });
+  const [saved, setSaved] = useState<Saved<T>>(start.saved);
+  const current = useRef(saved);
+  current.current = saved;
   const done = useRef(false);
   const [finished, setFinished] = useState(false);
   const changed = useMemo(() => JSON.stringify(saved.draft) !== JSON.stringify(blank), [saved.draft, blank]);
@@ -100,8 +109,15 @@ export function usePersistedDraft<T>(
       setSaved({ key: newIdempotencyKey(), draft: value });
       return;
     }
-    setSaved((s) => ({ key: s.key, draft: typeof next === 'function' ? (next as (d: T) => T)(s.draft) : next }));
+    setSaved((s) => ({ ...s, draft: typeof next === 'function' ? (next as (d: T) => T)(s.draft) : next }));
   }, []);
+  const sending = useCallback(() => {
+    if (done.current || current.current.sent) return;
+    const sent = { ...current.current, sent: true as const };
+    // Kept now, not on the next effect: the request goes out before React renders again.
+    saveDraft(store, name, sent);
+    setSaved(sent);
+  }, [store, name]);
   const finish = useCallback(() => {
     done.current = true;
     finishedAs.current = JSON.stringify(latest.current);
@@ -114,5 +130,5 @@ export function usePersistedDraft<T>(
     dropDraft(store, name);
     setSaved({ key: newIdempotencyKey(), draft: blank });
   }, [store, name, blank]);
-  return { key: saved.key, draft: saved.draft, setDraft, finish, discard };
+  return { key: saved.key, draft: saved.draft, setDraft, finish, discard, sending, mended: start.mended };
 }

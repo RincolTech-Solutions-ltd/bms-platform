@@ -45,6 +45,11 @@ function ReferenceInput({ id, value, onChange }: { id: string; value: string; on
   );
 }
 
+/** Said under a date that a draft from an earlier day had set back to today (#670), so a back date is not lost unseen. */
+export function DateReset() {
+  return <p className="field-hint" role="status">This draft was started on an earlier day, so its date is now today. Change it if the money moved on another day.</p>;
+}
+
 interface RepayDraft { amount: string; valueDate: string; method: PaymentMethod; reference: string; startedOn: string }
 
 /** What the server answered for a repayment: the receipt and where the money went. */
@@ -93,7 +98,7 @@ export function RepaymentForm({ loan, onDone }: { loan: Loan; onDone: (r: Repaym
   const loanId = loan.id ?? '';
   const refresh = useRefreshLoan(loanId);
   const today = businessToday();
-  const { key, draft, setDraft, finish, discard } = usePersistedDraft<RepayDraft>(`lending-repay:${me.user_id ?? ''}:${loanId}`, {
+  const { key, draft, setDraft, finish, discard, sending, mended } = usePersistedDraft<RepayDraft>(`lending-repay:${me.user_id ?? ''}:${loanId}`, {
     amount: '',
     valueDate: today,
     method: 'cash',
@@ -104,12 +109,14 @@ export function RepaymentForm({ loan, onDone }: { loan: Loan; onDone: (r: Repaym
   const amountMinor = parseAmount(draft.amount, loan.currency);
   const valid = amountMinor !== null && isIsoDate(draft.valueDate);
   const save = useMutation({
-    mutationFn: () =>
-      lending.repay(
+    mutationFn: () => {
+      sending();
+      return lending.repay(
         loanId,
         { amount_minor: amountMinor ?? 0, value_date: draft.valueDate, payment_method_key: draft.method, external_reference: draft.reference.trim() || undefined },
         key,
-      ),
+      );
+    },
     onSuccess: (r) => {
       finish();
       refresh();
@@ -127,6 +134,7 @@ export function RepaymentForm({ loan, onDone }: { loan: Loan; onDone: (r: Repaym
       </p>
       <label htmlFor="repay-date">Date paid</label>
       <input id="repay-date" type="date" max={businessToday()} value={draft.valueDate} onChange={(e) => update({ valueDate: e.target.value })} />
+      {mended && <DateReset />}
       <MethodChoice name="repay-method" value={draft.method} onChange={(m) => update({ method: m })} />
       <ReferenceInput id="repay-ref" value={draft.reference} onChange={(v) => update({ reference: v })} />
       <Problem error={save.error} />
@@ -147,7 +155,7 @@ export function DisburseForm({ loan }: { loan: Loan }) {
   const loanId = loan.id ?? '';
   const refresh = useRefreshLoan(loanId);
   const today = businessToday();
-  const { key, draft, setDraft, finish } = usePersistedDraft<DisburseDraft>(`lending-disburse:${me.user_id ?? ''}:${loanId}`, {
+  const { key, draft, setDraft, finish, sending, mended } = usePersistedDraft<DisburseDraft>(`lending-disburse:${me.user_id ?? ''}:${loanId}`, {
     date: today,
     method: 'cash',
     reference: '',
@@ -155,8 +163,10 @@ export function DisburseForm({ loan }: { loan: Loan }) {
   }, (d) => onToday(d, 'date', today));
   const update = (patch: Partial<DisburseDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const save = useMutation({
-    mutationFn: () =>
-      lending.disburse(loanId, { disbursement_date: draft.date, payment_method_key: draft.method, external_reference: draft.reference.trim() || undefined }, key),
+    mutationFn: () => {
+      sending();
+      return lending.disburse(loanId, { disbursement_date: draft.date, payment_method_key: draft.method, external_reference: draft.reference.trim() || undefined }, key);
+    },
     onSuccess: () => {
       finish();
       refresh();
@@ -176,6 +186,7 @@ export function DisburseForm({ loan }: { loan: Loan }) {
       </p>
       <label htmlFor="disburse-date">Disbursement date</label>
       <input id="disburse-date" type="date" max={businessToday()} value={draft.date} onChange={(e) => update({ date: e.target.value })} />
+      {mended && <DateReset />}
       <MethodChoice name="disburse-method" value={draft.method} onChange={(m) => update({ method: m })} />
       <ReferenceInput id="disburse-ref" value={draft.reference} onChange={(v) => update({ reference: v })} />
       <Problem error={save.error} />

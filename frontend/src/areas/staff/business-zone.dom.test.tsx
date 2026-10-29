@@ -27,10 +27,11 @@ function officer(zone?: string, permissions = ['lending.insights.read']): Me {
   } as unknown as Me;
 }
 
-function shellAt(me: Me, path: string): void {
+function shellAt(me: Me, path: string, answers: Record<string, unknown> = {}): void {
   setAccessToken('test-token-officer-07');
+  const data: Record<string, unknown> = { ...answers, '/api/v1/me': me };
   vi.spyOn(api, 'GET').mockImplementation(((url: string) =>
-    url === '/api/v1/me' ? Promise.resolve({ data: me, response: new Response() }) : new Promise(() => undefined)) as never);
+    url in data ? Promise.resolve({ data: data[url], response: new Response() }) : new Promise(() => undefined)) as never);
   const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: [path] }) });
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -79,6 +80,20 @@ describe("today in the business's own zone", () => {
     const to = screen.getByLabelText('To') as HTMLInputElement;
     expect(to.value).toBe('2026-10-28');
     expect(to.max).toBe('2026-10-28');
+  }, 15_000);
+
+  it("gives a Lagos repayment its own today when it restores an earlier day's draft (#670)", async () => {
+    // The shell sets the zone as it draws, before the loan page and its form, so the form's first today is already Lagos's.
+    const loan = { id: '00000000-0000-4000-8000-0000000000a7', loan_no: 'LN-BR1-000007', status: 'active', currency: 'UGX' };
+    const me = officer('Africa/Lagos', ['lending.loans.read', 'lending.repayments.create']);
+    const draft = { amount: '50000', valueDate: '2026-10-27', method: 'cash', reference: '', startedOn: '2026-10-27' };
+    sessionStorage.setItem(`retail-draft:lending-repay:${me.user_id}:${loan.id}`, JSON.stringify({ key: 'test-key-670-lagos', draft }));
+    shellAt(me, `/staff/lending/loans/${loan.id}`, { '/api/v1/lending/loans/{loan_id}': loan });
+    fireEvent.click(await screen.findByRole('button', { name: 'Record repayment' }, { timeout: 10_000 }));
+    const date = screen.getByLabelText('Date paid') as HTMLInputElement;
+    expect([date.value, date.max]).toEqual(['2026-10-28', '2026-10-28']);
+    expect((screen.getByLabelText('Amount (UGX)') as HTMLInputElement).value).toBe('50000');
+    sessionStorage.clear();
   }, 15_000);
 });
 

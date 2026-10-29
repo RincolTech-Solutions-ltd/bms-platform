@@ -9,6 +9,7 @@ import { instructionWords, investmentTxnWords, percent } from './investment-stat
 import { businessToday } from '../../../api/retail';
 import { isIsoDate, money, onToday, words } from './loan-state';
 import { BusyButton } from '../../../app/ui/BusyButton';
+import { DateReset } from './actions';
 
 // The forms of the investment page: funding, return payout, maturity payout, rollover, early
 // withdrawal (with its quote), the maturity instruction and a reversal. Each write keeps its draft
@@ -53,7 +54,7 @@ export function FundForm({ inv }: { inv: Investment }) {
   const id = inv.id ?? '';
   const refresh = useRefresh(id);
   const today = businessToday();
-  const { key, draft, setDraft, finish } = usePersistedDraft<FundDraft>(`invest-fund:${me.user_id ?? ''}:${id}`, {
+  const { key, draft, setDraft, finish, sending, mended } = usePersistedDraft<FundDraft>(`invest-fund:${me.user_id ?? ''}:${id}`, {
     date: today,
     method: 'cash',
     reference: '',
@@ -61,8 +62,10 @@ export function FundForm({ inv }: { inv: Investment }) {
   }, (d) => onToday(d, 'date', today));
   const update = (patch: Partial<FundDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const save = useMutation({
-    mutationFn: () =>
-      investments.fund(id, { value_date: draft.date, payment_method_key: draft.method, external_reference: draft.reference.trim() || undefined }, key),
+    mutationFn: () => {
+      sending();
+      return investments.fund(id, { value_date: draft.date, payment_method_key: draft.method, external_reference: draft.reference.trim() || undefined }, key);
+    },
     onSuccess: () => {
       finish();
       refresh();
@@ -77,6 +80,7 @@ export function FundForm({ inv }: { inv: Investment }) {
       </p>
       <label htmlFor="fund-date">Date received</label>
       <input id="fund-date" type="date" max={businessToday()} value={draft.date} onChange={(e) => update({ date: e.target.value })} />
+      {mended && <DateReset />}
       <MethodChoice name="fund-method" value={draft.method} onChange={(m) => update({ method: m })} />
       <label htmlFor="fund-ref">Reference (optional)</label>
       <input id="fund-ref" maxLength={100} value={draft.reference} onChange={(e) => update({ reference: e.target.value })} autoComplete="off" />
