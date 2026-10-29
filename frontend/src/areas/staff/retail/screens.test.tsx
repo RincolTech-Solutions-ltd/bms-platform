@@ -21,6 +21,12 @@ import { ALL_BRANCHES } from '../../../auth/branch';
 
 const renderToString = (node: ReactElement) => render(node).replaceAll('<!-- -->', '');
 
+// Issue #690: the Stock page links to Items and Categories, so a link renders as a plain anchor without a router.
+vi.mock('@tanstack/react-router', async (original) => {
+  const real = await original<typeof import('@tanstack/react-router')>();
+  return { ...real, Link: ({ children, to, className }: { children: unknown; to: string; className?: string }) => <a href={to} className={className}>{children as never}</a> };
+});
+
 // Component tests render to static markup (the test setup has no DOM): they prove what each screen
 // shows and, above all, what a user without retail.profit.read never sees.
 
@@ -126,14 +132,14 @@ describe('stock screen', () => {
     vi.unstubAllGlobals();
   });
 
-  it('offers the category picker with All categories (#578)', () => {
+  it('offers the category chips, All first, each category with its item count (#690, which replaces the picker of #578 here)', () => {
     const client = new QueryClient();
-    client.setQueryData(['retail', 'categories'], [{ id: 'c1', name: 'Cables' }, { id: 'c2', name: 'Lighting' }]);
+    client.setQueryData(['retail', 'categories'], [{ id: 'c1', name: 'Cables', product_count: 3 }, { id: 'c2', name: 'Lighting', product_count: 2 }]);
     const html = page('sales', <StockPage />, client);
-    expect(html).toContain('for="stock-category"');
-    expect(html).toContain('All categories');
-    expect(html).toContain('role="combobox"');
-    expect(html).toContain('id="stock-category"');
+    expect(html).toContain('role="group" aria-label="Categories"');
+    expect(html).toContain('aria-pressed="true">All</button>');
+    expect(html).toContain('Cables <span class="find-chip-count num">3</span>');
+    expect(html).not.toContain('id="stock-category"');
   });
 });
 

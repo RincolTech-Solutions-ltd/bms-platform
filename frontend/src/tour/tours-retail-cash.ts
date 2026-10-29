@@ -35,21 +35,22 @@ export const productsPage: Tour = {
   // Version 5 says what an item is counted in, as the item form now does (issue #547); version 6 that the category comes first and
   // the item code is made from it (issue #493).
   // Version 7: the app always makes the item code, never typed (issue #562).
-  version: 7,
+  // Version 8: the search and the category chips come first, and on a phone an item is a row that opens it (issue #690).
+  version: 8,
   title: 'This page: items',
   audience: (me) => held(me, CATALOGUE) && held(me, STOCK_READ),
   autoStart: false,
   page: '/staff/retail/catalogue/products',
   steps: [
+    step({ id: 'search', target: 'product-search', title: 'Find an item', body: 'Type a name, a code, a barcode or a category. The list narrows as you type. Tap a category under the box to see only its items. Nothing found? Tap Add it.' }),
     step({ id: 'add', target: 'product-add', title: 'Add an item', body: 'Tap here to add something you sell. Pick the category first, then type the name, what it is counted in and the price. The app gives it the next code of the category, such as BLB-0001: you never type one. Adding from the category\'s own page saves picking the category.' }),
     step({ id: 'sizes', target: 'product-add-sizes', title: 'Sizes and colours', body: 'Sell one design in several sizes or prints? Tap here and type the sizes and the colours once. Each one gets its own price, stock and item code.' }),
     step({ id: 'join', target: 'product-join-sizes', title: 'One item per size?', body: 'If you typed each size as its own item, tap here to join them. Each keeps its stock and history.' }),
-    step({ id: 'search', target: 'product-search', title: 'Find an item', body: 'Type a name, a code or a category. The list narrows as you type.' }),
-    step({ id: 'filters', target: 'product-filters', title: 'Narrow the list', body: 'Pick a category, or choose Switched off to see items you no longer sell.' }),
-    step({ id: 'edit', target: 'product-list', title: 'Change an item', body: 'Tap Edit on an item to change its name, category or what it is counted in. Moving it to another category keeps its item code. Tap Stock to see how much of it you hold.' }),
+    step({ id: 'filters', target: 'product-filters', title: 'Narrow the list', body: 'Choose Inactive to see items you no longer sell.' }),
+    step({ id: 'edit', target: 'product-list', title: 'Change an item', body: 'Tap an item on a phone, or Edit on a laptop, to change its name, category or what it is counted in. Moving it to another category keeps its item code. Tap Stock to see how much of it you hold.' }),
     // Issue #412: the low-stock level is on the item's page, under Edit.
-    step({ id: 'minimum', target: 'product-list', title: 'Warn me when stock is below', body: 'Tap Edit on an item to set when you are told it is running low. Set one level for every shop and store, or a different one for a shop. With no level, you are told when it would run out within 14 days.' }),
-    step({ id: 'price', target: 'product-list', needs: [PRICE_EDIT], optional: true, title: 'Change a price', body: 'Tap Change price on an item. The old price stays in its history, so earlier sales keep the price they were made at.' }),
+    step({ id: 'minimum', target: 'product-list', title: 'Warn me when stock is below', body: 'Open an item to set when you are told it is running low. On a phone tap the item; on a laptop tap Edit. Set one level for every shop and store, or a different one for a shop. With no level, you are told when it would run out within 14 days.' }),
+    step({ id: 'price', target: 'product-list', needs: [PRICE_EDIT], optional: true, title: 'Change a price', body: 'Open an item and tap Change price, or tap Change price on it in the list on a laptop. The old price stays in its history, so earlier sales keep the price they were made at.' }),
   ],
 };
 
