@@ -1437,8 +1437,8 @@ the items show only while you search, and go away once one is picked. Every item
   whose count still equals the committed line); a count changed or added since the review, here or in another tab, stays.
   The removal is stamped like any change and the stored count carries the commit time, so another tab drops exactly those
   items and says "Counted and saved in another tab" when nothing is left, or "2 counts were saved from another tab; your
-  other counts are still here" when some of its counts did not go in, or "Another tab committed its counts; your newer
-  counts here are not in stock yet" when none of its counts went in (each changed here after the other tab's review). Two
+  other counts are still here" when some of its counts did not go in, or "A count was saved from another tab; your newer
+  counts on this page are kept" when none of its counts went in (each changed here after the other tab's review). Two
   counts of the same moment go to the greater value and the stored counts compare whatever their order, so two tabs settle
   after one write each. The page is keyed by branch, so a branch switch
   opens that branch's own saved count. An item found but not typed yet is kept too. A restored count of an item no longer

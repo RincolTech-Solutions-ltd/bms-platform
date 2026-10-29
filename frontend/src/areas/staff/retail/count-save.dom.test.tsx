@@ -410,7 +410,7 @@ describe('a commit and an old count', () => {
     const mine = readStored(branchA);
     otherTab(keyOf(branchA), { ...mine, committed: Date.now() + 1000 });
     expect(countBox('A-1').value).toBe('5');
-    expect(screen.getByTestId('count-other-tab').textContent).toBe('Another tab committed its counts; your newer counts here are not in stock yet');
+    expect(screen.getByTestId('count-other-tab').textContent).toBe('A count was saved from another tab; your newer counts on this page are kept');
     expect(document.body.textContent).not.toMatch(/\b0 counts/);
   });
 
