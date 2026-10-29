@@ -115,7 +115,7 @@ function TestMessage({ eventKey, text, canSend }: { eventKey: string; text: stri
   const [to, setTo] = useState('');
   const send = useMutation({
     mutationFn: () => sms.testMessage(eventKey, text, to),
-    meta: { success: (r: SmsTestResult) => (r.outcome === 'sent' || r.outcome === 'sunk' ? 'Test message sent' : null) },
+    meta: { success: (r: SmsTestResult) => (r.outcome === 'sent' ? 'Test message sent' : r.outcome === 'sunk' ? 'Test message recorded' : null) },
   });
   if (!canSend) return null;
   const error = send.error instanceof SmsError ? send.error : null;
@@ -135,7 +135,7 @@ function TestMessage({ eventKey, text, canSend }: { eventKey: string; text: stri
       <label htmlFor={`sms-test-${eventKey}`}>Phone number</label>
       <input id={`sms-test-${eventKey}`} inputMode="tel" autoComplete="off" value={to} onChange={(e) => { setTo(e.target.value); send.reset(); }} />
       {error && <p role="alert" className="field-error">{error.fields.to ?? error.message}</p>}
-      {send.data && <p role="status" className="alert alert-info">{testWords(send.data)}</p>}
+      {send.data && send.data.outcome !== 'sent' && send.data.outcome !== 'sunk' && <p role="status" className="alert alert-info">{testWords(send.data)}</p>}
       <p>
         <BusyButton type="submit" className="btn-ghost" busy={send.isPending} disabled={to.trim() === ''}>
           Send a test message

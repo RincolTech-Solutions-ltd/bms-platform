@@ -121,7 +121,6 @@ function AddNumber({ onAdded }: { onAdded: () => void }) {
       <input id="sms-oo-reason" autoComplete="off" maxLength={200} value={reason} onChange={(e) => { setReason(e.target.value); add.reset(); }} aria-invalid={error !== null && error.fields.reason !== undefined} />
       <p className="field-hint">Needed only when the number is already stopped for every message and you choose reminders only. Words about why, not names or numbers.</p>
       {error?.fields.reason && <p role="alert" className="field-error">{error.fields.reason}</p>}
-      {add.isSuccess && <p role="status" className="alert alert-success">Added.</p>}
       <p>
         <BusyButton type="submit" className="rt-primary" busy={add.isPending} notReady={phone.trim() === ''}>
           Add to the list
@@ -138,13 +137,13 @@ function PasteList({ onAdded }: { onAdded: () => void }) {
   const run = useMutation({
     mutationFn: (dryRun: boolean) => sms.importOptOuts(text, scope, dryRun),
     onSuccess: (result) => {
-      setChecked(result);
+      setChecked(result.dry_run ? result : null);
       if (!result.dry_run) {
         setText('');
         onAdded();
       }
     },
-    meta: { success: (result: SmsImportResult) => (result.dry_run ? null : 'Numbers added') },
+    meta: { success: (result: SmsImportResult) => (result.dry_run ? null : result.added + result.changed === 1 ? '1 number added' : `${result.added + result.changed} numbers added`) },
   });
   const error = run.error instanceof SmsError ? run.error : null;
   const invalid = checked?.rows.filter((r) => r.outcome === 'invalid_phone') ?? [];
@@ -167,7 +166,7 @@ function PasteList({ onAdded }: { onAdded: () => void }) {
       {error && <p role="alert" className="field-error">{error.fields.numbers ?? error.message}</p>}
       {checked && (
         <div role="status" className="alert alert-info stack">
-          <p>{checked.dry_run ? 'Checked, nothing added yet: ' : 'Done: '}{importWords(checked)}.</p>
+          <p>Checked, nothing added yet: {importWords(checked)}.</p>
           {invalid.length > 0 && <p>Not read: {invalid.map((r) => `number ${r.line}`).join(', ')}.</p>}
         </div>
       )}
@@ -212,7 +211,7 @@ export function OptOutsScreen() {
       return refresh();
     },
     onError: refresh,
-    meta: { success: 'Opt-out lifted' },
+    meta: { success: 'Number taken off the list' },
   });
   if (!allowed) return <NoAccess what="the opt-out list" />;
   const canManage = mayManageSettings(me);

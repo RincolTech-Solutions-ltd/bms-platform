@@ -706,7 +706,6 @@ function DigestSettings() {
           </select>
         </label>
         <Problem error={save.error} />
-        {save.isSuccess && !draft && <p role="status" className="alert alert-success">Saved.</p>}
         <div className="rt-row">
           <BusyButton type="submit" busy={save.isPending}>Save</BusyButton>
           <button type="button" className="btn-ghost" onClick={() => void preview.refetch()}>Preview today&apos;s text</button>

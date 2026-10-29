@@ -126,10 +126,10 @@ function Editor({ saved, canManage, notice, setNotice }: { saved: SmsSettings; c
 
   const save = useMutation({
     mutationFn: (c: SmsSettingsChange) => sms.changeSettings(saved.version, c),
-    onSuccess: (next, c) => {
+    onSuccess: (next) => {
       queryClient.setQueryData(['sms', 'settings'], next);
       void queryClient.invalidateQueries({ queryKey: ['sms', 'templates'] });
-      setNotice({ kind: 'success', text: c.enabled === true ? 'SMS is on.' : c.enabled === false ? 'SMS is off.' : 'Saved.' });
+      setNotice(null);
     },
     // Someone else's change (or a rule the screen could not see): read it again so the next try carries the right version.
     onError: (error) => {
