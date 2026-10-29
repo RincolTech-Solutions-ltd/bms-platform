@@ -91,7 +91,7 @@ export function BusinessNotificationsScreen() {
                   role="switch"
                   checked={on}
                   disabled={!canChange || busy}
-                  onChange={(e) => void save({ [s.key]: e.target.checked }, e.target.checked ? 'Notification turned on' : 'Notification turned off')}
+                  onChange={(e) => void save({ [s.key]: e.target.checked }, `${s.title} ${e.target.checked ? 'on' : 'off'}`)}
                 />{' '}
                 {s.title}
               </label>

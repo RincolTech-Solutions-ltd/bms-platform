@@ -316,7 +316,9 @@ function successCode(text: string, m: Mutation, hookOpts: Map<string, string>, s
   for (const send of m.sends) {
     for (const call of text.matchAll(new RegExp(`(^|[^\\w.])${send.replace('.', '\\.')}\\s*\\(`, 'g'))) parts.push(restOfBlock(text, call.index + call[0].length - 1));
   }
-  return follow(text, successOnly ? parts.map(withoutOnError) : parts, true);
+  if (!successOnly) return follow(text, parts, true);
+  // Stripped after following too: following a name can bring back a function whose failure path sets a message.
+  return withoutCatch(withoutOnError(follow(text, parts.map(withoutOnError), true)));
 }
 
 /** The mutations of one file that say nothing when they work and carry no toast-exempt reason. */
@@ -329,7 +331,9 @@ function silent(text: string, hooks: string[] = mutationHooks(text), hookOpts = 
 // One success signal per action (review of #685): a success path that shows a toast and also sets a success note
 // (`setDone('Saved.')`, `setMessage(...)`, `setSaved(true)`) says it twice. A full success screen that replaces the form keeps
 // its screen, sets no toast and is marked `// toast-exempt: success screen`, so it never reaches this check. Clearing a note
-// (`setMessage(null)`) is not a note, and an onError handler is not the success path.
+// (`setMessage(null)`) is not a note, and an onError handler or a catch block is not the success path. The check reads state
+// names, so a state that holds what a write returned is named for what it holds (`setVoided`, `setReport`); renaming a
+// success note to slip past this list is the same defect, and review must refuse it.
 const SUCCESS_NOTE = /\bset(?:Done|Saved|Message|Notice|Success)\((?!\s*(?:null|false|undefined|''|"")\s*\))/;
 
 /** `code` without its `onError:` handlers (a name, or an arrow function with a balanced body), so a failure path is not read. */
@@ -360,6 +364,29 @@ function notesItself(text: string, m: Mutation): boolean {
   return [...own.matchAll(new RegExp(`\\b${m.name}\\.(?:isSuccess|data)\\b`, 'g'))].some((use) => /alert-success|<Success\b/.test(own.slice(use.index, use.index + 300)));
 }
 
+// JUSTIFICATION-A3: round 3 of the #685 review asks the success-twice check to cover writes by hand too.
+/** `code` without its `catch (...) { ... }` blocks, which say a failure. */
+function withoutCatch(code: string): string {
+  let out = code;
+  for (let at = out.search(/\bcatch\s*(?:\([^()]*\))?\s*\{/); at >= 0; at = out.search(/\bcatch\s*(?:\([^()]*\))?\s*\{/)) {
+    const open = out.indexOf('{', at);
+    out = out.slice(0, at) + out.slice(open + balanced(out, open).length);
+  }
+  return out;
+}
+
+/** The writes by hand of one file whose success path both shows a toast and sets a success note. */
+function doubledByHand(text: string): string[] {
+  return [...text.matchAll(BUSY_ON)]
+    .filter((m) => !exempted(text, m.index, TOAST_EXEMPT))
+    .filter((m) => {
+      // Stripped after following too: following a name can bring back the whole function the write sits in.
+      const code = withoutCatch(withoutOnError(follow(text, [withoutCatch(restOfBlock(text, m.index))], true)));
+      return SAYS_DONE.test(code) && SUCCESS_NOTE.test(code);
+    })
+    .map((m) => `${text.slice(0, m.index).split('\n').length} ${m[0]}`);
+}
+
 /** The mutations of one file whose success path both shows a toast and sets, or draws, a success note. */
 function doubled(text: string, hooks: string[] = mutationHooks(text), hookOpts = new Map(hookOptions(text))): string[] {
   return mutations(text, hooks)
@@ -385,6 +412,10 @@ describe('success toast guard', () => {
 
   it('no staff mutation says its success twice, in a toast and a success note', () => {
     expect(staff.flatMap(({ file, text }) => doubled(text, hooks, hookOpts).map((m) => `${file}:${m}`))).toEqual([]);
+  });
+
+  it('no staff write by hand says its success twice, in a toast and a success note', () => {
+    expect(staff.flatMap(({ file, text }) => doubledByHand(text).map((m) => `${file}:${m}`))).toEqual([]);
   });
 
   it('every staff write by hand says in a toast when it worked, or says why not', () => {
@@ -421,6 +452,12 @@ describe('success toast guard on fixtures', () => {
     expect(doubled(`const save = useMutation({ mutationFn: send, onError: (e) => setMessage(e.message), meta: { success: 'Saved' } });`)).toEqual([]);
     expect(doubled(`// toast-exempt: success screen, the receipt replaces the form\nconst save = useMutation({ mutationFn: send, onSuccess: () => setDone(r) });`)).toEqual([]);
     expect(doubled(`const save = useMutation({ mutationFn: send, meta: { success: 'Saved' } });\nreturn save.isSuccess && <Success>Saved.</Success>;`)).toEqual(['1 save']);
+  });
+
+  it('fails a write by hand that toasts and sets a success note, and passes a note set only on failure', () => {
+    const write = (after: string) => `async function save() {\n  setBusy(true);\n  try {\n    await api.save();\n    sayDone('Saved');${after}\n  } catch (e) {\n    setMessage(e.message);\n  } finally {\n    setBusy(false);\n  }\n}`;
+    expect(doubledByHand(write("\n    setMessage('Saved.');"))).toEqual(['2 setBusy(true)']);
+    expect(doubledByHand(write(''))).toEqual([]);
   });
 
   it('fails a write by hand that says nothing, and passes sayDone or a toast-exempt reason above it', () => {

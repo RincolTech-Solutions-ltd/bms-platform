@@ -132,6 +132,23 @@ describe('DoneToast (#682)', () => {
     expect((await screen.findByText('Undone')).closest('.toast')?.className).toBe('toast toast-success');
   });
 
+  it('shows Undo busy while its request runs, and keeps the toast up until it answers (review of #685)', async () => {
+    let answer: () => void = () => undefined;
+    const back = vi.fn(() => new Promise<void>((resolve) => (answer = resolve)));
+    app(<></>);
+    act(() => sayDone('Pack switched off', back));
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    const undo = screen.getByRole('button', { name: 'Undo' });
+    expect(undo.getAttribute('aria-busy')).toBe('true');
+    act(() => vi.advanceTimersByTime(TOAST_MS * 3));
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy();
+    vi.useRealTimers();
+    await act(async () => answer());
+    expect((await screen.findByText('Undone')).closest('.toast')?.className).toBe('toast toast-success');
+    expect(back).toHaveBeenCalledTimes(1);
+  });
+
   it('says a write by hand with sayDone', () => {
     app(<></>);
     act(() => sayDone('Member saved'));

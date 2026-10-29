@@ -3,6 +3,7 @@ import { createContext, useCallback, useEffect, useRef, useState, type ReactNode
 import { createPortal } from 'react-dom';
 import { icons } from '../../../components/icons';
 import { announceToSheet } from '../../../app/ui/announce';
+import { BusyButton } from '../../../app/ui/BusyButton';
 
 // A toast (the .toast class of app/ui/feedback.css, docs/ui-rules.md rule 15): a dark neutral pill at the bottom with a leading
 // icon for its kind, raised on top of the on-screen success message and gone after four seconds. A screen calls `useToast()`,
@@ -30,7 +31,7 @@ const TONE_ICON = { success: icons.check, error: icons.error, info: icons.info }
  * the page then, but never a live region) still lets it be heard.
  */
 /** The one action a toast may carry (rule 15), such as Undo (#682). */
-export type ToastAction = { label: string; run: () => void };
+export type ToastAction = { label: string; run: () => void; busy?: boolean };
 
 export function Toast({ message, tone, silent = false, action }: { message: string; tone: ToastTone; silent?: boolean; action?: ToastAction }) {
   const announce = silent ? { 'aria-hidden': true } : tone === 'error' ? { role: 'alert', 'aria-live': 'assertive' as const } : { role: 'status', 'aria-live': 'polite' as const };
@@ -43,9 +44,10 @@ export function Toast({ message, tone, silent = false, action }: { message: stri
       <span className="toast-icon">{TONE_ICON[tone]}</span>
       <span>{message}</span>
       {action && (
-        <button type="button" className="toast-action" onClick={action.run}>
+        // Undo writes, so it is a BusyButton (design system rule 6): busy, and said Working, while its request runs.
+        <BusyButton type="button" className="toast-action" busy={action.busy ?? false} onClick={action.run}>
           {action.label}
-        </button>
+        </BusyButton>
       )}
     </p>
   );
@@ -70,8 +72,8 @@ export function useToast(ms: number = TOAST_MS, silent = false): { show: (messag
         const error = was.error ?? was.message;
         return { message: `${error} ${message}`, tone: 'error', error };
       });
-      // A toast with an action stays a little longer, so there is time to reach it.
-      timer.current = setTimeout(() => setShown(null), action ? ms * 2 : ms);
+      // A toast with an action stays a little longer, so there is time to reach it, and stays up while its action works.
+      if (!action?.busy) timer.current = setTimeout(() => setShown(null), action ? ms * 2 : ms);
     },
     [ms],
   );
@@ -149,6 +151,7 @@ export function DoneToast() {
       const run = () => {
         if (pressed || !undo) return;
         pressed = true;
+        show(message, 'success', { label: 'Undo', run, busy: true });
         undo()
           .then(
             () => show('Undone', 'success'),

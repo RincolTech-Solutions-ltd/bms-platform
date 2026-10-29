@@ -365,6 +365,9 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
    `main.tsx` beside the router, drawn inside an open modal dialog or the side menu layout) says them, and it stays up
    across a change of page. A write that can be taken back (a switch turned on or off) names the request that undoes it in
    `meta.undo`, and the toast then carries Undo, stays eight seconds, runs it once, says Undone and reads every list again.
+   Undo writes, so it is a `BusyButton`: busy (and said Working) while its request runs, and the toast stays up until it
+   answers. A change whose way back needs more than the toast can ask (turning SMS on again needs its notice read) offers
+   no Undo; nor does one whose result carries no version to send it on.
    A write by hand (a `setBusy(true)` with try and catch) calls `sayDone(words)` once the request has worked. Success is
    never said twice: a screen that already says it, in its own success toast, a success note or alert, or a success or
    receipt screen (directly or through a parent's callback), sets no `meta.success` and carries `// toast-exempt: <where it
