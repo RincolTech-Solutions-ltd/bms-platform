@@ -1,6 +1,6 @@
 import type { Pack, Product } from '../../../api/retail';
-import { milliOf, qtyString } from './maths';
-import { activePacks, factorMilli, quantityIn, unitWord, unitWords } from './units-state';
+import { qtyString } from './maths';
+import { activePacks, factorMilli, packsAndPieces, quantityIn, unitWord, unitWords } from './units-state';
 
 // Issue #699 (ADR-107): an item's packages as a ladder, biggest first. A pack may say what it holds one level down (a carton
 // holds 12 boxes, a box 10 pieces); a pack made before says nothing and holds its factor of the smallest unit. The server keeps
@@ -132,59 +132,15 @@ export function wholeLevels(levels: StockLevel[] | undefined): { unit: string; s
   return out.sort((a, b) => (a.size > b.size ? -1 : 1));
 }
 
-/** Stock split into every level, biggest first, and the pieces left: [{unit, n}] with the smallest unit last. */
-export function breakdown(qty: string, unit: string, levels: StockLevel[] | undefined): { unit: string; n: bigint }[] {
-  let left = BigInt(Math.abs(milliOf(qty)));
-  const out: { unit: string; n: bigint }[] = [];
-  for (const l of wholeLevels(levels)) {
-    const n = left / l.size;
-    left -= n * l.size;
-    out.push({ unit: l.unit, n });
-  }
-  // The pieces left are thousandths, kept so 2.5 metres reads as such.
-  out.push({ unit, n: left });
-  return out;
-}
-
 /**
- * Stock at every level, as a person says it: "2 Cartons, 3 Boxes and 5 Pieces (275 Pieces)". A level with none is left out;
- * less than the smallest package reads in pieces only; below zero says how far short.
+ * Stock at every level, as a person says it: "2 Cartons, 3 Boxes and 5 Pieces (275 Pieces)", the words of packsAndPieces
+ * (ADR-103) with every level of the ladder. A level with none is left out; below zero says how far short.
  */
 export function everyLevel(qty: string, unit: string | undefined, levels: StockLevel[] | undefined): string {
-  if (!unit) return qty;
-  const parts = breakdown(qty, unit, levels);
-  const short = milliOf(qty) < 0 ? ' short' : '';
-  const said = parts
-    .map((p, i) => (i === parts.length - 1 ? (p.n > 0n ? quantityIn(qtyString(Number(p.n)), unit) : '') : p.n > 0n ? quantityIn(qtyString(Number(p.n * 1000n)), p.unit) : ''))
-    .filter(Boolean);
-  const total = quantityIn(qtyString(Math.abs(milliOf(qty))), unit);
-  if (said.length === 0) return `${total}${short}`;
-  const words = said.length > 1 ? `${said.slice(0, -1).join(', ')} and ${said[said.length - 1]}` : said[0];
-  return parts.slice(0, -1).some((p) => p.n > 0n) ? `${words}${short} (${total}${short})` : `${words}${short}`;
+  const top = wholeLevels(levels)[0];
+  return packsAndPieces(qty, unit, top ? { unit: top.unit, factor: qtyString(Number(top.size)), levels } : undefined);
 }
 
-/**
- * A count typed at every level, in thousandths of the smallest unit: whole packages times their size plus the pieces. Null when
- * nothing is typed or a box cannot be read. `counts` holds one text per whole level, biggest first, then the pieces.
- */
-export function countMilli(counts: string[], levels: StockLevel[] | undefined, piecesMilli: (text: string) => number | null): number | null {
-  const sizes = wholeLevels(levels);
-  if (counts.every((c) => c.trim() === '')) return null;
-  let total = 0n;
-  for (let i = 0; i < sizes.length; i++) {
-    const text = (counts[i] ?? '').trim();
-    if (text === '') continue;
-    if (!/^\d+$/.test(text)) return null;
-    total += BigInt(text) * (sizes[i]?.size ?? 0n);
-  }
-  const rest = (counts[sizes.length] ?? '').trim();
-  if (rest !== '') {
-    const p = piecesMilli(rest);
-    if (p === null) return null;
-    total += BigInt(p);
-  }
-  return total > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(total);
-}
 
 /** The level Buy stock opens on: the item's usual buying package while it is still bought, else none (the smallest unit). */
 export function usualBuyingPack(product: Product): Pack | undefined {

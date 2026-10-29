@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Pack } from '../../../api/retail';
-import { breakdown, chain, changeWords, changesOf, countMilli, everyLevel, holdsProblem, ladderOf, perPieceMinor, soOne, usualBuyingPack } from './ladder-state';
-import { parseCount } from './maths';
+import { chain, changeWords, changesOf, everyLevel, holdsProblem, ladderOf, perPieceMinor, soOne, usualBuyingPack } from './ladder-state';
+import { ladderLevels, packsAndPiecesMilli, packsAndPiecesProblem, samePack } from './units-state';
 
 // Issue #699 (ADR-107): the ladder's words and sums. Example items, not a real shop.
 
@@ -75,11 +75,17 @@ describe('stock at every level', () => {
   });
 
   it('splits stock into a box per level and adds a count back up', () => {
-    expect(breakdown('275.000', 'Piece', levels).map((p) => `${p.n} ${p.unit}`)).toEqual(['2 Carton', '3 Box', '5000 Piece']);
-    expect(countMilli(['2', '3', '5'], levels, parseCount)).toBe(275_000);
-    expect(countMilli(['', '', '2.5'], levels, parseCount)).toBe(2_500);
-    expect(countMilli(['', '', ''], levels, parseCount)).toBeNull();
-    expect(countMilli(['1.5', '', ''], levels, parseCount)).toBeNull();
+    const ladder = { unit: 'Carton', factor: '120.000', levels };
+    expect(ladderLevels(ladder)?.map((l) => l.unit)).toEqual(['Carton', 'Box']);
+    expect(ladderLevels({ unit: 'Carton', factor: '120.000', levels: [levels[0]!] })).toBeNull();
+    expect(packsAndPiecesMilli('2|3', '5', ladder)).toBe(275_000);
+    expect(packsAndPiecesMilli('|1', '', ladder)).toBe(10_000);
+    expect(packsAndPiecesMilli('', '2.5', ladder)).toBe(2_500);
+    expect(packsAndPiecesMilli('', '', ladder)).toBeNull();
+    expect(packsAndPiecesMilli('1.5|', '', ladder)).toBeNull();
+    expect(packsAndPiecesProblem('2|x', '', 'Piece', 'Carton')).toBe('Type whole Cartons, and the rest in Pieces.');
+    expect(samePack(ladder, { unit: 'Carton', factor: '120.000' })).toBe(false);
+    expect(samePack(ladder, { ...ladder })).toBe(true);
   });
 });
 

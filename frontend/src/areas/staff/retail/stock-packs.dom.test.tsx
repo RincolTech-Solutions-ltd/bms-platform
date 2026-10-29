@@ -52,6 +52,13 @@ describe('Stock in packs and pieces', () => {
     expect(rowOf('Test cable').textContent).toContain('40 Metre');
   });
 
+  it('shows stock at every level of a ladder (issue #699)', () => {
+    const levels = [{ unit: 'Carton', factor: '120.000' }, { unit: 'Box', factor: '10.000' }];
+    const socket: StockRow = { product_id: 'p5', code: 'TS-5', description: 'Test socket', category: 'Sockets', unit: 'Piece', qty: '275.000', negative: false, standard_pack: { unit: 'Carton', factor: '120.000', levels } };
+    screenOf(<StockTable rows={[socket]} showCost={false} />);
+    expect(rowOf('Test socket').textContent).toContain('2 Cartons, 3 Boxes and 5 Pieces (275 Pieces)');
+  });
+
   it('shows the total and each branch in packs and pieces on a phone', () => {
     const data: AllBranchesStock = {
       branches: [{ id: 'b1', code: 'HQ', name: 'Test Main' }, { id: 'b2', code: 'B2', name: 'Test Two' }],

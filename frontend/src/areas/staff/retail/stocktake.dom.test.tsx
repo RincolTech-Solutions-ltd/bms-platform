@@ -418,6 +418,23 @@ describe('counting in cartons and pieces', () => {
     expect(createStocktake.mock.calls[0]?.[0]).toEqual({ branch_id: expect.any(String), lines: [{ product_id: 'S-1', counted_qty: '130.000' }] });
   });
 
+  it('takes a box for every level of a ladder and adds them up (issue #699)', async () => {
+    const levels = [{ unit: 'Carton', factor: '120.000' }, { unit: 'Box', factor: '10.000' }];
+    const socket: StockRow = { ...row('K-1', 'Test Socket', '300.000'), unit: 'Piece', standard_pack: { unit: 'Carton', factor: '120.000', levels } };
+    listStock.mockResolvedValue([socket]);
+    createStocktake.mockResolvedValue({ id: 'st1', status: 'draft', lines: [] });
+    open();
+    await screen.findByText(EMPTY);
+    expect(document.getElementById('count-K-1-total')?.textContent).toBe('Type what you counted at every level, big to small. The app adds them up.');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Test Socket Cartons' }), { target: { value: '2' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Test Socket Boxes' }), { target: { value: '3' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Test Socket Pieces' }), { target: { value: '5' } });
+    expect(document.getElementById('count-K-1-total')?.textContent).toBe('Counted 2 Cartons, 3 Boxes and 5 Pieces (275 Pieces)');
+    fireEvent.click(screen.getByRole('button', { name: 'Review the difference (1 counted)' }));
+    await waitFor(() => expect(createStocktake).toHaveBeenCalledTimes(1));
+    expect(createStocktake.mock.calls[0]?.[0]).toEqual({ branch_id: expect.any(String), lines: [{ product_id: 'K-1', counted_qty: '275.000' }] });
+  });
+
   it('counts 0 with the 0 button, emptying the cartons', async () => {
     listStock.mockResolvedValue([soap]);
     open();
