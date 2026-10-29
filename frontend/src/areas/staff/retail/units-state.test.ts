@@ -3,7 +3,7 @@ import type { Pack, Product, SaleLine } from '../../../api/retail';
 import { buildPurchase, restockLineProblem, restockTotal, withUnit as restockWithUnit, type RestockLine } from './restock';
 import { buildSaleRequest, defaultPrice, draftTotal, lineHint, newLine, withUnit, type Draft } from './sale-state';
 import { factorProblem } from './catalogue-packs';
-import { baseCostMinor, baseQtyMilli, enteredPriceMinor, enteredQty, packPriceMinor, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, samePack, standardPack } from './units-state';
+import { baseCostMinor, baseQtyMilli, enteredPriceMinor, enteredQty, packPriceMinor, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, quantityIn, samePack, standardPack, unitWord, unitWords } from './units-state';
 
 // Units of measure (ADR-033, issue #194): the forms convert with the same rules as the server
 // (Quantities.java) so a line is judged before it is sent. Names and amounts are fabricated.
@@ -139,6 +139,16 @@ describe('the restock form with a pack', () => {
     expect(restockLineProblem({ product: odd, unitId: BOX, cost: '100', sell: '100', qtyByBranch: { b1: '0.001' } })).toContain('does not convert exactly');
     expect(restockLineProblem({ product: odd, unitId: BOX, cost: '100', sell: '100', qtyByBranch: { b1: '3' } })).toBeNull();
   });
+
+  // Review of #687, round 5: Buy stock's words never show a short code a shop typed.
+  it('says a short code unit and pack in full words in its problems', () => {
+    const short: Product = { ...pen, unit: 'pc', packs: [{ id: 'k4', product_id: 'e1', unit_id: BOX, unit: 'ctn', factor: '2.500', active: true, version: 1 }] };
+    const odd = restockLineProblem({ product: short, unitId: BOX, cost: '100', sell: '100', qtyByBranch: { b1: '0.001' } }) ?? '';
+    const noSize = restockLineProblem({ product: short, unitId: BOX, cost: '100', sell: '100', qtyByBranch: { b1: '1' }, packSize: '' }) ?? '';
+    expect(odd).toContain('to pieces');
+    expect(noSize).toContain('pieces were in each carton');
+    expect(`${odd} ${noSize}`).not.toMatch(/\bpcs?\b|\bctn\b/);
+  });
 });
 
 describe('stock in packs and pieces (issue #650)', () => {
@@ -158,13 +168,33 @@ describe('stock in packs and pieces (issue #650)', () => {
     expect(packsAndPieces('-27.000', 'Piece', carton)).toBe('1 Carton and 3 Pieces short (27 Pieces short)');
     expect(packsAndPieces('-3.000', 'Piece', carton)).toBe('3 Pieces short');
   });
-  it('shows an item with no pack as it always did', () => {
-    expect(packsAndPieces('127.000', 'Piece', undefined)).toBe('127 Piece');
-    expect(packsAndPieces('5.000', 'Piece', { unit: 'Pair', factor: '1.000' })).toBe('5 Piece');
+  it('shows an item with no pack in its unit in full words with a correct plural (issue #680)', () => {
+    expect(packsAndPieces('127.000', 'Piece', undefined)).toBe('127 Pieces');
+    expect(packsAndPieces('1.000', 'Piece', undefined)).toBe('1 Piece');
+    expect(packsAndPieces('-1.000', 'Piece', undefined)).toBe('-1 Piece');
+    expect(packsAndPieces('8.000', 'piece', undefined)).toBe('8 pieces');
+    expect(packsAndPieces('5.000', 'Piece', { unit: 'Pair', factor: '1.000' })).toBe('5 Pieces');
     expect(packsAndPieces('5.000', undefined, carton)).toBe('5');
+    expect(quantityIn('2.500', 'metre')).toBe('2.5 metres');
+    expect(quantityIn('3.000', 'box')).toBe('3 boxes');
+  });
+  it('says a short code a shop typed as its full word, singular for exactly one (issue #680)', () => {
+    expect(quantityIn('8.000', 'pc')).toBe('8 pieces');
+    expect(quantityIn('1.000', 'pc')).toBe('1 piece');
+    expect(quantityIn('12.000', 'PCS')).toBe('12 pieces');
+    expect(quantityIn('2.000', 'ltr')).toBe('2 litres');
+    expect(quantityIn('1.000', 'Kg')).toBe('1 kilogram');
+    expect(quantityIn('3.000', 'ctn')).toBe('3 cartons');
+    // The unit alone, as Sell, Buy stock and the packs page show it (review of #687).
+    expect(unitWord('pc')).toBe('piece');
+    expect(unitWord('ctn')).toBe('carton');
+    expect(unitWord('Bulb')).toBe('Bulb');
+    expect(unitWords('pc')).toBe('pieces');
+    expect(unitWords(undefined)).toBe('');
   });
   it('works with a pack of a decimal size', () => {
-    expect(packsAndPieces('26.000', 'Kg', { unit: 'Sack', factor: '12.500' })).toBe('2 Sacks and 1 Kg (26 Kgs)');
+    expect(packsAndPieces('26.000', 'Kilogram', { unit: 'Sack', factor: '12.500' })).toBe('2 Sacks and 1 Kilogram (26 Kilograms)');
+    expect(packsAndPieces('26.000', 'kg', { unit: 'Sack', factor: '12.500' })).toBe('2 Sacks and 1 kilogram (26 kilograms)');
   });
   it('reads packs and pieces as one quantity in pieces', () => {
     expect(packsAndPiecesMilli('5', '7', carton)).toBe(127_000);

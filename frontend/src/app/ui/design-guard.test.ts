@@ -548,8 +548,6 @@ const RECORD_LIST = /categor|unit|supplier|customer|buyer|brand|pack|branch|plac
 const BRANCH = 'a branch is set up on the Branches screen with its own checks, never in the middle of this form';
 const ITEM_PACK = "an item's pack needs its size, use and price, so it is added on the item's page, whose pack form adds a unit in place";
 const ADD_IN_PLACE_EXEMPT: Record<string, string> = {
-  'areas/staff/branch-picker.tsx branches': `switches the branch in use, not a form field; ${BRANCH}`,
-  'areas/staff/top-bar.tsx branches': `switches the branch in use, not a form field; ${BRANCH}`,
   'areas/staff/retail/account.tsx branches': BRANCH,
   'areas/staff/retail/purchasing-ui.tsx branches': BRANCH,
   'areas/staff/retail/return-new.tsx branches.filter((b) => b.stocks_goods !== false)': BRANCH,
@@ -653,5 +651,23 @@ describe('design guard, an empty list is never a dead end (issue #619)', () => {
     const source = readFileSync(join(SRC, file), 'utf8');
     const missing = runtimeSelects(source).filter(({ line }) => !handlesEmpty(source, line)).map(({ line, list }) => `${file}:${line} maps ${list}`);
     expect(missing).toEqual([]);
+  });
+});
+
+// Issue #680: a retail column or label says Selling price or Buying price, never a bare Price or Cost ("Average cost" is a retired
+// word of the glossary guard): a table header, a card row's span, a term, a form label, a card heading, or a label prop (Stat,
+// KeyFigureRow, Field). JUSTIFICATION-A3: the issue asks for this design-guard test; it is one regex and its fixtures.
+const BARE_PRICE_LABEL = /<(th|span|dt|label|h[2-4]|strong)\b[^>]*>\s*(?:\{\s*['"`])?(?:Price|Cost)(?:['"`]\s*\})?\s*<\/\1>|\blabel=(?:\{\s*)?['"`](?:Price|Cost)['"`]/;
+
+describe('design guard, no bare Price or Cost label on a retail screen (issue #680)', () => {
+  it('finds a bare column, row label or label prop, and passes the plain words', () => {
+    const bare = ['<th className="num">Price</th>', "<th>{'Cost'}</th>", '<span>Cost</span>', '<dt>Price</dt>', '<label htmlFor="p">Price</label>', '<h3 className="cat-title">Cost</h3>', '<strong>Price</strong>', '<Stat label="Price" />', "<KeyFigureRow label={'Cost'} />"];
+    expect(bare.filter((s) => !BARE_PRICE_LABEL.test(s))).toEqual([]);
+    const plain = ['<th className="num">Selling price</th>', '<th>Price list</th>', '<span>At buying price</span>', '<h2>Price history</h2>', '<label htmlFor="p">Selling price</label>', '<Stat label="Price lists" />'];
+    expect(plain.filter((s) => BARE_PRICE_LABEL.test(s))).toEqual([]);
+  });
+
+  it.each([...files(join(SRC, 'areas/staff/retail'), /\.tsx$/), ...files(join(SRC, 'offline'), /\.tsx$/)].map((f) => relative(SRC, f)))('%s has no bare Price or Cost label', (file) => {
+    expect(code(file).match(BARE_PRICE_LABEL)?.[0] ?? null).toBeNull();
   });
 });

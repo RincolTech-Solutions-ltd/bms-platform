@@ -54,7 +54,7 @@ describe('the walk-in price of a pack', () => {
 describe('the below-cost hint while a price is typed', () => {
   it('warns when the pack price is not above its size times the last price paid, only with the cost', () => {
     // 24 x 750 = 18,000.
-    expect(packBelowCostHint(bulb, '24', 18_000)).toContain('not above what 24 piece cost at the last price paid, UGX 18,000');
+    expect(packBelowCostHint(bulb, '24', 18_000)).toContain('not above the buying price of 24 pieces at the last price paid, UGX 18,000');
     expect(packBelowCostHint(bulb, '24', 18_001)).toBeNull();
     // An empty price is the suggested one, 24,000: above.
     expect(packBelowCostHint(bulb, '24', null)).toBeNull();
@@ -71,8 +71,8 @@ describe('the sale line, which quotations and orders draw too', () => {
         <SaleLineCard line={{ ...newLine(bulb), unitId: 'u-carton', price: String(defaultPrice(bulb, 'u-carton')) }} index={0} unitsOn onQty={() => undefined} onPrice={() => undefined} onUnit={() => undefined} onRemove={() => undefined} />
       </StaffContext.Provider>,
     ).replaceAll('<!-- -->', '');
-    expect(html).toContain('>carton (24 piece)<');
-    expect(html).toContain('>dozen (12 piece)<');
+    expect(html).toContain('>carton (24 pieces)<');
+    expect(html).toContain('>dozen (12 pieces)<');
     expect(html).not.toContain('>box (10 piece)<');
     expect(html).toContain('value="20000"');
   });
@@ -127,7 +127,7 @@ describe('the pack table on Edit item', () => {
   });
 
   it('marks a pack below cost and names each Change button', () => {
-    expect(html).toContain('Below cost');
+    expect(html).toContain('Below buying price');
     expect(html).toContain('aria-label="Change the carton pack"');
   });
 
