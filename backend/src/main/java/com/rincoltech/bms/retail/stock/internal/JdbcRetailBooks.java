@@ -71,10 +71,13 @@ class JdbcRetailBooks implements RetailBooks {
     public String accountRef(String systemKey, UUID branchId) {
         String method = METHOD_OF.get(systemKey);
         // Retail has no switch-off: a method switched off, or mapped to an account no longer postable, keeps
-        // taking retail money on its seeded account, as before the mapping existed.
+        // taking retail money on its seeded account, as before the mapping existed. A mapping to the seeded account
+        // itself answers the key, so the cash book never reads one account twice.
         return method == null
                 ? systemKey
-                : methods.accountRefIfMapped(method, branchId).orElse(systemKey);
+                : methods.accountRefIfMapped(method, branchId)
+                        .filter(ref -> !accounts.byRef(ref).equals(accounts.bySystemKey(systemKey)))
+                        .orElse(systemKey);
     }
 
     private Line resolve(Leg leg, UUID branchId) {

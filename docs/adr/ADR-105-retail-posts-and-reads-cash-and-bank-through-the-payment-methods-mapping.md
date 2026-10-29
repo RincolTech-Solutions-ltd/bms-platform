@@ -28,10 +28,13 @@ mapping.
 2. **Retail has no switch-off.** When the method is unmapped, switched off (`is_active = false`) or mapped to an account
    that is no longer postable and active, retail posts to the seeded account, as it did before the mapping existed. Lending
    still refuses a switched-off method (`payment_method_unmapped`); a shop cannot stop taking cash.
-3. **The cash book reads the same account.** The daily cash position, the cash on hand that the banking check compares and
-   the bank balance that the withdrawal check compares read the account `RetailBooks.accountRef` gives for the branch now.
-   `LedgerAccounts.balanceByBranch` and `movementByDay` take a reference (`gl:<account id>` or a system key) for this.
-   Lending cash on the shared till shows in the cash book as other movements, never hidden (ADR-022 decision 10).
+3. **The cash book reads the same account, and the seeded one.** The daily cash position, the cash on hand that the banking
+   check compares and the bank balance that the withdrawal check compares read the seeded account together with the account
+   `RetailBooks.accountRef` gives for the branch now (one account when they are the same; `accountRef` answers the key when
+   the mapping names the seeded account itself, so nothing is counted twice). A day before a remap therefore reads exactly
+   as it did, and the cash still on the seeded till counts until the business moves it with a journal, which then nets to
+   nothing. `LedgerAccounts.balanceByBranch` and `movementByDay` take a reference (`gl:<account id>` or a system key) for
+   this. Lending cash on the shared till shows in the cash book as other movements, never hidden (ADR-022 decision 10).
 4. **The restrictions go.** `PUT /ledger/payment-methods` no longer refuses `cash` or `bank` with retail on, and `V117`
    replaces `platform_set_tenant_modules` with its V10 body, without the check and the advisory lock that V43 added.
 5. **Mobile money stays on retail's own account.** Retail's `mobile_money` (1035) has no method in `payment_methods`
@@ -44,8 +47,8 @@ mapping gives each shop its own till. A tenant that never remapped posts to exac
 (`RetailPaymentMethodsIT`).
 
 **Worse:** a leg named `cash_on_hand` may now land on another account, so a reader of the journal must resolve the mapping
-rather than trust the key. The cash book reads the account mapped now: a remap does not move the balance already on the old
-till, which the business moves with a journal, and until then the cash book's opening starts from the new till's balance.
+rather than trust the key. The cash book reads the seeded account and the one mapped now: after a second remap (from one
+non-seeded till to another) the first till leaves the cash book, so its balance is moved with a journal first.
 
 **Watch for:** a new retail rule that posts outside `RetailBooks`, or reads a cash balance by system key, would split the cash
 again. A future mapping for retail's `mobile_money` would need a method key of its own.

@@ -7,6 +7,13 @@
 -- account (payment_methods_remap_blocks_retail) has nothing left to protect. platform_set_tenant_modules is replaced
 -- with its V10 body, without that check and without the advisory lock it took to serialise with a mapping save.
 --
+-- Checked against every definition (review of #677): the function is created in V2 and replaced only in V10 and V43, on
+-- main up to V113 and on the branches of V114 (#127), V115 (#676) and V116 (#239); V90 names it in a comment only. The
+-- current body is V43's, which is V10's plus the lock and the check, so the body below is V43's less exactly those lines
+-- and nothing later is lost. What happens after a module is switched on that the function does not do (the default units
+-- of V109, the packs switched on at start) runs in core.tenancy's ModuleSetUp from PlatformService, which this leaves
+-- alone; PlatformIT.retailIsSwitchedOnWhileCashIsRemapped asserts both halves.
+--
 -- A function replaced in place: no table is touched, no lock is held beyond the catalogue row, safe on a populated
 -- database. Its owner and the grants from V2 stay.
 

@@ -258,6 +258,18 @@ class PlatformIT extends IntegrationTest {
         ResponseEntity<JsonNode> switched = platform.call(HttpMethod.PUT, path, both, operator.accessToken());
         assertThat(switched.getStatusCode()).as("%s", switched.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(JdbcCheck.moduleTenants("retail")).contains(tenantId);
+        // Review of #677: V117 rebuilt the function from V10; the retail chart and the V109 default units still follow.
+        assertThat(TestDatabase.owner()
+                        .sql("""
+                        SELECT EXISTS (SELECT 1 FROM gl_accounts WHERE tenant_id = :t AND system_key = 'inventory')
+                           AND EXISTS (SELECT 1 FROM retail_units WHERE tenant_id = :t)
+                           AND pg_get_functiondef('platform_set_tenant_modules(uuid, text[], uuid)'::regprocedure)
+                               NOT LIKE '%payment_methods%'
+                        """)
+                        .param("t", tenantId)
+                        .query(Boolean.class)
+                        .single())
+                .isTrue();
     }
 
     /** FR-TEN-05, FR-TEN-06: subscription moves are audited; suspension makes the tenant read only. */

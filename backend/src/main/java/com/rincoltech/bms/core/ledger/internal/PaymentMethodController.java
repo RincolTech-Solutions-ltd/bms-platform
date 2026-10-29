@@ -152,7 +152,10 @@ class PaymentMethodController {
     @Transactional
     MappingList set(@Valid @RequestBody SetRequest r) {
         requireScope(r.branchId());
-        // Saves of one tenant's mappings run one after the other. The lock ends with the transaction.
+        // Saves of one tenant's mappings run one after the other, so each reads the row it replaces. Nothing outside
+        // this
+        // controller takes the lock since V117 dropped it from platform_set_tenant_modules. It ends with the
+        // transaction.
         jdbc.sql(
                         "SELECT pg_advisory_xact_lock(hashtextextended('payment_methods:' || current_setting('app.tenant_id'), 0))")
                 .query()

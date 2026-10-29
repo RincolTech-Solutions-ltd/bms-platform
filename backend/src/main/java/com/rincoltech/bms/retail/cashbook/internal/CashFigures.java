@@ -204,13 +204,16 @@ class CashFigures {
      * The ledger's cash on hand for the branch around each of the given days: opening is the
      * balance at the end of the previous day, closing is the listed movements added to it, and
      * the remainder to the balance at the end of the day is {@code otherMovements} (a manual
-     * journal or an unlisted source), never hidden. The till is the account the branch's cash is
-     * mapped to now (ADR-105), the account retail and lending both post their cash to.
+     * journal or an unlisted source), never hidden. The till is {@link #accounts}: the seeded one and
+     * the one the branch's cash is mapped to (ADR-105), so a day before a remap reads as it did.
      */
     Map<LocalDate, Position> positions(UUID branch, NavigableMap<LocalDate, Day> days, LocalDate from, LocalDate to) {
-        String till = books.accountRef("cash_on_hand", branch);
-        long base = ledger.balanceByBranch(till, from.minusDays(1)).getOrDefault(branch, 0L);
-        Map<LocalDate, Long> movement = ledger.movementByDay(till, branch, from, to);
+        long base = 0;
+        Map<LocalDate, Long> movement = new TreeMap<>();
+        for (String till : accounts("cash_on_hand", branch)) {
+            base += ledger.balanceByBranch(till, from.minusDays(1)).getOrDefault(branch, 0L);
+            ledger.movementByDay(till, branch, from, to).forEach((d, m) -> movement.merge(d, m, Long::sum));
+        }
         Map<LocalDate, Position> out = new TreeMap<>();
         long running = base;
         for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
@@ -244,16 +247,26 @@ class CashFigures {
         return out;
     }
 
-    /** The cash on hand now, from the ledger, for one branch: its mapped till (ADR-105). */
+    /** The cash on hand now, from the ledger, for one branch, over {@link #accounts} of the till. */
     long cashOnHand(UUID branch, LocalDate asOf) {
-        return ledger.balanceByBranch(books.accountRef("cash_on_hand", branch), asOf)
-                .getOrDefault(branch, 0L);
+        return accounts("cash_on_hand", branch).stream()
+                .mapToLong(till -> ledger.balanceByBranch(till, asOf).getOrDefault(branch, 0L))
+                .sum();
     }
 
-    /** The balance across every branch, from the ledger, of the bank account the branch banks into (ADR-105). */
+    /** The balance across every branch, from the ledger, over {@link #accounts} of the bank the branch banks into. */
     long bankBalance(UUID branch, LocalDate asOf) {
-        return ledger.balanceByBranch(books.accountRef("bank", branch), asOf).values().stream()
+        return accounts("bank", branch).stream()
+                .flatMap(bank -> ledger.balanceByBranch(bank, asOf).values().stream())
                 .mapToLong(Long::longValue)
                 .sum();
+    }
+
+    /**
+     * ADR-105: the seeded account and, when the method is mapped elsewhere at the branch, that account too. Money posted
+     * before a remap stays on the seeded account until the business moves it with a journal, which then nets to nothing.
+     */
+    private Set<String> accounts(String seededKey, UUID branch) {
+        return new TreeSet<>(java.util.List.of(seededKey, books.accountRef(seededKey, branch)));
     }
 }

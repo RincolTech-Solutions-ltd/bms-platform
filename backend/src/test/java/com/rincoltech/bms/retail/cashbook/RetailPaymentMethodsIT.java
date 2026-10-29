@@ -109,8 +109,12 @@ class RetailPaymentMethodsIT extends LoanFixtures {
     }
 
     JsonNode cashDay(UUID branch) {
+        return cashDay(branch, today);
+    }
+
+    JsonNode cashDay(UUID branch, LocalDate on) {
         ResponseEntity<JsonNode> r =
-                cb.get("/reports/cash/daily?branch_id=" + branch + "&from=" + today + "&to=" + today, ALL);
+                cb.get("/reports/cash/daily?branch_id=" + branch + "&from=" + on + "&to=" + on, ALL);
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
         return r.getBody().get("items").get(0);
     }
@@ -189,6 +193,61 @@ class RetailPaymentMethodsIT extends LoanFixtures {
                 .isEqualTo(HttpStatus.CREATED);
         assertThat(movement(UUID.fromString(branchTill), t.secondBranch())).isEqualTo(3_000);
         assertThat(movement(tillId, t.secondBranch())).isZero();
+        JsonNode branchDay = cashDay(t.secondBranch());
+        assertThat(branchDay.get("closing_minor").asLong()).isEqualTo(3_000);
+        assertThat(branchDay.get("other_movements_minor").asLong()).isZero();
+        assertThat(cashDay(hq).get("closing_minor").asLong())
+                .as("the head office does not see the branch's till")
+                .isEqualTo(day.get("closing_minor").asLong());
+    }
+
+    /** JUSTIFICATION-A3: two new test cases the review of #677 asked for (history across a remap, the bank remapped). */
+    @Test
+    void frGl08_aRemapLeavesTheDaysBeforeItAsTheyReadAndKeepsTheirCashInTheTill() {
+        LocalDate before = today.minusDays(1);
+        assertThat(cb.sale(hq, "cash", item, "4", before).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        JsonNode was = cashDay(hq, before);
+        String till = assetAccount("1094", "Test new till");
+        assertThat(mapMethod("cash", null, till, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(cb.sale(hq, "cash", item, "2", today).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        assertThat(cashDay(hq, before)).as("the day before the remap").isEqualTo(was);
+        JsonNode day = cashDay(hq);
+        assertThat(day.get("opening_minor").asLong()).isEqualTo(6_000);
+        assertThat(day.get("closing_minor").asLong()).isEqualTo(9_000);
+        assertThat(day.get("other_movements_minor").asLong()).isZero();
+        ResponseEntity<JsonNode> banked = bank(9_000);
+        assertThat(banked.getBody().path("warnings"))
+                .as("the cash on the seeded till before the remap still counts")
+                .isEmpty();
+    }
+
+    @Test
+    void frGl08_withBankRemappedRetailBankMoneyLandsOnTheMappedBankAndItsBalanceWarns() {
+        String bankAccount = assetAccount("1095", "Test business bank");
+        UUID bankId = UUID.fromString(bankAccount);
+        assertThat(mapMethod("bank", null, bankAccount, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(cb.sale(hq, "bank", item, "2", today).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(cb.sale(hq, "cash", item, "10", today).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(bank(10_000).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(movement(bankId, hq)).isEqualTo(3_000 + 10_000);
+        assertThat(movement(t.account("bank"), hq)).isZero();
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("business_date", today.toString());
+        body.put("amount_minor", 12_000);
+        body.put("purpose", "Float for change");
+        assertThat(cb.post("/withdrawals", body, ALL).getBody().path("warnings"))
+                .isEmpty();
+        body.put("amount_minor", 2_000);
+        assertThat(cb.post("/withdrawals", body, ALL)
+                        .getBody()
+                        .get("warnings")
+                        .get(0)
+                        .asString())
+                .isEqualTo("bank_balance_negative");
+        assertThat(movement(bankId, hq)).isEqualTo(13_000 - 14_000);
     }
 
     @Test
@@ -203,5 +262,16 @@ class RetailPaymentMethodsIT extends LoanFixtures {
         assertThat(lendingCashDeposit(10_000).getBody().get("code").asString())
                 .as("lending still refuses a method switched off")
                 .isEqualTo("payment_method_unmapped");
+
+        // Mapped again, then the mapped till is deactivated: retail falls back to the seeded till, never a dead
+        // account.
+        assertThat(mapMethod("cash", null, till, true).getStatusCode()).isEqualTo(HttpStatus.OK);
+        TestDatabase.owner()
+                .sql("UPDATE gl_accounts SET is_active = false WHERE id = ?::uuid")
+                .param(till)
+                .update();
+        assertThat(cb.sale(hq, "cash", item, "2", today).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(movement(t.account("cash_on_hand"), hq)).isEqualTo(6_000);
+        assertThat(movement(UUID.fromString(till), hq)).isZero();
     }
 }
