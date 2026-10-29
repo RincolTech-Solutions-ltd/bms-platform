@@ -253,9 +253,10 @@ or is outside the caller's scope, deliberately indistinguishable), `invalid_phon
 carries the `X-Request-Id` header.
 
 The branch a retail event happens in (`RetailBranchContext.resolve`, trade-capabilities section 2.2, issue #257) is
-refused as 404 with the top-level code `unknown_branch` and the same code on the field, for a branch that does not exist,
-is inactive or is outside the caller's scope alike, and as 403 `permission_denied` when the caller does not hold the
-permission at all; `branch_required` stays 422. A branch checked as a field among others (a transfer's destination, an
+refused as 404 with the top-level code `unknown_branch` and the same code on the field for a branch outside the caller's
+scope (an unknown id is outside every scope short of all branches, so a scoped caller cannot tell the two apart), and as
+403 `permission_denied` when the caller does not hold the permission at all; a closed branch inside the scope and
+`branch_required` stay 422. A branch checked as a field among others (a transfer's destination, an
 offline sale's branch, a stock minimum's branch) is still the 422 field problem above.
 
 ## 7.8 Idempotency (money-moving endpoints)
