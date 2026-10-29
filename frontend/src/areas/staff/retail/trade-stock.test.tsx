@@ -155,7 +155,7 @@ describe('transfer statuses', () => {
     const html = page(mockMe('admin'), <ShortageWarning from="Test Branch A (BR1)" />);
     expect(html).toContain('Some of this stock never arrived.');
     expect(html).toContain('back into the stock of Test Branch A (BR1), the missing');
-    expect(html).not.toMatch(/[–—]/);
+    expect(html).not.toMatch(new RegExp(`[${String.fromCharCode(0x2013, 0x2014)}]`));
   });
 
   it('lists a transfer on its way, and shows the sent summary without cost for a seller', () => {
