@@ -242,21 +242,21 @@ class CatalogueService {
             throw ApiException.validation(List.of(new FieldProblem(
                     "usual_pack.of_unit_id", "inactive_unit", "This unit is switched off. Choose another one.")));
         }
-        // Issue #637, ADR-100 note: one level only, so Roll of Metre and Metre of Roll can never both be kept.
-        if (of.usualPack() != null) {
-            throw ApiException.validation(List.of(new FieldProblem(
-                    "usual_pack.of_unit_id",
-                    "unit_is_a_pack",
-                    of.name() + " is itself a pack of " + of.usualPack().ofUnit()
-                            + ". Choose the unit it counts, such as "
-                            + of.usualPack().ofUnit() + ".")));
-        }
-        String counting = repo.unitCountedByUsualPack(unitId);
-        if (counting != null) {
-            throw ApiException.validation(List.of(new FieldProblem(
-                    "usual_pack",
-                    "unit_counted_by_pack",
-                    counting + " is a pack of this unit, so this unit cannot be a pack too.")));
+        // Issue #699 (ADR-107, amending the ADR-100 note of #637): a usual pack may count another pack, a Box of rolls
+        // of 2
+        // Roll, any depth; only a loop is refused, so Roll of Metre and Metre of Roll can never both be kept.
+        for (Unit down = of; down.usualPack() != null; ) {
+            UUID next = down.usualPack().ofUnitId();
+            if (next.equals(unitId)) {
+                throw ApiException.validation(List.of(new FieldProblem(
+                        "usual_pack.of_unit_id",
+                        "usual_pack_loop",
+                        of.name() + " is itself a pack of this unit. Choose a smaller unit.")));
+            }
+            down = repo.unit(next).orElse(null);
+            if (down == null) {
+                break;
+            }
         }
         return of;
     }
@@ -462,13 +462,34 @@ class CatalogueService {
             after.put("duplicate_reason", duplicateReason);
         }
         audit.record(AuditLog.Entry.created("retail.product.created", PRODUCT, p.id(), null, after));
-        for (int i = 0; i < packs.size(); i++) {
+        // Issue #699 (ADR-107): a package may hold another of the same request, so a held one is made first; one that
+        // holds
+        // nothing made is refused on its own row.
+        Set<UUID> made = new java.util.HashSet<>(Set.of(p.unitId()));
+        List<Integer> left = new ArrayList<>(
+                java.util.stream.IntStream.range(0, packs.size()).boxed().toList());
+        while (!left.isEmpty()) {
+            int i = left.stream()
+                    .filter(j -> packs.get(j).holdsUnitId() == null
+                            || made.contains(packs.get(j).holdsUnitId()))
+                    .findFirst()
+                    .orElse(left.getFirst());
+            left.remove(Integer.valueOf(i));
             PackRequest k = packs.get(i);
             try {
-                createPack(p, k.unitId(), k.factor(), purposes.get(i), k.sellMinor(), by, null);
+                createPack(
+                        p,
+                        k.unitId(),
+                        k.factor(),
+                        purposes.get(i),
+                        k.sellMinor(),
+                        new Holds(k.holdsUnitId(), k.holdsQty(), Boolean.TRUE.equals(k.usualBuy())),
+                        by,
+                        null);
             } catch (ApiException e) {
                 throw ofPack(e, i);
             }
+            made.add(k.unitId());
         }
         return withPacks(visible(repo.find(p.id()).orElseThrow()));
     }
@@ -982,6 +1003,7 @@ class CatalogueService {
                 r.factor(),
                 packPurpose(r),
                 r.sellMinor(),
+                new Holds(r.holdsUnitId(), r.holdsQty(), Boolean.TRUE.equals(r.usualBuy())),
                 CurrentPrincipal.require().userId(),
                 null);
         return forCaller(repo.pack(productId, r.unitId()).orElseThrow());
@@ -1011,7 +1033,14 @@ class CatalogueService {
      * the price permission and the purpose.
      */
     void createPack(
-            Product product, UUID unitId, BigDecimal factor, String purpose, Long sellMinor, UUID by, String source) {
+            Product product,
+            UUID unitId,
+            BigDecimal factor,
+            String purpose,
+            Long sellMinor,
+            Holds holds,
+            UUID by,
+            String source) {
         Unit unit = repo.unit(unitId).orElse(null);
         if (unit == null) {
             throw ApiException.validation(List.of(new FieldProblem("unit_id", "unknown_unit", "No such unit.")));
@@ -1025,11 +1054,42 @@ class CatalogueService {
                     "pack_unit_is_base_unit",
                     "A pack must be a different unit from the one the product is counted in.");
         }
+        // Issue #699 (ADR-107): a pack may say what it holds, one level down, and its size is worked out from that.
+        if ((holds.unitId() == null) != (holds.qty() == null)) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    holds.unitId() == null ? "holds_unit_id" : "holds_qty",
+                    "required",
+                    "Say what one " + unitWord(unit.name()) + " holds and how many.")));
+        }
+        if (holds.unitId() != null) {
+            BigDecimal size = heldFactor(product, repo.packs(product.id()), holds.unitId(), unit.name())
+                    .multiply(BigDecimal.valueOf(holds.qty()));
+            if (size.compareTo(PackLadder.MAX_FACTOR) > 0) {
+                throw ladderProblem(new PackLadder.Problem("too_big", unitId), unit.name());
+            }
+            if (factor != null && factor.compareTo(size) != 0) {
+                throw ApiException.validation(List.of(new FieldProblem(
+                        "factor",
+                        "factor_mismatch",
+                        "1 " + unitWord(unit.name()) + " holding " + holds.qty() + " is " + plain(size)
+                                + " of the item, not " + plain(factor) + ".")));
+            }
+            factor = size;
+        } else if (factor == null) {
+            throw ApiException.validation(
+                    List.of(new FieldProblem("factor", "required", "Say how many of the item are in one pack.")));
+        }
+        if (holds.usualBuy() && purpose.equals(RetailCatalogue.PACK_SELL)) {
+            throw usualBuyNotBought();
+        }
         UUID id = UUID.randomUUID();
         try {
-            repo.insertPack(id, product.id(), unitId, factor, purpose, sellMinor, by);
+            repo.insertPack(id, product.id(), unitId, factor, purpose, sellMinor, holds.unitId(), holds.qty(), by);
         } catch (DuplicateKeyException e) {
             throw duplicate("duplicate_pack", "The product has a pack of this unit already.");
+        }
+        if (holds.usualBuy()) {
+            repo.setUsualBuy(product.id(), id, true);
         }
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("product_id", product.id());
@@ -1038,6 +1098,13 @@ class CatalogueService {
         after.put("purpose", purpose);
         if (sellMinor != null) {
             after.put("sell_minor", sellMinor);
+        }
+        if (holds.unitId() != null) {
+            after.put("holds_unit_id", holds.unitId());
+            after.put("holds_qty", holds.qty());
+        }
+        if (holds.usualBuy()) {
+            after.put("usual_buy", true);
         }
         if (source != null) {
             after.put("source", source);
@@ -1055,12 +1122,11 @@ class CatalogueService {
         if (before.version() != expected) {
             throw Versions.conflict(before.version());
         }
-        java.math.BigDecimal factor = r.factor() == null ? new java.math.BigDecimal(before.factor()) : r.factor();
         boolean active = r.active() == null ? before.active() : r.active();
         if (active && !before.active()) {
             // Switching on again: the item's unit may have changed while the pack was off, so the factor is confirmed.
             Unit unit = repo.unit(unitId).orElseThrow(ApiException::notFound);
-            if (r.factor() == null) {
+            if (r.factor() == null && r.holdsQty() == null) {
                 throw ApiException.rule(
                         "factor_required",
                         "Confirm how many of the item are in one pack when switching it on again: the item's unit may have changed.");
@@ -1075,7 +1141,25 @@ class CatalogueService {
                         "This unit is now the one the item is counted in, so it cannot also be a pack.");
             }
         }
+        List<Pack> all = repo.packs(productId);
+        if (!active && before.active()) {
+            // Issue #699: a level another level holds stays, or the bigger one would hold nothing.
+            all.stream()
+                    .filter(k -> k.active() && unitId.equals(k.holdsUnitId()))
+                    .findFirst()
+                    .ifPresent(k -> {
+                        throw ApiException.rule(
+                                "level_in_use",
+                                "The " + unitWord(k.unit()) + " holds the " + unitWord(before.unit()) + ". Remove the "
+                                        + unitWord(k.unit()) + " or change what it holds first.");
+                    });
+        }
+        Ladder ladder = ladderAfter(product, all, before, r, active);
+        java.math.BigDecimal factor = ladder.factor();
         String purpose = r.purpose() == null ? before.purpose() : r.purpose();
+        if (Boolean.TRUE.equals(r.usualBuy()) && (!active || purpose.equals(RetailCatalogue.PACK_SELL))) {
+            throw usualBuyNotBought();
+        }
         // Dropping a price the pack does not have, or giving it the price it has, changes nothing and needs no
         // permission.
         boolean clear = Boolean.TRUE.equals(r.clearSellMinor()) && before.sellMinor() != null;
@@ -1094,6 +1178,13 @@ class CatalogueService {
         if (priced && (resized || madeBuyOnly)) {
             requirePriceEdit("This pack has its own price. Ask someone who may change prices.");
         }
+        // Issue #699: a bigger level with its own price that this change resizes is a price change too.
+        for (Resized k : ladder.others()) {
+            if (k.pack().sellMinor() != null) {
+                requirePriceEdit("This changes the size of the "
+                        + unitWord(k.pack().unit()) + ", which has its own price. Ask someone who may change prices.");
+            }
+        }
         if (r.sellMinor() != null && clear) {
             throw ApiException.validation(List.of(new FieldProblem(
                     "sell_minor", "invalid", "Give a new price or drop the pack's own price, not both.")));
@@ -1111,20 +1202,40 @@ class CatalogueService {
         diff(was, now, "active", before.active(), active);
         diff(was, now, "purpose", before.purpose(), purpose);
         diff(was, now, "sell_minor", before.sellMinor(), sellMinor);
+        diff(was, now, "holds_unit_id", before.holdsUnitId(), ladder.holdsUnitId());
+        diff(was, now, "holds_qty", before.holdsQty(), ladder.holdsQty());
+        boolean usualBuy = r.usualBuy() == null
+                ? before.usualBuy() && active && !purpose.equals(RetailCatalogue.PACK_SELL)
+                : r.usualBuy();
+        diff(was, now, "usual_buy", before.usualBuy(), usualBuy);
         if (now.isEmpty()) {
             return forCaller(before);
         }
-        if (repo.updatePack(before.id(), factor, active, purpose, sellMinor, expected) == 0) {
+        if (repo.updatePack(
+                        before.id(),
+                        factor,
+                        active,
+                        purpose,
+                        sellMinor,
+                        ladder.holdsUnitId(),
+                        ladder.holdsQty(),
+                        expected)
+                == 0) {
             throw repo.pack(productId, unitId)
                     .map(k -> Versions.conflict(k.version()))
                     .orElseGet(ApiException::notFound);
         }
+        if (r.usualBuy() != null) {
+            repo.setUsualBuy(productId, before.id(), usualBuy);
+        }
         audit.record(new AuditLog.Entry("retail.product_unit.updated", PACK, before.id(), null, was, now));
+        resizeOthers(ladder, before, null, null);
         return forCaller(repo.pack(productId, unitId).orElseThrow());
     }
 
     /** D23, issue #554: see {@code RetailCatalogue.useBuyingSize}. The caller holds the product's row lock. */
     boolean useBuyingSize(UUID productId, UUID unitId, java.math.BigDecimal factor, String sourceType, UUID sourceId) {
+        Product product = repo.find(productId).orElseThrow(ApiException::notFound);
         Pack before = repo.pack(productId, unitId).orElseThrow(ApiException::notFound);
         String size = factor.setScale(3).toPlainString();
         if (before.factor().equals(size)) {
@@ -1133,23 +1244,218 @@ class CatalogueService {
         Map<String, Object> was = new LinkedHashMap<>();
         Map<String, Object> now = new LinkedHashMap<>();
         was.put("factor", before.factor());
+        // Issue #699 (ADR-107): a pack that holds another level keeps a whole number of it, and the levels above
+        // follow.
+        Ladder ladder;
+        try {
+            ladder = ladderAfter(
+                    product,
+                    repo.packs(productId),
+                    before,
+                    new UpdatePackRequest(factor, null, null, null, null, null, null, null),
+                    before.active());
+        } catch (ApiException e) {
+            ladder = null;
+        }
         // Review of #624: a pack with its own price sells at it whatever its size, so a new usual size is a
         // price change, as on Edit item. Without retail.price.edit the delivery still saves at its own size, the
-        // usual size stays, the skip is audited, and the response says so on the line.
-        if (before.sellMinor() != null && !CurrentPrincipal.require().hasPermission(PRICE_EDIT)) {
+        // usual size stays, the skip is audited, and the response says so on the line. The same for a bigger level
+        // with its own price that would follow (issue #699).
+        boolean pricesMove = before.sellMinor() != null
+                || (ladder != null
+                        && ladder.others().stream().anyMatch(k -> k.pack().sellMinor() != null));
+        String kept = ladder == null
+                ? "not_whole"
+                : pricesMove && !CurrentPrincipal.require().hasPermission(PRICE_EDIT) ? "own_price" : null;
+        if (kept != null) {
             now.put("factor_asked", size);
-            now.put("reason", "own_price");
+            now.put("reason", kept);
             now.put("source_type", sourceType);
             now.put("source_id", sourceId);
             audit.record(new AuditLog.Entry("retail.product_unit.size_kept", PACK, before.id(), null, was, now));
             return false;
         }
-        repo.updatePack(before.id(), factor, before.active(), before.version());
+        repo.resizePack(before.id(), factor, ladder.holdsUnitId(), ladder.holdsQty());
         now.put("factor", size);
+        if (!Objects.equals(before.holdsQty(), ladder.holdsQty())) {
+            was.put("holds_qty", before.holdsQty());
+            now.put("holds_qty", ladder.holdsQty());
+        }
         now.put("source_type", sourceType);
         now.put("source_id", sourceId);
         audit.record(new AuditLog.Entry("retail.product_unit.updated", PACK, before.id(), null, was, now));
+        resizeOthers(ladder, before, sourceType, sourceId);
         return true;
+    }
+
+    // ---- The ladder: packages inside packages (issue #699, ADR-107) ---------------------------------------
+    // JUSTIFICATION-A3: the ladder is new behaviour (ADR-107); its helpers sit beside the pack code they serve.
+
+    /** What a new pack holds (both null: it holds its factor of the item's unit) and whether Buy stock opens on it. */
+    record Holds(UUID unitId, Integer qty, boolean usualBuy) {
+        static final Holds NONE = new Holds(null, null, false);
+    }
+
+    /** A bigger level that follows a change, with its new factor. */
+    record Resized(Pack pack, BigDecimal factor) {}
+
+    /** A level after a change: its factor, what it holds and every other level whose size follows. */
+    record Ladder(BigDecimal factor, UUID holdsUnitId, Integer holdsQty, List<Resized> others) {}
+
+    /**
+     * Issue #699: the level {@code before} after the change {@code r}, and the levels above it worked out again. A new number
+     * held, or a new level held, is taken as it is; a factor alone, on a level that holds another, must stay a whole number
+     * of that level (422 not_whole). A level that held one now switched off, switching on again with a factor, holds the
+     * item's unit again. Refusals name the level in plain words.
+     */
+    private Ladder ladderAfter(Product product, List<Pack> all, Pack before, UpdatePackRequest r, boolean active) {
+        UUID holdsUnitId = before.holdsUnitId();
+        Integer holdsQty = before.holdsQty();
+        BigDecimal factor = r.factor() == null ? new BigDecimal(before.factor()) : r.factor();
+        if (r.holdsUnitId() != null || r.holdsQty() != null) {
+            if (r.holdsQty() == null) {
+                throw ApiException.validation(List.of(new FieldProblem(
+                        "holds_qty", "required", "Say how many are in one " + unitWord(before.unit()) + ".")));
+            }
+            holdsUnitId =
+                    r.holdsUnitId() != null ? r.holdsUnitId() : holdsUnitId != null ? holdsUnitId : product.unitId();
+            holdsQty = r.holdsQty();
+        } else if (r.factor() != null && holdsUnitId != null) {
+            BigDecimal held = levelFactor(product, all, holdsUnitId);
+            if (held == null) {
+                holdsUnitId = null;
+                holdsQty = null;
+            } else {
+                holdsQty = PackLadder.wholeOf(factor, held);
+                if (holdsQty == null) {
+                    throw notWhole(before.unit(), held, product);
+                }
+            }
+        }
+        List<PackLadder.Level> levels = new ArrayList<>();
+        for (Pack k : all) {
+            if (k.unitId().equals(before.unitId())) {
+                if (active) {
+                    levels.add(new PackLadder.Level(k.unitId(), holdsUnitId, holdsQty, factor));
+                }
+            } else if (k.active()) {
+                levels.add(new PackLadder.Level(k.unitId(), k.holdsUnitId(), k.holdsQty(), new BigDecimal(k.factor())));
+            }
+        }
+        Map<UUID, BigDecimal> after;
+        try {
+            after = PackLadder.factors(product.unitId(), levels);
+        } catch (PackLadder.Problem e) {
+            throw ladderProblem(e, before.unit());
+        }
+        if (active && holdsUnitId != null) {
+            BigDecimal worked = after.get(before.unitId());
+            if (r.factor() != null && r.holdsQty() != null && worked.compareTo(r.factor()) != 0) {
+                throw ApiException.validation(List.of(new FieldProblem(
+                        "factor",
+                        "factor_mismatch",
+                        "1 " + unitWord(before.unit()) + " holding " + holdsQty + " is " + plain(worked)
+                                + " of the item, not " + plain(r.factor()) + ".")));
+            }
+            factor = worked;
+        }
+        List<Resized> others = new ArrayList<>();
+        for (Pack k : all) {
+            BigDecimal next = k.unitId().equals(before.unitId()) || !k.active() ? null : after.get(k.unitId());
+            if (next != null && next.compareTo(new BigDecimal(k.factor())) != 0) {
+                others.add(new Resized(k, next));
+            }
+        }
+        return new Ladder(factor, holdsUnitId, holdsQty, others);
+    }
+
+    /** Issue #699: every bigger level that follows a change takes its new size, audited as worked out from {@code cause}. */
+    private void resizeOthers(Ladder ladder, Pack cause, String sourceType, UUID sourceId) {
+        for (Resized k : ladder.others()) {
+            repo.resizePack(
+                    k.pack().id(), k.factor(), k.pack().holdsUnitId(), k.pack().holdsQty());
+            Map<String, Object> now = new LinkedHashMap<>();
+            now.put("factor", k.factor().setScale(3).toPlainString());
+            now.put("because_of_unit_id", cause.unitId());
+            if (sourceType != null) {
+                now.put("source_type", sourceType);
+                now.put("source_id", sourceId);
+            }
+            audit.record(new AuditLog.Entry(
+                    "retail.product_unit.updated",
+                    PACK,
+                    k.pack().id(),
+                    null,
+                    Map.of("factor", k.pack().factor()),
+                    now));
+        }
+    }
+
+    /** The size of a level of the item: 1 for its own unit, an active pack's factor, or null for anything else. */
+    private static BigDecimal levelFactor(Product product, List<Pack> all, UUID unitId) {
+        if (unitId.equals(product.unitId())) {
+            return BigDecimal.ONE;
+        }
+        return all.stream()
+                .filter(k -> k.active() && k.unitId().equals(unitId))
+                .findFirst()
+                .map(k -> new BigDecimal(k.factor()))
+                .orElse(null);
+    }
+
+    /** The size of the level a new pack holds, or 422 holds_unknown in plain words. */
+    private static BigDecimal heldFactor(Product product, List<Pack> all, UUID heldUnitId, String packUnit) {
+        BigDecimal held = levelFactor(product, all, heldUnitId);
+        if (held == null) {
+            throw ladderProblem(new PackLadder.Problem("holds_unknown", heldUnitId), packUnit);
+        }
+        return held;
+    }
+
+    private static ApiException ladderProblem(PackLadder.Problem e, String unit) {
+        String pack = unitWord(unit);
+        return switch (e.code()) {
+            case "holds_bigger" ->
+                ApiException.validation(List.of(new FieldProblem(
+                        "holds_unit_id",
+                        "holds_bigger",
+                        "A " + pack + " cannot hold itself or a package that holds it. Choose a smaller one.")));
+            case "too_big" ->
+                ApiException.validation(List.of(
+                        new FieldProblem("holds_qty", "too_big", "That is too many in one " + pack + ". Type fewer.")));
+            default ->
+                ApiException.validation(List.of(new FieldProblem(
+                        "holds_unit_id",
+                        "holds_unknown",
+                        "Choose what one " + pack + " holds: the smallest unit or another package of this item.")));
+        };
+    }
+
+    /** 422 not_whole: "A carton must hold a whole number of the level below it, which is 10 piece." */
+    private static ApiException notWhole(String unit, BigDecimal held, Product product) {
+        return ApiException.validation(List.of(new FieldProblem(
+                "factor",
+                "not_whole",
+                "A " + unitWord(unit) + " must hold a whole number of the level below it, which is " + plain(held) + " "
+                        + unitWord(product.unit()) + ". Type a size that is a whole number of it.")));
+    }
+
+    private static ApiException usualBuyNotBought() {
+        return ApiException.validation(List.of(new FieldProblem(
+                "usual_buy",
+                "usual_buy_not_bought",
+                "Buy stock opens only on a package that is switched on and used for buying.")));
+    }
+
+    /** A unit's name as a word in a sentence: lower case, a short code as its word ("Ctn" is "carton"). */
+    private static String unitWord(String name) {
+        String lower = name == null ? "" : name.trim().toLowerCase(Locale.ROOT);
+        return RetailCatalogue.SHORT_CODE_WORDS.getOrDefault(lower, lower);
+    }
+
+    /** 120.000 as 120, 12.5 as 12.5. */
+    private static String plain(BigDecimal n) {
+        return n.stripTrailingZeros().toPlainString();
     }
 
     /**

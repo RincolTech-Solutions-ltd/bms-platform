@@ -90,6 +90,22 @@ public interface RetailCatalogue {
                 """.formatted(product);
     }
 
+    /**
+     * Issue #699 (ADR-107): every level of the ladder of the product aliased {@code product}, biggest first, as a subquery of
+     * {@code level_units} and {@code level_factors} (two arrays in the same order, null when there is none): its active packs
+     * holding a whole number of more than one base unit. Stock reads "2 Cartons, 3 Boxes and 5 Pieces" from them and Count
+     * stock takes a box for each.
+     */
+    static String packLevelsSql(String product) {
+        return """
+                SELECT array_agg(lu.name ORDER BY lk.factor DESC, lk.unit_id) AS level_units,
+                       array_agg(lk.factor ORDER BY lk.factor DESC, lk.unit_id) AS level_factors
+                  FROM retail_product_units lk JOIN retail_units lu ON lu.id = lk.unit_id
+                 WHERE lk.tenant_id = %1$s.tenant_id AND lk.product_id = %1$s.id AND lk.active AND lk.factor > 1
+                   AND lk.factor = trunc(lk.factor)
+                """.formatted(product);
+    }
+
     Optional<ProductSnapshot> find(UUID productId);
 
     /** What every selling price in a response says when it is left out (ADR-055). */

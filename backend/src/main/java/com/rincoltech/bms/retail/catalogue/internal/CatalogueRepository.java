@@ -622,9 +622,11 @@ class CatalogueRepository {
                          WHERE b.tenant_id = k.tenant_id AND b.product_id = k.product_id AND b.qty > 0),
                        p.cost_minor)) AS below_cost,
                    k.id IS NOT DISTINCT FROM (SELECT pack_id FROM (""" + RetailCatalogue.standardPackSql("p") + """
-                   ) sp) AS standard
+                   ) sp) AS standard,
+                   k.holds_unit_id, hu.name AS holds_unit, k.holds_qty, k.usual_buy
               FROM retail_product_units k JOIN retail_units u ON u.id = k.unit_id
               JOIN retail_products p ON p.id = k.product_id
+              LEFT JOIN retail_units hu ON hu.id = k.holds_unit_id
             """;
 
     private static Pack pack(ResultSet rs, int n) throws SQLException {
@@ -641,7 +643,11 @@ class CatalogueRepository {
                 rs.getObject("suggested_sell_minor", Long.class),
                 rs.getObject("below_cost", Boolean.class),
                 rs.getObject("sell_minor") != null,
-                rs.getBoolean("standard"));
+                rs.getBoolean("standard"),
+                rs.getObject("holds_unit_id", UUID.class),
+                rs.getString("holds_unit"),
+                rs.getObject("holds_qty", Integer.class),
+                rs.getBoolean("usual_buy"));
     }
 
     List<Pack> packs(UUID productId) {
@@ -697,34 +703,68 @@ class CatalogueRepository {
             java.math.BigDecimal factor,
             String purpose,
             Long sellMinor,
+            UUID holdsUnitId,
+            Integer holdsQty,
             UUID by) {
         jdbc.sql("""
                         INSERT INTO retail_product_units
-                            (id, tenant_id, product_id, unit_id, factor, purpose, sell_minor, created_by)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?)
+                            (id, tenant_id, product_id, unit_id, factor, purpose, sell_minor, holds_unit_id, holds_qty,
+                             created_by)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?)
                         """)
-                .params(id, productId, unitId, factor, purpose, sellMinor, by)
+                .params(id, productId, unitId, factor, purpose, sellMinor, holdsUnitId, holdsQty, by)
                 .update();
     }
 
-    /** Rows changed: 0 when the version moved since it was read. */
-    int updatePack(UUID id, java.math.BigDecimal factor, boolean active, int expectedVersion) {
-        return jdbc.sql(
-                        "UPDATE retail_product_units SET factor = ?, active = ?, updated_at = now(), version = version + 1 WHERE id = ? AND version = ?")
-                .params(factor, active, id, expectedVersion)
-                .update();
-    }
-
-    /** Issue #624: the whole pack at once, with its purpose and own selling price; 0 when the version moved. */
+    /**
+     * Issue #624: the whole pack at once, with its purpose and own selling price, and (issue #699) what it holds; 0 when the
+     * version moved. A pack made only for selling, or switched off, is no longer the usual buying level.
+     */
     int updatePack(
-            UUID id, java.math.BigDecimal factor, boolean active, String purpose, Long sellMinor, int expectedVersion) {
+            UUID id,
+            java.math.BigDecimal factor,
+            boolean active,
+            String purpose,
+            Long sellMinor,
+            UUID holdsUnitId,
+            Integer holdsQty,
+            int expectedVersion) {
         return jdbc.sql("""
                         UPDATE retail_product_units SET factor = ?, active = ?, purpose = ?, sell_minor = ?,
+                               holds_unit_id = ?, holds_qty = ?,
+                               usual_buy = usual_buy AND ? AND ? <> 'sell',
                                updated_at = now(), version = version + 1
                          WHERE id = ? AND version = ?
                         """)
-                .params(factor, active, purpose, sellMinor, id, expectedVersion)
+                .params(factor, active, purpose, sellMinor, holdsUnitId, holdsQty, active, purpose, id, expectedVersion)
                 .update();
+    }
+
+    /**
+     * Issue #699 (ADR-107): a level's size and what it holds, for a level worked out again because one it holds changed or a
+     * delivery's size was made usual. The caller holds the product's row lock, so no version is compared; it is still moved.
+     * JUSTIFICATION-A3: the two writes the ladder needs, beside the pack's other writes.
+     */
+    void resizePack(UUID id, java.math.BigDecimal factor, UUID holdsUnitId, Integer holdsQty) {
+        jdbc.sql("""
+                        UPDATE retail_product_units SET factor = ?, holds_unit_id = ?, holds_qty = ?,
+                               updated_at = now(), version = version + 1
+                         WHERE id = ?
+                        """).params(factor, holdsUnitId, holdsQty, id).update();
+    }
+
+    /** Issue #699: the level Buy stock opens on; every other pack of the item is cleared first (one per item, V118). */
+    void setUsualBuy(UUID productId, UUID packId, boolean usual) {
+        jdbc.sql("""
+                        UPDATE retail_product_units SET usual_buy = false, updated_at = now(), version = version + 1
+                         WHERE product_id = ? AND usual_buy AND (id <> ? OR NOT ?)
+                        """).params(productId, packId, usual).update();
+        if (usual) {
+            jdbc.sql("""
+                            UPDATE retail_product_units SET usual_buy = true, updated_at = now(), version = version + 1
+                             WHERE id = ? AND NOT usual_buy
+                            """).param(packId).update();
+        }
     }
 
     /** Active packs only: a pack that was switched off no longer ties the product's unit or the pack's unit down. */
@@ -759,15 +799,6 @@ class CatalogueRepository {
                         SELECT EXISTS (SELECT 1 FROM retail_stock_movements WHERE product_id = ?)
                             OR EXISTS (SELECT 1 FROM retail_stock_balances WHERE product_id = ? AND qty <> 0)
                         """).params(productId, productId).query(Boolean.class).single();
-    }
-
-    /** Issue #637: the name of a unit whose usual pack counts this one, or null. */
-    String unitCountedByUsualPack(UUID unitId) {
-        return jdbc.sql("SELECT name FROM retail_units WHERE pack_of_unit_id = ? ORDER BY name LIMIT 1")
-                .param(unitId)
-                .query(String.class)
-                .optional()
-                .orElse(null);
     }
 
     boolean unitHasPacks(UUID unitId) {

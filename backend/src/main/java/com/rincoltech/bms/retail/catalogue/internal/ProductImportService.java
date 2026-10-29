@@ -466,7 +466,14 @@ class ProductImportService {
                 packUnitId = unitIds.get(p.packUnit().toLowerCase(Locale.ROOT));
                 try {
                     catalogue.createPack(
-                            product, packUnitId, p.packFactor(), RetailCatalogue.PACK_BOTH, null, by, "import");
+                            product,
+                            packUnitId,
+                            p.packFactor(),
+                            RetailCatalogue.PACK_BOTH,
+                            null,
+                            CatalogueService.Holds.NONE,
+                            by,
+                            "import");
                 } catch (ApiException e) {
                     // Issue #662: a pack unit switched off after the check read the units is a change made meanwhile.
                     if (e.errors().stream().anyMatch(f -> f.code().equals("inactive_unit"))) {

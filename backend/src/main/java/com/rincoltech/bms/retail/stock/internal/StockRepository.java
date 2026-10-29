@@ -61,7 +61,8 @@ class StockRepository {
         StringBuilder sql = new StringBuilder("""
                 SELECT p.id, p.code, p.description, p.category_id, c.name AS category, u.name AS unit, p.sell_minor,
                        coalesce(b.avg_cost_minor, p.cost_minor) AS cost_minor, coalesce(b.qty, 0) AS qty,
-                       coalesce(b.reserved_qty, 0) AS reserved_qty, sp.pack_unit, sp.pack_factor
+                       coalesce(b.reserved_qty, 0) AS reserved_qty, sp.pack_unit, sp.pack_factor, pl.level_units,
+                       pl.level_factors
                   FROM retail_products p
                   JOIN retail_units u ON u.id = p.unit_id
                   JOIN retail_categories c ON c.id = p.category_id
@@ -157,12 +158,24 @@ class StockRepository {
      * Issue #650: the pack a product's stock is shown in, its standard pack, by the catalogue's one rule (ADR-103); the
      * service leaves it out while the units capability is off.
      */
-    static final String STANDARD_PACK =
-            "  LEFT JOIN LATERAL (" + RetailCatalogue.standardPackSql("p") + ") sp ON true\n";
+    static final String STANDARD_PACK = "  LEFT JOIN LATERAL (" + RetailCatalogue.standardPackSql("p")
+            + ") sp ON true\n" + "  LEFT JOIN LATERAL (" + RetailCatalogue.packLevelsSql("p") + ") pl ON true\n";
 
+    /** Issue #699 (ADR-107): with every level of the item's ladder, biggest first, for stock read at every level. */
     private static StandardPack standardPack(ResultSet rs) throws SQLException {
         String unit = rs.getString("pack_unit");
-        return unit == null ? null : new StandardPack(unit, Quantities.format(rs.getBigDecimal("pack_factor")));
+        if (unit == null) {
+            return null;
+        }
+        java.sql.Array unitArray = rs.getArray("level_units");
+        String[] units = unitArray == null ? new String[0] : (String[]) unitArray.getArray();
+        java.sql.Array factorArray = rs.getArray("level_factors");
+        BigDecimal[] factors = factorArray == null ? new BigDecimal[0] : (BigDecimal[]) factorArray.getArray();
+        List<StockApi.PackLevel> levels = new java.util.ArrayList<>();
+        for (int i = 0; i < units.length; i++) {
+            levels.add(new StockApi.PackLevel(units[i], Quantities.format(factors[i])));
+        }
+        return new StandardPack(unit, Quantities.format(rs.getBigDecimal("pack_factor")), levels);
     }
 
     /**
@@ -187,7 +200,8 @@ class StockRepository {
         StringBuilder sql = new StringBuilder("""
                 SELECT p.id, p.code, p.description, p.category_id, c.name AS category, u.name AS unit, p.sell_minor,
                        coalesce(round(t.held_value / nullif(t.held_qty, 0)), p.cost_minor)::bigint AS cost_minor,
-                       coalesce(t.total, 0) AS total, coalesce(t.negs, 0) > 0 AS negative, sp.pack_unit, sp.pack_factor
+                       coalesce(t.total, 0) AS total, coalesce(t.negs, 0) > 0 AS negative, sp.pack_unit, sp.pack_factor,
+                       pl.level_units, pl.level_factors
                   FROM retail_products p
                   JOIN retail_units u ON u.id = p.unit_id
                   JOIN retail_categories c ON c.id = p.category_id

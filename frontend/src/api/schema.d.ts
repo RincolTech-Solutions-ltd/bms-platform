@@ -15164,6 +15164,18 @@ export interface components {
             factor?: string;
             /** @description True when the pack has its own selling price, sent to every caller (the amount only to one who may see prices): a new usual size or making it buy only then needs retail.price.edit (issue #624) */
             has_own_price?: boolean;
+            /**
+             * Format: int32
+             * @description Issue #699: how many of that level are in one pack; factor is this times its factor
+             */
+            holds_qty?: number;
+            /** @description Issue #699: the name of that level's unit */
+            holds_unit?: string;
+            /**
+             * Format: uuid
+             * @description Issue #699 (ADR-107): the level one pack holds, the item's own unit or another pack's unit; absent when the pack holds factor of the item's unit and says no more
+             */
+            holds_unit_id?: string;
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
@@ -15185,19 +15197,37 @@ export interface components {
             unit?: string;
             /** Format: uuid */
             unit_id?: string;
+            /** @description Issue #699: true for the level the shop usually buys the item in */
+            usual_buy?: boolean;
             /**
              * Format: int32
              * @description Send as If-Match when updating
              */
             version?: number;
         };
+        /** @description Issue #699: one level of an item's packages and the base units in one */
+        RetailPackLevel: {
+            /** @description Base units in one, three places, for example 120.000 */
+            factor?: string;
+            unit?: string;
+        };
         RetailPackList: {
             items?: components["schemas"]["RetailPack"][];
         };
-        /** @description A pack size: factor base units in one pack of the unit */
+        /** @description A pack size: factor base units in one pack of the unit, or holds_qty of the level holds_unit_id (issue #699) */
         RetailPackRequest: {
-            /** @description Base units in one pack, at least 1, up to three places, for example 12 or 12.5 */
-            factor: string;
+            /** @description Base units in one pack, at least 1, up to three places, for example 12 or 12.5; required unless holds_unit_id and holds_qty are sent, and then it must agree with them */
+            factor?: string;
+            /**
+             * Format: int32
+             * @description Issue #699: how many of holds_unit_id are in one pack, a whole number
+             */
+            holds_qty?: number;
+            /**
+             * Format: uuid
+             * @description Issue #699 (ADR-107): the level one pack holds, the item's own unit or another pack's unit of the item (in a new item's packs, one of its other packs); sent with holds_qty
+             */
+            holds_unit_id?: string;
             /** @description What the pack is for: buy, sell or both; a pack bought only has no selling price (issue #624). Left out, both; the screens fill in the unit's usual purpose (issue #637) */
             purpose?: string;
             /**
@@ -15207,6 +15237,8 @@ export interface components {
             sell_minor?: number;
             /** Format: uuid */
             unit_id: string;
+            /** @description Issue #699: true for the level the shop usually buys the item in, which Buy stock opens on; never on a pack only for selling. Clears it on the item's other packs */
+            usual_buy?: boolean;
         };
         /** @description Omitted fields are unchanged; a pack is never deleted, only switched off */
         RetailPackUpdate: {
@@ -15215,6 +15247,16 @@ export interface components {
             clear_sell_minor?: boolean;
             /** @description Base units in one pack, at least 1; required to switch a pack on again */
             factor?: string;
+            /**
+             * Format: int32
+             * @description Issue #699: how many of the level held are in one pack, a whole number. With factor alone, a pack that holds another level must stay a whole number of it (422 not_whole)
+             */
+            holds_qty?: number;
+            /**
+             * Format: uuid
+             * @description Issue #699 (ADR-107): the level one pack holds, the item's own unit or another active pack's unit of the item; sent with holds_qty. Every bigger level that holds this one is worked out again; stock, kept in the item's unit, never changes
+             */
+            holds_unit_id?: string;
             /** @description buy, sell or both; a pack made buy only loses its selling price (issue #624) */
             purpose?: string;
             /**
@@ -15222,6 +15264,8 @@ export interface components {
              * @description A new selling price of one pack; needs retail.price.edit (issue #624)
              */
             sell_minor?: number;
+            /** @description Issue #699: true to make this the level Buy stock opens on, false to clear it */
+            usual_buy?: boolean;
         };
         RetailPayment: {
             /** Format: int64 */
@@ -17237,6 +17281,8 @@ export interface components {
         RetailStandardPack: {
             /** @description Base units in one pack, three places, for example 24.000 */
             factor?: string;
+            /** @description Issue #699 (ADR-107): every active pack of the item holding a whole number of more than one base unit, biggest first, so stock is shown and counted at every level */
+            levels?: components["schemas"]["RetailPackLevel"][];
             unit?: string;
         };
         /** @description Imported credit sales. They were never posted to the ledger (issue #96), so the statement lists them apart and the ledger-supported closing balance leaves them out */
