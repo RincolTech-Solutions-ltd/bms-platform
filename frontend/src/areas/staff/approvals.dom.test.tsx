@@ -12,7 +12,7 @@ import { StaffContext } from './context';
 // item, member and collector.
 
 const requests: Record<string, Approval> = {
-  r1: { id: 'r1', action_type: 'collateral_release', subject_id: 'c1', payload: { collected_by: 'Test Collector 01', note: 'Loan paid in full' } },
+  r1: { id: 'r1', action_type: 'collateral_release', subject_id: 'c1', payload: { collected_by: 'Test Collector 01', note: 'Loan paid in full' } as unknown as Approval['payload'] },
 };
 
 vi.mock('../../api/client', async (original) => ({

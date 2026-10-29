@@ -55,7 +55,7 @@ export function What({ item }: { item: Approval }) {
   const member = useQuery({ queryKey: ['members', 'one', memberId], queryFn: () => members.get(memberId ?? ''), enabled: release && !!memberId, retry: false });
   if (!release) return <>{ACTION_WORDS[item.action_type ?? ''] ?? item.action_type}</>;
   const c = detail.data?.item;
-  const payload = request.data?.payload ?? {};
+  const payload: Record<string, unknown> = request.data?.payload ?? {};
   const collectedBy = typeof payload.collected_by === 'string' ? payload.collected_by : undefined;
   const note = typeof payload.note === 'string' ? payload.note : undefined;
   return (
