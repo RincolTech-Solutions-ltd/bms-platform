@@ -316,6 +316,18 @@ describe('the end of a count', () => {
     expect(screen.queryByRole('button', { name: 'Review the difference (1 counted)' })).toBeNull();
   });
 
+  it('says Saved for a newer count typed after a commit it missed, and keeps both in storage (round 8)', async () => {
+    await ready();
+    const earlier = Date.now() - 1000;
+    // The other tab committed A-1, and this tab never heard it.
+    localStorage.setItem(keyOf(branchA), JSON.stringify({ counts: {}, packCounts: {}, listed: [], done: [], at: { 'A-1': earlier }, committed: earlier }));
+    fireEvent.change(countBox('A-1'), { target: { value: '5' } });
+    await waitFor(() => expect(status()).toBe('Saved on this phone, 1 item'));
+    const kept = readStored(branchA);
+    expect(kept.counts['A-1']).toBe('5');
+    expect(kept.committed).toBe(earlier);
+  });
+
   it('takes in a commit it missed before making a review, so counts that went in elsewhere are never reviewed again (round 7)', async () => {
     await ready();
     fireEvent.change(countBox('A-1'), { target: { value: '7' } });

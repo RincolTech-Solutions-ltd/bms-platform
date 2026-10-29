@@ -251,7 +251,10 @@ export function useCountSave({ saveKey, restored, saved, apply, hold }: {
         quiet.current = setTimeout(() => setOther((o) => (o?.kind === 'open' ? null : o)), OTHER_TAB_MS);
       }
       // What this tab holds that the other did not store goes back to storage, so a reload there or here keeps it (review of #686).
-      if (!sameStored(merged, theirs)) writeCount(saveKey, merged);
+      // Saved is said only for what is stored (issue #681): the merged count, or the other tab's when they already agree.
+      const ok = sameStored(merged, theirs) || writeCount(saveKey, merged);
+      setOnDevice(ok);
+      setStored(ok ? JSON.stringify([next.counts, next.packCounts]) : null);
       if (sameCount(next, latest.current)) return;
       // Taken as it is, so it is not stamped as typed here.
       before.current = next;
