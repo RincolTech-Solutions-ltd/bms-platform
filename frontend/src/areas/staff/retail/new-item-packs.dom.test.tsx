@@ -184,6 +184,24 @@ describe('Add an item (issue #689)', () => {
     expect(createProduct).not.toHaveBeenCalled();
   });
 
+  it('shows a refused package on its own row, not on the smallest unit', async () => {
+    const { RetailError } = await import('../../../api/retail');
+    const message = 'This unit is switched off. Choose another one.';
+    createProduct.mockRejectedValue(new RetailError(message, 422, 'validation_failed', { pack_index: 1, errors: [{ field: 'packs[1].unit_id', code: 'inactive_unit', message }] }));
+    open();
+    await fill('u1');
+    fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
+    fireEvent.change(within(screen.getByTestId('package-row')).getByLabelText(/^Package/), { target: { value: 'u2' } });
+    fireEvent.change(within(screen.getByTestId('package-row')).getByLabelText(/^How many bulbs in one carton/), { target: { value: '10' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add another package' }));
+    fireEvent.change(within(screen.getAllByTestId('package-row')[1]!).getByLabelText(/^Package/), { target: { value: 'u3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    const [first, second] = screen.getAllByTestId('package-row');
+    expect(await within(second!).findByText(message)).toBeTruthy();
+    expect(within(first!).queryByText(message)).toBeNull();
+    expect(screen.getAllByText(message)).toHaveLength(1);
+  });
+
   it('shows no package question while packs are off', async () => {
     const off = { ...owner, module_capabilities: { ...owner.module_capabilities, retail: (owner.module_capabilities?.retail ?? []).filter((c) => c !== 'units') } };
     open(off);

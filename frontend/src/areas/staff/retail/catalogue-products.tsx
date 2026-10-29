@@ -18,7 +18,7 @@ import { MakeFamilyPanel, SIZES_JOIN, SIZES_NEW, VariantNote } from './catalogue
 import { ItemPhoto, PhotoChoice, PhotoEditor, sendNewPhoto, shownPhoto } from './item-photo';
 import { ScreenLink } from './screen-link';
 import { UNITS, canUse, capabilityOn, holds } from './permissions';
-import { NewItemPackages, newPackageRow, packageAsUnit, packsToSend, rowProblem, unitWord, withPackages, type PackageRow } from './new-item-packs';
+import { NewItemPackages, newPackageRow, packErrorOf, packageAsUnit, packsToSend, rowProblem, unitWord, withPackages, type PackageRow } from './new-item-packs';
 import { StockMinimumEditor } from './stock-minimum';
 import { UnitPicker } from './unit-picker';
 import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
@@ -201,6 +201,8 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
     },
     onError: () => { sending.current = false; },
   });
+  // Issue #689: a refused package is shown on its row, not under the form.
+  const packError = packErrorOf(save.error);
   const busy = save.isPending || check.isPending;
   // Issue #353: while a new item's name is typed, the items it may already be and the category of items like it.
   const hints = useNameHints(description, !product && canManage);
@@ -287,9 +289,10 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
               answer={inPackages}
               onAnswer={setInPackages}
               rows={packRows}
-              onRows={setPackRows}
+              onRows={(rows) => { setPackRows(rows); save.reset(); }}
               mayPrice={mayPrice}
               showErrors={showErrors}
+              refused={packError}
             />
           )}
         </>
@@ -369,7 +372,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
           onChangeName={forget}
         />
       )}
-      {!exists && <Problem error={save.error ?? check.error} />}
+      {!exists && !packError && <Problem error={save.error ?? check.error} />}
       <BusyButton busy={busy} type="submit" className="rt-primary" disabled={exists !== null || similar !== null}>{product ? 'Save changes' : 'Add item'}</BusyButton>
       <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
     </form>
