@@ -79,7 +79,7 @@ export function restockLineProblem(l: RestockLine): string | null {
   const factor = lineFactor(l);
   if (pack && factor === null) return `Enter how many ${unitWords(l.product.unit ?? 'item')} were in each ${unitWord(pack.unit)}: 1 or more.`;
   if (pack && qtys.some((q) => q !== null && baseQtyMilli(q, factor ?? undefined) === null)) {
-    return `A quantity does not convert exactly to ${l.product.unit ?? 'items'}. Change it.`;
+    return `A quantity does not convert exactly to ${l.product.unit ? unitWords(l.product.unit) : 'items'}. Change it.`;
   }
   return null;
 }
@@ -346,7 +346,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
             {pack && chosenUnitHint(pack.unit, l.product.unit) && <p className="hint" data-testid="unit-hint">{chosenUnitHint(pack.unit, l.product.unit)}</p>}
             {pack && (
               <div data-testid={`pack-size-${i}`}>
-                <Field id={`size-${i}`} required inputMode="decimal" label={howManyInEach(l.product.unit ?? 'item', pack.unit ?? 'pack')}
+                <Field id={`size-${i}`} required inputMode="decimal" label={howManyInEach(unitWord(l.product.unit) || 'item', unitWord(pack.unit) || 'pack')}
                   hint={`Usually ${showQty(pack.factor ?? '')}. Change it when this delivery's ${unitWord(pack.unit)} held a different number.`}
                   error={factor === null ? 'Enter 1 or more, with at most three decimals.' : null}
                   value={l.packSize ?? showQty(pack.factor ?? '')} onChange={(e) => patch(i, { packSize: e.target.value })} />

@@ -139,6 +139,16 @@ describe('the restock form with a pack', () => {
     expect(restockLineProblem({ product: odd, unitId: BOX, cost: '100', sell: '100', qtyByBranch: { b1: '0.001' } })).toContain('does not convert exactly');
     expect(restockLineProblem({ product: odd, unitId: BOX, cost: '100', sell: '100', qtyByBranch: { b1: '3' } })).toBeNull();
   });
+
+  // Review of #687, round 5: Buy stock's words never show a short code a shop typed.
+  it('says a short code unit and pack in full words in its problems', () => {
+    const short: Product = { ...pen, unit: 'pc', packs: [{ id: 'k4', product_id: 'e1', unit_id: BOX, unit: 'ctn', factor: '2.500', active: true, version: 1 }] };
+    const odd = restockLineProblem({ product: short, unitId: BOX, cost: '100', sell: '100', qtyByBranch: { b1: '0.001' } }) ?? '';
+    const noSize = restockLineProblem({ product: short, unitId: BOX, cost: '100', sell: '100', qtyByBranch: { b1: '1' }, packSize: '' }) ?? '';
+    expect(odd).toContain('to pieces');
+    expect(noSize).toContain('pieces were in each carton');
+    expect(`${odd} ${noSize}`).not.toMatch(/\bpcs?\b|\bctn\b/);
+  });
 });
 
 describe('stock in packs and pieces (issue #650)', () => {
