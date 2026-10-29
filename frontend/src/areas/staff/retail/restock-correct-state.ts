@@ -47,7 +47,6 @@ export function redraftOf(purchase: Purchase, products: Product[], today: string
   }
   return {
     supplierId: purchase.supplier_id ?? '',
-    newSupplier: '',
     // Today, not the old date: the old day may be banked in the cash book already (ADR-044).
     purchasedOn: today,
     method: (purchase.payment_method ?? 'cash') as PurchasePayment,

@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
 import { RetailError } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { branchLabel } from '../../../auth/branch';
 import { router as appRouter } from '../../../app/router';
 import { TourProvider } from '../../../tour/host';
+import { chooseCategory } from '../../../test-utils/category-picker';
 import { StaffContext } from '../context';
 
 // Quick add (issue #632): one form and one tap for an item, its prices and how many there are. Add sends one request with the
@@ -22,7 +23,12 @@ vi.setConfig({ testTimeout: 20000 });
 
 const quickAdd = vi.fn();
 const setProductPhoto = vi.fn();
+const createCategory = vi.fn();
+const createUnit = vi.fn();
+const addPack = vi.fn();
 let units: Record<string, unknown>[] = [];
+const BULBS = [{ id: 'c1', name: 'Test Bulbs', active: true, product_count: 0, version: 1, code_prefix: 'BLB' }];
+let categories: Record<string, unknown>[] = BULBS;
 
 vi.mock('../../../api/retail', async (original) => {
   const real = await original<typeof import('../../../api/retail')>();
@@ -30,7 +36,11 @@ vi.mock('../../../api/retail', async (original) => {
     ...real,
     retail: {
       ...real.retail,
-      listCategories: () => Promise.resolve([{ id: 'c1', name: 'Test Bulbs', active: true, product_count: 0, version: 1, code_prefix: 'BLB' }]),
+      listCategories: () => Promise.resolve(categories),
+      createCategory: (...a: unknown[]) => createCategory(...a),
+      createUnit: (...a: unknown[]) => createUnit(...a),
+      addPack: (...a: unknown[]) => addPack(...a),
+      suggestCategoryPrefix: () => Promise.resolve(''),
       listUnits: () => Promise.resolve(units),
       quickAdd: (...a: unknown[]) => quickAdd(...a),
       setProductPhoto: (...a: unknown[]) => setProductPhoto(...a),
@@ -38,7 +48,8 @@ vi.mock('../../../api/retail', async (original) => {
   };
 });
 
-const { QuickAddForm, addedLine, pieceUnit, refusedForCertain } = await import('./quick-add');
+const { CARTON_FAILED, PACKAGE_UNIT, QuickAddForm, addedLine, isPackageWord, pieceUnit, readLastGroup, refusedForCertain, writeLastGroup } = await import('./quick-add');
+const { ADD_CHOICE } = await import('../../../app/ui/PickerWithAdd');
 
 const owner = mockMe('admin');
 const branch = owner.branches?.[0];
@@ -52,22 +63,38 @@ function catalogueOnly(): Me {
 }
 
 function open(me: Me, onSell = vi.fn(), initialName?: string) {
+  // A router for the Turn on cartons line's help link, shown while packs are off (D76).
+  const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/retail/quick-add'] }) });
   render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <StaffContext.Provider value={{ me, branch: branch?.id ?? '', chooseBranch: () => undefined }}>
-        <QuickAddForm onSell={onSell} initialName={initialName} />
-      </StaffContext.Provider>
-    </QueryClientProvider>,
+    <RouterContextProvider router={router}>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <StaffContext.Provider value={{ me, branch: branch?.id ?? '', chooseBranch: () => undefined }}>
+          <QuickAddForm onSell={onSell} initialName={initialName} />
+        </StaffContext.Provider>
+      </QueryClientProvider>
+    </RouterContextProvider>,
   );
   return onSell;
 }
 
 const type = (label: string | RegExp, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
 
+/** The owner chose Test Bulbs last time at every branch (issue #688), so the group is chosen for them. */
+function rememberBulbs() {
+  for (const b of owner.branches ?? []) writeLastGroup(owner.user_id ?? '', b.id ?? '', 'c1');
+}
+
+beforeEach(rememberBulbs);
+
 afterEach(() => {
   cleanup();
   quickAdd.mockReset();
   setProductPhoto.mockReset();
+  createCategory.mockReset();
+  createUnit.mockReset();
+  addPack.mockReset();
+  window.localStorage.clear();
+  categories = BULBS;
   units = [{ id: 'u1', name: 'pc', active: true, product_count: 0, version: 1 }];
 });
 units = [{ id: 'u1', name: 'pc', active: true, product_count: 0, version: 1 }];
@@ -86,7 +113,7 @@ describe('quick add', () => {
     await screen.findByTestId('qa-done');
     expect(quickAdd).toHaveBeenCalledTimes(1);
     const [body, key] = quickAdd.mock.calls[0] as [Record<string, unknown>, string];
-    expect(body).toEqual({ description: 'Test Bulb 60W', sell_minor: 6000, cost_minor: 4000, unit_id: 'u1', qty: '600.000', branch_id: branch?.id });
+    expect(body).toEqual({ description: 'Test Bulb 60W', sell_minor: 6000, cost_minor: 4000, category_id: 'c1', unit_id: 'u1', qty: '600.000', branch_id: branch?.id });
     expect(key).toMatch(/^[0-9a-f-]{36}$/);
     expect(screen.getByTestId('qa-done').textContent).toBe(`Test Bulb 60W added: 600 pc at ${branchLabel(branch)}`);
     fireEvent.click(screen.getByRole('button', { name: 'Sell it' }));
@@ -111,8 +138,8 @@ describe('quick add', () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText(/^Name/)));
   });
 
-  it('leaves the category out, so the server files the item under General', async () => {
-    quickAdd.mockResolvedValue({ product_id: 'p3', description: 'Test Soap', unit: 'Piece', item_made: true, category_made: true, unit_made: true, qty: '1' });
+  it('leaves the unit out with no piece unit, so the server makes Piece, but always sends the group', async () => {
+    quickAdd.mockResolvedValue({ product_id: 'p3', description: 'Test Soap', unit: 'Piece', item_made: true, category_made: false, unit_made: true, qty: '1' });
     units = [];
     open(owner);
     await screen.findByTestId('qa-piece-made');
@@ -122,7 +149,7 @@ describe('quick add', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     await screen.findByTestId('qa-done');
     const body = (quickAdd.mock.calls[0] as [Record<string, unknown>])[0];
-    expect(body).not.toHaveProperty('category_id');
+    expect(body).toMatchObject({ category_id: 'c1' });
     expect(body).not.toHaveProperty('unit_id');
   });
 
@@ -210,13 +237,13 @@ describe('quick add', () => {
   });
 
   it('asks for a unit when the shop switched Piece off, and never sends without one', async () => {
-    units = [{ id: 'u7', name: 'Piece', active: false, product_count: 0, version: 1 }, { id: 'u8', name: 'Box', active: true, product_count: 0, version: 1 }];
+    units = [{ id: 'u7', name: 'Piece', active: false, product_count: 0, version: 1 }, { id: 'u8', name: 'Tube', active: true, product_count: 0, version: 1 }];
     open(owner);
     type(/^Name/, 'Test Glue');
     type(/^Selling price/, '1500');
     type(/How many do you have here now/, '4');
-    // The units are read: Box is offered, and no line says Piece will be made.
-    await screen.findByRole('option', { name: 'Box' });
+    // The units are read: Tube is offered, and no line says Piece will be made.
+    await screen.findByRole('option', { name: 'Tube' });
     expect(screen.queryByTestId('qa-piece-made')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     expect(await screen.findByText('The Piece unit is switched off. Choose a unit.')).toBeTruthy();
@@ -366,6 +393,218 @@ describe('quick add', () => {
     expect(quickAdd).not.toHaveBeenCalled();
     expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe('Test Lamp');
     online.mockRestore();
+  });
+});
+
+// JUSTIFICATION-A3: issue #688 asks for these tests: refused without a group, added in place, cancelled, remembered, none yet.
+describe('the group is needed (issue #688)', () => {
+  const group = () => screen.getByRole('combobox', { name: /^Category/ });
+  const value = (label: RegExp) => (screen.getByLabelText(label) as HTMLInputElement).value;
+
+  it('sits right under the Name, and Add refuses without one: Choose a group, the box focused, nothing sent and never General', async () => {
+    window.localStorage.clear();
+    open(owner);
+    const order = [...screen.getByTestId('qa-fields').querySelectorAll('input, button[role="combobox"]')].map((el) => el.id);
+    expect(order.slice(0, 3)).toEqual(['qa-name', 'qa-category', 'qa-sell']);
+    expect(group().getAttribute('aria-required')).toBe('true');
+    expect(group().textContent).toBe('Choose a group');
+    expect(screen.queryByText(/General/)).toBeNull();
+    type(/^Name/, 'Test Lamp');
+    type(/^Selling price/, '5000');
+    type(/How many do you have here now/, '2');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(await screen.findByText('Choose a group.')).toBeTruthy();
+    expect(document.activeElement).toBe(group());
+    expect(quickAdd).not.toHaveBeenCalled();
+  });
+
+  it('adds a group in place: back on the form with the group chosen and the name and prices kept', async () => {
+    window.localStorage.clear();
+    createCategory.mockResolvedValue({ id: 'c7', name: 'Test Torches', active: true, version: 1, code_prefix: 'TRC' });
+    quickAdd.mockResolvedValue({ product_id: 'p8', description: 'Test Torch', unit: 'pc', item_made: true, branch_id: branch?.id, qty: '4' });
+    open(owner);
+    type(/^Name/, 'Test Torch');
+    type(/^Selling price/, '9000');
+    type(/^Buying price/, '7000');
+    type(/How many do you have here now/, '4');
+    fireEvent.click(group());
+    fireEvent.click(await screen.findByRole('button', { name: '+ Add a group' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Add a group' });
+    fireEvent.change(within(sheet).getByLabelText(/^Name of the new group/), { target: { value: 'Test Torches' } });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Add group' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(createCategory).toHaveBeenCalledWith('Test Torches');
+    expect(group().textContent).toBe('Test Torches');
+    expect([value(/^Name/), value(/^Selling price/), value(/^Buying price/), value(/How many do you have here now/)]).toEqual(['Test Torch', '9000', '7000', '4']);
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await screen.findByTestId('qa-done');
+    expect((quickAdd.mock.calls[0] as [Record<string, unknown>])[0]).toMatchObject({ description: 'Test Torch', category_id: 'c7', sell_minor: 9000 });
+  });
+
+  it('loses nothing when the add sheet is cancelled', async () => {
+    window.localStorage.clear();
+    open(owner);
+    type(/^Name/, 'Test Fan');
+    fireEvent.click(group());
+    fireEvent.click(await screen.findByRole('button', { name: '+ Add a group' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Add a group' })).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(value(/^Name/)).toBe('Test Fan');
+    expect(group().textContent).toBe('Choose a group');
+    expect(createCategory).not.toHaveBeenCalled();
+  });
+
+  it('remembers the last group per person and the shop the stock went to, once an item is added, and chooses it next time', async () => {
+    window.localStorage.clear();
+    quickAdd.mockResolvedValue({ product_id: 'p5', description: 'Test Fuse', unit: 'pc', item_made: true, branch_id: other?.id, qty: '2' });
+    open(owner);
+    await chooseCategory(group(), 'Test Bulbs');
+    // Chosen, but nothing is added yet: nothing is remembered.
+    expect(readLastGroup(owner.user_id ?? '', branch?.id ?? '')).toBeNull();
+    // Chosen at the branch in use, then Where moved to the other branch: it is remembered there, where the stock went.
+    fireEvent.change(screen.getByLabelText(/^Where/), { target: { value: other?.id } });
+    type(/^Name/, 'Test Fuse');
+    type(/^Selling price/, '500');
+    type(/How many do you have here now/, '2');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await screen.findByTestId('qa-done');
+    expect(readLastGroup(owner.user_id ?? '', other?.id ?? '')).toBe('c1');
+    expect(readLastGroup(owner.user_id ?? '', branch?.id ?? '')).toBeNull();
+    expect(readLastGroup('someone-else', other?.id ?? '')).toBeNull();
+    cleanup();
+    open(owner);
+    // At the branch in use nothing is remembered, so the group is asked for; at the other one it is chosen.
+    await waitFor(() => expect(group().textContent).toBe('Choose a group'));
+    fireEvent.change(screen.getByLabelText(/^Where/), { target: { value: other?.id } });
+    await waitFor(() => expect(group().textContent).toBe('Test Bulbs'));
+  });
+
+  it('offers only + Add a group when the shop has no groups yet', async () => {
+    window.localStorage.clear();
+    categories = [];
+    open(owner);
+    expect(await screen.findByText('No groups yet.')).toBeTruthy();
+    const addGroup = screen.getByRole('button', { name: '+ Add a group' });
+    expect(screen.queryByRole('combobox', { name: /^Category/ })).toBeNull();
+    // Add refuses, and the focus goes to the one way to fill it.
+    type(/^Name/, 'Test Lamp');
+    type(/^Selling price/, '5000');
+    type(/How many do you have here now/, '1');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(screen.getByTestId('qa-category-error').textContent).toBe('Choose a group.');
+    expect(document.activeElement).toBe(addGroup);
+    expect(quickAdd).not.toHaveBeenCalled();
+  });
+});
+
+// JUSTIFICATION-A3: D76, added to issue #688, asks for these tests: a carton item gets its pack and its stock in pieces, an
+// empty field gives no pack, two items keep two carton sizes, and the Carton unit is made in place.
+describe('comes in cartons of (issue #688, D76)', () => {
+  const packsOn: Me = { ...owner, module_capabilities: { ...owner.module_capabilities, retail: [...(owner.module_capabilities?.retail ?? []), 'units'] } };
+  const PIECE = { id: 'u1', name: 'Piece', active: true, product_count: 0, version: 1 };
+  const CARTON = { id: 'u9', name: 'Carton', active: true, product_count: 0, version: 1 };
+  const fill = (name: string, size: string, cartons: string, loose: string) => {
+    type(/^Name/, name);
+    type(/^Selling price/, '1000');
+    fireEvent.change(screen.getByLabelText(/^Comes in cartons of how many pieces/), { target: { value: size } });
+    type(/^How many full cartons/, cartons);
+    type(/^And how many loose pieces/, loose);
+  };
+
+  it('gives the item its own carton pack, for selling and buying, and adds its stock in pieces', async () => {
+    units = [PIECE, CARTON];
+    quickAdd.mockResolvedValue({ product_id: 'p20', description: 'Test Bulb', unit: 'Piece', item_made: true, branch_id: branch?.id, qty: '77' });
+    addPack.mockResolvedValue({});
+    open(packsOn);
+    await screen.findByRole('option', { name: 'Piece' });
+    fill('Test Bulb', '24', '3', '5');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await screen.findByTestId('qa-done');
+    expect((quickAdd.mock.calls[0] as [Record<string, unknown>])[0]).toMatchObject({ description: 'Test Bulb', unit_id: 'u1', qty: '77.000' });
+    expect(addPack).toHaveBeenCalledWith('p20', { unit_id: 'u9', factor: '24', purpose: 'both' });
+    expect(createUnit).not.toHaveBeenCalled();
+    expect(screen.getByTestId('qa-done').textContent).toBe(`Test Bulb added: 3 cartons and 5 pieces at ${branchLabel(branch)}`);
+  });
+
+  it('gives no pack when the field is left empty, and asks how many as before', async () => {
+    units = [PIECE, CARTON];
+    quickAdd.mockResolvedValue({ product_id: 'p21', description: 'Test Cup', unit: 'Piece', item_made: true, branch_id: branch?.id, qty: '4' });
+    open(packsOn);
+    await screen.findByRole('option', { name: 'Piece' });
+    expect(screen.queryByLabelText(/^How many full cartons/)).toBeNull();
+    type(/^Name/, 'Test Cup');
+    type(/^Selling price/, '1000');
+    type(/How many do you have here now/, '4');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await screen.findByTestId('qa-done');
+    expect((quickAdd.mock.calls[0] as [Record<string, unknown>])[0]).toMatchObject({ qty: '4.000' });
+    expect(addPack).not.toHaveBeenCalled();
+    expect(screen.getByTestId('qa-done').textContent).toBe(`Test Cup added: 4 Piece at ${branchLabel(branch)}`);
+  });
+
+  it('keeps each item its own carton size, and makes the Carton unit in place when the shop has none', async () => {
+    units = [PIECE];
+    createUnit.mockResolvedValue(CARTON);
+    addPack.mockResolvedValue({});
+    quickAdd.mockResolvedValueOnce({ product_id: 'p22', description: 'Test Bulb', unit: 'Piece', item_made: true, branch_id: branch?.id, qty: '24' });
+    quickAdd.mockResolvedValueOnce({ product_id: 'p23', description: 'Test Paco', unit: 'Piece', item_made: true, branch_id: branch?.id, qty: '12' });
+    open(packsOn);
+    await screen.findByRole('option', { name: 'Piece' });
+    fill('Test Bulb', '24', '1', '');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await screen.findByTestId('qa-done');
+    expect(createUnit).toHaveBeenCalledWith('Carton');
+    expect(screen.getByTestId('qa-done').textContent).toBe(`Test Bulb added: 1 carton at ${branchLabel(branch)}`);
+    fireEvent.click(screen.getByRole('button', { name: 'Add another' }));
+    expect((screen.getByLabelText(/^Comes in cartons of/) as HTMLInputElement).value).toBe('');
+    fill('Test Paco', '6', '2', '0');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(addPack).toHaveBeenCalledTimes(2));
+    expect(addPack.mock.calls.map(([id, body]) => [id, (body as { factor: string }).factor])).toEqual([['p22', '24'], ['p23', '6']]);
+    expect((quickAdd.mock.calls[1] as [Record<string, unknown>])[0]).toMatchObject({ qty: '12.000' });
+  });
+
+  it('keeps the item and says so when the carton pack could not be added', async () => {
+    units = [PIECE, CARTON];
+    quickAdd.mockResolvedValue({ product_id: 'p24', description: 'Test Soap', unit: 'Piece', item_made: true, branch_id: branch?.id, qty: '24' });
+    addPack.mockRejectedValue(new RetailError('Refused', 422, 'validation_failed'));
+    open(packsOn);
+    await screen.findByRole('option', { name: 'Piece' });
+    fill('Test Soap', '24', '1', '');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(await screen.findByTestId('qa-photo-note')).toBeTruthy();
+    expect(screen.getByTestId('qa-photo-note').textContent).toContain(CARTON_FAILED);
+    expect(screen.getByTestId('qa-done').textContent).toBe(`Test Soap added: 24 Piece at ${branchLabel(branch)}`);
+  });
+
+  // JUSTIFICATION-A3: round 3 of the #691 review asks that a package word is never the item's own unit; this is its test.
+  it('never takes a box, carton, dozen or pack as the item\'s own unit, even one added in place', async () => {
+    units = [PIECE, CARTON, { id: 'u8', name: 'Box', active: true, product_count: 0, version: 1 }];
+    const dozen = { id: 'u7', name: 'Dozen', active: true, product_count: 0, version: 1 };
+    createUnit.mockImplementation(async () => { units = [...units, dozen]; return dozen; });
+    open(packsOn);
+    await screen.findByRole('option', { name: 'Piece' });
+    const unit = screen.getByLabelText(/^Counted in/) as HTMLSelectElement;
+    expect([...unit.options].map((o) => o.text)).toEqual(['Choose a unit', 'Piece', '+ Add a unit']);
+    fireEvent.change(unit, { target: { value: ADD_CHOICE } });
+    const sheet = await screen.findByRole('dialog', { name: 'Add a unit' });
+    fireEvent.change(within(sheet).getByLabelText(/^Name of the new unit/), { target: { value: 'Dozen' } });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Add unit' }));
+    expect(await screen.findByText(PACKAGE_UNIT)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    type(/^Name/, 'Test Egg');
+    type(/^Selling price/, '500');
+    type(/How many do you have here now/, '12');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(document.activeElement).toBe(screen.getByLabelText(/^Counted in/));
+    expect(quickAdd).not.toHaveBeenCalled();
+    expect(['Box', 'carton', ' PACKS ', 'Piece'].map(isPackageWord)).toEqual([true, true, true, false]);
+  });
+
+  it('offers to turn cartons on while packs are off, and asks no carton size', async () => {
+    open(owner);
+    expect(await screen.findByTestId('packs-turn-on')).toBeTruthy();
+    expect(screen.queryByLabelText(/^Comes in cartons of/)).toBeNull();
   });
 });
 

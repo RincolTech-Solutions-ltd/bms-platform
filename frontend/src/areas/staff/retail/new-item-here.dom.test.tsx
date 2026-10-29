@@ -98,7 +98,7 @@ describe('Buy stock: add an item that is not in the list', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Not in the list? Add it here' }));
     await within(form()).findByRole('option', { name: 'piece' });
     fireEvent.click(field(/^Category/));
-    fireEvent.click(await screen.findByRole('button', { name: 'Add a new category' }));
+    fireEvent.click(await screen.findByRole('button', { name: '+ Add a category' }));
     fireEvent.change(screen.getByLabelText(/^Name of the new category/), { target: { value: 'Rice' } });
     expect(await screen.findByText('RCE', { selector: 'strong' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Add category' }));
@@ -212,7 +212,7 @@ describe('Buy stock: add an item that is not in the list', () => {
   // Review of #552, must-fix 1 and 2: an item already on the purchase keeps its line and gets the quantity added, as a scan adds,
   // and a quantity is never replaced, by a number or by nothing.
   const onThePurchase = (qty: string) => ({
-    supplierId: '', newSupplier: '', purchasedOn: '2026-10-24', method: 'cash' as const,
+    supplierId: '', purchasedOn: '2026-10-24', method: 'cash' as const,
     lines: [{ product: { ...made, id: 'p1', code: 'BLB-0001', sell_minor: 8500 }, cost: '6000', sell: '8500', qtyByBranch: { [mockMe('admin').branches?.[0]?.id ?? '']: qty } }],
   });
 
