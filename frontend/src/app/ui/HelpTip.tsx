@@ -13,9 +13,10 @@ const EDGE = 16;
 export function HelpTip({ tip }: { tip: HelpTipKey }) {
   const { label, text } = HELP_TIPS[tip];
   const [open, setOpen] = useState(false);
-  const [shift, setShift] = useState(0);
+  const [place, setPlace] = useState<{ top: number; left: number } | null>(null);
   const id = useId();
   const box = useRef<HTMLSpanElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
   const bubble = useRef<HTMLSpanElement>(null);
   // A tap focuses the button before its click: the focus must not open the tip that the click then closes again.
   const tapping = useRef(false);
@@ -28,28 +29,34 @@ export function HelpTip({ tip }: { tip: HelpTipKey }) {
     const escape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
+    // The text is placed on the screen, not in the page, so a scroll would leave it behind: it closes instead.
+    const scrolled = () => setOpen(false);
     document.addEventListener('pointerdown', outside);
     document.addEventListener('keydown', escape);
+    window.addEventListener('scroll', scrolled, true);
     return () => {
       document.removeEventListener('pointerdown', outside);
       document.removeEventListener('keydown', escape);
+      window.removeEventListener('scroll', scrolled, true);
     };
   }, [open]);
 
+  // Under the button, kept inside the screen. Fixed on the screen, so a table that scrolls sideways never cuts it off.
   useLayoutEffect(() => {
-    const el = bubble.current;
-    if (!open || !el) {
-      setShift(0);
+    const at = button.current?.getBoundingClientRect();
+    const width = bubble.current?.getBoundingClientRect().width ?? 0;
+    if (!open || !at) {
+      setPlace(null);
       return;
     }
-    const rect = el.getBoundingClientRect();
     const right = document.documentElement.clientWidth - EDGE;
-    setShift(rect.right > right ? Math.max(EDGE - rect.left, right - rect.right) : rect.left < EDGE ? EDGE - rect.left : 0);
+    setPlace({ top: at.bottom + 4, left: Math.max(EDGE, Math.min(at.left, right - width)) });
   }, [open]);
 
   return (
     <span className="help-tip" ref={box}>
       <button
+        ref={button}
         type="button"
         className="btn-ghost btn-icon help-tip-button"
         aria-label={`More about ${label}`}
@@ -62,7 +69,7 @@ export function HelpTip({ tip }: { tip: HelpTipKey }) {
       >
         <span aria-hidden="true">?</span>
       </button>
-      <span ref={bubble} id={id} role="status" className="help-tip-text" style={shift ? { transform: `translateX(${shift}px)` } : undefined}>
+      <span ref={bubble} id={id} role="status" className="help-tip-text" style={place ?? undefined}>
         {open ? text : ''}
       </span>
     </span>

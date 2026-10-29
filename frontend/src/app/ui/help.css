@@ -110,9 +110,20 @@
   line-height: 1;
 }
 
+/* The tap area is wider than the line, so only the circle shows a press or an open tip, never a box over the words around it. */
+.help-tip-button:hover:not(:disabled) {
+  background: transparent;
+}
+
+.help-tip-button:hover > span,
+.help-tip-button[aria-expanded='true'] > span {
+  background: var(--color-accent-tint);
+}
+
+/* Fixed on the screen at the place HelpTip measures, so a scrolling table never cuts it off; its own words, never a header's capitals. */
 .help-tip-text {
-  position: absolute;
-  top: calc(100% + var(--space-1));
+  position: fixed;
+  top: 0;
   left: 0;
   z-index: var(--z-dropdown);
   width: max-content;
@@ -127,6 +138,8 @@
   font-weight: normal;
   line-height: 1.4;
   text-align: start;
+  text-transform: none;
+  letter-spacing: normal;
   white-space: normal;
 }
 

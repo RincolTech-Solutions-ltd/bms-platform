@@ -341,8 +341,10 @@ export function joinSuggestion(names: readonly string[], base?: string): { name:
   let end = 0;
   while (start + end < shortest - 1 && sameAt((words) => words[words.length - 1 - end])) end += 1;
   const first = items[0] ?? [];
+  const name = [...first.slice(0, start), ...first.slice(first.length - end)].join(' ');
   return {
-    name: [...first.slice(0, start), ...first.slice(first.length - end)].join(' '),
+    // A name that started mid way ("2.5mm twin cable" gives "cable") starts with a capital, as an item's name does.
+    name: name.charAt(0).toLocaleUpperCase() + name.slice(1),
     sizes: items.map((words) => words.slice(start, words.length - end).join(' ').replace(/^\((.*)\)$/, '$1').slice(0, 30)),
   };
 }

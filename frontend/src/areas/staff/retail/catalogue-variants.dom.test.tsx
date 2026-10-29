@@ -231,6 +231,7 @@ describe('the suggested name and sizes', () => {
     expect(joinSuggestion(['Twin cable 1.5mm', 'Twin cable 2.5mm'])).toEqual({ name: 'Twin cable', sizes: ['1.5mm', '2.5mm'] });
     expect(joinSuggestion(['Bulb 9W LED', 'bulb 12W led'])).toEqual({ name: 'Bulb LED', sizes: ['9W', '12W'] });
     expect(joinSuggestion(['Romper (S)', 'Romper (M)'])).toEqual({ name: 'Romper', sizes: ['S', 'M'] });
+    expect(joinSuggestion(['2.5mm twin cable', '1.5mm twin cable'])).toEqual({ name: 'Twin cable', sizes: ['2.5mm', '1.5mm'] });
   });
 
   it('leaves every item a size, and suggests nothing from one item alone', () => {

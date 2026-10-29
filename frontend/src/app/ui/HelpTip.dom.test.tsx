@@ -60,6 +60,14 @@ describe('the help tip', () => {
     expect(screen.queryByText(WORDS)).toBeNull();
   });
 
+  it('closes when the page scrolls, since its words are placed on the screen', () => {
+    const tip = page();
+    fireEvent.click(tip);
+    expect(screen.getByText(WORDS)).toBeTruthy();
+    fireEvent.scroll(window);
+    expect(screen.queryByText(WORDS)).toBeNull();
+  });
+
   it('keeps every tip short and plain: one or two sentences, no dashes', () => {
     for (const { label, text } of Object.values(HELP_TIPS)) {
       expect(text.split(/[.?!](\s|$)/).filter((s) => s.trim() !== '').length, label).toBeLessThanOrEqual(2);
