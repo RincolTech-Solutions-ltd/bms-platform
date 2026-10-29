@@ -174,7 +174,9 @@ final class CatalogueApi {
             @Schema(
                     description = "Issue #689 (ADR-106): packages made with the item in its transaction, checked as"
                             + " POST /products/{id}/units checks them; all are saved with the item or none is")
-            List<@Valid @NotNull PackRequest> packs) {}
+            // Review of #692: each pack is validated by the service, so its problems carry pack_index and packs[i]
+            // names.
+            List<@NotNull PackRequest> packs) {}
 
     @Schema(
             name = "UpdateRetailProductRequest",

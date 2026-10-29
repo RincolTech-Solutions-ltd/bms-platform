@@ -225,6 +225,47 @@ class RetailNewItemPacksIT extends IntegrationTest {
                 .isEqualTo(2);
     }
 
+    /** Review of #692, round 4: a pack's own bounds are checked by the service, so an oversized size names its pack. */
+    // JUSTIFICATION-A3: round 4 of the #692 review asks for this IT on an oversized factor.
+    @Test
+    void anOversizedPackageSizeIsRefusedOnItsRow() {
+        ResponseEntity<JsonNode> r = api.post(
+                "/products",
+                item(
+                        "Test Bulb 60W",
+                        bulb,
+                        List.of(pack(carton, "10", "both", null), pack(box, "1000000000000", "buy", null))),
+                ADMIN);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().get("pack_index").asInt()).isEqualTo(1);
+        assertThat(r.getBody().toString()).contains("packs[1].factor");
+        assertThat(products("Test Bulb 60W")).isZero();
+        assertThat(packRows()).isZero();
+    }
+
+    /** Review of #692, round 4: Quick add makes items too, and never in a package. */
+    @Test
+    void quickAddNeverCountsAnItemInAPackage() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("description", "Test Bulb 60W");
+        body.put("sell_minor", 5_000);
+        body.put("category_id", category);
+        body.put("unit_id", box);
+        body.put("qty", "10");
+        body.put("branch_id", t.headOffice());
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/quick-add", body, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().toString()).contains("unit_is_package").contains("A box is a package.");
+        assertThat(products("Test Bulb 60W")).isZero();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM retail_stock_balances WHERE tenant_id = ?")
+                        .params(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isZero();
+    }
+
     @Test
     void aRefusedPackageSavesNothing() {
         // The second package repeats the first unit: the item and the first package are made, then the whole

@@ -34,6 +34,7 @@ import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdateProductRe
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdateUnitRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UsualPack;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UsualPackRequest;
+import jakarta.validation.Validator;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -74,18 +75,21 @@ class CatalogueService {
     private final AuditLog audit;
     private final ModuleSettings settings;
     private final BarcodeRepository barcodes;
+    private final Validator validator;
 
     CatalogueService(
             CatalogueRepository repo,
             CurrentTenant currentTenant,
             AuditLog audit,
             ModuleSettings settings,
-            BarcodeRepository barcodes) {
+            BarcodeRepository barcodes,
+            Validator validator) {
         this.repo = repo;
         this.currentTenant = currentTenant;
         this.audit = audit;
         this.settings = settings;
         this.barcodes = barcodes;
+        this.validator = validator;
     }
 
     /**
@@ -376,8 +380,29 @@ class CatalogueService {
         if (!packs.isEmpty()) {
             requireUnits();
         }
-        List<String> purposes =
-                packs.stream().map(CatalogueService::packPurpose).toList();
+        // Review of #692: each pack's bounds (the rules of POST /products/{id}/units) and price checks, before anything
+        // is
+        // written; a refusal names the pack (pack_index, packs[i].factor), never the item's own fields.
+        List<String> purposes = new ArrayList<>();
+        for (int i = 0; i < packs.size(); i++) {
+            List<FieldProblem> bad = validator.validate(packs.get(i)).stream()
+                    .map(v -> new FieldProblem(
+                            v.getPropertyPath()
+                                    .toString()
+                                    .replaceAll("([a-z0-9])([A-Z])", "$1_$2")
+                                    .toLowerCase(Locale.ROOT),
+                            "invalid",
+                            v.getMessage()))
+                    .toList();
+            try {
+                if (!bad.isEmpty()) {
+                    throw ApiException.validation(bad);
+                }
+                purposes.add(packPurpose(packs.get(i)));
+            } catch (ApiException e) {
+                throw ofPack(e, i);
+            }
+        }
         String duplicateReason = acceptName(r.description().trim(), r.unitId(), null, r.duplicateReason());
         UUID by = CurrentPrincipal.require().userId();
         // Issue #562, ADR-081 as amended: the category always gives the code, such as BLB-0001; a typed one is refused.
