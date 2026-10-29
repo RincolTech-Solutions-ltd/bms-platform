@@ -9,7 +9,7 @@ import { instructionWords, investmentTxnWords, percent } from './investment-stat
 import { businessToday } from '../../../api/retail';
 import { isIsoDate, money, onToday, words } from './loan-state';
 import { BusyButton } from '../../../app/ui/BusyButton';
-import { DateReset } from './actions';
+import { DateReset, SentBefore } from './actions';
 
 // The forms of the investment page: funding, return payout, maturity payout, rollover, early
 // withdrawal (with its quote), the maturity instruction and a reversal. Each write keeps its draft
@@ -54,7 +54,7 @@ export function FundForm({ inv }: { inv: Investment }) {
   const id = inv.id ?? '';
   const refresh = useRefresh(id);
   const today = businessToday();
-  const { key, draft, setDraft, finish, sending, mended } = usePersistedDraft<FundDraft>(`invest-fund:${me.user_id ?? ''}:${id}`, {
+  const { key, draft, setDraft, finish, sending, mended, sentBefore } = usePersistedDraft<FundDraft>(`invest-fund:${me.user_id ?? ''}:${id}`, {
     date: today,
     method: 'cash',
     reference: '',
@@ -74,6 +74,7 @@ export function FundForm({ inv }: { inv: Investment }) {
   if (save.data) return <Waiting executed={save.data.executed} done="Funded. The investment is active and its schedule is below." />;
   return (
     <form aria-label="Record funding" onSubmit={(e) => { e.preventDefault(); if (isIsoDate(draft.date) && !save.isPending) save.mutate(); }}>
+      <SentBefore kind="funding" on={sentBefore} />
       <p>
         Receives {money(inv.principal_minor, inv.currency)} from the member. Above the business's approval limit a checker
         approves it first.

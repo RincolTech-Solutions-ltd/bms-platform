@@ -50,8 +50,9 @@ describe('businessToday', () => {
 //
 // Known limits (#670). The scan reads text, not types, so it lets through: toLocaleString with no date options on a Date the
 // file does not declare as one (`x = new Date(...)` or `x: Date`), such as a record's field, a function's result or another
-// name for the same Date. A declared name counts across the whole file, so the same name used for a number in another
-// function is taken for a Date too (a hit, not a miss); date-fns format on a date other than new Date(), Date.now() or a value named now; and a reason or a
+// name for the same Date. A declared name (DATE_NAMES, matched by RECEIVER on the variable a call is made on, never a field)
+// counts across the whole file, so the same name used for a number in another function is taken for a Date too, a false
+// positive that fails loud (a hit, not a miss); date-fns format on a date other than new Date(), Date.now() or a value named now; and a reason or a
 // bracket in a template literal with `${...}`, or in a string that a quote mark in JSX text or a regex literal threw off,
 // since those are read as code.
 const SRC = fileURLToPath(new URL('../', import.meta.url));

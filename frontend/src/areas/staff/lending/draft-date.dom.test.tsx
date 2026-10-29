@@ -21,13 +21,13 @@ const loan: Loan = { id: ID, loan_no: 'LN-BR1-000001', status: 'approved', curre
 const inv = { id: ID, principal_minor: 1000000, currency: 'UGX' } as unknown as Investment;
 const NOTE = /started on an earlier day, so its date is now today/;
 
-const FORMS: { name: string; draftName: string; field: string; label: string; form: ReactElement }[] = [
-  { name: 'repayment', draftName: `lending-repay:${me.user_id}:${ID}`, field: 'valueDate', label: 'Date paid', form: <RepaymentForm loan={{ ...loan, status: 'active' }} onDone={() => undefined} /> },
-  { name: 'disbursement', draftName: `lending-disburse:${me.user_id}:${ID}`, field: 'date', label: 'Disbursement date', form: <DisburseForm loan={loan} /> },
-  { name: 'investment funding', draftName: `invest-fund:${me.user_id}:${ID}`, field: 'date', label: 'Date received', form: <FundForm inv={inv} /> },
+const FORMS: { name: string; kind: string; draftName: string; field: string; label: string; form: ReactElement }[] = [
+  { name: 'repayment', kind: 'repayment', draftName: `lending-repay:${me.user_id}:${ID}`, field: 'valueDate', label: 'Date paid', form: <RepaymentForm loan={{ ...loan, status: 'active' }} onDone={() => undefined} /> },
+  { name: 'disbursement', kind: 'disbursement', draftName: `lending-disburse:${me.user_id}:${ID}`, field: 'date', label: 'Disbursement date', form: <DisburseForm loan={loan} /> },
+  { name: 'investment funding', kind: 'funding', draftName: `invest-fund:${me.user_id}:${ID}`, field: 'date', label: 'Date received', form: <FundForm inv={inv} /> },
 ];
 
-function show(f: (typeof FORMS)[number], saved?: { draft: Record<string, string>; sent?: true }): HTMLInputElement {
+function show(f: (typeof FORMS)[number], saved?: { draft: Record<string, string>; sent?: string }): HTMLInputElement {
   if (saved) sessionStorage.setItem(`retail-draft:${f.draftName}`, JSON.stringify({ key: 'test-key-670', ...saved }));
   render(
     <QueryClientProvider client={new QueryClient()}>
@@ -37,7 +37,7 @@ function show(f: (typeof FORMS)[number], saved?: { draft: Record<string, string>
   return screen.getByLabelText(f.label) as HTMLInputElement;
 }
 
-const kept = (f: (typeof FORMS)[number]) => JSON.parse(sessionStorage.getItem(`retail-draft:${f.draftName}`) ?? '{}') as { key?: string; draft?: Record<string, string>; sent?: boolean };
+const kept = (f: (typeof FORMS)[number]) => JSON.parse(sessionStorage.getItem(`retail-draft:${f.draftName}`) ?? '{}') as { key?: string; draft?: Record<string, string>; sent?: string };
 const draftOn = (f: (typeof FORMS)[number], date: string, startedOn?: string) => ({
   method: 'cash', reference: 'TEST-REF-01', [f.field]: date, ...(f.name === 'repayment' ? { amount: '50000' } : {}), ...(startedOn ? { startedOn } : {}),
 });
@@ -82,11 +82,18 @@ describe.each(FORMS)('a $name draft restored from the tab', (f) => {
     expect(screen.queryByText(NOTE)).toBeNull();
   });
 
-  it('whose key was already sent, keeps the body it went with, earlier day or not', () => {
-    const date = show(f, { draft: draftOn(f, '2026-10-28', '2026-10-28'), sent: true });
+  it('whose key was sent on an earlier day, keeps the body and key it went with and says it may be saved', () => {
+    const date = show(f, { draft: draftOn(f, '2026-10-28', '2026-10-28'), sent: '2026-10-28' });
     expect(date.value).toBe('2026-10-28');
     expect(screen.queryByText(NOTE)).toBeNull();
-    expect(kept(f)).toEqual({ key: 'test-key-670', draft: draftOn(f, '2026-10-28', '2026-10-28'), sent: true });
+    expect(screen.getByText(`This ${f.kind} was sent on 28 Oct 2026 and may already be saved. Send it again to check.`)).toBeTruthy();
+    expect(kept(f)).toEqual({ key: 'test-key-670', draft: draftOn(f, '2026-10-28', '2026-10-28'), sent: '2026-10-28' });
+  });
+
+  it('whose key was sent today, keeps its body with no line', () => {
+    expect(show(f, { draft: draftOn(f, '2026-10-20', '2026-10-28'), sent: '2026-10-29' }).value).toBe('2026-10-20');
+    expect(screen.queryByText(/may already be saved/)).toBeNull();
+    expect(screen.queryByText(NOTE)).toBeNull();
   });
 });
 
@@ -98,7 +105,7 @@ describe('sending a money form', () => {
     fireEvent.submit(screen.getByRole('form', { name: 'Record a repayment' }));
     return vi.waitFor(() => {
       expect(repay).toHaveBeenCalledWith(ID, expect.objectContaining({ value_date: '2026-10-29' }), 'test-key-670');
-      expect(kept(f).sent).toBe(true);
+      expect(kept(f).sent).toBe('2026-10-29');
     });
   });
 
@@ -107,6 +114,6 @@ describe('sending a money form', () => {
     const f = FORMS[2]!;
     show(f, { draft: draftOn(f, '2026-10-29', '2026-10-29') });
     fireEvent.submit(screen.getByRole('form', { name: 'Record funding' }));
-    return vi.waitFor(() => expect(kept(f).sent).toBe(true));
+    return vi.waitFor(() => expect(kept(f).sent).toBe('2026-10-29'));
   });
 });

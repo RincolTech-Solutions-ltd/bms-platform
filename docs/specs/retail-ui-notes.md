@@ -102,7 +102,9 @@ totals shown while typing are a preview; the server's response is the receipt.
   disbursement or investment funding draft notes the business day it was started; read back from the tab on a
   later day its date starts again from today (a date after today becomes today), keeping the amount and the key,
   and the form says the date is now today. A draft whose key was already sent (the form marks it as it posts) is
-  never changed, so a retry after a lost answer posts the same body under the same key once.
+  never changed, so a retry after a lost answer posts the same body under the same key once; restored on a later
+  day, it says above the form "This repayment was sent on 28 Oct 2026 and may already be saved. Send it again to
+  check." with its own kind and day.
   The guard also counts `toLocaleString` on a name the file declares as a Date (`x = new Date(...)`, `x: Date`)
   and date-fns on `Date.now()` or `now`; it reads brackets, comments and reasons with strings blanked, so a
   bracket or URL in a string does not throw off a call's options and a reason counts only in a comment. Its known
