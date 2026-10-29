@@ -31,15 +31,20 @@
 -- The tables have FORCE ROW LEVEL SECURITY and no app.tenant_id is bound here: as in V103, bms_owner has BYPASSRLS, and an owner
 -- without it drops FORCE for this transaction only.
 --
--- Locks, taken first and never a reason to fail. The previous release keeps serving during the deploy: it reads
--- retail_branch_roles on every sale, may write a role, and locks branch rows FOR SHARE. So, before anything else:
---   - retail_branch_roles in ACCESS EXCLUSIVE mode, so no role can be written between the fold and the narrowed check, and the
---     check needs no further lock;
+-- Locks, all taken in one retried step before anything else. The deploy is zero downtime: the previous release keeps serving
+-- while this runs, reads retail_branch_roles on every sale, may write a role, and locks branch rows FOR SHARE. So:
+--   - retail_branch_roles in ACCESS EXCLUSIVE mode. SHARE ROW EXCLUSIVE would already keep a role write from landing between
+--     the fold and the narrowed check, but the constraint swap needs ACCESS EXCLUSIVE, and taking that later would be a second
+--     lock step that could wait or deadlock behind traffic; taking it once here covers the fold and the swap, and the check
+--     stays a plain validated constraint (no NOT VALID left for a later migration);
 --   - branches in EXCLUSIVE mode, so no transaction holds a branch row lock the fold's updates would wait on (plain reads go on);
---   - with an owner that lacks BYPASSRLS, every table whose FORCE is dropped, in ACCESS EXCLUSIVE mode.
--- Each attempt waits at most two seconds, so a shop never queues long behind the request; on a timeout the attempt is undone,
--- the migration sleeps a second and tries again. After 120 attempts it waits for the locks without a timeout. Once they are
--- held no statement here waits on another transaction, and lock_timeout is off for the rest.
+--   - only with an owner that lacks BYPASSRLS, every table whose FORCE is toggled below, in ACCESS EXCLUSIVE mode, so the
+--     NO FORCE and FORCE statements take no lock of their own. Staging and production run as bms_owner with BYPASSRLS (V103),
+--     where no toggle runs.
+-- Each attempt waits at most two seconds, so a shop never queues long behind the request. On lock_not_available the attempt's
+-- subtransaction is undone (no lock is kept while waiting), the migration sleeps a second and tries again, for about two
+-- minutes (40 attempts). Only then does it stop, with a message that says traffic held the locks and nothing was changed.
+-- Once the locks are held no statement here waits on another transaction, and lock_timeout is off for the rest.
 
 DO $$
 DECLARE
@@ -48,7 +53,7 @@ DECLARE
 BEGIN
     LOOP
         BEGIN
-            PERFORM set_config('lock_timeout', CASE WHEN attempt < 120 THEN '2s' ELSE '0' END, true);
+            PERFORM set_config('lock_timeout', '2s', true);
             LOCK TABLE retail_branch_roles IN ACCESS EXCLUSIVE MODE;
             LOCK TABLE branches IN EXCLUSIVE MODE;
             IF NOT bypass THEN
@@ -61,6 +66,13 @@ BEGIN
             EXIT;
         EXCEPTION WHEN lock_not_available THEN
             attempt := attempt + 1;
+            IF attempt >= 40 THEN
+                RAISE EXCEPTION USING
+                    ERRCODE = '55P03',
+                    MESSAGE = 'V115: other transactions held retail_branch_roles or branches for about two minutes, so the'
+                              || ' branch role store was not folded. Nothing was changed.',
+                    HINT = 'Run the deploy again when traffic is lower (issue #371, ADR-104).';
+            END IF;
             PERFORM pg_sleep(1);
         END;
     END LOOP;
