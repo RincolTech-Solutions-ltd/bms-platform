@@ -733,7 +733,10 @@ destination still holds what came in, applied to the received quantity.
 - Receive and cancel are money-moving (`Idempotency-Key`); a replayed key returns the first response and
   two racing receipts receive once (the transfer row is locked).
 - Switching `transfer_receipt` off, directly or by choosing the `shop` profile, is refused (422
-  `transfers_in_transit`) while any transfer is in transit.
+  `transfers_in_transit`) while any transfer is in transit. The check runs inside the settings write,
+  under the tenant settings row lock, and a transfer reads the capability under a shared lock on that
+  row, so a dispatch committing at the same moment is either seen by the check or made after the
+  change as a one-step move (issue #239).
 - `GET /retail/transfers` gains a `status` filter, which is how the in-transit list is read with its
   lines; `GET /retail/reports/transfers-in-flight` adds the age, the value and the reconciliation.
 - Not done here: the shortage is posted to the ledger but is not yet a line of the daily profit report.

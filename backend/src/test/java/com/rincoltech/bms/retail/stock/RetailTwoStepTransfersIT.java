@@ -7,11 +7,15 @@ import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.retail.RetailTestSupport;
 import com.rincoltech.bms.testsupport.Api;
+import java.sql.Connection;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -632,6 +636,68 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.OK);
         ResponseEntity<JsonNode> after = dispatch("1");
         assertThat(after.getBody().get("status").asString()).isEqualTo("completed");
+    }
+
+    // JUSTIFICATION-A3: the switch-off race test #239 asks for; no existing test holds a dispatch still.
+    /**
+     * Issue #239: a switch-off sent while a dispatch is between reading the capability and committing waits for the
+     * dispatch, then sees the transfer on its way and is refused. The dispatch is held still on the source's balance row,
+     * after it has read the capability under the settings lock.
+     */
+    @Test
+    void aSwitchOffDuringADispatchWaitsForItAndIsRefused() throws Exception {
+        switchOn();
+        api.stockUp(t.headOffice(), product, "10");
+        try (Connection c = TestDatabase.ownerDataSource().getConnection()) {
+            c.setAutoCommit(false);
+            try (Statement s = c.createStatement()) {
+                s.execute("SELECT 1 FROM retail_stock_balances WHERE tenant_id = '" + t.tenantId()
+                        + "' AND branch_id = '" + t.headOffice() + "' AND product_id = '" + product + "' FOR UPDATE");
+            }
+            CompletableFuture<ResponseEntity<JsonNode>> sending = CompletableFuture.supplyAsync(() -> dispatch("4"));
+            assertThat(waitersReach(1, sending))
+                    .as("the dispatch waits on the balance row")
+                    .isTrue();
+            CompletableFuture<ResponseEntity<JsonNode>> switching =
+                    CompletableFuture.supplyAsync(() -> putCapabilities(Map.of("transfer_receipt", false)));
+            assertThat(waitersReach(2, switching))
+                    .as("the switch-off waits for the dispatch's share lock on the settings")
+                    .isTrue();
+            c.commit();
+
+            ResponseEntity<JsonNode> sent = sending.get(30, TimeUnit.SECONDS);
+            ResponseEntity<JsonNode> refused = switching.get(30, TimeUnit.SECONDS);
+
+            assertThat(sent.getStatusCode()).as("%s", sent.getBody()).isEqualTo(HttpStatus.CREATED);
+            assertThat(sent.getBody().get("status").asString()).isEqualTo("in_transit");
+            assertThat(refused.getStatusCode()).as("%s", refused.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+            assertThat(code(refused)).isEqualTo("transfers_in_transit");
+            assertThat(api.get("/settings/capabilities", SETTINGS)
+                            .getBody()
+                            .get("transfer_receipt")
+                            .asBoolean())
+                    .isTrue();
+            assertThat(receiveAll(RetailTestSupport.id(sent)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        }
+    }
+
+    /**
+     * Waits (up to 30 seconds) until {@code n} database backends wait for a lock, then reports whether the call is still
+     * unfinished. The only lock waits in this test are the ones it arranges.
+     */
+    private boolean waitersReach(int n, CompletableFuture<?> call) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (System.nanoTime() < deadline && !call.isDone()) {
+            long waiting = TestDatabase.owner()
+                    .sql("SELECT count(DISTINCT pid) FROM pg_locks WHERE NOT granted")
+                    .query(Long.class)
+                    .single();
+            if (waiting >= n) {
+                return !call.isDone();
+            }
+            Thread.sleep(50);
+        }
+        return false;
     }
 
     /** A branch's role is pinned while a dispatched transfer touches it (spec 2.1), and free again once it is received. */

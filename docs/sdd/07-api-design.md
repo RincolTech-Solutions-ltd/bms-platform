@@ -1333,7 +1333,9 @@ caller's scope, 422 `branch_has_open_work` while a dispatched transfer is unrece
 `branch_role_forbids_sales` for a store. Built (issue #193): the two-step transfer, whose routes
 (`/receive`, `/cancel`, the `status` filter) and the reports `stock-by-location` and
 `transfers-in-flight` are in section 7.11.20 above; a capability change that switches
-`transfer_receipt` off while a transfer is on its way is 422 `transfers_in_transit`.
+`transfer_receipt` off while a transfer is on its way is 422 `transfers_in_transit`, decided under
+the settings row lock, which a transfer holds shared while it records (issue #239), so a dispatch
+in progress makes the change wait and is then counted.
 
 Built (issue #194, units of measure): the three pack routes above, the optional `unit_id` on a sale line and a restock line, the pack fields on their responses, and the `pack unit` and `pack factor` import columns. New error codes: 422 `quantity_not_representable`, `unknown_pack_unit` (a field problem), `pack_unit_is_base_unit`, `unit_in_use_by_pack`; 409 `duplicate_pack`. Built (issue #195, price lists, migration V41): the routes below and the optional `price_list_id` on a sale and `price_override_reason` on a sale line; a sale line and a sale carry how they were priced. All of them are 404 `capability_not_enabled` while `price_lists` is off. Reading a list, its items or the groups needs `retail.pricelist.manage` as well as writing: a list is a customer's negotiated price, so a seller never lists them and asks `POST /retail/prices/resolve` (`retail.sale.create`) for the price it needs. Money is integer minor units per the item's unit; the cost of an item never leaves, only `below_cost` and only with `retail.profit.read`. New error codes: 422 `no_price_in_list`, `override_reason_required`, `unknown_price_list` (a field problem), `unit_in_use_by_price_list`; 409 `price_item_overlap`, `duplicate_price_list`, `duplicate_customer_group`; 422 `price_item_closed`; 403 `permission_denied` for a price override or a foreign list without the permission. Design only, not built: the rest of this section.
 
