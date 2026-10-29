@@ -24,6 +24,27 @@ afterAll(async () => {
   await server?.close();
 });
 
+// D76 (issue #688): with cartons on and a carton size typed, the cartons and loose fields fit a 412px phone and a laptop, and on
+// the laptop every field keeps to the form's column.
+// JUSTIFICATION-A3: D76 asks to check the desktop layout as well as 412px; the existing check covers phones only.
+describe.each([412, 1280])('Quick add in cartons at %ipx wide', (width) => {
+  it('fits, with Comes in cartons of, full cartons and loose pieces', async () => {
+    const page = await browser.newPage({ viewport: { width, height: 900 }, ...(width < 720 ? { hasTouch: true, isMobile: true } : {}) });
+    await page.goto(`${base}layout/quick-add.html?packs=1`);
+    await page.locator('#qa-carton').waitFor();
+    await page.fill('#qa-carton', '24');
+    await page.locator('#qa-cartons').waitFor();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth), 'page width').toBeLessThanOrEqual(width);
+    const form = await page.evaluate(() => document.querySelector('form')?.getBoundingClientRect().right ?? Infinity);
+    for (const id of ['qa-carton', 'qa-cartons', 'qa-qty']) {
+      const box = await page.evaluate((x) => document.getElementById(x)?.getBoundingClientRect().toJSON(), id);
+      expect(box?.right, id).toBeLessThanOrEqual(form + 0.5);
+      expect(box?.height, `${id} is a 48px target`).toBeGreaterThanOrEqual(47.5);
+    }
+    await page.close();
+  });
+});
+
 describe.each([360, 390, 412])('Quick add at %ipx wide', (width) => {
   it.each([1, 2])('fits the phone at font scale %i, before and after Add shows the errors', async (font) => {
     const page = await browser.newPage({ viewport: { width, height: 900 }, hasTouch: true, isMobile: true });

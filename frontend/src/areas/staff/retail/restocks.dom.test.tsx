@@ -223,7 +223,7 @@ describe('entering a voided restock again', () => {
 });
 
 describe('the date of a restock entered again', () => {
-  const draft = { supplierId: '', newSupplier: '', purchasedOn: '2020-01-01', method: 'cash' as const, lines: [] };
+  const draft = { supplierId: '', purchasedOn: '2020-01-01', method: 'cash' as const, lines: [] };
 
   it('warns in plain words when it is dated before today', () => {
     screenOf(admin, <RestockForm draftName="restock-again:test:r1" initial={draft} again />);
