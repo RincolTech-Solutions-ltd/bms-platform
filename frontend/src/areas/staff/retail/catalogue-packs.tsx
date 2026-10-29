@@ -342,7 +342,6 @@ export function PackEditor({ product }: { product: Product }) {
 
 export const PACKS_QUESTION = 'Also sold or bought in cartons or boxes?';
 export const ASK_OWNER_PACKS = 'Ask the owner to turn on cartons in Retail settings.';
-export const PACKS_ON_ADDING = 'Cartons are on. Once the item is added, tap Edit on it to add its cartons and boxes.';
 
 /** The /me of every signed-in query with packs listed among the retail capabilities. */
 export function withPacksOn(me: Me): Me {
@@ -354,10 +353,9 @@ export function withPacksOn(me: Me): Me {
  * Issue #630: while packs are off, the item form says in one line that they exist. Someone who manages settings turns them on
  * here, through the capabilities route with its If-Match, and the pack section shows at once; anyone else reads who can.
  */
-export function PacksTurnOn({ adding }: { adding: boolean }) {
+export function PacksTurnOn(_props: { adding: boolean }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
-  const [done, setDone] = useState(false);
   const turnOn = useMutation({
     mutationFn: async () => {
       // Read, then send only units with that version; the server merges it. A change by someone else in between is read
@@ -376,12 +374,11 @@ export function PacksTurnOn({ adding }: { adding: boolean }) {
       queryClient.setQueryData(['retail', 'capabilities'], next);
       queryClient.setQueriesData<Me>({ queryKey: ['me'] }, (was) => (was ? withPacksOn(was) : was));
       void queryClient.invalidateQueries({ queryKey: ['me'] });
-      setDone(true);
     },
     meta: { success: 'Packs switched on' },
   });
   if (!holds(me, 'retail.catalogue.manage')) return null;
-  if (capabilityOn(me, 'retail', UNITS)) return done && adding ? <p role="status" data-testid="packs-on">{PACKS_ON_ADDING}</p> : null;
+  if (capabilityOn(me, 'retail', UNITS)) return null;
   return (
     <div className="stack" data-testid="packs-turn-on">
       <p>{PACKS_QUESTION}</p>
