@@ -100,6 +100,9 @@ class RetailBranchRolesIT extends IntegrationTest {
         ResponseEntity<JsonNode> listed = api.get("/branch-roles", ADMIN);
         assertThat(listed.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(code(listed)).isEqualTo("capability_not_enabled");
+        // Issue #257: plain words for API callers, the code kept for clients.
+        assertThat(listed.getBody().get("detail").asString())
+                .isEqualTo("This feature is not switched on for your business.");
         // A role row can exist while the capability is off (set directly); it is ignored.
         TestDatabase.owner()
                 .sql("INSERT INTO retail_branch_roles (tenant_id, branch_id, role) VALUES (?, ?, 'shop')")
