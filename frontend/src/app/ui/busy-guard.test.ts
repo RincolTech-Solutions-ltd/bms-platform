@@ -310,19 +310,54 @@ function restOfBlock(text: string, from: number): string {
 }
 
 /** The code that runs when a mutation works: its options, its hook's, each send to the end of its block, and what they call. */
-function successCode(text: string, m: Mutation, hookOpts: Map<string, string>): string {
+function successCode(text: string, m: Mutation, hookOpts: Map<string, string>, successOnly = false): string {
   const callee = /=\s*(\w+)/.exec(text.slice(m.index))?.[1] ?? '';
   const parts = [balanced(text, text.indexOf('(', m.index)), hookOpts.get(callee) ?? ''];
   for (const send of m.sends) {
     for (const call of text.matchAll(new RegExp(`(^|[^\\w.])${send.replace('.', '\\.')}\\s*\\(`, 'g'))) parts.push(restOfBlock(text, call.index + call[0].length - 1));
   }
-  return follow(text, parts, true);
+  return follow(text, successOnly ? parts.map(withoutOnError) : parts, true);
 }
 
 /** The mutations of one file that say nothing when they work and carry no toast-exempt reason. */
 function silent(text: string, hooks: string[] = mutationHooks(text), hookOpts = new Map(hookOptions(text))): string[] {
   return mutations(text, hooks)
     .filter((m) => !exempted(text, m.index, TOAST_EXEMPT) && !SAYS_DONE.test(successCode(text, m, hookOpts)))
+    .map((m) => `${m.line} ${m.name}`);
+}
+
+// One success signal per action (review of #685): a success path that shows a toast and also sets a success note
+// (`setDone('Saved.')`, `setMessage(...)`, `setSaved(true)`) says it twice. A full success screen that replaces the form keeps
+// its screen, sets no toast and is marked `// toast-exempt: success screen`, so it never reaches this check. Clearing a note
+// (`setMessage(null)`) is not a note, and an onError handler is not the success path.
+const SUCCESS_NOTE = /\bset(?:Done|Saved|Message|Notice|Success)\((?!\s*(?:null|false|undefined|''|"")\s*\))/;
+
+/** `code` without its `onError:` handlers (a name, or an arrow function with a balanced body), so a failure path is not read. */
+function withoutOnError(code: string): string {
+  let out = code;
+  for (let at = out.search(/\bonError:/); at >= 0; at = out.search(/\bonError:/)) {
+    let end = at + 'onError:'.length;
+    while (/\s/.test(out[end] ?? '')) end += 1;
+    if (out[end] === '(') {
+      end += balanced(out, end).length;
+      end = out.indexOf('=>', end) + 2;
+      while (/\s/.test(out[end] ?? '')) end += 1;
+    }
+    if (out[end] === '{' || out[end] === '(') end += balanced(out, end).length;
+    else end += /^[^,}\n]*/.exec(out.slice(end))?.[0].length ?? 0;
+    out = out.slice(0, at) + out.slice(end);
+  }
+  return out;
+}
+
+/** The mutations of one file whose success path both shows a toast and sets a success note. */
+function doubled(text: string, hooks: string[] = mutationHooks(text), hookOpts = new Map(hookOptions(text))): string[] {
+  return mutations(text, hooks)
+    .filter((m) => !exempted(text, m.index, TOAST_EXEMPT))
+    .filter((m) => {
+      const code = successCode(text, m, hookOpts, true);
+      return SAYS_DONE.test(code) && SUCCESS_NOTE.test(code);
+    })
     .map((m) => `${m.line} ${m.name}`);
 }
 
@@ -336,6 +371,10 @@ describe('success toast guard', () => {
 
   it('every staff mutation says in a toast when it worked, or says why not', () => {
     expect(staff.flatMap(({ file, text }) => silent(text, hooks, hookOpts).map((m) => `${file}:${m}`))).toEqual([]);
+  });
+
+  it('no staff mutation says its success twice, in a toast and a success note', () => {
+    expect(staff.flatMap(({ file, text }) => doubled(text, hooks, hookOpts).map((m) => `${file}:${m}`))).toEqual([]);
   });
 
   it('every staff write by hand says in a toast when it worked, or says why not', () => {
@@ -363,6 +402,14 @@ describe('success toast guard on fixtures', () => {
     expect(silent(`const save = useMutation({ mutationFn: send, onSuccess: () => show(x, 'info') });\nconst tone = ok ? 'success' : 'info'`)).toEqual(['1 save']);
     expect(silent(`const save = useMutation({ mutationFn: send, meta: { success: () => null } });${press}`)).toEqual(['1 save']);
     expect(silent(`const save = useMutation({ mutationFn: send, onSuccess: (r) => show(savedWords(r), r.ok ? 'success' : 'info') });`)).toEqual([]);
+  });
+
+  it('fails a success said twice, and passes a toast alone, a cleared note, an error note and a success screen', () => {
+    expect(doubled(`const save = useMutation({ mutationFn: send, onSuccess: () => setDone('Saved.'), meta: { success: 'Saved' } });`)).toEqual(['1 save']);
+    expect(doubled(`const save = useMutation({ mutationFn: send, onSuccess: () => { setMessage(t); show(t, 'success'); } });`)).toEqual(['1 save']);
+    expect(doubled(`const save = useMutation({ mutationFn: send, onSuccess: () => setMessage(null), meta: { success: 'Saved' } });`)).toEqual([]);
+    expect(doubled(`const save = useMutation({ mutationFn: send, onError: (e) => setMessage(e.message), meta: { success: 'Saved' } });`)).toEqual([]);
+    expect(doubled(`// toast-exempt: success screen, the receipt replaces the form\nconst save = useMutation({ mutationFn: send, onSuccess: () => setDone(r) });`)).toEqual([]);
   });
 
   it('fails a write by hand that says nothing, and passes sayDone or a toast-exempt reason above it', () => {
