@@ -317,7 +317,7 @@ describe('a commit and an old count', () => {
     await ready();
     expect(countBox('A-1').value).toBe('10');
     expect(screen.queryByTestId('count-earlier')).toBeNull();
-    expect(screen.getByTestId('count-kept').textContent).toMatch(/^Counts from today \d{2}:\d{2} are filled in\.Start again$/);
+    expect(screen.getByTestId('count-kept').textContent).toMatch(/^Counted today at \d{2}:\d{2}Start again$/);
     fireEvent.click(screen.getByRole('button', { name: 'Start again' }));
     expect(screen.getByText('Clear all 2 counts? Your stock does not change.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Keep them' }));
@@ -352,7 +352,7 @@ describe('a commit and an old count', () => {
     await screen.findByText(/^Not counted yet/);
     expect(countBox('A-1').value).toBe('10');
     expect(screen.queryByTestId('count-earlier')).toBeNull();
-    expect(screen.getByTestId('count-kept').textContent).toMatch(/^Counts from \w+day \d{2}:\d{2} are filled in\./);
+    expect(screen.getByTestId('count-kept').textContent).toMatch(/^Counted on \w+day at \d{2}:\d{2}Start again$/);
     expect(status()).toBe('Saved on this phone, 1 item');
   });
 

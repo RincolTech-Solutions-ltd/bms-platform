@@ -429,7 +429,7 @@ function CountSheet({ branchId }: { branchId: string }) {
       {saving.other && <p className="hint" data-testid="count-other-tab">{otherTabWords(saving.other)}</p>}
       {keptLine && kept && valid.length > 0 && (
         <div className="alert alert-info" data-testid="count-kept">
-          <p>{`Counts from ${kept.day} ${kept.time} are filled in.`}</p>
+          <p>{kept.earlier ? `Counted on ${kept.day} at ${kept.time}` : `Counted today at ${kept.time}`}</p>
           {clearing ? (
             <p className="cluster">
               <span>{`Clear all ${valid.length} ${valid.length === 1 ? 'count' : 'counts'}? Your stock does not change.`}</span>
