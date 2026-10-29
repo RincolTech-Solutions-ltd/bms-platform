@@ -143,6 +143,30 @@ class RetailNewItemPacksIT extends IntegrationTest {
             assertThat(RetailCatalogue.isPackageWord(word)).as(word).isFalse();
         }
         assertThat(RetailCatalogue.isPackageWord(null)).isFalse();
+        // Review of #692: the unit reads in the singular, whatever its name.
+        assertThat(RetailCatalogue.packageAsUnit("Boxes"))
+                .isEqualTo("A box is a package. Choose the smallest unit, like piece, then add the box below.");
+        assertThat(RetailCatalogue.packageAsUnit("Cases")).startsWith("A case is a package.");
+        assertThat(RetailCatalogue.packageAsUnit("Sets of 4")).startsWith("A set of 4 is a package.");
+        assertThat(RetailCatalogue.packageAsUnit("Ctn")).startsWith("A ctn is a package.");
+    }
+
+    /** Review of #692: Add an item with sizes and colours makes items too, and never in a package. */
+    // JUSTIFICATION-A3: the review of #692 asks for this route's refusal to be proven by an IT.
+    @Test
+    void anItemWithSizesIsNeverCountedInAPackage() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("name", "Test Bulb");
+        body.put("category_id", category);
+        body.put("unit_id", box);
+        body.put("cost_minor", 3_000);
+        body.put("sell_minor", 5_000);
+        body.put("sizes", List.of("40W", "60W"));
+        ResponseEntity<JsonNode> r = api.post("/product-families", body, ADMIN);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().toString()).contains("unit_is_package").contains("A box is a package.");
+        body.put("unit_id", bulb);
+        assertThat(api.post("/product-families", body, ADMIN).getStatusCode()).isEqualTo(HttpStatus.CREATED);
     }
 
     @Test
@@ -164,17 +188,6 @@ class RetailNewItemPacksIT extends IntegrationTest {
         assertThat(isPackage.get(box.toString())).isTrue();
         assertThat(isPackage.get(carton.toString())).isTrue();
         assertThat(isPackage.get(bulb.toString())).isFalse();
-    }
-
-    @Test
-    void anItemWithSizesIsNeverCountedInAPackage() {
-        Map<String, Object> body = item("Test Bulb", box, null);
-        body.put("name", body.remove("description"));
-        body.put("sizes", List.of("40W", "60W"));
-        ResponseEntity<JsonNode> r = api.post("/product-families", body, ADMIN);
-        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(r.getBody().toString()).contains("unit_is_package").contains("A box is a package.");
-        assertThat(products("Test Bulb 40W")).isZero();
     }
 
     @Test
@@ -224,12 +237,34 @@ class RetailNewItemPacksIT extends IntegrationTest {
                 ADMIN);
         assertThat(twice.getStatusCode()).as("%s", twice.getBody()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(twice.getBody().toString()).contains("duplicate_pack");
+        // Review of #692: the refusal names the package it is about, never the item's own unit.
+        assertThat(twice.getBody().get("pack_index").asInt()).isEqualTo(1);
 
         // A package in the item's own unit is refused after the item is written.
         ResponseEntity<JsonNode> own =
                 api.post("/products", item("Test Bulb 60W", bulb, List.of(pack(bulb, "10", "both", null))), ADMIN);
         assertThat(own.getStatusCode()).as("%s", own.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(own.getBody().toString()).contains("pack_unit_is_base_unit");
+        assertThat(own.getBody().get("pack_index").asInt()).isZero();
+
+        // A package unit switched off meanwhile is refused on that package's field.
+        String version = api.get("/units", ADMIN)
+                .getBody()
+                .get("items")
+                .valueStream()
+                .filter(u -> u.get("id").asString().equals(box.toString()))
+                .findFirst()
+                .orElseThrow()
+                .get("version")
+                .asString();
+        api.call(HttpMethod.PATCH, "/units/" + box, Map.of("active", false), ADMIN, "*", Map.of("If-Match", version));
+        ResponseEntity<JsonNode> off = api.post(
+                "/products",
+                item("Test Bulb 60W", bulb, List.of(pack(carton, "10", "both", null), pack(box, "100", "buy", null))),
+                ADMIN);
+        assertThat(off.getStatusCode()).as("%s", off.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(off.getBody().get("pack_index").asInt()).isEqualTo(1);
+        assertThat(off.getBody().toString()).contains("packs[1].unit_id").contains("inactive_unit");
 
         // A price on a package from someone who may not change prices is refused before anything is written.
         ResponseEntity<JsonNode> priced = api.post(

@@ -48,5 +48,5 @@ cartons are added in one go, so stock reads in cartons and pieces (ADR-103) from
 cement" (only "of" and a number makes a size), since "Bag" alone is a package; the owner chose the list with bag and sack in
 it. The word list is English only.
 
-**Watch for:** a new way to make items must call `CatalogueService.requireSmallestUnit`, as `POST /retail/products` and `POST
+**Watch for:** a new way to make items must call `CatalogueService.refusePackageUnit`, as `POST /retail/products` and `POST
 /retail/product-families` do, to keep the rule; the CSV import and Edit item do not apply it yet. Quick add will reuse the package rows once issue #688 lands.

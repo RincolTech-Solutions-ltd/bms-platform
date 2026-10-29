@@ -48,6 +48,22 @@ public interface RetailCatalogue {
     }
 
     /**
+     * Issue #689: the refusal of a package as a new item's unit, the unit named in the singular ("Boxes" reads "a box"), as
+     * the PWA words it ({@code packageAsUnit} in new-item-packs.tsx).
+     */
+    static String packageAsUnit(String unitName) {
+        String word = unitName.trim().toLowerCase(java.util.Locale.ROOT);
+        int of = word.indexOf(" of ");
+        String head = of < 0 ? word : word.substring(0, of);
+        String tail = of < 0 ? "" : word.substring(of);
+        head = head.endsWith("xes")
+                ? head.substring(0, head.length() - 2)
+                : head.endsWith("s") && !head.endsWith("ss") ? head.substring(0, head.length() - 1) : head;
+        word = head + tail;
+        return "A " + word + " is a package. Choose the smallest unit, like piece, then add the " + word + " below.";
+    }
+
+    /**
      * Issue #650 (ADR-103): the standard pack of the product aliased {@code product}, the one its stock is shown and counted
      * in, as a subquery of {@code pack_id}, {@code pack_unit} and {@code pack_factor} (one row or none). Of its active packs
      * holding more than one base unit: first a pack used for selling or both (ADR-099) whose unit has a usual pack (ADR-100) of
