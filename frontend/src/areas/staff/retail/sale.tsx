@@ -40,6 +40,7 @@ import { useEntryChecks, useEntryNorms } from './entry-checks';
 import { FirstItemsCard, useNoItemsYet } from './first-items';
 import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
 import { ScreenLink, addOn } from './screen-link';
+import { CustomerPicker } from './customer-picker';
 import { dropWords } from './stocktake';
 import { useBranchHold } from '../branch-picker';
 import { icons } from '../../../components/icons';
@@ -270,6 +271,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
 
   // The client sale id is the draft's key, so a sale whose answer was lost and that is kept to send later is never twice.
   // The request is kept with the draft once sent: until the server answers, the same request is all that can go again.
+  // toast-exempt: success screen, the sale complete screen headed Sale saved through onSaved
   const save = useMutation({
     mutationFn: (body: SaleRequest) => retail.createSale(body, key),
     onError: (e) => {
@@ -294,6 +296,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       setDraft((d) => ({ ...d, customerId: c.id ?? '', newBuyerName: '', newBuyerContact: '' }));
       setAddingBuyer(false);
     },
+    meta: { success: 'Customer added' },
   });
   const update = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const setLine = (i: number, patch: { qty?: string; price?: string; typed?: boolean; reason?: string }) =>
@@ -569,6 +572,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
   };
   const entry = useEntryChecks('sell', branchId, warnings, send, draft.lines);
   const lost = locked && !save.isPending && !(save.error instanceof RetailError);
+  // toast-exempt: success screen, the queued notice: the provisional receipt headed Sale saved on this phone through onQueued
   const keep = useMutation({
     mutationFn: async () => {
       if (!offline) throw new Error('Offline sales are not available');
@@ -697,20 +701,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       {pricesOn && draft.method !== 'credit' && (
         <fieldset data-tour="sale-customer">
           <legend>Customer</legend>
-          {showsEmptyChoice(customers) ? (
-            <EmptyChoice id="price-customer" label="Customer (optional): sets the price list" load={customers} text="No customers yet." ask="Ask the owner to add your customers first."
-              add={addOn(me, 'buyers', 'Add a customer', '/staff/retail/catalogue/buyers')} />
-          ) : (
-          <>
-          <label htmlFor="price-customer">Customer (optional): sets the price list</label>
-          <select id="price-customer" value={draft.customerId} onChange={(e) => update({ customerId: e.target.value })}>
-            <option value="">No customer: retail prices</option>
-            {(customers.data ?? []).map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-          </>
-          )}
+          <CustomerPicker id="price-customer" label="Customer (optional): sets the price list" placeholder="No customer: retail prices"
+            customers={customers} value={draft.customerId} onChange={(customerId) => update({ customerId })} />
         </fieldset>
       )}
       {canChooseList && (

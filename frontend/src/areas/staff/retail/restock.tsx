@@ -12,7 +12,7 @@ import { Gate, Money, Note, Problem, ProductPicker, money, useProfitAccess } fro
 import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne, scanInto, touchedLine } from './barcode-state';
 import { ScreenToast, useItemAdded } from './toast';
-import { UNITS, capabilityOn } from './permissions';
+import { UNITS, canUse, capabilityOn } from './permissions';
 import { OWN_PRICE_KEEPS_SIZE, baseCostMinor, baseQtyMilli, buyingPacks, chosenPack, deliveredFactor, mayKeepSize, packPriceMinor, sameFactor } from './units-state';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Field, FieldsNeededNote } from '../../../app/ui/Field';
@@ -21,7 +21,8 @@ import { NewItemHere, type AddedItem } from './new-item-here';
 import { RowChevron } from '../../../app/ui/ListRow';
 import { entryWarnings, type EntryWarning } from './entry-checks-state';
 import { useEntryChecks, useEntryNorms } from './entry-checks';
-import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
+import { AddByName } from '../../../app/ui/EmptyChoice';
+import { PickerWithAdd } from '../../../app/ui/PickerWithAdd';
 
 // Restock (FR-RET-06): supplier, lines with cost, sell price and a quantity per branch. Saving sets
 // the product's cost and sell price in the same transaction and leaves a price history row.
@@ -125,18 +126,27 @@ export const METHODS: { value: PurchasePayment; label: string }[] = [
   { value: 'credit', label: `${WORDS.onCredit} (owed to the supplier)` },
 ];
 
-/** On credit is owed to someone, so it needs a supplier: one chosen or a new one typed. */
-export function creditNeedsSupplier(method: PurchasePayment, supplierId: string, newSupplier: string): string | null {
-  return method === 'credit' && supplierId === '' && newSupplier.trim() === '' ? 'On credit needs a supplier. Choose one above, or add a new one.' : null;
+/** On credit is owed to someone, so it needs a supplier chosen in the list (+ Add a supplier adds one there, issue #688). */
+export function creditNeedsSupplier(method: PurchasePayment, supplierId: string): string | null {
+  return method === 'credit' && supplierId === '' ? 'On credit needs a supplier. Choose one above, or + Add a supplier.' : null;
 }
 
 /** What the restock form keeps with its key in this tab until saved or cleared (#77). */
 export interface RestockDraft {
   supplierId: string;
-  newSupplier: string;
   purchasedOn: string;
   method: PurchasePayment;
   lines: RestockLine[];
+}
+
+/**
+ * A draft kept before issue #688 may carry a typed `newSupplier`, which the form no longer shows: it is dropped when the draft is
+ * restored, so nothing is made that the form does not show. A draft without one is given back as it was.
+ */
+export function withoutTypedSupplier(draft: RestockDraft): RestockDraft {
+  if (!('newSupplier' in draft)) return draft;
+  const { newSupplier: _dropped, ...rest } = draft as RestockDraft & { newSupplier?: string };
+  return rest;
 }
 
 /** What the confirmation needs besides the server's answer: who supplied it and the prices before. */
@@ -162,31 +172,23 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
   const queryClient = useQueryClient();
   const branches = (me.branches ?? []).filter((b) => b.id && b.stocks_goods !== false);
   // A restock entered again after a void (issue #351) has a draft of its own, so a restock in progress is never overwritten.
-  const { key, draft, setDraft, finish, discard } = usePersistedDraft<RestockDraft>(draftName ?? `restock:${me.user_id ?? ''}`, initial ?? {
-    supplierId: '', newSupplier: '', purchasedOn: businessToday(), method: 'cash', lines: [],
-  });
-  const { supplierId, newSupplier, purchasedOn, method, lines } = draft;
+  const { key, draft, setDraft, finish, discard } = usePersistedDraft<RestockDraft>(draftName ?? `restock:${me.user_id ?? ''}`, initial ? withoutTypedSupplier(initial) : {
+    supplierId: '', purchasedOn: businessToday(), method: 'cash', lines: [],
+  }, withoutTypedSupplier);
+  const { supplierId, purchasedOn, method, lines } = draft;
   const field = <K extends keyof RestockDraft>(k: K) => (v: RestockDraft[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const setSupplierId = field('supplierId');
-  const setNewSupplier = field('newSupplier');
   const setPurchasedOn = field('purchasedOn');
   const setMethod = field('method');
   const setLines = (f: (ls: RestockLine[]) => RestockLine[]) => setDraft((d) => ({ ...d, lines: f(d.lines) }));
   const suppliers = useQuery({ queryKey: ['retail', 'suppliers'], queryFn: () => retail.listSuppliers() });
 
+  // toast-exempt: success screen, the purchase saved screen that replaces the form
   const save = useMutation({
     mutationFn: async () => {
-      let id = supplierId;
-      let supplierName = (suppliers.data ?? []).find((x) => x.id === supplierId)?.name ?? '';
+      const supplierName = (suppliers.data ?? []).find((x) => x.id === supplierId)?.name ?? '';
       const before = Object.fromEntries(lines.map((l) => [l.product.id ?? '', { sell: l.product.sell_minor, cost: l.product.cost_minor }]));
-      if (!id && newSupplier.trim()) {
-        const created = await retail.createSupplier({ name: newSupplier.trim() });
-        id = created.id ?? '';
-        supplierName = created.name ?? newSupplier.trim();
-        // Kept in the draft, so a retry after a failed restock does not add the supplier twice.
-        setDraft((d) => ({ ...d, supplierId: id, newSupplier: '' }));
-      }
-      const saved = await retail.createPurchase(buildPurchase({ supplierId: id, purchasedOn, method, lines }), key);
+      const saved = await retail.createPurchase(buildPurchase({ supplierId, purchasedOn, method, lines }), key);
       return { saved, context: { supplierName, before } };
     },
     onSuccess: ({ saved, context }) => {
@@ -242,8 +244,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
   const patchWhole = (i: number, line: RestockLine) => setLines((ls) => ls.map((l, n) => (n === i ? line : l)));
 
   const problems = lines.map(restockLineProblem);
-  const supplierProblem = creditNeedsSupplier(method, supplierId, newSupplier);
-  const noSuppliers = showsEmptyChoice(suppliers, suppliers.data && supplierOptions(suppliers.data, supplierId));
+  const supplierProblem = creditNeedsSupplier(method, supplierId);
   const blocked = lines.length === 0 || problems.some((p) => p !== null) || supplierProblem !== null;
   // Issue #353: each line against the item's own purchases, said before saving, never blocking.
   const norms = useEntryNorms(lines.map((l) => l.product.id));
@@ -265,27 +266,42 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
       <FieldsNeededNote />
 
       <div data-tour="restock-supplier">
-      {noSuppliers ? (
-        // The supplier is added right here, by the name typed below, when the purchase is saved.
-        <EmptyChoice id="supplier" label="Supplier" load={suppliers} text="No suppliers yet. Type a new one below." />
-      ) : (
-      <>
-      <label htmlFor="supplier">Supplier{method === 'credit' && <span className="field-star" aria-hidden="true"> *</span>}</label>
-      <select id="supplier" value={supplierId} aria-required={method === 'credit' || undefined} onChange={(e) => setSupplierId(e.target.value)}>
-        <option value="">No supplier</option>
-        {supplierOptions(suppliers.data ?? [], supplierId).map((s) => (
-          <option key={s.id} value={s.id}>{s.active === false ? `${s.name} (switched off)` : s.name}</option>
-        ))}
-      </select>
-      </>
-      )}
+      {/* Issue #688: a supplier who is not in the list is added in a sheet over the form and chosen; the lines stay. */}
+      <PickerWithAdd
+        id="supplier"
+        label="Supplier"
+        thing="supplier"
+        placeholder="No supplier"
+        options={supplierOptions(suppliers.data ?? [], supplierId).map((s) => ({ value: s.id ?? '', label: s.active === false ? `${s.name ?? ''} (switched off)` : s.name ?? '' }))}
+        value={supplierId}
+        onChange={setSupplierId}
+        canAdd={canUse(me, 'suppliers')}
+        required={method === 'credit'}
+        loading={suppliers.data === undefined}
+        load={suppliers}
+        empty="No suppliers yet."
+        ask="Ask the owner to add a supplier first."
+        form={(done, cancel) => (
+          <AddByName
+            id="supplier-add"
+            onCancel={cancel}
+            add={{
+              label: 'Add a supplier',
+              name: 'Name of the new supplier',
+              send: 'Add supplier',
+              maxLength: 120,
+              create: (name) => retail.createSupplier({ name }),
+              onAdded: (s: Supplier) => {
+                queryClient.setQueryData<Supplier[]>(['retail', 'suppliers'], (was) => was && [...was.filter((x) => x.id !== s.id), s]);
+                void queryClient.invalidateQueries({ queryKey: ['retail', 'suppliers'] });
+                show(`Added the supplier ${s.name ?? ''}.`, 'success');
+                done({ value: s.id ?? '', label: s.name ?? '' });
+              },
+            }}
+          />
+        )}
+      />
       </div>
-      {supplierId === '' && (
-        <>
-          <label htmlFor="new-supplier">{noSuppliers ? 'Add a new supplier' : 'Or add a new supplier'}</label>
-          <input id="new-supplier" value={newSupplier} aria-required={supplierProblem !== null || undefined} data-needed={supplierProblem !== null ? '' : undefined} onChange={(e) => setNewSupplier(e.target.value)} />
-        </>
-      )}
       <label htmlFor="bought-on">Bought on</label>
       <input id="bought-on" type="date" max={businessToday()} value={purchasedOn} onChange={(e) => setPurchasedOn(e.target.value)} />
       {again && purchasedOn < businessToday() && (

@@ -10,7 +10,8 @@ import { Money, Problem, money } from './ui';
 import { SETTINGS_MANAGE, UNITS, capabilityOn, holds } from './permissions';
 import { factorMilli, hasOwnPrice, packPriceMinor } from './units-state';
 import { WORDS } from '../../../app/glossary';
-import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
+import { AddByName } from '../../../app/ui/EmptyChoice';
+import { PickerWithAdd } from '../../../app/ui/PickerWithAdd';
 import { Hint } from '../../../app/ui/Hint';
 import { RowChevron } from '../../../app/ui/ListRow';
 import { MoneyInput } from '../../../app/ui/MoneyInput';
@@ -100,6 +101,12 @@ function PackSheet({ product, pack, mayPrice, onClose }: { product: Product; pac
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onClose();
+    },
+    meta: {
+      success: (_r: unknown, v: Parameters<typeof retail.updatePack>[3]) => (v?.active === false ? 'Pack switched off' : v?.active === true ? 'Pack switched on' : 'Pack saved'),
+      // A switch on or off can be taken back from the toast (#682): the same change the other way, on the version it made.
+      undo: (r: Awaited<ReturnType<typeof retail.updatePack>>, v: Parameters<typeof retail.updatePack>[3]) =>
+        v?.active === undefined || typeof r?.version !== 'number' ? null : () => retail.updatePack(product.id ?? '', pack.unit_id ?? '', r.version ?? 1, { active: !v.active }),
     },
   });
   const problem = factorProblem(factor);
@@ -225,6 +232,7 @@ export function PackEditor({ product }: { product: Product }) {
       setFilled({ factor: '', purpose: 'both' });
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
+    meta: { success: 'Pack added' },
   });
   if (!allowed) return null;
   const rows = packs.data ?? [];
@@ -293,25 +301,31 @@ export function PackEditor({ product }: { product: Product }) {
         </div>
       )}
       {open && <PackSheet key={`${open.unit_id}-${open.version}`} product={product} pack={open} mayPrice={mayPrice} onClose={() => setEditing(null)} />}
-      {showsEmptyChoice(units, units.data && choices) ? (
-        <EmptyChoice id="pack-unit" label="Add a pack" load={units} text="No other unit to make a pack of yet." add={{
-          label: 'Add a new unit', name: 'Name of the new unit, such as carton', send: 'Add unit', maxLength: 50,
-          create: (name) => retail.createUnit(name),
-          onAdded: (unit) => {
-            queryClient.setQueryData<Unit[]>(['retail', 'catalogue', 'units'], (was) => [...(was ?? []).filter((u) => u.id !== unit.id), unit]);
-            void queryClient.invalidateQueries({ queryKey: ['retail', 'catalogue', 'units'] });
-            setUnitId(unit.id ?? '');
-          },
-        }} />
-      ) : (
-      <>
-      <label htmlFor="pack-unit">Add a pack</label>
-      <select id="pack-unit" value={unitId} onChange={(e) => chooseUnit(choices.find((u) => u.id === e.target.value))}>
-        <option value="">Choose a unit</option>
-        {choices.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-      </select>
-      </>
-      )}
+      {/* The pack's unit, with "+ Add a unit" in a sheet over the pack form (issue #688). */}
+      <PickerWithAdd
+        id="pack-unit"
+        label="Add a pack"
+        thing="unit"
+        placeholder="Choose a unit"
+        options={choices.map((u) => ({ value: u.id ?? '', label: u.name ?? '' }))}
+        value={unitId}
+        onChange={(next) => chooseUnit(choices.find((u) => u.id === next) ?? (next ? { id: next } : undefined))}
+        canAdd
+        loading={units.data === undefined}
+        load={units}
+        empty="No other unit to make a pack of yet."
+        form={(done, cancel) => (
+          <AddByName id="pack-unit-add" onCancel={cancel} add={{
+            label: 'Add a unit', name: 'Name of the new unit, such as carton', send: 'Add unit', maxLength: 50,
+            create: (name) => retail.createUnit(name),
+            onAdded: (unit: Unit) => {
+              queryClient.setQueryData<Unit[]>(['retail', 'catalogue', 'units'], (was) => [...(was ?? []).filter((u) => u.id !== unit.id), unit]);
+              void queryClient.invalidateQueries({ queryKey: ['retail', 'catalogue', 'units'] });
+              done({ value: unit.id ?? '', label: unit.name ?? '' });
+            },
+          }} />
+        )}
+      />
       <label htmlFor="pack-factor">Items in one pack</label>
       <input
         id="pack-factor"
@@ -374,8 +388,10 @@ export function PacksTurnOn() {
       queryClient.setQueriesData<Me>({ queryKey: ['me'] }, (was) => (was ? withPacksOn(was) : was));
       void queryClient.invalidateQueries({ queryKey: ['me'] });
     },
+    meta: { success: 'Packs switched on' },
   });
-  if (!holds(me, 'retail.catalogue.manage') || capabilityOn(me, 'retail', UNITS)) return null;
+  if (!holds(me, 'retail.catalogue.manage')) return null;
+  if (capabilityOn(me, 'retail', UNITS)) return null;
   return (
     <div className="stack" data-testid="packs-turn-on">
       <p>{PACKS_QUESTION}</p>
