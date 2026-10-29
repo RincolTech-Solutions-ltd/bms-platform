@@ -62,9 +62,10 @@ describe('the approvals inbox action column', () => {
     expect(await screen.findByText(/Collected by Test Collector 01\./)).toBeTruthy();
     expect(document.body.textContent).toContain('Note: Loan paid in full');
   });
-  it('leaves out who collects it when the request cannot be read', async () => {
+  it('says who collects it could not be loaded when the request cannot be read', async () => {
     show('collateral_release', 'c1', 'gone');
     expect(await screen.findByText(/Member: Test Borrower 01\./)).toBeTruthy();
+    expect(await screen.findByText(/Who collects it could not be loaded\./)).toBeTruthy();
     expect(document.body.textContent).not.toContain('Collected by');
   });
   it('shows an item with no currency in the business currency (issue #289)', async () => {

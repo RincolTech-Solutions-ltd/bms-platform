@@ -68,6 +68,7 @@ export function What({ item }: { item: Approval }) {
       ) : detail.isError ? <span className="hint"> The item could not be loaded here. Open the collateral register to see it before you decide.</span> : null}
       {member.data?.full_name && <span className="hint"> Member: {member.data.full_name}.</span>}
       {collectedBy && <span className="hint"> Collected by {collectedBy}.</span>}
+      {request.isError && <span className="hint"> Who collects it could not be loaded. Open the request before you decide.</span>}
       {note && <span className="hint"> Note: {note}</span>}
     </>
   );
