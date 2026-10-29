@@ -1326,11 +1326,12 @@ the profile and the eight flags, `PUT` needs `If-Match` with the settings versio
 does (the `ETag` is returned by `GET`), a change is partial, the group also carries the policy `credit_sale_recognition` (`on_sale`, the default, or `on_payment`; ADR-043, 422 on any other value; the kind of business does not change it) and the read-only `credit_recognition_effective_from` (the first business day of `on_payment`, the day after it was asked for: the rule counts from that day, and credit sales dated earlier keep counting the way they did; it is one way, so asking for `on_sale` once that day has come answers 422 `credit_rule_cannot_be_switched_off`, "This rule cannot be switched off once it has started. Ask Rincol support.", and before it cancels the change; a payment counts on the day it was entered and at the branch that took it), choosing a profile writes its preset
 first, the change is audited as `retail.capabilities.changed` with old and new values; an unknown key
 is 400 and a wrong value 422); `GET /retail/branch-roles` (`retail.stock.read`; the active branches in
-the caller's scope with `role` and `can_sell`) and `PUT /retail/branch-roles/{branch_id}` (body
-`{role}`, `retail.branch_role.manage`, audited as `retail.branch_role.changed`, 404 outside the
-caller's scope, 422 `branch_has_open_work` while a dispatched transfer is unreceived), both 404
-`capability_not_enabled` until `branch_roles` is on. `POST /retail/sales` answers 422
-`branch_role_forbids_sales` for a store. Built (issue #193): the two-step transfer, whose routes
+the caller's scope with `role` and `can_sell`; a Store, `sells_goods` false, is `store`) and `PUT
+/retail/branch-roles/{branch_id}` (body `{role}`, `shop` or `both` since ADR-104, `store` being 422 `validation_failed`
+because a store is marked with `sells_goods` on `PATCH /branches/{id}`; `retail.branch_role.manage`, audited as
+`retail.branch_role.changed`, 404 outside the caller's scope, 422 `branch_is_store` for a Store, 422 `branch_has_open_work`
+while a dispatched transfer is unreceived), both 404 `capability_not_enabled` until `branch_roles` is on. `POST
+/retail/sales` answers 422 `branch_does_not_sell` for a store (ADR-048; `branch_role_forbids_sales` until ADR-104). Built (issue #193): the two-step transfer, whose routes
 (`/receive`, `/cancel`, the `status` filter) and the reports `stock-by-location` and
 `transfers-in-flight` are in section 7.11.20 above; a capability change that switches
 `transfer_receipt` off while a transfer is on its way is 422 `transfers_in_transit`.
@@ -1449,7 +1450,7 @@ ageing, documents and quotations, purchase orders, goods receipts, supplier bill
 payments, landed cost, transfer receive and cancel, sale returns, and the reports stock-by-location,
 transfers-in-flight and supplier-payables. Existing routes gain optional request fields (a sale
 line's `unit_id`, a sale's `price_list_id`) that are ignored when the capability is off. New error
-codes: 422 `branch_role_forbids_sales`, `quantity_not_representable`, `no_price_in_list`,
+codes: 422 `branch_role_forbids_sales` (no longer answered since ADR-104), `branch_is_store`, `quantity_not_representable`, `no_price_in_list`,
 `credit_limit_exceeded`, `customer_required`, `payment_exceeds_allocatable`, `received_exceeds_dispatched`, `branch_has_open_work`, `unit_in_use_by_pack`, `transfers_in_transit`; 409 `price_item_overlap`, `transfer_not_in_transit`, `transfer_in_transit`, `transfer_cancelled`.
 
 ### 7.11.22 Lending: insights (`/lending/insights`, #153, ADR-030)
