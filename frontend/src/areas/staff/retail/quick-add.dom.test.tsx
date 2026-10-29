@@ -48,7 +48,7 @@ vi.mock('../../../api/retail', async (original) => {
   };
 });
 
-const { CARTON_FAILED, PACKAGE_UNIT, QuickAddForm, addedLine, isPackageWord, pieceUnit, readLastGroup, refusedForCertain, writeLastGroup } = await import('./quick-add');
+const { CARTON_FAILED, PACKAGE_UNIT, QuickAddForm, addedLine, pieceUnit, readLastGroup, refusedForCertain, writeLastGroup } = await import('./quick-add');
 const { ADD_CHOICE } = await import('../../../app/ui/PickerWithAdd');
 
 const owner = mockMe('admin');
@@ -502,7 +502,7 @@ describe('the group is needed (issue #688)', () => {
 describe('comes in cartons of (issue #688, D76)', () => {
   const packsOn: Me = { ...owner, module_capabilities: { ...owner.module_capabilities, retail: [...(owner.module_capabilities?.retail ?? []), 'units'] } };
   const PIECE = { id: 'u1', name: 'Piece', active: true, product_count: 0, version: 1 };
-  const CARTON = { id: 'u9', name: 'Carton', active: true, product_count: 0, version: 1 };
+  const CARTON = { id: 'u9', name: 'Carton', active: true, product_count: 0, version: 1, is_package: true };
   const fill = (name: string, size: string, cartons: string, loose: string) => {
     type(/^Name/, name);
     type(/^Selling price/, '1000');
@@ -579,8 +579,9 @@ describe('comes in cartons of (issue #688, D76)', () => {
 
   // JUSTIFICATION-A3: round 3 of the #691 review asks that a package word is never the item's own unit; this is its test.
   it('never takes a box, carton, dozen or pack as the item\'s own unit, even one added in place', async () => {
-    units = [PIECE, CARTON, { id: 'u8', name: 'Box', active: true, product_count: 0, version: 1 }];
-    const dozen = { id: 'u7', name: 'Dozen', active: true, product_count: 0, version: 1 };
+    // The server marks a package word `is_package` (issue #689, ADR-106); the screen reads only that flag.
+    units = [PIECE, CARTON, { id: 'u8', name: 'Box', active: true, product_count: 0, version: 1, is_package: true }];
+    const dozen = { id: 'u7', name: 'Dozen', active: true, product_count: 0, version: 1, is_package: true };
     createUnit.mockImplementation(async () => { units = [...units, dozen]; return dozen; });
     open(packsOn);
     await screen.findByRole('option', { name: 'Piece' });
@@ -598,7 +599,6 @@ describe('comes in cartons of (issue #688, D76)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     expect(document.activeElement).toBe(screen.getByLabelText(/^Counted in/));
     expect(quickAdd).not.toHaveBeenCalled();
-    expect(['Box', 'carton', ' PACKS ', 'Piece'].map(isPackageWord)).toEqual([true, true, true, false]);
   });
 
   it('offers to turn cartons on while packs are off, and asks no carton size', async () => {

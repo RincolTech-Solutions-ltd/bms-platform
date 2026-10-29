@@ -337,7 +337,7 @@ describe('setting up a shop quickly (issue #625)', () => {
   const PARTS = [
     ['areas/staff/menu.tsx', 'areas/staff/retail/first-items.tsx', 'areas/staff/retail/catalogue.tsx'],
     ['areas/staff/retail/shop-setup.tsx', 'areas/staff/retail/shop-starters.ts'],
-    // The Used for words (Both, Selling, Buying) are those of a pack on an item, kept once in the pack editor (ADR-099).
+    // The Used for words (Both, Buying, Selling) are those of a pack on an item, kept once in the pack editor (ADR-099).
     ['areas/staff/retail/shop-setup.tsx', 'areas/staff/retail/shop-setup-state.ts', 'areas/staff/retail/catalogue-packs.tsx'],
     ['areas/staff/retail/shop-setup.tsx'],
     ['areas/staff/retail/permissions.ts'],
@@ -554,7 +554,7 @@ describe('selling or buying in cartons (issue #630)', () => {
   const boldIn = (runs: Inline[]) => [...new Set(runs.flat().filter((r) => r.strong).map((r) => r.text))];
   const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const whole = (label: string) => new RegExp(`(^|[>'"])\\s*${escape(label)}\\s*($|[<'"])`, 'm');
-  const screens = source(['areas/staff/retail/catalogue-products.tsx', 'areas/staff/retail/catalogue-packs.tsx', 'app/glossary.ts', 'app/router.tsx']);
+  const screens = source(['areas/staff/retail/catalogue-products.tsx', 'areas/staff/retail/catalogue-packs.tsx', 'areas/staff/retail/new-item-packs.tsx', 'areas/staff/retail/unit-picker.tsx', 'app/glossary.ts', 'app/router.tsx']);
 
   it('has the article the item form links to, for whoever manages the catalogue, found with the words a shop owner types', () => {
     const cartons = articleById(CARTONS)!;

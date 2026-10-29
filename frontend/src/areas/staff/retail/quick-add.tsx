@@ -82,9 +82,8 @@ export function writeLastGroup(userId: string, branchId: string, categoryId: str
 // JUSTIFICATION-A3: D76 was added to issue #688 and asks for this field on the same screen; it adds no route and no table.
 const CARTON_NAMES = ['carton', 'cartons', 'ctn'];
 // A package is never the item's own unit here (round 3 of the #691 review): stock is counted in the smallest unit, and the
-// carton goes in Comes in cartons of. These words are left out of the unit list, and one added in place is refused.
-const PACKAGE_WORDS = [...CARTON_NAMES, 'box', 'boxes', 'dozen', 'dozens', 'pack', 'packs', 'packet', 'packets'];
-export const isPackageWord = (name: string | undefined) => PACKAGE_WORDS.includes((name ?? '').trim().toLowerCase());
+// carton goes in Comes in cartons of. A unit the server marks `is_package` (the one list, RetailCatalogue.PACKAGE_WORDS, issue
+// #689, ADR-106) is left out of the unit list, and one added in place is refused.
 export const PACKAGE_UNIT = 'A box, carton, dozen or pack is a package, not the item\'s own unit. Choose the single piece, and type the carton size below.';
 export const CARTON_FAILED = "The carton pack could not be added. Add it on the item's page, under Cartons, boxes and other packs.";
 
@@ -213,8 +212,9 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const nothingTyped = inCartons && cartons.trim() === '' && qty.trim() === '';
   const counted = !mayCount ? null : !inCartons ? parseCount(qty)
     : cartonCount === null || looseMilli === null || nothingTyped ? null : cartonCount * Number(sizeMilli) + looseMilli;
-  const unitName = (units.data ?? []).find((u) => u.id === unitId)?.name ?? 'Piece';
-  const unitIsPackage = unitId !== '' && isPackageWord(unitName);
+  const chosenUnit = (units.data ?? []).find((u) => u.id === unitId);
+  const unitName = chosenUnit?.name ?? 'Piece';
+  const unitIsPackage = unitId !== '' && chosenUnit?.is_package === true;
   const pieces = plural(unitName.toLowerCase());
   // Paid for now from cash: only where this person may buy stock, and with the buying price, which the purchase needs.
   const paying = paid && profit && mayCount && holdsAt(me, BUY, where);
@@ -505,7 +505,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
       <div className="stack" data-tour="quick-add-more">
       <UnitPicker
         id="qa-unit"
-        units={(units.data ?? []).filter((u) => u.active !== false && !isPackageWord(u.name))}
+        units={(units.data ?? []).filter((u) => u.active !== false && u.is_package !== true)}
         loading={units.data === undefined}
         load={units}
         value={unitId}

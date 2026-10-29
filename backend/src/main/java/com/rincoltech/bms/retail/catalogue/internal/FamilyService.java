@@ -82,6 +82,8 @@ class FamilyService {
     @Transactional
     Family create(CreateFamilyRequest r) {
         catalogue.requireCategoryAndUnit(r.categoryId(), r.unitId(), null, null);
+        // Issue #689 (ADR-106): a new item with sizes is never counted in a package either.
+        catalogue.refusePackageUnit(r.unitId());
         String name = r.name().trim();
         // Issue #562: the item's base code is the category's next code, such as BLB-0007, and never typed.
         if (r.baseCode() != null && !r.baseCode().isBlank()) {

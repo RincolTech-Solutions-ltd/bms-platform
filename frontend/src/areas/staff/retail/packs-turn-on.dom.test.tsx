@@ -40,6 +40,7 @@ const { RetailError } = await import('../../../api/retail');
 const { ProductForm } = await import('./catalogue-products');
 const { ASK_OWNER_PACKS, PACKS_QUESTION, withPacksOn } = await import('./catalogue-packs');
 const { DoneToast, doneToasts } = await import('./toast');
+const { PACKAGES_QUESTION } = await import('./new-item-packs');
 
 afterEach(() => {
   cleanup();
@@ -90,7 +91,7 @@ describe('the turn-on line on the item form', () => {
     expect(screen.queryByText(PACKS_QUESTION)).toBeNull();
   });
 
-  it('says on Add an item that the packs are on in one toast, with no note beside it', async () => {
+  it('says on Add an item that the packs are on in one toast, and asks about packages at once (issue #689)', async () => {
     capabilities.mockResolvedValue({ capabilities: { units: false }, version: 3 });
     changeCapabilities.mockResolvedValue({ capabilities: { units: true }, version: 4 });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } }, mutationCache: doneToasts() });
@@ -107,6 +108,8 @@ describe('the turn-on line on the item form', () => {
     await waitFor(() => expect(document.querySelectorAll('.toast')).toHaveLength(1));
     expect(document.querySelector('.toast')?.textContent).toContain('Packs switched on');
     expect(screen.queryByTestId('packs-on')).toBeNull();
+    expect(await screen.findByText(PACKAGES_QUESTION)).toBeTruthy();
+    expect(screen.queryByText(PACKS_QUESTION)).toBeNull();
     expect(changeCapabilities).toHaveBeenCalledWith({ units: true }, 3);
   });
 
