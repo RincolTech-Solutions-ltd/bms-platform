@@ -283,6 +283,7 @@ describe('Add an item (issue #689)', () => {
     for (let n = 1; n < 10; n++) fireEvent.click(screen.getByRole('button', { name: 'Add another package' }));
     expect(screen.getAllByTestId('package-row')).toHaveLength(10);
     expect(screen.queryByRole('button', { name: 'Add another package' })).toBeNull();
+    expect(screen.getByText('Up to 10 packages')).toBeTruthy();
     fireEvent.click(screen.getAllByRole('button', { name: /^Remove the/ })[0]!);
     expect(screen.getByRole('button', { name: 'Add another package' })).toBeTruthy();
   });

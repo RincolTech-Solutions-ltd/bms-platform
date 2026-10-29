@@ -149,7 +149,9 @@ class RetailNewItemPacksIT extends IntegrationTest {
         assertThat(RetailCatalogue.packageAsUnit("Boxes")).startsWith("Boxes is a package.");
         assertThat(RetailCatalogue.packageAsUnit("Sets of 4")).startsWith("Sets of 4 is a package.");
         assertThat(RetailCatalogue.packageAsUnit("Set of 4")).startsWith("A set of 4 is a package.");
-        assertThat(RetailCatalogue.packageAsUnit("Ctn")).startsWith("A ctn is a package.");
+        assertThat(RetailCatalogue.packageAsUnit("Ctn"))
+                .isEqualTo("A carton is a package. Choose the smallest unit, like piece, then add the carton below.");
+        assertThat(RetailCatalogue.packageAsUnit("PKT")).startsWith("A packet is a package.");
     }
 
     /** Review of #692: Add an item with sizes and colours makes items too, and never in a package. */
@@ -245,7 +247,7 @@ class RetailNewItemPacksIT extends IntegrationTest {
 
     /**
      * Review of #692, round 5: the shape of every refusal of {@code packs}. A missing package names its row; more than ten
-     * (the form offers no more) is a 422 on {@code packs}; a size that is not a number is the 400 of any unreadable body.
+     * (the form offers no more) is a 422 on {@code packs}; a size that is not a number is a 422 on its package's factor.
      */
     // JUSTIFICATION-A3: the round 5 review asks for an IT pinning these shapes.
     @Test
@@ -268,7 +270,11 @@ class RetailNewItemPacksIT extends IntegrationTest {
 
         ResponseEntity<JsonNode> notANumber =
                 api.post("/products", item("Test Bulb 60W", bulb, List.of(pack(carton, "ten", "both", null))), ADMIN);
-        assertThat(notANumber.getStatusCode()).as("%s", notANumber.getBody()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(notANumber.getStatusCode())
+                .as("%s", notANumber.getBody())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(notANumber.getBody().get("pack_index").asInt()).isZero();
+        assertThat(notANumber.getBody().toString()).contains("packs[0].factor");
 
         assertThat(products("Test Bulb 60W")).isZero();
         assertThat(packRows()).isZero();

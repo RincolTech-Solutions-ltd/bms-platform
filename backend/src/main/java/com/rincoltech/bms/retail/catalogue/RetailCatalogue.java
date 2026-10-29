@@ -49,10 +49,12 @@ public interface RetailCatalogue {
 
     /**
      * Issue #689: the refusal of a package as a new item's unit, as the PWA words it ({@code packageAsUnit} in
-     * new-item-packs.tsx): "A box is a package", or "Cartons is a package" for a unit named in the plural.
+     * new-item-packs.tsx): "A box is a package", or "Cartons is a package" for a unit named in the plural. A short code reads
+     * as its word, as {@code unitWord} in units-state.ts maps it (review of #692): "Ctn" is "a carton", "Pkt" is "a packet".
      */
     static String packageAsUnit(String unitName) {
-        String word = unitName.trim().toLowerCase(java.util.Locale.ROOT);
+        String name = unitName.trim().toLowerCase(java.util.Locale.ROOT);
+        String word = java.util.Map.of("ctn", "carton", "pkt", "packet").getOrDefault(name, name);
         String head = word.split(" ")[0];
         String named = head.endsWith("s") && !head.endsWith("ss")
                 ? Character.toUpperCase(word.charAt(0)) + word.substring(1)

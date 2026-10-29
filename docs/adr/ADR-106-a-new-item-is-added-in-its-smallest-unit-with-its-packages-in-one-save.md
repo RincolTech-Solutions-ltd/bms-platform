@@ -44,8 +44,8 @@ sold in packages and give them, all in one form and one save.
    keeping the item code the app gave, and the new item leads the Items list. A form holds at most ten packages, the most the
    request takes.
 5. **Used for in the owner's order everywhere.** The one list of what a pack is for (`PURPOSES` in `catalogue-packs.tsx`)
-   now reads Both, Buying, Selling, so Edit item, shop setup and this form show the same order. This amends the order
-   ADR-100 decision 1 names (Both, Selling, Buying); ADR-100 itself is left as accepted. The values are unchanged.
+   now reads Both, Buying, Selling, so Edit item, shop setup and this form show the same order; the values are unchanged.
+   Supersedes the order in ADR-100 (owner, 29 Oct 2026).
 
 ## Consequences
 

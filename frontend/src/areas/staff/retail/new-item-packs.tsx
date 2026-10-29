@@ -210,11 +210,13 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
               </fieldset>
             );
           })}
-          {rows.length < MAX_PACKAGES && (
+          {rows.length < MAX_PACKAGES ? (
             <button type="button" className="btn-ghost" onClick={() => onRows([...rows, newPackageRow(Math.max(0, ...rows.map((r) => r.key)) + 1)])}>
               {icons.plus}
               <span>Add another package</span>
             </button>
+          ) : (
+            <Hint>Up to 10 packages</Hint>
           )}
         </>
       )}
