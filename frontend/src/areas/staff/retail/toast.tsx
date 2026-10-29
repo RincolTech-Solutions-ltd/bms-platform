@@ -1,3 +1,4 @@
+import { MutationCache } from '@tanstack/react-query';
 import { createContext, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { icons } from '../../../components/icons';
 import { announceToSheet } from '../../../app/ui/announce';
@@ -65,6 +66,49 @@ export function useToast(ms: number = TOAST_MS, silent = false): { show: (messag
     [ms],
   );
   return { show, toast: shown ? <Toast message={shown.message} tone={shown.tone} silent={silent} /> : null };
+}
+
+// JUSTIFICATION-A3: #682 asks for one shared success toast for every write; nothing raises a toast from the query client yet.
+/**
+ * What a write says when it works (issue #682): most people read very little, so every save, sale, add, edit, delete, move,
+ * purchase and payment answers with a short toast in plain words, such as 'Sale saved' or 'Payment recorded'. A mutation names
+ * its words in `meta: { success }`, a sentence or a function of the result and what was sent (null says nothing, for an
+ * outcome that is not a success); `doneToasts` raises them in the one `DoneToast` the app mounts beside the router. A screen
+ * that already shows its own success toast keeps doing so and sets no `meta.success`. `busy-guard.test.ts` fails a staff
+ * mutation that says neither, unless a `// toast-exempt: <reason>` line sits above it.
+ */
+export type DoneWords = string | ((data: never, variables: never) => string | null);
+
+declare module '@tanstack/react-query' {
+  interface Register {
+    mutationMeta: { success?: DoneWords };
+  }
+}
+
+const doneListeners = new Set<(message: string) => void>();
+
+/** The query client's mutation cache: a mutation that succeeds says its `meta.success` in the app's DoneToast. */
+export function doneToasts(): MutationCache {
+  return new MutationCache({
+    onSuccess: (data, variables, _context, mutation) => {
+      const words = mutation.meta?.success;
+      const message = typeof words === 'function' ? (words as (d: unknown, v: unknown) => string | null)(data, variables) : words;
+      if (message) doneListeners.forEach((hear) => hear(message));
+    },
+  });
+}
+
+/** The app's one success toast for the mutations that name their words in `meta.success`. */
+export function DoneToast() {
+  const { show, toast } = useToast();
+  useEffect(() => {
+    const hear = (message: string) => show(message, 'success');
+    doneListeners.add(hear);
+    return () => {
+      doneListeners.delete(hear);
+    };
+  }, [show]);
+  return <>{toast}</>;
 }
 
 /** What the toast says when an item goes on a form's lines (issue #498): the quantity it now has, or that one is still to type. */
