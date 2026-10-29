@@ -34,8 +34,10 @@ const digitsOnly = (term: string) => /^\d+$/.test(term.trim());
 export type NoItemCase = { kind: 'category'; category: string } | { kind: 'filtered' } | { kind: 'digits' } | { kind: 'add' };
 
 export function noItemCase(term: string, category: string | undefined, filtered: boolean): NoItemCase {
+  // A chip or a filter first, so a known item or barcode hidden by it is offered with Search all (review of #703).
   if (category) return { kind: 'category', category };
   if (filtered) return { kind: 'filtered' };
+  // Digits only, of any length, are a code or a label, never a name to add.
   if (digitsOnly(term)) return { kind: 'digits' };
   return { kind: 'add' };
 }

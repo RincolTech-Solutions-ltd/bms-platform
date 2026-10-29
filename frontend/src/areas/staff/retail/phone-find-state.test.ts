@@ -72,10 +72,11 @@ describe('a search that finds nothing', () => {
     expect(noItemCase('bulb', undefined, false)).toEqual({ kind: 'add' });
     expect(noItemCase('bulb', 'Test Cables', false)).toEqual({ kind: 'category', category: 'Test Cables' });
     expect(noItemCase('bulb', undefined, true)).toEqual({ kind: 'filtered' });
-    // Digits of any length are a code or a barcode, never a name to add.
+    // Digits of any length are a code or a barcode, never a name to add (review of #703: 7 and 15 digits too).
     for (const digits of ['1234567', '6001234567890', '123456789012345']) expect(noItemCase(digits, undefined, false)).toEqual({ kind: 'digits' });
-    // A chip or a filter may hide what the digits name, so they still offer Search all categories.
-    expect(noItemCase('6001234567890', 'Test Cables', true)).toEqual({ kind: 'category', category: 'Test Cables' });
+    // A chip or filter comes first, so a barcode hidden by it offers Search all categories, never a false "no item".
+    expect(noItemCase('6001234567890', 'Test Cables', false)).toEqual({ kind: 'category', category: 'Test Cables' });
+    expect(noItemCase('6001234567890', undefined, true)).toEqual({ kind: 'filtered' });
     expect(noItemCase('1234567', undefined, true)).toEqual({ kind: 'filtered' });
   });
 
