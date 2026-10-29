@@ -78,10 +78,12 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
   const [startNew, setStartNew] = useState('');
   const drafts = useQuery({ queryKey: ['lending', 'loans', 'drafts', draft.memberId], queryFn: () => api.drafts(draft.memberId), enabled: !editing && draft.memberId !== '' });
   const open = editing || startNew === draft.memberId ? undefined : draftsFirst(drafts.data ?? [])[0];
-  // Send waits for the look and the answer, so the question is never passed by unseen; a failed look does not hold it.
+  // Sending waits for the question above (review of #711): while the drafts are still being looked up, or a draft is offered
+  // and not yet answered, Send is held and the save bar says why, so a second draft is never made unseen on a slow phone and
+  // Continue that draft is the one primary action. A failed look does not hold it.
   const asking = !editing && draft.memberId !== '' && startNew !== draft.memberId && (drafts.isPending || open !== undefined);
   const held = guard.blocked ? 'Wait for the check above before sending again.'
-    : asking ? (open ? 'Answer the question at the top first: continue that draft or start a new one.' : 'Checking whether this member has a draft.') : undefined;
+    : asking ? (open ? 'Choose one first: continue that draft, or start a new one.' : 'Looking for this member\'s other drafts.') : undefined;
   const set = <K extends keyof ApplicationDraft>(key: K, value: ApplicationDraft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const inputMode = exponentOf(currency) ? 'decimal' : 'numeric';
 
