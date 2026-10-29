@@ -29,17 +29,38 @@ first. ADR-048 said a later change would fold the role into the flag. This is th
   (422 `branch_is_store`).
 - **One refusal.** `BranchRoles.requireMaySell` and its code `branch_role_forbids_sales` are removed; every selling path
   already called `RetailBranchContext.requireSells` next to it, which now answers alone with `branch_does_not_sell`.
-- **Migration V115, data preserving, behaviour preserving.**
-  1. A branch with role `store` in a business with `branch_roles` on, which keeps goods and sells, becomes a Store
-     (`sells_goods = false`). It was refused every sale before and still is; it still keeps stock.
-  2. A role `store` on a branch that keeps no goods (ADR-041) leaves the flag alone (a Store must keep goods); that branch was
-     and is refused every sale for keeping no goods.
-  3. A role `store` in a business with `branch_roles` off was never read, so the branch sold and still sells.
-  4. Every `store` row then becomes `both`. No branch and no role row is deleted. Each changed branch and row gets an audit row
-     by the system (`core.branch.updated`, `retail.branch_role.changed`) with the value before, so the earlier choice can be
-     read back. The block is idempotent and `RetailStoreRoleFoldIT` replays it on a scratch database with fabricated rows.
-  5. The role check is narrowed to `shop` and `both`, and the permission `retail.branch_role.manage` is described as setting a
-     selling branch as a shop or both.
+- **Migration V115 keeps all data and changes nothing silently.** The role was in force only while the business's
+  `branch_roles` switch was on, the exact predicate `RetailCapabilities.enabled` reads. It then refused a sale, a quotation,
+  a price resolution, an order and an offline sale report. The Store flag refuses those and the till too (ADR-048). So:
+  1. **The guard.** A `store` branch in force that still sells by the flag is folded only when nothing would change for it in
+     practice:
+     - it keeps goods;
+     - no credit sale made there is still owing (counted as `BranchTillCheck` counts it, written-off and imported sales left
+       out);
+     - since the role was set, its till has taken no payment on a credit sale or on account, paid out no refund, and recorded no
+       savings, banking, withdrawal or advance repayment.
+
+     An open branch that keeps no goods cannot be a Store, and as `both` it could start issuing quotations, so it is not
+     folded either. If any branch fails, the migration stops and changes nothing. It names the business, the branch code and
+     the reasons. The administrator then chooses for each branch, through the previous release:
+     - settle the credit sales;
+     - mark it a Store on Branches, and its till stops;
+     - or set its role to shop or both, and it sells again.
+
+     Then the deploy is run again. The rule is the function `retail_store_fold_blockers`, which stays in the schema for the
+     test and is not granted to the application.
+  2. **The fold.** Every other `store` branch in force that keeps goods becomes a Store (`sells_goods = false`). A branch
+     already marked a Store keeps its flag. A `store` role with the switch off was never read, so that branch keeps selling.
+  3. **Every `store` row then becomes `both`.** No branch and no role row is deleted. Each changed branch and row gets an
+     audit row by the system (`core.branch.updated`, `retail.branch_role.changed`) with the value before. The fold is
+     idempotent.
+  4. **The role check is narrowed to `shop` and `both`.** The permission `retail.branch_role.manage` is now described as
+     setting a selling branch as a shop or both.
+
+  `RetailStoreRoleFoldIT` covers this in two tests:
+  - it replays the migration on a scratch database at the migration before it, stopped and then remedied;
+  - it checks the guard against a credit sale owing, a written-off one, a payment, a banking and a refund, all made
+    through the API.
 - **Permission unchanged.** Marking a Store needs `core.branches.manage`; `retail.branch_role.manage` sets shop or both.
 
 ## Consequences
@@ -49,10 +70,16 @@ first. ADR-048 said a later change would fold the role into the flag. This is th
 - The stock-by-location report with roles on now shows a Store as a store, where before it showed the role.
 
 **Worse, and to watch:**
-- A branch folded by step 1 now follows the rest of ADR-048 too: its till takes no payment on a credit sale, no payment on
-  account, no refund, and no savings, banking, withdrawal or advance repayment. Under the role only a sale, a quotation, a price
-  resolution and an order were refused. Expenses stay allowed, and "Sells again" on the Branches screen undoes it.
+- A folded branch follows the rest of ADR-048 from now on. Its till had taken none of these since it became a store, and it
+  now refuses them: payments on credit sales and on account, refunds, savings, bankings, withdrawals and advance repayments.
+  Expenses stay allowed, and "Sells again" on the Branches screen undoes it.
+- A business whose role stores use their tills stops the deploy until the administrator chooses for each branch. The
+  message says what to do, and the previous release keeps serving meanwhile.
 - A caller that matched `branch_role_forbids_sales` now gets `branch_does_not_sell`; the web app maps both.
 - An administrator of a business with `branch_roles` off who had set a dormant `store` role will find `both` and an audit row,
   not a Store; turning the capability on no longer makes that branch a store.
-- During the deploy the previous release may try to write `store` and fail the check until the new release is serving.
+- During the deploy the previous release may try to write `store` and fail the check (a 500, not a 422) until the new
+  release is serving. The release note says so.
+- V115 must merge after V114 (#127) or be renumbered above whatever is on main at merge, as for every migration (Flyway runs
+  with `outOfOrder` off). `RetailStoreRoleFoldIT` reads its version and the one before it from the folder, so a renumbering
+  needs no change to the test.

@@ -1,6 +1,6 @@
 package com.rincoltech.bms.retail.stock;
 
-import java.util.UUID;
+import com.rincoltech.bms.core.tenancy.Branches;
 
 /**
  * The role of a retail branch (ADR-033, ADR-104). Retail stock owns it because branches and role checks
@@ -12,6 +12,9 @@ import java.util.UUID;
  */
 public interface BranchRoles {
 
-    /** The role in force for the branch: {@code BOTH} when the capability is off or no row exists. */
-    BranchRole roleOf(UUID branchId);
+    /**
+     * The role in force for the branch, read from the row the caller already holds and its stored role: {@code BOTH} when
+     * the capability is off or no row exists.
+     */
+    BranchRole roleOf(Branches.Branch branch);
 }

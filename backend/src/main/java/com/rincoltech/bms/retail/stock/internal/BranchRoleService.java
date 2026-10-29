@@ -52,12 +52,11 @@ class BranchRoleService implements BranchRoles {
 
     @Override
     @Transactional(readOnly = true)
-    public BranchRole roleOf(UUID branchId) {
+    public BranchRole roleOf(Branches.Branch branch) {
         if (!capabilities.enabled(RetailCapabilities.BRANCH_ROLES)) {
             return BranchRole.BOTH;
         }
-        boolean store = branches.all().stream().anyMatch(b -> b.id().equals(branchId) && !b.sellsGoods());
-        return store ? BranchRole.STORE : stored(branchId);
+        return branch.sellsGoods() ? stored(branch.id()) : BranchRole.STORE;
     }
 
     /** The active branches the caller may read stock in, with their roles. */
