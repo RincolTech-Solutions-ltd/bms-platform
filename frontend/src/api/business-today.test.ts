@@ -55,9 +55,12 @@ const DEVICE_DAY = [
   /\.toDateString\(\)/g,
   /\bformat\(\s*new Date\(\s*\)/g,
 ];
-// Formatting calls that use the device's zone unless their options name one (not timeZoneName, not undefined).
-const FORMATTERS = /Intl\.DateTimeFormat\(|\.toLocale(?:Date|Time)String\(/g;
+// Formatting calls that use the device's zone unless their options name one (not timeZoneName, not undefined). A number has
+// toLocaleString too, so that one counts as a date only on `new Date(...)` or when its options name a part of a date.
+const FORMATTERS = /Intl\.DateTimeFormat\(|\.toLocale(?:Date|Time)?String\(/g;
 const NAMES_A_ZONE = /\btimeZone\s*:\s*(?!undefined\b)[^\s,}]/;
+const DATE_OPTIONS = /\b(?:dateStyle|timeStyle|weekday|era|year|month|day|hour|minute|second)\s*:/;
+const ON_A_NEW_DATE = /new Date\([^()]*(?:\([^()]*\)[^()]*)*\)\s*$/;
 const COMMENTS = /\/\*[\s\S]*?\*\/|\/\/.*$/gm;
 
 /** The end of a call's arguments: the index just after the bracket that closes the one before `open`. */
@@ -72,21 +75,29 @@ function closeOf(text: string, open: number): number {
   return i;
 }
 
-/** The lines (from 1) where `text` reads the device's calendar day without a reason given on the lines of the hit. */
+/**
+ * The lines (from 1) where `text` reads the device's calendar day without a reason. The reason sits on a line of the hit
+ * itself, or alone in a comment on the line just above it; a reason at the end of a line of code covers that line only.
+ */
 export function deviceDays(text: string): number[] {
   const lines = text.split('\n');
   const lineOf = (at: number) => text.slice(0, at).split('\n').length;
+  const commentOnly = (line: string) => /^\s*(?:\/\/|\/\*|\{\/\*)/.test(line);
   const hits = new Set<number>();
   const hit = (start: number, end: number) => {
     const first = lineOf(start);
     const last = lineOf(Math.max(start, end - 1));
-    if (!lines.slice(first - 1, last).some((line) => ALLOW.test(line))) hits.add(first);
+    const above = lines[first - 2] ?? '';
+    const excused = lines.slice(first - 1, last).some((line) => ALLOW.test(line)) || (commentOnly(above) && ALLOW.test(above));
+    if (!excused) hits.add(first);
   };
   for (const re of DEVICE_DAY) for (const m of text.matchAll(re)) hit(m.index ?? 0, (m.index ?? 0) + m[0].length);
   for (const m of text.matchAll(FORMATTERS)) {
     const start = m.index ?? 0;
     const end = closeOf(text, start + m[0].length);
-    if (!NAMES_A_ZONE.test(text.slice(start + m[0].length, end).replace(COMMENTS, ''))) hit(start, end);
+    const options = text.slice(start + m[0].length, end).replace(COMMENTS, '');
+    const onADate = m[0] !== '.toLocaleString(' || DATE_OPTIONS.test(options) || ON_A_NEW_DATE.test(text.slice(Math.max(0, start - 200), start));
+    if (onADate && !NAMES_A_ZONE.test(options)) hit(start, end);
   }
   return [...hits].sort((a, b) => a - b);
 }
@@ -119,9 +130,15 @@ describe('the business date guard', () => {
       "const day = new Intl.DateTimeFormat('en-CA', { /* timeZone: 'Africa/Kampala' */ }).format(now);",
       "const day = format(new Date(), 'yyyy-MM-dd');",
       'const same = new Date().toDateString() === shown;',
+      "const when = d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });",
+      'const when = new Date(e.at).toLocaleString();',
+      "const when = new Date(e.at ?? '').toLocaleString('en-GB');",
       'const day = now.getDate();',
     ]) expect(deviceDays(code), code).toEqual([1]);
     expect(deviceDays("const day = new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(now);")).toEqual([]);
+    expect(deviceDays("const when = d.toLocaleString('en-GB', { dateStyle: 'medium', timeZone: zone });")).toEqual([]);
+    // A number's toLocaleString is not a date.
+    expect(deviceDays("const count = `${value.toLocaleString('en')} days`;")).toEqual([]);
   });
 
   it('catches a chain split across lines, on the line where the match starts', () => {
@@ -130,13 +147,16 @@ describe('the business date guard', () => {
     expect(deviceDays("const f = new Intl.DateTimeFormat('en-GB', {\n  timeZone: zone,\n});\n")).toEqual([]);
   });
 
-  it('lets a reason on the lines of the hit excuse it, and nothing else', () => {
+  it('lets a reason on its own line or alone on the line above excuse a hit, never both lines', () => {
     const cut = 'const day = d.toISOString().slice(0, 10);';
+    expect(deviceDays(cut)).toEqual([1]);
     expect(deviceDays(`${cut} // business-day-ok: a calendar sum on a UTC midnight`)).toEqual([]);
     expect(deviceDays(`${cut} // business-day-ok:`)).toEqual([1]);
     expect(deviceDays(`${cut} // business-day-ok:   `)).toEqual([1]);
-    expect(deviceDays(`// business-day-ok: the line above\n${cut}`)).toEqual([2]);
+    expect(deviceDays(`// business-day-ok: a calendar sum on a UTC midnight\n${cut}`)).toEqual([]);
+    expect(deviceDays(`// business-day-ok: a calendar sum on a UTC midnight\n${cut}\n${cut}`)).toEqual([3]);
     expect(deviceDays(`${cut} // business-day-ok: this one\n${cut}`)).toEqual([2]);
+    expect(deviceDays(`{/* business-day-ok: shown on this phone's clock */}\n<td>{d.toLocaleDateString()}</td>`)).toEqual([]);
     expect(deviceDays('const day = d\n  .toISOString() // business-day-ok: a calendar sum\n  .slice(0, 10);')).toEqual([]);
   });
 });

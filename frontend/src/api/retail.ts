@@ -255,25 +255,28 @@ export const RETAIL_CURRENCY = 'UGX';
  */
 export const RETAIL_ZONE = 'Africa/Kampala';
 
-let businessZone = RETAIL_ZONE;
+let zoneNow = RETAIL_ZONE;
 
 /**
  * The signed-in business's own time zone, `tenant_timezone` on /me, set by the staff shell once the profile loads (#667). The
  * server dates events in it (BusinessClock), so every default date does too; an empty or unknown zone keeps Africa/Kampala.
  */
 export function setBusinessZone(zone: string | undefined | null): void {
-  businessZone = RETAIL_ZONE;
+  zoneNow = RETAIL_ZONE;
   if (!zone) return;
   try {
     new Intl.DateTimeFormat('en-CA', { timeZone: zone });
-    businessZone = zone;
+    zoneNow = zone;
   } catch {
     // An unknown zone name: Africa/Kampala stays.
   }
 }
 
+/** The signed-in business's time zone (setBusinessZone), for showing its moments on its own clock. */
+export const businessZone = (): string => zoneNow;
+
 /** Today as yyyy-mm-dd in the business's timezone, not the browser's or UTC (#112 items 3 and 9, #667). */
-export function businessToday(now: Date = new Date(), zone: string = businessZone): string {
+export function businessToday(now: Date = new Date(), zone: string = zoneNow): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 }
 
