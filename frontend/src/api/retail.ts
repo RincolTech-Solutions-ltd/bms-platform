@@ -403,7 +403,8 @@ export interface RetailApi {
   listProducts(q: { query?: string; branchId?: string; signal?: AbortSignal }): Promise<Product[]>;
   listCategories(): Promise<Category[]>;
   /** Catalogue management (#146): one page of products, with the filters of the Products screen. */
-  listCatalogue(q: { query?: string; categoryId?: string; active?: boolean; cursor?: string; signal?: AbortSignal }): Promise<ProductPage>;
+  /** With `branchId` each item carries its stock there (`qty`), for a session that may read that branch's stock. */
+  listCatalogue(q: { query?: string; categoryId?: string; active?: boolean; branchId?: string; cursor?: string; signal?: AbortSignal }): Promise<ProductPage>;
   getProduct(id: string): Promise<Product>;
   /** Before saving a new or renamed item: the products with this name or a close one (issue #352). */
   similarProducts(q: { description: string; unitId?: string; excludeId?: string }): Promise<SimilarProducts>;
@@ -746,10 +747,10 @@ const realRetail: RetailApi = {
     return unwrap(await api.GET('/api/v1/retail/categories')).items ?? [];
   },
 
-  async listCatalogue({ query, categoryId, active, cursor, signal }) {
+  async listCatalogue({ query, categoryId, active, branchId, cursor, signal }) {
     return unwrap(
       await api.GET('/api/v1/retail/products', {
-        params: { query: { query: query || undefined, category_id: categoryId || undefined, active, limit: 50, cursor } },
+        params: { query: { query: query || undefined, category_id: categoryId || undefined, active, branch_id: branchId || undefined, limit: 50, cursor } },
         signal,
       }),
     );

@@ -59,7 +59,14 @@ export function staffTabs(me: Me, { sells }: { sells: boolean }): Tab[] {
   const money = moneyLinks(me);
   const tabs: (Tab | false)[] = [
     sells && { id: 'sell', to: pathOf('sale'), label: 'Sell', icon: icons.sale, paths: [pathOf('sale')] },
-    showRetail(me) && canUse(me, 'stock') && { id: 'stock', to: pathOf('stock'), label: 'My stock', icon: icons.stock, paths: [pathOf('stock'), pathOf('stocktake')] },
+    // Items and Categories are My stock's first two entries (issue #690), so the tab stays current on them.
+    showRetail(me) && canUse(me, 'stock') && {
+      id: 'stock',
+      to: pathOf('stock'),
+      label: 'My stock',
+      icon: icons.stock,
+      paths: [pathOf('stock'), pathOf('stocktake'), '/staff/retail/catalogue/products', '/staff/retail/catalogue/categories'],
+    },
     showRetail(me) && canUse(me, 'restock') && {
       id: 'buy',
       to: pathOf('restock'),

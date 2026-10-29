@@ -201,6 +201,13 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `retail.catalogue.manage` (name only; the code start is the app's, from `prefix-suggestion`), the new one chosen at once with a
   dark toast, and `No category called "X". Add it?`. Tests `category-picker.dom.test.tsx`; other tests choose a category
   with `chooseCategory` (`frontend/src/test-utils/category-picker.ts`).
+- **Built (find items on a phone, issue #690, FR-UXN-13):** PWA only, no migration, no API change (Items now passes the
+  existing `branch_id` of `GET /retail/products` for a reader of that branch's stock). Items and My stock put the search and a
+  row of category chips first (`frontend/src/areas/staff/retail/phone-find.tsx`), sticky under the top bar on a phone; a chip
+  sets the page's category filter and is remembered per page; My stock starts with Items and Categories; a phone item row
+  opens the item; digits that are a known barcode find its item; a search nothing narrowed that finds nothing offers Add it,
+  which opens Quick add with the name. Tests `phone-find-state.test.ts`, `phone-find.dom.test.tsx`,
+  `layout/phone-find.layout.test.ts`.
 - **Built (Refresh is a visible button in the top bar again, issue #631, FR-UXN-11):** PWA only, no migration, no API change.
   `RefreshButton` sits in `StaffBar` just before Search on every staff screen, named Refresh, its icon alone below 720px, and
   is gone from the person menu (`TopMenu`). Below 430px the bar's controls touch, each exactly 48px, so the branch name stays
