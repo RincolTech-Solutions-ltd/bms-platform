@@ -11,6 +11,7 @@ describe('retail problem details in plain words', () => {
     ['permission_denied', 403, /do not have permission/i],
     ['module_not_enabled', 404, /not switched on/i],
     ['branch_required', 422, /choose one branch/i],
+    ['unknown_branch', 404, /not one you work in/i],
     ['sale_voided', 409, /already been voided/i],
     ['sale_not_payable', 422, /not voided takes payments/i],
     ['sale_historical', 422, /with your accountant/i],

@@ -25,6 +25,8 @@ const BY_CODE: Record<string, string> = {
   permission_denied: 'You do not have permission to do this.',
   module_not_enabled: 'Retail is not switched on for this business.',
   branch_required: 'Choose one branch in the Branch box at the top of the page first.',
+  // Issue #257: 404 for a branch outside the caller's scope, closed or unknown (trade-capabilities 2.2).
+  unknown_branch: 'That branch is closed or is not one you work in. Choose another branch in the Branch box.',
   branch_role_forbids_sales: 'This branch is a store and does not sell. Choose a shop in the Branch box.',
   branch_is_store: 'This branch is a store. Mark it as selling again on Branches before choosing shop or both.',
   branch_has_open_work: 'A stock move to or from this branch is not yet received. Finish it before changing the branch role.',
