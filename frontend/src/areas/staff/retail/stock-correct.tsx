@@ -94,8 +94,9 @@ function QuantityForm({ row, branchId, onDone, onWaiting }: { row: StockRow; bra
       }
     },
     onSettled: () => { sending.current = false; },
+    meta: { success: (r: Awaited<ReturnType<typeof retail.correctStock>>) => (r && isWaiting(r) ? null : 'Stock corrected') },
   });
-  const difference = differenceWords(draft.qty, shown, row.unit);
+  const difference =differenceWords(draft.qty, shown, row.unit);
   const press = () => {
     if (!ready || sending.current) return;
     sending.current = true;
@@ -145,6 +146,7 @@ function CategoryForm({ row, onDone }: { row: StockRow; onDone: (message: string
       onDone(`${saved.description} is now in ${saved.category}. It was in ${row.category}.`);
     },
     onSettled: () => { sending.current = false; },
+    meta: { success: 'Category changed' },
   });
   if (product.isPending || categories.isPending) return <p className="loading">Loading</p>;
   if (!product.data) return <Problem error={product.error} />;

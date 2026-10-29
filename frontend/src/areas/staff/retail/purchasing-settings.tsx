@@ -80,6 +80,7 @@ export function PurchasingSettings() {
       queryClient.setQueryData(['retail', 'purchasing-settings'], next);
       setSaved(true);
     },
+    meta: { success: 'Settings saved' },
   });
   if (!on) return null;
   return (

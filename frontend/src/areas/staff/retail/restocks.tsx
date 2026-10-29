@@ -52,8 +52,9 @@ export function CorrectPanel({ purchase, onDone, onCancel }: { purchase: Purchas
       if (alreadyVoided(error)) onDone(`Purchase ${purchase.purchase_no ?? ''} was voided already.`);
     },
     onSettled: () => { sending.current = false; },
+    meta: { success: 'Purchase voided' },
   });
-  const press = (again: boolean) => {
+  const press =(again: boolean) => {
     if (!ready || sending.current) return;
     sending.current = true;
     send.mutate(again);

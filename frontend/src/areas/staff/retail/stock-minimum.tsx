@@ -25,6 +25,7 @@ export function StockMinimumEditor({ productId, unit }: { productId: string; uni
       setEvery(null);
       done(next, qty === null ? 'No level for every branch now.' : `Every shop and store warns below ${showLevel(qty)}.`);
     },
+    meta: { success: 'Level saved' },
   });
   if (level.isPending) return <p className="loading">Loading</p>;
   if (!level.data) return <Problem error={level.error} />;
@@ -86,6 +87,7 @@ function BranchLevel({ productId, branch, per, onSaved }: { productId: string; b
       setTyped(null);
       onSaved(next, qty === null ? `${name} follows the level for every branch now.` : `${name} warns below ${showLevel(qty)}.`);
     },
+    meta: { success: 'Level saved' },
   });
   const applies = branch.applies_qty ? `warns below ${showLevel(branch.applies_qty)}${per}` : 'no level, watched by its pace';
   return (

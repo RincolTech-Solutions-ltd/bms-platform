@@ -42,6 +42,7 @@ export function UsageForm({ branchId, onSaved }: { branchId: string; onSaved?: (
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onSaved?.(u);
     },
+    meta: { success: (u: Usage) => (u?.kind === 'damaged' ? 'Damage recorded' : 'Usage recorded') },
   });
   const valid = lines.length > 0 && reason.trim() !== '' && lines.every((l) => parseQty(l.qty) !== null);
 

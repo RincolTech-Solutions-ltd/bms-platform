@@ -180,6 +180,7 @@ function useSaveReceipt(key: string, finish: () => void, build: () => GoodsRecei
       if (notes.length > 0) setKept({ receiptId: receipt.id ?? '', notes });
       else void navigate({ to: '/staff/retail/goods-received/$receiptId', params: { receiptId: receipt.id ?? '' } });
     },
+    meta: { success: 'Goods received saved' },
   });
 }
 

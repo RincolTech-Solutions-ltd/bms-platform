@@ -249,6 +249,7 @@ function CountSheet({ branchId }: { branchId: string }) {
       setDraft(st);
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
+    meta: { success: 'Count saved' },
   });
 
   if (draft) {

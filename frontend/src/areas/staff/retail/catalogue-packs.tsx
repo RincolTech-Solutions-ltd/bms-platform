@@ -101,6 +101,7 @@ function PackSheet({ product, pack, mayPrice, onClose }: { product: Product; pac
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onClose();
     },
+    meta: { success: (_r: unknown, v: Parameters<typeof retail.updatePack>[3]) => (v?.active === false ? 'Pack switched off' : v?.active === true ? 'Pack switched on' : 'Pack saved') },
   });
   const problem = factorProblem(factor);
   const body = packChange(pack, { factor, purpose, priceMinor }, mayPrice);
@@ -225,6 +226,7 @@ export function PackEditor({ product }: { product: Product }) {
       setFilled({ factor: '', purpose: 'both' });
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
+    meta: { success: 'Pack added' },
   });
   if (!allowed) return null;
   const rows = packs.data ?? [];
@@ -376,6 +378,7 @@ export function PacksTurnOn({ adding }: { adding: boolean }) {
       void queryClient.invalidateQueries({ queryKey: ['me'] });
       setDone(true);
     },
+    meta: { success: 'Packs switched on' },
   });
   if (!holds(me, 'retail.catalogue.manage')) return null;
   if (capabilityOn(me, 'retail', UNITS)) return done && adding ? <p role="status" data-testid="packs-on">{PACKS_ON_ADDING}</p> : null;
