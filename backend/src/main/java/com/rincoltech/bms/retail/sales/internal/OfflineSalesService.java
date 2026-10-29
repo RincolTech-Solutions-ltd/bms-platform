@@ -117,9 +117,11 @@ class OfflineSalesService {
                     "Permission denied",
                     "You do not sell at this branch, so you cannot report a sale made there.");
         }
-        // The same may-sell-here check as the sale path: a store never sells (ADR-048, ADR-104), so no sale is reported
-        // there.
+        // The same may-sell-here checks as the sale path: a store never sells (ADR-048, ADR-104) and a branch that
+        // keeps no
+        // goods sells nothing (ADR-041), so no sale is reported there. A closed branch is not refused here, as before.
         branches.requireSells(r.branchId(), "branch_id");
+        branches.requireStocksReceiving(r.branchId(), "branch_id");
         repo.dropWaiting(r.clientSaleId());
         // A sale already recorded under this id (its answer was lost, then a later send was refused) is the sale: the
         // report is kept closed by it, never open for a manager to discard.
@@ -173,6 +175,7 @@ class OfflineSalesService {
                         "You do not sell at this branch, so you cannot report a sale waiting there.");
             }
             branches.requireSells(branchId, "branch_id");
+            branches.requireStocksReceiving(branchId, "branch_id");
         }
         int accepted = 0;
         for (WaitingSale w : r.items()) {

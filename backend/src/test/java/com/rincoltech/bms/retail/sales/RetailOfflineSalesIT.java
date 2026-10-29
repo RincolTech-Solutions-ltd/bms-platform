@@ -1213,6 +1213,25 @@ class RetailOfflineSalesIT extends IntegrationTest {
         assertThat(waitingRows()).isZero();
     }
 
+    /** A branch that keeps no goods sells nothing (ADR-041), so no refusal or waiting sale is reported there (#371, ADR-104). */
+    @Test
+    void aReportForABranchThatKeepsNoGoodsIsRefused() {
+        TestDatabase.owner()
+                .sql("UPDATE branches SET stocks_goods = false WHERE id = ?")
+                .param(t.headOffice())
+                .update();
+        UUID client = UUID.randomUUID();
+        ResponseEntity<JsonNode> reported = api.post(
+                "/offline-failures", failureReport(client, offlineSale(client, Instant.now(), "1", 2_000)), SALES);
+        assertThat(reported.getStatusCode()).as("%s", reported.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(reported.getBody().get("code").asString()).isEqualTo("branch_not_stocking");
+        ResponseEntity<JsonNode> waiting =
+                api.post("/offline-waiting", Map.of("items", List.of(waitingAt(client))), SALES);
+        assertThat(waiting.getStatusCode()).as("%s", waiting.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(waiting.getBody().get("code").asString()).isEqualTo("branch_not_stocking");
+        assertThat(waitingRows()).isZero();
+    }
+
     /** A summary of a sale waiting on a phone is taken only for a branch the reporter sells at, as a report is. */
     @Test
     void aWaitingSummaryIsOnlyForABranchTheReporterSellsAt() {
