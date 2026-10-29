@@ -261,6 +261,21 @@ describe('the end of a count', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('st-r', ['A-2']));
   });
+
+  // Review of #686, round 5: a review open here when another tab commits the same count is ended, so the same difference is
+  // never taken twice; back on the sheet the person sees what went in there.
+  it('ends this tab’s review when another tab commits the count, so Commit the count cannot take it again', async () => {
+    createStocktake.mockResolvedValue({ id: 'st-r', status: 'draft', lines: [lines[0]] });
+    await ready();
+    fireEvent.change(countBox('A-1'), { target: { value: '7' } });
+    await reviewIt(1);
+    const mine = readStored(branchA);
+    otherTab(keyOf(branchA), { counts: {}, packCounts: {}, listed: [], done: [], at: { 'A-1': Date.now() + 1000 }, committed: Date.now() + 1000 });
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Commit the count' })).toBeNull());
+    expect(screen.getByTestId('count-other-tab').textContent).toBe('Counted and saved in another tab');
+    expect(commitStocktake).not.toHaveBeenCalled();
+    expect(mine.counts['A-1']).toBe('7');
+  });
 });
 
 // Review of #686, round 3: a commit takes away only the counts that went in, and a count kept from before says when it was saved.

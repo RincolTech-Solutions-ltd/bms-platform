@@ -251,6 +251,12 @@ function CountSheet({ branchId }: { branchId: string }) {
     if (!next) setDraft((d) => (d?.status === 'draft' ? null : d));
   }, []);
   const saving = useCountSave({ saveKey, restored, saved: { counts, packCounts, listed, done }, apply, hold: asking });
+  // A commit in another tab ends a review here (review of #686): its expected stock is gone, so committing it would take the
+  // same difference again. Back on the sheet the person sees what went in there and reviews what is left afresh.
+  const otherKind = saving.other?.kind;
+  useEffect(() => {
+    if (otherKind === 'committed' || otherKind === 'partly') setDraft((d) => (d?.status === 'draft' ? null : d));
+  }, [otherKind, saving.other]);
   /** Takes in the counts of an earlier day the person chose to use. */
   const useThem = () => {
     const taken = saving.takeStored();
