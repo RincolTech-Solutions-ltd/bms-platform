@@ -1,4 +1,4 @@
-import type { Unit } from '../../../api/retail';
+import { RetailError, type Unit } from '../../../api/retail';
 import { plural } from '../../../app/glossary';
 import { Field } from '../../../app/ui/Field';
 import { Hint } from '../../../app/ui/Hint';
@@ -53,6 +53,19 @@ export function packageAsUnit(unit: Unit | undefined): string | null {
   return `A ${word} is a package. Choose the smallest unit, like piece, then add the ${word} below.`;
 }
 
+/**
+ * Review of #692: another smallest unit is never offered as its own package, and a size filled in from a package's usual pack
+ * is filled in again for it (100 bulbs is no box of pieces), or cleared when the unit's usual pack counts something else. A
+ * typed size stays.
+ */
+export function forSmallest(rows: PackageRow[], units: Unit[], smallestId: string): PackageRow[] {
+  return rows.map((r) => {
+    const row = r.unitId === smallestId ? { ...r, unitId: '' } : r;
+    const factor = factorForUnit(row.factor, row.filled.factor, usualFactor(units.find((u) => u.id === row.unitId), { unit_id: smallestId }));
+    return factor === row.factor ? row : { ...row, factor, filled: { ...row.filled, factor } };
+  });
+}
+
 /** A package holds a whole number of the smallest unit, 2 or more. */
 export function sizeProblem(factor: string): string | null {
   return /^\d+$/.test(factor.trim()) && Number(factor.trim()) >= 2 ? null : 'Type a whole number, 2 or more.';
@@ -60,20 +73,6 @@ export function sizeProblem(factor: string): string | null {
 
 export function rowProblem(row: PackageRow): string | null {
   return row.unitId === '' ? 'Choose the package.' : sizeProblem(row.factor);
-}
-
-/**
- * Review of #692: when the smallest unit changes, a package in that unit is dropped, and a size the app filled in from a
- * unit's usual pack (never one the owner typed) follows the new smallest unit, or empties when the usual pack does not
- * count it.
- */
-export function rowsForSmallest(rows: PackageRow[], units: Unit[], smallestId: string): PackageRow[] {
-  return rows.map((r) => {
-    const unitId = r.unitId === smallestId ? '' : r.unitId;
-    const usual = unitId === '' ? null : usualFactor(units.find((u) => u.id === unitId), { unit_id: smallestId });
-    const factor = factorForUnit(r.factor, r.filled.factor, usual);
-    return { ...r, unitId, factor, filled: { ...r.filled, factor: factor === r.factor ? r.filled.factor : factor } };
-  });
 }
 
 /** The packs the create request sends; a price only from someone who may set one, never on a pack only for buying. */
@@ -86,6 +85,15 @@ export function packsToSend(rows: PackageRow[], mayPrice: boolean) {
   }));
 }
 
+/** The server's refusal of package `index` (its `pack_index`), on its size when it names `packs[i].factor`, else on its unit. */
+export type PackError = { index: number; onSize: boolean; message: string };
+
+export function packErrorOf(error: unknown): PackError | null {
+  if (!(error instanceof RetailError) || typeof error.problem?.pack_index !== 'number') return null;
+  const fields = (error.problem.errors as { field?: string }[] | undefined) ?? [];
+  return { index: error.problem.pack_index, onSize: fields.some((f) => f.field?.endsWith('.factor') === true), message: error.message };
+}
+
 /** ", with carton of 10 and box of 100", or nothing without packages: the end of "60W bulb added". */
 export function withPackages(rows: PackageRow[], units: Unit[]): string {
   const said = rows.map((r) => `${unitWord(units.find((u) => u.id === r.unitId), 'package')} of ${r.factor.trim()}`);
@@ -93,7 +101,7 @@ export function withPackages(rows: PackageRow[], units: Unit[]): string {
   return `, with ${said.length === 1 ? said[0] : `${said.slice(0, -1).join(', ')} and ${said[said.length - 1]}`}`;
 }
 
-export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows, onRows, mayPrice, showErrors, refused }: {
+export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows, onRows, mayPrice, showErrors, refused = null }: {
   /** The smallest unit chosen, or none yet. */
   smallest: Unit | undefined;
   /** The switched-on units of the business. */
@@ -105,8 +113,8 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
   onRows: (rows: PackageRow[]) => void;
   mayPrice: boolean;
   showErrors: boolean;
-  /** Review of #692: the server's refusal of one package (its `pack_index`), shown on that package's row. */
-  refused?: { index: number; message: string } | null;
+  /** The server's refusal of one package, shown on that package's row. */
+  refused?: PackError | null;
 }) {
   const one = unitWord(smallest, 'item');
   const many = smallest ? plural(one) : 'items';
@@ -133,6 +141,7 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
             const choices = units.filter((u) => u.id !== smallest?.id && !used.has(u.id ?? ''));
             const pack = unitWord(units.find((u) => u.id === row.unitId), 'package');
             const size = sizeProblem(row.factor);
+            const mine = refused?.index === i ? refused : null;
             return (
               <fieldset key={row.key} className="stack" data-testid="package-row">
                 <legend>{rows.length > 1 ? `Package ${i + 1}` : 'Package'}</legend>
@@ -145,8 +154,8 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
                   load={load}
                   value={row.unitId}
                   onChange={(unitId) => chooseUnit(row, unitId)}
-                  error={row.unitId === '' ? 'Choose the package.' : null}
-                  showError={showErrors}
+                  error={row.unitId === '' ? 'Choose the package.' : mine && !mine.onSize ? mine.message : null}
+                  showError={showErrors || (mine !== null && !mine.onSize)}
                 />
                 <Field
                   id={`item-pack-size-${row.key}`}
@@ -157,8 +166,8 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
                   placeholder="10"
                   value={row.factor}
                   onChange={(e) => change(row.key, { factor: e.target.value })}
-                  error={size}
-                  showError={showErrors}
+                  error={size ?? (mine?.onSize ? mine.message : null)}
+                  showError={showErrors || mine?.onSize === true}
                 />
                 <p className="field-label">Used for</p>
                 <Segmented label={`Used for, ${pack}`} options={USED_FOR} value={row.purpose} onChange={(purpose) => change(row.key, { purpose })} />
@@ -177,7 +186,6 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
                 ) : (
                   <Hint>It sells at the {one} price times its size until someone who may change prices sets its own.</Hint>
                 )}
-                {refused?.index === i && <p role="alert" className="rt-flag" data-testid="package-refused">{refused.message}</p>}
                 {rows.length > 1 && (
                   <button type="button" className="btn-ghost" onClick={() => onRows(rows.filter((r) => r.key !== row.key))}>
                     Remove the {pack}
