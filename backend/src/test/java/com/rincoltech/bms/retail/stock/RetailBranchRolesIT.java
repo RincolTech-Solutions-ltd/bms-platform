@@ -235,6 +235,8 @@ class RetailBranchRolesIT extends IntegrationTest {
         assertThat(outside.getBody().get("errors").get(0).get("code").asString())
                 .isEqualTo("unknown_branch");
         assertThat(outside.getBody().get("detail").asString()).doesNotContain("scope");
+        assertThat(outside.getBody().get("errors").get(0).get("message").asString())
+                .isEqualTo("That branch is not one you work in.");
     }
 
     /**

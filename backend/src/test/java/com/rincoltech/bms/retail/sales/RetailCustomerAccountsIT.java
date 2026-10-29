@@ -110,6 +110,16 @@ class RetailCustomerAccountsIT extends IntegrationTest {
         return r.getBody().get("code").asString();
     }
 
+    /** Each field problem's message by its field, so no assertion leans on the order of the problems. */
+    static Map<String, String> messages(ResponseEntity<JsonNode> r) {
+        Map<String, String> byField = new LinkedHashMap<>();
+        r.getBody()
+                .get("errors")
+                .forEach(e ->
+                        byField.put(e.get("field").asString(), e.get("message").asString()));
+        return byField;
+    }
+
     UUID customer(String name) {
         return RetailTestSupport.id(api.post("/customers", Map.of("name", name), CLERK));
     }
@@ -1624,24 +1634,32 @@ class RetailCustomerAccountsIT extends IntegrationTest {
         ResponseEntity<JsonNode> termsOnly =
                 api.call(HttpMethod.PUT, path, Map.of("terms_days", 1), MANAGER, "*", match);
         assertThat(termsOnly.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        // Issue #257: the refusal is in a shop owner's words, never an API field name.
-        JsonNode limitProblem = termsOnly.getBody().get("errors").get(0);
-        assertThat(limitProblem.get("field").asString()).isEqualTo("credit_limit_minor");
-        assertThat(limitProblem.get("message").asString())
-                .isEqualTo("Also say how much this buyer may owe, or that they have no credit limit.");
-        empty.getBody()
-                .get("errors")
-                .forEach(e -> assertThat(e.get("message").asString()).doesNotContain("_"));
+        // Issue #257: each refusal is in a shop owner's words, never an API field name.
+        assertThat(messages(termsOnly))
+                .containsExactly(Map.entry(
+                        "credit_limit_minor",
+                        "Also say how much this buyer may owe, or that they have no credit limit."));
+        assertThat(messages(empty))
+                .containsOnly(
+                        Map.entry(
+                                "credit_limit_minor",
+                                "Also say how much this buyer may owe, or that they have no credit limit."),
+                        Map.entry(
+                                "terms_days",
+                                "Also say how many days this buyer has to pay, or that they have no payment terms."));
         // A value and its clear flag together contradict each other.
-        assertThat(api.call(
-                                HttpMethod.PUT,
-                                path,
-                                Map.of("credit_limit_minor", 1, "clear_credit_limit", true, "terms_days", 1),
-                                MANAGER,
-                                "*",
-                                match)
-                        .getStatusCode())
-                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        ResponseEntity<JsonNode> both = api.call(
+                HttpMethod.PUT,
+                path,
+                Map.of("credit_limit_minor", 1, "clear_credit_limit", true, "terms_days", 1, "clear_terms_days", true),
+                MANAGER,
+                "*",
+                match);
+        assertThat(both.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(messages(both))
+                .containsOnly(
+                        Map.entry("credit_limit_minor", "Either set a credit limit or say there is none, not both."),
+                        Map.entry("terms_days", "Either set payment terms or say there are none, not both."));
         assertThat(version(c)).isEqualTo(v);
         JsonNode kept = api.get(path, ADMIN).getBody();
         assertThat(kept.get("credit_limit_minor").asLong()).isEqualTo(7_000);
