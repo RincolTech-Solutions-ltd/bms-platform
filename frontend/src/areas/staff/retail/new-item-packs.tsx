@@ -1,5 +1,4 @@
 import { RetailError, type Unit } from '../../../api/retail';
-import { plural } from '../../../app/glossary';
 import { Field } from '../../../app/ui/Field';
 import { Hint } from '../../../app/ui/Hint';
 import { MoneyInput } from '../../../app/ui/MoneyInput';
@@ -7,6 +6,7 @@ import { Segmented } from '../../../app/ui/Segmented';
 import { icons } from '../../../components/icons';
 import { PURPOSES, factorForUnit, purposeForUnit, usualFactor, type Purpose } from './catalogue-packs';
 import { UnitPicker } from './unit-picker';
+import { unitWord, unitWords } from './units-state';
 
 // Issue #689 (ADR-106): Add an item asks for the smallest unit, then whether the item is bought or sold in packages, and
 // takes the packages in the same form, so one save makes the item and its packs together. A package is a pack of
@@ -34,9 +34,14 @@ export function newPackageRow(key: number): PackageRow {
   return { key, unitId: '', factor: '', purpose: 'both', priceMinor: null, filled: { factor: '', purpose: 'both' } };
 }
 
-/** "bulb" for a unit named Bulb; the word a sentence names the unit by. */
-export function unitWord(unit: Unit | undefined, none: string): string {
-  return unit?.name ? unit.name.trim().toLowerCase() : none;
+/** "bulb" for a unit named Bulb, "piece" for Pc (the shop words of units-state.ts, #680), or `none` when no unit is chosen. */
+export function oneOf(unit: Unit | undefined, none: string): string {
+  return unit?.name?.trim() ? unitWord(unit.name.trim()).toLowerCase() : none;
+}
+
+/** "bulbs" for a unit named Bulb, "pieces" for Pc, or `none` when no unit is chosen. */
+export function manyOf(unit: Unit | undefined, none: string): string {
+  return unit?.name?.trim() ? unitWords(unit.name.trim()).toLowerCase() : none;
 }
 
 /**
@@ -45,7 +50,8 @@ export function unitWord(unit: Unit | undefined, none: string): string {
  */
 export function packageAsUnit(unit: Unit | undefined): string | null {
   if (!unit?.is_package) return null;
-  const word = unitWord(unit, '');
+  // The unit's own name, not its shop word, so the sentence is the server's word for word.
+  const word = (unit.name ?? '').trim().toLowerCase();
   const head = word.split(' ')[0] ?? '';
   const named = head.endsWith('s') && !head.endsWith('ss') ? word.charAt(0).toUpperCase() + word.slice(1) : `A ${word}`;
   return `${named} is a package. Choose the smallest unit, like piece, then add the ${word} below.`;
@@ -102,7 +108,7 @@ export function packErrorOf(error: unknown): PackError | null {
 
 /** ", with carton of 10 and box of 100", or nothing without packages: the end of "60W bulb added". */
 export function withPackages(rows: PackageRow[], units: Unit[]): string {
-  const said = rows.map((r) => `${unitWord(units.find((u) => u.id === r.unitId), 'package')} of ${r.factor.trim()}`);
+  const said = rows.map((r) => `${oneOf(units.find((u) => u.id === r.unitId), 'package')} of ${r.factor.trim()}`);
   if (said.length === 0) return '';
   return `, with ${said.length === 1 ? said[0] : `${said.slice(0, -1).join(', ')} and ${said[said.length - 1]}`}`;
 }
@@ -122,8 +128,8 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
   /** The server's refusal of one package, shown on that package's row. */
   refused?: PackError | null;
 }) {
-  const one = unitWord(smallest, 'item');
-  const many = smallest ? plural(one) : 'items';
+  const one = oneOf(smallest, 'item');
+  const many = manyOf(smallest, 'items');
   const change = (key: number, next: Partial<PackageRow>) => onRows(rows.map((r) => (r.key === key ? { ...r, ...next } : r)));
   const chooseUnit = (row: PackageRow, unitId: string) => {
     const unit = units.find((u) => u.id === unitId);
@@ -145,7 +151,7 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
           {rows.map((row, i) => {
             const used = new Set(rows.filter((r) => r.key !== row.key).map((r) => r.unitId));
             const choices = units.filter((u) => u.id !== smallest?.id && !used.has(u.id ?? ''));
-            const pack = unitWord(units.find((u) => u.id === row.unitId), 'package');
+            const pack = oneOf(units.find((u) => u.id === row.unitId), 'package');
             const size = sizeProblem(row.factor);
             const mine = refused?.index === i ? refused : null;
             return (

@@ -47,7 +47,7 @@ vi.mock('../../../api/retail', async (original) => {
 
 const { ProductsPage } = await import('./catalogue-products');
 const { withPacksOn } = await import('./catalogue-packs');
-const { PACKAGES_QUESTION, forSmallest, packageAsUnit, sizeProblem, withPackages, newPackageRow } = await import('./new-item-packs');
+const { PACKAGES_QUESTION, forSmallest, manyOf, oneOf, packageAsUnit, sizeProblem, withPackages, newPackageRow } = await import('./new-item-packs');
 
 const owner = withPacksOn(mockMe('admin'));
 
@@ -99,6 +99,9 @@ describe('the words of Add an item', () => {
     for (const ok of ['2', '10', ' 100 ']) expect(sizeProblem(ok)).toBeNull();
     for (const bad of ['', '1', '0', '2.5', '-4', 'ten']) expect(sizeProblem(bad)).toBe('Type a whole number, 2 or more.');
     expect(sizeProblem('100000')).toBeNull();
+    // Unit names read in the shop's words (#680): a short code is its full word, one or many.
+    expect([oneOf({ name: 'Pc' }, 'item'), manyOf({ name: 'Pc' }, 'items'), oneOf({ name: 'Ctn' }, 'package')]).toEqual(['piece', 'pieces', 'carton']);
+    expect([oneOf(undefined, 'item'), manyOf({ name: 'Bulb' }, 'items')]).toEqual(['item', 'bulbs']);
     for (const big of ['100001', '1000000000000']) expect(sizeProblem(big)).toBe('Type a number up to 100,000.');
   });
 

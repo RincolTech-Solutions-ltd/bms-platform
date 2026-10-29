@@ -18,7 +18,7 @@ import { MakeFamilyPanel, SIZES_JOIN, SIZES_NEW, VariantNote } from './catalogue
 import { ItemPhoto, PhotoChoice, PhotoEditor, sendNewPhoto, shownPhoto } from './item-photo';
 import { ScreenLink } from './screen-link';
 import { UNITS, canUse, capabilityOn, holds } from './permissions';
-import { NewItemPackages, forSmallest, newPackageRow, packErrorOf, packageAsUnit, packsToSend, rowProblem, unitWord, withPackages, type PackageRow } from './new-item-packs';
+import { NewItemPackages, forSmallest, newPackageRow, packErrorOf, packageAsUnit, oneOf, packsToSend, rowProblem, withPackages, type PackageRow } from './new-item-packs';
 import { StockMinimumEditor } from './stock-minimum';
 import { UnitPicker } from './unit-picker';
 import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
@@ -332,14 +332,14 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
         <>
           {profit ? (
             <>
-              <label htmlFor="item-cost">{`Buying price of one ${unitWord(smallest, 'item')} (${RETAIL_CURRENCY})`}</label>
+              <label htmlFor="item-cost">{`Buying price of one ${oneOf(smallest, 'item')} (${RETAIL_CURRENCY})`}</label>
               <input id="item-cost" inputMode="numeric" value={cost} onChange={(e) => setCost(e.target.value)} aria-invalid={costMinor === null} autoComplete="off" />
               <Hint>What you pay the supplier for one. Leave 0 if you do not know it yet; buying stock sets it.</Hint>
             </>
           ) : null}
           <Field
             id="item-sell"
-            label={`Selling price of one ${unitWord(smallest, 'item')} (${RETAIL_CURRENCY})`}
+            label={`Selling price of one ${oneOf(smallest, 'item')} (${RETAIL_CURRENCY})`}
             required
             error={sellMinor === null ? `Type the price you sell one at, in ${RETAIL_CURRENCY}.` : null}
             showError={showErrors}
