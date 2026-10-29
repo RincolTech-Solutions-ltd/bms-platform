@@ -18,7 +18,7 @@ import { MakeFamilyPanel, SIZES_JOIN, SIZES_NEW, VariantNote } from './catalogue
 import { ItemPhoto, PhotoChoice, PhotoEditor, sendNewPhoto, shownPhoto } from './item-photo';
 import { ScreenLink } from './screen-link';
 import { UNITS, canUse, capabilityOn, holds } from './permissions';
-import { NewItemPackages, forSmallest, newPackageRow, packErrorOf, packageAsUnit, oneOf, packsToSend, rowProblem, withPackages, type PackageRow } from './new-item-packs';
+import { NewItemPackages, UsualLevel, answeredPieces, forSmallest, newPackageRow, packErrorOf, packageAsUnit, oneOf, packsToSend, piecePriceOf, rowProblem, withPackages, type PackageRow, type UsualAnswer } from './new-item-packs';
 import { StockMinimumEditor } from './stock-minimum';
 import { UnitPicker } from './unit-picker';
 import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
@@ -152,7 +152,14 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
   const [inPackages, setInPackages] = useState<'no' | 'yes'>('no');
   const [packRows, setPackRows] = useState<PackageRow[]>([newPackageRow(1)]);
   const packages = packsOn && inPackages === 'yes' ? packRows : [];
-  const complete = description.trim() !== '' && categoryId !== '' && unitProblem === null && (product ? true : sellMinor !== null && costMinor !== null)
+  // Issue #699: how the shop usually buys and sells it, and the price of one of that level; the piece price is worked out.
+  const [buyAt, setBuyAt] = useState<UsualAnswer>({ key: 0, priceMinor: null });
+  const [sellAt, setSellAt] = useState<UsualAnswer>({ key: 0, priceMinor: null });
+  const buyPieces = answeredPieces(packages, units.data ?? [], smallest, 'buy', buyAt);
+  const sellPieces = answeredPieces(packages, units.data ?? [], smallest, 'sell', sellAt);
+  const costOf = buyPieces === null ? costMinor : piecePriceOf(buyAt, buyPieces);
+  const sellOf = sellPieces === null ? sellMinor : piecePriceOf(sellAt, sellPieces);
+  const complete = description.trim() !== '' && categoryId !== '' && unitProblem === null && (product ? true : sellOf !== null && (!profit || costOf !== null))
     && (!variant || size.trim() !== '' || colour.trim() !== '') && packages.every((r) => rowProblem(r, packages) === null);
   const chosen = fixed ?? (categories.data ?? []).find((c) => c.id === categoryId);
   const movedFrom = product && !variant && categoryId !== product.category_id ? product.category : null;
@@ -170,8 +177,10 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
       const reason = duplicateReason ? { duplicate_reason: duplicateReason } : {};
       if (product && variant) return { saved: await retail.updateProduct(product.id ?? '', product.version ?? 1, { active, variant_size: size.trim(), variant_colour: colour.trim() }), photoNote: null };
       if (product) return { saved: await retail.updateProduct(product.id ?? '', product.version ?? 1, { description: description.trim(), category_id: categoryId, unit_id: unitId, active, ...reason }), photoNote: null };
-      const packs = packages.length > 0 ? { packs: packsToSend(packages, mayPrice) } : {};
-      const saved = await retail.createProduct({ description: description.trim(), category_id: categoryId, unit_id: unitId, sell_minor: sellMinor ?? 0, cost_minor: profit ? (costMinor ?? 0) : 0, ...reason, ...packs });
+      // Issue #699: the level it is usually sold at keeps the price typed for one of it; Buy stock opens on the usual buying level.
+      const priced = packages.map((r) => (sellPieces !== null && r.key === sellAt.key ? { ...r, priceMinor: sellAt.priceMinor } : r));
+      const packs = packages.length > 0 ? { packs: packsToSend(priced, mayPrice, buyPieces !== null ? buyAt.key : null) } : {};
+      const saved = await retail.createProduct({ description: description.trim(), category_id: categoryId, unit_id: unitId, sell_minor: sellOf ?? 0, cost_minor: profit ? (costOf ?? 0) : 0, ...reason, ...packs });
       // The item stands whatever happens to its photo: a failed upload only adds a line to the message.
       return { saved, photoNote: await sendNewPhoto(saved.id ?? '', photo) };
     },
@@ -331,23 +340,25 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
       ) : (
         <>
           {profit ? (
-            <>
+            <UsualLevel id="item-buy" use="buy" on={packages.length > 0} rows={packages} units={units.data ?? []} smallest={smallest} answer={buyAt} onAnswer={setBuyAt} showErrors={showErrors}>
               <label htmlFor="item-cost">{`Buying price of one ${oneOf(smallest, 'item')} (${RETAIL_CURRENCY})`}</label>
               <input id="item-cost" inputMode="numeric" value={cost} onChange={(e) => setCost(e.target.value)} aria-invalid={costMinor === null} autoComplete="off" />
               <Hint>What you pay the supplier for one. Leave 0 if you do not know it yet; buying stock sets it.</Hint>
-            </>
+            </UsualLevel>
           ) : null}
-          <Field
-            id="item-sell"
-            label={`Selling price of one ${oneOf(smallest, 'item')} (${RETAIL_CURRENCY})`}
-            required
-            error={sellMinor === null ? `Type the price you sell one at, in ${RETAIL_CURRENCY}.` : null}
-            showError={showErrors}
-            inputMode="numeric"
-            value={sell}
-            onChange={(e) => setSell(e.target.value)}
-            autoComplete="off"
-          />
+          <UsualLevel id="item-sell-at" use="sell" on={packages.length > 0} rows={packages} units={units.data ?? []} smallest={smallest} answer={sellAt} onAnswer={setSellAt} showErrors={showErrors}>
+            <Field
+              id="item-sell"
+              label={`Selling price of one ${oneOf(smallest, 'item')} (${RETAIL_CURRENCY})`}
+              required
+              error={sellMinor === null ? `Type the price you sell one at, in ${RETAIL_CURRENCY}.` : null}
+              showError={showErrors}
+              inputMode="numeric"
+              value={sell}
+              onChange={(e) => setSell(e.target.value)}
+              autoComplete="off"
+            />
+          </UsualLevel>
           {!profit && <p className="hint">The buying price is set when you buy stock.</p>}
           <PhotoChoice id="item-photo" file={photo} onChange={setPhoto} />
           <PacksTurnOn />

@@ -259,6 +259,34 @@ describe('Add an item (issue #689)', () => {
     expect(screen.queryByText('One or more fields are invalid.')).toBeNull();
   });
 
+  // JUSTIFICATION-A3: issue #699 asks for this test: a carton price at setup gives the right piece cost.
+  it('asks how it is usually bought and sold, and works the piece prices out from a carton (issue #699)', async () => {
+    createProduct.mockImplementation(async () => made);
+    open();
+    await fill('u1');
+    fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
+    const row = screen.getByTestId('package-row');
+    fireEvent.change(within(row).getByLabelText(/^Package/), { target: { value: 'u2' } });
+    fireEvent.change(within(row).getByLabelText(/^How many bulbs in one carton/), { target: { value: '120' } });
+    const buy = screen.getByTestId('usual-buy');
+    expect(within(buy).getByText('How do you usually buy it?')).toBeTruthy();
+    fireEvent.click(within(buy).getByRole('radio', { name: 'Carton' }));
+    fireEvent.change(within(buy).getByLabelText(/^What do you pay for one carton\?/), { target: { value: '600000' } });
+    expect(within(buy).getByTestId('usual-buy-piece').textContent).toBe('That is UGX 5,000 a bulb.');
+    const sell = screen.getByTestId('usual-sell');
+    fireEvent.click(within(sell).getByRole('radio', { name: 'Carton' }));
+    fireEvent.change(within(sell).getByLabelText(/^Selling price of one carton/), { target: { value: '690000' } });
+    expect(within(sell).getByTestId('usual-sell-piece').textContent).toBe('That is UGX 5,750 a bulb.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    await waitFor(() => expect(createProduct).toHaveBeenCalledTimes(1));
+    expect(createProduct.mock.calls[0]?.[0]).toMatchObject({
+      cost_minor: 5_000,
+      sell_minor: 5_750,
+      packs: [{ unit_id: 'u2', factor: '120', purpose: 'both', sell_minor: 690_000, usual_buy: true }],
+    });
+  });
+
   it('makes a carton of boxes of bulbs: the bigger package holds the box and the bulbs are worked out (issue #699)', async () => {
     createProduct.mockImplementation(async () => made);
     open();

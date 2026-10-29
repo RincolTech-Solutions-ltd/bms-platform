@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { RetailError, type Unit } from '../../../api/retail';
 import { Field } from '../../../app/ui/Field';
 import { Hint } from '../../../app/ui/Hint';
@@ -6,7 +7,8 @@ import { Segmented } from '../../../app/ui/Segmented';
 import { icons } from '../../../components/icons';
 import { PURPOSES, factorForUnit, purposeForUnit, usualFactor, type Purpose } from './catalogue-packs';
 import { UnitPicker } from './unit-picker';
-import { shown, type Rung } from './ladder-state';
+import { perPieceMinor, shown, type Rung } from './ladder-state';
+import { money } from './ui';
 import { LadderRungs, LadderSum, LookInside } from './package-ladder';
 import { unitWord, unitWords } from './units-state';
 
@@ -167,6 +169,83 @@ export function withPackages(rows: PackageRow[], units: Unit[]): string {
   const said = rows.map((r) => `${oneOf(units.find((u) => u.id === r.unitId), 'package')} of ${r.factor.trim()}${r.holdsKey === 0 ? '' : ` ${manyOf(unitOf(r.holdsKey), 'packages')}`}`);
   if (said.length === 0) return '';
   return `, with ${said.length === 1 ? said[0] : `${said.slice(0, -1).join(', ')} and ${said[said.length - 1]}`}`;
+}
+
+/**
+ * Issue #699 (owner, 29 Oct 2026): a wholesale shop buys in cartons, so setting up the item asks how it is usually bought and
+ * what one of that level costs, and works the piece out; the same for selling. An answer is a package row's key (0 for the
+ * smallest unit) and the price of one of it.
+ * JUSTIFICATION-A3: the owner's new setup questions; no existing control asks for a level and its price.
+ */
+export type UsualAnswer = { key: number; priceMinor: number | null };
+
+/** The levels a question offers: the smallest unit, then each package used for `use` that is whole, smallest first. */
+export function levelChoices(rows: PackageRow[], units: Unit[], smallest: Unit | undefined, use: 'buy' | 'sell') {
+  const packs = rows
+    .filter((r) => r.unitId !== '' && rowPieces(rows, r) !== null && r.purpose !== (use === 'buy' ? 'sell' : 'buy'))
+    .map((r) => ({ value: String(r.key), label: unitWord(units.find((u) => u.id === r.unitId)?.name), pieces: rowPieces(rows, r) ?? 1n }))
+    .sort((a, b) => (a.pieces < b.pieces ? -1 : 1));
+  return [{ value: '0', label: unitWord(smallest?.name) || 'Piece', pieces: 1n }, ...packs];
+}
+
+/** The smallest units in one of the level answered, or null for the smallest unit itself (or a level no longer offered). */
+export function answeredPieces(rows: PackageRow[], units: Unit[], smallest: Unit | undefined, use: 'buy' | 'sell', answer: UsualAnswer): bigint | null {
+  if (answer.key === 0) return null;
+  return levelChoices(rows, units, smallest, use).find((c) => c.value === String(answer.key))?.pieces ?? null;
+}
+
+/** The price of one of the smallest unit from an answer at a bigger level, rounded half up; null until a price is typed. */
+export function piecePriceOf(answer: UsualAnswer, pieces: bigint): number | null {
+  return answer.priceMinor === null ? null : perPieceMinor(answer.priceMinor, pieces * 1000n);
+}
+
+/** "How do you usually buy it?" with the levels, and for a package "What do you pay for one carton?" with the piece worked out. */
+export function UsualLevel({ id, use, on, rows, units, smallest, answer, onAnswer, showErrors, children }: {
+  id: string;
+  /** Asked only while the item has packages; else the form's own price field alone. */
+  on: boolean;
+  use: 'buy' | 'sell';
+  rows: PackageRow[];
+  units: Unit[];
+  smallest: Unit | undefined;
+  answer: UsualAnswer;
+  onAnswer: (answer: UsualAnswer) => void;
+  showErrors: boolean;
+  /** The question for the smallest unit itself, the form's own price field. */
+  children: ReactNode;
+}) {
+  const choices = levelChoices(rows, units, smallest, use);
+  if (!on || choices.length < 2) return <>{children}</>;
+  const chosen = choices.find((c) => c.value === String(answer.key)) ?? choices[0]!;
+  const question = use === 'buy' ? 'How do you usually buy it?' : 'How do you usually sell it, and at what price?';
+  const one = oneOf(smallest, 'item');
+  const level = chosen.label.toLowerCase();
+  const piece = chosen.value === '0' ? null : piecePriceOf(answer, chosen.pieces);
+  return (
+    <div className="stack" data-testid={`usual-${use}`}>
+      <p className="field-label">{question}</p>
+      {choices.length <= 5 ? (
+        <Segmented label={question} options={choices.map(({ value, label }) => ({ value, label }))} value={chosen.value} onChange={(v) => onAnswer({ key: Number(v), priceMinor: null })} />
+      ) : (
+        // empty: the smallest unit is always the first choice
+        <select id={`${id}-level`} aria-label={question} value={chosen.value} onChange={(e) => onAnswer({ key: Number(e.target.value), priceMinor: null })}>
+          {choices.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+        </select>
+      )}
+      {chosen.value === '0' ? children : (
+        <MoneyInput
+          id={`${id}-price`}
+          label={use === 'buy' ? `What do you pay for one ${level}?` : `Selling price of one ${level}`}
+          required
+          valueMinor={answer.priceMinor}
+          onChange={(priceMinor) => onAnswer({ ...answer, priceMinor })}
+          error={answer.priceMinor === null ? `Type the price of one ${level}.` : null}
+          showError={showErrors}
+          hint={piece !== null ? <span data-testid={`usual-${use}-piece`}>That is {money(piece)} a {one}.</span> : `1 ${level} is ${String(chosen.pieces)} ${manyOf(smallest, 'items')}. The app works out the price of one.`}
+        />
+      )}
+    </div>
+  );
 }
 
 export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows, onRows, mayPrice, showErrors, refused = null }: {
