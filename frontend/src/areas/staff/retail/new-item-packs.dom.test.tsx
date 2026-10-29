@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -83,6 +84,9 @@ describe('the words of Add an item', () => {
     expect(packageAsUnit(undefined)).toBeNull();
     // A short code reads in the shop's words, as the rest of the form names it (review of #692).
     expect(packageAsUnit({ name: 'Ctn', is_package: true })).toBe('A carton is a package. Choose the smallest unit, like piece, then add the carton below.');
+    // The sentences RetailNewItemPacksIT checks on the server, from one file, so the screen and the API agree.
+    const contract = JSON.parse(readFileSync('../fixtures/retail/package-refusals-689.json', 'utf8')) as { cases: { unit: string; sentence: string }[] };
+    for (const c of contract.cases) expect(packageAsUnit({ name: c.unit, is_package: true }), c.unit).toBe(c.sentence);
   });
 
   it('refills a size the app filled when the smallest unit changes, and keeps one the owner typed (review of #692)', () => {

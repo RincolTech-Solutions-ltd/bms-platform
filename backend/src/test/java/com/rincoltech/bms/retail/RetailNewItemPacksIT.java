@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Issue #689 (ADR-106): Add an item makes the item in its smallest unit and its packages in one request and one
@@ -143,15 +145,28 @@ class RetailNewItemPacksIT extends IntegrationTest {
             assertThat(RetailCatalogue.isPackageWord(word)).as(word).isFalse();
         }
         assertThat(RetailCatalogue.isPackageWord(null)).isFalse();
-        // Review of #692: a unit named in the plural reads right too.
-        assertThat(RetailCatalogue.packageAsUnit("Cartons"))
-                .isEqualTo("Cartons is a package. Choose the smallest unit, like piece, then add the cartons below.");
-        assertThat(RetailCatalogue.packageAsUnit("Boxes")).startsWith("Boxes is a package.");
         assertThat(RetailCatalogue.packageAsUnit("Sets of 4")).startsWith("Sets of 4 is a package.");
-        assertThat(RetailCatalogue.packageAsUnit("Set of 4")).startsWith("A set of 4 is a package.");
-        assertThat(RetailCatalogue.packageAsUnit("Ctn"))
-                .isEqualTo("A carton is a package. Choose the smallest unit, like piece, then add the carton below.");
-        assertThat(RetailCatalogue.packageAsUnit("PKT")).startsWith("A packet is a package.");
+        // Review of #692: the sentences the PWA's test checks too, from one file, so the server and the screen agree;
+        // every
+        // short code of the word list reads as its word.
+        JsonNode cases = JsonMapper.builder()
+                .build()
+                .readTree(
+                        Path.of("../fixtures/retail/package-refusals-689.json").toFile())
+                .get("cases");
+        for (JsonNode c : cases) {
+            String unit = c.get("unit").asString();
+            assertThat(RetailCatalogue.isPackageWord(unit)).as(unit).isTrue();
+            assertThat(RetailCatalogue.packageAsUnit(unit))
+                    .as(unit)
+                    .isEqualTo(c.get("sentence").asString());
+        }
+        for (String code : RetailCatalogue.SHORT_CODE_WORDS.keySet()) {
+            assertThat(cases.valueStream()
+                            .anyMatch(c -> c.get("unit").asString().equalsIgnoreCase(code)))
+                    .as("the fixture has %s", code)
+                    .isTrue();
+        }
     }
 
     /** Review of #692: Add an item with sizes and colours makes items too, and never in a package. */

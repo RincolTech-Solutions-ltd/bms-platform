@@ -42,6 +42,11 @@ public interface RetailCatalogue {
                     + "|sets? of \\d+.*",
             Pattern.CASE_INSENSITIVE);
 
+    /** Every short code of {@link #PACKAGE_WORDS} and its word, as {@code UNIT_WORDS} in units-state.ts has them. */
+    java.util.Map<String, String> SHORT_CODE_WORDS = java.util.Map.of(
+            "ctn", "carton", "ctns", "carton", "pkt", "packet", "pkts", "packet", "bx", "box", "doz", "dozen", "dz",
+            "dozen");
+
     /** True when the unit's name is a package word of {@link #PACKAGE_WORDS}. */
     static boolean isPackageWord(String unitName) {
         return unitName != null && PACKAGE_WORDS.matcher(unitName.trim()).matches();
@@ -50,11 +55,12 @@ public interface RetailCatalogue {
     /**
      * Issue #689: the refusal of a package as a new item's unit, as the PWA words it ({@code packageAsUnit} in
      * new-item-packs.tsx): "A box is a package", or "Cartons is a package" for a unit named in the plural. A short code reads
-     * as its word, as {@code unitWord} in units-state.ts maps it (review of #692): "Ctn" is "a carton", "Pkt" is "a packet".
+     * as its word, as {@code unitWord} in units-state.ts maps it (review of #692): "Ctn" and "Ctns" are "a carton", "Bx" is "a
+     * box", "Doz" and "Dz" are "a dozen". fixtures/retail/package-refusals-689.json holds the sentences both sides must give.
      */
     static String packageAsUnit(String unitName) {
         String name = unitName.trim().toLowerCase(java.util.Locale.ROOT);
-        String word = java.util.Map.of("ctn", "carton", "pkt", "packet").getOrDefault(name, name);
+        String word = SHORT_CODE_WORDS.getOrDefault(name, name);
         String head = word.split(" ")[0];
         String named = head.endsWith("s") && !head.endsWith("ss")
                 ? Character.toUpperCase(word.charAt(0)) + word.substring(1)
