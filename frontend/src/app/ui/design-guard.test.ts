@@ -27,10 +27,6 @@ const HEX = /#[0-9a-fA-F]{3,8}\b/;
 const MOVES = new Set(['transform', 'opacity']);
 // The named exceptions, each a colour or background fade with its reason; anything else that animates fails the guard.
 const MOTION_EXCEPTIONS: Record<string, { property: string; why: string }[]> = {
-  'app/ui/buttons.css': [
-    { property: 'background', why: 'a button fades to its hover and pressed fill in --motion-fast rather than flashing' },
-    { property: 'border-color', why: 'the edge of a button fades with its fill' },
-  ],
   'app/ui/forms.css': [{ property: 'border-color', why: 'a field edge fades to the hover and focus colour' }],
   'app/ui/surfaces.css': [{ property: 'border-color', why: 'a link card edge fades to the accent on hover' }],
   'app/ui/feedback.css': [{ property: 'background-position', why: 'the skeleton shimmer slides its gradient while a page loads' }],
@@ -261,6 +257,32 @@ describe('design guard', () => {
     expect(theme).toMatch(/--ease-out:\s*cubic-bezier\(0\.2,\s*0,\s*0,\s*1\)/);
     expect(theme).toMatch(/--text-display:/);
     expect(code('app/ui/base.css')).toMatch(/prefers-reduced-motion: reduce\)\s*\{\s*:root\s*\{[^}]*--motion:\s*0ms/);
+  });
+
+  // Pressed (#682): every button, tile, card and row answers a tap by the shared press alone: transform and opacity, nothing
+  // else, in --motion-fast (100 to 160 ms) on the ease-out curve, and no shrinking under reduced motion. A plain <button> takes
+  // it from buttons.css, so a screen never draws its own. The busy rule only cancels the press, so it is not a press.
+  // JUSTIFICATION-A3: #682 asks the guard to hold the press; no existing test checks :active rules.
+  it('presses by transform and opacity only, in 100 to 160 ms on the ease-out curve, and not by scale under reduced motion', () => {
+    const pressed = allStylesheets.flatMap((f) =>
+      rulesOf(code(relative(SRC, f)))
+        .filter(({ selectors }) => selectors.some((s) => /:active\b/.test(s)) && !/aria-busy/.test(selectors.join()))
+        .flatMap(({ selectors, body }) => [...body.matchAll(/([a-z-]+)\s*:/g)].map(([, prop]) => `${selectors.join(', ')} ${prop}`)),
+    );
+    expect(pressed.length).toBeGreaterThan(4);
+    expect(pressed.filter((p) => !/ (transform|opacity)$/.test(p))).toEqual([]);
+    const buttons = rulesOf(code('app/ui/buttons.css'));
+    const base = buttons.find(({ selectors }) => selectors.length === 2 && selectors.includes('button') && selectors.includes('.btn'));
+    expect(transitioned(/transition:\s*([^;]+)/.exec(base?.body ?? '')?.[1] ?? '')).toEqual(['transform', 'opacity']);
+    const press = buttons.find(({ selectors }) => selectors[0]?.startsWith('button:active:not('));
+    expect(press?.body).toMatch(/transform:\s*scale\(var\(--press-scale\)\)/);
+    expect(press?.body).toMatch(/opacity:\s*var\(--press-opacity\)/);
+    const theme = code('app/theme.css');
+    const fast = Number(/--motion-fast:\s*(\d+)ms/.exec(theme)?.[1]);
+    expect(fast).toBeGreaterThanOrEqual(100);
+    expect(fast).toBeLessThanOrEqual(160);
+    expect(theme).toMatch(/--transition:\s*var\(--motion-fast\)\s+var\(--ease-out\)/);
+    expect(code('app/ui/base.css')).toMatch(/prefers-reduced-motion: reduce\)\s*\{\s*:root\s*\{[^}]*--press-scale:\s*1;/);
   });
 
   // The palette tokens do not change with the theme (#429), so a stylesheet draws with the colour roles, which do. The only
@@ -513,6 +535,71 @@ describe('design guard, the cross-cutting fixes of the 70-screen audit', () => {
     expect(phone).toMatch(/\.breadcrumbs li\.crumb-parent::before \{\s*content: none;/);
     expect(nav).toMatch(/\.breadcrumbs li \+ li::before/);
     expect(nav).not.toMatch(/\.breadcrumbs li::before/);
+  });
+});
+
+// Rule 26 (issue #688): a picker that chooses a record (a category, a unit, a supplier, a customer, a brand, a pack, a branch)
+// is the shared PickerWithAdd (or its hook useAddInPlace), whose list ends with "+ Add a <thing>". A hand-built <select> over a
+// list of those records fails here, unless it is listed below with the reason it stays as it is. The list is read off the name
+// of the list the options map, so a select of records under another name is for review to catch.
+// JUSTIFICATION-A3: issue #688 asks for this guard; it reuses runtimeSelects of rule 25 below rather than a second parser.
+const RECORD_LIST = /categor|unit|supplier|customer|buyer|brand|pack|branch|places/i;
+// The exemptions, each with its reason (the issue asks for a list with reasons; JUSTIFICATION-A3: one entry per picker found).
+const BRANCH = 'a branch is set up on the Branches screen with its own checks, never in the middle of this form';
+const ITEM_PACK = "an item's pack needs its size, use and price, so it is added on the item's page, whose pack form adds a unit in place";
+const ADD_IN_PLACE_EXEMPT: Record<string, string> = {
+  'areas/staff/branch-picker.tsx branches': `switches the branch in use, not a form field; ${BRANCH}`,
+  'areas/staff/top-bar.tsx branches': `switches the branch in use, not a form field; ${BRANCH}`,
+  'areas/staff/retail/account.tsx branches': BRANCH,
+  'areas/staff/retail/purchasing-ui.tsx branches': BRANCH,
+  'areas/staff/retail/return-new.tsx branches.filter((b) => b.stocks_goods !== false)': BRANCH,
+  'areas/staff/retail/quick-add.tsx places': `Where holds only the branches this person may add stock at; ${BRANCH}`,
+  'areas/staff/retail/catalogue-barcodes.tsx packs': ITEM_PACK,
+  'areas/staff/retail/goods-receive.tsx line.packs': ITEM_PACK,
+  'areas/staff/retail/purchase-order-form.tsx line.packs': ITEM_PACK,
+  'areas/staff/retail/restock.tsx packs': ITEM_PACK,
+  'areas/staff/retail/sale.tsx packs': ITEM_PACK,
+  'areas/staff/retail/unit-usual-pack.tsx choices': 'It holds sits in the Usual pack sheet of the Units page, so a second sheet is not opened over it; with no unit to hold it adds one in place',
+  'areas/staff/retail/price-lists.tsx units': "the item's own unit and its packs, not the list of units; a pack is added on the item's page",
+  'areas/staff/retail/expenses.tsx activeCategories(list)': 'expense categories hold the items an expense is booked to; the empty list opens their screen and comes back (rule 25); moves onto PickerWithAdd next',
+  'areas/staff/retail/sale.tsx (customers.data ?? [])': 'the credit buyer already adds a buyer in place with a name and a phone, saved with the sale and kept in the draft; moves onto PickerWithAdd next',
+  'areas/staff/retail/sale.tsx (offline?.catalogue?.customers ?? [])': 'the offline sale reads the customers kept on the phone, and adding one needs the internet',
+};
+
+// A list under a plain name (choices, options, rows) is a record list too in a file that works with records (review of #691:
+// the pack form's unit select mapped `choices`).
+const PLAIN_LIST = /^\(?(?:choices|options|rows|list|items)\b/;
+const RECORD_TYPES = /\btype (?:Unit|Supplier|Customer|Category|Branch)\b|: (?:Unit|Supplier|Customer|Category)\[\]/;
+
+/** The hand-built record pickers of `source`, as `list` (the list the options map). */
+export function recordSelects(source: string): string[] {
+  const records = RECORD_TYPES.test(source);
+  return runtimeSelects(source).map(({ list }) => list).filter((list) => RECORD_LIST.test(list) || (records && PLAIN_LIST.test(list)));
+}
+
+describe('design guard, a record picker adds what is missing in place (issue #688)', () => {
+  const sources = components.map((f) => relative(SRC, f)).filter((f) => f !== 'app/ui/PickerWithAdd.tsx');
+
+  it('finds a select of records and passes one of something else', () => {
+    expect(recordSelects('<select>{suppliers.map((s) => <option />)}</select>')).toEqual(['suppliers']);
+    expect(recordSelects('<select>{(customers.data ?? []).map((c) => <option />)}</select>')).toEqual(['(customers.data ?? [])']);
+    expect(recordSelects('<select>{periods.map((p) => <option />)}</select>')).toEqual([]);
+    expect(recordSelects('<select>{PACKS.map((p) => <option />)}</select>')).toEqual([]);
+    expect(recordSelects("import { type Unit } from 'x';\n<select>{choices.map((u) => <option />)}</select>")).toEqual(['choices']);
+    expect(recordSelects('<select>{choices.map((c) => <option />)}</select>')).toEqual([]);
+  });
+
+  it.each(sources)('%s builds every record picker on PickerWithAdd, or is exempt with a reason', (file) => {
+    const found = recordSelects(readFileSync(join(SRC, file), 'utf8')).map((list) => `${file} ${list}`);
+    expect(found.filter((key) => !ADD_IN_PLACE_EXEMPT[key])).toEqual([]);
+  });
+
+  it('keeps every exemption in use and gives each a reason', () => {
+    const all = new Set(sources.flatMap((file) => recordSelects(readFileSync(join(SRC, file), 'utf8')).map((list) => `${file} ${list}`)));
+    for (const [key, why] of Object.entries(ADD_IN_PLACE_EXEMPT)) {
+      expect(all.has(key) ? key : null, `${key} is exempt but no longer found`).toBe(key);
+      expect(why.trim().length, key).toBeGreaterThan(20);
+    }
   });
 });
 

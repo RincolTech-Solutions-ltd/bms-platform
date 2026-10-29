@@ -55,7 +55,7 @@ back to what opened it.
     `prefers-reduced-motion` is respected. No bounce. The design guard scans every stylesheet under `frontend/src` and fails a
     `transition` or `@keyframes` that animates anything but `transform` and `opacity`, a transition that names no property
     (so animates all), and `ease-in` or `ease-in-out`. Its short exception list names each colour or background fade with
-    its reason: a button's fill and edge, a field's and a link card's edge, and the skeleton shimmer. So the tour spotlight
+    its reason: a field's and a link card's edge, and the skeleton shimmer (a button's fill changes at once since issue #682). So the tour spotlight
     glides by `transform`, the side menu folds without animating its width, and shadows and focus rings change at once.
     The one longer motion is the sale-complete check, drawn in 400ms (issue #520), still by `transform` only. A skeleton may
     shimmer for 1.2s as the existing one in `feedback.css` does (accepted, 24 Oct 2026), since the global reduced-motion
@@ -75,10 +75,19 @@ back to what opened it.
 ## Feedback
 
 14. A page load shows a skeleton, and nothing at all for under 1 second.
-15. Toasts are dark and neutral, at the bottom, with an icon, for about 4 seconds, with at most one action. An error is never
+15. Toasts are dark and neutral, at the bottom, with an icon, for 6 seconds (12 with an Undo), with at most one action. An error is never
     a blocking dialog.
     Every toast names its tone: the check of `success` only where a write succeeded, `info` for a refusal (an item already on
     the sale) or a change that waits for approval, `error` for a failure. `show()` has no default tone.
+    Every successful save, sale, add, edit, delete, move, purchase and payment in the staff area says so in a success toast
+    of a few plain words, because most people read very little (issue #682): the screen's own `show(text, 'success')`, or
+    the words in the mutation's `meta: { success }` (or `sayDone` for a write by hand) that the app's one `DoneToast` says,
+    with Undo where `meta.undo` can take it back. Success is never said twice: a screen that already shows a success note
+    or screen keeps that and is exempt. The success toast guard in `busy-guard.test.ts` fails a staff write that says
+    nothing, unless `// toast-exempt: <reason>` sits above it.
+    A press shows at once: every button, tile, link card and row sinks to `--press-scale` and dims to `--press-opacity`,
+    by transform and opacity only, in `--motion-fast` (100 to 160ms); under reduced motion it only dims. A busy button
+    is the `BusyButton` (rule 6 of the design system) and a disabled one is flat grey, never only faded.
 16. Status colours are only for real status. An information note is neutral grey with the info icon, never a lavender or brand
     tint.
 
@@ -128,4 +137,13 @@ back to what opened it.
     guard fails a `<select>` of a list read at run time that has no `EmptyChoice` near it and no `empty:` comment saying why it
     is never empty (a filter with its "All", a select drawn only when it has choices). The help article is
     `frontend/src/help/articles/empty-list.md`.
+
+## Add it in place (issue #688)
+
+26. Every picker that chooses a record ends its list with "+ Add a <thing>" for whoever may add one (the permission of the
+    full add screen; hidden from anyone else). It opens a small Sheet over the form with only the fields that record needs; on
+    save the record is chosen and the person is back on the same form with everything typed still there, and on cancel
+    nothing is lost. Nothing navigates away. It is one component, `PickerWithAdd` (a select) or its hook `useAddInPlace` (a
+    picker that draws its own list, as the category picker does), in `frontend/src/app/ui/PickerWithAdd.tsx`. The design
+    guard fails a record picker built without it unless the guard lists it as exempt with a reason.
 

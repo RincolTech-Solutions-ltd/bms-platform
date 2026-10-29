@@ -40,6 +40,7 @@ const { RetailError } = await import('../../../api/retail');
 const { ProductForm } = await import('./catalogue-products');
 const { ASK_OWNER_PACKS, PACKS_QUESTION, withPacksOn } = await import('./catalogue-packs');
 const { PACKAGES_QUESTION } = await import('./new-item-packs');
+const { DoneToast, doneToasts } = await import('./toast');
 
 afterEach(() => {
   cleanup();
@@ -100,6 +101,26 @@ describe('the turn-on line on the item form', () => {
 
     expect(await screen.findByText(PACKAGES_QUESTION)).toBeTruthy();
     expect(screen.queryByText(PACKS_QUESTION)).toBeNull();
+    expect(changeCapabilities).toHaveBeenCalledWith({ units: true }, 3);
+  });
+
+  it('says on Add an item that the packs are on in one toast, with no note beside it', async () => {
+    capabilities.mockResolvedValue({ capabilities: { units: false }, version: 3 });
+    changeCapabilities.mockResolvedValue({ capabilities: { units: true }, version: 4 });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } }, mutationCache: doneToasts() });
+    client.setQueryData(['me', 't'], owner);
+    render(
+      <QueryClientProvider client={client}>
+        <Staffed><ProductForm onSaved={() => undefined} onCancel={() => undefined} /></Staffed>
+        <DoneToast />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Turn on cartons' }));
+
+    await waitFor(() => expect(document.querySelectorAll('.toast')).toHaveLength(1));
+    expect(document.querySelector('.toast')?.textContent).toContain('Packs switched on');
+    expect(screen.queryByTestId('packs-on')).toBeNull();
     expect(changeCapabilities).toHaveBeenCalledWith({ units: true }, 3);
   });
 

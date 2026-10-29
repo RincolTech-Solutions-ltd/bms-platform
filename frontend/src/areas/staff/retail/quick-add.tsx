@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { RETAIL_CURRENCY, RetailError, retail, type QuickAdd, type QuickAddRequest, type Unit } from '../../../api/retail';
 import { IDEMPOTENCY_UNSURE_CODES } from '../../../api/retail-errors';
 import { branchLabel } from '../../../auth/branch';
-import { WORDS } from '../../../app/glossary';
+import { WORDS, plural } from '../../../app/glossary';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { EmptyChoice } from '../../../app/ui/EmptyChoice';
 import { Field, FieldsNeededNote, focusFirstMissing } from '../../../app/ui/Field';
@@ -18,14 +18,17 @@ import { ExistsPanel, existingOf, type ExistingItem } from './catalogue-names';
 import { newIdempotencyKey } from './idempotency';
 import { PhotoChoice, sendNewPhoto } from './item-photo';
 import { parseCount, qtyString, showQty } from './maths';
-import { branchesWhere, canUse, holdsAt } from './permissions';
+import { PacksTurnOn, factorProblem } from './catalogue-packs';
+import { UNITS, branchesWhere, canUse, capabilityOn, holdsAt } from './permissions';
+import { factorMilli } from './units-state';
 import { UnitPicker } from './unit-picker';
 import { Gate, Problem, money, useProfitAccess, useStockingBranch } from './ui';
 
 // Quick add (issue #632): a shop owner needed nine steps on four screens to add one item and its stock, and said AppSheet was
-// still easier. One form and one tap: the name, the selling price, the buying price (optional), how many there are here now,
-// where (the branch in use, or a store), the category (left out, the item goes under General) and the unit (the shop's piece
-// unit), and a photo if wanted. Add makes the item and adds the quantity to its stock at that branch as opening stock, in one
+// still easier. One form and one tap: the name, the category right under it, the selling price, the buying price (optional),
+// how many there are here now, where (the branch in use, or a store), the unit (the shop's piece unit), and a photo if wanted.
+// The category is needed (issue #688): an item is never filed under General unasked. The last one this person chose at this
+// shop is chosen for them next time, and "+ Add a group" adds one in a sheet over the form, which keeps what was typed. Add makes the item and adds the quantity to its stock at that branch as opening stock, in one
 // request (POST /retail/quick-add, ADR-101), so no other item's stock is touched and it is never profit. A name already in the
 // list offers to use that item and just add the quantity to its stock. Nothing is kept for later: offline, the form says it needs the internet, as Add it here does.
 // Goods just bought with shop money (issue #646): a tick, off by default, books them as a purchase paid from the branch's cash or
@@ -57,6 +60,53 @@ export function addedLine(done: QuickAdd, where: string): string {
   if (done.qty === undefined) return `${name} added.`;
   const of = (qty: string | undefined) => `${qty ?? ''} ${done.unit ?? ''}`.trim();
   return done.item_made ? `${name} added: ${of(done.qty)} at ${where}` : `${name}: ${of(done.qty)} added at ${where}, ${of(done.total_qty)} now`;
+}
+
+// The last group chosen on Quick add, per business (the host, or the dev server's tenant), person and shop (issue #688), kept
+// the way range-state.ts keeps the Home range; blocked storage only means the group is asked for again.
+// JUSTIFICATION-A3: the issue asks to remember the last group per person and shop; no existing store carries it.
+const groupKey = (userId: string, branchId: string) =>
+  `bms.quickAddGroup.${import.meta.env.DEV && import.meta.env.VITE_DEV_TENANT ? import.meta.env.VITE_DEV_TENANT : window.location.hostname}.${userId}.${branchId}`;
+
+export function readLastGroup(userId: string, branchId: string): string | null {
+  try { return window.localStorage.getItem(groupKey(userId, branchId)); } catch { return null; }
+}
+
+export function writeLastGroup(userId: string, branchId: string, categoryId: string): void {
+  try { window.localStorage.setItem(groupKey(userId, branchId), categoryId); } catch { /* asked for again next time */ }
+}
+
+// Comes in cartons of (issue #688, D76): a size typed under the unit gives the new item its own carton pack, for selling and
+// buying, through the existing pack route (#627, #628, #654), so a carton of bulbs (24) and a carton of pacos (6) each keep their
+// own number. The Carton unit is made in place when the shop has none. How many then takes full cartons and loose ones.
+// JUSTIFICATION-A3: D76 was added to issue #688 and asks for this field on the same screen; it adds no route and no table.
+const CARTON_NAMES = ['carton', 'cartons', 'ctn'];
+// A package is never the item's own unit here (round 3 of the #691 review): stock is counted in the smallest unit, and the
+// carton goes in Comes in cartons of. These words are left out of the unit list, and one added in place is refused.
+const PACKAGE_WORDS = [...CARTON_NAMES, 'box', 'boxes', 'dozen', 'dozens', 'pack', 'packs', 'packet', 'packets'];
+export const isPackageWord = (name: string | undefined) => PACKAGE_WORDS.includes((name ?? '').trim().toLowerCase());
+export const PACKAGE_UNIT = 'A box, carton, dozen or pack is a package, not the item\'s own unit. Choose the single piece, and type the carton size below.';
+export const CARTON_FAILED = "The carton pack could not be added. Add it on the item's page, under Cartons, boxes and other packs.";
+
+/** "3 cartons and 5 pieces", "1 carton", "5 pieces": what was counted, in the words the person typed it. */
+export function cartonWords(cartons: number, looseMilli: number, unit: string): string {
+  const many = (n: string, one: string) => (n === '1' ? one : plural(one));
+  const parts = [
+    ...(cartons > 0 ? [`${cartons} ${many(String(cartons), 'carton')}`] : []),
+    ...(looseMilli > 0 || cartons === 0 ? [`${showQty(qtyString(looseMilli))} ${many(showQty(qtyString(looseMilli)), unit.toLowerCase())}`] : []),
+  ];
+  return parts.join(' and ');
+}
+
+/** Gives the new item its carton pack of `size`, making the Carton unit first when the shop has none; a note when it failed. */
+export async function addCartonPack(productId: string, size: string, units: Unit[]): Promise<string | null> {
+  try {
+    const carton = units.find((u) => u.active !== false && CARTON_NAMES.includes((u.name ?? '').trim().toLowerCase())) ?? (await retail.createUnit('Carton'));
+    await retail.addPack(productId, { unit_id: carton.id ?? '', factor: size.trim(), purpose: 'both' });
+    return null;
+  } catch {
+    return CARTON_FAILED;
+  }
 }
 
 /** The fetch never reached the server: no status and no problem body. */
@@ -100,7 +150,11 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const [sell, setSell] = useState('');
   const [cost, setCost] = useState('');
   const [qty, setQty] = useState('');
-  const [categoryId, setCategoryId] = useState('');
+  // Comes in cartons of (D76): the size of one carton, and how many full cartons there are; qty is then the loose ones.
+  const [cartonSize, setCartonSize] = useState('');
+  const [cartons, setCartons] = useState('');
+  // The group last chosen here, from the first render on; checked against the list once it is read (below).
+  const [categoryId, setCategoryId] = useState(() => readLastGroup(me.user_id ?? '', where || here.branchId || '') ?? '');
   const [unitId, setUnitId] = useState('');
   const [photo, setPhoto] = useState<File | null>(null);
   const [paid, setPaid] = useState(false);
@@ -108,7 +162,8 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const [showErrors, setShowErrors] = useState(false);
   const [offline, setOffline] = useState(false);
   const [exists, setExists] = useState<ExistingItem | null>(null);
-  const [done, setDone] = useState<{ added: QuickAdd; note: string | null } | null>(null);
+  // `counting` is what was counted in cartons ("3 cartons and 5 pieces"), once the item's carton pack is made.
+  const [done, setDone] = useState<{ added: QuickAdd; note: string | null; counting: string | null } | null>(null);
   // One key per attempt, and the request sent with it. While the answer is not certain (lost, a 5xx, a timeout) both are kept and
   // Add sends exactly that request again, whatever was typed since, so a retry can never add the stock twice; a new key and a new
   // request only once the server has answered for certain (success, or a 4xx refusal).
@@ -125,7 +180,18 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const piece = pieceUnit(units.data ?? []);
   // A Piece or a General the owner switched off is never switched back on by the server: the person chooses one instead.
   const pieceOff = piece === undefined && (units.data ?? []).some((u) => u.active === false && (u.name ?? '').trim().toLowerCase() === 'piece');
-  const generalOff = (categories.data ?? []).some((c) => c.active === false && (c.name ?? '').trim().toLowerCase() === 'general');
+  // The group: the one this person last chose at this shop, until they choose one in this form (issue #688).
+  const shop = where || here.branchId || '';
+  const [groupChosen, setGroupChosen] = useState(false);
+  useEffect(() => {
+    if (groupChosen || categories.data === undefined) return;
+    const last = readLastGroup(me.user_id ?? '', shop);
+    setCategoryId(categories.data.find((c) => c.id === last && c.active !== false)?.id ?? '');
+  }, [categories.data, groupChosen, me.user_id, shop]);
+  const chooseGroup = (next: string) => {
+    setCategoryId(next);
+    setGroupChosen(true);
+  };
   // What was said when the person kept an item already in the list instead of a duplicate (someone who may not add stock).
   const [kept, setKept] = useState<string | null>(null);
   // The piece unit is chosen once the units are read, unless the person has chosen another.
@@ -137,7 +203,19 @@ export function QuickAddForm({ initialName = '', onSell }: {
 
   const sellMinor = parseMinor(sell, RETAIL_CURRENCY);
   const costMinor = cost.trim() === '' ? 0 : parseMinor(cost, RETAIL_CURRENCY);
-  const counted = mayCount ? parseCount(qty) : null;
+  const packsOn = capabilityOn(me, 'retail', UNITS);
+  const sizeMilli = packsOn ? factorMilli(cartonSize) : null;
+  const sizeWrong = packsOn && cartonSize.trim() !== '' && factorProblem(cartonSize) !== null;
+  const inCartons = sizeMilli !== null && !sizeWrong;
+  // In cartons: whole cartons and loose ones, each may be left empty for none, but not both.
+  const cartonCount = cartons.trim() === '' ? 0 : /^\d+$/.test(cartons.trim()) ? Number(cartons.trim()) : null;
+  const looseMilli = inCartons && qty.trim() === '' ? 0 : parseCount(qty);
+  const nothingTyped = inCartons && cartons.trim() === '' && qty.trim() === '';
+  const counted = !mayCount ? null : !inCartons ? parseCount(qty)
+    : cartonCount === null || looseMilli === null || nothingTyped ? null : cartonCount * Number(sizeMilli) + looseMilli;
+  const unitName = (units.data ?? []).find((u) => u.id === unitId)?.name ?? 'Piece';
+  const unitIsPackage = unitId !== '' && isPackageWord(unitName);
+  const pieces = plural(unitName.toLowerCase());
   // Paid for now from cash: only where this person may buy stock, and with the buying price, which the purchase needs.
   const paying = paid && profit && mayCount && holdsAt(me, BUY, where);
   // Ticked, then Where moved to a place where this person may not buy stock: Add is held until they untick or move back, so
@@ -147,13 +225,14 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const whereName = branchLabel(places.find((b) => b.id === where)) || 'this place';
   const paidMinor = paying && counted !== null && costMinor !== null ? Math.round((counted * costMinor) / 1000) : null;
   const complete = name.trim() !== '' && sellMinor !== null && costMinor !== null && (!mayCount || (counted !== null && where !== ''))
-    && (!pieceOff || unitId !== '') && (!generalOff || categoryId !== '')
+    && (!pieceOff || unitId !== '') && categoryId !== '' && !sizeWrong && !unitIsPackage
     && (!paying || (costMinor > 0 && counted !== null && counted > 0)) && !cannotPayHere;
   const canAddAnyway = (me.permissions ?? []).includes('core.settings.manage');
   const openLabel = mayCount ? 'Use the existing one and just add stock' : 'Keep the existing one';
   // The button that sends the held request again: Add is off while the name panel shows, so then the panel button that sent it.
   const resend = exists === null ? 'Add' : unsure.current?.duplicate_reason ? 'Add anyway' : openLabel;
 
+  // toast-exempt: success screen, the form turns into its added screen (qa-done) with Sell it and Add another
   const add = useMutation({
     mutationFn: async (extra: { productId?: string; duplicateReason?: string }) => {
       const body: QuickAddRequest = unsure.current ?? {
@@ -172,18 +251,23 @@ export function QuickAddForm({ initialName = '', onSell }: {
         };
       unsure.current = body;
       const added = await retail.quickAdd(body, key.current);
-      // The photo after the item (#617): a failed upload leaves the item and says so under the line.
+      // The photo after the item (#617): a failed upload leaves the item and says so under the line. The carton pack likewise.
       const note = added.item_made ? await sendNewPhoto(added.product_id ?? '', photo) : null;
-      return { added, note };
+      const packed = added.item_made && inCartons ? await addCartonPack(added.product_id ?? '', cartonSize, units.data ?? []) : null;
+      const counting = added.item_made && inCartons && packed === null && cartonCount !== null && looseMilli !== null
+        ? cartonWords(cartonCount, looseMilli, unitName) : null;
+      return { added, note: [note, packed].filter(Boolean).join(' ') || null, counting };
     },
-    onSuccess: ({ added, note }) => {
+    onSuccess: ({ added, note, counting }) => {
+      // Issue #688: the group is remembered once an item is added with it, at the shop the stock went to.
+      if (added.item_made && categoryId) writeLastGroup(me.user_id ?? '', added.branch_id ?? shop, categoryId);
       key.current = newIdempotencyKey();
       unsure.current = null;
       setNotSure(false);
       setHeld(false);
       setRefused(false);
       setExists(null);
-      setDone({ added, note });
+      setDone({ added, note, counting });
       // The first-run card, the item search, the stock lists and Home all read again with the new item.
       for (const k of [['retail', 'catalogue'], ['retail', 'products'], ['retail', 'stock'], ['retail', 'stocked-branches'], ['retail', 'home']]) {
         void queryClient.invalidateQueries({ queryKey: k });
@@ -229,7 +313,9 @@ export function QuickAddForm({ initialName = '', onSell }: {
     setSell('');
     setCost('');
     setQty('');
-    setCategoryId('');
+    setCartonSize('');
+    setCartons('');
+    setGroupChosen(false);
     setUnitId(piece?.id ?? '');
     setWhere(null);
     setPhoto(null);
@@ -246,6 +332,8 @@ export function QuickAddForm({ initialName = '', onSell }: {
     setSell('');
     setCost('');
     setQty('');
+    setCartonSize('');
+    setCartons('');
     setPhoto(null);
     setPaid(false);
     setShowErrors(false);
@@ -265,7 +353,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
     const notHere = onSell && canUse(me, 'sale') && stocked && !canSell;
     return (
       <section className="rt-card stack" aria-labelledby="qa-done">
-        <p id="qa-done" role="status" className="alert alert-success" data-testid="qa-done">{addedLine(done.added, atName)}</p>
+        <p id="qa-done" role="status" className="alert alert-success" data-testid="qa-done">{done.counting ? `${done.added.description ?? 'The item'} added: ${done.counting} at ${atName}` : addedLine(done.added, atName)}</p>
         {done.added.paid_from && done.added.paid_minor !== undefined && (
           <p className="hint" data-testid="qa-paid"><span className="num">{money(done.added.paid_minor)}</span> taken from {done.added.paid_from === 'cash' ? 'Cash' : 'Mobile money'} at {atName}, recorded as Buy stock {done.added.purchase_no}.</p>
         )}
@@ -296,6 +384,18 @@ export function QuickAddForm({ initialName = '', onSell }: {
         onChange={(e) => { setName(e.target.value); setExists(null); }}
         autoComplete="off"
       />
+      <CategoryPicker
+        id="qa-category"
+        label="Category"
+        thing="group"
+        placeholder="Choose a group"
+        categories={(categories.data ?? []).filter((c) => c.active !== false)}
+        value={categoryId}
+        onChange={chooseGroup}
+        required
+        error={categoryId === '' ? 'Choose a group.' : null}
+        showError={showErrors}
+      />
       <Field
         id="qa-sell"
         label={`${WORDS.sellingPrice} (${RETAIL_CURRENCY})`}
@@ -324,11 +424,28 @@ export function QuickAddForm({ initialName = '', onSell }: {
       )}
       {mayCount ? (
         <>
+          {inCartons && (
+            <Field
+              id="qa-cartons"
+              label="How many full cartons do you have here now?"
+              required
+              error={cartonCount === null ? 'Type the number of full cartons, a whole number, or 0.'
+                : nothingTyped ? `Type how many cartons and loose ${pieces} you have, or 0.`
+                : paying && counted === 0 ? 'Type how many you bought, more than 0.' : null}
+              showError={showErrors}
+              inputMode="numeric"
+              value={cartons}
+              onChange={(e) => setCartons(e.target.value)}
+              autoComplete="off"
+            />
+          )}
           <Field
             id="qa-qty"
-            label="How many do you have here now?"
-            required
-            error={counted === null ? 'Type how many you have, or 0.' : paying && counted === 0 ? 'Type how many you bought, more than 0.' : null}
+            label={inCartons ? `And how many loose ${pieces}?` : 'How many do you have here now?'}
+            required={!inCartons}
+            optional={inCartons}
+            error={inCartons ? (looseMilli === null ? `Type how many loose ${pieces}, or leave it empty.` : null)
+              : counted === null ? 'Type how many you have, or 0.' : paying && counted === 0 ? 'Type how many you bought, more than 0.' : null}
             showError={showErrors}
             inputMode="decimal"
             value={qty}
@@ -386,29 +503,35 @@ export function QuickAddForm({ initialName = '', onSell }: {
       )}
       </div>
       <div className="stack" data-tour="quick-add-more">
-      <CategoryPicker
-        id="qa-category"
-        label={generalOff ? 'Category' : <>Category <span className="field-optional">(optional)</span></>}
-        categories={(categories.data ?? []).filter((c) => c.active !== false)}
-        value={categoryId}
-        onChange={setCategoryId}
-        {...(generalOff
-          ? { required: true, error: categoryId === '' ? 'The General category is switched off. Choose a category.' : null, showError: showErrors }
-          : { noneLabel: 'General', hint: 'Leave it to put the item under General.' })}
-      />
       <UnitPicker
         id="qa-unit"
-        units={(units.data ?? []).filter((u) => u.active !== false)}
+        units={(units.data ?? []).filter((u) => u.active !== false && !isPackageWord(u.name))}
         loading={units.data === undefined}
         load={units}
         value={unitId}
         onChange={(next) => { setUnitId(next); setExists(null); }}
         required={pieceOff}
-        error={pieceOff && unitId === '' ? 'The Piece unit is switched off. Choose a unit.' : null}
-        showError={showErrors}
+        error={unitIsPackage ? PACKAGE_UNIT : pieceOff && unitId === '' ? 'The Piece unit is switched off. Choose a unit.' : null}
+        showError={showErrors || unitIsPackage}
       />
       {units.data !== undefined && piece === undefined && !pieceOff && unitId === '' && (
         <p className="hint" data-testid="qa-piece-made">Left empty, the item is counted in Piece, made for you.</p>
+      )}
+      {packsOn ? (
+        <Field
+          id="qa-carton"
+          label={`Comes in cartons of how many ${pieces}?`}
+          optional
+          hint="Leave it empty if it does not come in cartons."
+          error={sizeWrong ? `Type how many ${pieces} are in one carton: 1 or more, such as 24.` : null}
+          showError={showErrors}
+          inputMode="decimal"
+          value={cartonSize}
+          onChange={(e) => setCartonSize(e.target.value)}
+          autoComplete="off"
+        />
+      ) : (
+        <PacksTurnOn />
       )}
       <PhotoChoice id="qa-photo" file={photo} onChange={setPhoto} />
       </div>
