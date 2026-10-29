@@ -146,9 +146,21 @@ class RetailNewItemPacksIT extends IntegrationTest {
         }
         assertThat(RetailCatalogue.isPackageWord(null)).isFalse();
         assertThat(RetailCatalogue.packageAsUnit("Sets of 4")).startsWith("Sets of 4 is a package.");
-        // Review of #692: the sentences the PWA's test checks too, from one file, so the server and the screen agree;
-        // every
-        // short code of the word list reads as its word.
+        assertThat(RetailCatalogue.packageAsUnit("Set of 4")).startsWith("A set of 4 is a package.");
+        assertThat(RetailCatalogue.packageAsUnit("Ctn"))
+                .isEqualTo("A carton is a package. Choose the smallest unit, like piece, then add the carton below.");
+        assertThat(RetailCatalogue.packageAsUnit("PKT")).startsWith("A packet is a package.");
+        // Every short code the word list refuses reads as its word, as unitWord says it in the PWA (round 4 review of
+        // #692).
+        for (String[] code :
+                new String[][] {{"Ctns", "carton"}, {"pkts", "packet"}, {"Bx", "box"}, {"DOZ", "dozen"}, {"dz", "dozen"}
+                }) {
+            assertThat(RetailCatalogue.packageAsUnit(code[0]))
+                    .as(code[0])
+                    .startsWith("A " + code[1] + " is a package.");
+        }
+        // Review of #692: the sentences the PWA's test checks too, from one file
+        // (fixtures/retail/package-refusals-689.json), so the server and the screen agree, and the file has every code.
         JsonNode cases = JsonMapper.builder()
                 .build()
                 .readTree(
