@@ -279,6 +279,19 @@ describe('a second start for the same member (issue #704)', () => {
     send();
     await waitFor(() => expect(api.calls.map((c) => c.name)).toEqual(['create', 'submit']));
   });
+
+  // JUSTIFICATION-A3: the round 1 review of #711 asks that Send never makes a second draft with the question unanswered.
+  it('sends nothing while the question is unanswered, and says to choose first', async () => {
+    const api = mount(<ApplicationForm memberId={borrower.id} />, { drafts: [newer] });
+    await screen.findByRole('option', { name: /Test monthly loan/ });
+    type(/^Loan product/, 'p1');
+    type(/^Amount asked for/, '1,000,000');
+    type(/^What the loan is for/, 'business');
+    send();
+    expect(await screen.findByText('Choose one first: continue that draft, or start a new one.')).toBeTruthy();
+    expect(api.calls).toEqual([]);
+    expect(screen.getByRole('button', { name: 'Start a new one' }).className).toBe('btn btn-block');
+  });
 });
 
 describe('changing a draft', () => {

@@ -78,6 +78,10 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
   const [startNew, setStartNew] = useState('');
   const drafts = useQuery({ queryKey: ['lending', 'loans', 'drafts', draft.memberId], queryFn: () => api.drafts(draft.memberId), enabled: !editing && draft.memberId !== '' });
   const open = editing || startNew === draft.memberId ? undefined : draftsFirst(drafts.data ?? [])[0];
+  // Sending waits for the question above (review of #711): while the drafts are still being looked up, or a draft is offered
+  // and not yet answered, Send stops and says why, so a second draft is never made unseen on a slow phone.
+  const [askFirst, setAskFirst] = useState(false);
+  const draftsUnknown = !editing && draft.memberId !== '' && drafts.isPending;
   const set = <K extends keyof ApplicationDraft>(key: K, value: ApplicationDraft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const inputMode = exponentOf(currency) ? 'decimal' : 'numeric';
 
@@ -92,6 +96,11 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (busy || guard.blocked) return;
+    if (open || draftsUnknown) {
+      setAskFirst(true);
+      document.getElementById('af-open-draft')?.scrollIntoView?.({ block: 'center' });
+      return;
+    }
     setFailure(null);
     setTried(true);
     if (!form.attempt(order)) return;
@@ -154,11 +163,13 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
 
   return (
     <form className="mf" onSubmit={(e) => void submit(e)} noValidate aria-label={editing ? 'Change the application' : 'New loan application'} data-tour="application-form">
+      {askFirst && draftsUnknown && <p className="hint" role="status">Looking for this member's other drafts. Tap again in a moment.</p>}
       {open && (
         <section className="rt-card stack" aria-labelledby="af-open-draft">
           <p id="af-open-draft">{draftQuestion(open, today, businessZone())}</p>
           <Link to="/staff/lending/loans/$loanId/edit" params={{ loanId: open.id ?? '' }} className="btn rt-primary btn-block">Continue that draft</Link>
-          <button type="button" className="btn-block" onClick={() => setStartNew(draft.memberId)}>Start a new one</button>
+          {askFirst && <p className="hint" role="status">Choose one first: continue that draft, or start a new one.</p>}
+          <button type="button" className="btn btn-block" onClick={() => { setStartNew(draft.memberId); setAskFirst(false); }}>Start a new one</button>
         </section>
       )}
       <FieldsNeededNote />
