@@ -16,8 +16,9 @@ sold in packages and give them, all in one form and one save.
 ## Decision
 
 1. **A package word is never a new item's smallest unit.** A unit named box, carton, dozen, pack, packet, bag, sack, crate,
-   case, tray, bundle or bale (one or many, any case, with or without "of N"), or "set of N", is a package. `POST
-   /retail/products`, and so Quick add, which makes its item through the same call (ADR-101), refuses it as `unit_id` with 422
+   case, tray, bundle or bale (one or many, any case, with or without "of N"), its short codes ctn, ctns, pkt, pkts, bx, doz
+   and dz, or "set of N", is a package. `POST /retail/products`, and so Quick add, which makes its item through the same call
+   (ADR-101), and `POST /retail/product-families` (an item with sizes) refuse it as `unit_id` with 422
    `unit_is_package`: "A box is a package. Choose the smallest unit, like piece, then add the box below." The unit may still be
    a pack of any item. Items already counted in such a unit, and Edit item, are unchanged.
 2. **One list, on the server.** The words are one pattern, `RetailCatalogue.PACKAGE_WORDS`. Every unit `GET /retail/units`
@@ -47,5 +48,5 @@ cartons are added in one go, so stock reads in cartons and pieces (ADR-103) from
 cement" (only "of" and a number makes a size), since "Bag" alone is a package; the owner chose the list with bag and sack in
 it. The word list is English only.
 
-**Watch for:** a new way to make items must go through `POST /retail/products` (or its `create`) to keep the rule; the CSV
-import and Edit item do not apply it yet. Quick add will reuse the package rows once issue #688 lands.
+**Watch for:** a new way to make items must call `CatalogueService.requireSmallestUnit`, as `POST /retail/products` and `POST
+/retail/product-families` do, to keep the rule; the CSV import and Edit item do not apply it yet. Quick add will reuse the package rows once issue #688 lands.

@@ -167,6 +167,17 @@ class RetailNewItemPacksIT extends IntegrationTest {
     }
 
     @Test
+    void anItemWithSizesIsNeverCountedInAPackage() {
+        Map<String, Object> body = item("Test Bulb", box, null);
+        body.put("name", body.remove("description"));
+        body.put("sizes", List.of("40W", "60W"));
+        ResponseEntity<JsonNode> r = api.post("/product-families", body, ADMIN);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().toString()).contains("unit_is_package").contains("A box is a package.");
+        assertThat(products("Test Bulb 40W")).isZero();
+    }
+
+    @Test
     void anItemAndTwoPackagesAreMadeInOneRequest() {
         ResponseEntity<JsonNode> r = api.post(
                 "/products",

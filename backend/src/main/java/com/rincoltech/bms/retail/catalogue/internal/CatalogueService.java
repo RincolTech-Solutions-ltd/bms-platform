@@ -371,15 +371,7 @@ class CatalogueService {
     @Transactional
     Product create(CreateProductRequest r) {
         requireCategoryAndUnit(r.categoryId(), r.unitId(), null, null);
-        Unit smallest = repo.unit(r.unitId()).orElseThrow();
-        if (smallest.isPackage()) {
-            String word = smallest.name().trim().toLowerCase(Locale.ROOT);
-            throw ApiException.validation(List.of(new FieldProblem(
-                    "unit_id",
-                    "unit_is_package",
-                    "A " + word + " is a package. Choose the smallest unit, like piece, then add the " + word
-                            + " below.")));
-        }
+        requireSmallestUnit(r.unitId());
         List<PackRequest> packs = r.packs() == null ? List.of() : r.packs();
         if (!packs.isEmpty()) {
             requireUnits();
@@ -1265,6 +1257,24 @@ class CatalogueService {
         if (!unit.active() && !unitId.equals(currentUnitId)) {
             throw ApiException.validation(List.of(
                     new FieldProblem("unit_id", "inactive_unit", "This unit is switched off. Choose another one.")));
+        }
+    }
+
+    /**
+     * Issue #689 (ADR-106): a new item, or a new item with sizes, is never counted in a package. "A box is a package", or
+     * "Cartons is a package" for a unit named in the plural.
+     */
+    void requireSmallestUnit(UUID unitId) {
+        Unit unit = repo.unit(unitId).orElseThrow();
+        if (unit.isPackage()) {
+            String word = unit.name().trim().toLowerCase(Locale.ROOT);
+            String named = word.split(" ")[0].endsWith("s")
+                    ? Character.toUpperCase(word.charAt(0)) + word.substring(1)
+                    : "A " + word;
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "unit_id",
+                    "unit_is_package",
+                    named + " is a package. Choose the smallest unit, like piece, then add the " + word + " below.")));
         }
     }
 
