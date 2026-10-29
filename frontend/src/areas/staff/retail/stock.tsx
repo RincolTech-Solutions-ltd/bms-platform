@@ -1,7 +1,7 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { Fragment, useState } from 'react';
-import { NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
+import { SearchBox, SearchResults } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { Segmented } from '../../../app/ui/Segmented';
 import { retail, type AllBranchesStock, type StockLevel, type StockRow } from '../../../api/retail';
@@ -19,7 +19,8 @@ import { ListGroupBy, ViewSwitch, useListView } from './list-chain';
 import { STOCK_NAMES, STOCK_ORDER, listUser, withoutShop, type ListSelection } from './list-chain-state';
 import { GroupedStock, type StockFilter } from './stock-grouped';
 import { keptWords } from './orders-state';
-import { CategoryPicker } from './category-picker';
+import { CategoryChips, FindBar, NoItem, useChosenChip } from './phone-find';
+import { ScreenLink } from './screen-link';
 import { Hint } from '../../../app/ui/Hint';
 import { WORDS } from '../../../app/glossary';
 
@@ -289,13 +290,13 @@ export function StockPage() {
   const search = useLiveSearch();
   const query = search.term;
   const [negativeOnly, setNegativeOnly] = useState(false);
-  const [categoryId, setCategoryId] = useState('');
   const [level, setLevel] = useState<StockLevel | ''>('');
   // Closed branches that still hold stock are left out of the whole-business list unless asked for (#329).
   const [showClosed, setShowClosed] = useState(false);
   // An inactive item (issue #342) leaves the list unless asked for; its history and the reports keep it.
   const [showInactive, setShowInactive] = useState(false);
   const categories = useQuery({ queryKey: ['retail', 'categories'], queryFn: () => retail.listCategories() });
+  const [categoryId, setCategoryId] = useChosenChip('stock', categories.data);
   const one = useQuery({
     queryKey: ['retail', 'stock', branchId, query, categoryId, negativeOnly, level, showInactive],
     queryFn: ({ signal }) => retail.listStock({ branchId: branchId ?? '', query, categoryId, negativeOnly, level: level || undefined, includeInactive: showInactive, signal }),
@@ -315,16 +316,22 @@ export function StockPage() {
   useCrumbTail(all ? 'By location' : undefined);
   const stockFilter: StockFilter = { query, categoryId, negativeOnly, level, includeClosed: showClosed, includeInactive: showInactive };
   const shopChosen = !all && branchId !== null;
-  const narrowing = { pending: result.isPlaceholderData, searching: query !== '', filterKey: [all ? 'all' : branchId, query, categoryId, negativeOnly, level, showInactive].join('|') };
+  // On a phone the chips stand for the groups, so the list is one plain list with the category under each item (issue #690).
+  const narrowing = { pending: result.isPlaceholderData, searching: query !== '', flat: phone, filterKey: [all ? 'all' : branchId, query, categoryId, negativeOnly, level, showInactive].join('|') };
   return (
     <Gate screen="stock" title="Stock">
+      {/* Issue #690: Items and Categories one tap from My stock, before anything else. */}
+      <nav className="find-entries" aria-label="Items and categories">
+        <ScreenLink screen="products" to="/staff/retail/catalogue/products">Items</ScreenLink>
+        <ScreenLink screen="categories" to="/staff/retail/catalogue/categories">Categories</ScreenLink>
+      </nav>
+      <FindBar tour="stock-search">
+        <SearchBox id="stock-search" label="Search by name, code or category" search={search} fetching={finding} count={shown} />
+        <CategoryChips categories={categories.data ?? []} value={categoryId} onChange={setCategoryId} />
+      </FindBar>
       {!all && branchId !== null && <NoStockHere branchId={branchId} />}
       <ViewSwitch view={list.view} onChange={list.setView} />
       <StockLevelFilter level={level} onChange={setLevel} />
-      <div data-tour="stock-search">
-        <SearchBox id="stock-search" label="Search by name, code or category" search={search} fetching={finding} count={shown} />
-      </div>
-      <CategoryPicker id="stock-category" categories={categories.data ?? []} value={categoryId} onChange={setCategoryId} noneLabel="All categories" allowAdd={false} />
       <label style={{ fontWeight: 400 }}>
         <input type="checkbox" style={{ width: 'auto', minHeight: 24, marginRight: 8 }} checked={negativeOnly} onChange={(e) => setNegativeOnly(e.target.checked)} />
         Show only negative stock
@@ -359,7 +366,7 @@ export function StockPage() {
       )}
       {!grouped && result.isPending && (all || branchId !== null) && <SkeletonList label="Loading stock" />}
       {!grouped && <Problem error={result.error} />}
-      {!grouped && shown === 0 && query && <NoResults term={query} onClear={search.clear} noun="items" />}
+      {!grouped && shown === 0 && query && <NoItem term={query} onClear={search.clear} />}
       {!grouped && (
       <div data-tour="stock-list">
       <SearchResults fetching={finding}>

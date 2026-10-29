@@ -2,7 +2,7 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { useRef, useState, type ReactNode } from 'react';
 import { BusyButton } from '../../../app/ui/BusyButton';
-import { NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
+import { SearchBox, SearchResults } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { RETAIL_CURRENCY, businessZone, retail, type Category, type PriceChange, type Product, type SimilarProduct } from '../../../api/retail';
 import { Field, FieldsNeededNote, focusFirstMissing } from '../../../app/ui/Field';
@@ -17,13 +17,15 @@ import { BarcodeEditor } from './catalogue-barcodes';
 import { MakeFamilyPanel, SIZES_JOIN, SIZES_NEW, VariantNote } from './catalogue-variants';
 import { ItemPhoto, PhotoChoice, PhotoEditor, sendNewPhoto, shownPhoto } from './item-photo';
 import { ScreenLink } from './screen-link';
-import { canUse } from './permissions';
+import { canUse, holdsAt } from './permissions';
 import { StockMinimumEditor } from './stock-minimum';
 import { UnitPicker } from './unit-picker';
 import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
 import { CategoryPicker } from './category-picker';
+import { CategoryChips, FindBar, ItemRow, NoItem, useChosenChip } from './phone-find';
+import { RowList } from '../../../app/ui/ListRow';
 import { ScreenToast } from './toast';
-import { Gate, Problem, money, useProfitAccess, useToast } from './ui';
+import { Gate, Problem, money, useBranchView, useIsPhone, useProfitAccess, useToast } from './ui';
 import { WORDS } from '../../../app/glossary';
 import { Hint } from '../../../app/ui/Hint';
 
@@ -427,13 +429,18 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
   const profit = useProfitAccess();
   const search = useLiveSearch();
   const query = search.term;
-  const [categoryId, setCategoryId] = useState('');
+  const phone = useIsPhone();
+  // Issue #690: the stock of each item in the branch in use, so a phone row shows it in packs and pieces.
+  // The server refuses branch_id to a session that may not read stock there, so it is asked only then.
+  const { all, branchId } = useBranchView();
+  const stockAt = !all && branchId && holdsAt(me, 'retail.stock.read', branchId) ? branchId : '';
   const [activeFilter, setActiveFilter] = useState<'active' | 'off' | 'all'>('active');
   const categories = useQuery({ queryKey: ['retail', 'catalogue', 'categories'], queryFn: () => retail.listCategories() });
+  const [categoryId, setCategoryId] = useChosenChip('items', categories.data);
   const active = activeFilter === 'all' ? undefined : activeFilter === 'active';
   const page = useInfiniteQuery({
-    queryKey: ['retail', 'catalogue', 'products', query, categoryId, activeFilter],
-    queryFn: ({ pageParam, signal }) => retail.listCatalogue({ query, categoryId, ...(active === undefined ? {} : { active }), ...(pageParam ? { cursor: pageParam } : {}), signal }),
+    queryKey: ['retail', 'catalogue', 'products', query, categoryId, activeFilter, stockAt],
+    queryFn: ({ pageParam, signal }) => retail.listCatalogue({ query, categoryId, branchId: stockAt, ...(active === undefined ? {} : { active }), ...(pageParam ? { cursor: pageParam } : {}), signal }),
     initialPageParam: '',
     getNextPageParam: (last) => last.next_cursor || undefined,
     placeholderData: keepPreviousData,
@@ -443,8 +450,13 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
   const canPrice = (me.permissions ?? []).includes(PRICE);
   const g = useCategoryGroups({ screen: 'items', items, categoryOf: (p) => p.category, resetKey: [query, categoryId, activeFilter].join('|'), searching: query !== '', pending: page.isPlaceholderData });
   const card = (p: Product) => <ProductCard key={p.id} product={p} showCost={profit} canPrice={canPrice} onEdit={() => onEdit(p.id ?? '')} onPrice={() => onPrice(p.id ?? '')} extra={<ScreenLink screen="stock" to="/staff/retail/stock" label={`See the stock of ${p.description}`}>Stock</ScreenLink>} />;
+  // Issue #690: search first, the category chips under it, both kept at the top on a phone, where each item is one row that opens it.
   return (
     <>
+      <FindBar>
+        <div data-tour="product-search"><SearchBox id="items-search" label="Search by name, code or category" search={search} fetching={finding} count={page.data ? items.length : undefined} more={page.hasNextPage} /></div>
+        <CategoryChips categories={categories.data ?? []} value={categoryId} onChange={setCategoryId} />
+      </FindBar>
       <p className="cluster">
         {/* Not a second primary action (rule 6): Quick add sits with the other ways to add, as a plain button. */}
         {canUse(me, 'quickAdd') && <Link className="btn" to={'/staff/retail/quick-add' as never}>Quick add</Link>}
@@ -452,11 +464,7 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
         <Link className="btn" to={SIZES_NEW as never} data-tour="product-add-sizes">Add an item with sizes and colours</Link>
         <Link className="btn" to={SIZES_JOIN as never} data-tour="product-join-sizes">Join items as sizes of one item</Link>
       </p>
-      <div data-tour="product-search"><SearchBox id="items-search" label="Search by name, code or category" search={search} fetching={finding} count={page.data ? items.length : undefined} more={page.hasNextPage} /></div>
       <div className="rt-row" data-tour="product-filters">
-        <div>
-          <CategoryPicker id="items-category" categories={categories.data ?? []} value={categoryId} onChange={setCategoryId} noneLabel="All categories" allowAdd={false} />
-        </div>
         <div>
           <label htmlFor="items-active">Show</label>
           <select id="items-active" value={activeFilter} onChange={(e) => setActiveFilter(e.target.value as 'active' | 'off' | 'all')}>
@@ -468,11 +476,17 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
       </div>
       {page.isPending && <p className="loading">Loading</p>}
       <Problem error={page.error} />
-      {page.data && items.length === 0 && (query ? <NoResults term={query} onClear={search.clear} noun="items" /> : <p className="empty-state">No items found.</p>)}
+      {page.data && items.length === 0 && (query ? <NoItem term={query} onClear={search.clear} /> : <p className="empty-state">No items found.</p>)}
       <div data-tour="product-list">
         <SearchResults fetching={finding}>
-          {items.length > 0 && <GroupControls state={g} paged={page.hasNextPage} />}
-          {g.active ? <GroupedCards state={g} renderItem={card} /> : <ul style={{ listStyle: 'none', padding: 0 }}>{items.map(card)}</ul>}
+          {phone ? (
+            items.length > 0 && <RowList label="Items">{items.map((p) => <ItemRow key={p.id} product={p} onOpen={() => onEdit(p.id ?? '')} />)}</RowList>
+          ) : (
+            <>
+              {items.length > 0 && <GroupControls state={g} paged={page.hasNextPage} />}
+              {g.active ? <GroupedCards state={g} renderItem={card} /> : <ul style={{ listStyle: 'none', padding: 0 }}>{items.map(card)}</ul>}
+            </>
+          )}
         </SearchResults>
       </div>
       {page.hasNextPage && <button type="button" onClick={() => void page.fetchNextPage()} disabled={page.isFetchingNextPage || page.isPlaceholderData}>{page.isFetchingNextPage ? 'Loading' : 'Show more items'}</button>}
@@ -481,6 +495,7 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
 }
 
 export function ProductsPage() {
+  const { me } = useStaff();
   const [view, setView] = useState<View>({ mode: 'list' });
   const { show, toast } = useToast();
   const back = () => setView({ mode: 'list' });
@@ -489,6 +504,10 @@ export function ProductsPage() {
   return (
     <Gate screen="products" title="Items">
       {view.mode === 'list' && <ProductList onAdd={() => setView({ mode: 'new' })} onEdit={open} onPrice={(id) => setView({ mode: 'price', id })} />}
+      {/* Issue #690: a phone row opens the item, so its price is changed from here as well as from the list. */}
+      {view.mode === 'edit' && (me.permissions ?? []).includes(PRICE) && (
+        <p className="cluster"><button type="button" className="btn-sm" onClick={() => setView({ mode: 'price', id: view.id })}>Change price</button></p>
+      )}
       <ScreenToast.Provider value={show}>
         {view.mode === 'new' && <ProductForm onSaved={saved} onCancel={back} onOpen={open} />}
         {(view.mode === 'edit' || view.mode === 'price') && <Editing id={view.id} mode={view.mode} onSaved={saved} onCancel={back} onOpen={open} />}

@@ -525,12 +525,13 @@ export function createMockRetail(): RetailApi {
 
     listCategories: () => delay(cats.map(categoryRow)),
 
-    listCatalogue: ({ query, categoryId: category, active, cursor }) => {
+    listCatalogue: ({ query, categoryId: category, active, branchId, cursor }) => {
       const wanted = [...products.values()]
         .filter((p) => matches(p, query) && (!category || categoryId(p.category) === category) && (active === undefined || (p.active !== false) === active))
         .sort((a, b) => a.code.localeCompare(b.code));
       const start = cursor ? Number(cursor) : 0;
-      return delay({ items: wanted.slice(start, start + 50).map(asProduct), ...(start + 50 < wanted.length ? { next_cursor: String(start + 50) } : {}) });
+      const row = (p: MockProduct): Product => (branchId ? { ...asProduct(p), qty: fromMilli(bal(branchId, p.id)), negative: bal(branchId, p.id) < 0 } : asProduct(p));
+      return delay({ items: wanted.slice(start, start + 50).map(row), ...(start + 50 < wanted.length ? { next_cursor: String(start + 50) } : {}) });
     },
 
     // Issue #342: the one-product read also reports the stock on hand and in how many branches it is not zero.
