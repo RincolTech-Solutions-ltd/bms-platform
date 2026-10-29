@@ -15,8 +15,8 @@ const ROOTS = [join(FRONTEND, 'src'), join(FRONTEND, 'layout'), join(FRONTEND, '
 
 // Each real shop or client name as its length and the SHA-256 of the name normalised (lower case, letters and digits only).
 // The length says almost nothing, and the hash cannot be read back. Every text file is normalised the same way and each
-// stretch of it of a listed length is hashed, so a name is caught however it is spelt or glued ("my-bulb shop", "XMLBulbShop",
-// "info@mybulbshop.com", "bulbshops"). When a review or an issue turns up another real name, add an entry:
+// stretch of it of a listed length is hashed, so a name is caught however it is spelt or glued ("my-test shop one", "XMLTestShopOne",
+// "info@mytestshopone.com", "testshopones"). When a review or an issue turns up another real name, add an entry:
 //   node -e "const n='<name normalised>';console.log(n.length, require('crypto').createHash('sha256').update(n).digest('hex'))"
 const DENYLIST: ReadonlyArray<{ length: number; hash: string }> = [
   { length: 9, hash: '44c455b9f3c22f8b028ced92623032c4d9d820161dff13c4aed799fb8011b217' },
