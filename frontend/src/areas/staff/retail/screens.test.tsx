@@ -97,24 +97,24 @@ describe('stock screen', () => {
     expect(admin).toContain('UGX 3,500');
   });
 
-  it('says Price and puts Cost before it (issue #330), and says only Price without the permission', () => {
+  it('says Selling price and puts Average buying price before it (issues #330, #680), and only Selling price without the permission', () => {
     const admin = renderToString(<StockTable rows={rows} showCost />);
-    // ADR-079: the cost of stock is the shop's average buying price.
-    expect(admin.indexOf('>Average cost<')).toBeGreaterThan(-1);
-    expect(admin.indexOf('>Average cost<')).toBeLessThan(admin.indexOf('>Price<'));
+    // ADR-079: the cost of stock is the shop's average buying price; #680 names both columns in the owner's words.
+    expect(admin.indexOf('>Average buying price<')).toBeGreaterThan(-1);
+    expect(admin.indexOf('>Average buying price<')).toBeLessThan(admin.indexOf('>Selling price<'));
     expect(admin.indexOf('UGX 3,500')).toBeLessThan(admin.indexOf('UGX 6,000'));
-    expect(admin).not.toContain('Selling price');
+    expect(admin).not.toMatch(/>Average cost<|>Price</);
     const sales = renderToString(<StockTable rows={rows} showCost={false} />);
-    expect(sales).toContain('>Price<');
-    expect(sales).not.toContain('Selling');
+    expect(sales).toContain('>Selling price<');
+    expect(sales).not.toContain('buying');
   });
 
-  it('shows cost then price on the all-branches table and the phone cards', () => {
+  it('shows buying then selling price on the all-branches table and the phone cards', () => {
     const data = { branches: [{ id: 'b1', code: 'BR1', name: 'Test Branch A' }], items: [{ product_id: 'p1', description: 'Test Item 01', unit: 'piece', total_qty: '3.000', sell_minor: 6000, cost_minor: 3500, balances: [{ branch_id: 'b1', qty: '3.000' }] }] } as AllBranchesStock;
     const table = renderToString(<AllBranchesTable data={data} showCost />);
-    expect(table.indexOf('>Average cost<')).toBeLessThan(table.indexOf('>Price<'));
-    expect(renderToString(<AllBranchesList data={data} showCost />)).toContain('Average cost UGX 3,500, price UGX 6,000 each');
-    expect(renderToString(<AllBranchesList data={data} showCost={false} />)).toContain('Price UGX 6,000 each');
+    expect(table.indexOf('>Average buying price<')).toBeLessThan(table.indexOf('>Selling price<'));
+    expect(renderToString(<AllBranchesList data={data} showCost />)).toContain('Average buying price UGX 3,500, selling price UGX 6,000 each');
+    expect(renderToString(<AllBranchesList data={data} showCost={false} />)).toContain('Selling price UGX 6,000 each');
   });
 
   it('shows the category of each item in a Category column when the list is not grouped', () => {
