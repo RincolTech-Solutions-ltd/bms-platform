@@ -45,6 +45,7 @@ const setOnline = (on: boolean) => {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   // Back online while the page is still mounted, as React Query hears the event only then.
   setOnline(true);
   cleanup();
@@ -313,6 +314,8 @@ describe('a commit and an old count', () => {
     localStorage.setItem(keyOf(branchA), JSON.stringify({ counts, packCounts: {}, listed: Object.keys(counts), done: Object.keys(counts), at: Object.fromEntries(Object.keys(counts).map((id) => [id, t])) }));
 
   it('fills in a count of the same day with a line saying when, and Start again clears it after a confirm', async () => {
+    // Midday in the business's zone, so a count of a minute ago is always the same day.
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.parse('2026-10-29T09:00:00Z') });
     keep({ 'A-1': '10', 'A-2': '3' }, Date.now() - 60_000);
     await ready();
     expect(countBox('A-1').value).toBe('10');
@@ -370,6 +373,26 @@ describe('a commit and an old count', () => {
     expect(readStored(branchA).counts).toEqual({ 'A-1': '10', 'A-2': '7' });
   });
 
+  // Review of #686, round 5: Use them dates the count, and prunes it, from what it took; a count gone meanwhile is said.
+  it('dates a count taken with Use them from when it was last saved, and drops items no longer on the sheet', async () => {
+    keep({ 'A-1': '10', 'A-9': '2' }, daysAgo(4));
+    await asked();
+    const stored = readStored(branchA);
+    localStorage.setItem(keyOf(branchA), JSON.stringify({ ...stored, counts: { ...stored.counts, 'A-2': '7' }, at: { ...stored.at, 'A-2': Date.now() } }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use them' }));
+    await screen.findByText(/^Not counted yet/);
+    expect(screen.getByTestId('count-kept').textContent).toMatch(/^Counted today at/);
+    await waitFor(() => expect(readStored(branchA).counts).toEqual({ 'A-1': '10', 'A-2': '7' }));
+  });
+
+  it('says so when the count was committed or cleared in another tab before Use them', async () => {
+    keep({ 'A-1': '10' }, daysAgo(4));
+    await asked();
+    localStorage.removeItem(keyOf(branchA));
+    fireEvent.click(screen.getByRole('button', { name: 'Use them' }));
+    expect((await screen.findByTestId('count-gone')).textContent).toBe('Those counts were committed or cleared in another tab, so this count starts empty.');
+  });
+
   it('starts again from the question about an earlier day, clearing the saved count', async () => {
     keep({ 'A-1': '10' }, daysAgo(4));
     await asked();
@@ -378,6 +401,31 @@ describe('a commit and an old count', () => {
     expect(countBox('A-1').value).toBe('');
     expect(screen.queryByTestId('count-earlier')).toBeNull();
     expect(localStorage.getItem(keyOf(branchA))).toBeNull();
+  });
+
+  // Review of #686, round 5: the other tab committed Test Lamp 4 while this tab has a newer 5, so none of this tab's counts went in.
+  it('says plainly that the other tab committed and this tab has newer counts, never 0 counts were saved', async () => {
+    await ready();
+    fireEvent.change(countBox('A-1'), { target: { value: '5' } });
+    const mine = readStored(branchA);
+    otherTab(keyOf(branchA), { ...mine, committed: Date.now() + 1000 });
+    expect(countBox('A-1').value).toBe('5');
+    expect(screen.getByTestId('count-other-tab').textContent).toBe('Another tab committed its counts; your newer counts here are not in stock yet');
+    expect(document.body.textContent).not.toMatch(/\b0 counts/);
+  });
+
+  // Review of #686, round 5: the same counts in another order are the same, so two tabs never write back and forth.
+  it('writes nothing back for the same counts listed in another order', async () => {
+    await ready();
+    for (const [id, v] of [['A-1', '4'], ['A-2', '6']] as const) {
+      fireEvent.change(countBox(id), { target: { value: v } });
+      fireEvent.blur(countBox(id));
+    }
+    const mine = readStored(branchA);
+    const writes = vi.spyOn(Storage.prototype, 'setItem');
+    otherTab(keyOf(branchA), { ...mine, listed: [...mine.listed].reverse(), done: [...mine.done].reverse(), at: Object.fromEntries(Object.entries(mine.at).reverse()) });
+    expect(writes).not.toHaveBeenCalled();
+    writes.mockRestore();
   });
 
   // Review of #686, round 4: a tab whose merge holds more than the other tab stored writes it back, so a reload keeps it.

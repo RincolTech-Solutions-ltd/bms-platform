@@ -148,7 +148,8 @@ function CountSheet({ branchId }: { branchId: string }) {
   const [restored] = useState(() => readCount(saveKey));
   // Owner, round 3 of the review of #686: counts brought back on opening say when they were saved, in the business's zone.
   // Those of the same business day are filled in with a line saying so; those of an earlier day wait for Use them.
-  const [kept] = useState(() => { const t = savedAt(restored); return t === null ? null : whenSaved(t, businessZone()); });
+  const [kept, setKept] = useState(() => { const t = savedAt(restored); return t === null ? null : whenSaved(t, businessZone()); });
+  const [goneElsewhere, setGoneElsewhere] = useState(false);
   const [asking, setAsking] = useState(() => kept?.earlier === true);
   const [keptLine, setKeptLine] = useState(() => kept !== null && !kept.earlier);
   const [clearing, setClearing] = useState(false);
@@ -252,9 +253,13 @@ function CountSheet({ branchId }: { branchId: string }) {
   const saving = useCountSave({ saveKey, restored, saved: { counts, packCounts, listed, done }, apply, hold: asking });
   /** Takes in the counts of an earlier day the person chose to use. */
   const useThem = () => {
-    saving.takeStored();
+    const taken = saving.takeStored();
+    const t = savedAt(taken);
+    // Dated from the count as taken now, which another tab may have added to today; gone, the page says so.
+    setKept(t === null ? null : whenSaved(t, businessZone()));
+    setGoneElsewhere(t === null);
     setAsking(false);
-    setKeptLine(true);
+    setKeptLine(t !== null);
   };
   /** Clears this sheet and its saved count (Start again), here and in another tab of it; stock does not change. */
   const startAgain = () => {
@@ -266,11 +271,12 @@ function CountSheet({ branchId }: { branchId: string }) {
   // A restored count for an item no longer on the sheet is dropped once the sheet is read, so the device never keeps it.
   const pruned = useRef(restored === null);
   useEffect(() => {
-    if (pruned.current || !onSheet) return;
+    // A count taken with Use them is pruned once the question is answered.
+    if (pruned.current || !onSheet || asking) return;
     pruned.current = true;
     const keep = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).filter(([id]) => onSheet.has(id)));
     setCounts((c) => keep(c)); setPackCounts((c) => keep(c)); setListed((l) => l.filter((id) => onSheet.has(id))); setDone((d) => d.filter((id) => onSheet.has(id)));
-  }, [onSheet]);
+  }, [onSheet, asking]);
   // Issue #353: each count against what the records hold here, or, where they hold nothing, against the item's usual purchase;
   // said before the review, never blocking. Only the counts whose records hold nothing read the item's history.
   const sheet = new Map((stock.data ?? []).map((r) => [r.product_id ?? '', r]));
@@ -333,7 +339,7 @@ function CountSheet({ branchId }: { branchId: string }) {
   // Review of #686, round 4: the question about an earlier day stands alone, so nothing is typed, unsaved, before it is answered.
   if (asking && kept) {
     return (
-      <div className="alert alert-warning" role="alert" data-testid="count-earlier">
+      <div className="alert alert-warning" role="group" aria-label="Counts from an earlier day" data-testid="count-earlier">
         <p>{`You have counts from ${kept.day}. Use them or start again?`}</p>
         <p className="cluster">
           <button type="button" className="btn-sm" onClick={useThem}>Use them</button>
@@ -427,6 +433,7 @@ function CountSheet({ branchId }: { branchId: string }) {
       {/* Issue #681: the person counting always sees that their work is kept, and where. */}
       <p className="hint count-saved-all" role="status" data-testid="count-saved-all">{savedWords}</p>
       {saving.other && <p className="hint" data-testid="count-other-tab">{otherTabWords(saving.other)}</p>}
+      {goneElsewhere && valid.length === 0 && <p className="hint" data-testid="count-gone">Those counts were committed or cleared in another tab, so this count starts empty.</p>}
       {keptLine && kept && valid.length > 0 && (
         <div className="alert alert-info" data-testid="count-kept">
           <p>{kept.earlier ? `Counted on ${kept.day} at ${kept.time}` : `Counted today at ${kept.time}`}</p>

@@ -1437,7 +1437,10 @@ the items show only while you search, and go away once one is picked. Every item
   whose count still equals the committed line); a count changed or added since the review, here or in another tab, stays.
   The removal is stamped like any change and the stored count carries the commit time, so another tab drops exactly those
   items and says "Counted and saved in another tab" when nothing is left, or "2 counts were saved from another tab; your
-  other counts are still here" when some of its counts did not go in. The page is keyed by branch, so a branch switch
+  other counts are still here" when some of its counts did not go in, or "Another tab committed its counts; your newer
+  counts here are not in stock yet" when none of its counts went in (each changed here after the other tab's review). Two
+  counts of the same moment go to the greater value and the stored counts compare whatever their order, so two tabs settle
+  after one write each. The page is keyed by branch, so a branch switch
   opens that branch's own saved count. An item found but not typed yet is kept too. A restored count of an item no longer
   on the sheet is dropped once the sheet is read. A count saved earlier the same business day (the business's time zone)
   is filled in with the line "Counted today at 14:05" ("Counted on Monday at 14:05" for an earlier day's count taken
@@ -1446,7 +1449,9 @@ the items show only while you search, and go away once one is picked. Every item
   other tab says "This count was cleared in another tab"). A count from an earlier business day is not filled in
   silently: the page shows only the question "You have counts from Monday. Use them or start again?" with **Use them** and
   **Start again**, so nothing is typed before it is answered, and keeps the saved count as it is until then. **Use them**
-  takes the count as stored at that moment, with anything another tab added since the page opened. A tab that merges a
+  takes the count as stored at that moment, with anything another tab added since the page opened, dates the line from it
+  and drops its items no longer on the sheet; a count committed or cleared in another tab meanwhile starts empty with "Those
+  counts were committed or cleared in another tab, so this count starts empty." A tab that merges a
   change from another tab writes the merge back when it holds more than that tab stored, so a reload anywhere keeps it. After Commit the count a success screen (the kit's
   `SuccessScreen`) says **Stock updated for N items** with how many went up, went down and matched and the first five
   changes in words ("Test Lamp: 2 pieces more"), with **Start another count** and **Back to My stock**, and a success toast.

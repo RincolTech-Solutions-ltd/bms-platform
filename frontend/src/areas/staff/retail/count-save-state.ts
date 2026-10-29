@@ -78,18 +78,29 @@ export function clearCount(key: string): void {
 const idsOf = (...states: CountState[]) => [...new Set(states.flatMap((s) => [...Object.keys(s.counts), ...Object.keys(s.packCounts)]))];
 const itemOf = (s: CountState, id: string) => JSON.stringify([s.counts[id] ?? '', s.packCounts[id] ?? null]);
 const filled = (s: CountState, id: string) => (s.counts[id] ?? '').trim() !== '' || (s.packCounts[id]?.text ?? '').trim() !== '';
-export const sameCount = (a: CountState, b: CountState) =>
-  JSON.stringify([a.counts, a.packCounts, a.listed, a.done]) === JSON.stringify([b.counts, b.packCounts, b.listed, b.done]);
+// A map as its entries in key order, so two tabs that hold the same in another order compare equal (review of #686, round 5).
+const entries = (m: Record<string, unknown>) => Object.entries(m).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+const canon = (s: CountState) => JSON.stringify([entries(s.counts), entries(s.packCounts), [...s.listed].sort(), [...s.done].sort()]);
+/** The same counts, found and counted items, whatever their order. */
+export const sameCount = (a: CountState, b: CountState) => canon(a) === canon(b);
+/** The same change times, whatever their order. */
+export const sameTimes = (a: Record<string, number>, b: Record<string, number>) => JSON.stringify(entries(a)) === JSON.stringify(entries(b));
 
 /**
  * Two tabs counting the same branch (review of #681): each item takes the newer of the two counts, never the whole sheet of one
  * tab. The items found keep this tab's order with the other tab's added after; an item emptied in the newer count leaves the
- * counted ones.
+ * counted ones. Two counts of the same moment go to the greater value, so both tabs merge alike and settle after one write
+ * each; the times of items no longer counted (committed or emptied) are kept, so a tab that missed the change cannot bring
+ * them back.
  */
 export function mergeCounts(mine: SavedCount, theirs: SavedCount): SavedCount {
   const out: SavedCount = { counts: {}, packCounts: {}, listed: [], done: [], at: {} };
-  for (const id of idsOf(mine, theirs)) {
-    const pick = (theirs.at[id] ?? 0) > (mine.at[id] ?? 0) ? theirs : mine;
+  const newer = (id: string) => {
+    const [t, m] = [theirs.at[id] ?? 0, mine.at[id] ?? 0];
+    return t > m ? theirs : m > t ? mine : itemOf(theirs, id) > itemOf(mine, id) ? theirs : mine;
+  };
+  for (const id of new Set([...idsOf(mine, theirs), ...Object.keys(mine.at), ...Object.keys(theirs.at)])) {
+    const pick = newer(id);
     if (pick.counts[id] !== undefined) out.counts[id] = pick.counts[id];
     const pack = pick.packCounts[id];
     if (pack) out.packCounts[id] = pack;
@@ -97,7 +108,6 @@ export function mergeCounts(mine: SavedCount, theirs: SavedCount): SavedCount {
     if (at !== undefined) out.at[id] = at;
   }
   // An item whose newer side no longer lists it (committed or emptied there) leaves the list of found items too.
-  const newer = (id: string) => ((theirs.at[id] ?? 0) > (mine.at[id] ?? 0) ? theirs : mine);
   const stays = (id: string) => (mine.at[id] === undefined && theirs.at[id] === undefined) || newer(id).listed.includes(id) || filled(out, id);
   out.listed = [...mine.listed, ...theirs.listed.filter((id) => !mine.listed.includes(id))].filter(stays);
   out.done = [...mine.done, ...theirs.done.filter((id) => !mine.done.includes(id))].filter((id) => filled(out, id));
@@ -138,12 +148,13 @@ export function saveWords(items: number, onDevice: boolean): string {
  * What another tab of the same count did: it is open there too, it committed every count, it committed `n` of this tab's counts
  * and left the others, or it cleared the count with Start again.
  */
-export type OtherTab = { kind: 'open' | 'committed' | 'cleared' } | { kind: 'partly'; n: number } | null;
+export type OtherTab = { kind: 'open' | 'committed' | 'cleared' | 'kept' } | { kind: 'partly'; n: number } | null;
 
 /** The words for what another tab did. */
 export function otherTabWords(other: Exclude<OtherTab, null>): string {
   if (other.kind === 'partly') return `${other.n} ${other.n === 1 ? 'count was' : 'counts were'} saved from another tab; your other counts are still here`;
   if (other.kind === 'open') return 'This count is also open in another tab';
+  if (other.kind === 'kept') return 'Another tab committed its counts; your newer counts here are not in stock yet';
   return other.kind === 'committed' ? 'Counted and saved in another tab' : 'This count was cleared in another tab';
 }
 
@@ -228,7 +239,8 @@ export function useCountSave({ saveKey, restored, saved, apply, hold }: {
       if (fresh) {
         // How many of this tab's counts went in there; the rest stay.
         const gone = idsOf(latest.current).filter((id) => filled(latest.current, id) && !filled(next, id)).length;
-        setOther(idsOf(next).some((id) => filled(next, id)) ? { kind: 'partly', n: gone } : { kind: 'committed' });
+        // None of this tab's counts went in (each changed here since): the other tab committed its older ones.
+        setOther(!idsOf(next).some((id) => filled(next, id)) ? { kind: 'committed' } : gone > 0 ? { kind: 'partly', n: gone } : { kind: 'kept' });
       } else {
         // Open there too, said until that tab has been quiet for a minute.
         setOther({ kind: 'open' });
@@ -236,7 +248,7 @@ export function useCountSave({ saveKey, restored, saved, apply, hold }: {
         quiet.current = setTimeout(() => setOther((o) => (o?.kind === 'open' ? null : o)), OTHER_TAB_MS);
       }
       // What this tab holds that the other did not store goes back to storage, so a reload there or here keeps it (review of #686).
-      if (!sameCount(next, theirs) || JSON.stringify(merged.at) !== JSON.stringify(theirs.at)) writeCount(saveKey, merged);
+      if (!sameCount(next, theirs) || !sameTimes(merged.at, theirs.at)) writeCount(saveKey, merged);
       if (sameCount(next, latest.current)) return;
       // Taken as it is, so it is not stamped as typed here.
       before.current = next;
@@ -260,12 +272,13 @@ export function useCountSave({ saveKey, restored, saved, apply, hold }: {
      */
     takeStored: () => {
       const now = readCount(saveKey);
-      if (!now) return;
+      if (!now) return null;
       at.current = now.at;
       commitAt.current = now.committed;
       const { at: _at, committed: _committed, ...next } = now;
       before.current = next;
       apply(next);
+      return now;
     },
   };
 }

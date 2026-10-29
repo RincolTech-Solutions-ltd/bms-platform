@@ -91,6 +91,16 @@ describe('two tabs of one count', () => {
     expect(merged.committed).toBe(300);
   });
 
+  // Review of #686, round 5: both tabs merge a tie alike, and keep the time of an item no longer counted.
+  it('settles a tie the same way from either side, and keeps the time of an item committed in either tab', () => {
+    const a = tab({ 'A-1': '4' }, { 'A-1': 100 });
+    const b = tab({ 'A-1': '5' }, { 'A-1': 100 });
+    expect(mergeCounts(a, b).counts).toEqual(mergeCounts(b, a).counts);
+    const gone = mergeCounts(tab({}, { 'A-1': 300 }, []), tab({ 'A-1': '4' }, { 'A-1': 100 }));
+    expect(gone.counts).toEqual({});
+    expect(gone.at).toEqual({ 'A-1': 300 });
+  });
+
   it('keeps an item found and not typed in either tab', () => {
     const merged = mergeCounts({ ...tab({}, {}), listed: ['A-9'] }, tab({ 'A-1': '4' }, { 'A-1': 100 }));
     expect(merged.listed).toEqual(['A-9', 'A-1']);
