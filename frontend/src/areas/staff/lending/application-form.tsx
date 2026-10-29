@@ -78,6 +78,10 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
   const [startNew, setStartNew] = useState('');
   const drafts = useQuery({ queryKey: ['lending', 'loans', 'drafts', draft.memberId], queryFn: () => api.drafts(draft.memberId), enabled: !editing && draft.memberId !== '' });
   const open = editing || startNew === draft.memberId ? undefined : draftsFirst(drafts.data ?? [])[0];
+  // Send waits for the look and the answer, so the question is never passed by unseen; a failed look does not hold it.
+  const asking = !editing && draft.memberId !== '' && startNew !== draft.memberId && (drafts.isPending || open !== undefined);
+  const held = guard.blocked ? 'Wait for the check above before sending again.'
+    : asking ? (open ? 'Answer the question at the top first: continue that draft or start a new one.' : 'Checking whether this member has a draft.') : undefined;
   const set = <K extends keyof ApplicationDraft>(key: K, value: ApplicationDraft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const inputMode = exponentOf(currency) ? 'decimal' : 'numeric';
 
@@ -91,7 +95,7 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (busy || guard.blocked) return;
+    if (busy || held) return;
     setFailure(null);
     setTried(true);
     if (!form.attempt(order)) return;
@@ -158,7 +162,7 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
         <section className="rt-card stack" aria-labelledby="af-open-draft">
           <p id="af-open-draft">{draftQuestion(open, today, businessZone())}</p>
           <Link to="/staff/lending/loans/$loanId/edit" params={{ loanId: open.id ?? '' }} className="btn rt-primary btn-block">Continue that draft</Link>
-          <button type="button" className="btn-block" onClick={() => setStartNew(draft.memberId)}>Start a new one</button>
+          <button type="button" className="btn btn-block" onClick={() => setStartNew(draft.memberId)}>Start a new one</button>
         </section>
       )}
       <FieldsNeededNote />
@@ -267,7 +271,7 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
         )}
       </Group>
       <Problem error={failure ? new Error(failure) : null} />
-      <SaveBar label="Send for appraisal" busy={busy} blocked={guard.blocked ? 'Wait for the check above before sending again.' : undefined} tourId="application-send"
+      <SaveBar label="Send for appraisal" busy={busy} blocked={held} tourId="application-send"
         cancel={editing ? <Link to="/staff/lending/loans/$loanId" params={{ loanId: base?.id ?? '' }} className="btn btn-ghost">Cancel</Link> : <Link to="/staff/lending" className="btn btn-ghost">Cancel</Link>} />
     </form>
   );

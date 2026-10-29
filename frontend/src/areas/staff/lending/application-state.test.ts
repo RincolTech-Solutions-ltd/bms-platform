@@ -12,6 +12,7 @@ describe('the question a second start asks (issue #704)', () => {
     expect(draftQuestion(d, '2026-10-29', 'Africa/Kampala')).toBe('This member already has a draft loan, LN000902, started at 20:58. Continue it?');
     expect(draftQuestion(d, '2026-10-31', 'Africa/Kampala')).toBe('This member already has a draft loan, LN000902, started on 29 Oct at 20:58. Continue it?');
     expect(draftQuestion({ loan_no: 'LN000902' }, '2026-10-29', 'Africa/Kampala')).toBe('This member already has a draft loan, LN000902. Continue it?');
+    expect(draftQuestion({}, '2026-10-29', 'Africa/Kampala')).toBe('This member already has a draft loan. Continue it?');
   });
 });
 

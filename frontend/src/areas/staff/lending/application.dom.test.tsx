@@ -71,7 +71,7 @@ const appraisal: LoanAppraisal = {
 };
 
 /** An in-memory application client that records each call, the server's version rule included. */
-function createApplicationsMock(start?: Loan, tightened = false, drafts: LoanListItem[] = []) {
+function createApplicationsMock(start?: Loan, tightened = false, drafts: LoanListItem[] | Promise<LoanListItem[]> = []) {
   let current: Loan | undefined = start;
   const calls: { name: string; version?: number; body?: unknown }[] = [];
   let failOnce: { name: string; error: FormError } | null = null;
@@ -122,7 +122,7 @@ function createApplicationsMock(start?: Loan, tightened = false, drafts: LoanLis
   return { api, calls, failNext: (name: string, error: FormError) => { failOnce = { name, error }; }, loseNext: (name: string) => { loseOnce = name; } };
 }
 
-function mount(node: ReactElement, opts: { me?: Me; loan?: Loan; items?: CollateralItem[]; tightened?: boolean; drafts?: LoanListItem[] } = {}) {
+function mount(node: ReactElement, opts: { me?: Me; loan?: Loan; items?: CollateralItem[]; tightened?: boolean; drafts?: LoanListItem[] | Promise<LoanListItem[]> } = {}) {
   const applications = createApplicationsMock(opts.loan, opts.tightened, opts.drafts);
   const members = createMembersMock([borrower, guarantor]);
   const collateral = createCollateralMock(opts.items ?? [plot, unvalued]);
@@ -266,6 +266,27 @@ describe('a second start for the same member (issue #704)', () => {
     const go = screen.getByRole('link', { name: 'Continue that draft' });
     expect(go.getAttribute('href')).toBe('/staff/lending/loans/d2/edit');
     expect(go.className).toMatch(/rt-primary/);
+    expect(screen.getByRole('button', { name: 'Start a new one' }).className).toMatch(/\bbtn\b/);
+  });
+
+  // JUSTIFICATION-A3: the test the review of #711 asks for (drafts back late, Send pressed unanswered, no create).
+  it('holds Send until the look is back and the question is answered, so nothing is made unseen', async () => {
+    let answer: (l: LoanListItem[]) => void = () => {};
+    const api = mount(<ApplicationForm memberId={borrower.id} />, { drafts: new Promise((r) => { answer = r; }) });
+    await screen.findByRole('option', { name: /Test monthly loan/ });
+    type(/^Loan product/, 'p1');
+    type(/^Amount asked for/, '1,000,000');
+    type(/^What the loan is for/, 'business');
+    expect(screen.getByText('Checking whether this member has a draft.')).toBeTruthy();
+    send();
+    answer([newer]);
+    expect(await screen.findByText(/^Answer the question at the top first/)).toBeTruthy();
+    send();
+    await tick();
+    expect(api.calls).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Start a new one' }));
+    send();
+    await waitFor(() => expect(api.calls.map((c) => c.name)).toEqual(['create', 'submit']));
   });
 
   it('still starts a new one when asked, and sends it', async () => {

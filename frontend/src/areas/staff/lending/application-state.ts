@@ -114,15 +114,15 @@ export function pledgeable(item: CollateralItem, currency: string): boolean {
   return ['pledged', 'in_custody'].includes(item.custody_status ?? '') && currencyOf(item.currency) === currency && item.collateral_value_minor != null;
 }
 
-/** Field keys the form ties its messages to, in the order the form shows them. Guarantor and pledge keys are the API's. */
 /** The question a second start asks (issue #704): "started at 20:58" today, "started on 27 Oct at 20:58" on an earlier day. */
 export function draftQuestion(l: LoanListItem, today: string, zone: string): string {
   const t = Date.parse(l.created_at ?? '');
   const day = Number.isNaN(t) ? '' : businessToday(new Date(t), zone);
   const on = day && day !== today ? ` on ${new Intl.DateTimeFormat('en-GB', { timeZone: zone, day: 'numeric', month: 'short' }).format(t)}` : '';
-  return `This member already has a draft loan, ${l.loan_no ?? ''}${day ? `, started${on} at ${clockTime(l.created_at, zone)}` : ''}. Continue it?`;
+  return `This member already has a draft loan${l.loan_no ? `, ${l.loan_no}` : ''}${day ? `, started${on} at ${clockTime(l.created_at, zone)}` : ''}. Continue it?`;
 }
 
+/** Field keys the form ties its messages to, in the order the form shows them. Guarantor and pledge keys are the API's. */
 export function applicationOrder(d: ApplicationDraft): string[] {
   return [
     'member_id', 'product_id', 'requested_principal_minor', 'requested_term_count', 'purpose_category', 'proposed_disbursement_date', 'guarantors',
