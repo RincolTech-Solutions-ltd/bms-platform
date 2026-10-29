@@ -27,8 +27,8 @@ import { Sheet } from '../../../app/ui/Sheet';
 /** What a pack is for, the one list (issue #637): its values, its Used for label and its words in a sentence. The first is the default. */
 export const PURPOSES = [
   { value: 'both', label: 'Both', use: 'for buying and selling' },
-  { value: 'sell', label: 'Selling', use: 'for selling' },
   { value: 'buy', label: 'Buying', use: 'for buying' },
+  { value: 'sell', label: 'Selling', use: 'for selling' },
 ] as const;
 
 export type Purpose = (typeof PURPOSES)[number]['value'];
