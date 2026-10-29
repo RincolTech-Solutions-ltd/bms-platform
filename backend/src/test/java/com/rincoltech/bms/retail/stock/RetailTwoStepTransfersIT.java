@@ -2,6 +2,7 @@ package com.rincoltech.bms.retail.stock;
 
 import static com.rincoltech.bms.retail.RetailTestSupport.ADMIN;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
@@ -468,6 +469,44 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         assertThat(partial.getBody().get("errors").get(0).get("code").asString())
                 .isEqualTo("incomplete");
         assertThat(qty(t.secondBranch(), product)).isEqualTo("0.000");
+    }
+
+    // JUSTIFICATION-A3: the V116 receipt rules #239 asks for; no existing test writes a receipt past the service.
+    /**
+     * V116 (issue #239): the database refuses a receipt that leaves a line without received_qty, or that brought stock
+     * of value without the destination entry; a receipt where nothing arrived needs no destination entry.
+     */
+    @Test
+    void theDatabaseRefusesAReceiptWithoutEveryLineOrWithoutTheDestinationEntry() {
+        switchOn();
+        api.stockUp(t.headOffice(), product, "10");
+        UUID id = dispatched("4");
+        String receipt =
+                "UPDATE retail_transfers SET status = 'received', received_at = now(), received_by = created_by"
+                        + " WHERE tenant_id = ? AND id = ?";
+
+        assertThatThrownBy(() -> TestDatabase.owner()
+                        .sql(receipt)
+                        .params(t.tenantId(), id)
+                        .update())
+                .hasMessageContaining("a receipt records what arrived on every line");
+        TestDatabase.owner()
+                .sql("UPDATE retail_transfer_lines SET received_qty = 3 WHERE tenant_id = ? AND transfer_id = ?")
+                .params(t.tenantId(), id)
+                .update();
+        assertThatThrownBy(() -> TestDatabase.owner()
+                        .sql(receipt)
+                        .params(t.tenantId(), id)
+                        .update())
+                .hasMessageContaining("has the destination entry");
+        assertThat(api.get("/transfers/" + id, ADMIN).getBody().get("status").asString())
+                .isEqualTo("in_transit");
+
+        UUID lost = dispatched("2");
+        ResponseEntity<JsonNode> nothing = receive(lost, received(product, "0"), ADMIN, "*");
+        assertThat(nothing.getStatusCode()).as("%s", nothing.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(net(lost, t.secondBranch(), "inventory")).isZero();
+        assertThat(net(lost, t.secondBranch(), "stock_shrinkage")).isEqualTo(2_000);
     }
 
     /** A replayed key returns the first receipt and moves nothing again; two racing receipts receive once. */
