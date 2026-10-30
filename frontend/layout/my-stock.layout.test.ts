@@ -21,7 +21,13 @@ beforeAll(async () => {
   base = server.resolvedUrls?.local[0] ?? '';
   browser = await chromium.launch();
   if (SHOTS) mkdirSync(SHOTS, { recursive: true });
-});
+  // The dev server compiles the whole router graph on the first visit, which can pass 30 s on a slow runner: one warm-up
+  // visit with a long wait, so each test waits only for its own page.
+  const warm = await browser.newPage();
+  await warm.goto(`${base}layout/my-stock.html`);
+  await warm.locator('.stock-card').first().waitFor({ timeout: 150_000 });
+  await warm.close();
+}, 180_000);
 
 afterAll(async () => {
   await browser?.close();
