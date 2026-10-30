@@ -603,6 +603,20 @@ describe('packages on Quick add, the rows of Add an item (issue #695)', () => {
     });
   });
 
+  it('notes half a loose piece rounded half up, as the server books it', async () => {
+    units = [PIECE, CARTON];
+    open(packsOn);
+    await screen.findByRole('option', { name: 'Piece' });
+    carton('24');
+    const buy = screen.getByTestId('usual-buy');
+    fireEvent.click(within(buy).getByRole('radio', { name: 'Carton' }));
+    fireEvent.change(within(buy).getByLabelText(/^What do you pay for one carton\?/), { target: { value: '100000' } });
+    count('1', '2.5');
+    fireEvent.click(screen.getByLabelText(/I just bought these/));
+    // 100,000 and 2.5 at 4,167 (10,417.5): UGX 110,418, the paid_minor of RetailQuickAddPacksIT.
+    expect(screen.getByTestId('qa-paid-total').textContent).toBe('UGX 110,418');
+  });
+
   it('keeps the cartons typed when a row changes but its levels do not', async () => {
     units = [PIECE, CARTON];
     open(packsOn);
@@ -728,7 +742,8 @@ describe('packages on Quick add, the rows of Add an item (issue #695)', () => {
     count('1', '');
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     const panel = await screen.findByTestId('name-exists');
-    if (_what === 'not readable') await waitFor(() => expect(getProduct).toHaveBeenCalled());
+    // A failed read is said at once, before any tap.
+    if (_what === 'not readable') expect((await screen.findByTestId('qa-existing-unread')).textContent).toMatch(said);
     await new Promise((r) => setTimeout(r, 50));
     fireEvent.click(within(panel).getByRole('button', { name: 'Use the existing one and just add stock' }));
     expect(screen.getByTestId('qa-panel-note').textContent).toMatch(said);

@@ -260,6 +260,20 @@ class RetailQuickAddPacksIT extends IntegrationTest {
         assertThat(stock(productOf(made))).isEqualByComparingTo("24");
     }
 
+    // JUSTIFICATION-A3: round 3 of the review of #716 asks for half loose pieces and a bound on the package price by
+    // name.
+    @Test
+    void halfALoosePieceRoundsHalfUpAsTheNoteDoesAndAnOverBigLevelPriceIsNamed() {
+        // 1 carton and 2.5 pieces: 100,000 and 2.5 at 4,167 is 10,417.5, rounded half up: 110,418, as the form's note.
+        ResponseEntity<JsonNode> r = paidByTheCarton("Test Ruler", "26.5", 100_000);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(r.getBody().get("paid_minor").asLong()).isEqualTo(110_418);
+
+        ResponseEntity<JsonNode> big = paidByTheCarton("Test Ruler Long", "24", 10_000_000_000_001L);
+        assertThat(big.getStatusCode()).as("%s", big.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(big.getBody().get("errors").get(0).get("field").asString()).isEqualTo("paid_level_cost_minor");
+    }
+
     @Test
     void aPackageLevelWithoutPaidFromIsRefused() {
         Map<String, Object> body = new LinkedHashMap<>();

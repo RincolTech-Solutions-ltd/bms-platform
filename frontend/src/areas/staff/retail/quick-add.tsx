@@ -598,6 +598,10 @@ export function QuickAddForm({ initialName = '', onSell }: {
         <p className="hint" data-testid="qa-packs-not-added">The packages you typed are not added to {exists.name}. How many is counted in its own packages.</p>
       )}
       {exists && panelNote && <p role="alert" className="alert alert-warning" data-testid="qa-panel-note">{panelNote}</p>}
+      {exists && !panelNote && forExisting && existing.isError && (
+        // Round 3 of the review of #716: a failed read of the item's packages is said at once, not only after a tap.
+        <p role="alert" className="alert alert-warning" data-testid="qa-existing-unread">{`The packages of ${exists.name} could not be read. Check the connection, then tap ${openLabel}.`}</p>
+      )}
       {exists && (
         <ExistsPanel
           item={exists}
