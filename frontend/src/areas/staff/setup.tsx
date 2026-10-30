@@ -11,6 +11,7 @@ import { DataExportCard } from './data-export';
 import { NewIconNote, rememberIconVersion } from '../../install/NewIcon';
 import { useStaff } from './context';
 import { PlanCard } from './plan';
+import { ShortLinkCard } from './short-link';
 import { Hint } from '../../app/ui/Hint';
 import { sayDone } from './retail/toast';
 
@@ -381,6 +382,8 @@ export function Setup() {
             </p>
           )}
         </fieldset>
+
+        <ShortLinkCard />
 
         <fieldset>
           <legend>Reports</legend>

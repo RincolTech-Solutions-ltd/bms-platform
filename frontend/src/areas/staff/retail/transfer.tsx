@@ -12,6 +12,7 @@ import { milliOf } from './maths';
 import { TRANSFER, TRANSFER_RECEIPT, UNITS, capabilityOn, holdsAt, needsOf } from './permissions';
 import { BranchRequired, Gate, NoStockHere, PacksAndPiecesFields, ProductPicker, Problem, money, useProfitAccess, useStockingBranch } from './ui';
 import { ScanBar } from './scan';
+import { NextSteps, mayCountAt } from './next-steps';
 import { PACK_UNUSABLE, plusOne, scanInto } from './barcode-state';
 import { useItemAdded } from './toast';
 import { chosenPack, packsAndPiecesProblem, samePack, standardPack, unitWords } from './units-state';
@@ -209,6 +210,7 @@ const HEADING: Record<string, string> = { voided: 'Undone', in_transit: 'Stock s
 
 export function TransferSummary({ transfer, onNew }: { transfer: Transfer; onNew?: () => void }) {
   const label = useBranchLabel();
+  const { me, chooseBranch } = useStaff();
   const profit = useProfitAccess();
   return (
     <section aria-label="Saved">
@@ -231,7 +233,16 @@ export function TransferSummary({ transfer, onNew }: { transfer: Transfer; onNew
       {profit && transfer.shortage_cost_minor !== undefined && transfer.shortage_cost_minor > 0 && <p>Lost on the way, at cost: {money(transfer.shortage_cost_minor)}</p>}
       {transfer.status === 'voided' && <p>Undone: {transfer.void_reason}</p>}
       {transfer.status === 'cancelled' && <p>Taken back: {transfer.void_reason}</p>}
-      {onNew && <button type="button" className="rt-primary" onClick={onNew}>Move more stock</button>}
+      {/* Issue #700: once the goods are there, the next job is to count them at the branch that took them in. */}
+      {/* Move more stock stays the primary: a clear form here, or Move stock where a past move is only shown. */}
+      <NextSteps at="moveDone" lead steps={[
+        onNew ? { label: 'Move more stock', onClick: onNew } : { label: 'Move more stock', screen: 'transfer', to: '/staff/retail/transfer' },
+        {
+          label: 'Count stock at the receiving branch', words: `Count stock at ${label(transfer.to_branch_id)}`, screen: 'stocktake', to: '/staff/retail/stocktake',
+          onClick: () => chooseBranch?.(transfer.to_branch_id ?? ''),
+          show: (transfer.status === 'completed' || transfer.status === 'received') && chooseBranch !== undefined && mayCountAt(me, transfer.to_branch_id),
+        },
+      ]} />
     </section>
   );
 }

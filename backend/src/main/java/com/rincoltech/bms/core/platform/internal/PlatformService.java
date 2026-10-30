@@ -13,6 +13,7 @@ import com.rincoltech.bms.core.tenancy.ModuleManifest;
 import com.rincoltech.bms.core.tenancy.ModuleSetUp;
 import com.rincoltech.bms.core.tenancy.ModuleSettingsGroup;
 import com.rincoltech.bms.core.tenancy.PlatformHost;
+import com.rincoltech.bms.core.tenancy.ShortNames;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
@@ -69,6 +70,7 @@ class PlatformService implements TenantProvisioning {
     private final TransactionTemplate transactions;
     private final Set<String> moduleKeys;
     private final GoLiveDate goLive;
+    private final ShortNames shortNames;
     private final Map<String, ModuleSettingsGroup> settingsGroups;
     private final List<ModuleSetUp> setUps;
     private final ObjectMapper mapper;
@@ -84,8 +86,10 @@ class PlatformService implements TenantProvisioning {
             List<ModuleSettingsGroup> settingsGroups,
             List<ModuleSetUp> setUps,
             ObjectMapper mapper,
-            GoLiveDate goLive) {
+            GoLiveDate goLive,
+            ShortNames shortNames) {
         this.goLive = goLive;
+        this.shortNames = shortNames;
         this.jdbc = jdbc;
         this.tenantAdmins = tenantAdmins;
         this.hosts = hosts;
@@ -212,9 +216,13 @@ class PlatformService implements TenantProvisioning {
     public Optional<Created> create(NewTenant request, Steps steps) {
         UUID operator = CurrentPrincipal.require().userId();
         String slug = request.slug() == null ? "" : request.slug().trim();
-        if (!hosts.isValidSlug(slug)) {
+        // ADR-108: the slug is the shop's short link, so a new one follows the short name rules (shape and the reserved
+        // list), as at Activate.
+        if (!hosts.isValidSlug(slug) || ShortNames.refusal(slug).isPresent()) {
             throw ApiException.validation(List.of(new FieldProblem(
-                    "slug", "invalid_slug", "3 to 63 lower case letters, digits or hyphens; not a reserved name.")));
+                    "slug",
+                    "invalid_slug",
+                    "3 to 20 lower case letters and digits, a hyphen may join two words; not a reserved name.")));
         }
         String timezone = request.timezone() == null ? "Africa/Kampala" : request.timezone();
         try {
@@ -239,6 +247,19 @@ class PlatformService implements TenantProvisioning {
                 () -> transactions.execute(status -> {
                     if (!steps.before()) {
                         return null;
+                    }
+                    // ADR-108: claimed under the name's lock, which every claim of a short name takes, before the count
+                    // below; a name another confirmed application holds is not this tenant's, and a concurrent create
+                    // that still meets tenants_slug_key is the 409 further down.
+                    if (shortNames
+                            .takenBy(slug, steps.application(), true)
+                            .filter("applied"::equals)
+                            .isPresent()) {
+                        throw new ApiException(
+                                HttpStatus.CONFLICT,
+                                "duplicate_slug",
+                                "Slug taken",
+                                "An application whose email is confirmed chose this short name.");
                     }
                     boolean taken = jdbc.sql("SELECT count(*) FROM platform_list_tenants() WHERE slug = ?")
                                     .param(slug)
@@ -314,13 +335,17 @@ class PlatformService implements TenantProvisioning {
     @Override
     @Transactional(readOnly = true)
     public boolean slugAvailable(String slug) {
+        // ADR-108: a suggestion is a short name, so its shape and the reserved list apply.
         return slug != null
                 && hosts.isValidSlug(slug)
+                && ShortNames.refusal(slug).isEmpty()
                 && jdbc.sql("SELECT count(*) FROM platform_list_tenants() WHERE slug = ?")
                                 .param(slug)
                                 .query(Long.class)
                                 .single()
-                        == 0;
+                        == 0
+                // ADR-108: nor chosen by a confirmed open application.
+                && shortNames.takenBy(slug, null, false).isEmpty();
     }
 
     /** In a transaction bound to the tenant, so a module switched on sets itself up there (ADR-098). */

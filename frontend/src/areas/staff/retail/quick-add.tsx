@@ -22,6 +22,7 @@ import { PacksTurnOn, factorProblem } from './catalogue-packs';
 import { UNITS, branchesWhere, canUse, capabilityOn, holdsAt } from './permissions';
 import { factorMilli, spellingsOf } from './units-state';
 import { UnitPicker } from './unit-picker';
+import { QuickAddedNext } from './next-steps';
 import { Gate, Problem, money, useProfitAccess, useStockingBranch } from './ui';
 
 // Quick add (issue #632): a shop owner needed nine steps on four screens to add one item and its stock, and said AppSheet was
@@ -359,10 +360,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
         )}
         {done.note && <p className="hint" data-testid="qa-photo-note">{done.note}</p>}
         {notHere && <p className="hint" data-testid="qa-not-here">{sellsThere ? `You do not sell at ${atName}, so Sell it is not offered here.` : `${atName} is a store, so the item is sold from a shop.`}</p>}
-        <p className="cluster">
-          <button type="button" className="rt-primary" onClick={another}>Add another</button>
-          {canSell && <button type="button" onClick={() => onSell(done.added.product_id ?? '', at)}>Sell it</button>}
-        </p>
+        <QuickAddedNext added={done.added} onAnother={another} onSell={canSell ? () => onSell(done.added.product_id ?? '', at) : undefined} />
       </section>
     );
   }

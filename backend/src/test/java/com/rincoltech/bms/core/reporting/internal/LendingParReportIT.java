@@ -436,6 +436,10 @@ class LendingParReportIT extends LendingBookSupport {
                                'due'
                           FROM generate_series(1, ?) g
                         """).params(t.tenantId(), n).update();
+        // Fresh statistics for the 2,600 rows just written, so the planner does not pick a plan that passes the
+        // statement timeout on a slow runner (issue #719).
+        owner.sql("ANALYZE lending_members, lending_loans, lending_schedule_items")
+                .update();
 
         var scope = new com.rincoltech.bms.lending.insights.InsightsFigures.PortfolioScope(
                 TODAY, TODAY, TODAY, null, null, null);

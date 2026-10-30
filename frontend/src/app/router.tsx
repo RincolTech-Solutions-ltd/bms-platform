@@ -147,7 +147,8 @@ const retailUsageRoute = retailScreen('/usage', 'Usage and damage').lazy(() => i
 const retailStockRoute = retailScreen('/stock', 'Stock').lazy(() => import('../areas/staff/retail/stock').then((m) => m.Route));
 // Quick add (issue #632): `name` is what Sell's search typed before it found nothing, so the form starts with it.
 const retailQuickAddRoute = retailScreen('/quick-add', 'Quick add', textParams('name')).lazy(() => import('../areas/staff/retail/quick-add').then((m) => m.Route));
-const retailStocktakeRoute = retailScreen('/stocktake', WORDS.countStock).lazy(() => import('../areas/staff/retail/stocktake').then((m) => m.Route));
+// Count it now (issue #700): `item` is the item just added, put on the sheet ready to type, and `from` the screen it came from.
+const retailStocktakeRoute = retailScreen('/stocktake', WORDS.countStock, textParams('item', 'from')).lazy(() => import('../areas/staff/retail/stocktake').then((m) => m.Route));
 const retailTransferRoute = retailScreen('/transfer', 'Move stock').lazy(() => import('../areas/staff/retail/transfer').then((m) => m.Route));
 const retailTransfersRoute = retailScreen('/transfers', 'Stock moves').lazy(() => import('../areas/staff/retail/transfers').then((m) => m.Route));
 const retailStockByLocationRoute = retailScreen('/stock-by-location', 'Stores and shops').lazy(() => import('../areas/staff/retail/stock-by-location').then((m) => m.Route));
@@ -345,6 +346,10 @@ const signUpRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sign-
 const findSignInRoute = createRoute({ getParentRoute: () => rootRoute, path: '/find-sign-in' }).lazy(() =>
   import('../areas/onboarding/find-sign-in').then((m) => m.Route),
 );
+// Where a short link lands when no shop uses it (issue #708, ADR-108).
+const linkNotFoundRoute = createRoute({ getParentRoute: () => rootRoute, path: '/link-not-found' }).lazy(() =>
+  import('../areas/onboarding/link-not-found').then((m) => m.Route),
+);
 const signUpVerifyRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sign-up/verify' }).lazy(() =>
   import('../areas/onboarding/applicant').then((m) => m.VerifyRoute),
 );
@@ -526,6 +531,7 @@ export const router = createRouter({
     styleRoute,
     signUpRoute,
     findSignInRoute,
+    linkNotFoundRoute,
     signUpVerifyRoute,
     applicationStatusRoute,
     operatorSignInRoute,
