@@ -393,6 +393,12 @@ class RetailQuickAddPacksIT extends IntegrationTest {
         ResponseEntity<JsonNode> one = quickAdd("Test Folder", "3", List.of(tooFew));
         assertThat(one.getStatusCode()).as("%s", one.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(one.getBody().get("errors").get(0).get("field").asString()).startsWith("packs[0].");
+
+        // Issue #724: a size below the ladder's 2 is refused on the request, as holds_qty is.
+        ResponseEntity<JsonNode> single = quickAdd("Test Folder", "3", List.of(pack(carton, "1.5")));
+        assertThat(single.getStatusCode()).as("%s", single.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(single.getBody().get("errors").get(0).get("field").asString())
+                .isEqualTo("packs[0].factor");
         assertThat(scalar(
                         "SELECT count(*) FROM retail_products WHERE tenant_id = ? AND description = 'Test Folder'",
                         t.tenantId()))
