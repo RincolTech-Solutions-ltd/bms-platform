@@ -173,7 +173,17 @@ class RetailNewItemPacksIT extends IntegrationTest {
                     .as(unit)
                     .isEqualTo(c.get("sentence").asString());
         }
-        for (String code : RetailCatalogue.SHORT_CODE_WORDS.keySet()) {
+        // Every package short code of the one list of unit words (ADR-109).
+        List<String> packageCodes = JsonMapper.builder()
+                .build()
+                .readTree(Path.of("../frontend/src/words/unit-words.json").toFile())
+                .get("units")
+                .valueStream()
+                .flatMap(u -> u.get("codes").valueStream().map(JsonNode::asString))
+                .filter(RetailCatalogue::isPackageWord)
+                .toList();
+        assertThat(packageCodes).contains("ctn", "bx", "dz");
+        for (String code : packageCodes) {
             assertThat(cases.valueStream()
                             .anyMatch(c -> c.get("unit").asString().equalsIgnoreCase(code)))
                     .as("the fixture has %s", code)

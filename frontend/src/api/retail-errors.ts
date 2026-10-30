@@ -128,7 +128,6 @@ const BY_CODE: Record<string, string> = {
   item_code_made_by_app: 'The app makes the item code from the category, and an item keeps it. Reload the page and save again.',
   duplicate_category: 'A category with this name already exists.',
   duplicate_category_prefix: 'Another category already uses this code start. Choose other letters.',
-  duplicate_unit: 'A unit with this name already exists.',
   duplicate_supplier: 'A supplier with this name already exists.',
   inactive_category: 'This category is switched off. Choose another one, or switch it on first.',
   inactive_unit: 'This unit is switched off. Choose another one, or switch it on first.',
@@ -180,6 +179,9 @@ export function retailMessage(problem: RetailProblem | undefined, status: number
   // Issue #257: only the 404 is a branch outside the caller's scope (trade-capabilities 2.2). A closed branch or a transfer's
   // destination is a 422 whose field message the server words for its own case, shown below.
   if (p.code === 'unknown_branch' && status === 404) return 'That branch is not one you work in. Choose another branch in the Branch box.';
+  // Issue #698: a category that exists by case or spaces is named, as the server names it ("You already have BULBS.").
+  const existing = (p as Record<string, unknown>)['existing_name'];
+  if (p.code === 'duplicate_category' && typeof existing === 'string') return `You already have ${existing}.`;
   const known = p.code ? BY_CODE[p.code] : undefined;
   if (known) return known;
   if (p.code === 'validation_failed') {

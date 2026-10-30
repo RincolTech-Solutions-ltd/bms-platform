@@ -150,7 +150,7 @@ describe('Set up your shop (issue #625)', () => {
       ...hardware.packs.filter((p) => p.name !== 'Roll').map((p) => ({ id: `u-${p.name}`, name: p.name, active: true, version: 1, usual_pack: pack })),
     ];
     // Another phone added Roll after this one read the list.
-    createUnit.mockRejectedValue(new RetailError('exists', 409, 'duplicate_unit'));
+    createUnit.mockRejectedValue(new RetailError('exists', 409, 'unit_exists'));
     draw();
     fireEvent.click(screen.getByLabelText(/Hardware and building/));
     await screen.findByTestId('setup-pack-roll');

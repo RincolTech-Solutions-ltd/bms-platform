@@ -2,8 +2,8 @@ package com.rincoltech.bms.retail.catalogue.internal;
 
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.tenancy.ModuleSetUp;
+import com.rincoltech.bms.retail.catalogue.CatalogueNames;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -37,9 +37,13 @@ class DefaultUnits implements ModuleSetUp {
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public void switchedOn() {
+        // Issue #698: every default's key locked first, in key order, so "pcs" added on a screen at this moment and the
+        // Piece made here are never two units.
+        NAMES.stream().map(CatalogueNames::unitKey).sorted().forEach(repo::lockUnitKey);
         Set<String> existing = repo.unitIdsByName().keySet();
         for (String name : NAMES) {
-            if (existing.contains(name.toLowerCase(Locale.ROOT))) {
+            // Issue #698: keyed as the units are, so a shop with Pcs gets no second Piece.
+            if (existing.contains(CatalogueNames.unitKey(name))) {
                 continue;
             }
             UUID id = UUID.randomUUID();

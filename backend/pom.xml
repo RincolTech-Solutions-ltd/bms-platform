@@ -214,6 +214,15 @@
                     <include>*.md</include>
                 </includes>
             </resource>
+            <!-- The one list of unit words (ADR-109), read by CatalogueNames from the very file the PWA imports. The image build
+                 supplies the folder as the `words` build context (Dockerfile). -->
+            <resource>
+                <directory>${project.basedir}/../frontend/src/words</directory>
+                <targetPath>words</targetPath>
+                <includes>
+                    <include>unit-words.json</include>
+                </includes>
+            </resource>
         </resources>
         <plugins>
             <plugin>
