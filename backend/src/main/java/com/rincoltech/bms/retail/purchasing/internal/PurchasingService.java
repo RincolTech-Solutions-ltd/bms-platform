@@ -235,8 +235,8 @@ class PurchasingService implements QuickAddPurchase {
         List<FieldProblem> problems = validator.validate(r).stream()
                 .map(v -> {
                     String path = v.getPropertyPath().toString();
-                    String field = whole.signum() > 0 && path.startsWith(packLine) && path.endsWith(".costMinor")
-                            ? "paid_level_cost_minor"
+                    String field = whole.signum() > 0 && path.startsWith(packLine + ".")
+                            ? packLineField(path)
                             : quickAddField(path);
                     return new FieldProblem(field, "invalid", v.getMessage());
                 })
@@ -256,6 +256,17 @@ class PurchasingService implements QuickAddPurchase {
             return "cost_minor";
         }
         return path.equals("paymentMethod") ? "paid_from" : path;
+    }
+
+    /**
+     * Issue #724: the package line's own fields. Its count is the whole packages in qty, its price is
+     * paid_level_cost_minor, and anything else on it is the package bought in.
+     */
+    private static String packLineField(String path) {
+        if (path.endsWith(".qty")) {
+            return "qty";
+        }
+        return path.endsWith(".costMinor") ? "paid_level_cost_minor" : "paid_level_unit_id";
     }
 
     /**

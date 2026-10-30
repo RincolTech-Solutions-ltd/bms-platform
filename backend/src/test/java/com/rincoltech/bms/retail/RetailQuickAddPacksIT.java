@@ -2,13 +2,20 @@ package com.rincoltech.bms.retail;
 
 import static com.rincoltech.bms.retail.RetailTestSupport.ADMIN;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.kernel.ApiException;
+import com.rincoltech.bms.kernel.CurrentPrincipal;
+import com.rincoltech.bms.kernel.Principal;
+import com.rincoltech.bms.kernel.TenantContext;
+import com.rincoltech.bms.retail.stock.QuickAddPurchase;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,6 +24,8 @@ import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -31,6 +40,12 @@ class RetailQuickAddPacksIT extends IntegrationTest {
 
     @Autowired
     TestRestTemplate http;
+
+    @Autowired
+    QuickAddPurchase purchases;
+
+    @Autowired
+    PlatformTransactionManager transactionManager;
 
     TestDatabase.Fixture t;
     RetailTestSupport api;
@@ -281,6 +296,36 @@ class RetailQuickAddPacksIT extends IntegrationTest {
         JsonNode problem = r.getBody().get("errors").get(0);
         assertThat(problem.get("field").asString()).isEqualTo("paid_level_unit_id");
         assertThat(problem.get("code").asString()).isEqualTo("unknown_pack_unit");
+        assertThat(stock(productOf(made))).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void aCountProblemOnThePackageLineIsNamedQty() {
+        // Issue #724: Quick add's own qty bound keeps the count of packages in range over HTTP, so purchasing is called
+        // as Quick add calls it. 1,000,000,000,000 cartons and 1 piece: the carton line breaks its 11 digits.
+        ResponseEntity<JsonNode> made = quickAdd("Test Tape Roll", "0", List.of(pack(carton, "24")));
+        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
+        Principal admin = Principal.uniform(api.userId(), "staff", Set.of(), true, Set.of());
+        assertThatThrownBy(() -> TenantContext.callAs(t.tenantId(), () -> {
+                    CurrentPrincipal.set(admin);
+                    try {
+                        return new TransactionTemplate(transactionManager)
+                                .execute(status -> purchases.buy(
+                                        t.headOffice(),
+                                        productOf(made),
+                                        new BigDecimal("24000000000001"),
+                                        4_167,
+                                        "cash",
+                                        new QuickAddPurchase.Level(carton, 100_000)));
+                    } finally {
+                        CurrentPrincipal.clear();
+                    }
+                }))
+                .isInstanceOfSatisfying(
+                        ApiException.class,
+                        e -> assertThat(e.errors())
+                                .extracting(ApiException.FieldProblem::field)
+                                .containsExactly("qty"));
         assertThat(stock(productOf(made))).isEqualByComparingTo("0");
     }
 
