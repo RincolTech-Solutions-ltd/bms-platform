@@ -35,11 +35,12 @@ sizes and colors and packages."
    body of ADR-106's `packs`, at most ten). The packs are checked once before anything is written and then made on every
    size in the same transaction through the same `createPack`; a refusal names its row (`pack_index`, `packs[i].factor`) and
    saves nothing: no item, no size, no pack, no audit entry. The checks and the making are `CatalogueService.checkPacks` and
-   `makePacks`, shared with `POST /retail/products`, so the two routes cannot drift. A package price is never copied to a size
-   priced differently and never guessed for it (owner, round 2 of #723): while every size keeps the item's selling and
-   buying price, each size's package gets the price sent; once any size has its own price, the packages are made with no
-   price of their own on every size, and the form says "Sizes have different prices, so set the carton price on each size's
-   page after saving."
+   `makePacks`, shared with `POST /retail/products`, so the two routes cannot drift. A package's selling price is given for
+   the item's price; a size priced differently gets it in the same proportion, rounded half up (owner, clarification on
+   #723: a carton at 96,000 for 4,000 a piece is 72,000 for the size at 3,000 and 144,000 for the size at 6,000). Before
+   saving, the form shows each size's worked-out package price ("Carton of 100W") and the owner may change it, sent as
+   `pack_prices`; a package price not above that size's cost of the whole package is flagged with the words Items uses for
+   a price below the buying price.
 6. **The words.** The toast says "Longtime bulb added in 3 sizes, with carton of 24" (or "in 2 colours", "in 6 sizes and
    colours"). A HelpTip explains the question. The photo, if any, goes to the item.
 
@@ -53,4 +54,4 @@ ready lists are English only and change only with the app.
 
 **Watch for:** a code keeps only the letters and digits of a size, so two typed sizes such as 1.0mm and 10mm still give the
 same code. The form says so before saving ("Two of them would have the code ..."). A new ready size must not clash with
-another of its list. Sizes priced apart need their package prices set on each size's page after saving.
+another of its list. A worked-out package price is a suggestion the owner should check; the form flags one below cost but does not refuse it.

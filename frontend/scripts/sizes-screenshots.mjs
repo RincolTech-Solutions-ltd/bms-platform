@@ -81,10 +81,12 @@ for (const width of [412, 1366]) {
   const row = page.locator('[data-testid="package-row"]').first();
   await row.getByLabel(/^Package unit/).selectOption({ label: 'Carton' });
   await row.getByLabel(/^How many pieces in one carton/).fill('24');
+  await row.getByLabel(/^Selling price of one carton/).fill('96000');
   await page.getByLabel(/^Selling price of one piece/).fill('4000');
   await page.getByLabel('Selling price of 40W').fill('3000');
   await page.getByLabel('Selling price of 100W').fill('6000');
-  await at('[data-testid="size-prices"]', page, -90);
+  await page.getByLabel('Buying price of 100W').fill('7000');
+  await at('[data-testid="size-pack-prices"]', page, -90);
   await shot(page, '03-price-of-each-size', width);
 
   // 4. Saved in one tap.

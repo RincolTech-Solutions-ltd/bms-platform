@@ -7,7 +7,7 @@ taken from the retail mock with `frontend/scripts/sizes-screenshots.mjs`. Every 
 |---|---|
 | `01-sizes-chips` | "Does it come in different sizes, colours or types?" answered Yes, the kind Bulbs (watts) and 40W, 60W and 100W tapped |
 | `02-colours-chips` | The ready colours as chips, White tapped and Warm white typed and added |
-| `03-price-of-each-size` | A carton of 24 for every size, and the price of each of the 3, 40W cheaper and 100W dearer; since the sizes are priced apart, the note says to set the carton price on each size's page after saving |
+| `03-price-of-each-size` | A carton of 24 at 96,000 for every size, and the carton price of each size worked out from its own price (40W 72,000, 100W 144,000), changeable; 100W bought at 7,000 a bulb is flagged, its carton not above what 24 cost |
 | `04-added-in-3-sizes` | One tap saved it all: "Test Longtime Bulb added in 3 sizes, with carton of 24." and the next steps |
 
 To take them again:

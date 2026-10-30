@@ -2384,6 +2384,15 @@
             "minLength" : 0,
             "type" : "string"
           },
+          "pack_prices" : {
+            "description" : "Issue #697: a size's own selling price for one of its packages; a package price not named here is the one sent, in proportion to the size's selling price",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSizePackPrice"
+            },
+            "maxItems" : 1000,
+            "minItems" : 0,
+            "type" : "array"
+          },
           "packs" : {
             "description" : "Issue #697 (ADR-111): packages every size and colour gets, made in its transaction, checked as on POST /products; all are saved with the item or none is",
             "items" : {
@@ -19169,6 +19178,32 @@
             "type" : "array"
           }
         }
+      },
+      "RetailSizePackPrice" : {
+        "description" : "Issue #697: one size's own selling price of one of its packages",
+        "properties" : {
+          "colour" : {
+            "maxLength" : 30,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "sell_minor" : {
+            "format" : "int64",
+            "maximum" : 10000000000000,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "size" : {
+            "maxLength" : 30,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "unit_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        },
+        "required" : [ "sell_minor", "unit_id" ]
       },
       "RetailSlowMover" : {
         "description" : "An item that sold in the branch in the last 90 days, but slowly",

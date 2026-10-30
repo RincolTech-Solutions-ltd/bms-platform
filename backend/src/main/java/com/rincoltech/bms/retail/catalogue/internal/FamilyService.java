@@ -22,6 +22,7 @@ import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PackRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceChange;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceNotCopied;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Product;
+import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.SizePackPrice;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.TermsCopied;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdateFamilyRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.VariantOptions;
@@ -98,20 +99,15 @@ class FamilyService {
                 VariantGrid.plan(base, r.sizes(), r.colours(), r.variants(), r.costMinor(), r.sellMinor(), Set.of(), 0);
         requireSome(plan);
         // Issue #697 (ADR-111): Add an item's packages, checked before anything is written, then made on every size.
-        List<PackRequest> asked = r.packs() == null ? List.of() : r.packs();
-        // Owner, round 2 of #723: a package price is never copied to a size priced differently, nor guessed for it;
-        // while any size has its own price, the packages are made with no price of their own.
-        boolean onePrice =
-                plan.stream().allMatch(v -> v.sellMinor() == r.sellMinor() && v.costMinor() == r.costMinor());
-        List<PackRequest> packs =
-                onePrice ? asked : asked.stream().map(FamilyService::unpriced).toList();
+        List<PackRequest> packs = r.packs() == null ? List.of() : r.packs();
         List<String> purposes = catalogue.checkPacks(packs);
         String duplicateReason = catalogue.acceptItemName(name, r.unitId(), null, Set.of(), r.duplicateReason());
         UUID id = UUID.randomUUID();
         UUID by = CurrentPrincipal.require().userId();
         repo.insertFamily(id, name, base, r.categoryId(), r.unitId(), by, duplicateReason);
         for (UUID variant : insertVariants(id, name, r.categoryId(), r.unitId(), plan, by, true)) {
-            catalogue.makePacks(repo.find(variant).orElseThrow(), packs, purposes, by);
+            Product size = repo.find(variant).orElseThrow();
+            catalogue.makePacks(size, pricedFor(packs, size, r.sellMinor(), r.packPrices()), purposes, by);
         }
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("name", name);
@@ -129,12 +125,41 @@ class FamilyService {
         return get(id);
     }
 
-    /** The package as sent, without a selling price of its own (round 2 of #723). */
-    private static PackRequest unpriced(PackRequest k) {
-        return k == null
-                ? null
-                : new PackRequest(
-                        k.unitId(), k.factor(), k.purpose(), null, k.holdsUnitId(), k.holdsQty(), k.usualBuy());
+    // JUSTIFICATION-A3: the owner's clarification on #723 asks each size's package price in proportion, or as typed.
+    /**
+     * Owner, clarification on #723: a package's selling price is given for the item's price, so a size priced differently
+     * gets it in the same proportion, rounded half up (a carton at 96,000 for 4,000 a piece is 144,000 for the size at
+     * 6,000), unless {@code pack_prices} names that size's own price for the package, which the form shows and lets the owner
+     * change. A pack with no price stays without one.
+     */
+    static List<PackRequest> pricedFor(List<PackRequest> packs, Product size, long itemSell, List<SizePackPrice> own) {
+        String key = Planned.key(size.variant().size(), size.variant().colour());
+        return packs.stream()
+                .map(k -> {
+                    if (k == null || k.sellMinor() == null) {
+                        return k;
+                    }
+                    Long typed = (own == null ? List.<SizePackPrice>of() : own)
+                            .stream()
+                                    .filter(p -> p != null
+                                            && k.unitId().equals(p.unitId())
+                                            && Planned.key(VariantGrid.clean(p.size()), VariantGrid.clean(p.colour()))
+                                                    .equals(key))
+                                    .map(SizePackPrice::sellMinor)
+                                    .findFirst()
+                                    .orElse(null);
+                    long price = typed != null
+                            ? typed
+                            : itemSell <= 0 || size.sellMinor() == itemSell
+                                    ? k.sellMinor()
+                                    : BigDecimal.valueOf(k.sellMinor())
+                                            .multiply(BigDecimal.valueOf(size.sellMinor()))
+                                            .divide(BigDecimal.valueOf(itemSell), 0, RoundingMode.HALF_UP)
+                                            .longValueExact();
+                    return new PackRequest(
+                            k.unitId(), k.factor(), k.purpose(), price, k.holdsUnitId(), k.holdsQty(), k.usualBuy());
+                })
+                .toList();
     }
 
     /** Issue #697 (ADR-111): the sizes and colours the shop typed before, offered again beside the app's ready lists. */

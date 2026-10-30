@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useId, useState } from 'react';
-import { retail } from '../../../api/retail';
+import { RETAIL_CURRENCY, retail } from '../../../api/retail';
+import { MoneyInput } from '../../../app/ui/MoneyInput';
 import { READY_COLOURS, SIZE_KINDS, cleanOption, distinctOptions, type SizeKind } from '../../../api/retail-variants';
 import { HelpTip } from '../../../app/ui/HelpTip';
 import { Hint } from '../../../app/ui/Hint';
@@ -133,9 +134,23 @@ export function chosenOptions(value: SizesAnswer) {
 }
 
 /** The price of each size, under the item's own prices, which every size starts at. */
-export function SizePrices({ rows, profit, onEdit, codesKnown, problem, showErrors, note = null }: {
-  /** Round 2 of #723: why the packages are saved without a price. */
-  note?: string | null;
+/**
+ * Owner, clarification on #723: a package priced for the item's selling price, in proportion to one size's price, rounded
+ * half up as the server's FamilyService.pricedFor does: a carton at 96,000 for 4,000 a piece is 144,000 at 6,000.
+ */
+export function packPriceFor(priceMinor: number, sizeSell: number, itemSell: number): number {
+  if (itemSell <= 0 || sizeSell === itemSell) return priceMinor;
+  const n = BigInt(priceMinor) * BigInt(sizeSell);
+  const d = BigInt(itemSell);
+  return Number((2n * n + d) / (2n * d));
+}
+
+/** One size's price for one of its packages, worked out and changeable; `hint` says when it is not above its cost. */
+export type SizePackPriceRow = { key: string; label: string; valueMinor: number | null; hint: string | null };
+
+export function SizePrices({ rows, profit, onEdit, codesKnown, problem, showErrors, packPrices = [], onPackPrice = () => undefined }: {
+  packPrices?: SizePackPriceRow[];
+  onPackPrice?: (key: string, valueMinor: number | null) => void;
   rows: PreviewRow[];
   profit: boolean;
   onEdit: Parameters<typeof VariantPreview>[0]['onEdit'];
@@ -148,7 +163,17 @@ export function SizePrices({ rows, profit, onEdit, codesKnown, problem, showErro
       <h3>{rows.length === 0 ? 'Price of each size' : `Price of each of the ${rows.length}`}</h3>
       <Hint full>Each one starts at the prices above. Change one if it costs more or less.</Hint>
       {rows.length > 0 && <VariantPreview rows={rows} profit={profit} onEdit={onEdit} codesKnown={codesKnown} />}
-      {note && <p role="note" className="alert alert-info" data-testid="size-pack-note">{note}</p>}
+      {packPrices.length > 0 && (
+        <div className="stack" data-testid="size-pack-prices">
+          <h3>Package price of each size</h3>
+          <Hint full>Worked out from each size's price. Change one if you sell it for another price.</Hint>
+          {packPrices.map((p) => (
+            <MoneyInput key={p.key} id={`size-pack-${p.key}`} label={`${p.label} (${RETAIL_CURRENCY})`} valueMinor={p.valueMinor} onChange={(v) => onPackPrice(p.key, v)}
+              error={p.valueMinor === null ? `Type the price of the ${p.label.toLowerCase()}.` : null} showError={showErrors}
+              hint={p.hint ? <span role="note" className="alert alert-warning" data-testid="size-pack-below-cost">{p.hint}</span> : undefined} />
+          ))}
+        </div>
+      )}
       {problem && (showErrors || rows.length > 0) && <p role="note" className="alert alert-warning">{problem}</p>}
     </section>
   );

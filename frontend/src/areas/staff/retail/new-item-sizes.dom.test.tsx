@@ -128,11 +128,15 @@ describe('sizes on Add an item', () => {
     fireEvent.change(screen.getByLabelText(/^Package unit/), { target: { value: 'u2' } });
     fireEvent.change(screen.getByLabelText(/^How many bulbs in one carton/), { target: { value: '24' } });
     fireEvent.change(screen.getByLabelText(/^Selling price of one carton/), { target: { value: '96000' } });
-    expect(screen.queryByTestId('size-pack-note')).toBeNull();
     fireEvent.change(screen.getByLabelText('Selling price of 40W'), { target: { value: '3000' } });
     fireEvent.change(screen.getByLabelText('Selling price of 100W'), { target: { value: '6000' } });
-    // Round 2 of #723: sizes priced apart get no carton price, and the form says where to set it.
-    expect(screen.getByTestId('size-pack-note').textContent).toBe("Sizes have different prices, so set the carton price on each size's page after saving.");
+    // Owner, clarification on #723: each size's carton price is worked out, shown, changeable, and flagged below its cost.
+    expect((screen.getByLabelText(/^Carton of 100W/) as HTMLInputElement).value).toBe('144,000');
+    expect((screen.getByLabelText(/^Carton of 40W/) as HTMLInputElement).value).toBe('72,000');
+    fireEvent.change(screen.getByLabelText('Buying price of 100W'), { target: { value: '7000' } });
+    expect(screen.getByTestId('size-pack-below-cost').textContent).toContain('168,000');
+    fireEvent.change(screen.getByLabelText(/^Carton of 100W/), { target: { value: '170000' } });
+    expect(screen.queryByTestId('size-pack-below-cost')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     await waitFor(() => expect(createFamily).toHaveBeenCalledTimes(1));
     expect(createProduct).not.toHaveBeenCalled();
@@ -142,9 +146,13 @@ describe('sizes on Add an item', () => {
       unit_id: 'u1',
       sell_minor: 4000,
       variants: [{ size: '40W', sell_minor: 3000 }, { size: '60W', sell_minor: 4000 }, { size: '100W', sell_minor: 6000 }],
-      packs: [{ unit_id: 'u2', factor: '24', purpose: 'both' }],
+      packs: [{ unit_id: 'u2', factor: '24', purpose: 'both', sell_minor: 96000 }],
+      pack_prices: [
+        { size: '40W', unit_id: 'u2', sell_minor: 72000 },
+        { size: '60W', unit_id: 'u2', sell_minor: 96000 },
+        { size: '100W', unit_id: 'u2', sell_minor: 170000 },
+      ],
     });
-    expect((createFamily.mock.calls[0]?.[0] as { packs: object[] }).packs[0]).not.toHaveProperty('sell_minor');
     expect((await screen.findAllByText('Test longlife bulb added in 3 sizes, with carton of 24.')).length).toBeGreaterThan(0);
   });
 
@@ -160,7 +168,6 @@ describe('sizes on Add an item', () => {
     fireEvent.change(screen.getByLabelText(/^Package unit/), { target: { value: 'u2' } });
     fireEvent.change(screen.getByLabelText(/^How many bulbs in one carton/), { target: { value: '24' } });
     fireEvent.change(screen.getByLabelText(/^Selling price of one carton/), { target: { value: '96000' } });
-    expect(screen.queryByTestId('size-pack-note')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     await waitFor(() => expect(createFamily).toHaveBeenCalledTimes(1));
     expect(createFamily.mock.calls[0]?.[0]).toMatchObject({ packs: [{ unit_id: 'u2', factor: '24', purpose: 'both', sell_minor: 96000 }] });

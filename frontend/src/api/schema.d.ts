@@ -9013,6 +9013,8 @@ export interface components {
             duplicate_reason?: string;
             /** @description The item's name, as Baby romper */
             name: string;
+            /** @description Issue #697: a size's own selling price for one of its packages; a package price not named here is the one sent, in proportion to the size's selling price */
+            pack_prices?: components["schemas"]["RetailSizePackPrice"][];
             /** @description Issue #697 (ADR-111): packages every size and colour gets, made in its transaction, checked as on POST /products; all are saved with the item or none is */
             packs?: components["schemas"]["RetailPackRequest"][];
             /**
@@ -17351,6 +17353,15 @@ export interface components {
         RetailSimilarProducts: {
             exact?: components["schemas"]["RetailSimilarProduct"][];
             similar?: components["schemas"]["RetailSimilarProduct"][];
+        };
+        /** @description Issue #697: one size's own selling price of one of its packages */
+        RetailSizePackPrice: {
+            colour?: string;
+            /** Format: int64 */
+            sell_minor: number;
+            size?: string;
+            /** Format: uuid */
+            unit_id: string;
         };
         /** @description An item that sold in the branch in the last 90 days, but slowly */
         RetailSlowMover: {
