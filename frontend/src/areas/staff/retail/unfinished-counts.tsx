@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { businessZone, retail, type OpenStocktake } from '../../../api/retail';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { useStaff } from '../context';
@@ -22,6 +22,24 @@ export const SELL_COUNT_NOTE = 'Counted when the item was added on Sell';
 
 /** True for a count Sell started, whose own retry is cancelled once it is thrown away. */
 export const fromSale = (count: Pick<OpenStocktake, 'note'>) => count.note === SELL_COUNT_NOTE;
+
+// Issue #730: the counts whose save is on its way, from Count stock or Sell, so Throw it away is never offered for one; a
+// discard that reached the server first would cancel the save the person asked for.
+const onTheirWay = new Set<string>();
+const listeners = new Set<() => void>();
+const told = () => listeners.forEach((l) => l());
+
+/** Marks the count `id` as saving until `save` settles. */
+export function savingCount<T>(id: string, save: Promise<T>): Promise<T> {
+  onTheirWay.add(id);
+  told();
+  return save.finally(() => { onTheirWay.delete(id); told(); });
+}
+
+const useSaving = (id: string) => useSyncExternalStore(
+  (l) => { listeners.add(l); return () => listeners.delete(l); },
+  () => onTheirWay.has(id),
+);
 
 /** "You started a count here on 29 Oct and did not finish it", or today, or a weekday within the week, in the business's zone. */
 export function unfinishedWords(count: Pick<OpenStocktake, 'created_at' | 'created_by' | 'note'>, userId: string | undefined, zone: string, now: number = Date.now()): string {
@@ -56,6 +74,7 @@ function UnfinishedCount({ count, branchId, onFinish, onThrown }: { count: OpenS
   const queryClient = useQueryClient();
   const [asking, setAsking] = useState(false);
   const id = count.id ?? '';
+  const saving = useSaving(id);
   const drop = useMutation({
     mutationFn: () => retail.discardStocktake(id),
     onSuccess: () => {
@@ -67,7 +86,9 @@ function UnfinishedCount({ count, branchId, onFinish, onThrown }: { count: OpenS
     <div className="alert alert-warning" data-testid={`unfinished-${id}`}>
       <div className="stack">
       <p>{unfinishedWords(count, me.user_id, businessZone())}</p>
-      {asking ? (
+      {saving ? (
+        <p className="hint">This count is being saved now.</p>
+      ) : asking ? (
         <div role="group" aria-label="Throw this count away?" className="stack">
           <p>{fromSale(count)
             ? 'Throw this count away? Your stock stays as it is, and the sale that started it cannot save it any more.'

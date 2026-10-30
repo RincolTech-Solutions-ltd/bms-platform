@@ -22,7 +22,8 @@ import { entryWarnings } from './entry-checks-state';
 import { useEntryChecks, useEntryNorms } from './entry-checks';
 import { SuccessScreen } from '../../../app/ui/SuccessScreen';
 import { HelpTip } from '../../../app/ui/HelpTip';
-import { UnfinishedCounts, unfinishedKey } from './unfinished-counts';
+import { UnfinishedCounts, savingCount, unfinishedKey } from './unfinished-counts';
+import { refusedForCertain } from './quick-add';
 import { NextSteps, mayCountAt } from './next-steps';
 import { branchLabel } from '../../../auth/branch';
 import { changeWords, clearCount, countKey, otherTabWords, readCount, savedAt, saveWords, useCountSave, whenSaved, type CountState } from './count-save-state';
@@ -279,6 +280,8 @@ function CountSheet({ branchId, item, from, reopen }: { branchId: string; item?:
     onSuccess: (st) => {
       if (!st) return show(CHANGED_ELSEWHERE, 'info');
       madeHere.current.add(st.id ?? '');
+      // Issue #730: a save that failed on the last review says nothing about this one.
+      commit.reset();
       if (!markMoved()) return setDraft(st);
       // Committed in another tab while this review was on its way: the review is thrown away, never shown.
       void retail.discardStocktake(st.id ?? '').catch(() => undefined);
@@ -342,19 +345,23 @@ function CountSheet({ branchId, item, from, reopen }: { branchId: string; item?:
   // toast-exempt: success screen, the review turns into Stock updated for N items, with the toast issue #681 asks for too;
   // setDone there is the list of counted items, not a success note
   const commit = useMutation({
-    mutationFn: (acknowledged: string[]) => retail.commitStocktake(draft?.id ?? '', acknowledged),
+    mutationFn: (acknowledged: string[]) => savingCount(draft?.id ?? '', retail.commitStocktake(draft?.id ?? '', acknowledged)),
     onSuccess: (st) => {
       // Issue #353: a count is saved when it is committed, so that is when its confirmed warnings are recorded.
       entry.saved();
       setDraft(st);
       // Issue #681: the count is done, so this device keeps nothing more of it, another tab of it hears so, and the screen says so.
       // Only the counts that went in leave the page; one changed or added since the review, here or in another tab, stays.
-      saving.committed();
-      const sent = new Map((st.lines ?? []).map((l) => [l.product_id ?? '', milliOf(l.counted_qty ?? '0')]));
-      const left = (id: string) => !sent.has(id) || parseCount(totals[id] ?? '') !== sent.get(id);
-      const keep = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).filter(([id]) => left(id)));
-      setCounts(keep(counts)); setPackCounts(keep(packCounts)); setListed(listed.filter(left)); setDone(done.filter(left)); setConfirming(false);
-      setKeptLine(false);
+      // A count opened with Finish it never held what is typed on this sheet, so the sheet keeps all of it (issue #730).
+      if (madeHere.current.has(st.id ?? '')) {
+        saving.committed();
+        const sent = new Map((st.lines ?? []).map((l) => [l.product_id ?? '', milliOf(l.counted_qty ?? '0')]));
+        const left = (id: string) => !sent.has(id) || parseCount(totals[id] ?? '') !== sent.get(id);
+        const keep = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).filter(([id]) => left(id)));
+        setCounts(keep(counts)); setPackCounts(keep(packCounts)); setListed(listed.filter(left)); setDone(done.filter(left));
+        setKeptLine(false);
+      }
+      setConfirming(false);
       const n = st.lines?.length ?? 0;
       show(`Stock updated for ${n} ${n === 1 ? 'item' : 'items'}`, 'success');
       // Everything retail is read again, the list of counts not saved among it (issue #728).
@@ -365,12 +372,21 @@ function CountSheet({ branchId, item, from, reopen }: { branchId: string; item?:
   const units = new Map((stock.data ?? []).map((r) => [r.product_id ?? '', r.unit]));
   // JUSTIFICATION-A3: Finish it and Back to the count of issue #728 belong to the sheet that holds the review.
   // Issue #728: Finish it shows the review of a count left unsaved, here or from My stock, ready to save.
+  // Issue #730: it is measured against the commits this tab has heard, as a review made here is, so a count saved here earlier
+  // never reads as saved in another tab; and a failed save of an earlier review says nothing about it.
+  const { reset: resetCommit } = commit;
   const openDraft = useCallback((id: string) => {
     retail.getStocktake(id).then(
-      (st) => (st.status === 'draft' ? setDraft(st) : show('That count is no longer open. Count again.', 'info')),
+      (st) => {
+        if (st.status !== 'draft') return show('That count is no longer open. Count again.', 'info');
+        saving.catchUp();
+        reviewMark.current = saving.heardCommit();
+        resetCommit();
+        setDraft(st);
+      },
       () => show('That count could not be opened. Try again.', 'error'),
     );
-  }, [show]);
+  }, [show, saving, resetCommit]);
   const finishing = useRef(false);
   useEffect(() => {
     if (!reopen || finishing.current) return;
@@ -379,10 +395,12 @@ function CountSheet({ branchId, item, from, reopen }: { branchId: string; item?:
   }, [reopen, openDraft]);
   // Issue #728: a review made here and left with Back to the count is thrown away, so it never shows as a count not finished;
   // the next review is a new one. A count opened with Finish it stays as it was, and so does one whose save was sent (review of
-  // #729): a discard that overtook it would cancel the save the person asked for.
+  // #729): a discard that overtook it would cancel the save the person asked for. Only a save whose answer was lost may have
+  // landed; one the server refused for certain did not, so its review is thrown away too (issue #730).
   const backToCount = () => {
     if (commit.isPending) return;
-    if (draft?.id && madeHere.current.has(draft.id) && !commit.isError) void retail.discardStocktake(draft.id).then(() => queryClient.invalidateQueries({ queryKey: unfinishedKey(branchId) }), () => undefined);
+    const mayHaveLanded = commit.isError && !refusedForCertain(commit.error);
+    if (draft?.id && madeHere.current.has(draft.id) && !mayHaveLanded) void retail.discardStocktake(draft.id).then(() => queryClient.invalidateQueries({ queryKey: unfinishedKey(branchId) }), () => undefined);
     setDraft(null);
   };
 
