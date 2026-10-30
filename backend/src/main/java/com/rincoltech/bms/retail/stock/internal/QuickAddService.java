@@ -106,6 +106,14 @@ class QuickAddService {
         if (paid && (r.costMinor() == null || r.costMinor() <= 0)) {
             problems.add(new FieldProblem("cost_minor", "required", "Type what you paid for one."));
         }
+        // Issue #695: the package bought in comes with its price, and only with goods paid for.
+        if ((r.paidLevelUnitId() == null) != (r.paidLevelCostMinor() == null)
+                || (r.paidLevelUnitId() != null && !paid)) {
+            problems.add(new FieldProblem(
+                    "paid_level_unit_id",
+                    "invalid",
+                    "Send the package bought in with its price, and only with paid_from."));
+        }
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);
         }
@@ -152,7 +160,15 @@ class QuickAddService {
         QuickAddPurchase.Bought bought = null;
         if (paid) {
             // The purchase locks the item, then its balance row (ADR-079 lock order); the total is read after it.
-            bought = purchases.buy(branch, product.id(), r.qty(), r.costMinor(), r.paidFrom());
+            bought = purchases.buy(
+                    branch,
+                    product.id(),
+                    r.qty(),
+                    r.costMinor(),
+                    r.paidFrom(),
+                    r.paidLevelUnitId() == null
+                            ? null
+                            : new QuickAddPurchase.Level(r.paidLevelUnitId(), r.paidLevelCostMinor()));
             total = Quantities.format(ledger.lock(branch, product.id()));
             audited(id, branch, product, r.qty(), r.costMinor(), r.paidFrom(), bought.purchaseId());
         } else if (branch != null) {

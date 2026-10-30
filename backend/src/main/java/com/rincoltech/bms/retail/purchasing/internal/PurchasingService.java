@@ -193,14 +193,35 @@ class PurchasingService implements QuickAddPurchase {
      */
     @Override
     @Transactional
-    public Bought buy(UUID branchId, UUID productId, BigDecimal qty, long costMinor, String method) {
-        PurchaseRequest r = new PurchaseRequest(
-                null,
-                clock.today(tenant.profile().timezone()),
-                method,
-                "Quick add",
-                List.of(new PurchaseLineRequest(
-                        productId, costMinor, null, List.of(new BranchQty(branchId, qty)), null, null, null)));
+    public Bought buy(UUID branchId, UUID productId, BigDecimal qty, long costMinor, String method, Level level) {
+        // Issue #695: bought by the carton, the whole cartons are one pack line at the carton price, as Buy stock
+        // records
+        // it, and only the pieces left over are at the piece cost, so the cash that leaves is what the cartons cost.
+        BigDecimal factor = level == null
+                ? null
+                : catalogue
+                        .packUnit(productId, level.unitId())
+                        .map(RetailCatalogue.PackUnit::factor)
+                        .orElse(null);
+        BigDecimal whole = factor == null ? BigDecimal.ZERO : qty.divideToIntegralValue(factor);
+        BigDecimal loose = qty.subtract(whole.multiply(factor == null ? BigDecimal.ZERO : factor));
+        List<PurchaseLineRequest> lines = new ArrayList<>();
+        if (loose.signum() > 0 || whole.signum() == 0) {
+            lines.add(new PurchaseLineRequest(
+                    productId, costMinor, null, List.of(new BranchQty(branchId, loose)), null, null, null));
+        }
+        if (whole.signum() > 0) {
+            lines.add(new PurchaseLineRequest(
+                    productId,
+                    level.costMinor(),
+                    null,
+                    List.of(new BranchQty(branchId, whole)),
+                    level.unitId(),
+                    null,
+                    null));
+        }
+        PurchaseRequest r =
+                new PurchaseRequest(null, clock.today(tenant.profile().timezone()), method, "Quick add", lines);
         // The bounds Buy stock's route checks before record(), so nothing Buy stock refuses is taken here; named by the
         // Quick add field the value came from.
         List<FieldProblem> problems = validator.validate(r).stream()

@@ -204,8 +204,10 @@ export function piecePriceOf(answer: UsualAnswer, pieces: bigint): number | null
  * "How do you usually buy it, and for how much?" with the levels (the owner's words, issue #695), and for a package "What do
  * you pay for one carton?" with the piece worked out. Add an item and Quick add both ask it here.
  */
-export function UsualLevel({ id, use, on, rows, units, smallest, answer, onAnswer, showErrors, children }: {
+export function UsualLevel({ id, use, on, rows, units, smallest, answer, onAnswer, showErrors, optional = false, children }: {
   id: string;
+  /** Review of #716: the price of one may be left empty (Quick add's buying price when nothing is paid now). */
+  optional?: boolean;
   /** Asked only while the item has packages; else the form's own price field alone. */
   on: boolean;
   use: 'buy' | 'sell';
@@ -240,10 +242,10 @@ export function UsualLevel({ id, use, on, rows, units, smallest, answer, onAnswe
         <MoneyInput
           id={`${id}-price`}
           label={use === 'buy' ? `What do you pay for one ${level}?` : `Selling price of one ${level}`}
-          required
+          required={!optional}
           valueMinor={answer.priceMinor}
           onChange={(priceMinor) => onAnswer({ ...answer, priceMinor })}
-          error={answer.priceMinor === null ? `Type the price of one ${level}.` : null}
+          error={answer.priceMinor === null && !optional ? `Type the price of one ${level}.` : null}
           showError={showErrors}
           hint={piece !== null ? <span data-testid={`usual-${use}-piece`}>That is {money(piece)} a {one}.</span> : `1 ${level} is ${String(chosen.pieces)} ${manyOf(smallest, 'items')}. The app works out the price of one.`}
         />

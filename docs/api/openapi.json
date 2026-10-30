@@ -17048,6 +17048,8 @@
           },
           "holds_qty" : {
             "format" : "int32",
+            "maximum" : 1000000,
+            "minimum" : 2,
             "type" : "integer"
           },
           "holds_unit_id" : {
@@ -17055,10 +17057,13 @@
             "type" : "string"
           },
           "purpose" : {
+            "pattern" : "buy|sell|both",
             "type" : "string"
           },
           "sell_minor" : {
             "format" : "int64",
+            "maximum" : 10000000000000,
+            "minimum" : 0,
             "type" : "integer"
           },
           "unit_id" : {
@@ -17068,7 +17073,8 @@
           "usual_buy" : {
             "type" : "boolean"
           }
-        }
+        },
+        "required" : [ "unit_id" ]
       },
       "RetailQuickAddRequest" : {
         "description" : "Issue #632: an item, its prices and how many there are at a branch, in one tap. With product_id, an item already in the list, only the quantity is added and the other item fields are ignored",
@@ -17114,6 +17120,18 @@
           "paid_from" : {
             "description" : "Issue #646: the goods were just bought and paid from the branch's cash or mobile money (retail.purchase.create there). qty above 0 and cost_minor above 0 are then needed, and the stock is recorded as a purchase, as Buy stock does, never against opening balance equity. Left out: opening stock, as before",
             "pattern" : "cash|mobile_money",
+            "type" : "string"
+          },
+          "paid_level_cost_minor" : {
+            "description" : "Issue #695: what one package of paid_level_unit_id cost",
+            "format" : "int64",
+            "maximum" : 10000000000000,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "paid_level_unit_id" : {
+            "description" : "Issue #695: with paid_from, the package the goods were bought in (one of packs, or a pack of product_id); sent with paid_level_cost_minor. The whole packages are then one line at that price, as Buy stock records a pack, and only the pieces left over are at cost_minor, so the money that leaves is what was paid",
+            "format" : "uuid",
             "type" : "string"
           },
           "product_id" : {

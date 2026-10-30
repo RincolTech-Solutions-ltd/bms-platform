@@ -21,6 +21,7 @@ import { parseCount, qtyString, showQty } from './maths';
 import { PacksTurnOn } from './catalogue-packs';
 import { NewItemPackages, UsualLevel, answeredPieces, forSmallest, newPackageRow, packErrorOf, packageAsUnit, packsToSend, piecePriceOf, rowProblem, rowsAsRungs, type PackageRow, type UsualAnswer } from './new-item-packs';
 import { UNITS, branchesWhere, canUse, capabilityOn, holds, holdsAt } from './permissions';
+import { ladderOfProduct, type Rung } from './ladder-state';
 import { ladderLevels, packsAndPiecesMilli, packsAndPiecesParts, packsAndPiecesProblem, type PackSize } from './units-state';
 import { UnitPicker } from './unit-picker';
 import { Gate, PacksAndPiecesFields, Problem, money, useProfitAccess, useStockingBranch } from './ui';
@@ -87,7 +88,11 @@ const PRICE = 'retail.price.edit';
 
 /** Issue #695: the levels the new item's packages make, biggest first, as Count stock takes them; none without packages. */
 export function countLevels(rows: PackageRow[], units: Unit[], smallest: Unit | undefined): (PackSize & { unit: string }) | undefined {
-  const rungs = rowsAsRungs(rows, units, smallest);
+  return levelsOf(rowsAsRungs(rows, units, smallest));
+}
+
+/** Review of #716: the levels of a ladder, biggest first, for an item already in the list as for the packages typed. */
+export function levelsOf(rungs: Rung[]): (PackSize & { unit: string }) | undefined {
   const top = rungs[0];
   if (!top) return undefined;
   return { unit: top.unit, factor: qtyString(Number(top.pieces)), levels: rungs.map((r) => ({ unit: r.unit, factor: qtyString(Number(r.pieces)) })) };
@@ -141,6 +146,8 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const [buyAt, setBuyAt] = useState<UsualAnswer>({ key: 0, priceMinor: null });
   const [sellAt, setSellAt] = useState<UsualAnswer>({ key: 0, priceMinor: null });
   const [packCount, setPackCount] = useState('');
+  // True after a change of the package levels cleared the packages counted, so the form says so.
+  const [countReset, setCountReset] = useState(false);
   // The group last chosen here, from the first render on; checked against the list once it is read (below).
   const [categoryId, setCategoryId] = useState(() => readLastGroup(me.user_id ?? '', where || here.branchId || '') ?? '');
   const [unitId, setUnitId] = useState('');
@@ -201,9 +208,16 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const sellPieces = answeredPieces(packages, switchedOn, chosenUnit, 'sell', sellAt);
   const typedCost = cost.trim() === '' ? 0 : parseMinor(cost, RETAIL_CURRENCY);
   const sellMinor = sellPieces === null ? parseMinor(sell, RETAIL_CURRENCY) : piecePriceOf(sellAt, sellPieces);
-  const costMinor = buyPieces === null ? typedCost : piecePriceOf(buyAt, buyPieces);
-  // How many: a box for each level of the packages, big to small, and the loose pieces, as Count stock takes them.
-  const levels = countLevels(packages, switchedOn, chosenUnit);
+  // Review of #716: an empty price for the usual buying level is no buying price, as the piece field, unless paying now.
+  const costMinor = buyPieces === null ? typedCost : buyAt.priceMinor === null && !paid ? 0 : piecePriceOf(buyAt, buyPieces);
+  // How many: a box for each level of the packages, big to small, and the loose pieces, as Count stock takes them. For an
+  // item already in the list (the name panel), its own packages, so the pieces sent are worked out as that item counts them.
+  const existing = useQuery({
+    queryKey: ['retail', 'products', exists?.id ?? ''],
+    queryFn: () => retail.getProduct(exists?.id ?? ''),
+    enabled: exists !== null && mayCount,
+  });
+  const levels = exists !== null && existing.data ? levelsOf(ladderOfProduct(existing.data)) : countLevels(packages, switchedOn, chosenUnit);
   const countProblem = levels ? packsAndPiecesProblem(packCount, qty, unitName, ladderLevels(levels)?.map((l) => l.unit) ?? levels.unit) : null;
   const counted = !mayCount ? null : levels ? (countProblem === null ? packsAndPiecesMilli(packCount, qty, levels) : null) : parseCount(qty);
   // Paid for now from cash: only where this person may buy stock, and with the buying price, which the purchase needs.
@@ -213,7 +227,14 @@ export function QuickAddForm({ initialName = '', onSell }: {
   const cannotPayHere = paid && profit && mayCount && !holdsAt(me, BUY, where);
   // The place named on the paid lines; never empty, even before Where is known.
   const whereName = branchLabel(places.find((b) => b.id === where)) || 'this place';
-  const paidMinor = paying && counted !== null && costMinor !== null ? Math.round((counted * costMinor) / 1000) : null;
+  // Review of #716: bought by the carton, the whole cartons are paid at the carton price and only the pieces left over at the
+  // piece cost, as the server books it, so the money shown and taken is what the cartons cost (never 100,008 for 100,000).
+  const paidLevelUnit = packages.find((r) => r.key === buyAt.key)?.unitId;
+  const paidLevel = paying && exists === null && buyPieces !== null && buyAt.priceMinor !== null && paidLevelUnit
+    ? { unitId: paidLevelUnit, priceMinor: buyAt.priceMinor, milli: Number(buyPieces) * 1000 } : null;
+  const wholeLevels = paidLevel && counted !== null ? Math.floor(counted / paidLevel.milli) : 0;
+  const paidMinor = paying && counted !== null && costMinor !== null
+    ? wholeLevels * (paidLevel?.priceMinor ?? 0) + Math.round(((counted - wholeLevels * (paidLevel?.milli ?? 0)) * costMinor) / 1000) : null;
   const complete = name.trim() !== '' && sellMinor !== null && costMinor !== null && (!mayCount || (counted !== null && where !== ''))
     && (!pieceOff || unitId !== '') && categoryId !== '' && unitProblem === null && packages.every((r) => rowProblem(r, packages) === null)
     && (!paying || (costMinor > 0 && counted !== null && counted > 0)) && !cannotPayHere;
@@ -239,6 +260,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
                 ...(packages.length > 0
                   ? { packs: packsToSend(packages.map((r) => (sellPieces !== null && r.key === sellAt.key ? { ...r, priceMinor: sellAt.priceMinor } : r)), mayPrice, buyPieces !== null ? buyAt.key : null) }
                   : {}),
+                ...(paidLevel ? { paid_level_unit_id: paidLevel.unitId, paid_level_cost_minor: paidLevel.priceMinor } : {}),
               }),
           ...(mayCount && counted !== null ? { qty: qtyString(counted), branch_id: where } : {}),
           ...(paying && costMinor ? { paid_from: paidFrom, cost_minor: costMinor } : {}),
@@ -310,6 +332,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
     setBuyAt({ key: 0, priceMinor: null });
     setSellAt({ key: 0, priceMinor: null });
     setPackCount('');
+    setCountReset(false);
   };
   /** Start again: everything typed is cleared, after the server said for certain that nothing was saved. */
   const startAgain = () => {
@@ -420,7 +443,15 @@ export function QuickAddForm({ initialName = '', onSell }: {
           answer={inPackages}
           onAnswer={setInPackages}
           rows={packRows}
-          onRows={(rows) => { setPackRows(rows); setPackCount(''); }}
+          onRows={(rows) => {
+            // Review of #716: the cartons typed stay unless the levels they were typed in change.
+            const said = (next: PackageRow[]) => JSON.stringify(countLevels(next, switchedOn, chosenUnit)?.levels ?? []);
+            if (said(rows) !== said(packRows) && packCount !== '') {
+              setPackCount('');
+              setCountReset(true);
+            }
+            setPackRows(rows);
+          }}
           mayPrice={mayPrice}
           showErrors={showErrors}
           refused={packError}
@@ -430,7 +461,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
         <PacksTurnOn />
       )}
       {profit && (
-        <UsualLevel id="qa-buy" use="buy" on={packages.length > 0} rows={packages} units={switchedOn} smallest={chosenUnit} answer={buyAt} onAnswer={setBuyAt} showErrors={showErrors}>
+        <UsualLevel id="qa-buy" use="buy" on={packages.length > 0} rows={packages} units={switchedOn} smallest={chosenUnit} answer={buyAt} onAnswer={setBuyAt} showErrors={showErrors} optional={!paying}>
           <Field
             id="qa-cost"
             label={`${WORDS.buyingPrice} (${RETAIL_CURRENCY})`}
@@ -465,6 +496,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
             // Issue #695: in packages, a box for each level and the loose pieces, the total in pieces under them.
             <div className="stack" data-testid="qa-count-levels">
               <p id="qa-qty-name" className="field-label">How many do you have here now?</p>
+              {countReset && <p role="status" className="hint" data-testid="qa-count-reset">The packages changed, so type how many packages again.</p>}
               <PacksAndPiecesFields
                 id="qa-qty"
                 nameId="qa-qty-name"
@@ -472,7 +504,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
                 pack={levels}
                 packs={packCount}
                 pieces={qty}
-                onPacks={setPackCount}
+                onPacks={(text) => { setPackCount(text); setCountReset(false); }}
                 onPieces={setQty}
                 totalWord="You have"
                 invalid={showErrors && counted === null}
@@ -551,6 +583,10 @@ export function QuickAddForm({ initialName = '', onSell }: {
       {exists && mayCount && counted !== null && counted > 0 && (
         <p className="hint" data-testid="qa-adds-to">The {showQty(qtyString(counted))} you typed is added to the stock it already has there.</p>
       )}
+      {exists && packages.length > 0 && (
+        // Review of #716: the existing item keeps its own packages, and How many is counted in them.
+        <p className="hint" data-testid="qa-packs-not-added">The packages you typed are not added to {exists.name}. How many is counted in its own packages.</p>
+      )}
       {exists && panelNote && <p role="alert" className="alert alert-warning" data-testid="qa-panel-note">{panelNote}</p>}
       {exists && (
         <ExistsPanel
@@ -590,7 +626,8 @@ export function QuickAddForm({ initialName = '', onSell }: {
       ) : notSure ? (
         <p role="alert" className="alert alert-warning" data-testid="qa-not-sure">{notSureLine(resend)}</p>
       ) : (
-        !exists && !packError && <Problem error={add.error} />
+        // A refused package shows on its row; with the rows hidden (No), here.
+        !exists && !(packError && packages.length > 0) && <Problem error={add.error} />
       )}
       <p className="cluster" data-tour="quick-add-go">
         <BusyButton busy={add.isPending} type="submit" className="rt-primary" disabled={exists !== null}>Add</BusyButton>

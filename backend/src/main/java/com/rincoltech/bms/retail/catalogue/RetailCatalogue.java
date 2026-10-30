@@ -2,6 +2,12 @@ package com.rincoltech.bms.retail.catalogue;
 
 import com.rincoltech.bms.kernel.Principal;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
 import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.util.List;
@@ -265,13 +271,21 @@ public interface RetailCatalogue {
     // JUSTIFICATION-A3: the stock module may not see the catalogue's internal PackRequest, so its public API carries
     // the pack.
     @Schema(name = "RetailQuickAddPack", description = "As RetailPackRequest: a size, or what it holds and how many")
+    // Review of #716: the constraints of RetailPackRequest, checked on the request as POST /retail/products checks
+    // them;
+    // holds_qty within PackLadder.MIN_HOLDS and MAX_HOLDS.
     record NewPack(
-            UUID unitId,
-            @Schema(type = "string", example = "24") BigDecimal factor,
+            @NotNull UUID unitId,
+
+            @DecimalMin("1") @Digits(integer = 11, fraction = 3) @Schema(type = "string", example = "24")
+            BigDecimal factor,
+
+            @jakarta.validation.constraints.Pattern(regexp = PACK_PURPOSES)
             String purpose,
-            Long sellMinor,
+
+            @PositiveOrZero @Max(MAX_AMOUNT_MINOR) Long sellMinor,
             UUID holdsUnitId,
-            Integer holdsQty,
+            @Min(2) @Max(1_000_000) Integer holdsQty,
             Boolean usualBuy) {}
 
     /**

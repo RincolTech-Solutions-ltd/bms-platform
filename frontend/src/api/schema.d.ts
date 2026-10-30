@@ -16118,7 +16118,7 @@ export interface components {
             /** Format: int64 */
             sell_minor?: number;
             /** Format: uuid */
-            unit_id?: string;
+            unit_id: string;
             usual_buy?: boolean;
         };
         /** @description Issue #632: an item, its prices and how many there are at a branch, in one tap. With product_id, an item already in the list, only the quantity is added and the other item fields are ignored */
@@ -16146,6 +16146,16 @@ export interface components {
             packs?: components["schemas"]["RetailQuickAddPack"][];
             /** @description Issue #646: the goods were just bought and paid from the branch's cash or mobile money (retail.purchase.create there). qty above 0 and cost_minor above 0 are then needed, and the stock is recorded as a purchase, as Buy stock does, never against opening balance equity. Left out: opening stock, as before */
             paid_from?: string;
+            /**
+             * Format: int64
+             * @description Issue #695: what one package of paid_level_unit_id cost
+             */
+            paid_level_cost_minor?: number;
+            /**
+             * Format: uuid
+             * @description Issue #695: with paid_from, the package the goods were bought in (one of packs, or a pack of product_id); sent with paid_level_cost_minor. The whole packages are then one line at that price, as Buy stock records a pack, and only the pieces left over are at cost_minor, so the money that leaves is what was paid
+             */
+            paid_level_unit_id?: string;
             /**
              * Format: uuid
              * @description An item already in the list, chosen instead of a new item of the same name

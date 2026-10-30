@@ -165,6 +165,114 @@ class RetailQuickAddPacksIT extends IntegrationTest {
         assertThat(stock(productOf(r))).isEqualByComparingTo("275");
     }
 
+    // JUSTIFICATION-A3: the review of #716 asks for these cases: the cash of a carton bought, a null package and
+    // holds_qty.
+    /** Paid from cash, bought by the carton at {@code cartonPrice}; the piece cost is that price over 24, rounded. */
+    ResponseEntity<JsonNode> paidByTheCarton(String name, String qty, long cartonPrice) {
+        Map<String, Object> k = pack(carton, "24");
+        k.put("usual_buy", true);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("description", name);
+        body.put("category_id", category);
+        body.put("unit_id", piece);
+        body.put("sell_minor", 6_000);
+        body.put("cost_minor", Math.round(cartonPrice / 24.0));
+        body.put("qty", qty);
+        body.put("branch_id", t.headOffice());
+        body.put("packs", List.of(k));
+        body.put("paid_from", "cash");
+        body.put("paid_level_unit_id", carton);
+        body.put("paid_level_cost_minor", cartonPrice);
+        return api.postKeyed("/quick-add", body, ADMIN, "*", UUID.randomUUID().toString());
+    }
+
+    @Test
+    void cashPaidForWholeCartonsIsTheCartonPriceNotThePieceCostTimesThePieces() {
+        // UGX 100,000 for 24 is 4,166.67 a piece: the piece cost times 24 would take 100,008 from the till.
+        ResponseEntity<JsonNode> r = paidByTheCarton("Test Marker", "24", 100_000);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(r.getBody().get("paid_minor").asLong()).isEqualTo(100_000);
+        assertThat(stock(productOf(r))).isEqualByComparingTo("24");
+    }
+
+    @Test
+    void cartonsAndLoosePiecesPayTheCartonPriceAndThePieceCost() {
+        // 1 carton and 5 pieces: 100,000 for the carton and 5 at 4,167.
+        ResponseEntity<JsonNode> r = paidByTheCarton("Test Highlighter", "29", 100_000);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(r.getBody().get("paid_minor").asLong()).isEqualTo(100_000 + 5 * 4_167);
+        assertThat(stock(productOf(r))).isEqualByComparingTo("29");
+    }
+
+    // JUSTIFICATION-A3: round 2 of the review of #716 asks for this nested case by name.
+    @Test
+    void aCartonOfBoxesBoughtByTheCartonPaysTheCartonPriceAndTheLoosePieces() {
+        // A carton of 12 boxes of 10 at UGX 120,000 is UGX 1,000 a piece: 1 carton and 3 pieces take 123,000.
+        Map<String, Object> cartonOfBoxes = new LinkedHashMap<>();
+        cartonOfBoxes.put("unit_id", carton);
+        cartonOfBoxes.put("holds_unit_id", box);
+        cartonOfBoxes.put("holds_qty", 12);
+        cartonOfBoxes.put("purpose", "both");
+        cartonOfBoxes.put("usual_buy", true);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("description", "Test Crayon");
+        body.put("category_id", category);
+        body.put("unit_id", piece);
+        body.put("sell_minor", 1_500);
+        body.put("cost_minor", 1_000);
+        body.put("qty", "123");
+        body.put("branch_id", t.headOffice());
+        body.put("packs", List.of(pack(box, "10"), cartonOfBoxes));
+        body.put("paid_from", "cash");
+        body.put("paid_level_unit_id", carton);
+        body.put("paid_level_cost_minor", 120_000);
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/quick-add", body, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(r.getBody().get("paid_minor").asLong()).isEqualTo(123_000);
+        assertThat(stock(productOf(r))).isEqualByComparingTo("123");
+    }
+
+    @Test
+    void aPackageLevelWithoutPaidFromIsRefused() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("description", "Test Stapler");
+        body.put("category_id", category);
+        body.put("unit_id", piece);
+        body.put("sell_minor", 6_000);
+        body.put("qty", "24");
+        body.put("branch_id", t.headOffice());
+        body.put("packs", List.of(pack(carton, "24")));
+        body.put("paid_level_unit_id", carton);
+        body.put("paid_level_cost_minor", 100_000);
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/quick-add", body, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+
+    @Test
+    void aMissingPackageAndAnOutOfRangeHoldsQtyAreRefusedOnTheirRowsAsOnItems() {
+        // Review of #716: the packs pass through the same per-pack checks as POST /retail/products, never a 500.
+        List<Map<String, Object>> withNull = new java.util.ArrayList<>();
+        withNull.add(null);
+        ResponseEntity<JsonNode> none = quickAdd("Test Folder", "3", withNull);
+        assertThat(none.getStatusCode()).as("%s", none.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(none.getBody().get("errors").get(0).get("field").asString()).startsWith("packs[0]");
+
+        Map<String, Object> tooFew = new LinkedHashMap<>();
+        tooFew.put("unit_id", carton);
+        tooFew.put("holds_unit_id", piece);
+        tooFew.put("holds_qty", 1);
+        tooFew.put("purpose", "both");
+        ResponseEntity<JsonNode> one = quickAdd("Test Folder", "3", List.of(tooFew));
+        assertThat(one.getStatusCode()).as("%s", one.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(one.getBody().get("errors").get(0).get("field").asString()).startsWith("packs[0].");
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_products WHERE tenant_id = ? AND description = 'Test Folder'",
+                        t.tenantId()))
+                .isZero();
+    }
+
     @Test
     void aRefusedPackageSavesNothingAndNamesItsRow() {
         // The item's own unit is no package of it: the second package is refused, and neither the item, its first
