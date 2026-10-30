@@ -376,9 +376,11 @@ function CountSheet({ branchId, item, from, reopen }: { branchId: string; item?:
     openDraft(reopen);
   }, [reopen, openDraft]);
   // Issue #728: a review made here and left with Back to the count is thrown away, so it never shows as a count not finished;
-  // the next review is a new one. A count opened with Finish it stays as it was.
+  // the next review is a new one. A count opened with Finish it stays as it was, and so does one whose save was sent (review of
+  // #729): a discard that overtook it would cancel the save the person asked for.
   const backToCount = () => {
-    if (draft?.id && madeHere.current.has(draft.id)) void retail.discardStocktake(draft.id).then(() => queryClient.invalidateQueries({ queryKey: unfinishedKey(branchId) }), () => undefined);
+    if (commit.isPending) return;
+    if (draft?.id && madeHere.current.has(draft.id) && !commit.isError) void retail.discardStocktake(draft.id).then(() => queryClient.invalidateQueries({ queryKey: unfinishedKey(branchId) }), () => undefined);
     setDraft(null);
   };
 
@@ -417,7 +419,7 @@ function CountSheet({ branchId, item, from, reopen }: { branchId: string; item?:
           show(CHANGED_ELSEWHERE, 'info');
         }} busy={commit.isPending} units={units} packs={packOf} />
         <Problem error={commit.error} />
-        {draft.status === 'draft' && <button type="button" onClick={backToCount}>Back to the count</button>}
+        {draft.status === 'draft' && !commit.isPending && <button type="button" onClick={backToCount}>Back to the count</button>}
       </>
     );
   }

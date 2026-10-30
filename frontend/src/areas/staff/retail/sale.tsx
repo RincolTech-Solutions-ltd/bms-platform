@@ -416,7 +416,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
   };
   const countCommitted = (h: HeldCount) => {
     drop(h.product.id);
-    for (const key of [['retail', 'products'], ['retail', 'stocked-branches']]) void queryClient.invalidateQueries({ queryKey: key });
+    // Issue #728: the saved count leaves the list of counts not saved.
+    for (const key of [['retail', 'products'], ['retail', 'stocked-branches'], ['retail', 'stocktakes']]) void queryClient.invalidateQueries({ queryKey: key });
     add({ ...h.product, qty: qtyString(h.counted) });
   };
   const countFailed = (h: HeldCount, e: unknown) => {

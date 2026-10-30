@@ -366,6 +366,20 @@ describe('a count that wipes or halves stock', () => {
     expect(discardStocktake).not.toHaveBeenCalled();
   });
 
+  // Review of #729: a discard sent after Save the count could reach the server first and cancel the save.
+  it('hides Back to the count while the save is on its way, and never throws away a count whose save was sent', async () => {
+    await review();
+    let answer: (v: unknown) => void = () => undefined;
+    commitStocktake.mockReturnValue(new Promise((_, reject) => { answer = reject; }));
+    for (const name of ['Yes, Test Plug Four Way is right', 'Yes, Test Plug Two Way is right']) fireEvent.click(screen.getByRole('checkbox', { name }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: 'Back to the count' })).toBeNull();
+    answer(new TypeError('Failed to fetch'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to the count' }));
+    expect(discardStocktake).not.toHaveBeenCalled();
+  });
+
   // Issue #728: Save, the word a shop worker knows, and a tip that nothing changes before it; Review the difference stays before it.
   it('names the last step Save the count, with a tip that stock changes only then', async () => {
     await review();
