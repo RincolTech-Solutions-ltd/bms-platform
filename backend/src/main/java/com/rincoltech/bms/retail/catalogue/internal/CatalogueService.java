@@ -593,7 +593,7 @@ class CatalogueService {
      * Review of #692: a refusal of the new item's package {@code i} names it, its fields as {@code packs[i].unit_id} and the
      * problem with {@code pack_index}, so the form shows it on that package and never on the item's own unit.
      */
-    private static ApiException ofPack(ApiException e, int i) {
+    static ApiException ofPack(ApiException e, int i) {
         Map<String, Object> extensions = new LinkedHashMap<>(e.extensions());
         extensions.put("pack_index", i);
         List<FieldProblem> errors = e.errors().stream()

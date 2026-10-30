@@ -167,6 +167,31 @@ class RetailSizesInAddItemIT extends IntegrationTest {
                 .isZero();
     }
 
+    // JUSTIFICATION-A3: issue #726 asks an IT of both ways a package price can pass the largest amount.
+    /** Issue #726: a package price worked out or sent above the largest amount is a 422 on its row, never a 500. */
+    @Test
+    void aPackagePriceAboveTheLargestAmountIsRefusedOnItsRow() {
+        Map<String, Object> dearest = pack(carton, "24");
+        dearest.put("sell_minor", 10_000_000_000_000L);
+        // 100W at 6,000 a piece works the carton out at one and a half times the largest amount.
+        ResponseEntity<JsonNode> worked =
+                api.post("/product-families", item("Test Longlife Bulb", List.of(pack(carton, "12"), dearest)), ADMIN);
+        assertThat(worked.getStatusCode()).as("%s", worked.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(worked.getBody().get("pack_index").asInt()).isEqualTo(1);
+        assertThat(worked.getBody().toString()).contains("packs[1].sell_minor");
+
+        Map<String, Object> carton24 = pack(carton, "24");
+        carton24.put("sell_minor", 96_000);
+        Map<String, Object> sent = item("Test Longlife Bulb", List.of(carton24));
+        sent.put("pack_prices", List.of(Map.of("size", "60W", "unit_id", carton, "sell_minor", 10_000_000_000_001L)));
+        ResponseEntity<JsonNode> typed = api.post("/product-families", sent, ADMIN);
+        assertThat(typed.getStatusCode()).as("%s", typed.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(count("SELECT count(*) FROM retail_products WHERE tenant_id = ?"))
+                .isZero();
+        assertThat(count("SELECT count(*) FROM retail_product_units WHERE tenant_id = ?"))
+                .isZero();
+    }
+
     @Test
     void theSizesAndColoursAShopUsedAreOfferedAgain() {
         assertThat(api.get("/product-families/options", ADMIN).getBody().get("sizes"))
@@ -181,7 +206,7 @@ class RetailSizesInAddItemIT extends IntegrationTest {
         shirt.put("colours", List.of("Sky Blue"));
         assertThat(api.post("/product-families", shirt, ADMIN).getStatusCode()).isEqualTo(HttpStatus.CREATED);
         shirt.put("name", "Test Work Trousers");
-        shirt.put("sizes", List.of("m"));
+        shirt.put("sizes", List.of("m", "large"));
         shirt.put("colours", List.of("sky blue", "Red"));
         assertThat(api.post("/product-families", shirt, ADMIN).getStatusCode()).isEqualTo(HttpStatus.CREATED);
 
@@ -191,13 +216,10 @@ class RetailSizesInAddItemIT extends IntegrationTest {
         r.getBody().get("sizes").forEach(s -> sizes.add(s.asString()));
         List<String> colours = new ArrayList<>();
         r.getBody().get("colours").forEach(c -> colours.add(c.asString()));
-        // Each once ignoring case, the most used first.
-        assertThat(sizes).hasSize(2);
-        assertThat(sizes.getFirst()).isEqualToIgnoringCase("M");
-        assertThat(sizes).contains("Size 7");
-        assertThat(colours).hasSize(2);
-        assertThat(colours.getFirst()).isEqualToIgnoringCase("Sky Blue");
-        assertThat(colours).contains("Red");
+        // Each once ignoring case, the most used first; issue #726: in byte order, as the mock, so a capital comes
+        // first.
+        assertThat(sizes).containsExactly("M", "Size 7", "large");
+        assertThat(colours).containsExactly("Sky Blue", "Red");
 
         // Review of #723: another shop's sizes and colours are never offered here.
         TestDatabase.Fixture other = TestDatabase.tenant("retail-sizes-in-add-item-other", false, true);
