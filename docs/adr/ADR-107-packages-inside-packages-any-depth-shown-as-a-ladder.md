@@ -57,10 +57,15 @@ as he buys, to be asked at setup how he usually buys the item and for how much, 
    and store a loop between them, and the check remembers what it has walked, so even a loop written straight to the table
    ends in a refusal (review of #710). A pack's own ladder is changed only under the item's row lock, which every pack
    write takes, so two edits of one item never cross either.
-8. **One picture everywhere.** The ladder is shown biggest first, one level per line, with the pieces worked out in words
-   ("So 1 carton = 120 pieces") and a chain ("1 carton, 12 boxes, each 10 pieces"), on the item page and on Add an item, with
-   a Look inside drawing of one package and what it holds. A change on the item page shows a check sheet with the before and
-   after in words ("1 carton will be 144 pieces. It was 120.") before it is saved.
+8. **Set up smallest first, show stock biggest first** (amended by ADR-110, owner decision D99 = A, 30 Oct 2026). Where
+   the ladder is built, on Add an item and in the item page's package section, it reads from the bottom: the single unit
+   first, then "Does it come in a bigger pack?" adds the next level up (Piece, then Box of 10 pieces, then Carton of 12
+   boxes), one level per line, each with the total in single units worked out in words ("So 1 carton = 120 pieces").
+   Editing an existing ladder on the item page uses the same smallest first order. Where stock is read or entered, on My
+   stock, Count stock, Sell, Buy stock and Look inside, the levels stay biggest first ("2 cartons, 3 boxes and 5 pieces").
+   The chain under the ladder ("1 carton, 12 boxes, each 10 pieces") and the Look inside drawing of one package are on
+   both screens. A change on the item page shows a check sheet with the before and after in words ("1 carton will be 144
+   pieces. It was 120.") before it is saved.
 
 ## Consequences
 
