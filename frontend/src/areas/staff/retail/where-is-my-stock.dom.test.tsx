@@ -38,7 +38,7 @@ vi.mock('../../../api/retail', async (original) => {
 
 const { StockTable } = await import('./stock');
 const { ItemElsewhere, otherStockShops, stockElsewhere } = await import('./stock-elsewhere');
-const { UnfinishedCounts, unfinishedWords } = await import('./unfinished-counts');
+const { UnfinishedCounts, savingCount, unfinishedWords } = await import('./unfinished-counts');
 const { AddsTo } = await import('../branch-picker');
 
 const owner = mockMe('admin');
@@ -167,6 +167,20 @@ describe('counts left unsaved (issue #728)', () => {
     const card = await screen.findByTestId('unfinished-st-sale');
     fireEvent.click(within(card).getByRole('button', { name: 'Throw it away' }));
     expect(card.textContent).toContain('the sale that started it cannot save it any more');
+  });
+
+  // Issue #730: a discard that reached the server first would cancel the save, so Throw it away waits for the save's answer.
+  it('offers no Throw it away for a count whose save is on its way', async () => {
+    unfinishedStocktakes.mockResolvedValue([open]);
+    let answer: () => void = () => undefined;
+    const save = savingCount('st-9', new Promise<void>((resolve) => { answer = resolve; }));
+    show(<UnfinishedCounts branchId={shop} />);
+    const card = await screen.findByTestId('unfinished-st-9');
+    expect(within(card).queryByRole('button', { name: 'Throw it away' })).toBeNull();
+    expect(card.textContent).toContain('This count is being saved now.');
+    answer();
+    await save;
+    expect(await within(card).findByRole('button', { name: 'Throw it away' })).toBeTruthy();
   });
 
   it('on My stock, Finish it opens Count stock with the count', async () => {

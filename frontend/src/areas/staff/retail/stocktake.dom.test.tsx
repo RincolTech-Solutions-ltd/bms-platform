@@ -30,7 +30,8 @@ const getStocktake = vi.fn();
 const unfinishedStocktakes = vi.fn();
 unfinishedStocktakes.mockResolvedValue([]);
 
-const { StocktakePage, StocktakeReview } = await import('./stocktake');
+const { CHANGED_ELSEWHERE, StocktakePage, StocktakeReview } = await import('./stocktake');
+const { RetailError } = await import('../../../api/retail');
 
 afterEach(() => {
   cleanup();
@@ -378,6 +379,61 @@ describe('a count that wipes or halves stock', () => {
     answer(new TypeError('Failed to fetch'));
     fireEvent.click(await screen.findByRole('button', { name: 'Back to the count' }));
     expect(discardStocktake).not.toHaveBeenCalled();
+  });
+
+  // JUSTIFICATION-A3: three new DOM tests the issue asks for, beside their siblings.
+  // Issue #730: a save the server refused for certain did not land, so Back throws its review away; the next review starts clean.
+  it('throws away a review whose save was refused for certain, and the next one too', async () => {
+    await review();
+    discardStocktake.mockResolvedValue({ ...draft, status: 'discarded' });
+    commitStocktake.mockRejectedValue(new RetailError('Stock moved since the count.', 409, 'stock_moved_since_count'));
+    for (const name of ['Yes, Test Plug Four Way is right', 'Yes, Test Plug Two Way is right']) fireEvent.click(screen.getByRole('checkbox', { name }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to the count' }));
+    expect(discardStocktake).toHaveBeenCalledWith('st1');
+    createStocktake.mockResolvedValue({ ...draft, id: 'st2' });
+    fireEvent.click(screen.getByRole('button', { name: 'Review the difference (4 counted)' }));
+    await screen.findByRole('heading', { name: 'Review the difference' });
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the count' }));
+    expect(discardStocktake).toHaveBeenCalledWith('st2');
+  });
+
+  it('keeps a review whose save may have landed: a 5xx or a key still being worked on', async () => {
+    for (const lost of [new RetailError('Server error', 503), new RetailError('Still saving', 409, 'idempotency_in_progress')]) {
+      await review();
+      commitStocktake.mockRejectedValue(lost);
+      for (const name of ['Yes, Test Plug Four Way is right', 'Yes, Test Plug Two Way is right']) fireEvent.click(screen.getByRole('checkbox', { name }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Back to the count' }));
+      expect(discardStocktake).not.toHaveBeenCalled();
+      cleanup();
+      localStorage.clear();
+    }
+  });
+
+  // Issue #730: a count opened with Finish it never held what is typed on the sheet, so saving it leaves the sheet as it is; and
+  // a count saved here before it never makes it read as saved in another tab.
+  it('saves a count opened with Finish it after one saved here, and keeps what is typed on the sheet', async () => {
+    unfinishedStocktakes.mockResolvedValue([{ id: 'st-old', branch_id: 'b', created_at: '2026-10-29T09:00:00Z', lines: 2 }]);
+    await review();
+    for (const name of ['Yes, Test Plug Four Way is right', 'Yes, Test Plug Two Way is right']) fireEvent.click(screen.getByRole('checkbox', { name }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start another count' }));
+    for (const [id, qty] of [['A-1', '0'], ['A-3', '9']] as const) {
+      fireEvent.change(document.getElementById(`count-${id}`) as HTMLInputElement, { target: { value: qty } });
+    }
+    const old = { id: 'st-old', status: 'draft', lines: draft.lines.slice(0, 2) };
+    getStocktake.mockResolvedValue(old);
+    commitStocktake.mockResolvedValue({ ...old, status: 'committed' });
+    fireEvent.click(within(await screen.findByTestId('unfinished-st-old')).getByRole('button', { name: 'Finish it' }));
+    await screen.findByRole('heading', { name: 'Review the difference' });
+    for (const name of ['Yes, Test Plug Four Way is right', 'Yes, Test Plug Two Way is right']) fireEvent.click(screen.getByRole('checkbox', { name }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('st-old', ['A-1', 'A-2']));
+    expect(screen.queryByText(CHANGED_ELSEWHERE)).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: 'Start another count' }));
+    expect((document.getElementById('count-A-1') as HTMLInputElement).value).toBe('0');
+    expect((document.getElementById('count-A-3') as HTMLInputElement).value).toBe('9');
   });
 
   it('lets a save on its way complete, with no discard sent', async () => {
