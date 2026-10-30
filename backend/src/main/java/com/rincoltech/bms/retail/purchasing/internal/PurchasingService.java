@@ -196,12 +196,14 @@ class PurchasingService implements QuickAddPurchase {
     public Bought buy(UUID branchId, UUID productId, BigDecimal qty, long costMinor, String method, Level level) {
         // Issue #695: bought by the carton, the whole cartons are one pack line at the carton price, as Buy stock
         // records it, and only the pieces left over are at the piece cost, so the cash that leaves is what the
-        // cartons cost. A level that is no active pack of the item is refused, never booked at the piece cost.
+        // cartons cost. A level that is no active pack of the item is refused, never booked at the piece cost; so is a
+        // pack only for selling (issue #724), as Buy stock refuses it.
         BigDecimal factor = level == null
                 ? null
                 : catalogue
                         .packUnit(productId, level.unitId())
                         .filter(RetailCatalogue.PackUnit::active)
+                        .filter(RetailCatalogue.PackUnit::buys)
                         .map(RetailCatalogue.PackUnit::factor)
                         .orElseThrow(() -> ApiException.validation(List.of(new FieldProblem(
                                 "paid_level_unit_id",

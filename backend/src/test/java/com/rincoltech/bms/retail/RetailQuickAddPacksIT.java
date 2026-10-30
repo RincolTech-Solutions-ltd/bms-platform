@@ -260,6 +260,30 @@ class RetailQuickAddPacksIT extends IntegrationTest {
         assertThat(stock(productOf(made))).isEqualByComparingTo("24");
     }
 
+    @Test
+    void aPackOnlyForSellingIsNoBuyingLevel() {
+        // Issue #724: a half carton sold on its own is never what the goods were bought in; nothing is booked.
+        Map<String, Object> half = pack(box, "12");
+        half.put("purpose", "sell");
+        ResponseEntity<JsonNode> made = quickAdd("Test Glue Stick", "0", List.of(pack(carton, "24"), half));
+        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("product_id", productOf(made));
+        body.put("qty", "12");
+        body.put("branch_id", t.headOffice());
+        body.put("paid_from", "cash");
+        body.put("cost_minor", 4_167);
+        body.put("paid_level_unit_id", box);
+        body.put("paid_level_cost_minor", 50_000);
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/quick-add", body, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        JsonNode problem = r.getBody().get("errors").get(0);
+        assertThat(problem.get("field").asString()).isEqualTo("paid_level_unit_id");
+        assertThat(problem.get("code").asString()).isEqualTo("unknown_pack_unit");
+        assertThat(stock(productOf(made))).isEqualByComparingTo("0");
+    }
+
     // JUSTIFICATION-A3: round 3 of the review of #716 asks for half loose pieces and a bound on the package price by
     // name.
     @Test
