@@ -91,7 +91,10 @@ class ReferralsIT extends IntegrationTest {
 
     /** A business made through the platform API, so it has a subscription to pay. */
     Business business(String prefix) {
-        String slug = prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
+        // A slug is a short name of 20 characters at most (ADR-108): a long prefix is cut and the random part shrinks.
+        String head = prefix.length() > 15 ? prefix.substring(0, 15).replaceAll("-+$", "") : prefix;
+        String slug =
+                head + "-" + UUID.randomUUID().toString().substring(0, Math.max(4, Math.min(8, 19 - head.length())));
         String name = "Test Shop " + slug;
         ResponseEntity<JsonNode> created = platform.post(
                 "/api/v1/platform/tenants",
@@ -262,10 +265,10 @@ class ReferralsIT extends IntegrationTest {
         Set<String> codes = new HashSet<>();
         List<TestDatabase.Fixture> made = new ArrayList<>();
         for (int i = 0; i < 40; i++) {
-            TestDatabase.Fixture t = TestDatabase.tenant("dodos", false);
+            TestDatabase.Fixture t = TestDatabase.tenant("tduka", false);
             made.add(t);
             String code = code(t.tenantId());
-            assertThat(code).matches("^DODOS[2-9A-HJ-NP-Z]{2}$");
+            assertThat(code).matches("^TDUKA[2-9A-HJ-NP-Z]{2}$");
             codes.add(code);
         }
         assertThat(codes).hasSize(40);
@@ -277,9 +280,9 @@ class ReferralsIT extends IntegrationTest {
         // A slug with too few letters gives eight random characters; after ten taken tries, four follow the letters.
         String alphabet = "[2-9A-HJ-NP-Z]";
         assertThat(candidate("x9-42", 0)).matches("^" + alphabet + "{8}$");
-        assertThat(candidate("dodos-shop", 0)).matches("^DODOS" + alphabet + "{2}$");
-        assertThat(candidate("dodos-shop", 10)).matches("^DODOS" + alphabet + "{4}$");
-        assertThat(candidate("dodos-shop", 20)).matches("^" + alphabet + "{8}$");
+        assertThat(candidate("tduka-shop", 0)).matches("^TDUKA" + alphabet + "{2}$");
+        assertThat(candidate("tduka-shop", 10)).matches("^TDUKA" + alphabet + "{4}$");
+        assertThat(candidate("tduka-shop", 20)).matches("^" + alphabet + "{8}$");
 
         TestDatabase.Fixture t = made.getFirst();
         ResponseEntity<JsonNode> own = mine(t, staffToken(t, "tenant_admin"));

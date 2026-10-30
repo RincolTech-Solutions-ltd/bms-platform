@@ -52,7 +52,8 @@ class ShortLinkRedirectController {
 
             int statusCode) {}
 
-    @GetMapping("/api/v1/platform/short-links/{name}")
+    // The rule forwards /name/ as typed, so the trailing slash form is the same link.
+    @GetMapping({"/api/v1/platform/short-links/{name}", "/api/v1/platform/short-links/{name}/"})
     @PublicEndpoint
     @Operation(
             summary =

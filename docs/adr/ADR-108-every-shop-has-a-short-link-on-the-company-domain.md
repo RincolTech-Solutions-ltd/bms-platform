@@ -43,10 +43,10 @@ want the same name.
    still works: the server then picks a free name from the business name. Activate suggests the application's short name
    as the slug while it is free, refuses a badly shaped or reserved slug (422), and claims it under the lock in the
    creating transaction, refusing one another confirmed application chose (409 `duplicate_slug`). The operator's
-   `POST /platform/tenants` takes the same lock and answers a slug that meets `tenants_slug_key` with 409. It refuses the
-   reserved list but keeps FR-TEN-02's 3 to 63 characters and does not refuse a name a confirmed application chose (it
-   has no application to compare with); the operator's suggestions (`slugAvailable`) leave such names out. Both are left
-   so for the owner to decide.
+   `POST /platform/tenants` applies the same short name rules (422 for a badly shaped or reserved slug; owner decision on
+   #713, no carve-out), takes the same lock, refuses a name another confirmed application chose (409 `duplicate_slug`;
+   Activate passes its own application through `TenantProvisioning.Steps.application()`), and answers a slug that meets
+   `tenants_slug_key` with 409. The operator's suggestions (`slugAvailable`) leave the same names out.
 3. **One Cloudflare rule serves every shop, and the app does the forwarding.** The operator replaces the per-shop
    redirects with one single redirect on rincoltech.com: a path of one segment that is not reserved goes, as a 302, to
    `https://<platform host>/api/v1/platform/short-links<path>`. That endpoint answers a 302 to the shop's address
@@ -58,8 +58,9 @@ want the same name.
    The rule, as the operator sets it in the Cloudflare dashboard (Rules, Redirect Rules, Single Redirects):
 
    - When incoming requests match (custom filter expression):
-     `(http.host eq "rincoltech.com" and not http.request.uri.path wildcard r"/*/*" and not http.request.uri.path contains "." and not lower(http.request.uri.path) in {"/" "/about" ...})`
-     with every reserved name of decision 4, each with its leading slash.
+     `(http.host eq "rincoltech.com" and (not http.request.uri.path wildcard r"/*/*" or (http.request.uri.path wildcard r"/*/" and not http.request.uri.path wildcard r"/*/*/")) and not http.request.uri.path contains "." and not lower(http.request.uri.path) in {"/" "//" "/about" "/about/" ...})`
+     with every reserved name of decision 4, each with its leading slash and again with a trailing slash, so `/name` and
+     `/name/` are short links and `/name/more` stays the website's. The endpoint answers both forms.
    - Then: dynamic, `concat("https://<platform host>/api/v1/platform/short-links", http.request.uri.path)`, status 302,
      query string not kept.
 
@@ -90,8 +91,7 @@ goes through the platform host before the shop's host.
 rule is caught by the rule and shown "No shop uses this link". The list was written from the issue and common site paths,
 not from the website's sitemap: the website's owner confirms it before the rule goes live (runbook). The hand-made
 links must each reach their shop through the app before their redirects are deleted (runbook), or a stranger could claim
-a printed name. A link typed with a trailing slash (`rincoltech.com/<name>/`) is left to the website by the rule's
-`/*/*` test; printed links have none. A later release makes `short_name` required again and a later migration drops the 15 argument
+a printed name. A later release makes `short_name` required again and a later migration drops the 15 argument
 `onboarding_application_create`. The Cloudflare `wildcard` operator and `lower()` must be on the zone's plan; if the
 dashboard refuses either, `not substring(http.request.uri.path, 1) contains "/"` replaces the wildcard test, and the
 endpoint lower-cases the name in any case.

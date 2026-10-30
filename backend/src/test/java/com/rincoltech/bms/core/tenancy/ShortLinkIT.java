@@ -186,6 +186,7 @@ class ShortLinkIT extends IntegrationTest {
                         .get("problem")
                         .asString())
                 .isEqualTo("taken");
+        assertThat(apply(second, null).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         confirm(again);
         assertThat(shortNameOf(again)).isEqualTo(third);
         assertThat(check(second, "Test Electricals Shop", null)
@@ -223,8 +224,10 @@ class ShortLinkIT extends IntegrationTest {
         assertThat(rule.get("reserved").toString()).contains("\"about\"").contains("\"privacy\"");
         assertThat(rule.get("expression").asString())
                 .contains("http.host eq \"rincoltech.com\"")
-                .contains("\"/about\"")
-                .contains("\"/privacy\"");
+                .contains("\"/about\" \"/about/\"")
+                .contains("\"/privacy\" \"/privacy/\"")
+                // /name/ is a short link too, /name/more stays the website's.
+                .contains("wildcard r\"/*/\" and not http.request.uri.path wildcard r\"/*/*/\"");
         assertThat(rule.get("target").asString()).contains("/api/v1/platform/short-links\", http.request.uri.path)");
         assertThat(rule.get("status_code").asInt()).isEqualTo(302);
     }
@@ -234,6 +237,7 @@ class ShortLinkIT extends IntegrationTest {
     void theShortLinkForwardsToTheShop() {
         assertThat(follow(t.slug())).isEqualTo("https://" + t.slug() + "-bms-staging.rincoltech.test/");
         assertThat(follow(t.slug().toUpperCase())).isEqualTo("https://" + t.slug() + "-bms-staging.rincoltech.test/");
+        assertThat(follow(t.slug() + "/")).isEqualTo("https://" + t.slug() + "-bms-staging.rincoltech.test/");
         assertThat(follow("tnoshop1")).endsWith("/link-not-found?name=tnoshop1");
         JsonNode mine =
                 api.get("/api/v1/settings/short-link", staff.accessToken()).getBody();

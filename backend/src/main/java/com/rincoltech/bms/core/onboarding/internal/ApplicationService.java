@@ -557,6 +557,11 @@ class ApplicationService {
                     }
 
                     @Override
+                    public UUID application() {
+                        return id;
+                    }
+
+                    @Override
                     public void after(Created tenant) {
                         Instant now = clock.now();
                         activatedAt.set(now);

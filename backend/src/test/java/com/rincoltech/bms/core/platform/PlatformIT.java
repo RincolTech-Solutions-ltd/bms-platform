@@ -175,6 +175,12 @@ class PlatformIT extends IntegrationTest {
     void invalidTenantsAreRefused() {
         assertThat(create("admin", List.of()).getBody().get("code").asString()).isEqualTo("validation_failed");
         assertThat(create("-bad-", List.of()).getBody().get("code").asString()).isEqualTo("validation_failed");
+        // ADR-108: the slug is a short name, so the website's paths, a double hyphen and more than 20 are refused too.
+        for (String bad : List.of("pricing", "ab--cd", "a-slug-of-21-letters1")) {
+            assertThat(create(bad, List.of()).getBody().get("code").asString())
+                    .as(bad)
+                    .isEqualTo("validation_failed");
+        }
         assertThat(create(slug(), List.of("hospitality")).getBody().get("code").asString())
                 .isEqualTo("validation_failed");
         String slug = slug();

@@ -216,10 +216,13 @@ class PlatformService implements TenantProvisioning {
     public Optional<Created> create(NewTenant request, Steps steps) {
         UUID operator = CurrentPrincipal.require().userId();
         String slug = request.slug() == null ? "" : request.slug().trim();
-        // ADR-108 decision 4: the website's paths are refused as slugs too, since the slug is the shop's short link.
-        if (!hosts.isValidSlug(slug) || ShortNames.RESERVED.contains(slug)) {
+        // ADR-108: the slug is the shop's short link, so a new one follows the short name rules (shape and the reserved
+        // list), as at Activate.
+        if (!hosts.isValidSlug(slug) || ShortNames.refusal(slug).isPresent()) {
             throw ApiException.validation(List.of(new FieldProblem(
-                    "slug", "invalid_slug", "3 to 63 lower case letters, digits or hyphens; not a reserved name.")));
+                    "slug",
+                    "invalid_slug",
+                    "3 to 20 lower case letters and digits, a hyphen may join two words; not a reserved name.")));
         }
         String timezone = request.timezone() == null ? "Africa/Kampala" : request.timezone();
         try {
@@ -245,9 +248,19 @@ class PlatformService implements TenantProvisioning {
                     if (!steps.before()) {
                         return null;
                     }
-                    // ADR-108: the name's lock, which every claim of a short name takes, before the count below; a
-                    // concurrent create that still meets tenants_slug_key is the 409 further down.
-                    shortNames.takenBy(slug, null, true);
+                    // ADR-108: claimed under the name's lock, which every claim of a short name takes, before the count
+                    // below; a name another confirmed application holds is not this tenant's, and a concurrent create
+                    // that still meets tenants_slug_key is the 409 further down.
+                    if (shortNames
+                            .takenBy(slug, steps.application(), true)
+                            .filter("applied"::equals)
+                            .isPresent()) {
+                        throw new ApiException(
+                                HttpStatus.CONFLICT,
+                                "duplicate_slug",
+                                "Slug taken",
+                                "An application whose email is confirmed chose this short name.");
+                    }
                     boolean taken = jdbc.sql("SELECT count(*) FROM platform_list_tenants() WHERE slug = ?")
                                     .param(slug)
                                     .query(Long.class)

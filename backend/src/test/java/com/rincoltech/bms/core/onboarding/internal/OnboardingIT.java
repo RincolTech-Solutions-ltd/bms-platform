@@ -1041,6 +1041,41 @@ class OnboardingIT extends IntegrationTest {
         assertThat(outboxRows("onboarding.activation", email)).isZero();
     }
 
+    // JUSTIFICATION-A3: the owner's round 3 instruction on #713 asks for this refusal in create, and it needs its own
+    // test.
+    /**
+     * ADR-108: a name a confirmed application chose is not the operator's to give another tenant, nor another
+     * application's at Activate; the application that chose it is activated with it.
+     */
+    @Test
+    void aConfirmedApplicationsNameIsItsOwnAtActivate() {
+        String email = Api.email("chosen");
+        UUID id = verified(email, "Test Chosen Shop " + email);
+        String chosen = owner().sql("SELECT short_name FROM onboarding_applications WHERE id = ?")
+                .param(id)
+                .query(String.class)
+                .single();
+        Map<String, Object> tenant = new LinkedHashMap<>();
+        tenant.put("name", "Test Other Shop");
+        tenant.put("slug", chosen);
+        tenant.put("plan_code", "growth");
+        tenant.put("modules", List.of("retail"));
+        tenant.put("head_office", Map.of("code", "HQ", "name", "Head Office"));
+        tenant.put("admin", Map.of("full_name", "Test Owner 03", "email", Api.email("other")));
+        ResponseEntity<JsonNode> operatorMade =
+                platform.post("/api/v1/platform/tenants", tenant, operator.accessToken());
+        assertThat(operatorMade.getStatusCode())
+                .as("%s", operatorMade.getBody())
+                .isEqualTo(HttpStatus.CONFLICT);
+        assertThat(operatorMade.getBody().get("code").asString()).isEqualTo("duplicate_slug");
+        UUID other = verified(Api.email("other-app"), "Test Other App Shop");
+        assertThat(activate(other, activation(chosen, "trial", null)).getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+        ResponseEntity<JsonNode> done = activate(id, activation(chosen, "trial", null));
+        assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(done.getBody().get("tenant_slug").asString()).isEqualTo(chosen);
+    }
+
     // ---- Permissions, host rules and the database ----------------------------------------------
 
     /** NFR-SEC-04, ADR-016: no tenant token, no anonymous caller and no tenant host reaches the queue. */

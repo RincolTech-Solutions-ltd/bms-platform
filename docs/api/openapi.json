@@ -34066,6 +34066,26 @@
         "tags" : [ "sign-up" ]
       }
     },
+    "/api/v1/platform/short-links/{name}/" : {
+      "get" : {
+        "operationId" : "followShortLink_1",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "name",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "302" : {
+            "description" : "Location is the shop's address or the not found page"
+          }
+        },
+        "summary" : "Follow a short link: 302 to the shop, to its new address while an old name forwards, or to the page 'No shop uses this link' (ADR-108)",
+        "tags" : [ "sign-up" ]
+      }
+    },
     "/api/v1/platform/sign-up/applications" : {
       "post" : {
         "operationId" : "signUpApply",

@@ -155,11 +155,17 @@ class ShortNameService implements ShortNames {
     @Override
     public Rule rule(String platformOrigin) {
         List<String> reserved = RESERVED.stream().sorted().toList();
-        String paths = reserved.stream().map(r -> "\"/" + r + "\"").collect(Collectors.joining(" "));
+        // Each reserved name with and without a trailing slash, so /about/ stays the website's too.
+        String paths =
+                reserved.stream().map(r -> "\"/" + r + "\" \"/" + r + "/\"").collect(Collectors.joining(" "));
+        // One segment, with or without a trailing slash: /name and /name/ go to the app, /name/more stays the
+        // website's.
+        String oneSegment = "(not http.request.uri.path wildcard r\"/*/*\""
+                + " or (http.request.uri.path wildcard r\"/*/\" and not http.request.uri.path wildcard r\"/*/*/\"))";
         String expression = "(http.host eq \"" + shortLinkHost + "\""
-                + " and not http.request.uri.path wildcard r\"/*/*\""
+                + " and " + oneSegment
                 + " and not http.request.uri.path contains \".\""
-                + " and not lower(http.request.uri.path) in {\"/\" " + paths + "})";
+                + " and not lower(http.request.uri.path) in {\"/\" \"//\" " + paths + "})";
         String target = "concat(\"" + platformOrigin + "/api/v1/platform/short-links\", http.request.uri.path)";
         return new Rule(shortLinkHost, reserved, expression, target, 302);
     }

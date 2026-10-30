@@ -91,7 +91,7 @@ export function signUpProblems(form: SignUpForm): Problems {
     problems.agent_code = 'Letters, digits and hyphens only.';
   }
   if (form.referral_code.trim() !== '' && !REFERRAL.test(form.referral_code.trim())) {
-    problems.referral_code = 'A referral code is 4 to 10 letters and digits, for example DODOS7K. Check it, or leave it empty.';
+    problems.referral_code = 'A referral code is 4 to 10 letters and digits, for example TDUKA7K. Check it, or leave it empty.';
   }
   if (form.message.length > 1000) problems.message = 'Use at most 1000 characters.';
   return problems;
@@ -117,7 +117,7 @@ export function toSignUpRequest(form: SignUpForm): SignUpRequest {
 }
 
 /**
- * The code in a referral link, `/sign-up?ref=DODOS7K` (ADR-069): letters and digits only, in upper case, or empty for none or a
+ * The code in a referral link, `/sign-up?ref=TDUKA7K` (ADR-069): letters and digits only, in upper case, or empty for none or a
  * malformed one (the applicant can still type it).
  */
 export function referralCodeFrom(search: string): string {

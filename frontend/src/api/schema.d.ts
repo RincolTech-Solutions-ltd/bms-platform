@@ -3666,6 +3666,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/short-links/{name}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Follow a short link: 302 to the shop, to its new address while an old name forwards, or to the page 'No shop uses this link' (ADR-108) */
+        get: operations["followShortLink_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/sign-up/applications": {
         parameters: {
             query?: never;
@@ -26413,6 +26430,26 @@ export interface operations {
         };
     };
     followShortLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Location is the shop's address or the not found page */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    followShortLink_1: {
         parameters: {
             query?: never;
             header?: never;
