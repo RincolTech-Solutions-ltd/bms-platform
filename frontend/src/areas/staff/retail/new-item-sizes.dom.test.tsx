@@ -187,6 +187,36 @@ describe('sizes on Add an item', () => {
     expect(SIZE_KINDS.find((k) => k.key === 'cable')?.sizes[0]).toBe('1mm');
   });
 
+  it('keeps the sizes picked when the kind already chosen is tapped again (#726)', async () => {
+    open();
+    await fill();
+    fireEvent.click(screen.getByRole('radio', { name: 'Yes, sizes, colours or types' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Bulbs (watts)' }));
+    for (const s of ['40W', '60W']) fireEvent.click(chip('Sizes', s));
+    fireEvent.click(screen.getByRole('button', { name: 'Bulbs (watts)' }));
+    expect(chip('Sizes', '40W').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('Sizes', '60W').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  // JUSTIFICATION-A3: issue #726 asks a DOM test of each of its two form fixes.
+  it('forgets an edited carton price once its size is taken off (#726)', async () => {
+    open();
+    await fill();
+    fireEvent.click(screen.getByRole('radio', { name: 'Yes, sizes, colours or types' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Bulbs (watts)' }));
+    for (const s of ['40W', '60W', '100W']) fireEvent.click(chip('Sizes', s));
+    fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
+    fireEvent.change(screen.getByLabelText(/^Package unit/), { target: { value: 'u2' } });
+    fireEvent.change(screen.getByLabelText(/^How many bulbs in one carton/), { target: { value: '24' } });
+    fireEvent.change(screen.getByLabelText(/^Selling price of one carton/), { target: { value: '96000' } });
+    fireEvent.change(screen.getByLabelText(/^Carton of 100W/), { target: { value: '170000' } });
+    expect((screen.getByLabelText(/^Carton of 100W/) as HTMLInputElement).value).toBe('170,000');
+    fireEvent.click(chip('Sizes', '100W'));
+    expect(screen.queryByLabelText(/^Carton of 100W/)).toBeNull();
+    fireEvent.click(chip('Sizes', '100W'));
+    expect((screen.getByLabelText(/^Carton of 100W/) as HTMLInputElement).value).toBe('96,000');
+  });
+
   it('takes colours alone, typed ones too, and asks for at least two', async () => {
     createFamily.mockImplementation(async () => family);
     open();

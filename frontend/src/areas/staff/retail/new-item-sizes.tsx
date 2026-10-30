@@ -105,7 +105,7 @@ export function NewItemSizes({ value, onChange }: { value: SizesAnswer; onChange
           <p className="field-label" id={`${id}-kind`}>What kind of size?</p>
           <div className="option-chips" role="group" aria-labelledby={`${id}-kind`}>
             {SIZE_KINDS.map((k) => (
-              <button key={k.key} type="button" className="find-chip" aria-pressed={value.kind === k.key} onClick={() => set({ kind: k.key, sizes: value.sizes.filter((s) => !(kind?.sizes as readonly string[] | undefined)?.some((r) => r.toLowerCase() === s.toLowerCase())) })}>{k.label}</button>
+              <button key={k.key} type="button" className="find-chip" aria-pressed={value.kind === k.key} onClick={() => value.kind !== k.key && set({ kind: k.key, sizes: value.sizes.filter((s) => !(kind?.sizes as readonly string[] | undefined)?.some((r) => r.toLowerCase() === s.toLowerCase())) })}>{k.label}</button>
             ))}
           </div>
           {kind && kind.sizes.length > 0 && <Chips label="Sizes" values={kind.sizes} chosen={value.sizes} onTap={(s) => set({ sizes: toggled(value.sizes, s) })} />}
@@ -133,7 +133,6 @@ export function chosenOptions(value: SizesAnswer) {
   return { sizes: inOrder(kind?.sizes ?? [], value.sizes), colours: inOrder(READY_COLOURS, value.colours) };
 }
 
-/** The price of each size, under the item's own prices, which every size starts at. */
 /**
  * Owner, clarification on #723: a package priced for the item's selling price, in proportion to one size's price, rounded
  * half up as the server's FamilyService.pricedFor does: a carton at 96,000 for 4,000 a piece is 144,000 at 6,000.
@@ -148,6 +147,7 @@ export function packPriceFor(priceMinor: number, sizeSell: number, itemSell: num
 /** One size's price for one of its packages, worked out and changeable; `hint` says when it is not above its cost. */
 export type SizePackPriceRow = { key: string; label: string; valueMinor: number | null; hint: string | null };
 
+/** The price of each size, under the item's own prices, which every size starts at. */
 export function SizePrices({ rows, profit, onEdit, codesKnown, problem, showErrors, packPrices = [], onPackPrice = () => undefined }: {
   packPrices?: SizePackPriceRow[];
   onPackPrice?: (key: string, valueMinor: number | null) => void;
