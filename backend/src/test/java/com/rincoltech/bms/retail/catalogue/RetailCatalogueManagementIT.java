@@ -93,6 +93,9 @@ class RetailCatalogueManagementIT extends IntegrationTest {
         ResponseEntity<JsonNode> off = patch("/categories/" + spaced, Map.of("active", false), ADMIN);
         assertThat(off.getStatusCode()).as("%s", off.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(off.getBody().get("active").asBoolean()).isFalse();
+        ResponseEntity<JsonNode> recoded = patch("/categories/" + spaced, Map.of("code_prefix", "TCY"), ADMIN);
+        assertThat(recoded.getStatusCode()).as("%s", recoded.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(recoded.getBody().get("code_prefix").asString()).isEqualTo("TCY");
         // Renaming it to the other spelling is still a duplicate.
         ResponseEntity<JsonNode> renamed = patch("/categories/" + spaced, Map.of("name", "TEST CABLES"), ADMIN);
         assertThat(renamed.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);

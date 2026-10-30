@@ -103,8 +103,15 @@ class RetailCatalogueIT extends IntegrationTest {
                     CompletableFuture.supplyAsync(() -> api.post("/units", Map.of("name", "Piece"), ADMIN));
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
             while (TestDatabase.owner()
-                                    // Only an advisory lock waits: the POST behind the key's lock, not another test.
-                                    .sql("SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype = 'advisory'")
+                                    // Only a wait on this key's advisory lock counts, not another test's.
+                                    .sql("""
+                                            SELECT count(*) FROM pg_locks l,
+                                                   (SELECT hashtextextended(? || ':unit:piece', 0) AS k) h
+                                             WHERE NOT l.granted AND l.locktype = 'advisory' AND l.objsubid = 1
+                                               AND l.classid::bigint = ((h.k >> 32) & 4294967295)
+                                               AND l.objid::bigint = (h.k & 4294967295)
+                                            """)
+                                    .param(t.tenantId().toString())
                                     .query(Long.class)
                                     .single()
                             == 0

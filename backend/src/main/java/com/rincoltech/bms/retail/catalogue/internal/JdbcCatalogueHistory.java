@@ -48,6 +48,12 @@ class JdbcCatalogueHistory implements CatalogueHistory {
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
+    public void lockUnits(java.util.Collection<String> names) {
+        names.stream().map(CatalogueNames::unitKey).distinct().sorted().forEach(repo::lockUnitKey);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public Ensured ensureUnit(String name) {
         // Issue #698 (ADR-109): "pcs" in a file is the shop's Piece, whatever spelling it has. It is read under the
         // key's lock, so a unit added on a screen at this moment is never made twice.
