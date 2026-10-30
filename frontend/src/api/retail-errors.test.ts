@@ -20,7 +20,7 @@ describe('retail problem details in plain words', () => {
     ['version_conflict', 409, /changed by someone else/i],
     ['duplicate_product_code', 409, /code already exists/i],
     ['inactive_category', 422, /switched off/i],
-    ['stocktake_committed', 409, /already been committed/i],
+    ['stocktake_committed', 409, /already been saved/i],
     ['stocktake_discarded', 409, /was cancelled/i],
     ['token_expired', 401, /sign in/i],
   ])('maps %s', (code, status, text) => {

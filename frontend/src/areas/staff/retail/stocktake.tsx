@@ -21,6 +21,8 @@ import { ScreenToast, useItemAdded } from './toast';
 import { entryWarnings } from './entry-checks-state';
 import { useEntryChecks, useEntryNorms } from './entry-checks';
 import { SuccessScreen } from '../../../app/ui/SuccessScreen';
+import { HelpTip } from '../../../app/ui/HelpTip';
+import { UnfinishedCounts, unfinishedKey } from './unfinished-counts';
 import { NextSteps, mayCountAt } from './next-steps';
 import { branchLabel } from '../../../auth/branch';
 import { changeWords, clearCount, countKey, otherTabWords, readCount, savedAt, saveWords, useCountSave, whenSaved, type CountState } from './count-save-state';
@@ -67,7 +69,7 @@ export function StocktakeReview({ stocktake, onCommit, busy, units, packs }: {
   return (
     <form aria-label="Stock count review" noValidate onSubmit={(e) => e.preventDefault()}>
       {/* Issue #656: a discarded count never reads as committed. */}
-      <h2>{stocktake.status === 'committed' ? 'Stock count committed' : stocktake.status === 'discarded' ? 'Stock count cancelled' : 'Review the difference'}</h2>
+      <h2>{stocktake.status === 'committed' ? 'Stock count saved' : stocktake.status === 'discarded' ? 'Stock count cancelled' : 'Review the difference'}</h2>
       {changed.length === 0 ? (
         <p>Every counted item matches the system.</p>
       ) : (
@@ -120,11 +122,15 @@ export function StocktakeReview({ stocktake, onCommit, busy, units, packs }: {
       {draft && onCommit && (
         <>
           {/* Issue #636: the button names its hint, so a press that goes to a tick says why. */}
-          {open > 0 && <p className="hint" id={hintId}>{open === 1 ? 'Tick the line marked above before you commit the count.' : `Tick the ${open} lines marked above before you commit the count.`}</p>}
-          <BusyButton type="button" className="rt-primary" busy={busy === true} notReady={open > 0}
-            aria-describedby={open > 0 ? hintId : undefined} onClick={() => onCommit(changed.flatMap((l, i) => (l.product_id && ticked.has(keyOf(l, i)) ? [l.product_id] : [])))}>
-            Commit the count
-          </BusyButton>
+          {open > 0 && <p className="hint" id={hintId}>{open === 1 ? 'Tick the line marked above before you save the count.' : `Tick the ${open} lines marked above before you save the count.`}</p>}
+          {/* Issue #728: the word a shop worker knows, and that nothing changes before it. */}
+          <span className="next-step">
+            <BusyButton type="button" className="rt-primary" busy={busy === true} notReady={open > 0}
+              aria-describedby={open > 0 ? hintId : undefined} onClick={() => onCommit(changed.flatMap((l, i) => (l.product_id && ticked.has(keyOf(l, i)) ? [l.product_id] : [])))}>
+              Save the count
+            </BusyButton>
+            <HelpTip tip="saveCount" />
+          </span>
         </>
       )}
     </form>
@@ -141,7 +147,7 @@ export async function countableStock(branchId: string, api: Pick<typeof retail, 
   return [...active, ...withInactive.filter((r) => !shown.has(r.product_id) && Number(r.qty) !== 0)].sort((x, y) => (x.code ?? '').localeCompare(y.code ?? ''));
 }
 
-function CountSheet({ branchId, item, from }: { branchId: string; item?: string; from?: string }) {
+function CountSheet({ branchId, item, from, reopen }: { branchId: string; item?: string; from?: string; reopen?: string }) {
   const queryClient = useQueryClient();
   const { me, chooseBranch } = useStaff();
   // Issue #700: once a count is committed, Count another branch offers the others that keep goods where this person counts.
@@ -179,6 +185,8 @@ function CountSheet({ branchId, item, from }: { branchId: string; item?: string;
     added(id, p.description, now);
   };
   const [draft, setDraft] = useState<Stocktake | null>(null);
+  // The reviews this sheet made (issue #728), told from a count opened with Finish it.
+  const madeHere = useRef(new Set<string>());
   // The line the last scan counted, marked so the counter sees which one went up; the cursor stays in the Scan box.
   const [scanned, setScanned] = useState<string | null>(null);
   // The items on the count, in the order they were picked or scanned (issue #534): the sheet is searched, not shown whole.
@@ -270,6 +278,7 @@ function CountSheet({ branchId, item, from }: { branchId: string; item?: string;
     },
     onSuccess: (st) => {
       if (!st) return show(CHANGED_ELSEWHERE, 'info');
+      madeHere.current.add(st.id ?? '');
       if (!markMoved()) return setDraft(st);
       // Committed in another tab while this review was on its way: the review is thrown away, never shown.
       void retail.discardStocktake(st.id ?? '').catch(() => undefined);
@@ -352,6 +361,26 @@ function CountSheet({ branchId, item, from }: { branchId: string; item?: string;
     },
   });
   const units = new Map((stock.data ?? []).map((r) => [r.product_id ?? '', r.unit]));
+  // JUSTIFICATION-A3: Finish it and Back to the count of issue #728 belong to the sheet that holds the review.
+  // Issue #728: Finish it shows the review of a count left unsaved, here or from My stock, ready to save.
+  const openDraft = useCallback((id: string) => {
+    retail.getStocktake(id).then(
+      (st) => (st.status === 'draft' ? setDraft(st) : show('That count is no longer open. Count again.', 'info')),
+      () => show('That count could not be opened. Try again.', 'error'),
+    );
+  }, [show]);
+  const finishing = useRef(false);
+  useEffect(() => {
+    if (!reopen || finishing.current) return;
+    finishing.current = true;
+    openDraft(reopen);
+  }, [reopen, openDraft]);
+  // Issue #728: a review made here and left with Back to the count is thrown away, so it never shows as a count not finished;
+  // the next review is a new one. A count opened with Finish it stays as it was.
+  const backToCount = () => {
+    if (draft?.id && madeHere.current.has(draft.id)) void retail.discardStocktake(draft.id).then(() => queryClient.invalidateQueries({ queryKey: unfinishedKey(branchId) }), () => undefined);
+    setDraft(null);
+  };
 
   if (draft?.status === 'committed') {
     const n = draft.lines?.length ?? 0;
@@ -388,7 +417,7 @@ function CountSheet({ branchId, item, from }: { branchId: string; item?: string;
           show(CHANGED_ELSEWHERE, 'info');
         }} busy={commit.isPending} units={units} packs={packOf} />
         <Problem error={commit.error} />
-        {draft.status === 'draft' && <button type="button" onClick={() => setDraft(null)}>Back to the count</button>}
+        {draft.status === 'draft' && <button type="button" onClick={backToCount}>Back to the count</button>}
       </>
     );
   }
@@ -485,11 +514,12 @@ function CountSheet({ branchId, item, from }: { branchId: string; item?: string;
   };
   return (
     <>
+      <UnfinishedCounts branchId={branchId} onFinish={openDraft} />
       <Note>Find or scan each item you count, or work down the list Not counted yet. Type how many you counted, or 0 for an item that is gone. An item kept in cartons takes cartons and pieces, or pieces alone. Leave an item empty if you did not count it.</Note>
       {/* Issue #681: the person counting always sees that their work is kept, and where. */}
       <p className="hint count-saved-all" role="status" data-testid="count-saved-all">{savedWords}</p>
       {saving.other && <p className="hint" data-testid="count-other-tab">{otherTabWords(saving.other)}</p>}
-      {goneElsewhere && valid.length === 0 && <p className="hint" data-testid="count-gone">Those counts were committed or cleared in another tab, so this count starts empty.</p>}
+      {goneElsewhere && valid.length === 0 && <p className="hint" data-testid="count-gone">Those counts were saved or cleared in another tab, so this count starts empty.</p>}
       {keptLine && kept && valid.length > 0 && (
         <div className="alert alert-info" data-testid="count-kept">
           <p>{kept.earlier ? `Counted on ${kept.day} at ${kept.time}` : `Counted today at ${kept.time}`}</p>
@@ -524,7 +554,8 @@ function CountSheet({ branchId, item, from }: { branchId: string; item?: string;
         />
       </div>
       <ScreenToast.Provider value={show}>
-        <NewItemHere id="count-new" counting askCost={profit} qtyLabel="How many you counted" onAdded={addNew} />
+        <NewItemHere id="count-new" counting askCost={profit} qtyLabel="How many you counted" onAdded={addNew}
+          at={{ value: branchId, lead: 'Counted at', places: (me.branches ?? []).filter((b) => mayCountAt(me, b.id)) }} />
       </ScreenToast.Provider>
       <ScanBar id="count-scan" branchId={branchId} onFound={scanAdd} autoFocus toasts />
       {stock.isPending && <SkeletonList label="Loading stock" />}
@@ -562,7 +593,7 @@ function CountSheet({ branchId, item, from }: { branchId: string; item?: string;
 
 export function StocktakePage() {
   const { branchId } = useStockingBranch();
-  const { item, from } = (useRouter({ warn: false })?.state.location.search ?? {}) as { item?: string; from?: string };
+  const { item, from, finish } = (useRouter({ warn: false })?.state.location.search ?? {}) as { item?: string; from?: string; finish?: string };
   // The item and where it came from belong to the branch the count first opened at: Count another branch starts a plain count.
   const [opened, setOpened] = useState<string | null>(branchId);
   if (opened === null && branchId !== null) setOpened(branchId);
@@ -574,7 +605,8 @@ export function StocktakePage() {
       ) : (
         <>
           {/* Keyed by branch, so a branch switch starts afresh from that branch's own saved count (review of #681). */}
-          <CountSheet key={branchId} branchId={branchId} item={fresh && typeof item === 'string' ? item : undefined} from={fresh && typeof from === 'string' ? from : undefined} />
+          <CountSheet key={branchId} branchId={branchId} item={fresh && typeof item === 'string' ? item : undefined} from={fresh && typeof from === 'string' ? from : undefined}
+            reopen={fresh && typeof finish === 'string' ? finish : undefined} />
         </>
       )}
     </Gate>

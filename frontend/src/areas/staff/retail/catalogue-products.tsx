@@ -24,6 +24,7 @@ import { ScreenLink } from './screen-link';
 import { UNITS, canUse, capabilityOn, holds, holdsAt } from './permissions';
 import { NewItemPackages, UsualLevel, answeredPieces, forSmallest, newPackageRow, packErrorOf, packageAsUnit, oneOf, packsToSend, piecePriceOf, rowPieces, rowProblem, withPackages, type PackageRow, type UsualAnswer } from './new-item-packs';
 import { StockMinimumEditor } from './stock-minimum';
+import { ItemElsewhere } from './stock-elsewhere';
 import { UnitPicker } from './unit-picker';
 import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
 import { CategoryPicker } from './category-picker';
@@ -346,6 +347,8 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
       )}
       {product ? (
         <>
+          {/* Issue #728: none here and some at another shop says where, with a switch there. */}
+          <ItemElsewhere product={product} />
           {/* Issue #617: the photo comes first, under the name, not below the packs, barcodes and stock levels. */}
           {canManage && (
             <PhotoEditor

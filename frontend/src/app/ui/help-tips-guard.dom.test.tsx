@@ -32,6 +32,7 @@ const ELSEWHERE: Partial<Record<HelpTipKey, string>> = {
   onCredit: 'areas/staff/retail/credit-recognition.test.tsx',
   joinSizes: 'areas/staff/retail/catalogue-variants.dom.test.tsx',
   countItNow: 'areas/staff/retail/next-steps.dom.test.tsx',
+  saveCount: 'areas/staff/retail/stocktake.dom.test.tsx',
   itemSizes: 'areas/staff/retail/new-item-sizes.dom.test.tsx',
   guarantor: 'areas/staff/lending/application.dom.test.tsx',
   inArrears: 'areas/staff/home-cards.dom.test.tsx',

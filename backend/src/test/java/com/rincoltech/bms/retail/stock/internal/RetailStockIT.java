@@ -208,7 +208,8 @@ class RetailStockIT extends IntegrationTest {
             assertThat(refused.getBody().get("detail").asString())
                     .contains("Test Product SKT-14B")
                     .contains("more than half")
-                    .contains("commit the count")
+                    .contains("save the count")
+                    .doesNotContainIgnoringCase("commit")
                     .doesNotContainIgnoringCase("finish");
         }
         assertThat(refused(id, Map.of()).get("detail").asString()).contains("SKT-13A");

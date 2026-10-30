@@ -5,7 +5,7 @@ order: 10
 module: retail
 needs: retail.stocktake.commit, retail.stock.read
 screens: /staff/retail/stocktake
-words: count, counting, shelf, check stock, missing, stock check, difference, commit the count, not counted, empty, cartons and pieces, carton, pieces, saved, lost my count, reload, offline, stock updated
+words: count, counting, shelf, check stock, missing, stock check, difference, save the count, commit the count, not counted, started a count, throw it away, empty, cartons and pieces, carton, pieces, saved, lost my count, reload, offline, stock updated
 ---
 Count what is on the shelf and enter it. BMS shows the difference before anything changes.
 
@@ -17,8 +17,10 @@ Count what is on the shelf and enter it. BMS shows the difference before anythin
    ![Type how many you counted](count-stock-2.webp)
 3. Tap **Review the difference**. You see each item where the count and the records differ.
    ![Review the difference](count-stock-3.webp)
-4. When it looks right, tap **Commit the count**. Nothing changes until you do. A line that takes an item to 0, or removes more than half of it, says how many it removes: tick it if that is right, or tap **Back to the count** to fix it.
+4. When it looks right, tap **Save the count**. Nothing changes until you do. A line that takes an item to 0, or removes more than half of it, says how many it removes: tick it if that is right, or tap **Back to the count** to fix it.
    A screen then says "Stock updated" for the items you counted, with what went up and what went down. Tap **Start another count** or **Back to My stock**.
-   ![Commit the count](count-stock-4.webp)
+   ![Save the count](count-stock-4.webp)
 
 > A count far from what the records hold is asked about first: tap **Confirm** if it is right, or **Change** to fix it.
+
+> A count you reviewed and left without saving shows on My stock and Count stock as "You started a count here on 29 Oct and did not finish it". Tap **Finish it** to see its difference again and save it, or **Throw it away** to drop it. Your stock does not change until you save.

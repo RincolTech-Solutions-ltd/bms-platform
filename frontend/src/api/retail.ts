@@ -200,6 +200,7 @@ export type UsageRequest = S['RetailUsageRequest'];
 export type Usage = S['RetailUsageReport'];
 export type StocktakeRequest = S['RetailStocktakeRequest'];
 export type Stocktake = S['RetailStocktake'];
+export type OpenStocktake = S['RetailOpenStocktake'];
 /** Quick add (issue #632): an item, its prices and how many there are at a branch, in one request. */
 export type QuickAddRequest = S['RetailQuickAddRequest'];
 export type QuickAdd = S['RetailQuickAdd'];
@@ -626,6 +627,9 @@ export interface RetailApi {
   commitStocktake(id: string, acknowledged?: string[]): Promise<Stocktake>;
   /** Issue #656: ends a draft count without writing stock; a second call returns it unchanged, a committed one is refused with 409. */
   discardStocktake(id: string): Promise<Stocktake>;
+  getStocktake(id: string): Promise<Stocktake>;
+  /** Issue #728: the counts started at a branch and neither saved nor thrown away, newest first (retail.stocktake.commit there). */
+  unfinishedStocktakes(branchId: string): Promise<OpenStocktake[]>;
   /** Quick add (issue #632): makes the item and adds its stock at the branch as opening stock in one transaction; takes the Idempotency-Key of its form. */
   quickAdd(body: QuickAddRequest, idempotencyKey: string): Promise<QuickAdd>;
   /** Every product with its balance in each branch the caller may read (#144). */
@@ -1432,6 +1436,12 @@ const realRetail: RetailApi = {
   },
   async discardStocktake(id) {
     return unwrap(await api.POST('/api/v1/retail/stocktakes/{stocktake_id}/discard', { params: { path: { stocktake_id: id } } }));
+  },
+  async getStocktake(id) {
+    return unwrap(await api.GET('/api/v1/retail/stocktakes/{stocktake_id}', { params: { path: { stocktake_id: id } } }));
+  },
+  async unfinishedStocktakes(branchId) {
+    return unwrap(await api.GET('/api/v1/retail/stocktakes/unfinished', { params: { query: { branch_id: branchId } } }));
   },
 
   async quickAdd(body, key) {

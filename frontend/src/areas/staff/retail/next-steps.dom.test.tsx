@@ -254,7 +254,7 @@ describe('the done screens', () => {
     fireEvent.change(document.getElementById('count-p1') as HTMLInputElement, { target: { value: '3' } });
     fireEvent.blur(document.getElementById('count-p1') as HTMLInputElement);
     fireEvent.click(screen.getByRole('button', { name: /^Review the difference/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save the count' }));
     await screen.findByRole('heading', { name: 'Stock updated for 1 item' });
     expect(screen.queryByTestId('next-countFromAdd')).toBeNull();
     for (const name of NEXT_STEPS.countDone) expect(screen.getByRole(name === 'Back to My stock' ? 'link' : 'button', { name })).toBeTruthy();

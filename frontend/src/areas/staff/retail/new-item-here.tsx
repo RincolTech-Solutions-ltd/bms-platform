@@ -7,6 +7,10 @@ import { WORDS } from '../../../app/glossary';
 import { parseMinor } from '../../../components/money';
 import { useOnline } from '../../../offline/offline-context';
 import { useStaff } from '../context';
+import { AddsTo } from '../branch-picker';
+import type { Me } from '../../../api/client';
+
+type Branch = NonNullable<Me['branches']>[number];
 import { ExistsPanel, SimilarPanel, existingOf, type ExistingItem } from './catalogue-names';
 import { NameHintsPanel, useNameHints } from './name-hints';
 import { parseCount, parseQty } from './maths';
@@ -27,6 +31,9 @@ import { Problem, money } from './ui';
 
 export const ASK_MANAGER = 'Ask your manager to add this item.';
 export const OFFLINE_TEXT = 'You are offline. Adding a new item needs the internet. Connect, then tap Save the item again.';
+
+/** Where a new item's quantity goes (issue #728): the shop in use, its lead words, and the shops Change may switch to. */
+export type AddsAt = { value: string; lead?: string; places: Branch[] };
 
 /** The new item and what was typed with it, for the screen to put on its line. */
 export interface AddedItem {
@@ -58,8 +65,10 @@ export function ItemCodeLine({ id, category }: { id: string; category: Category 
   );
 }
 
-export function NewItemHere({ id, qtyLabel, qtyError, counting = false, askCost, description, ask = ASK_MANAGER, onOpenChange, onAdded }: {
+export function NewItemHere({ id, qtyLabel, qtyError, counting = false, askCost, description, ask = ASK_MANAGER, at, onOpenChange, onAdded }: {
   id: string;
+  /** The shop the quantity is for, shown beside it (issue #728), and the shops this screen may work at, for Change. */
+  at?: AddsAt;
   /** What a missing or wrong quantity says, when the screen's words differ from buying or counting (Sell, issue #615). */
   qtyError?: string;
   /** What the Description starts with: on Sell, what was typed in the search. */
@@ -100,11 +109,12 @@ export function NewItemHere({ id, qtyLabel, qtyError, counting = false, askCost,
     onOpenChange?.(false);
     setTimeout(() => document.getElementById(`${id}-open`)?.focus());
   };
-  return <NewItemForm id={id} qtyLabel={qtyLabel} qtyError={qtyError} counting={counting} askCost={askCost} initial={description} onAdded={onAdded} onClose={close} />;
+  return <NewItemForm id={id} qtyLabel={qtyLabel} qtyError={qtyError} counting={counting} askCost={askCost} initial={description} at={at} onAdded={onAdded} onClose={close} />;
 }
 
-function NewItemForm({ id, qtyLabel, qtyError, counting, askCost, initial = '', onAdded, onClose }: {
+function NewItemForm({ id, qtyLabel, qtyError, counting, askCost, initial = '', at, onAdded, onClose }: {
   id: string;
+  at?: AddsAt;
   qtyError?: string;
   initial?: string;
   qtyLabel?: string;
@@ -113,7 +123,7 @@ function NewItemForm({ id, qtyLabel, qtyError, counting, askCost, initial = '', 
   onAdded: (added: AddedItem) => string | void | Promise<string | void>;
   onClose: (refused?: string | void) => void;
 }) {
-  const { me } = useStaff();
+  const { me, chooseBranch } = useStaff();
   const online = useOnline();
   const queryClient = useQueryClient();
   const categories = useQuery({ queryKey: ['retail', 'catalogue', 'categories'], queryFn: () => retail.listCategories() });
@@ -310,6 +320,8 @@ function NewItemForm({ id, qtyLabel, qtyError, counting, askCost, initial = '', 
           autoComplete="off"
         />
       )}
+      {/* Issue #728: the shop the quantity is for, beside it; Change switches the shop in use, as the shop under the title does. */}
+      {qtyLabel !== undefined && at && <AddsTo id={`${id}-where`} lead={at.lead} value={at.value} places={at.places} onChoose={chooseBranch} />}
       <PhotoChoice id={`${id}-photo`} file={photo} onChange={setPhoto} />
       {exists && (
         <ExistsPanel

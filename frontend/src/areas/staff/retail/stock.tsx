@@ -24,6 +24,8 @@ import { ScreenLink } from './screen-link';
 import { Hint } from '../../../app/ui/Hint';
 import { HelpTip } from '../../../app/ui/HelpTip';
 import { WORDS } from '../../../app/glossary';
+import { ElsewhereNote, noneHere, otherStockShops, stockElsewhere, type Elsewhere } from './stock-elsewhere';
+import { UnfinishedCounts } from './unfinished-counts';
 
 // Stock per branch (FR-RET-03): balances with a negative flag and a search box. The cost column
 // exists only for a session holding retail.profit.read: showCost is the screen's choice and the server
@@ -63,7 +65,17 @@ function PriceTips({ cost }: { cost: boolean }) {
   );
 }
 
-export function StockTable({ rows, showCost, searching = false, filterKey = '', pending = false, flat = false, correctable }: { rows: StockRow[]; showCost: boolean; correctable?: Correctable } & Narrowing) {
+export function StockTable({ rows, showCost, searching = false, filterKey = '', pending = false, flat = false, correctable, elsewhere }: {
+  rows: StockRow[];
+  showCost: boolean;
+  correctable?: Correctable;
+  /** Issue #728: the other shop holding each item, said under an item with none here. */
+  elsewhere?: ReadonlyMap<string, Elsewhere>;
+} & Narrowing) {
+  const away = (r: StockRow) => {
+    const at = noneHere(r.qty) ? elsewhere?.get(r.product_id ?? '') : undefined;
+    return at && <ElsewhereNote at={at} id={r.product_id ?? ''} />;
+  };
   // On a phone the category sits under the item's name, so the table keeps room for the quantity and price.
   const phone = useIsPhone();
   const [corrected, setCorrected] = useState<string | null>(null);
@@ -83,6 +95,7 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
         {showCategory && r.category && <CategoryLabel category={r.category} />}
         <p className="stock-card-qty">In stock: <span className={r.standard_pack ? 'num qty-packs' : 'num'}><InPacks qty={r.qty ?? '0'} unit={r.unit} pack={r.standard_pack} /></span></p>
         {r.negative && <p className="rt-flag">Negative</p>}
+        {away(r)}
         {keptWords(r.qty, r.reserved_qty) && <p className="hint">{keptWords(r.qty, r.reserved_qty)}</p>}
         {(r.sell_minor !== undefined || (showCost && r.cost_minor !== undefined)) && <p className="hint"><PriceLine cost={showCost ? r.cost_minor : undefined} sell={r.sell_minor} /></p>}
         {correctable && correct(r)}
@@ -109,6 +122,7 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
         <td className={r.standard_pack ? 'num qty-packs' : 'num'}>
           <InPacks qty={r.qty ?? '0'} unit={r.unit} pack={r.standard_pack} />
           {r.negative && <div className="rt-flag">Negative</div>}
+          {away(r)}
           {keptWords(r.qty, r.reserved_qty) && <div className="hint">{keptWords(r.qty, r.reserved_qty)}</div>}
         </td>
         {showCost && <td className="num">{r.cost_minor !== undefined ? money(r.cost_minor) : ''}</td>}
@@ -324,6 +338,15 @@ export function StockPage() {
     enabled: all && !grouped && chipReady,
     placeholderData: keepPreviousData,
   });
+  // Issue #728: with an item at 0 here, the other shops this person may read are asked what they hold, in the cache key of the
+  // all-branches list with no filter, so switching to All branches reads it from there.
+  const shops = otherStockShops(me, branchId);
+  const elsewhereRead = useQuery({
+    queryKey: ['retail', 'stock', 'all-branches', query, categoryId, false, '', false, showInactive],
+    queryFn: ({ signal }) => retail.listStockAllBranches({ query, categoryId, includeInactive: showInactive, signal }),
+    enabled: !all && branchId !== null && !grouped && chipReady && shops.length > 0 && (one.data ?? []).some((r) => noneHere(r.qty)),
+  });
+  const elsewhere = branchId === null ? undefined : stockElsewhere(elsewhereRead.data, branchId, shops);
   const result = all ? many : one;
   const finding = result.isPlaceholderData || (result.isFetching && result.fetchStatus !== 'idle');
   // A known barcode shows its own item alone, not the items whose code only begins the same.
@@ -348,6 +371,7 @@ export function StockPage() {
         <CategoryChips categories={categories.data ?? []} value={categoryId} onChange={setCategoryId} />
       </FindBar>
       {!all && branchId !== null && <NoStockHere branchId={branchId} />}
+      {!all && branchId !== null && <UnfinishedCounts branchId={branchId} />}
       <ViewSwitch view={list.view} onChange={list.setView} />
       <StockLevelFilter level={level} onChange={setLevel} />
       <label style={{ fontWeight: 400 }}>
@@ -396,7 +420,7 @@ export function StockPage() {
       {!grouped && (
       <div data-tour="stock-list">
       <SearchResults fetching={finding}>
-        {!all && oneRows && <StockTable rows={oneRows} showCost={canProfit} correctable={mayCorrect(me, branchId) && branchId !== null ? { branchId } : undefined} {...narrowing} />}
+        {!all && oneRows && <StockTable rows={oneRows} showCost={canProfit} correctable={mayCorrect(me, branchId) && branchId !== null ? { branchId } : undefined} elsewhere={elsewhere} {...narrowing} />}
         {all && manyData && (phone ? <AllBranchesList data={manyData} showCost={canProfit} {...narrowing} /> : <AllBranchesTable data={manyData} showCost={canProfit} {...narrowing} />)}
       </SearchResults>
       </div>

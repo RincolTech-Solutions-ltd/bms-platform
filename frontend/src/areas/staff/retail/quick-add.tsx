@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { RETAIL_CURRENCY, RetailError, retail, type QuickAdd, type QuickAddRequest, type Unit } from '../../../api/retail';
 import { IDEMPOTENCY_UNSURE_CODES } from '../../../api/retail-errors';
 import { branchLabel } from '../../../auth/branch';
+import { AddsTo } from '../branch-picker';
 import { WORDS } from '../../../app/glossary';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { EmptyChoice } from '../../../app/ui/EmptyChoice';
@@ -57,12 +58,15 @@ export function pieceUnit(units: Unit[]): Unit | undefined {
   return PIECE_NAMES.map((n) => active.find((u) => (u.name ?? '').trim().toLowerCase() === n)).find((u) => u !== undefined);
 }
 
-/** The line said once Add has worked: "Test bulb added: 600 pieces at Test Shop One", or for an item already in the list what was added and what it has now. */
+/**
+ * The line said once Add has worked, naming the shop the stock went to (issue #728): "Added 600 pieces at Test Store. Test bulb is
+ * saved.", or for an item already in the list what was added there and what it has now.
+ */
 export function addedLine(done: QuickAdd, where: string): string {
   const name = done.description ?? 'The item';
   if (done.qty === undefined) return `${name} added.`;
   const of = (qty: string | undefined) => `${qty ?? ''} ${done.unit ?? ''}`.trim();
-  return done.item_made ? `${name} added: ${of(done.qty)} at ${where}` : `${name}: ${of(done.qty)} added at ${where}, ${of(done.total_qty)} now`;
+  return done.item_made ? `Added ${of(done.qty)} at ${where}. ${name} is saved.` : `Added ${of(done.qty)} of ${name} at ${where}. ${of(done.total_qty)} there now.`;
 }
 
 // The last group chosen on Quick add, per business (the host, or the dev server's tenant), person and shop (issue #688), kept
@@ -397,7 +401,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
     const notHere = onSell && canUse(me, 'sale') && stocked && !canSell;
     return (
       <section className="rt-card stack" aria-labelledby="qa-done">
-        <p id="qa-done" role="status" className="alert alert-success" data-testid="qa-done">{done.counting ? `${done.added.description ?? 'The item'} added: ${done.counting} at ${atName}` : addedLine(done.added, atName)}</p>
+        <p id="qa-done" role="status" className="alert alert-success" data-testid="qa-done">{done.counting ? `Added ${done.counting} at ${atName}. ${done.added.description ?? 'The item'} is saved.` : addedLine(done.added, atName)}</p>
         {done.added.paid_from && done.added.paid_minor !== undefined && (
           <p className="hint" data-testid="qa-paid"><span className="num">{money(done.added.paid_minor)}</span> taken from {done.added.paid_from === 'cash' ? 'Cash' : 'Mobile money'} at {atName}, recorded as Buy stock {done.added.purchase_no}.</p>
         )}
@@ -534,21 +538,9 @@ export function QuickAddForm({ initialName = '', onSell }: {
               autoComplete="off"
             />
           )}
-          <Field
-            id="qa-where"
-            label="Where"
-            required
-            error={where === '' ? 'Choose where the stock is.' : null}
-            showError={showErrors}
-            control={(props) => (
-              // empty: drawn only while places has a branch; with none, the EmptyChoice below stands in its place.
-              <select {...props} value={where} onChange={(e) => setWhere(e.target.value)}>
-                {places.map((b) => (
-                  <option key={b.id} value={b.id}>{branchLabel(b)}{b.sells_goods === false ? ' (store)' : ''}</option>
-                ))}
-              </select>
-            )}
-          />
+          {/* Issue #728: the shop the stock goes to, beside How many, with Change; drawn only while places has a branch, so
+              Where always holds one. With none, the EmptyChoice below stands in its place. */}
+          <AddsTo id="qa-where" value={where} places={places} onChoose={setWhere} />
           {profit && (holdsAt(me, BUY, where) || paid) && (
             <div className="stack" data-testid="qa-paid-from">
               <label htmlFor="qa-paid">

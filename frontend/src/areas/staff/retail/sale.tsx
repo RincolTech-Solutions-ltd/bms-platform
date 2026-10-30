@@ -430,7 +430,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       drop(h.product.id);
       const words = typeof e.problem?.detail === 'string' ? e.problem.detail : e.message;
       show(`${words} ${name} is not on the sale: use ${WORDS.countStock}, then sell it.`, 'error');
-    } else show(`The count of ${name} is not committed. Try again.`, 'error');
+    } else show(`The count of ${name} is not saved. Try again.`, 'error');
   };
   const notNow = (h: HeldCount) => {
     const draftId = drafts.current.get(h.product.id ?? '');
@@ -499,7 +499,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       } catch (e) {
         // A sale cleared or a screen left meanwhile hears nothing of it (issue #664); the kept draft is dealt with as above.
         if (lost) {
-          if (!stale()) show(`The count of ${name} may not be committed. Check it on ${WORDS.countStock} before you sell it.`, 'error');
+          if (!stale()) show(`The count of ${name} may not be saved. Check it on ${WORDS.countStock} before you sell it.`, 'error');
         } else if (!(e instanceof StaleCount)) show(`${name} is saved, but its count is not. Count it on ${WORDS.countStock}, then sell it.`, 'error');
       }
     }
@@ -644,7 +644,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
             notFound={(term, clear, hold) => (
               <ScreenToast.Provider value={show}>
                 <NewItemHere id="sale-new" description={term} ask={ASK_OWNER_ITEM} askCost={profit} qtyLabel={mayCount ? 'How many you have here' : undefined}
-                  qtyError="Type how many you have here, more than 0." onOpenChange={hold} onAdded={(added) => addNew(added, clear)} />
+                  qtyError="Type how many you have here, more than 0." onOpenChange={hold} onAdded={(added) => addNew(added, clear)}
+                  at={{ value: branchId, places: (me.branches ?? []).filter((b) => b.id === branchId) }} />
                 <ScreenLink screen="quickAdd" to="/staff/retail/quick-add" search={{ name: term }}>Quick add "{term}" with its prices and stock</ScreenLink>
               </ScreenToast.Provider>
             )}
@@ -657,7 +658,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       ))}
       {stuck && !online && held.length > 0 && (
         <p role="alert" className="alert alert-warning" data-testid="sale-count-offline">
-          A count on this sale is not committed. Connect to the internet, then commit the count or press Not now, before you clear the sale or switch branch.
+          A count on this sale is not saved. Connect to the internet, then save the count or press Not now, before you clear the sale or switch branch.
         </p>
       )}
 
@@ -939,7 +940,7 @@ function discardCount(id: string) {
 
 /**
  * Issue #656: the count Sell would make of a new item is a big drop, so the records already hold more of it here. The line asks
- * its tick first, as on Count stock; Commit the count then makes the count and sends it acknowledged. Not now leaves nothing open.
+ * its tick first, as on Count stock; Save the count then makes the count and sends it acknowledged. Not now leaves nothing open.
  */
 function HeldCountTick({ held, commit, onCommitted, onFailed, onCancel }: {
   held: HeldCount;
@@ -966,7 +967,7 @@ function HeldCountTick({ held, commit, onCommitted, onFailed, onCancel }: {
           <input type="checkbox" checked={ok} aria-describedby={wordsId} data-needed={ok ? undefined : ''} onChange={(e) => setOk(e.target.checked)} />
           {`Yes, ${name} is right`}
         </label>
-        <BusyButton type="button" className="rt-primary" busy={busy} notReady={!ok} onClick={() => sending.mutate()}>Commit the count</BusyButton>
+        <BusyButton type="button" className="rt-primary" busy={busy} notReady={!ok} onClick={() => sending.mutate()}>Save the count</BusyButton>
         {/* Not now discards a draft whose commit was lost; while the count is on its way it waits. */}
         {!busy && <button type="button" onClick={() => onCancel(held)}>Not now</button>}
       </div>
