@@ -20,17 +20,18 @@ Each button shows only to someone who may use it: the screen it opens is checked
 | `quickAdded` | Quick add | the item is added | Count it now; Add another; Sell it | Count it now, else Add another |
 | `countFromAdd` | Count stock | opened from Count it now | Back to Items | none |
 | `countDone` | Count stock | the count is committed | Start another count; Back to My stock; Count another branch | Start another count |
-| `buyDone` | Buy stock | the purchase is saved | Buy more stock; Move to the shop; My stock | Buy more stock, else none |
-| `moveDone` | Move stock | the stock is moved or received | Move more stock; Count stock at the receiving branch | Move more stock, else none |
+| `buyDone` | Buy stock | the purchase is saved | Buy more stock; Move to the shop; My stock | Buy more stock |
+| `moveDone` | Move stock | the stock is moved or received | Move more stock; Count stock at the receiving branch | Move more stock |
 
-Where a screen shows a past purchase or move (Stock moves opens one), there is no Buy more stock or Move more stock, and then
-no step is primary. Count stock done draws its buttons in the success screen (`SuccessScreen`), one under another.
+Where a screen only shows a past purchase or move (Stock moves opens one), Buy more stock or Move more stock is still the
+primary and opens Buy stock or Move stock. Count stock done draws its buttons in the success screen (`SuccessScreen`), one
+under another.
 
 ## What each button does
 
 - **Count it now** opens Count stock at the branch in use (on Quick add, at the branch the item was added at) with the new
   item already on the sheet and its box focused, ready to type how many. It shows only where the person may count at that
-  branch and it keeps goods. Quick add shows it only when no quantity was typed, since a typed quantity is already the count;
+  branch and it keeps goods. Quick add shows it only when nothing was counted (no quantity, or 0), since a quantity is the count;
   its count has no Back to Items, since Quick add is often reached from Sell. A help tip beside it says what it does. A switch
   to another branch on Count stock starts a plain count there, without the item.
 - **Add another** opens a clear Add an item form (on Quick add, keeping the category and where).

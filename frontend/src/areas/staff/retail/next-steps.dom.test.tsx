@@ -51,6 +51,8 @@ vi.mock('../../../api/retail', async (original) => {
       similarProducts: () => Promise.resolve({ exact: [], similar: [] }),
       nameHints: () => Promise.resolve({}),
       createProduct: (...a: unknown[]) => createProduct(...a),
+      getProduct: () => Promise.resolve(made),
+      listProducts: () => Promise.resolve([made]),
       listStock: (...a: unknown[]) => listStock(...a),
       createStocktake: (...a: unknown[]) => createStocktake(...a),
       commitStocktake: (...a: unknown[]) => commitStocktake(...a),
@@ -63,6 +65,7 @@ const { ProductsPage } = await import('./catalogue-products');
 const { StocktakePage } = await import('./stocktake');
 const { RestockSaved } = await import('./restock');
 const { TransferSummary } = await import('./transfer');
+const { RecordSale } = await import('./sale');
 
 const owner = mockMe('admin');
 const A = owner.branches?.[0]?.id ?? '';
@@ -189,6 +192,19 @@ describe('Add an item, then Count it now', () => {
     }
   });
 
+  it('Sell it opens the sale with the item on it, at the branch in use', async () => {
+    show(<ItemAddedNext item={made} onAnother={vi.fn()} />);
+    const href = new URL(screen.getByRole('link', { name: 'Sell it' }).getAttribute('href') ?? '', 'http://x');
+    expect(href.pathname).toBe('/staff/retail/sale');
+    // The sale route reads both, so neither is stripped on the way.
+    const search = appRouter.routesByPath['/staff/retail/sale'].options.validateSearch as (s: Record<string, unknown>) => Record<string, unknown>;
+    const read = search(Object.fromEntries(href.searchParams));
+    expect(read).toEqual({ item: 'p1', branch: A });
+    cleanup();
+    show(<RecordSale startItem={read.item as string} startBranch={read.branch as string} />);
+    expect(await screen.findByRole('button', { name: 'Remove Test bulb 60W' })).toBeTruthy();
+  });
+
   it('puts Count stock and Buy stock on Items as plain buttons, only for someone who may open them', async () => {
     show(<ProductsPage />);
     const steps = within(await screen.findByTestId('next-items')).getAllByRole('link');
@@ -215,6 +231,10 @@ describe('Quick add', () => {
     show(<QuickAddedNext added={{ ...added, branch_id: A, qty: '4.000' }} onAnother={vi.fn()} />);
     expect(names('quickAdded')).toEqual(['Add another']);
     expect(screen.getByRole('button', { name: 'Add another' }).className).toBe('btn-primary');
+    cleanup();
+    // None counted is nothing counted.
+    show(<QuickAddedNext added={{ ...added, branch_id: A, qty: '0.000' }} onAnother={vi.fn()} />);
+    expect(names('quickAdded')).toEqual(['Count it now', 'Add another']);
   });
 
   it('keeps Count it now from someone who may not count there', () => {
@@ -283,5 +303,14 @@ describe('the done screens', () => {
     show(<TransferSummary transfer={{ ...moved, status: 'in_transit' }} onNew={vi.fn()} />);
     expect(screen.queryByRole('link', { name: /^Count stock at/ })).toBeNull();
     expect(screen.getByRole('button', { name: 'Move more stock' }).className).toBe('btn-primary');
+  });
+
+  it('keeps Buy more stock and Move more stock the primary where a past purchase or move is only shown', () => {
+    const purchase: Purchase = { id: 'r1', purchase_no: 'PU-000001', purchased_on: '2026-10-29', total_minor: 9000, lines: [] };
+    show(<><RestockSaved purchase={purchase} context={{ supplierName: 'Test Supplier', before: {} }} /><TransferSummary transfer={{ id: 't1', from_branch_id: A, to_branch_id: B, status: 'completed', lines: [] }} /></>);
+    for (const [name, to] of [['Buy more stock', '/staff/retail/restock'], ['Move more stock', '/staff/retail/transfer']]) {
+      const more = screen.getByRole('link', { name });
+      expect([more.className, more.getAttribute('href')]).toEqual(['btn btn-primary', to]);
+    }
   });
 });

@@ -103,8 +103,8 @@ export function ItemAddedNext({ item, onAnother }: { item: Product; onAnother: (
 
 // JUSTIFICATION-A3: Quick add's after-save buttons, moved out of its form so the other builder's form changes never meet these.
 /**
- * Quick add's step once the item is added (issue #700): Add another and Sell it as before, and Count it now when no quantity
- * was typed (a typed quantity is already its count), at the branch the item was added at, else the branch in use.
+ * Quick add's step once the item is added (issue #700): Add another and Sell it as before, and Count it now when nothing was
+ * counted (no quantity, or none; a quantity above 0 is already its count), at the branch the item was added at, else the branch in use.
  */
 export function QuickAddedNext({ added, onAnother, onSell }: { added: QuickAdd; onAnother: () => void; onSell?: () => void }) {
   const { me, branch, chooseBranch } = useStaff();
@@ -114,7 +114,7 @@ export function QuickAddedNext({ added, onAnother, onSell }: { added: QuickAdd; 
       {
         // No `from`: Quick add is often reached from Sell, so Back to Items would send the person somewhere they never were.
         label: 'Count it now', screen: 'stocktake', to: '/staff/retail/stocktake', search: { item: added.product_id ?? '' },
-        onClick: () => { if (at !== branch) chooseBranch?.(at); }, show: added.qty == null && mayCountAt(me, at), tip: <HelpTip tip="countItNow" />,
+        onClick: () => { if (at !== branch) chooseBranch?.(at); }, show: (added.qty == null || Number(added.qty) === 0) && mayCountAt(me, at), tip: <HelpTip tip="countItNow" />,
       },
       { label: 'Add another', onClick: onAnother },
       { label: 'Sell it', onClick: onSell, show: onSell !== undefined },

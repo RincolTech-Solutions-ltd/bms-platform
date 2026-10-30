@@ -234,8 +234,9 @@ export function TransferSummary({ transfer, onNew }: { transfer: Transfer; onNew
       {transfer.status === 'voided' && <p>Undone: {transfer.void_reason}</p>}
       {transfer.status === 'cancelled' && <p>Taken back: {transfer.void_reason}</p>}
       {/* Issue #700: once the goods are there, the next job is to count them at the branch that took them in. */}
-      <NextSteps at="moveDone" lead={onNew !== undefined} steps={[
-        { label: 'Move more stock', onClick: onNew, show: onNew !== undefined },
+      {/* Move more stock stays the primary: a clear form here, or Move stock where a past move is only shown. */}
+      <NextSteps at="moveDone" lead steps={[
+        onNew ? { label: 'Move more stock', onClick: onNew } : { label: 'Move more stock', screen: 'transfer', to: '/staff/retail/transfer' },
         {
           label: 'Count stock at the receiving branch', words: `Count stock at ${label(transfer.to_branch_id)}`, screen: 'stocktake', to: '/staff/retail/stocktake',
           onClick: () => chooseBranch?.(transfer.to_branch_id ?? ''),
