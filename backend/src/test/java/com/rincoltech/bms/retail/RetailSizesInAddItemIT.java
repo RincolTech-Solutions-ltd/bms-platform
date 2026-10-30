@@ -108,7 +108,8 @@ class RetailSizesInAddItemIT extends IntegrationTest {
         }
         assertThat(prices).containsExactly(3_000L, 4_000L, 6_000L);
         assertThat(variants.get(2).get("cost_minor").asLong()).isEqualTo(3_500);
-        String packsAudited = "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.product_unit.created'";
+        String packsAudited =
+                "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.product_unit.created'";
         assertThat(count(packsAudited)).isEqualTo(3);
     }
 
