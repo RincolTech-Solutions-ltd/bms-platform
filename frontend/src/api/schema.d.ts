@@ -7080,6 +7080,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/stocktakes/unfinished": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The counts started at a branch and neither saved nor thrown away, newest first, at most 20 (issue #728); needs retail.stocktake.commit at that branch */
+        get: operations["listRetailUnfinishedStocktakes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/stocktakes/{stocktake_id}": {
         parameters: {
             query?: never;
@@ -14942,6 +14959,22 @@ export interface components {
             sale_no?: string;
             /** Format: int64 */
             total_minor?: number;
+        };
+        /** @description Issue #728: a count started at a branch and neither saved nor thrown away (a draft) */
+        RetailOpenStocktake: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: uuid */
+            created_by?: string;
+            /** Format: uuid */
+            id?: string;
+            /**
+             * Format: int32
+             * @description How many items it counted
+             */
+            lines?: number;
         };
         RetailOrder: {
             /** Format: uuid */
@@ -32520,6 +32553,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailStocktake"];
+                };
+            };
+        };
+    };
+    listRetailUnfinishedStocktakes: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOpenStocktake"][];
                 };
             };
         };

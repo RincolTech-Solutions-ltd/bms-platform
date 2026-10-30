@@ -25,6 +25,7 @@ import com.rincoltech.bms.retail.stock.internal.StockApi.AllBranchesRow;
 import com.rincoltech.bms.retail.stock.internal.StockApi.BranchBalance;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementPage;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementRow;
+import com.rincoltech.bms.retail.stock.internal.StockApi.OpenStocktake;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockBranch;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockPage;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockRow;
@@ -333,6 +334,15 @@ class StockService {
                 branch,
                 Map.of("lines", r.lines().size())));
         return visible(repo.stocktake(id, false).orElseThrow());
+    }
+
+    /**
+     * Issue #728: the counts started at a branch and neither saved nor thrown away, newest first, for someone who may count
+     * there, so My stock and Count stock can offer to finish or throw away each one.
+     */
+    @Transactional(readOnly = true)
+    List<OpenStocktake> openStocktakes(UUID branchId) {
+        return repo.openStocktakes(branches.resolve("retail.stocktake.commit", branchId));
     }
 
     @Transactional(readOnly = true)

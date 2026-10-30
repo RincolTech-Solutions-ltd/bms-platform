@@ -333,6 +333,43 @@ class RetailStockIT extends IntegrationTest {
                 .isEqualTo("committed");
     }
 
+    // JUSTIFICATION-A3: one test of the new read route, which no existing test can carry.
+    /**
+     * Issue #728: the counts started at a branch and neither saved nor thrown away are listed, newest first, to someone who
+     * may count there; a saved or thrown away one leaves the list, and someone who may count only elsewhere is refused.
+     */
+    @Test
+    void theUnfinishedCountsOfABranchAreListedToWhoeverMayCountThere() {
+        api.stockUp(t.headOffice(), product, "10");
+        UUID first = count(Map.of("product_id", product, "counted_qty", "9"));
+        UUID second = count(Map.of("product_id", product, "counted_qty", "8"));
+        UUID saved = count(Map.of("product_id", product, "counted_qty", "10"));
+        api.post("/stocktakes/" + saved + "/commit", Map.of(), ADMIN);
+        UUID thrown = count(Map.of("product_id", product, "counted_qty", "7"));
+        api.post("/stocktakes/" + thrown + "/discard", null, ADMIN);
+
+        String path = "/stocktakes/unfinished?branch_id=" + t.headOffice();
+        ResponseEntity<JsonNode> open = api.get(path, ADMIN);
+        assertThat(open.getStatusCode()).as("%s", open.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(open.getBody().valueStream().map(n -> n.get("id").asString()).toList())
+                .containsExactly(second.toString(), first.toString());
+        assertThat(open.getBody().get(0).get("lines").asInt()).isEqualTo(1);
+        assertThat(open.getBody().get(0).get("branch_id").asString())
+                .isEqualTo(t.headOffice().toString());
+
+        RetailTestSupport other = new RetailTestSupport(http, t);
+        assertThat(other.call(
+                                HttpMethod.GET,
+                                path,
+                                null,
+                                ADMIN,
+                                t.secondBranch().toString(),
+                                Map.of())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(api.get(path, SALES).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
     /** Issue #656: a discarded count is as final as a committed one, for the application and the owner alike. */
     @Test
     void aDiscardedCountCannotChange() {
