@@ -1,7 +1,7 @@
 // The words of every HelpTip (issue #707): the small question mark after a label that is not obvious. They live here, in one
 // place, so they can be checked and translated. Each is one or two short sentences in plain words, with no dashes. `label` is
-// the word the tip explains, as the screen shows it; the button is named "More about" it, so a screen reader says what it is
-// for. src/app/ui/help-tips-guard.test.ts proves every tip here is placed on its screen.
+// the words the tip sits beside, exactly as the screen shows them; the button is named "More about" them, so a screen reader
+// hears what is on the page. src/app/ui/help-tips-guard.test.ts proves every tip here is drawn on its screen.
 
 export interface HelpTipWords {
   label: string;
@@ -13,12 +13,16 @@ export const HELP_TIPS = {
     label: 'Average buying price',
     text: 'What one of this item has cost you on average, across all the stock you bought. The app works it out each time you buy stock.',
   },
+  buyingPrice: {
+    label: 'Buying price',
+    text: 'What one of this item has cost you on average, across all the stock you bought. The app works it out each time you buy stock.',
+  },
   sellingPrice: {
     label: 'Selling price',
     text: 'What a customer pays you for one. Change it on the item\'s page.',
   },
   lowStockLevel: {
-    label: 'Low stock level',
+    label: 'Warn me when stock is below',
     text: 'When stock falls below this number, the app tells you, so you can buy more in time.',
   },
   priceList: {
@@ -30,8 +34,8 @@ export const HELP_TIPS = {
     text: 'Sales the customer has not paid for yet. They count as profit only when the money comes in.',
   },
   joinSizes: {
-    label: 'Join items as sizes',
-    text: 'Use this when you typed each size as its own item. They become one item with sizes, and each keeps its stock, price and history.',
+    label: 'Put items together as sizes',
+    text: 'Use it when each size was added as its own item. Each one keeps its code too, so its labels and past sales still match.',
   },
   appraisal: {
     label: 'Appraisal',

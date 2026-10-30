@@ -129,7 +129,7 @@ describe('putting items together as sizes (issue #707)', () => {
     expect(screen.getByRole('heading', { name: '2. Name the item' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '3. Check the sizes' })).toBeTruthy();
     expect(screen.getAllByRole('combobox')).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'More about Join items as sizes' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'More about Put items together as sizes' })).toBeTruthy();
 
     await pickItem('Test twin cable 1.5mm', { typed: 'twin' });
     expect(ready()).toBe(false);

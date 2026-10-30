@@ -141,6 +141,7 @@ describe('the home cards', () => {
     expect(html).toContain('Cash and mobile money');
     expect(html).toContain('UGX 3,000');
     expect(html).toContain('Profit today');
+    expect(html).toContain('aria-label="More about On credit"');
   });
 
   it('say Sold, money collected, On credit now and profit of the money received when the buyer pays', () => {
@@ -160,6 +161,8 @@ describe('the home cards', () => {
     expect(html).toContain('Money received today');
     expect(html).toContain('Profit today');
     expect(html).not.toContain('UGX 3,000');
+    // Issue #707: On credit carries its help tip.
+    expect(html).toContain('aria-label="More about On credit"');
   });
 
   it('show no profit to a caller without it, and the money collected still', () => {

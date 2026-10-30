@@ -11,4 +11,5 @@ Chromium with reduced motion, on a phone at 412x900 and a laptop at 1366x900. No
 | `04-tip-open-*.png` | The help tip open after a tap, under its question mark |
 | `05-join-done-*.png` | Success: "Cable 100m roll now has 2 sizes" with Open it and Put more together |
 | `06-add-to-an-item-with-sizes-*.png` | Add more sizes to an item that already has sizes: one search for a size of that item, then the same three steps |
-| `07-my-stock-tip-on-keyboard-focus-1366.png` | My stock on a laptop: Average buying price and Selling price each with a tip, one open on keyboard focus |
+| `07-my-stock-phone-price-tips-412.png` | My stock on a phone: Buying price and Selling price tips once above the cards, one open over the page (above the button when there is no room below) |
+| `07-my-stock-tip-on-keyboard-focus-1366.png` | My stock on a laptop: Average buying price and Selling price each with a tip, one open on keyboard focus, not cut off by the table |

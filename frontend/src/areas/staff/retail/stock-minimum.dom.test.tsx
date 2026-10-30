@@ -60,6 +60,9 @@ describe('a level saved', () => {
     setEveryBranch.mockResolvedValue({ ...level, min_qty: '6.000' });
     screenOf();
     fireEvent.change(await screen.findByLabelText(/^Every shop and store/), { target: { value: '6' } });
+    // Issue #707: the legend carries its help tip, and the group keeps the legend's words as its name.
+    expect(screen.getByRole('button', { name: 'More about Warn me when stock is below' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Warn me when stock is below' })).toBeTruthy();
     fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0] as HTMLElement);
     await waitFor(() => expect(toasts()).toEqual(['Level set to 6']));
     expect(screen.queryByText(/warns below 6/)).toBeNull();

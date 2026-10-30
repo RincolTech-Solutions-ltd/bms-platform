@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useState, type ReactNode } from 'react';
 import type { FieldMessages } from '../../../api/lending-forms';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { EmptyChoice, type ChoiceAdd } from '../../../app/ui/EmptyChoice';
@@ -163,9 +163,11 @@ export function SelectField({ name, label, form, hint, required, disabled, value
 
 /** A group of related inputs under a heading (a fieldset and legend, so a screen reader announces the group). */
 export function Group({ title, children, tourId, tip }: { title: string; children: ReactNode; tourId?: string; tip?: HelpTipKey }) {
+  // With a help tip the group is named by its title alone, not with the tip's button (issue #707).
+  const titleId = useId();
   return (
-    <fieldset className="mf-group" data-tour={tourId}>
-      <legend>{title}{tip && <> <HelpTip tip={tip} /></>}</legend>
+    <fieldset className="mf-group" data-tour={tourId} aria-labelledby={tip ? titleId : undefined}>
+      <legend><span id={titleId}>{title}</span>{tip && <> <HelpTip tip={tip} /></>}</legend>
       {children}
     </fieldset>
   );

@@ -79,22 +79,32 @@
 }
 
 /*
- * HelpTip (issue #707, app/ui/HelpTip.tsx): a small question mark after a label. The button keeps the 48px tap area and gives it
- * back to the line with a negative margin, so a label with a tip is no taller than one without. The open text floats under it,
- * over the page, with a hairline edge.
+ * HelpTip (issue #707, app/ui/HelpTip.tsx): a small question mark after a label, in a 48px tap area of its own. The open text
+ * floats under it, over the page, with a hairline edge; while closed it is an empty, visually hidden live region, never removed,
+ * so a screen reader announces the words as they appear.
  */
 .help-tip {
-  position: relative;
   display: inline-flex;
   vertical-align: middle;
 }
 
+/* The whole 48px is its own: no negative margin, so it never lies over the select or the hint beside it. */
 .help-tip-button {
   min-width: var(--tap);
   min-height: var(--tap);
-  margin: calc(var(--space-3) * -1) calc(var(--space-2) * -1);
   padding: 0;
   justify-content: center;
+}
+
+/* A heading with its tip beside it: the tip stays out of the heading's own name. */
+.help-tip-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.help-tip-heading > :first-child {
+  margin: 0;
 }
 
 .help-tip-button > span {
@@ -125,7 +135,8 @@
   position: fixed;
   top: 0;
   left: 0;
-  z-index: var(--z-dropdown);
+  /* Over the bottom tabs of a phone, under an open menu, the tour and toasts. */
+  z-index: calc(var(--z-nav) + 1);
   width: max-content;
   max-width: min(18rem, calc(100vw - 32px));
   padding: var(--space-2) var(--space-3);
@@ -141,8 +152,4 @@
   text-transform: none;
   letter-spacing: normal;
   white-space: normal;
-}
-
-.help-tip-text:empty {
-  display: none;
 }

@@ -38,8 +38,8 @@ export function StockMinimumEditor({ productId, unit }: { productId: string; uni
   const parsed = parseLevel(typed);
   const per = unit ? ` ${unit}` : '';
   return (
-    <fieldset className="stack" data-tour="stock-minimum">
-      <legend>Warn me when stock is below <HelpTip tip="lowStockLevel" /></legend>
+    <fieldset className="stack" data-tour="stock-minimum" aria-labelledby={`min-legend-${productId}`}>
+      <legend><span id={`min-legend-${productId}`}>Warn me when stock is below</span> <HelpTip tip="lowStockLevel" /></legend>
       <p className="hint">
         You are told when this item falls below the level at a shop or store. Without a level, you are still told when it would run out within{' '}
         {data.lead_days ?? 14} days at the pace it sells.

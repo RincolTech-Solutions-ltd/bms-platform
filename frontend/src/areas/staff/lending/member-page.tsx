@@ -122,12 +122,15 @@ function MemberLoans({ memberId, canApply }: { memberId: string; canApply: boole
   );
 }
 
-function MemberCollateral({ memberId, currency, canAdd }: { memberId: string; currency?: string; canAdd: boolean }) {
+export function MemberCollateral({ memberId, currency, canAdd }: { memberId: string; currency?: string; canAdd: boolean }) {
   const api = useCollateralApi();
   const items = useQuery({ queryKey: ['collateral', 'member', memberId], queryFn: () => api.list({ memberId }) });
   return (
     <section className="rt-card stack" aria-labelledby="col-title">
-      <h2 id="col-title">Collateral <HelpTip tip="collateral" /></h2>
+      <div className="help-tip-heading">
+        <h2 id="col-title">Collateral</h2>
+        <HelpTip tip="collateral" />
+      </div>
       {items.isPending && <p className="loading">Loading collateral</p>}
       <Problem error={items.error} />
       {items.data && (items.data.items ?? []).length === 0 && <p className="empty-state">No collateral registered for this member.</p>}

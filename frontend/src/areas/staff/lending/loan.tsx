@@ -127,7 +127,7 @@ export function ScheduleTable({ schedule, currency, onWaive }: { schedule: LoanS
             <th className="num">Fees</th>
             <th className="num">Total due</th>
             <th className="num">Paid</th>
-            <th className="num">Outstanding <HelpTip tip="outstanding" /></th>
+            <th className="num" aria-label="Outstanding">Outstanding <HelpTip tip="outstanding" /></th>
             <th>Status</th>
           </tr>
         </thead>

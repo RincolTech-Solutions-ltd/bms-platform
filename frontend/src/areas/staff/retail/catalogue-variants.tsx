@@ -457,7 +457,7 @@ export function JoinPage() {
         <SuccessScreen
           level={2}
           title={`${done.name} now has ${done.count} ${done.count === 1 ? 'size' : 'sizes'}`}
-          detail="Each one keeps its stock, price and history."
+          detail="Each one keeps its code, stock, price and history."
           actions={[{ label: 'Open it', to: familyPath(done.id) }, { label: 'Put more together', onClick: startAgain }]}
         />
       </Gate>
@@ -489,7 +489,7 @@ export function JoinPage() {
   return (
     <Gate screen="products" title={title}>
       <p>
-        You have Cable 1.5mm and Cable 2.5mm as two items? Put them together as one item, Cable, with two sizes. Each keeps its stock, price and history.{' '}
+        You have Cable 1.5mm and Cable 2.5mm as two items? Put them together as one item, Cable, with two sizes. Each keeps its code, stock, price and history.{' '}
         <HelpTip tip="joinSizes" />
       </p>
       <section data-tour="join-pick" aria-labelledby="join-step-1" className="stack">

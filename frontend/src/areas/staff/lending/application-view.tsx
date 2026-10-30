@@ -122,7 +122,10 @@ export function AppraisalCard({ appraisal: a, currency, earlier = false }: { app
   const parts = scoreParts(a);
   return (
     <section className="rt-card stack" aria-labelledby="ap-appraisal" data-tour="application-appraisal">
-      <h2 id="ap-appraisal">{earlier ? 'Earlier appraisal' : 'Appraisal'} <HelpTip tip="appraisal" /></h2>
+      <div className="help-tip-heading">
+        <h2 id="ap-appraisal">{earlier ? 'Earlier appraisal' : 'Appraisal'}</h2>
+        <HelpTip tip="appraisal" />
+      </div>
       {earlier && <p className="alert alert-info" role="note">From before the application was sent back. It no longer stands: the application is waiting to be appraised again.</p>}
       <p className="ln-item-head">
         <span className="ap-score">{a.score} of 100</span>
