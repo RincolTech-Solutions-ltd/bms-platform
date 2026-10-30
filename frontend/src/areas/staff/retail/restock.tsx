@@ -12,7 +12,8 @@ import { Gate, Money, Note, Problem, ProductPicker, money, useProfitAccess } fro
 import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne, scanInto, touchedLine } from './barcode-state';
 import { ScreenToast, useItemAdded } from './toast';
-import { UNITS, canUse, capabilityOn } from './permissions';
+import { TRANSFER, UNITS, canUse, capabilityOn, holdsAt } from './permissions';
+import { NextSteps } from './next-steps';
 import { usualBuyingPack } from './ladder-state';
 import { OWN_PRICE_KEEPS_SIZE, baseCostMinor, baseQtyMilli, buyingPacks, chosenPack, deliveredFactor, mayKeepSize, packPriceMinor, quantityIn, sameFactor, unitWord, unitWords } from './units-state';
 import { BusyButton } from '../../../app/ui/BusyButton';
@@ -437,6 +438,10 @@ export function priceChanges(p: Purchase, before: RestockContext['before'], show
 export function RestockSaved({ purchase, context, onNew }: { purchase: Purchase; context: RestockContext; onNew?: () => void }) {
   const changes = priceChanges(purchase, context.before, useProfitAccess());
   const count = (purchase.lines ?? []).length;
+  const { me, chooseBranch } = useStaff();
+  // The first store (keeps goods, sells none) this purchase put stock into.
+  const into = new Set((purchase.lines ?? []).flatMap((l) => (l.qty_by_branch ?? []).map((q) => q.branch_id)));
+  const store = (me.branches ?? []).find((b) => b.id && into.has(b.id) && b.stocks_goods !== false && b.sells_goods === false);
   return (
     <section aria-label="Purchase saved">
       <h2>Purchase saved{purchase.purchase_no ? ` (${purchase.purchase_no})` : ''}</h2>
@@ -459,7 +464,12 @@ export function RestockSaved({ purchase, context, onNew }: { purchase: Purchase;
       ) : (
         <p>No price changed.</p>
       )}
-      {onNew && <button type="button" className="rt-primary" onClick={onNew}>Buy more stock</button>}
+      {/* Issue #700: the next jobs. Goods bought into a store are moved to a shop from that store, so the store is chosen first. */}
+      <NextSteps at="buyDone" lead steps={[
+        { label: 'Buy more stock', onClick: onNew, show: onNew !== undefined },
+        { label: 'Move to the shop', screen: 'transfer', to: '/staff/retail/transfer', onClick: () => chooseBranch?.(store?.id ?? ''), show: store !== undefined && chooseBranch !== undefined && holdsAt(me, TRANSFER, store.id) },
+        { label: 'My stock', screen: 'stock', to: '/staff/retail/stock' },
+      ]} />
     </section>
   );
 }
