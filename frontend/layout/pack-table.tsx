@@ -1,12 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
+import { RouterContextProvider } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
 import type { Me } from '../src/api/client';
 import type { Pack, Product, Unit } from '../src/api/retail';
 import { mockMe } from '../src/api/retail-mock';
-import { router as appRouter } from '../src/app/router';
 import { StaffContext } from '../src/areas/staff/context';
 import { PackEditor } from '../src/areas/staff/retail/catalogue-packs';
+import { layoutRouter } from './router';
 import '../src/app/theme.css';
 import '../src/app/ui/index.css';
 
@@ -38,7 +38,7 @@ const units: Unit[] = [
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
 client.setQueryData(['retail', 'packs', 'p1'], packs);
 client.setQueryData(['retail', 'catalogue', 'units'], units);
-const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/retail/catalogue/products'] }) });
+const router = layoutRouter('/staff/retail/catalogue/products');
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <RouterContextProvider router={router}>

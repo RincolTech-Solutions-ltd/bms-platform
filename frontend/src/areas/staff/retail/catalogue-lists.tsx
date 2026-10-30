@@ -13,6 +13,7 @@ import { ScreenLink } from './screen-link';
 import { Gate, Problem, changeFailureText, requireVersion, useToast } from './ui';
 import { useComeBack } from '../../../app/ui/EmptyChoice';
 import { UsualPackSheet, holdsText, mayHaveUsualPack, usedForText, usualSizeProblem } from './unit-usual-pack';
+import { orExistingUnit } from './units-state';
 
 // Categories and Units (#146): the same screen twice. A row can be renamed or switched off, never
 // deleted: items and their history keep pointing at it. A switched-off row stays on the items that
@@ -131,6 +132,8 @@ function NamedList({ noun, plural, list, create, update, withPrefix = false, sec
     mutationFn: () => create(name.trim(), asksUsual ? { size: usual.size.trim(), of_unit_id: ofUnitId, purpose: usual.purpose } : undefined),
     onSuccess: (row) => {
       close();
+      // Issue #698: a unit the shop has under another spelling or case is not added again.
+      if ('reused' in row && row.reused) return done(`You already have ${row.name ?? ''}.`);
       const codes = withPrefix && 'code_prefix' in row && row.code_prefix ? ` Its item codes start with ${row.code_prefix}.` : '';
       done(`Added the ${noun} "${row.name}".${codes}`);
       // Opened from an empty list on a form (issue #619): what was added takes the person back to that form.
@@ -284,7 +287,8 @@ export function CategoriesPage() {
 export function UnitsPage() {
   return (
     <Gate screen="units" title="Units">
-      <NamedList noun="unit" plural="units" sections={UNIT_SECTIONS} list={() => retail.listUnits()} create={(n, usual) => retail.createUnit(n, usual)} update={(id, v, b) => retail.updateUnit(id, v, b)} />
+      <NamedList noun="unit" plural="units" sections={UNIT_SECTIONS} list={() => retail.listUnits()} create={(n, usual) => orExistingUnit(retail.createUnit(n, usual))} update={(id, v, b) => retail.updateUnit(id, v, b)} />
+
     </Gate>
   );
 }

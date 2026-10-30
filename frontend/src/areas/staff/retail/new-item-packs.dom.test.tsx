@@ -270,7 +270,7 @@ describe('Add an item (issue #689)', () => {
     fireEvent.change(within(row).getByLabelText(/^Package/), { target: { value: 'u2' } });
     fireEvent.change(within(row).getByLabelText(/^How many bulbs in one carton/), { target: { value: '120' } });
     const buy = screen.getByTestId('usual-buy');
-    expect(within(buy).getByText('How do you usually buy it?')).toBeTruthy();
+    expect(within(buy).getByText('How do you usually buy it, and for how much?')).toBeTruthy();
     fireEvent.click(within(buy).getByRole('radio', { name: 'Carton' }));
     fireEvent.change(within(buy).getByLabelText(/^What do you pay for one carton\?/), { target: { value: '600000' } });
     expect(within(buy).getByTestId('usual-buy-piece').textContent).toBe('That is UGX 5,000 a bulb.');

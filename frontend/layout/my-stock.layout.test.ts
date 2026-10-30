@@ -1,40 +1,31 @@
-import react from '@vitejs/plugin-react';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { chromium, type Browser, type Page } from 'playwright';
-import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { openLayout } from './open';
 
 // My stock on a phone 412 wide (issue #680), at the default and a large font size: a card per item inside the page, the quantity
 // larger than the prices, the money in tabular figures, Correct and the shop label full 48px targets, no stripe on a card, and no
 // sideways scroll. Switching shop from the label shows the dark toast inside the screen. With LAYOUT_SHOTS=1 it saves the pictures
 // of the pull request in docs/ui/shop-owner-clarity-680.
 
-let server: ViteDevServer;
 let browser: Browser;
-let base = '';
 const SHOTS = process.env.LAYOUT_SHOTS === '1' ? resolve(process.cwd(), '../docs/ui/shop-owner-clarity-680') : null;
 
 beforeAll(async () => {
-  server = await createServer({ configFile: false, root: process.cwd(), plugins: [react()], logLevel: 'error', server: { port: 0, host: '127.0.0.1' } });
-  await server.listen();
-  base = server.resolvedUrls?.local[0] ?? '';
   browser = await chromium.launch();
   if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 });
 
 afterAll(async () => {
   await browser?.close();
-  await server?.close();
 });
 
 const WIDTH = 412;
 
 async function open(font: number, theme = 'light'): Promise<Page> {
   const page = await browser.newPage({ viewport: { width: WIDTH, height: 915 }, hasTouch: true, isMobile: true });
-  await page.goto(`${base}layout/my-stock.html?font=${font}&theme=${theme}`);
-  await page.locator('.stock-card').first().waitFor();
-  return page;
+  return openLayout(page, `layout/my-stock.html?font=${font}&theme=${theme}`, page.locator('.stock-card'));
 }
 
 describe.each([1, 2])('My stock at 412px, font scale %i', (font) => {
@@ -125,8 +116,7 @@ describe.each([1, 2])('My stock at 412px, font scale %i', (font) => {
 
 it('shows one toast at a time: the switch replaces a toast of the screen', async () => {
   const page = await browser.newPage({ viewport: { width: WIDTH, height: 915 }, hasTouch: true, isMobile: true });
-  await page.goto(`${base}layout/my-stock.html?screenToast=1`);
-  await page.locator('.stock-card').first().waitFor();
+  await openLayout(page, 'layout/my-stock.html?screenToast=1', page.locator('.stock-card'));
   expect(await page.locator('.toast:visible').allTextContents()).toEqual(['Stock corrected.']);
   await page.getByRole('combobox', { name: /Switch shop/ }).selectOption({ label: 'Test Branch B (BR2)' });
   await page.locator('.shop-here-name', { hasText: 'Test Branch B (BR2)' }).waitFor();

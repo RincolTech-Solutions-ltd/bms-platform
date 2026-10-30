@@ -5,8 +5,8 @@
 Accepted (issue #709, owner decisions D92, D93, D98 and D99 of 30 Oct 2026). Builds on ADR-033 (units of measure),
 ADR-098 (default units for a retail business), ADR-100 (a unit's usual pack), ADR-106 (a new item in its smallest unit, a
 package never) and ADR-107 (packages inside packages). Amends ADR-098 (the default list) and ADR-107 rule 8 (the order the
-ladder is built in). Migration `V121`. Works with pending ADR-109 (one unit for many spellings, pull request #715), whose shared list
-of spellings the key below is to read once it is merged.
+ladder is built in). Migration `V121`. Works with ADR-109 (one unit for many spellings, issue #698), whose shared list of spellings the
+key below reads.
 
 ## Context
 
@@ -38,9 +38,9 @@ fixed at 12 (D98), and for the ladder to be set up from the smallest level up wh
    delivery's size made usual keeps the 12 (`retail.product_unit.size_kept`, reason `fixed_count`). The forms fill in 12
    and do not let it be changed. Every other package's count is set per item, as ADR-107 says.
 5. **One key for a shop's own spellings.** `StandardUnits.key` decides when two names are the same unit (Pcs and Piece,
-   Doz and Dozen, Kgs and Kg). Every use of the synonyms in this decision goes through it; until #715 is merged it reads a
-   small list of its own, after that it returns `CatalogueNames.unitKey` and the gram and millilitre spellings move to the
-   shared `unit-words.json`.
+   Doz and Dozen, Kgs and Kg). Every use of the synonyms in this decision goes through it, and it returns
+   `CatalogueNames.unitKey` (ADR-109), so there is one list of spellings: `frontend/src/words/unit-words.json`, which gains
+   gram and millilitre with this issue.
 6. **Existing shops.** `V121`, a Java migration so it uses that key, adds each standard unit a retail business that is not
    closed lacks under any spelling, audited as `retail.unit.created` by `system` with `source` `V121`. Nothing a shop made
    is touched or renamed, and two of its own units that are the same unit are left as they are.
@@ -56,5 +56,5 @@ ones the people who use the app say.
 **Worse:** the dozen's rule hangs on the unit's name, as `is_package` does: a unit renamed to Dozen takes it on, and one
 renamed away from it loses it. Seventeen units is a longer list than eight; the sections and the order keep it readable.
 
-**Watch for:** when #715 merges, point `StandardUnits.key` at `CatalogueNames.unitKey` and add the gram and ml spellings to
-`unit-words.json`; `StandardUnitsTest` keeps the cases both must give.
+**Watch for:** a new spelling of a standard unit goes into `unit-words.json`, never into `StandardUnits`;
+`StandardUnitsTest` keeps the cases the key must give.

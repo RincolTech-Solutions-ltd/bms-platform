@@ -1,0 +1,15 @@
+{
+  "about": "Issue #698, ADR-109: the one list of unit words. The PWA imports it (units-state.ts) and the server reads this very file (CatalogueNames). codes are read as the word in a sentence; also are other spellings of the same unit, shown as typed. Add a spelling here once.",
+  "units": [
+    { "word": "piece", "plural": "pieces", "codes": ["pc", "pcs", "pce"], "also": [] },
+    { "word": "kilogram", "plural": "kilograms", "codes": ["kg", "kgs"], "also": ["kilo", "kilos"] },
+    { "word": "gram", "plural": "grams", "codes": ["gm", "gms"], "also": ["g", "gramme", "grammes"] },
+    { "word": "millilitre", "plural": "millilitres", "codes": ["ml", "mls"], "also": ["milliliter", "milliliters"] },
+    { "word": "litre", "plural": "litres", "codes": ["ltr", "ltrs"], "also": ["l", "liter", "liters"] },
+    { "word": "metre", "plural": "metres", "codes": ["mtr", "mtrs"], "also": ["m", "meter", "meters"] },
+    { "word": "carton", "plural": "cartons", "codes": ["ctn", "ctns"], "also": [] },
+    { "word": "packet", "plural": "packets", "codes": ["pkt", "pkts"], "also": [] },
+    { "word": "dozen", "plural": "dozens", "codes": ["doz", "dz"], "also": [] },
+    { "word": "box", "plural": "boxes", "codes": ["bx"], "also": [] }
+  ]
+}

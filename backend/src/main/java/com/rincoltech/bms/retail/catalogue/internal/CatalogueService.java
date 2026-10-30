@@ -10,6 +10,7 @@ import com.rincoltech.bms.kernel.Cursor;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.Search;
 import com.rincoltech.bms.kernel.Versions;
+import com.rincoltech.bms.retail.catalogue.CatalogueNames;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.StandardUnits;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Category;
@@ -50,6 +51,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
 
 /**
  * The retail catalogue (FR-RET-01, FR-RET-02, FR-RET-14). One {@code @Transactional} method per
@@ -68,8 +70,6 @@ class CatalogueService {
     static final String GENERAL = "General";
 
     static final String PIECE = "Piece";
-    /** The piece unit a business may already have, lower case, in the order Quick add prefers them. */
-    static final List<String> PIECE_NAMES = List.of("piece", "pc", "pcs");
 
     private final CatalogueRepository repo;
     private final CurrentTenant currentTenant;
@@ -168,8 +168,10 @@ class CatalogueService {
     @Transactional
     Category createCategory(CategoryRequest r) {
         UUID id = UUID.randomUUID();
-        String name = r.name().trim();
+        // Issue #698 (D86 = A): saved in the one display style.
+        String name = CatalogueNames.display(r.name());
         String prefix = r.codePrefix() == null || r.codePrefix().isBlank() ? null : prefix(r.codePrefix());
+        refuseSameCategory(name, null);
         try {
             repo.insertCategory(id, name, prefix, CurrentPrincipal.require().userId());
         } catch (DuplicateKeyException e) {
@@ -195,7 +197,29 @@ class CatalogueService {
         return p;
     }
 
-    /** Which unique index refused the category: its name or its code start. */
+    /**
+     * Issue #698: a category name another category has, in any case, is refused before anything is written (a refused
+     * insert would end the transaction), naming the one that has it so the screen can offer it: "You already have BULBS.".
+     */
+    private void refuseSameCategory(String name, UUID self) {
+        // Spaces inside count once, so a category saved before ("test  cables") is found too (review of #715).
+        java.util.function.Function<String, String> key =
+                n -> n.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+        repo.categories().stream()
+                .filter(c -> !c.id().equals(self) && key.apply(c.name()).equals(key.apply(name)))
+                .findFirst()
+                .ifPresent(c -> {
+                    throw new ApiException(
+                            HttpStatus.CONFLICT,
+                            "duplicate_category",
+                            "Duplicate",
+                            "You already have " + c.name() + ".",
+                            List.of(),
+                            Map.of("existing_id", c.id(), "existing_name", c.name()));
+                });
+    }
+
+    /** Which unique index refused the category: its name (added a moment ago by someone else) or its code start. */
     static ApiException duplicateCategory(DuplicateKeyException e) {
         return String.valueOf(e.getMessage()).contains("retail_categories_code_prefix")
                 ? duplicate(
@@ -208,12 +232,16 @@ class CatalogueService {
     Unit createUnit(UnitRequest r) {
         UUID id = UUID.randomUUID();
         String name = r.name().trim();
+        refuseSameUnit(name, null);
         Unit of = requireUsualPackOf(id, r.usualPack());
         requireFixedUsualSize(name, r.usualPack());
+        // Only a write that raced the lock above is refused here: back to the savepoint, the unit made meanwhile is
+        // read and named, so the refusal always carries existing_id (review of #715).
+        Object savepoint = TransactionAspectSupport.currentTransactionStatus().createSavepoint();
         try {
             repo.insertUnit(id, name, CurrentPrincipal.require().userId());
         } catch (DuplicateKeyException e) {
-            throw duplicate("duplicate_unit", "A unit with this name exists.");
+            throw unitMadeMeanwhile(savepoint, name, id);
         }
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("name", name);
@@ -292,7 +320,7 @@ class CatalogueService {
         if (before.version() != expected) {
             throw Versions.conflict(before.version());
         }
-        String name = r.name() == null ? before.name() : r.name().trim();
+        String name = r.name() == null ? before.name() : CatalogueNames.display(r.name());
         boolean active = r.active() == null ? before.active() : r.active();
         if (name.isEmpty()) {
             throw ApiException.validation(List.of(new FieldProblem("name", "invalid", "The name must not be blank.")));
@@ -306,6 +334,10 @@ class CatalogueService {
         diff(was, now, "code_prefix", before.codePrefix(), codePrefix);
         if (now.isEmpty()) {
             return before;
+        }
+        // Only a new name is checked, so a duplicate stored before #698 can still be switched off (review of #715).
+        if (now.containsKey("name")) {
+            refuseSameCategory(name, id);
         }
         try {
             if (repo.updateCategory(id, name, active, codePrefix, expected) == 0) {
@@ -362,12 +394,16 @@ class CatalogueService {
                     "unit_in_use_by_pack",
                     "This unit is the unit of an active pack size. Switch those packs off on their items first.");
         }
+        if (now.containsKey("name")) {
+            refuseSameUnit(name, id);
+        }
+        Object savepoint = TransactionAspectSupport.currentTransactionStatus().createSavepoint();
         try {
             if (repo.updateUnit(id, name, active, expected) == 0) {
                 throw staleUnit(id);
             }
         } catch (DuplicateKeyException e) {
-            throw duplicate("duplicate_unit", "A unit with this name exists.");
+            throw unitMadeMeanwhile(savepoint, name, id);
         }
         if (now.containsKey("usual_pack")) {
             // Null when clear_usual_pack was sent: the three columns are cleared together (issue #637).
@@ -375,6 +411,34 @@ class CatalogueService {
         }
         audit.record(new AuditLog.Entry("retail.unit.updated", "retail.unit", id, null, was, now));
         return repo.unit(id).orElseThrow();
+    }
+
+    // JUSTIFICATION-A3: the one refusal both unit writes share, with the existing unit in its body (issue #698).
+    /**
+     * Issue #698 (ADR-109): a unit name another unit already stands for, in any spelling or case ("pcs" when Piece exists), is
+     * refused with 409 {@code unit_exists} naming it, under the lock of its key so two at once make one unit.
+     */
+    private void refuseSameUnit(String name, UUID self) {
+        repo.lockUnitKey(name);
+        repo.sameUnit(name, self).ifPresent(u -> {
+            throw unitExists(u);
+        });
+    }
+
+    /** The unit another request made under the same name a moment ago, read after going back to the savepoint. */
+    private ApiException unitMadeMeanwhile(Object savepoint, String name, UUID self) {
+        TransactionAspectSupport.currentTransactionStatus().rollbackToSavepoint(savepoint);
+        return unitExists(repo.sameUnit(name, self).orElseThrow());
+    }
+
+    private static ApiException unitExists(Unit u) {
+        return new ApiException(
+                HttpStatus.CONFLICT,
+                "unit_exists",
+                "Duplicate",
+                "You already have " + u.name() + ".",
+                List.of(),
+                Map.of("existing_id", u.id(), "existing_name", u.name(), "existing_active", u.active()));
     }
 
     private ApiException staleCategory(UUID id) {
@@ -428,7 +492,9 @@ class CatalogueService {
                 throw ofPack(e, i);
             }
         }
-        String duplicateReason = acceptName(r.description().trim(), r.unitId(), null, r.duplicateReason());
+        // Issue #698 (D86 = A): the name is checked, saved, audited and answered in the one display style.
+        String description = CatalogueNames.display(r.description());
+        String duplicateReason = acceptName(description, r.unitId(), null, r.duplicateReason());
         UUID by = CurrentPrincipal.require().userId();
         // Issue #562, ADR-081 as amended: the category always gives the code, such as BLB-0001; a typed one is refused.
         if (r.code() != null && !r.code().isBlank()) {
@@ -437,7 +503,7 @@ class CatalogueService {
         Product p = new Product(
                 UUID.randomUUID(),
                 repo.nextItemCode(r.categoryId()),
-                r.description().trim(),
+                description,
                 r.categoryId(),
                 null,
                 r.unitId(),
@@ -542,7 +608,13 @@ class CatalogueService {
      */
     @Transactional
     RetailCatalogue.NewItem createItem(
-            String description, UUID categoryId, UUID unitId, long costMinor, long sellMinor, String duplicateReason) {
+            String description,
+            UUID categoryId,
+            UUID unitId,
+            long costMinor,
+            long sellMinor,
+            String duplicateReason,
+            List<RetailCatalogue.NewPack> packs) {
         UUID by = CurrentPrincipal.require().userId();
         boolean categoryMade = false;
         UUID category = categoryId;
@@ -567,15 +639,13 @@ class CatalogueService {
             // Only a switched-on piece unit is used; a switched-off pc or pcs is passed over and Piece is made. A
             // switched-off
             // Piece is not switched back on: the person chooses a unit.
-            Map<String, UUID> units = repo.unitIdsByName();
+            // Issue #698: Piece, pc and pcs share one key, so the lookup finds whichever spelling the shop has.
+            String piece = CatalogueNames.unitKey(PIECE);
+            // The key's lock, as POST /units takes it, so "pcs" added at this moment and Piece made here are one unit.
+            repo.lockUnitKey(PIECE);
             Set<String> off = repo.inactiveUnitNames();
-            unit = PIECE_NAMES.stream()
-                    .filter(n -> !off.contains(n))
-                    .map(units::get)
-                    .filter(Objects::nonNull)
-                    .findFirst()
-                    .orElse(null);
-            if (unit == null && off.contains(PIECE.toLowerCase(Locale.ROOT))) {
+            unit = off.contains(piece) ? null : repo.unitIdsByName().get(piece);
+            if (unit == null && off.contains(piece)) {
                 throw ApiException.validation(List.of(new FieldProblem(
                         "unit_id", "inactive_unit", "The Piece unit is switched off. Choose a unit.")));
             }
@@ -583,10 +653,25 @@ class CatalogueService {
         if (unit == null) {
             unit = UUID.randomUUID();
             unitMade = madeForQuickAdd("retail_units", "retail.unit", unit, PIECE, by);
-            unit = unitMade ? unit : repo.unitIdsByName().get(PIECE.toLowerCase(Locale.ROOT));
+            unit = unitMade ? unit : repo.unitIdsByName().get(CatalogueNames.unitKey(PIECE));
         }
+        // Issue #695: the packages go through create, so each is checked and refused on its own row as on Items.
+        List<PackRequest> asked = packs == null
+                ? null
+                : packs.stream()
+                        .map(k -> k == null
+                                ? null
+                                : new PackRequest(
+                                        k.unitId(),
+                                        k.factor(),
+                                        k.purpose(),
+                                        k.sellMinor(),
+                                        k.holdsUnitId(),
+                                        k.holdsQty(),
+                                        k.usualBuy()))
+                        .toList();
         Product p = create(new CreateProductRequest(
-                null, description, category, unit, costMinor, sellMinor, duplicateReason, null));
+                null, description, category, unit, costMinor, sellMinor, duplicateReason, asked));
         // Read again: the answer of create leaves out the cost for someone who may not read it.
         return new RetailCatalogue.NewItem(
                 CatalogueLookup.snapshot(repo.find(p.id()).orElseThrow()), categoryMade, unitMade);
@@ -682,7 +767,8 @@ class CatalogueService {
         } else {
             // Issue #384: a variant's name, category and unit are its item's; only its size, colour, code and on sale
             // change here.
-            if (r.description() != null && !r.description().trim().equals(before.description())) {
+            if (r.description() != null
+                    && !CatalogueNames.display(r.description()).equals(CatalogueNames.display(before.description()))) {
                 throw ApiException.rule(
                         "variant_name_follows_item",
                         "The name of a size or colour comes from its item. Change the item's name on its sizes and colours page.");
@@ -727,9 +813,7 @@ class CatalogueService {
                 before.code(),
                 variant != null
                         ? VariantGrid.description(variant.familyName(), size, colour)
-                        : r.description() == null
-                                ? before.description()
-                                : r.description().trim(),
+                        : r.description() == null ? before.description() : CatalogueNames.display(r.description()),
                 r.categoryId() == null ? before.categoryId() : r.categoryId(),
                 null,
                 r.unitId() == null ? before.unitId() : r.unitId(),
@@ -1526,10 +1610,9 @@ class CatalogueService {
                 "Buy stock opens only on a package that is switched on and used for buying.")));
     }
 
-    /** A unit's name as a word in a sentence: lower case, a short code as its word ("Ctn" is "carton"). */
+    /** A unit's name as a word in a sentence: lower case, a short code as its word ("Ctn" is "carton"), from the one list. */
     private static String unitWord(String name) {
-        String lower = name == null ? "" : name.trim().toLowerCase(Locale.ROOT);
-        return RetailCatalogue.SHORT_CODE_WORDS.getOrDefault(lower, lower);
+        return CatalogueNames.unitWord(name);
     }
 
     /** "pieces", "boxes", "metres": a unit's word in the plural for a number other than one (review of #710). */

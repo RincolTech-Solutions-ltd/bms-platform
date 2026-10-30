@@ -8,7 +8,7 @@ import { useStaff } from '../context';
 import { showQty } from './maths';
 import { Money, Problem, money } from './ui';
 import { SETTINGS_MANAGE, UNITS, capabilityOn, holds } from './permissions';
-import { factorMilli, hasOwnPrice, packPriceMinor, quantityIn, unitWord, unitWords } from './units-state';
+import { factorMilli, hasOwnPrice, orExistingUnit, packPriceMinor, quantityIn, unitWord, unitWords, type AddedUnit } from './units-state';
 import { WORDS } from '../../../app/glossary';
 import { AddByName } from '../../../app/ui/EmptyChoice';
 import { PickerWithAdd } from '../../../app/ui/PickerWithAdd';
@@ -326,9 +326,9 @@ export function PackEditor({ product }: { product: Product }) {
         form={(done, cancel) => (
           <AddByName id="pack-unit-add" onCancel={cancel} add={{
             label: 'Add a unit', name: 'Name of the new unit, such as carton', send: 'Add unit', maxLength: 50,
-            create: (name) => retail.createUnit(name),
-            onAdded: (unit: Unit) => {
-              queryClient.setQueryData<Unit[]>(['retail', 'catalogue', 'units'], (was) => [...(was ?? []).filter((u) => u.id !== unit.id), unit]);
+            create: (name) => orExistingUnit(retail.createUnit(name)),
+            onAdded: (unit: AddedUnit) => {
+              if (!unit.reused) queryClient.setQueryData<Unit[]>(['retail', 'catalogue', 'units'], (was) => [...(was ?? []).filter((u) => u.id !== unit.id), unit]);
               void queryClient.invalidateQueries({ queryKey: ['retail', 'catalogue', 'units'] });
               done({ value: unit.id ?? '', label: unit.name ?? '' });
             },

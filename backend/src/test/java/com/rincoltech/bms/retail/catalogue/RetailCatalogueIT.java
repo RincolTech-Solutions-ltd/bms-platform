@@ -17,6 +17,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -76,6 +78,63 @@ class RetailCatalogueIT extends IntegrationTest {
     }
 
     /**
+     * Review of #715 (issue #698): an import holding the key's lock while it adds "pcs" and a POST of "Piece" at the same
+     * moment end with one unit. The import is played by an open owner transaction that does what the import does: it takes
+     * the key's lock, then inserts.
+     */
+    // JUSTIFICATION-A3: the review of #715 asks for this race to be proven by an IT.
+    @Test
+    void anImportAddingPcsAndAPostOfPieceAtOnceEndWithOneUnit() throws Exception {
+        UUID pcs = UUID.randomUUID();
+        try (Connection c = TestDatabase.ownerDataSource().getConnection()) {
+            c.setAutoCommit(false);
+            try (PreparedStatement s =
+                    c.prepareStatement("SELECT pg_advisory_xact_lock(hashtextextended(? || ':unit:' || 'piece', 0))")) {
+                s.setString(1, t.tenantId().toString());
+                s.execute();
+            }
+            try (PreparedStatement s =
+                    c.prepareStatement("INSERT INTO retail_units (id, tenant_id, name) VALUES (?, ?, 'pcs')")) {
+                s.setObject(1, pcs);
+                s.setObject(2, t.tenantId());
+                s.executeUpdate();
+            }
+            CompletableFuture<ResponseEntity<JsonNode>> post =
+                    CompletableFuture.supplyAsync(() -> api.post("/units", Map.of("name", "Piece"), ADMIN));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            while (TestDatabase.owner()
+                                    // Only a wait on this key's advisory lock counts, not another test's.
+                                    .sql("""
+                                            SELECT count(*) FROM pg_locks l,
+                                                   (SELECT hashtextextended(? || ':unit:piece', 0) AS k) h
+                                             WHERE NOT l.granted AND l.locktype = 'advisory' AND l.objsubid = 1
+                                               AND l.classid::bigint = ((h.k >> 32) & 4294967295)
+                                               AND l.objid::bigint = (h.k & 4294967295)
+                                            """)
+                                    .param(t.tenantId().toString())
+                                    .query(Long.class)
+                                    .single()
+                            == 0
+                    && System.nanoTime() < deadline) {
+                Thread.sleep(50);
+            }
+            assertThat(post.isDone()).as("the POST waits for the key's lock").isFalse();
+            c.commit();
+            ResponseEntity<JsonNode> answer = post.get(30, TimeUnit.SECONDS);
+            assertThat(answer.getStatusCode()).as("%s", answer.getBody()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(answer.getBody().get("code").asString()).isEqualTo("unit_exists");
+            assertThat(answer.getBody().get("existing_id").asString()).isEqualTo(pcs.toString());
+        }
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM retail_units WHERE tenant_id = ? AND lower(name) IN ('pcs', 'piece')")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+    }
+
+    /**
      * Data dictionary rule 1: codes are unique ignoring case and surrounding spaces. Issue #562: an add never takes a typed
      * code, and the database still refuses a second item holding one in other capitals.
      */
@@ -99,11 +158,16 @@ class RetailCatalogueIT extends IntegrationTest {
         assertThatThrownBy(() -> api.existingCode(second, "sw-01"))
                 .isInstanceOf(org.springframework.dao.DuplicateKeyException.class);
 
-        assertThat(api.post("/units", Map.of("name", "PCS"), ADMIN)
-                        .getBody()
-                        .get("code")
-                        .asString())
-                .isEqualTo("duplicate_unit");
+        // Issue #698 (ADR-109): the same unit in another case or spelling is refused, naming the one that exists.
+        for (String same : List.of("PCS", "pc", "Pieces")) {
+            ResponseEntity<JsonNode> again2 = api.post("/units", Map.of("name", same), ADMIN);
+            assertThat(again2.getStatusCode()).as(same).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(again2.getBody().get("code").asString()).isEqualTo("unit_exists");
+            assertThat(again2.getBody().get("existing_id").asString()).isEqualTo(unit.toString());
+            assertThat(again2.getBody().get("detail").asString())
+                    .isEqualTo("You already have "
+                            + again2.getBody().get("existing_name").asString() + ".");
+        }
         body.put("description", "Test switch three");
         body.put("category_id", UUID.randomUUID());
         assertThat(api.post("/products", body, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
@@ -163,7 +227,8 @@ class RetailCatalogueIT extends IntegrationTest {
                 "*",
                 Map.of("If-Match", "\"1\""));
         assertThat(patched.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(patched.getBody().get("description").asString()).isEqualTo("Test plug three pin");
+        // Saved in the display style (issue #698, ADR-109, D86 = A).
+        assertThat(patched.getBody().get("description").asString()).isEqualTo("Test Plug Three Pin");
         assertThat(patched.getBody().get("active").asBoolean()).isFalse();
         assertThat(patched.getBody().get("sell_minor").asLong()).isEqualTo(1_100);
         ResponseEntity<JsonNode> withPrice = api.call(

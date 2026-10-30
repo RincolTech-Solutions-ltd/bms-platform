@@ -1,8 +1,16 @@
 package com.rincoltech.bms.retail.catalogue;
 
 import com.rincoltech.bms.kernel.Principal;
+import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
 import java.math.BigDecimal;
 import java.text.Normalizer;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -42,11 +50,6 @@ public interface RetailCatalogue {
                     + "|sets? of \\d+.*",
             Pattern.CASE_INSENSITIVE);
 
-    /** Every short code of {@link #PACKAGE_WORDS} and its word, as {@code UNIT_WORDS} in units-state.ts has them. */
-    java.util.Map<String, String> SHORT_CODE_WORDS = java.util.Map.of(
-            "ctn", "carton", "ctns", "carton", "pkt", "packet", "pkts", "packet", "bx", "box", "doz", "dozen", "dz",
-            "dozen");
-
     /** True when the unit's name is a package word of {@link #PACKAGE_WORDS}. */
     static boolean isPackageWord(String unitName) {
         return unitName != null && PACKAGE_WORDS.matcher(unitName.trim()).matches();
@@ -56,11 +59,11 @@ public interface RetailCatalogue {
      * Issue #689: the refusal of a package as a new item's unit, as the PWA words it ({@code packageAsUnit} in
      * new-item-packs.tsx): "A box is a package", or "Cartons is a package" for a unit named in the plural. A short code reads
      * as its word, as {@code unitWord} in units-state.ts maps it (review of #692): "Ctn" and "Ctns" are "a carton", "Bx" is "a
-     * box", "Doz" and "Dz" are "a dozen". fixtures/retail/package-refusals-689.json holds the sentences both sides must give.
+     * box", "Doz" and "Dz" are "a dozen", from the one list (ADR-109). fixtures/retail/package-refusals-689.json holds the
+     * sentences both sides must give.
      */
     static String packageAsUnit(String unitName) {
-        String name = unitName.trim().toLowerCase(java.util.Locale.ROOT);
-        String word = SHORT_CODE_WORDS.getOrDefault(name, name);
+        String word = CatalogueNames.unitWord(unitName);
         String head = word.split(" ")[0];
         String named = head.endsWith("s") && !head.endsWith("ss")
                 ? Character.toUpperCase(word.charAt(0)) + word.substring(1)
@@ -131,7 +134,6 @@ public interface RetailCatalogue {
      * may be used at all is the {@code units} capability, which the caller checks.
      */
     Optional<PackUnit> packUnit(UUID productId, UUID unitId);
-
     /**
      * ADR-067 decision 11: the product's sell price in force at {@code at}, from its price history (the last change at or
      * before it; before the first change, the price that change replaced), or the current price when the history says
@@ -244,13 +246,40 @@ public interface RetailCatalogue {
      * Issue #632, Quick add: makes an item in the caller's transaction through the same rules as Items (the code from the
      * category, ADR-081; the name check, 422 {@code duplicate_product_name}). A null category files it under General and a
      * null unit counts it in the shop's piece unit (Piece, or pc when the business uses that); either is made when the
-     * business has none of that name, and a switched-off one is refused as on Items.
+     * business has none of that name, and a switched-off one is refused as on Items. Issue #695: its packages are made with
+     * it, as a new item's packs on Items (ADR-106, ADR-107), so a refused package saves nothing.
      */
     NewItem createItem(
-            String description, UUID categoryId, UUID unitId, long costMinor, long sellMinor, String duplicateReason);
+            String description,
+            UUID categoryId,
+            UUID unitId,
+            long costMinor,
+            long sellMinor,
+            String duplicateReason,
+            List<NewPack> packs);
 
     /** The item Quick add made, and whether it also made the General category or the Piece unit. */
     record NewItem(ProductSnapshot product, boolean categoryMade, boolean unitMade) {}
+
+    /** Issue #695: a package of a new Quick add item, with the fields and rules of a new item's pack on Items. */
+    // JUSTIFICATION-A3: the stock module may not see the catalogue's internal PackRequest, so its public API carries
+    // the pack.
+    @Schema(name = "RetailQuickAddPack", description = "As RetailPackRequest: a size, or what it holds and how many")
+    // Review of #716: the constraints of RetailPackRequest, checked on the request as POST /retail/products checks
+    // them, holds_qty within PackLadder.MIN_HOLDS and MAX_HOLDS.
+    record NewPack(
+            @NotNull UUID unitId,
+
+            @DecimalMin("1") @Digits(integer = 11, fraction = 3) @Schema(type = "string", example = "24")
+            BigDecimal factor,
+
+            @jakarta.validation.constraints.Pattern(regexp = PACK_PURPOSES)
+            String purpose,
+
+            @PositiveOrZero @Max(MAX_AMOUNT_MINOR) Long sellMinor,
+            UUID holdsUnitId,
+            @Min(2) @Max(1_000_000) Integer holdsQty,
+            Boolean usualBuy) {}
 
     /**
      * A pack size: {@code factor} base units in one pack of {@code unit}. Issue #624: {@code purpose} says whether it is

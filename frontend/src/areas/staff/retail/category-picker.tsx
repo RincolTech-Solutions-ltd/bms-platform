@@ -32,10 +32,11 @@ const CATEGORIES = ['retail', 'catalogue', 'categories'];
 // Every list of categories the screens keep: the catalogue's, and the Stock page's filter.
 const CATEGORY_KEYS = [CATEGORIES, ['retail', 'categories']];
 
-/** The category already called `name`, whatever the case and the spaces around it, switched off or not. */
+/** The category already called `name`, whatever the case and the spaces in it (issue #698), switched off or not. */
 export function sameName(categories: Category[], name: string): Category | undefined {
-  const wanted = name.trim().toLowerCase();
-  return wanted === '' ? undefined : categories.find((c) => (c.name ?? '').trim().toLowerCase() === wanted);
+  const key = (n: string) => n.trim().replace(/\s+/g, ' ').toLowerCase();
+  const wanted = key(name);
+  return wanted === '' ? undefined : categories.find((c) => key(c.name ?? '') === wanted);
 }
 
 /** The categories whose name holds the search, any part of it and whatever the case. */

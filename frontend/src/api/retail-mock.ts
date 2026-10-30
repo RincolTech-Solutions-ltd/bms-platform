@@ -19,6 +19,7 @@ import { createReturnsMock } from './retail-returns-mock';
 import { createPurchasingMock } from './retail-purchasing-mock';
 import { barcodeKey, checkBarcode, scanKeys, shopEan } from '../areas/staff/retail/barcode-state';
 import { bigDrop } from '../areas/staff/retail/maths';
+import { listedWord } from '../areas/staff/retail/units-state';
 import { MAX_VARIANTS, cleanOption, planVariants, variantDescription, variantKey, variantLabel } from './retail-variants';
 
 // Fabricated retail data for VITE_RETAIL_MOCK and for tests: invented products, branches and
@@ -361,8 +362,13 @@ export function createMockRetail(): RetailApi {
     const levels = own.filter((k) => Number.isInteger(Number(k.factor))).map((k) => ({ unit: k.unit, factor: k.factor }));
     return top ? { standard_pack: { unit: top.unit, factor: top.factor, levels } } : {};
   };
-  const clash = (list: { id: string; name: string }[], id: string, name: string, code: string, what: string) => {
-    if (list.some((x) => x.id !== id && x.name.toLowerCase() === name.trim().toLowerCase())) refuse(409, code, `A ${what} with this name exists.`);
+  // Issue #698: the refusal names the row that exists; a unit compares by the one list's spellings ("pcs" is Piece).
+  const clash = (list: { id: string; name: string; active?: boolean }[], id: string, name: string, code: string, what: string) => {
+    const key = (n: string) => (what === 'unit' ? listedWord(n) : n.trim().toLowerCase());
+    const hit = list.find((x) => x.id !== id && key(x.name) === key(name));
+    if (!hit) return;
+    if (what === 'unit') refuse(409, 'unit_exists', `You already have ${hit.name}.`, { existing_id: hit.id, existing_name: hit.name, existing_active: hit.active !== false });
+    refuse(409, code, `A ${what} with this name exists.`, { existing_id: hit.id, existing_name: hit.name });
   };
   const staleRow = (row: { version?: number }, version: number) => {
     if ((row.version ?? 1) !== version) refuse(409, 'version_conflict', 'This was changed by someone else. Reload and try again.');
@@ -1422,6 +1428,12 @@ export function createMockRetail(): RetailApi {
           p = { id: nextId('b'), code, description: (body.description ?? '').trim(), category: category.name, unit: unit.name, costMinor: body.cost_minor ?? 0, sellMinor: body.sell_minor ?? 0, active: true, version: 1 };
           products.set(p.id, p);
           history.set(p.id, [{ id: nextId('h'), at: new Date().toISOString(), source: 'initial', new_sell_minor: p.sellMinor, currency: 'UGX', ...(profitAccess ? { new_cost_minor: p.costMinor } : {}) }]);
+          // Issue #695: the new item's packages in the same save, sizes worked out through what each holds, as the server does.
+          const made = (body.packs ?? []).map((k): Pack => {
+            const held = unitRows.find((u) => u.id === k.holds_unit_id);
+            return { id: nextId('k'), product_id: p.id, unit_id: k.unit_id, unit: unitRows.find((u) => u.id === k.unit_id)?.name ?? '', factor: k.factor ?? '1.000', active: true, version: 1, purpose: k.purpose ?? 'both', ...(k.purpose === 'buy' || k.sell_minor === undefined ? {} : { sell_minor: k.sell_minor }), ...(held && k.holds_qty !== undefined ? { holds_unit_id: held.id, holds_unit: held.name, holds_qty: k.holds_qty } : {}), usual_buy: k.usual_buy === true };
+          });
+          if (made.length > 0) packs.set(p.id, reladder(p.id, made));
         }
         // The quantity is added to what the branch holds, never set (ADR-101).
         const added = body.qty === undefined ? null : toMilli(body.qty);
