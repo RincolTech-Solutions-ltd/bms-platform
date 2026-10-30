@@ -16106,6 +16106,21 @@ export interface components {
             /** @description True when this add made the Piece unit */
             unit_made?: boolean;
         };
+        /** @description As RetailPackRequest: a size, or what it holds and how many */
+        RetailQuickAddPack: {
+            /** @example 24 */
+            factor?: string;
+            /** Format: int32 */
+            holds_qty?: number;
+            /** Format: uuid */
+            holds_unit_id?: string;
+            purpose?: string;
+            /** Format: int64 */
+            sell_minor?: number;
+            /** Format: uuid */
+            unit_id?: string;
+            usual_buy?: boolean;
+        };
         /** @description Issue #632: an item, its prices and how many there are at a branch, in one tap. With product_id, an item already in the list, only the quantity is added and the other item fields are ignored */
         RetailQuickAddRequest: {
             /**
@@ -16127,6 +16142,8 @@ export interface components {
             description?: string;
             /** @description As on a new item: to add a name that exists already, administrators only */
             duplicate_reason?: string;
+            /** @description Issue #695: the new item's packages, as packs of POST /retail/products (issue #689, ADR-106, ADR-107), made in the same transaction; a refused package names its pack_index and saves nothing. Ignored with product_id. qty stays in the item's smallest unit */
+            packs?: components["schemas"]["RetailQuickAddPack"][];
             /** @description Issue #646: the goods were just bought and paid from the branch's cash or mobile money (retail.purchase.create there). qty above 0 and cost_minor above 0 are then needed, and the stock is recorded as a purchase, as Buy stock does, never against opening balance equity. Left out: opening stock, as before */
             paid_from?: string;
             /**

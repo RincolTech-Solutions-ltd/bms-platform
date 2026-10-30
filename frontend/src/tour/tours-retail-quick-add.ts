@@ -10,14 +10,14 @@ const retail = (step: Omit<TourStep, 'module'>): TourStep => ({ module: 'retail'
 
 export const quickAddPage: Tour = {
   id: 'page-quick-add',
-  version: 2,
+  version: 3,
   title: 'This page: quick add',
   audience: (me) => held(me, 'retail.catalogue.manage') && held(me, 'retail.stock.read'),
   autoStart: false,
   page: '/staff/retail/quick-add',
   steps: [
-    retail({ id: 'fields', target: 'quick-add-fields', title: 'Type what you know', body: 'Type the name and choose its group. Type the selling price. The buying price is optional. Type how many you have here now.' }),
-    retail({ id: 'where', target: 'quick-add-more', title: 'Unit and photo', body: 'The unit starts as a piece. Add a photo if you like.' }),
+    retail({ id: 'fields', target: 'quick-add-fields', title: 'Type what you know', body: 'Type the name and choose its group. The unit starts as a piece. Say if you buy or sell it in cartons or boxes. Type the prices, then how many you have here now.' }),
+    retail({ id: 'where', target: 'quick-add-more', title: 'Photo', body: 'Add a photo if you like.' }),
     retail({ id: 'add', target: 'quick-add-go', title: 'One tap', body: 'Tap Add. The item and its stock are saved together. Then tap Add another, or Sell it.' }),
   ],
 };

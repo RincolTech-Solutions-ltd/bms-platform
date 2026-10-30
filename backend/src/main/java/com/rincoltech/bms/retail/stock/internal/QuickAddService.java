@@ -140,7 +140,8 @@ class QuickAddService {
                     r.unitId(),
                     r.costMinor() == null ? 0 : r.costMinor(),
                     r.sellMinor(),
-                    r.duplicateReason());
+                    r.duplicateReason(),
+                    r.packs());
             product = made.product();
             categoryMade = made.categoryMade();
             unitMade = made.unitMade();

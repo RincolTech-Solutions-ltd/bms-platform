@@ -623,7 +623,8 @@ describe('adding an item quickly (issue #632)', () => {
   const PARTS = [
     ['areas/staff/menu.tsx', 'areas/staff/tabs.tsx', 'areas/staff/retail/first-items.tsx'],
     ['areas/staff/retail/quick-add.tsx', 'app/glossary.ts'],
-    ['areas/staff/retail/quick-add.tsx', 'areas/staff/retail/item-photo.tsx'],
+    // Issue #695: the packages questions are the shared rows of Add an item.
+    ['areas/staff/retail/quick-add.tsx', 'areas/staff/retail/item-photo.tsx', 'areas/staff/retail/new-item-packs.tsx'],
     ['areas/staff/retail/quick-add.tsx'],
     ['areas/staff/retail/quick-add.tsx'],
   ];

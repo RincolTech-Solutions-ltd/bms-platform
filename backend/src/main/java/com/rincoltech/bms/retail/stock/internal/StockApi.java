@@ -234,7 +234,15 @@ final class StockApi {
                                     + " (retail.purchase.create there). qty above 0 and cost_minor above 0 are then needed, and the"
                                     + " stock is recorded as a purchase, as Buy stock does, never against opening balance equity."
                                     + " Left out: opening stock, as before")
-            String paidFrom) {}
+            String paidFrom,
+
+            @Size(max = 10)
+            @Schema(
+                    description =
+                            "Issue #695: the new item's packages, as packs of POST /retail/products (issue #689, ADR-106,"
+                                    + " ADR-107), made in the same transaction; a refused package names its pack_index and"
+                                    + " saves nothing. Ignored with product_id. qty stays in the item's smallest unit")
+            List<RetailCatalogue.NewPack> packs) {}
 
     @Schema(name = "RetailQuickAdd")
     record QuickAdd(

@@ -17039,6 +17039,37 @@
           }
         }
       },
+      "RetailQuickAddPack" : {
+        "description" : "As RetailPackRequest: a size, or what it holds and how many",
+        "properties" : {
+          "factor" : {
+            "example" : "24",
+            "type" : "string"
+          },
+          "holds_qty" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "holds_unit_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "purpose" : {
+            "type" : "string"
+          },
+          "sell_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "unit_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "usual_buy" : {
+            "type" : "boolean"
+          }
+        }
+      },
       "RetailQuickAddRequest" : {
         "description" : "Issue #632: an item, its prices and how many there are at a branch, in one tap. With product_id, an item already in the list, only the quantity is added and the other item fields are ignored",
         "properties" : {
@@ -17070,6 +17101,15 @@
             "maxLength" : 300,
             "minLength" : 0,
             "type" : "string"
+          },
+          "packs" : {
+            "description" : "Issue #695: the new item's packages, as packs of POST /retail/products (issue #689, ADR-106, ADR-107), made in the same transaction; a refused package names its pack_index and saves nothing. Ignored with product_id. qty stays in the item's smallest unit",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailQuickAddPack"
+            },
+            "maxItems" : 10,
+            "minItems" : 0,
+            "type" : "array"
           },
           "paid_from" : {
             "description" : "Issue #646: the goods were just bought and paid from the branch's cash or mobile money (retail.purchase.create there). qty above 0 and cost_minor above 0 are then needed, and the stock is recorded as a purchase, as Buy stock does, never against opening balance equity. Left out: opening stock, as before",

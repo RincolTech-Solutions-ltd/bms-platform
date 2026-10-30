@@ -1,8 +1,10 @@
 package com.rincoltech.bms.retail.catalogue;
 
 import com.rincoltech.bms.kernel.Principal;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.text.Normalizer;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -244,13 +246,33 @@ public interface RetailCatalogue {
      * Issue #632, Quick add: makes an item in the caller's transaction through the same rules as Items (the code from the
      * category, ADR-081; the name check, 422 {@code duplicate_product_name}). A null category files it under General and a
      * null unit counts it in the shop's piece unit (Piece, or pc when the business uses that); either is made when the
-     * business has none of that name, and a switched-off one is refused as on Items.
+     * business has none of that name, and a switched-off one is refused as on Items. Issue #695: its packages are made with
+     * it, as a new item's packs on Items (ADR-106, ADR-107), so a refused package saves nothing.
      */
     NewItem createItem(
-            String description, UUID categoryId, UUID unitId, long costMinor, long sellMinor, String duplicateReason);
+            String description,
+            UUID categoryId,
+            UUID unitId,
+            long costMinor,
+            long sellMinor,
+            String duplicateReason,
+            List<NewPack> packs);
 
     /** The item Quick add made, and whether it also made the General category or the Piece unit. */
     record NewItem(ProductSnapshot product, boolean categoryMade, boolean unitMade) {}
+
+    /** Issue #695: a package of a new Quick add item, with the fields and rules of a new item's pack on Items. */
+    // JUSTIFICATION-A3: the stock module may not see the catalogue's internal PackRequest, so its public API carries
+    // the pack.
+    @Schema(name = "RetailQuickAddPack", description = "As RetailPackRequest: a size, or what it holds and how many")
+    record NewPack(
+            UUID unitId,
+            @Schema(type = "string", example = "24") BigDecimal factor,
+            String purpose,
+            Long sellMinor,
+            UUID holdsUnitId,
+            Integer holdsQty,
+            Boolean usualBuy) {}
 
     /**
      * A pack size: {@code factor} base units in one pack of {@code unit}. Issue #624: {@code purpose} says whether it is

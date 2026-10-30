@@ -18,6 +18,7 @@ import { unitWord, unitWords } from './units-state';
 // new is stored. The words follow the units chosen: "How many bulbs in one carton".
 
 export const PACKAGES_QUESTION = 'Do you buy or sell it in boxes, cartons or other packages?';
+export const USUAL_BUY_QUESTION = 'How do you usually buy it, and for how much?';
 
 const ANSWERS = [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }] as const;
 
@@ -199,7 +200,10 @@ export function piecePriceOf(answer: UsualAnswer, pieces: bigint): number | null
   return answer.priceMinor === null ? null : perPieceMinor(answer.priceMinor, pieces * 1000n);
 }
 
-/** "How do you usually buy it?" with the levels, and for a package "What do you pay for one carton?" with the piece worked out. */
+/**
+ * "How do you usually buy it, and for how much?" with the levels (the owner's words, issue #695), and for a package "What do
+ * you pay for one carton?" with the piece worked out. Add an item and Quick add both ask it here.
+ */
 export function UsualLevel({ id, use, on, rows, units, smallest, answer, onAnswer, showErrors, children }: {
   id: string;
   /** Asked only while the item has packages; else the form's own price field alone. */
@@ -217,7 +221,7 @@ export function UsualLevel({ id, use, on, rows, units, smallest, answer, onAnswe
   const choices = levelChoices(rows, units, smallest, use);
   if (!on || choices.length < 2) return <>{children}</>;
   const chosen = choices.find((c) => c.value === String(answer.key)) ?? choices[0]!;
-  const question = use === 'buy' ? 'How do you usually buy it?' : 'How do you usually sell it, and at what price?';
+  const question = use === 'buy' ? USUAL_BUY_QUESTION : 'How do you usually sell it, and at what price?';
   const one = oneOf(smallest, 'item');
   const level = chosen.label.toLowerCase();
   const piece = chosen.value === '0' ? null : piecePriceOf(answer, chosen.pieces);
