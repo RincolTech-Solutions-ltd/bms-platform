@@ -272,8 +272,7 @@ public interface RetailCatalogue {
     // the pack.
     @Schema(name = "RetailQuickAddPack", description = "As RetailPackRequest: a size, or what it holds and how many")
     // Review of #716: the constraints of RetailPackRequest, checked on the request as POST /retail/products checks
-    // them;
-    // holds_qty within PackLadder.MIN_HOLDS and MAX_HOLDS.
+    // them, holds_qty within PackLadder.MIN_HOLDS and MAX_HOLDS.
     record NewPack(
             @NotNull UUID unitId,
 

@@ -233,6 +233,33 @@ class RetailQuickAddPacksIT extends IntegrationTest {
         assertThat(stock(productOf(r))).isEqualByComparingTo("123");
     }
 
+    // JUSTIFICATION-A3: round 3 of the review of #716 asks for paid plus product_id with a level, and an unknown level.
+    @Test
+    void anItemAlreadyInTheListBoughtByItsOwnCartonPaysTheCartonPrice() {
+        ResponseEntity<JsonNode> made = quickAdd("Test Eraser", "0", List.of(pack(carton, "24")));
+        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("product_id", productOf(made));
+        body.put("qty", "24");
+        body.put("branch_id", t.headOffice());
+        body.put("paid_from", "cash");
+        body.put("cost_minor", 4_167);
+        body.put("paid_level_unit_id", carton);
+        body.put("paid_level_cost_minor", 100_000);
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/quick-add", body, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(r.getBody().get("paid_minor").asLong()).isEqualTo(100_000);
+
+        // A level that is no package of the item is refused, never booked at 24 times the piece cost.
+        body.put("paid_level_unit_id", box);
+        ResponseEntity<JsonNode> none =
+                api.postKeyed("/quick-add", body, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(none.getStatusCode()).as("%s", none.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(none.getBody().get("errors").get(0).get("code").asString()).isEqualTo("unknown_pack_unit");
+        assertThat(stock(productOf(made))).isEqualByComparingTo("24");
+    }
+
     @Test
     void aPackageLevelWithoutPaidFromIsRefused() {
         Map<String, Object> body = new LinkedHashMap<>();

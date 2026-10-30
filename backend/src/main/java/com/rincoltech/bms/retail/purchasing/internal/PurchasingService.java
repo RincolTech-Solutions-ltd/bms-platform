@@ -195,14 +195,18 @@ class PurchasingService implements QuickAddPurchase {
     @Transactional
     public Bought buy(UUID branchId, UUID productId, BigDecimal qty, long costMinor, String method, Level level) {
         // Issue #695: bought by the carton, the whole cartons are one pack line at the carton price, as Buy stock
-        // records
-        // it, and only the pieces left over are at the piece cost, so the cash that leaves is what the cartons cost.
+        // records it, and only the pieces left over are at the piece cost, so the cash that leaves is what the
+        // cartons cost. A level that is no active pack of the item is refused, never booked at the piece cost.
         BigDecimal factor = level == null
                 ? null
                 : catalogue
                         .packUnit(productId, level.unitId())
+                        .filter(RetailCatalogue.PackUnit::active)
                         .map(RetailCatalogue.PackUnit::factor)
-                        .orElse(null);
+                        .orElseThrow(() -> ApiException.validation(List.of(new FieldProblem(
+                                "paid_level_unit_id",
+                                "unknown_pack_unit",
+                                "The item has no such package. Choose how you bought it again."))));
         BigDecimal whole = factor == null ? BigDecimal.ZERO : qty.divideToIntegralValue(factor);
         BigDecimal loose = qty.subtract(whole.multiply(factor == null ? BigDecimal.ZERO : factor));
         List<PurchaseLineRequest> lines = new ArrayList<>();
@@ -224,8 +228,16 @@ class PurchasingService implements QuickAddPurchase {
                 new PurchaseRequest(null, clock.today(tenant.profile().timezone()), method, "Quick add", lines);
         // The bounds Buy stock's route checks before record(), so nothing Buy stock refuses is taken here; named by the
         // Quick add field the value came from.
+        // Review of #716: a problem on the package line is named by the package fields it came from.
+        String packLine = "lines[" + (lines.size() - 1) + "]";
         List<FieldProblem> problems = validator.validate(r).stream()
-                .map(v -> new FieldProblem(quickAddField(v.getPropertyPath().toString()), "invalid", v.getMessage()))
+                .map(v -> {
+                    String path = v.getPropertyPath().toString();
+                    String field = whole.signum() > 0 && path.startsWith(packLine) && path.endsWith(".costMinor")
+                            ? "paid_level_cost_minor"
+                            : quickAddField(path);
+                    return new FieldProblem(field, "invalid", v.getMessage());
+                })
                 .toList();
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);

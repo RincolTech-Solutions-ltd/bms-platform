@@ -26,8 +26,9 @@ const setProductPhoto = vi.fn();
 const createCategory = vi.fn();
 const createUnit = vi.fn();
 const addPack = vi.fn();
-// Never answers unless a test says so: an item already in the list is then counted in the packages typed.
-const getProduct = vi.fn((..._a: unknown[]): Promise<unknown> => new Promise(() => undefined));
+// An item already in the list with no packages, unless a test says otherwise (round 3 of the review of #716).
+const noPacks = async (id: unknown) => ({ id, description: 'Test Rice 1kg', unit: 'pc', unit_id: 'u1' });
+const getProduct = vi.fn((...a: unknown[]): Promise<unknown> => noPacks(a[0]));
 let units: Record<string, unknown>[] = [];
 const BULBS = [{ id: 'c1', name: 'Test Bulbs', active: true, product_count: 0, version: 1, code_prefix: 'BLB' }];
 let categories: Record<string, unknown>[] = BULBS;
@@ -96,7 +97,7 @@ afterEach(() => {
   createCategory.mockReset();
   createUnit.mockReset();
   addPack.mockReset();
-  getProduct.mockImplementation(() => new Promise(() => undefined));
+  getProduct.mockImplementation((...a: unknown[]) => noPacks(a[0]));
   window.localStorage.clear();
   categories = BULBS;
   units = [{ id: 'u1', name: 'pc', active: true, product_count: 0, version: 1 }];
@@ -681,6 +682,57 @@ describe('packages on Quick add, the rows of Add an item (issue #695)', () => {
     fireEvent.click(within(panel).getByRole('button', { name: 'Use the existing one and just add stock' }));
     await screen.findByTestId('qa-done');
     expect(quickAdd.mock.calls[1]?.[0]).toEqual({ product_id: 'p9', qty: '12.000', branch_id: branch?.id });
+  });
+
+  // JUSTIFICATION-A3: round 3 of the review of #716 asks for the paid existing item by its carton, and no count before its packages.
+  it('takes the carton price for an item already in the list bought by its own carton', async () => {
+    units = [PIECE, CARTON];
+    getProduct.mockImplementation(async () => ({ id: 'p9', unit: 'Piece', unit_id: 'u1', packs: [{ unit_id: 'u9', unit: 'Carton', factor: '24.000', active: true, purpose: 'both' }] }));
+    quickAdd.mockRejectedValueOnce(new RetailError('This product already exists: Test Rice 1kg (GNR-0001).', 422, 'duplicate_product_name', {
+      existing_id: 'p9', existing_code: 'GNR-0001', existing_name: 'Test Rice 1kg', may_add_anyway: false,
+    }));
+    quickAdd.mockResolvedValueOnce({ product_id: 'p9', description: 'Test Rice 1kg', unit: 'Piece', item_made: false, branch_id: branch?.id, qty: '24', total_qty: '24' });
+    open(packsOn);
+    await screen.findByRole('option', { name: 'Piece' });
+    type(/^Name/, 'Test Rice 1kg');
+    carton('24');
+    fireEvent.click(within(screen.getByTestId('usual-buy')).getByRole('radio', { name: 'Carton' }));
+    fireEvent.change(screen.getByLabelText(/^What do you pay for one carton\?/), { target: { value: '100000' } });
+    type(/^Selling price \(/, '6000');
+    count('1', '');
+    fireEvent.click(screen.getByLabelText(/I just bought these/));
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    const panel = await screen.findByTestId('name-exists');
+    await waitFor(() => expect(screen.getByTestId('qa-paid-total').textContent).toBe('UGX 100,000'));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Use the existing one and just add stock' }));
+    await screen.findByTestId('qa-done');
+    expect(quickAdd.mock.calls[1]?.[0]).toEqual({
+      product_id: 'p9', qty: '24.000', branch_id: branch?.id, paid_from: 'cash', cost_minor: 4_167, paid_level_unit_id: 'u9', paid_level_cost_minor: 100_000,
+    });
+  });
+
+  it.each([
+    ['still being read', () => new Promise(() => undefined), /^Reading the packages of Test Rice 1kg/],
+    ['not readable', () => Promise.reject(new RetailError('Offline', 0)), /^The packages of Test Rice 1kg could not be read/],
+  ])('adds nothing to an item already in the list while its packages are %s', async (_what, answer, said) => {
+    units = [PIECE, CARTON];
+    getProduct.mockImplementation(answer as () => Promise<unknown>);
+    quickAdd.mockRejectedValueOnce(new RetailError('This product already exists: Test Rice 1kg (GNR-0001).', 422, 'duplicate_product_name', {
+      existing_id: 'p9', existing_code: 'GNR-0001', existing_name: 'Test Rice 1kg', may_add_anyway: false,
+    }));
+    open(packsOn);
+    await screen.findByRole('option', { name: 'Piece' });
+    type(/^Name/, 'Test Rice 1kg');
+    carton('24');
+    type(/^Selling price \(/, '5000');
+    count('1', '');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    const panel = await screen.findByTestId('name-exists');
+    if (_what === 'not readable') await waitFor(() => expect(getProduct).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 50));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Use the existing one and just add stock' }));
+    expect(screen.getByTestId('qa-panel-note').textContent).toMatch(said);
+    expect(quickAdd).toHaveBeenCalledTimes(1);
   });
 
   it('keeps each item its own carton size: Add another starts with no packages', async () => {
