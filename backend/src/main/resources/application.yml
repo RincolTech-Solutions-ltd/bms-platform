@@ -126,10 +126,6 @@ bms:
     # The host of the shops' short links, rincoltech.com/<short name> (ADR-108); the Cloudflare rule there sends them to
     # the platform host, which forwards them to the shop.
     short-link-host: ${BMS_SHORT_LINK_HOST:rincoltech.com}
-    # Whether the Owner may change the short name in Settings (ADR-108 decision 5). A change moves the shop's host, so it
-    # is on only where every tenant host already reaches the app (the staging tunnel); off on the production VM, whose
-    # tenant DNS records are added by hand, until they are wildcard or automated.
-    short-name-change: ${BMS_SHORT_NAME_CHANGE:false}
     # Only the dev and test profiles may set this; startup fails otherwise (chapter 7 section 7.2).
     allow-tenant-header: ${ALLOW_TENANT_HEADER:false}
   auth:

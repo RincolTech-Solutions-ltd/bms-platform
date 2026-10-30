@@ -1,5 +1,5 @@
 import { Link, createLazyRoute } from '@tanstack/react-router';
-import { SHORT_LINK_HOST, SHORT_NAME } from './short-name';
+import { SHORT_NAME } from './short-name';
 
 // Where a short link lands when no shop uses it (issue #708, ADR-108): a name never taken, mistyped, or given up more than 90 days
 // ago. On the platform host, no sign-in. The name in the address is shown only when it has the shape of a short name.
@@ -17,7 +17,7 @@ export function LinkNotFound({ name }: { name: string | null }) {
       <p>
         {name ? (
           <>
-            No shop uses <strong>{SHORT_LINK_HOST}/{name}</strong> now.
+            No shop uses the short link <strong>{name}</strong> now.
           </>
         ) : (
           'No shop uses this link now.'

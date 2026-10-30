@@ -13,9 +13,9 @@ import org.springframework.http.HttpStatus;
 
 /**
  * A shop's short name and its short link {@code rincoltech.com/<short name>} (issue #708, ADR-108). The short name is the
- * tenant's slug, so its host and its link always agree. A new one is 3 to 20 lower case letters and digits, single hyphens
- * inside allowed, and not reserved. A name is taken while a business has it, an open application chose it, or it is held
- * after a change (V119).
+ * tenant's slug, chosen at sign-up and kept for good, so its host and its link always agree. A new one is 3 to 20 lower
+ * case letters and digits, single hyphens inside allowed, and not reserved. A name is taken while a business has it or an
+ * open application whose email is confirmed chose it (V119).
  */
 public interface ShortNames {
 
@@ -24,7 +24,7 @@ public interface ShortNames {
 
     /**
      * The website's own paths and the words a site or the platform uses (ADR-108 decision 4), plus the reserved host labels
-     * of FR-TEN-02. The Cloudflare rule leaves these to the website; sign-up, Settings and Activate refuse them.
+     * of FR-TEN-02. The Cloudflare rule leaves these to the website; sign-up, Activate and tenant creation refuse them.
      */
     Set<String> RESERVED = Set.of(
             "about",
@@ -147,25 +147,27 @@ public interface ShortNames {
     }
 
     /**
-     * Whether {@code name} is free for a new shop or a change, with up to three free suggestions when it is not: the name
-     * with the town or area first, then a shorter form of the business name, then the name with a number.
+     * Whether {@code name} is free for a new shop, with up to three free suggestions when it is not: the name with the town
+     * or area first, then a shorter form of the business name, then the name with a number.
      *
      * @param town the shop's town or area, or null
-     * @param exceptTenant a business whose own name and held names count as free (a change in Settings), or null
      * @param exceptApplication an application whose own choice counts as free (Activate), or null
      */
-    Check check(String name, String businessName, String town, UUID exceptTenant, UUID exceptApplication);
+    Check check(String name, String businessName, String town, UUID exceptApplication);
 
     /** Free suggestions as {@link #check} makes them, for a name already known to be taken. */
-    List<String> suggestions(String name, String businessName, String town, UUID exceptTenant);
+    List<String> suggestions(String name, String businessName, String town);
 
-    /** Who has the name now, as V119's {@code short_name_taken}: tenant, held, applied, or empty when free. */
-    Optional<String> takenBy(String name, UUID exceptTenant, UUID exceptApplication, boolean lock);
+    /**
+     * Who has the name now, as V119's {@code short_name_taken}: tenant or applied, or empty when free. With {@code lock}
+     * the caller's transaction first takes the name's lock, which every claim takes.
+     */
+    Optional<String> takenBy(String name, UUID exceptApplication, boolean lock);
 
     /** The short link as a person types it, {@code rincoltech.com/<slug>}. */
     String link(String slug);
 
-    /** The slug a short link reaches: the shop that has the name, or the shop that gave it up while it forwards. */
+    /** The slug a short link reaches: the active or suspended shop that has the name. */
     Optional<String> target(String name);
 
     /** The reserved names and the Cloudflare rule built from them (ADR-108 decision 3). */

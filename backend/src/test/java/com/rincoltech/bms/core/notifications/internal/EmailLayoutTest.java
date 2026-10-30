@@ -324,6 +324,20 @@ class EmailLayoutTest {
                 .isEqualTo(OutboxTemplates.placeholders("email", "onboarding.activation"));
         assertThat(body("onboarding.activation", params(), platform(), "").html())
                 .contains(">Set my password</a>");
+        // ADR-108: the welcome email names the short link; a row queued before it existed still renders, without it.
+        assertThat(plain).contains("Your shop's short link is rincoltech.test/testshop.");
+        Map<String, String> old = params();
+        old.remove("short_link");
+        for (String key : List.of("onboarding.activation", OutboxTemplates.ACTIVATION_TWO_STEP)) {
+            assertThat(templates.render("email", key, old).text())
+                    .as(key)
+                    .doesNotContain("short link")
+                    .contains("Rincol Tech");
+            assertThat(body(key, old, platform(), "").html())
+                    .as(key)
+                    .doesNotContain("short link")
+                    .doesNotContain("{");
+        }
     }
 
     @Test

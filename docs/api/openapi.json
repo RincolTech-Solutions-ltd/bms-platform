@@ -1618,16 +1618,6 @@
         },
         "required" : [ "reason" ]
       },
-      "ChangeShortNameRequest" : {
-        "properties" : {
-          "short_name" : {
-            "maxLength" : 63,
-            "minLength" : 0,
-            "type" : "string"
-          }
-        },
-        "required" : [ "short_name" ]
-      },
       "ChargeWaiverRequest" : {
         "description" : "FR-ARR-04: amount_minor left out waives all that is waivable",
         "properties" : {
@@ -23066,17 +23056,6 @@
       },
       "ShortLink" : {
         "properties" : {
-          "can_change" : {
-            "description" : "Whether the short name can be changed here (BMS_SHORT_NAME_CHANGE): a change moves the app's address, so it is off where new tenant hosts need a DNS record by hand",
-            "type" : "boolean"
-          },
-          "forwarding" : {
-            "description" : "Old names that still forward here, newest first",
-            "items" : {
-              "$ref" : "#/components/schemas/ShortLinkForwarding"
-            },
-            "type" : "array"
-          },
           "link" : {
             "description" : "As a person types it, for example rincoltech.com/modern",
             "type" : "string"
@@ -23085,27 +23064,8 @@
             "description" : "The short name, which is also the app's address (the slug)",
             "type" : "string"
           },
-          "sign_in_url" : {
-            "description" : "The sign-in page at the business's current address",
-            "type" : "string"
-          },
           "url" : {
             "description" : "The same with https://, for the Copy button",
-            "type" : "string"
-          }
-        }
-      },
-      "ShortLinkForwarding" : {
-        "description" : "Old names that still forward here, newest first",
-        "properties" : {
-          "forwards_until" : {
-            "format" : "date-time",
-            "type" : "string"
-          },
-          "link" : {
-            "type" : "string"
-          },
-          "short_name" : {
             "type" : "string"
           }
         }
@@ -23135,32 +23095,6 @@
           "target" : {
             "description" : "The dynamic target URL expression",
             "type" : "string"
-          }
-        }
-      },
-      "ShortNameCheck" : {
-        "properties" : {
-          "available" : {
-            "type" : "boolean"
-          },
-          "message" : {
-            "description" : "Plain words for the person typing",
-            "type" : "string"
-          },
-          "name" : {
-            "type" : "string"
-          },
-          "problem" : {
-            "description" : "invalid, reserved or taken; null when available",
-            "type" : "string"
-          },
-          "suggestions" : {
-            "description" : "Free names: with the town first, then a shorter form, then a number",
-            "items" : {
-              "description" : "Free names: with the town first, then a shorter form, then a number",
-              "type" : "string"
-            },
-            "type" : "array"
           }
         }
       },
@@ -23293,7 +23227,7 @@
             "type" : "string"
           },
           "short_name" : {
-            "description" : "The short name for the shop's link rincoltech.com/<short name>, which is also its address: 3 to 20 lower case letters and digits, a hyphen may join two words. A taken one is 409 short_name_taken with suggestions (ADR-108)",
+            "description" : "The short name for the shop's link rincoltech.com/<short name>, which is also its address: 3 to 20 lower case letters and digits, a hyphen may join two words. A taken one is 409 short_name_taken with suggestions (ADR-108). Optional for one release, for a sign-up page from before it: the server then picks a free one from the business name",
             "maxLength" : 63,
             "minLength" : 0,
             "type" : "string"
@@ -23322,7 +23256,7 @@
             "type" : "string"
           }
         },
-        "required" : [ "business_name", "contact_email", "contact_name", "contact_phone", "country", "modules", "short_name", "term", "way_in" ]
+        "required" : [ "business_name", "contact_email", "contact_name", "contact_phone", "country", "modules", "term", "way_in" ]
       },
       "SignUpShortNameCheck" : {
         "properties" : {
@@ -45676,63 +45610,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "The business's short link and its old names that still forward (ADR-108)",
-        "tags" : [ "settings" ]
-      },
-      "put" : {
-        "operationId" : "changeShortName",
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/ChangeShortNameRequest"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "200" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ShortLink"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "summary" : "Change the short name, which is also the app's address; the Owner only (403 owner_only). The old link forwards for 90 days, then the name is held 90 more. 409 short_name_taken with suggestions (ADR-108)",
-        "tags" : [ "settings" ]
-      }
-    },
-    "/api/v1/settings/short-link/check" : {
-      "get" : {
-        "operationId" : "checkShortName",
-        "parameters" : [ {
-          "in" : "query",
-          "name" : "name",
-          "required" : true,
-          "schema" : {
-            "maxLength" : 63,
-            "minLength" : 0,
-            "type" : "string"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ShortNameCheck"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "summary" : "Whether a new short name is free, with free suggestions when it is not (ADR-108)",
+        "summary" : "The business's short link (ADR-108)",
         "tags" : [ "settings" ]
       }
     },

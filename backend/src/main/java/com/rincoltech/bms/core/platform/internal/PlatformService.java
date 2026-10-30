@@ -245,6 +245,9 @@ class PlatformService implements TenantProvisioning {
                     if (!steps.before()) {
                         return null;
                     }
+                    // ADR-108: the name's lock, which every claim of a short name takes, before the count below; a
+                    // concurrent create that still meets tenants_slug_key is the 409 further down.
+                    shortNames.takenBy(slug, null, true);
                     boolean taken = jdbc.sql("SELECT count(*) FROM platform_list_tenants() WHERE slug = ?")
                                     .param(slug)
                                     .query(Long.class)
@@ -253,18 +256,6 @@ class PlatformService implements TenantProvisioning {
                     if (taken) {
                         throw new ApiException(
                                 HttpStatus.CONFLICT, "duplicate_slug", "Slug taken", "Another tenant has this slug.");
-                    }
-                    // ADR-108: claimed under the name's lock; a name a business gave up is held, so its old link
-                    // never lands in a new business.
-                    if (shortNames
-                            .takenBy(slug, null, null, true)
-                            .filter("held"::equals)
-                            .isPresent()) {
-                        throw new ApiException(
-                                HttpStatus.CONFLICT,
-                                "duplicate_slug",
-                                "Slug taken",
-                                "This name is held after a change.");
                     }
                     try {
                         jdbc.sql("SELECT platform_create_tenant(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -340,8 +331,8 @@ class PlatformService implements TenantProvisioning {
                                 .query(Long.class)
                                 .single()
                         == 0
-                // ADR-108: nor held after a change, nor chosen by an open application.
-                && shortNames.takenBy(slug, null, null, false).isEmpty();
+                // ADR-108: nor chosen by a confirmed open application.
+                && shortNames.takenBy(slug, null, false).isEmpty();
     }
 
     /** In a transaction bound to the tenant, so a module switched on sets itself up there (ADR-098). */

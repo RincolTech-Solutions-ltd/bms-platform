@@ -383,7 +383,7 @@ export function Setup() {
           )}
         </fieldset>
 
-        <ShortLinkCard isOwner={me.is_owner === true} canManage={permissions.includes('core.settings.manage')} />
+        <ShortLinkCard />
 
         <fieldset>
           <legend>Reports</legend>

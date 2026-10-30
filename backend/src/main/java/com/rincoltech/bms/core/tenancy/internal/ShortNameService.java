@@ -1,8 +1,6 @@
 package com.rincoltech.bms.core.tenancy.internal;
 
 import com.rincoltech.bms.core.tenancy.ShortNames;
-import com.rincoltech.bms.kernel.BusinessClock;
-import java.sql.Timestamp;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -28,44 +26,37 @@ class ShortNameService implements ShortNames {
     static final int SUGGESTIONS = 3;
 
     private final JdbcClient jdbc;
-    private final BusinessClock clock;
     private final String shortLinkHost;
 
-    ShortNameService(
-            JdbcClient jdbc,
-            BusinessClock clock,
-            @Value("${bms.tenancy.short-link-host:rincoltech.com}") String shortLinkHost) {
+    ShortNameService(JdbcClient jdbc, @Value("${bms.tenancy.short-link-host:rincoltech.com}") String shortLinkHost) {
         this.jdbc = jdbc;
-        this.clock = clock;
         this.shortLinkHost = shortLinkHost.trim().toLowerCase(Locale.ROOT);
     }
 
     @Override
     @Transactional
-    public Check check(String raw, String businessName, String town, UUID exceptTenant, UUID exceptApplication) {
+    public Check check(String raw, String businessName, String town, UUID exceptApplication) {
         String name = ShortNames.normalise(raw);
         Optional<Check> refused = ShortNames.refusal(name);
         if (refused.isPresent()) {
             Check r = refused.get();
-            return new Check(
-                    name, false, r.problem(), r.message(), suggestions(name, businessName, town, exceptTenant));
+            return new Check(name, false, r.problem(), r.message(), suggestions(name, businessName, town));
         }
-        if (takenBy(name, exceptTenant, exceptApplication, false).isEmpty()) {
+        if (takenBy(name, exceptApplication, false).isEmpty()) {
             return new Check(name, true, null, null, List.of());
         }
-        return new Check(
-                name, false, "taken", name + " is taken.", suggestions(name, businessName, town, exceptTenant));
+        return new Check(name, false, "taken", name + " is taken.", suggestions(name, businessName, town));
     }
 
     @Override
     @Transactional
-    public List<String> suggestions(String raw, String businessName, String town, UUID exceptTenant) {
+    public List<String> suggestions(String raw, String businessName, String town) {
         List<String> found = new ArrayList<>();
         for (String candidate : candidates(ShortNames.normalise(raw), businessName, town)) {
             if (found.size() == SUGGESTIONS) {
                 break;
             }
-            if (takenBy(candidate, exceptTenant, null, false).isEmpty()) {
+            if (takenBy(candidate, null, false).isEmpty()) {
                 found.add(candidate);
             }
         }
@@ -136,9 +127,9 @@ class ShortNameService implements ShortNames {
 
     @Override
     @Transactional
-    public Optional<String> takenBy(String name, UUID exceptTenant, UUID exceptApplication, boolean lock) {
-        return jdbc.sql("SELECT short_name_taken(?, ?, ?, ?, ?)")
-                .params(name, Timestamp.from(clock.now()), exceptTenant, exceptApplication, lock)
+    public Optional<String> takenBy(String name, UUID exceptApplication, boolean lock) {
+        return jdbc.sql("SELECT short_name_taken(?, ?, ?)")
+                .params(name, exceptApplication, lock)
                 .query(String.class)
                 .optional();
     }
@@ -155,8 +146,8 @@ class ShortNameService implements ShortNames {
         if (!TenantHostPattern.SLUG.matcher(name).matches()) {
             return Optional.empty();
         }
-        return jdbc.sql("SELECT slug FROM short_link_target(?, ?)")
-                .params(name, Timestamp.from(clock.now()))
+        return jdbc.sql("SELECT short_link_target(?)")
+                .param(name)
                 .query(String.class)
                 .optional();
     }

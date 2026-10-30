@@ -148,11 +148,17 @@ class ApplicationService {
             throw ApiException.validation(
                     List.of(new FieldProblem("business_name", "required", "Give the business and contact names.")));
         }
-        // ADR-108: the short name is checked for shape here and claimed under its lock below; first to apply keeps it.
-        String shortName = ShortNames.normalise(request.shortName());
-        ShortNames.refusal(shortName).ifPresent(refused -> {
-            throw ShortNames.refused("short_name", refused);
-        });
+        // ADR-108: the short name is checked for shape here and claimed under its lock below; the first to confirm
+        // keeps
+        // it. A form from before this release sends none (for one release): a free one is picked from the business
+        // name.
+        String typed = ShortNames.normalise(request.shortName());
+        if (!typed.isEmpty()) {
+            ShortNames.refusal(typed).ifPresent(refused -> {
+                throw ShortNames.refused("short_name", refused);
+            });
+        }
+        String shortName = typed.isEmpty() ? pickShortName(businessName, request.town()) : typed;
         // ADR-069: a code typed wrong is refused in plain words before anything is created; it says nothing about the
         // email, so the same-answer rule below still holds. A code of a business the applicant runs (their email or
         // phone is its Owner's or an administrator's) is dropped quietly and the answer is the usual one, so the form
@@ -176,9 +182,10 @@ class ApplicationService {
                 return;
             }
             // Who holds a name never depends on the email given, so a 409 says nothing about who applied (FR-ONB-03).
-            if (shortNames.takenBy(shortName, null, null, true).isPresent()) {
+            // A picked name taken meanwhile is kept unclaimed: the confirmation clears it if it is still taken then.
+            if (!typed.isEmpty() && shortNames.takenBy(typed, null, true).isPresent()) {
                 throw ShortNames.taken(
-                        "short_name", shortName, shortNames.suggestions(shortName, businessName, request.town(), null));
+                        "short_name", typed, shortNames.suggestions(typed, businessName, request.town()));
             }
             String mailbox = jdbc.sql("SELECT onboarding_email_key(?)")
                     .param(email)
@@ -238,11 +245,14 @@ class ApplicationService {
                     return;
                 }
                 reference = open.get().reference();
-                // ADR-108: a repeat's short name replaces the open application's own while its email is unconfirmed.
-                jdbc.sql("SELECT onboarding_application_set_short_name(?, ?, ?)")
-                        .params(email, shortName, Timestamp.from(now))
-                        .query()
-                        .singleRow();
+                // ADR-108: a repeat's short name, just claimed as free, replaces the open application's own, so a
+                // repeat never silently keeps the old name.
+                if (!typed.isEmpty()) {
+                    jdbc.sql("SELECT onboarding_application_set_short_name(?, ?, ?)")
+                            .params(email, typed, Timestamp.from(now))
+                            .query()
+                            .singleRow();
+                }
                 // ADR-069 decision 13: a returning applicant's code goes on the open application while it has no
                 // referrer
                 // and is still submitted; the database leaves an earlier code, or one in review, as it is.
@@ -268,7 +278,18 @@ class ApplicationService {
     /** ADR-108: a short name as the applicant types it, free or with free suggestions, the town or area first. */
     ShortNames.Check checkShortName(String name, String businessName, String town) {
         limiter.acquire(SignUpRateLimiter.SHORT_NAME_PER_IP, RequestContext.clientIp());
-        return shortNames.check(name, businessName, town, null, null);
+        return shortNames.check(name, businessName, town, null);
+    }
+
+    /** A free short name from the business name, its first word or the first free suggestion; null when none is free. */
+    private String pickShortName(String businessName, String town) {
+        String first = ShortNames.normalise(businessName)
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim()
+                .split(" ")[0];
+        ShortNames.Check c =
+                shortNames.check(first.length() > 20 ? first.substring(0, 20) : first, businessName, town, null);
+        return c.available() ? c.name() : c.suggestions().stream().findFirst().orElse(null);
     }
 
     /**
@@ -390,10 +411,7 @@ class ApplicationService {
                     .orElse(null);
             String slug = "activated".equals(application.status())
                     ? null
-                    : chosen != null
-                                    && shortNames
-                                            .takenBy(chosen, null, id, false)
-                                            .isEmpty()
+                    : chosen != null && shortNames.takenBy(chosen, id, false).isEmpty()
                             ? chosen
                             : suggestSlug(application.businessName());
             return new ApplicationDetail(
@@ -521,16 +539,16 @@ class ApplicationService {
                             throw notVerified();
                         }
                         // ADR-108: claimed under the name's lock, in the creating transaction; a name another
-                        // confirmed application chose, or one held after a change, is not this one's to take.
+                        // confirmed application chose is not this one's to take.
                         if (shortNames
-                                .takenBy(slug, null, id, true)
+                                .takenBy(slug, id, true)
                                 .filter(by -> !by.equals("tenant"))
                                 .isPresent()) {
                             throw new ApiException(
                                     HttpStatus.CONFLICT,
                                     "duplicate_slug",
                                     "Slug taken",
-                                    "Another application chose this short name, or it is held after a change.");
+                                    "Another application chose this short name.");
                         }
                         return true;
                     }

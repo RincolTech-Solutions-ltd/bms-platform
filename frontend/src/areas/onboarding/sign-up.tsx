@@ -1,6 +1,6 @@
 import { createLazyRoute } from '@tanstack/react-router';
-import { type FormEvent, useState } from 'react';
-import { applyForAccount, checkShortName, OnboardingError } from '../../api/onboarding';
+import { type FormEvent, useEffect, useState } from 'react';
+import { applyForAccount, checkShortName, OnboardingError, shortLinkHost } from '../../api/onboarding';
 import { type ShortNameCheck, ShortNameField, shortNameFrom } from './short-name';
 import { BusyButton } from '../../app/ui/BusyButton';
 import {
@@ -33,6 +33,8 @@ export interface SignUpViewProps {
   checkName: (name: string) => Promise<ShortNameCheck>;
   /** Free short names from a refused application. */
   suggestions?: string[];
+  /** The short link host from the server; empty until it has loaded. */
+  host?: string;
 }
 
 function Field({ id, label, problem, children }: { id: string; label: string; problem?: string; children: React.ReactNode }) {
@@ -49,7 +51,7 @@ function Field({ id, label, problem, children }: { id: string; label: string; pr
   );
 }
 
-export function SignUpView({ form, problems, busy, error, done, onChange, onSubmit, checkName, suggestions }: SignUpViewProps) {
+export function SignUpView({ form, problems, busy, error, done, onChange, onSubmit, checkName, suggestions, host = '' }: SignUpViewProps) {
   if (done) {
     return (
       <main className="card auth-card">
@@ -108,6 +110,7 @@ export function SignUpView({ form, problems, busy, error, done, onChange, onSubm
           value={form.short_name}
           onChange={(short_name) => set({ short_name })}
           check={checkName}
+          host={host}
           problem={problems.short_name}
           suggestions={suggestions}
         />
@@ -249,6 +252,12 @@ export function SignUp() {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [host, setHost] = useState('');
+  useEffect(() => {
+    shortLinkHost()
+      .then(setHost)
+      .catch(() => undefined);
+  }, []);
   const checkName = (name: string) => checkShortName(name, form.business_name.trim(), form.town.trim());
 
   function submit(e: FormEvent) {
@@ -289,6 +298,7 @@ export function SignUp() {
       onSubmit={submit}
       checkName={checkName}
       suggestions={suggestions}
+      host={host}
     />
   );
 }

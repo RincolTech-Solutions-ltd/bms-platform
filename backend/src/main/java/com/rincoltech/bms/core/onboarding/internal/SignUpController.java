@@ -45,11 +45,10 @@ class SignUpController {
             @NotBlank @Size(max = 200) String businessName,
             @NotBlank @Size(max = 200) String contactName,
 
-            @NotBlank
             @Size(max = 63)
             @Schema(
                     description =
-                            "The short name for the shop's link rincoltech.com/<short name>, which is also its address: 3 to 20 lower case letters and digits, a hyphen may join two words. A taken one is 409 short_name_taken with suggestions (ADR-108)")
+                            "The short name for the shop's link rincoltech.com/<short name>, which is also its address: 3 to 20 lower case letters and digits, a hyphen may join two words. A taken one is 409 short_name_taken with suggestions (ADR-108). Optional for one release, for a sign-up page from before it: the server then picks a free one from the business name")
             String shortName,
 
             @Size(max = 100) @Schema(description = "Optional: the shop's town or area, for short name suggestions")

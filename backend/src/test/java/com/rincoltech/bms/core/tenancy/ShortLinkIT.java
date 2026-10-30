@@ -23,8 +23,9 @@ import tools.jackson.databind.JsonNode;
 
 /**
  * Short links (issue #708, ADR-108, FR-TEN-12): a taken name is refused at sign-up with suggestions, the town or area first;
- * the reserved list is refused; the short link forwards to the shop; after a change in Settings the old link forwards for 90
- * days, and the freed name is then held 90 more. Fabricated businesses and people only.
+ * only an application whose email is confirmed holds a name; a repeat sign-up changes the name it asks for; the reserved
+ * list is refused and listed for the Cloudflare rule; the short link reaches the shop and Business set-up shows it.
+ * Fabricated businesses and people only.
  */
 class ShortLinkIT extends IntegrationTest {
 
@@ -36,8 +37,7 @@ class ShortLinkIT extends IntegrationTest {
     Api platform;
     TestDatabase.Fixture t;
     Api api;
-    Session ownerSession;
-    Session adminSession;
+    Session staff;
     String ip;
 
     @BeforeEach
@@ -46,16 +46,9 @@ class ShortLinkIT extends IntegrationTest {
         platform = Api.platform(http);
         t = TestDatabase.tenant("short", false, true);
         api = Api.tenant(http, t.slug());
-        String ownerEmail = Api.email("short-owner");
-        String adminEmail = Api.email("short-admin");
-        UUID owner = Api.staff(t, ownerEmail, new Role("tenant_admin", null));
-        UUID admin = Api.staff(t, adminEmail, new Role("tenant_admin", null));
-        TestDatabase.owner()
-                .sql("UPDATE users SET is_owner = true WHERE tenant_id = ? AND id = ?")
-                .params(t.tenantId(), owner)
-                .update();
-        ownerSession = api.signIn(owner, ownerEmail, Api.PASSWORD, null);
-        adminSession = api.signIn(admin, adminEmail, Api.PASSWORD, null);
+        String email = Api.email("short-admin");
+        UUID admin = Api.staff(t, email, new Role("tenant_admin", null));
+        staff = api.signIn(admin, email, Api.PASSWORD, null);
         int n = ADDRESS.getAndIncrement();
         ip = "203.0." + (113 + n / 250 % 2) + "." + (n % 250 + 1);
     }
@@ -78,7 +71,9 @@ class ShortLinkIT extends IntegrationTest {
         Map<String, Object> form = new LinkedHashMap<>();
         form.put("business_name", "Test Electricals Shop");
         form.put("contact_name", "Test Applicant 31");
-        form.put("short_name", shortName);
+        if (shortName != null) {
+            form.put("short_name", shortName);
+        }
         form.put("town", town);
         form.put("contact_email", email);
         form.put("contact_phone", "+256700000031");
@@ -90,14 +85,6 @@ class ShortLinkIT extends IntegrationTest {
                 HttpMethod.POST, "/api/v1/platform/sign-up/applications", form, null, Map.of("X-Forwarded-For", ip));
     }
 
-    String follow(String name) {
-        ResponseEntity<JsonNode> r = platform.get("/api/v1/platform/short-links/" + name, null);
-        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.FOUND);
-        return r.getHeaders().getLocation().toString();
-    }
-
-    // JUSTIFICATION-A3: review item 3 needs confirmed applications in this test; OnboardingIT's helpers are instance
-    // methods.
     /** Opens the newest confirmation link sent to the address: the application's email is confirmed. */
     void confirm(String email) {
         String link = TestDatabase.owner()
@@ -112,6 +99,7 @@ class ShortLinkIT extends IntegrationTest {
         assertThat(verified.getStatusCode()).as("%s", verified.getBody()).isEqualTo(HttpStatus.OK);
     }
 
+    /** The application's short name, or an empty string for none. */
     static String shortNameOf(String email) {
         return TestDatabase.owner()
                 .sql("SELECT coalesce(short_name, '') FROM onboarding_applications WHERE contact_email = ?")
@@ -120,8 +108,10 @@ class ShortLinkIT extends IntegrationTest {
                 .single();
     }
 
-    ResponseEntity<JsonNode> change(Api on, Session who, String name) {
-        return on.call(HttpMethod.PUT, "/api/v1/settings/short-link", Map.of("short_name", name), who.accessToken());
+    String follow(String name) {
+        ResponseEntity<JsonNode> r = platform.get("/api/v1/platform/short-links/" + name, null);
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.FOUND);
+        return r.getHeaders().getLocation().toString();
     }
 
     /** A taken name is refused with suggestions, the one with the town first; as typed and at the sign-up. */
@@ -141,8 +131,17 @@ class ShortLinkIT extends IntegrationTest {
         assertThat(refused.getBody().get("code").asString()).isEqualTo("short_name_taken");
         assertThat(refused.getBody().get("suggestions").get(0).asString()).endsWith("-kampala");
 
-        // An unconfirmed application holds nothing, so a throwaway address cannot squat a name; the first to confirm
-        // keeps it, and the next applicant is refused whatever email they give.
+        JsonNode free = check(fresh("tfree"), "Test Electricals Shop", null).getBody();
+        assertThat(free.get("available").asBoolean()).isTrue();
+        assertThat(free.get("suggestions")).isEmpty();
+    }
+
+    /**
+     * Review of #713 items 3 and 4: an unconfirmed application holds nothing, so a throwaway address cannot squat a name;
+     * the first to confirm keeps it, and the next applicant is refused whatever email they give, their own included.
+     */
+    @Test
+    void onlyAConfirmedApplicationHoldsAName() {
         String mine = fresh("tmine");
         String email = Api.email("short-mine");
         String rival = Api.email("short-rival");
@@ -167,22 +166,38 @@ class ShortLinkIT extends IntegrationTest {
         assertThat(shortNameOf(rival)).isEmpty();
     }
 
-    /** A repeat from a mailbox whose email is not confirmed changes the name its application asks for. */
+    /** A repeat sign-up never silently keeps the old name: the new one, claimed as free, replaces it. */
     @Test
-    void aRepeatBeforeTheConfirmationChangesTheName() {
+    void aRepeatSignUpChangesTheNameItAsksFor() {
         String again = Api.email("short-again");
         String first = fresh("tfirst");
         String second = fresh("tsecond");
+        String third = fresh("tthird");
         assertThat(apply(first, null, again).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(apply(second, null, again).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(shortNameOf(again)).isEqualTo(second);
-
-        JsonNode free = check(fresh("tfree"), "Test Electricals Shop", null).getBody();
-        assertThat(free.get("available").asBoolean()).isTrue();
-        assertThat(free.get("suggestions")).isEmpty();
+        confirm(again);
+        assertThat(apply(third, null, again).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(shortNameOf(again)).isEqualTo(third);
+        assertThat(check(second, "Test Electricals Shop", null)
+                        .getBody()
+                        .get("available")
+                        .asBoolean())
+                .isTrue();
     }
 
-    /** The reserved list: the website's own paths are refused at sign-up and in Settings, and listed for the rule. */
+    /** A sign-up page from before the short name sends none, for one release: a free one comes from the business name. */
+    @Test
+    void aSignUpWithoutAShortNameGetsAFreeOne() {
+        String email = Api.email("short-none");
+        ResponseEntity<JsonNode> applied = apply(null, null, email);
+        assertThat(applied.getStatusCode()).as("%s", applied.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        String picked = shortNameOf(email);
+        assertThat(picked).startsWith("test").matches(ShortNames.SHAPE);
+        assertThat(ShortNames.refusal(picked)).isEmpty();
+    }
+
+    /** The reserved list: the website's own paths are refused at sign-up, and listed for the rule. */
     @Test
     void theReservedNamesAreRefusedAndListedForTheRule() {
         for (String name : List.of(
@@ -193,9 +208,7 @@ class ShortLinkIT extends IntegrationTest {
                     .as(name)
                     .isEqualTo("reserved");
         }
-        ResponseEntity<JsonNode> refused = apply("pricing", null);
-        assertThat(refused.getStatusCode().value()).isEqualTo(422);
-        assertThat(change(api, ownerSession, "about").getStatusCode().value()).isEqualTo(422);
+        assertThat(apply("pricing", null).getStatusCode().value()).isEqualTo(422);
 
         JsonNode rule = platform.get("/api/v1/platform/short-link-rule", null).getBody();
         assertThat(rule.get("reserved").toString()).contains("\"about\"").contains("\"privacy\"");
@@ -207,92 +220,23 @@ class ShortLinkIT extends IntegrationTest {
         assertThat(rule.get("status_code").asInt()).isEqualTo(302);
     }
 
-    /** The short link reaches the shop; an unknown one reaches the page that says no shop uses it. */
+    /** The short link reaches the shop; an unknown one reaches the page that says no shop uses it; Settings shows it. */
     @Test
     void theShortLinkForwardsToTheShop() {
         assertThat(follow(t.slug())).isEqualTo("https://" + t.slug() + "-bms-staging.rincoltech.test/");
         assertThat(follow(t.slug().toUpperCase())).isEqualTo("https://" + t.slug() + "-bms-staging.rincoltech.test/");
         assertThat(follow("tnoshop1")).endsWith("/link-not-found?name=tnoshop1");
-        JsonNode mine = api.get("/api/v1/settings/short-link", adminSession.accessToken())
-                .getBody();
+        JsonNode mine =
+                api.get("/api/v1/settings/short-link", staff.accessToken()).getBody();
+        assertThat(mine.get("short_name").asString()).isEqualTo(t.slug());
         assertThat(mine.get("link").asString()).isEqualTo("rincoltech.com/" + t.slug());
         assertThat(mine.get("url").asString()).isEqualTo("https://rincoltech.com/" + t.slug());
-    }
-
-    /** Only the Owner changes it; the old link forwards to the new address for 90 days, then the name is held 90 more. */
-    @Test
-    void afterAChangeTheOldLinkForwardsAndTheFreedNameIsHeld() {
-        String old = t.slug();
-        String renamed = fresh("tnew");
-        assertThat(change(api, adminSession, renamed).getBody().get("code").asString())
-                .isEqualTo("owner_only");
-
-        ResponseEntity<JsonNode> done = change(api, ownerSession, renamed);
-        assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
-        assertThat(done.getBody().get("short_name").asString()).isEqualTo(renamed);
-        assertThat(done.getBody().get("forwarding").get(0).get("short_name").asString())
-                .isEqualTo(old);
-        assertThat(TestDatabase.owner()
-                        .sql(
-                                "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'core.tenant.short_name_changed'")
-                        .param(t.tenantId())
-                        .query(Long.class)
-                        .single())
-                .isEqualTo(1);
-
-        // The old link forwards to the new address; the new link works at once.
-        String newHost = "https://" + renamed + "-bms-staging.rincoltech.test/";
-        assertThat(follow(old)).isEqualTo(newHost);
-        assertThat(follow(renamed)).isEqualTo(newHost);
-        // The old address answers where the business went, so a bookmark or an installed app follows it.
-        ResponseEntity<JsonNode> oldHost = api.get("/api/v1/branding", null);
-        assertThat(oldHost.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-        assertThat(oldHost.getHeaders().getFirst("Bms-Moved-To"))
-                .isEqualTo("https://" + renamed + "-bms-staging.rincoltech.test");
-        // The hold: forwards 90 days, held 180 days after the change.
-        Map<String, Object> hold =
-                TestDatabase.owner().sql("""
-                        SELECT extract(day FROM forwards_until - released_at)::int AS forwards,
-                               extract(day FROM held_until - released_at)::int AS held
-                          FROM platform_short_name_holds WHERE name = ?
-                        """).param(old).query().singleRow();
-        assertThat(hold).containsEntry("forwards", 90).containsEntry("held", 180);
-
-        // Nobody else may take the old name while it is held, at sign-up or in another shop's Settings.
-        assertThat(check(old, "Test Shop", null).getBody().get("problem").asString())
-                .isEqualTo("taken");
-        TestDatabase.Fixture other = TestDatabase.tenant("short-other", false, true);
-        Api otherApi = Api.tenant(http, other.slug());
-        String otherEmail = Api.email("short-other");
-        UUID otherOwner = Api.staff(other, otherEmail, new Role("tenant_admin", null));
-        TestDatabase.owner()
-                .sql("UPDATE users SET is_owner = true WHERE tenant_id = ? AND id = ?")
-                .params(other.tenantId(), otherOwner)
-                .update();
-        Session otherSession = otherApi.signIn(otherOwner, otherEmail, Api.PASSWORD, null);
-        assertThat(change(otherApi, otherSession, old).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-
-        // After 90 days the old link no longer forwards, and the name is still held.
-        TestDatabase.owner()
-                .sql("UPDATE platform_short_name_holds SET released_at = released_at - interval '91 days',"
-                        + " forwards_until = forwards_until - interval '91 days',"
-                        + " held_until = held_until - interval '91 days' WHERE name = ?")
-                .param(old)
-                .update();
-        assertThat(follow(old)).endsWith("/link-not-found?name=" + old);
-        assertThat(api.get("/api/v1/branding", null).getHeaders().getFirst("Bms-Moved-To"))
-                .isNull();
-        assertThat(change(otherApi, otherSession, old).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-
-        // After 180 days the name is free again.
-        TestDatabase.owner()
-                .sql("UPDATE platform_short_name_holds SET released_at = released_at - interval '90 days',"
-                        + " forwards_until = forwards_until - interval '90 days',"
-                        + " held_until = held_until - interval '90 days' WHERE name = ?")
-                .param(old)
-                .update();
-        ResponseEntity<JsonNode> taken = change(otherApi, otherSession, old);
-        assertThat(taken.getStatusCode()).as("%s", taken.getBody()).isEqualTo(HttpStatus.OK);
-        assertThat(follow(old)).isEqualTo("https://" + old + "-bms-staging.rincoltech.test/");
+        // No self-service rename (owner decision on #713): there is nothing to change the short name with.
+        ResponseEntity<JsonNode> put = api.call(
+                HttpMethod.PUT,
+                "/api/v1/settings/short-link",
+                Map.of("short_name", fresh("tnew")),
+                staff.accessToken());
+        assertThat(put.getStatusCode().is2xxSuccessful()).isFalse();
     }
 }

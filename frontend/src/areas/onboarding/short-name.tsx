@@ -1,11 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 
-// The short name of a shop's link, rincoltech.com/<short name>, which is also its address (issue #708, ADR-108). One field for the
-// sign-up and for Change short name in Business set-up: it checks the name as it is typed and, when the name is taken or kept for
-// the website, offers free names to pick with one tap, the one with the shop's town or area first. The server checks again on save.
-
-/** The host of the short links as people type them; the server's BMS_SHORT_LINK_HOST. */
-export const SHORT_LINK_HOST = 'rincoltech.com';
+// The short name of a shop's link, rincoltech.com/<short name>, which is also its address (issue #708, ADR-108). The sign-up field
+// checks the name as it is typed and, when the name is taken or kept for the website, offers free names to pick with one tap, the
+// one with the shop's town or area first. The server checks again on save. The link's host comes from the server.
 
 /** A short name's shape: 3 to 20 lower case letters and digits, a single hyphen may join two words. */
 export const SHORT_NAME = /^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){1,18}[a-z0-9]$/;
@@ -60,11 +57,12 @@ export interface ShortNameFieldProps {
   suggestions?: string[];
   /** The name the shop has now (Settings): not checked, nothing said. */
   current?: string;
-  /** The short link host the server gave (Settings); the sign-up uses the usual one. */
-  host?: string;
+  /** The short link host the server gave (`short_link_host` of the rule); empty until it has loaded. */
+  host: string;
 }
 
-export function ShortNameField({ id, label, value, onChange, check, problem, suggestions, current, host = SHORT_LINK_HOST }: ShortNameFieldProps) {
+export function ShortNameField({ id, label, value, onChange, check, problem, suggestions, current, host }: ShortNameFieldProps) {
+  const prefix = host ? `${host}/` : '';
   const [answer, setAnswer] = useState<ShortNameCheck | null>(null);
   const asked = useRef(0);
   // The latest check without making a new function from the parent ask again.
@@ -96,7 +94,7 @@ export function ShortNameField({ id, label, value, onChange, check, problem, sug
     <div className="stack">
       <label htmlFor={id}>{label}</label>
       <div className="cluster">
-        <span aria-hidden="true">{host}/</span>
+        {prefix && <span aria-hidden="true">{prefix}</span>}
         <input
           id={id}
           value={value}
@@ -112,7 +110,8 @@ export function ShortNameField({ id, label, value, onChange, check, problem, sug
         />
       </div>
       <span id={`${id}-hint`} className="hint">
-        Your customers type {host}/{value.trim() || 'yourshop'} to reach your shop. 3 to 20 letters and digits.
+        Your customers type {prefix}
+        {value.trim() || 'yourshop'} to reach your shop. 3 to 20 letters and digits.
       </span>
       {shown && (
         <span id={`${id}-problem`} className="field-error">
@@ -121,7 +120,8 @@ export function ShortNameField({ id, label, value, onChange, check, problem, sug
       )}
       {free && (
         <span role="status" className="hint">
-          {host}/{free} is free.
+          {prefix}
+          {free} is free.
         </span>
       )}
       {offers.length > 0 && (

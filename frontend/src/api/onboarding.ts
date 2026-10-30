@@ -73,6 +73,12 @@ export async function checkShortName(name: string, businessName: string, town: s
   return data;
 }
 
+/** The host of the short links, `BMS_SHORT_LINK_HOST`, from the rule endpoint (ADR-108); empty when it cannot be read. */
+export async function shortLinkHost(): Promise<string> {
+  const { data } = await api.GET('/api/v1/platform/short-link-rule');
+  return data?.short_link_host ?? '';
+}
+
 export async function verifyApplicant(token: string): Promise<ApplicantView> {
   const { data, error } = await api.POST('/api/v1/platform/sign-up/verify', { body: { token } });
   if (error || !data) fail(error, 'We could not open your application.');

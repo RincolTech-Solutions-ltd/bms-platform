@@ -6,8 +6,6 @@ bms:
     tenant-host-pattern: "{slug}.localhost"
     platform-host: localhost
     allow-tenant-header: true
-    # *.localhost always resolves, so a changed short name works at once (ADR-108).
-    short-name-change: true
     # One-time links point at the local proxy (make dev), not https.
     link-scheme: http
     link-port: 8000
