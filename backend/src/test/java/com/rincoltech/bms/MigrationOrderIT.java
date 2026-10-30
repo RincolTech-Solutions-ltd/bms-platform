@@ -1648,7 +1648,7 @@ class MigrationOrderIT {
             assertThat(owner.sql("""
                                     SELECT count(*) FROM retail_products
                                      WHERE id = ? AND family_id IS NULL AND variant_size IS NULL AND variant_colour IS NULL
-                                       AND variant_sort IS NULL AND description = 'Test romper' AND code = 'T1' AND version = 1
+                                       AND variant_sort IS NULL AND description = 'Test Romper' AND code = 'T1' AND version = 1
                                     """).param(product).query(Long.class).single())
                     .as("the item is its own single variant, untouched")
                     .isEqualTo(1);
@@ -2340,7 +2340,8 @@ class MigrationOrderIT {
                             .param(tenant)
                             .query(String.class)
                             .list())
-                    .containsExactly("Blub BLBA", "Bulbs BLB", "Phone accessories PHA");
+                    // V120 (issue #698, ADR-109) puts the name in the display style, by case only.
+                    .containsExactly("Blub BLBA", "Bulbs BLB", "Phone Accessories PHA");
             assertThat(owner.sql("SELECT code_prefix FROM retail_categories WHERE tenant_id = ?")
                             .param(other)
                             .query(String.class)

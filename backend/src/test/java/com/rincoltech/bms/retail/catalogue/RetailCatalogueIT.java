@@ -167,7 +167,8 @@ class RetailCatalogueIT extends IntegrationTest {
                 "*",
                 Map.of("If-Match", "\"1\""));
         assertThat(patched.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(patched.getBody().get("description").asString()).isEqualTo("Test plug three pin");
+        // Saved in the display style (issue #698, ADR-109, D86 = A).
+        assertThat(patched.getBody().get("description").asString()).isEqualTo("Test Plug Three Pin");
         assertThat(patched.getBody().get("active").asBoolean()).isFalse();
         assertThat(patched.getBody().get("sell_minor").asLong()).isEqualTo(1_100);
         ResponseEntity<JsonNode> withPrice = api.call(
