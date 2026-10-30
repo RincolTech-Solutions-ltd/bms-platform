@@ -78,8 +78,8 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
         packRefs.forEach(r -> tables.add(r.table()));
         boolean bypass;
         try (Statement s = c.createStatement();
-                ResultSet rs = s.executeQuery(
-                        "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user")) {
+                ResultSet rs =
+                        s.executeQuery("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user")) {
             rs.next();
             bypass = rs.getBoolean(1);
         }
@@ -198,7 +198,8 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
                         "retail.unit",
                         merged.id(),
                         "{\"name\": " + json(merged.name()) + ", \"active\": " + merged.active() + "}",
-                        "{\"active\": false, \"merged_into_id\": " + json(kept.id().toString())
+                        "{\"active\": false, \"merged_into_id\": "
+                                + json(kept.id().toString())
                                 + ", \"merged_into_name\": " + json(kept.name()) + ", \"items\": " + items
                                 + ", \"items_with_sizes\": " + families + ", \"packages\": " + packs
                                 + ", \"usual_packs\": " + usualPacks + ", \"source\": \"" + SOURCE + "\"}");
@@ -231,34 +232,20 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
         if (merged.id().equals(kept.packOf()) || kept.id().equals(merged.packOf())) {
             return "one is the usual pack of the other";
         }
-        if (exists(
-                c,
-                """
+        if (exists(c, """
                 SELECT 1 FROM retail_products p
                  WHERE p.tenant_id = ? AND (
                        EXISTS (SELECT 1 FROM retail_product_units a JOIN retail_product_units b ON b.product_id = a.product_id
                                 WHERE a.product_id = p.id AND a.unit_id = ? AND b.unit_id = ?)
                     OR (p.unit_id = ? AND EXISTS (SELECT 1 FROM retail_product_units k WHERE k.product_id = p.id AND k.unit_id = ?))
                     OR (p.unit_id = ? AND EXISTS (SELECT 1 FROM retail_product_units k WHERE k.product_id = p.id AND k.unit_id = ?)))
-                """,
-                merged.tenant(),
-                merged.id(),
-                kept.id(),
-                merged.id(),
-                kept.id(),
-                kept.id(),
-                merged.id())) {
+                """, merged.tenant(), merged.id(), kept.id(), merged.id(), kept.id(), kept.id(), merged.id())) {
             return "an item has both";
         }
-        if (exists(
-                c,
-                """
+        if (exists(c, """
                 SELECT 1 FROM retail_products a JOIN retail_products b ON b.tenant_id = a.tenant_id AND b.name_key = a.name_key
                  WHERE a.tenant_id = ? AND a.unit_id = ? AND b.unit_id = ?
-                """,
-                merged.tenant(),
-                merged.id(),
-                kept.id())) {
+                """, merged.tenant(), merged.id(), kept.id())) {
             return "an item of the same name is in both";
         }
         return null;
@@ -268,8 +255,8 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
     private static int move(Connection c, String table, String column, UnitRow merged, UnitRow kept, boolean bump)
             throws SQLException {
         String touch = bump ? ", updated_at = now(), version = version + 1" : "";
-        try (PreparedStatement p = c.prepareStatement(
-                "UPDATE " + table + " SET " + column + " = ?" + touch + " WHERE tenant_id = ? AND " + column + " = ?")) {
+        try (PreparedStatement p = c.prepareStatement("UPDATE " + table + " SET " + column + " = ?" + touch
+                + " WHERE tenant_id = ? AND " + column + " = ?")) {
             p.setObject(1, kept.id());
             p.setObject(2, merged.tenant());
             p.setObject(3, merged.id());
@@ -292,8 +279,8 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
                 }
             }
         }
-        try (PreparedStatement p = c.prepareStatement(
-                "UPDATE " + table + " SET " + column + " = ? WHERE tenant_id = ? AND id = ?")) {
+        try (PreparedStatement p =
+                c.prepareStatement("UPDATE " + table + " SET " + column + " = ? WHERE tenant_id = ? AND id = ?")) {
             for (Change ch : changes) {
                 p.setString(1, ch.after());
                 p.setObject(2, ch.tenant());

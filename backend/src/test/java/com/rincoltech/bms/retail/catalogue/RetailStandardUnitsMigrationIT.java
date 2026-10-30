@@ -44,7 +44,8 @@ class RetailStandardUnitsMigrationIT extends IntegrationTest {
 
     @Test
     void mergesOnlySafeUnitsKeepsEveryRowAndRestylesNamesByCase() throws Exception {
-        String database = "standard_units_replay_" + UUID.randomUUID().toString().replace("-", "");
+        String database =
+                "standard_units_replay_" + UUID.randomUUID().toString().replace("-", "");
         try {
             String url = TestDatabase.scratchDatabase(database);
             DataSource ds = new DriverManagerDataSource(url, "bms_owner", TestDatabase.OWNER_PASSWORD);
@@ -56,16 +57,18 @@ class RetailStandardUnitsMigrationIT extends IntegrationTest {
             JdbcClient owner = JdbcClient.create(ds);
 
             UUID t = UUID.randomUUID();
-            owner.sql("INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'units-698', 'Test Shop Units', '" + PLAN
-                            + "')")
+            owner.sql("INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'units-698', 'Test Shop Units', '"
+                            + PLAN + "')")
                     .param(t)
                     .update();
             UUID bulbs = UUID.randomUUID();
-            owner.sql("INSERT INTO retail_categories (id, tenant_id, name, code_prefix) VALUES (?, ?, 'test bulbs', 'TB')")
+            owner.sql(
+                            "INSERT INTO retail_categories (id, tenant_id, name, code_prefix) VALUES (?, ?, 'test bulbs', 'TB')")
                     .params(bulbs, t)
                     .update();
             UUID spaced = UUID.randomUUID();
-            owner.sql("INSERT INTO retail_categories (id, tenant_id, name, code_prefix) VALUES (?, ?, 'test  cables', 'TC')")
+            owner.sql(
+                            "INSERT INTO retail_categories (id, tenant_id, name, code_prefix) VALUES (?, ?, 'test  cables', 'TC')")
                     .params(spaced, t)
                     .update();
             UUID piece = unit(owner, t, "Piece");
@@ -83,7 +86,8 @@ class RetailStandardUnitsMigrationIT extends IntegrationTest {
             // kilo: a price list uses it, so it is left.
             UUID nails = product(owner, t, "TB-0003", "TEST NAILS", bulbs, kilo);
             UUID list = UUID.randomUUID();
-            owner.sql("INSERT INTO retail_price_lists (id, tenant_id, name, currency) VALUES (?, ?, 'Test List', 'UGX')")
+            owner.sql(
+                            "INSERT INTO retail_price_lists (id, tenant_id, name, currency) VALUES (?, ?, 'Test List', 'UGX')")
                     .params(list, t)
                     .update();
             owner.sql("INSERT INTO retail_price_list_items (id, tenant_id, price_list_id, product_id, unit_id, min_qty,"
@@ -122,9 +126,13 @@ class RetailStandardUnitsMigrationIT extends IntegrationTest {
 
             Map<String, Object> merged = audit(owner, t, "retail.unit.merged", pcs);
             assertThat(merged.get("data").toString()).contains("\"merged_into_id\": \"" + piece + "\"", "\"items\": 1");
-            assertThat(audit(owner, t, "retail.unit.merge_skipped", ctn).get("data").toString())
+            assertThat(audit(owner, t, "retail.unit.merge_skipped", ctn)
+                            .get("data")
+                            .toString())
                     .contains("an item has both");
-            assertThat(audit(owner, t, "retail.unit.merge_skipped", kilo).get("data").toString())
+            assertThat(audit(owner, t, "retail.unit.merge_skipped", kilo)
+                            .get("data")
+                            .toString())
                     .contains("used by retail_price_list_items");
 
             // Names in the display style by case only; a name with extra spaces is left until it is next saved.
@@ -136,9 +144,13 @@ class RetailStandardUnitsMigrationIT extends IntegrationTest {
                     .isEqualTo("Test Bulbs");
             assertThat(name(owner, "SELECT name FROM retail_categories WHERE id = ?", spaced))
                     .isEqualTo("test  cables");
-            assertThat(audit(owner, t, "retail.product.updated", bulb).get("data").toString())
+            assertThat(audit(owner, t, "retail.product.updated", bulb)
+                            .get("data")
+                            .toString())
                     .contains("test led bulb 60w", "Test Led Bulb 60W", "V120");
-            assertThat(audit(owner, t, "retail.category.updated", bulbs).get("data").toString())
+            assertThat(audit(owner, t, "retail.category.updated", bulbs)
+                            .get("data")
+                            .toString())
                     .contains("\"source\": \"V120\"");
         } finally {
             TestDatabase.dropScratchDatabase(database);
@@ -163,7 +175,8 @@ class RetailStandardUnitsMigrationIT extends IntegrationTest {
     }
 
     static void pack(JdbcClient owner, UUID tenant, UUID product, UUID unit) {
-        owner.sql("INSERT INTO retail_product_units (id, tenant_id, product_id, unit_id, factor) VALUES (?, ?, ?, ?, 12)")
+        owner.sql(
+                        "INSERT INTO retail_product_units (id, tenant_id, product_id, unit_id, factor) VALUES (?, ?, ?, ?, 12)")
                 .params(UUID.randomUUID(), tenant, product, unit)
                 .update();
     }

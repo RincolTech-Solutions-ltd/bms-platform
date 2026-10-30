@@ -106,7 +106,8 @@ class RetailCatalogueIT extends IntegrationTest {
             assertThat(again2.getBody().get("code").asString()).isEqualTo("unit_exists");
             assertThat(again2.getBody().get("existing_id").asString()).isEqualTo(unit.toString());
             assertThat(again2.getBody().get("detail").asString())
-                    .isEqualTo("You already have " + again2.getBody().get("existing_name").asString() + ".");
+                    .isEqualTo("You already have "
+                            + again2.getBody().get("existing_name").asString() + ".");
         }
         body.put("description", "Test switch three");
         body.put("category_id", UUID.randomUUID());

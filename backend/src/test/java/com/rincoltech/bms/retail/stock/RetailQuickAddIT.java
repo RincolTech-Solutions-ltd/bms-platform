@@ -187,7 +187,9 @@ class RetailQuickAddIT extends IntegrationTest {
         ResponseEntity<JsonNode> r = quickAdd(item("Test Candle", 300, "12", hq));
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(r.getBody().toString()).contains("unit_id").contains("Piece unit is switched off");
-        assertThat(scalar("SELECT count(*) FROM retail_units WHERE tenant_id = ? AND lower(name) = 'piece'", t.tenantId()))
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_units WHERE tenant_id = ? AND lower(name) = 'piece'",
+                        t.tenantId()))
                 .isZero();
     }
 
