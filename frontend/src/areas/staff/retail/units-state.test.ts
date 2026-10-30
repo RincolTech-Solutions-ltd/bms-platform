@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { Pack, Product, SaleLine } from '../../../api/retail';
+import { RetailError, type Pack, type Product, type SaleLine } from '../../../api/retail';
 import { buildPurchase, restockLineProblem, restockTotal, withUnit as restockWithUnit, type RestockLine } from './restock';
 import { buildSaleRequest, defaultPrice, draftTotal, lineHint, newLine, withUnit, type Draft } from './sale-state';
 import { factorProblem } from './catalogue-packs';
-import { baseCostMinor, baseQtyMilli, enteredPriceMinor, enteredQty, packPriceMinor, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, quantityIn, samePack, spellingsOf, standardPack, listedWord, unitWord, unitWords } from './units-state';
+import { baseCostMinor, baseQtyMilli, enteredPriceMinor, enteredQty, packPriceMinor, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, quantityIn, samePack, spellingsOf, standardPack, listedWord, orExistingUnit, unitWord, unitWords } from './units-state';
 
 // Units of measure (ADR-033, issue #194): the forms convert with the same rules as the server
 // (Quantities.java) so a line is judged before it is sent. Names and amounts are fabricated.
@@ -198,6 +198,13 @@ describe('stock in packs and pieces (issue #650)', () => {
     expect(listedWord(' Liters ')).toBe('litre');
     expect(listedWord('Tray')).toBe('tray');
     expect(spellingsOf('carton')).toEqual(['carton', 'cartons', 'ctn', 'ctns']);
+  });
+
+  it('chooses the unit a refusal names, and leaves one that names none an error (review of #715)', async () => {
+    const named = new RetailError('You already have Piece.', 409, 'unit_exists', { existing_id: 'u1', existing_name: 'Piece', existing_active: true });
+    await expect(orExistingUnit(Promise.reject(named))).resolves.toMatchObject({ id: 'u1', name: 'Piece', reused: true });
+    const unnamed = new RetailError('A unit with this name was added a moment ago. Reload the units.', 409, 'unit_exists', {});
+    await expect(orExistingUnit(Promise.reject(unnamed))).rejects.toBe(unnamed);
     expect(unitWords(undefined)).toBe('');
   });
   it('works with a pack of a decimal size', () => {

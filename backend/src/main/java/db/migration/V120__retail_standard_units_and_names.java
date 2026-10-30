@@ -9,6 +9,8 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -27,21 +29,26 @@ import org.flywaydb.core.api.migration.Context;
  * <ol>
  *   <li>Units whose names share a key ("Piece", "pcs", "PC") are merged into one: the switched-on one first, then the one
  *       named as the unit's word, then the oldest. A unit is merged only when nothing but the catalogue uses it (items, items
- *       with sizes, packages, a unit's usual pack: every other foreign key to {@code retail_units}, and every foreign key to
- *       a package, is found from the catalog and checked) and moving those references clashes with nothing: no item would
- *       hold both units, no usual pack would count itself, and no two items of the same name would end up in one unit. Its
- *       references are moved to the kept unit, it is switched off and kept, never deleted, and {@code retail.unit.merged} is
- *       audited. A unit that cannot be merged is left exactly as it is and audited as {@code retail.unit.merge_skipped} with
- *       the reason.
- *   <li>Category, item and item-with-sizes names take the display style where that changes only their case, audited as
+ *       with sizes, packages, a unit's usual pack: every other foreign key to {@code retail_units}, every column named
+ *       {@code unit_id} or {@code *_unit_id} with or without a key, and every foreign key to a package, is found from the
+ *       catalog and checked) and moving those references clashes with nothing: no item would hold both units, no usual pack
+ *       chain would loop at any depth, and no two items of the same name would end up in one unit. Its references are moved
+ *       to the kept unit, it is switched off and kept, never deleted, {@code merged_into_id} names the kept unit (the
+ *       catalogue's pack lookup follows it, so a line queued offline with the old id still finds its pack), and
+ *       {@code retail.unit.merged} is audited. A unit that cannot be merged is left exactly as it is and audited as
+ *       {@code retail.unit.merge_skipped} with the reason.
+ *   <li>Category, item and item-with-sizes names take the display style where that changes only their case, with
+ *       {@code updated_at} and {@code version} moved so every client reads them again, audited as
  *       {@code retail.category.updated}, {@code retail.product.updated} and {@code retail.product_family.updated} with
  *       {@code source} {@code V120}. A name with extra spaces keeps them until it is next saved.
  * </ol>
  *
- * <p>Expand only: rows are updated, none deleted, and no table, column, constraint, grant or policy changes. The audit rows are
- * written as {@code system}, with nobody bound. Row security as in V109: {@code bms_owner} has BYPASSRLS; an owner without it
- * drops FORCE ROW LEVEL SECURITY on the tables read here for this transaction only, which takes ACCESS EXCLUSIVE on them until
- * the commit, so {@code lock_timeout} is five seconds and the migration fails and is retried rather than queueing requests.
+ * <p>Expand only: one nullable column, {@code retail_units.merged_into_id}, with a key not validated; rows are updated, none
+ * deleted, and no grant or policy changes. The audit rows are written as {@code system}, with nobody bound. Row security as in
+ * V109: {@code bms_owner} has BYPASSRLS; an owner without it drops FORCE ROW LEVEL SECURITY, for this transaction only, on the
+ * tables read here that force it, and restores exactly those. That takes ACCESS EXCLUSIVE on them until the commit, as does
+ * the new column, so {@code lock_timeout} is five seconds and the migration fails and is retried rather than queueing
+ * requests.
  */
 public class V120__retail_standard_units_and_names extends BaseJavaMigration {
 
@@ -52,7 +59,9 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
             "retail_products.unit_id",
             "retail_product_families.unit_id",
             "retail_product_units.unit_id",
-            "retail_units.pack_of_unit_id");
+            "retail_product_units.holds_unit_id",
+            "retail_units.pack_of_unit_id",
+            "retail_units.merged_into_id");
 
     private record UnitRow(UUID id, UUID tenant, String name, boolean active, Timestamp created, UUID packOf) {}
 
@@ -63,9 +72,18 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
         Connection c = context.getConnection();
         try (Statement s = c.createStatement()) {
             s.execute("SET LOCAL lock_timeout = '5s'");
+            // Where a merged unit went (review of #715): the catalogue's pack lookup follows it, so a line a device queued
+            // offline with the merged unit's id still finds its pack. Expand only: a nullable column and a key not
+            // validated (nothing holds a value yet, and validating would read the table through its row security).
+            s.execute("ALTER TABLE retail_units ADD COLUMN merged_into_id uuid");
+            s.execute("ALTER TABLE retail_units ADD CONSTRAINT retail_units_merged_into_fk"
+                    + " FOREIGN KEY (tenant_id, merged_into_id) REFERENCES retail_units (tenant_id, id) NOT VALID");
         }
-        // The references to a unit and to a package, from the catalog, so a table added later is never missed.
-        List<Ref> unitRefs = refs(c, "retail_units", "id");
+        // The references to a unit and to a package, from the catalog, so a table added later is never missed: every
+        // foreign key, and every column named unit_id or *_unit_id, since some hold a unit with no key (review of #715).
+        Set<Ref> unitRefs = new LinkedHashSet<>(refs(c, "retail_units", "id"));
+        unitRefs.addAll(namedRefs(c));
+        unitRefs.removeIf(r -> CATALOGUE.contains(r.table() + "." + r.column()));
         List<Ref> packRefs = refs(c, "retail_product_units", "unit_id");
         Set<String> tables = new LinkedHashSet<>(List.of(
                 "retail_units",
@@ -83,9 +101,11 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
             rs.next();
             bypass = rs.getBoolean(1);
         }
-        forceRowSecurity(c, tables, bypass, false);
+        // Only the tables that force row security now drop it, and only those get it back (review of #715).
+        Set<String> forced = bypass ? Set.of() : forced(c, tables);
+        forceRowSecurity(c, forced, false);
         try {
-            mergeUnits(c, unitRefs, packRefs);
+            mergeUnits(c, List.copyOf(unitRefs), packRefs);
             restyle(c, "retail_categories", "name", "retail.category.updated", "retail.category", "name");
             restyle(c, "retail_products", "description", "retail.product.updated", "retail.product", "description");
             restyle(
@@ -96,21 +116,54 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
                     "retail.product_family",
                     "name");
         } finally {
-            forceRowSecurity(c, tables, bypass, true);
+            forceRowSecurity(c, forced, true);
         }
     }
 
-    private static void forceRowSecurity(Connection c, Set<String> tables, boolean bypass, boolean on)
-            throws SQLException {
+    /** The tables of this list that force row level security now. */
+    private static Set<String> forced(Connection c, Set<String> tables) throws SQLException {
+        Set<String> out = new LinkedHashSet<>();
+        try (PreparedStatement p =
+                c.prepareStatement("SELECT relforcerowsecurity FROM pg_class WHERE oid = ?::regclass")) {
+            for (String t : tables) {
+                p.setString(1, t);
+                try (ResultSet rs = p.executeQuery()) {
+                    if (rs.next() && rs.getBoolean(1)) {
+                        out.add(t);
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    private static void forceRowSecurity(Connection c, Set<String> tables, boolean on) throws SQLException {
         try (Statement s = c.createStatement()) {
             s.execute("SET LOCAL row_security = " + (on ? "on" : "off"));
-            if (bypass) {
-                return;
-            }
             for (String t : tables) {
                 s.execute("ALTER TABLE " + t + (on ? " FORCE" : " NO FORCE") + " ROW LEVEL SECURITY");
             }
         }
+    }
+
+    /** Every column of a table here named unit_id or ending in _unit_id: a unit held with or without a foreign key. */
+    private static List<Ref> namedRefs(Connection c) throws SQLException {
+        List<Ref> out = new ArrayList<>();
+        try (Statement s = c.createStatement();
+                ResultSet rs = s.executeQuery("""
+                        SELECT k.table_name, k.column_name
+                          FROM information_schema.columns k
+                          JOIN information_schema.tables t
+                            ON t.table_schema = k.table_schema AND t.table_name = k.table_name
+                         WHERE k.table_schema = current_schema() AND t.table_type = 'BASE TABLE'
+                           AND (k.column_name = 'unit_id' OR k.column_name LIKE '%\\_unit\\_id')
+                         ORDER BY 1, 2
+                        """)) {
+            while (rs.next()) {
+                out.add(new Ref(rs.getString(1), rs.getString(2)));
+            }
+        }
+        return out;
     }
 
     /** The columns of other tables that point at {@code table}'s {@code column} through a foreign key. */
@@ -138,6 +191,8 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
 
     private static void mergeUnits(Connection c, List<Ref> unitRefs, List<Ref> packRefs) throws SQLException {
         Map<String, List<UnitRow>> groups = new LinkedHashMap<>();
+        // Every unit's usual pack, kept current as merges move them, for the loop check.
+        Map<UUID, UUID> packOf = new HashMap<>();
         try (Statement s = c.createStatement();
                 ResultSet rs = s.executeQuery("""
                         SELECT id, tenant_id, name, active, created_at, pack_of_unit_id
@@ -151,6 +206,9 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
                         rs.getBoolean(4),
                         rs.getTimestamp(5),
                         rs.getObject(6, UUID.class));
+                if (u.packOf() != null) {
+                    packOf.put(u.id(), u.packOf());
+                }
                 groups.computeIfAbsent(u.tenant() + ":" + CatalogueNames.unitKey(u.name()), k -> new ArrayList<>())
                         .add(u);
             }
@@ -166,7 +224,9 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
                     .thenComparing(UnitRow::id));
             UnitRow kept = group.getFirst();
             for (UnitRow merged : group.subList(1, group.size())) {
-                String why = whyNot(c, merged, kept, unitRefs, packRefs);
+                String why = reaches(packOf, kept.id(), merged.id()) || reaches(packOf, merged.id(), kept.id())
+                        ? "one is in the usual pack chain of the other"
+                        : whyNot(c, merged, kept, unitRefs, packRefs);
                 if (why != null) {
                     audit(
                             c,
@@ -185,10 +245,12 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
                 int packs = move(c, "retail_product_units", "unit_id", merged, kept, true);
                 move(c, "retail_product_units", "holds_unit_id", merged, kept, false);
                 int usualPacks = move(c, "retail_units", "pack_of_unit_id", merged, kept, true);
+                packOf.replaceAll((unit, of) -> of.equals(merged.id()) ? kept.id() : of);
                 update(
                         c,
-                        "UPDATE retail_units SET active = false, updated_at = now(), version = version + 1"
-                                + " WHERE tenant_id = ? AND id = ?",
+                        "UPDATE retail_units SET active = false, merged_into_id = ?, updated_at = now(),"
+                                + " version = version + 1 WHERE tenant_id = ? AND id = ?",
+                        kept.id(),
                         merged.tenant(),
                         merged.id());
                 audit(
@@ -207,30 +269,30 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
         }
     }
 
+    /** True when {@code to} is on the usual pack chain that starts at {@code from} (any depth, ADR-107). */
+    private static boolean reaches(Map<UUID, UUID> packOf, UUID from, UUID to) {
+        Set<UUID> seen = new HashSet<>();
+        for (UUID at = packOf.get(from); at != null && seen.add(at); at = packOf.get(at)) {
+            if (at.equals(to)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Why the unit cannot be merged into the kept one, or null when it can. */
     private static String whyNot(Connection c, UnitRow merged, UnitRow kept, List<Ref> unitRefs, List<Ref> packRefs)
             throws SQLException {
+        // A unit id is unique across businesses, so no tenant_id is assumed on a table that holds one.
         for (Ref r : unitRefs) {
-            if (!CATALOGUE.contains(r.table() + "." + r.column())
-                    && exists(
-                            c,
-                            "SELECT 1 FROM " + r.table() + " WHERE tenant_id = ? AND " + r.column() + " = ?",
-                            merged.tenant(),
-                            merged.id())) {
+            if (exists(c, "SELECT 1 FROM " + r.table() + " WHERE " + r.column() + " = ?", merged.id())) {
                 return "used by " + r.table();
             }
         }
         for (Ref r : packRefs) {
-            if (exists(
-                    c,
-                    "SELECT 1 FROM " + r.table() + " WHERE tenant_id = ? AND " + r.column() + " = ?",
-                    merged.tenant(),
-                    merged.id())) {
+            if (exists(c, "SELECT 1 FROM " + r.table() + " WHERE " + r.column() + " = ?", merged.id())) {
                 return "a package of it is used by " + r.table();
             }
-        }
-        if (merged.id().equals(kept.packOf()) || kept.id().equals(merged.packOf())) {
-            return "one is the usual pack of the other";
         }
         if (exists(c, """
                 SELECT 1 FROM retail_products p
@@ -280,7 +342,8 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
             }
         }
         try (PreparedStatement p =
-                c.prepareStatement("UPDATE " + table + " SET " + column + " = ? WHERE tenant_id = ? AND id = ?")) {
+                c.prepareStatement("UPDATE " + table + " SET " + column
+                        + " = ?, updated_at = now(), version = version + 1 WHERE tenant_id = ? AND id = ?")) {
             for (Change ch : changes) {
                 p.setString(1, ch.after());
                 p.setObject(2, ch.tenant());

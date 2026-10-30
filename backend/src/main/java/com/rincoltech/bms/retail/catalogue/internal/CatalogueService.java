@@ -200,8 +200,11 @@ class CatalogueService {
      * insert would end the transaction), naming the one that has it so the screen can offer it: "You already have BULBS.".
      */
     private void refuseSameCategory(String name, UUID self) {
+        // Spaces inside count once, so a category saved before ("test  cables") is found too (review of #715).
+        java.util.function.Function<String, String> key =
+                n -> n.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
         repo.categories().stream()
-                .filter(c -> !c.id().equals(self) && c.name().equalsIgnoreCase(name))
+                .filter(c -> !c.id().equals(self) && key.apply(c.name()).equals(key.apply(name)))
                 .findFirst()
                 .ifPresent(c -> {
                     throw new ApiException(
@@ -232,8 +235,9 @@ class CatalogueService {
         try {
             repo.insertUnit(id, name, CurrentPrincipal.require().userId());
         } catch (DuplicateKeyException e) {
-            // Only a write that raced the lock above lands here; the transaction is over, so nothing more is read.
-            throw duplicate("unit_exists", "You already have this unit.");
+            // Only a write that raced the lock above lands here; the transaction is over, so nothing more is read, and
+            // the refusal names no unit (the screens then show it as it is).
+            throw duplicate("unit_exists", "A unit with this name was added a moment ago. Reload the units.");
         }
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("name", name);
@@ -379,7 +383,7 @@ class CatalogueService {
                 throw staleUnit(id);
             }
         } catch (DuplicateKeyException e) {
-            throw duplicate("unit_exists", "You already have this unit.");
+            throw duplicate("unit_exists", "A unit with this name was added a moment ago. Reload the units.");
         }
         if (now.containsKey("usual_pack")) {
             // Null when clear_usual_pack was sent: the three columns are cleared together (issue #637).

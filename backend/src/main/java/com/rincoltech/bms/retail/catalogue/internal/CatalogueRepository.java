@@ -739,6 +739,14 @@ class CatalogueRepository {
                 .optional();
     }
 
+    /** Issue #698: the unit V120 merged this one into, if it did. */
+    Optional<UUID> mergedInto(UUID unitId) {
+        return jdbc.sql("SELECT merged_into_id FROM retail_units WHERE id = ? AND merged_into_id IS NOT NULL")
+                .param(unitId)
+                .query(UUID.class)
+                .optional();
+    }
+
     /** The sell price in force at {@code at} (see {@link com.rincoltech.bms.retail.catalogue.RetailCatalogue#sellMinorAt}). */
     long sellMinorAt(UUID productId, java.time.Instant at) {
         return jdbc.sql("""

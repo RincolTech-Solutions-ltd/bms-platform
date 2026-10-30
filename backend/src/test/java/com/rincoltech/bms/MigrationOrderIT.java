@@ -1648,9 +1648,10 @@ class MigrationOrderIT {
             assertThat(owner.sql("""
                                     SELECT count(*) FROM retail_products
                                      WHERE id = ? AND family_id IS NULL AND variant_size IS NULL AND variant_colour IS NULL
-                                       AND variant_sort IS NULL AND description = 'Test Romper' AND code = 'T1' AND version = 1
+                                       AND variant_sort IS NULL AND description = 'Test Romper' AND code = 'T1' AND version = 2
                                     """).param(product).query(Long.class).single())
-                    .as("the item is its own single variant, untouched")
+                    // V120 (issue #698) moved only the case of its name, and its version with it.
+                    .as("the item is its own single variant, untouched but for the case of its name")
                     .isEqualTo(1);
             assertThat(owner.sql("SELECT qty::text FROM retail_stock_balances WHERE product_id = ?")
                             .param(product)

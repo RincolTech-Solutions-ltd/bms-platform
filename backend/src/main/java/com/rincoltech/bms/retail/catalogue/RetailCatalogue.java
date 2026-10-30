@@ -128,6 +128,12 @@ public interface RetailCatalogue {
     Optional<PackUnit> packUnit(UUID productId, UUID unitId);
 
     /**
+     * Issue #698 (ADR-109): the unit a line means now: the one V120 merged this unit into, or the unit itself. A sale a phone
+     * kept offline with the old id is read as the item's own unit when that is where the unit went.
+     */
+    UUID unitNow(UUID unitId);
+
+    /**
      * ADR-067 decision 11: the product's sell price in force at {@code at}, from its price history (the last change at or
      * before it; before the first change, the price that change replaced), or the current price when the history says
      * nothing. Read in the caller's transaction.

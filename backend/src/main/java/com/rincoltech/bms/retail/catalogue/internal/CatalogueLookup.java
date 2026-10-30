@@ -27,8 +27,17 @@ class CatalogueLookup implements RetailCatalogue {
 
     @Override
     @Transactional(readOnly = true)
+    public UUID unitNow(UUID unitId) {
+        return unitId == null ? null : repo.mergedInto(unitId).orElse(unitId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Optional<PackUnit> packUnit(UUID productId, UUID unitId) {
+        // Issue #698 (ADR-109): a unit V120 merged names the one it went into, so a line a device kept with the old id
+        // (an offline sale, a draft) finds the pack, which moved to the kept unit.
         return repo.pack(productId, unitId)
+                .or(() -> repo.mergedInto(unitId).flatMap(kept -> repo.pack(productId, kept)))
                 .map(k -> new PackUnit(
                         k.unitId(),
                         k.unit(),

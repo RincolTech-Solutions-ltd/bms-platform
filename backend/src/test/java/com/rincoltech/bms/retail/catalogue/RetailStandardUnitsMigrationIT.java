@@ -94,6 +94,21 @@ class RetailStandardUnitsMigrationIT extends IntegrationTest {
                             + " price_minor, valid_from) VALUES (?, ?, ?, ?, ?, 0, 100, current_date)")
                     .params(UUID.randomUUID(), t, list, nails, kilo)
                     .update();
+            // Bags: a table holds it with no foreign key (review of #715), so it is left.
+            UUID bag = unit(owner, t, "Bag");
+            UUID bags = unit(owner, t, "Bags");
+            owner.sql("CREATE TABLE test_unit_notes_698 (unit_id uuid)").update();
+            owner.sql("INSERT INTO test_unit_notes_698 (unit_id) VALUES (?)").param(bags).update();
+            // trays: Tray is a usual pack of Crate, and Crate of trays, so merging would make a loop (review of #715).
+            UUID tray = unit(owner, t, "Tray");
+            UUID trays = unit(owner, t, "trays");
+            UUID crate = unit(owner, t, "Crate");
+            owner.sql("UPDATE retail_units SET pack_size = 2, pack_of_unit_id = ?, pack_purpose = 'buy' WHERE id = ?")
+                    .params(crate, tray)
+                    .update();
+            owner.sql("UPDATE retail_units SET pack_size = 3, pack_of_unit_id = ?, pack_purpose = 'buy' WHERE id = ?")
+                    .params(trays, crate)
+                    .update();
             int units = count(owner, "SELECT count(*) FROM retail_units WHERE tenant_id = ?", t);
 
             DatabaseMigrator.configure(url, "bms_owner", TestDatabase.OWNER_PASSWORD)
@@ -112,6 +127,25 @@ class RetailStandardUnitsMigrationIT extends IntegrationTest {
                     .isEqualTo(piece);
             assertThat(active(owner, pcs)).isFalse();
             assertThat(active(owner, piece)).isTrue();
+            // JUSTIFICATION-A3: the three cases the review of #715 asked to be proven, each a plain assertion.
+            // It names where it went, so a line kept offline with its id still finds its pack.
+            assertThat(owner.sql("SELECT merged_into_id FROM retail_units WHERE id = ?")
+                            .param(pcs)
+                            .query(UUID.class)
+                            .single())
+                    .isEqualTo(piece);
+            assertThat(active(owner, bags)).isTrue();
+            assertThat(active(owner, trays)).isTrue();
+            assertThat(active(owner, bag)).isTrue();
+            assertThat(active(owner, tray)).isTrue();
+            assertThat(audit(owner, t, "retail.unit.merge_skipped", bags)
+                            .get("data")
+                            .toString())
+                    .contains("used by test_unit_notes_698");
+            assertThat(audit(owner, t, "retail.unit.merge_skipped", trays)
+                            .get("data")
+                            .toString())
+                    .contains("usual pack chain");
             // Ctn and kilo are left exactly as they were.
             assertThat(active(owner, ctn)).isTrue();
             assertThat(active(owner, kilo)).isTrue();
@@ -138,6 +172,9 @@ class RetailStandardUnitsMigrationIT extends IntegrationTest {
             // Names in the display style by case only; a name with extra spaces is left until it is next saved.
             assertThat(name(owner, "SELECT description FROM retail_products WHERE id = ?", bulb))
                     .isEqualTo("Test Led Bulb 60W");
+            // Moved to Piece and restyled: each moves the version, so every client reads it again.
+            assertThat(count(owner, "SELECT version FROM retail_products WHERE id = ?", bulb))
+                    .isEqualTo(3);
             assertThat(name(owner, "SELECT description FROM retail_products WHERE id = ?", nails))
                     .isEqualTo("TEST NAILS");
             assertThat(name(owner, "SELECT name FROM retail_categories WHERE id = ?", bulbs))

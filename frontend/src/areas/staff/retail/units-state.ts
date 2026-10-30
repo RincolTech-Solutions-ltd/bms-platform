@@ -166,8 +166,9 @@ export type AddedUnit = Unit & { reused?: boolean };
  */
 export function orExistingUnit(added: Promise<Unit>): Promise<AddedUnit> {
   return added.catch((error: unknown) => {
-    if (!(error instanceof RetailError) || error.code !== 'unit_exists') throw error;
-    const p = error.problem ?? {};
+    const p = error instanceof RetailError ? (error.problem ?? {}) : {};
+    // Only a refusal that names the unit can choose it; one added a moment ago elsewhere stays an error (review of #715).
+    if (!(error instanceof RetailError) || error.code !== 'unit_exists' || !p['existing_id']) throw error;
     return { id: String(p['existing_id'] ?? ''), name: String(p['existing_name'] ?? ''), active: p['existing_active'] !== false, reused: true };
   });
 }
