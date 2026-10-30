@@ -1426,6 +1426,12 @@ export function createMockRetail(): RetailApi {
           p = { id: nextId('b'), code, description: (body.description ?? '').trim(), category: category.name, unit: unit.name, costMinor: body.cost_minor ?? 0, sellMinor: body.sell_minor ?? 0, active: true, version: 1 };
           products.set(p.id, p);
           history.set(p.id, [{ id: nextId('h'), at: new Date().toISOString(), source: 'initial', new_sell_minor: p.sellMinor, currency: 'UGX', ...(profitAccess ? { new_cost_minor: p.costMinor } : {}) }]);
+          // Issue #695: the new item's packages in the same save, sizes worked out through what each holds, as the server does.
+          const made = (body.packs ?? []).map((k): Pack => {
+            const held = unitRows.find((u) => u.id === k.holds_unit_id);
+            return { id: nextId('k'), product_id: p.id, unit_id: k.unit_id, unit: unitRows.find((u) => u.id === k.unit_id)?.name ?? '', factor: k.factor ?? '1.000', active: true, version: 1, purpose: k.purpose ?? 'both', ...(k.purpose === 'buy' || k.sell_minor === undefined ? {} : { sell_minor: k.sell_minor }), ...(held && k.holds_qty !== undefined ? { holds_unit_id: held.id, holds_unit: held.name, holds_qty: k.holds_qty } : {}), usual_buy: k.usual_buy === true };
+          });
+          if (made.length > 0) packs.set(p.id, reladder(p.id, made));
         }
         // The quantity is added to what the branch holds, never set (ADR-101).
         const added = body.qty === undefined ? null : toMilli(body.qty);
