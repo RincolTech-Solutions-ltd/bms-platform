@@ -834,12 +834,14 @@ class OnboardingIT extends IntegrationTest {
                         .query(String.class)
                         .list())
                 .containsExactly("retail");
-        // ADR-098: a shop signed up through onboarding starts with the default units.
+        // ADR-098: a shop signed up through onboarding starts with the default units, the standard ones of ADR-110.
         assertThat(owner.sql("SELECT name FROM retail_units WHERE tenant_id = ? ORDER BY name")
                         .param(tenantId)
                         .query(String.class)
                         .list())
-                .containsExactly("Box", "Kg", "Litre", "Metre", "Pack", "Pair", "Piece", "Set");
+                .containsExactly(
+                        "Bag", "Bale", "Box", "Bundle", "Carton", "Crate", "Dozen", "Gram", "Kg", "Litre", "Metre",
+                        "Ml", "Packet", "Pair", "Piece", "Roll", "Set");
         // Issue #630 (ADR-033 amendment): and with packs on, every other retail switch off, audited once.
         assertThat(owner.sql("""
                                 SELECT settings -> 'module_groups' -> 'retail' ->> 'units' FROM tenant_settings

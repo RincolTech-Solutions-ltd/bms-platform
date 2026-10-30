@@ -68,7 +68,8 @@ class MigrationOrderIT {
                     Path.of(MigrationOrderIT.class.getResource("/db/migration").toURI());
             try (Stream<Path> files = Files.list(dir)) {
                 return files.map(f -> f.getFileName().toString())
-                        .filter(n -> n.matches("V\\d+__.*\\.sql"))
+                        // A Java migration (V121, ADR-110) is its compiled class here; its records are not migrations.
+                        .filter(n -> n.matches("V\\d+__[^$]*\\.(sql|class)"))
                         .map(n -> n.substring(1, n.indexOf("__")))
                         .sorted(Comparator.comparingInt(Integer::parseInt))
                         .toList();
@@ -2394,8 +2395,8 @@ class MigrationOrderIT {
                     .param(withUnit)
                     .update();
 
-            MigrateResult result =
-                    DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+            // Stopped at V109: V121 (issue #709) gives every retail business the standard units it lacks, tested below.
+            MigrateResult result = flyway(postgres, "109").migrate();
 
             assertThat(result.success).isTrue();
             assertThat(owner.sql(
@@ -2409,6 +2410,86 @@ class MigrationOrderIT {
                             .query(String.class)
                             .list())
                     .containsExactly("piece");
+            for (UUID untouched : List.of(lendingOnly, closed)) {
+                assertThat(owner.sql("SELECT count(*) FROM retail_units WHERE tenant_id = ?")
+                                .param(untouched)
+                                .query(Long.class)
+                                .single())
+                        .isZero();
+            }
+        }
+    }
+
+    /**
+     * V121 (issue #709, ADR-110) gives every retail business the standard units it lacks, matching its own spellings (Pcs is
+     * Piece, Doz is Dozen), and touches nothing it made; a business without retail and a closed business get nothing.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates retail businesses across the standard units backfill.
+     */
+    @Test
+    void standardUnitsMigrationAddsOnlyWhatEachShopLacks() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("121") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID empty = UUID.randomUUID();
+            UUID own = UUID.randomUUID();
+            UUID lendingOnly = UUID.randomUUID();
+            UUID closed = UUID.randomUUID();
+            for (UUID id : List.of(empty, own, lendingOnly, closed)) {
+                owner.sql("INSERT INTO tenants (id, slug, name, plan_id, status) VALUES (?, ?, 'Test Tenant V121', "
+                                + "'00000000-0000-4000-8000-000000000001', ?)")
+                        .params(
+                                id,
+                                "test-v121-" + id.toString().substring(0, 8),
+                                id.equals(closed) ? "closed" : "active")
+                        .update();
+                owner.sql("INSERT INTO tenant_modules (tenant_id, module_key) VALUES (?, ?)")
+                        .params(id, id.equals(lendingOnly) ? "lending" : "retail")
+                        .update();
+            }
+            UUID pcs = UUID.randomUUID();
+            for (String name : List.of("Pcs", "Doz", "kgs", "Bulb", "Pack")) {
+                owner.sql("INSERT INTO retail_units (id, tenant_id, name, active, version) VALUES (?, ?, ?, ?, 3)")
+                        .params(name.equals("Pcs") ? pcs : UUID.randomUUID(), own, name, !name.equals("Doz"))
+                        .update();
+            }
+
+            MigrateResult result =
+                    DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+
+            assertThat(result.success).isTrue();
+            List<String> standard = List.of(
+                    "Bag", "Bale", "Box", "Bundle", "Carton", "Crate", "Dozen", "Gram", "Kg", "Litre", "Metre", "Ml",
+                    "Packet", "Pair", "Piece", "Roll", "Set");
+            assertThat(owner.sql("SELECT name FROM retail_units WHERE tenant_id = ? ORDER BY name")
+                            .param(empty)
+                            .query(String.class)
+                            .list())
+                    .containsExactlyElementsOf(standard);
+            List<String> added = owner.sql(
+                            "SELECT name FROM retail_units WHERE tenant_id = ? AND created_by IS NULL AND version = 1")
+                    .param(own)
+                    .query(String.class)
+                    .list();
+            assertThat(added)
+                    .containsExactlyInAnyOrderElementsOf(standard.stream()
+                            .filter(n -> !List.of("Piece", "Dozen", "Kg").contains(n))
+                            .toList());
+            assertThat(owner.sql("SELECT name || ' ' || active || ' ' || version FROM retail_units"
+                                    + " WHERE tenant_id = ? AND version = 3")
+                            .param(own)
+                            .query(String.class)
+                            .list())
+                    .as("the shop's own units are kept as they were, a switched off one too")
+                    .containsExactlyInAnyOrder("Bulb true 3", "Doz false 3", "Pack true 3", "Pcs true 3", "kgs true 3");
+            assertThat(owner.sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.unit.created'"
+                                    + " AND actor_kind = 'system' AND data -> 'after' ->> 'source' = 'V121'")
+                            .param(own)
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(added.size());
             for (UUID untouched : List.of(lendingOnly, closed)) {
                 assertThat(owner.sql("SELECT count(*) FROM retail_units WHERE tenant_id = ?")
                                 .param(untouched)

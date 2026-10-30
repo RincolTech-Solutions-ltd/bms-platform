@@ -126,8 +126,20 @@ final class CatalogueApi {
             @Schema(
                     description =
                             "Issue #689 (ADR-106): the name is a package word, such as Box or Carton, so it can be"
-                                    + " a pack but never the smallest unit of a new item")
-            boolean isPackage) {}
+                                    + " a pack but never the single unit of a new item")
+            boolean isPackage,
+
+            @Schema(
+                    description = "Issue #709 (ADR-110): one of the standard units every shop gets, under any spelling;"
+                            + " the list shows them first, in the standard order")
+            boolean standard,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Issue #709 (ADR-110, D98): present only for a package of a fixed size, 12 for a dozen;"
+                                    + " every pack of it holds exactly this many of the level it holds")
+            Integer fixedCount) {}
 
     @Schema(name = "RetailUsualPack", description = "The usual size of a pack in a smaller unit, and what it is for")
     record UsualPack(

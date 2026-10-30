@@ -378,6 +378,55 @@ class RetailPackLadderIT extends IntegrationTest {
         assertThat(factor(socket, carton)).isEqualTo("120.000");
     }
 
+    /** Issue #709 (ADR-110, D98): a dozen always holds 12, on a new item, on its own and when changed; a box holds any number. */
+    // JUSTIFICATION-A3: a new test case for the dozen rule of issue #709; no existing case covers a fixed count.
+    @Test
+    void aDozenAlwaysHolds12() {
+        UUID dozen = api.unit("Dozen");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("description", "Test Egg Tray");
+        body.put("category_id", category);
+        body.put("unit_id", piece);
+        body.put("cost_minor", 400);
+        body.put("sell_minor", 500);
+        body.put("packs", List.of(level(dozen, piece, 10, null)));
+        ResponseEntity<JsonNode> refused = api.post("/products", body, ADMIN);
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(refused.getBody().toString()).contains("fixed_count").contains("A dozen always holds 12.");
+
+        body.put("packs", List.of(level(dozen, piece, 12, null), level(box, dozen, 5, null)));
+        UUID eggs = RetailTestSupport.id(api.post("/products", body, ADMIN));
+        assertThat(factor(eggs, dozen)).isEqualTo("12.000");
+        assertThat(factor(eggs, box)).isEqualTo("60.000");
+
+        ResponseEntity<JsonNode> resized = change(eggs, dozen, Map.of("holds_qty", 10), ADMIN);
+        assertThat(resized.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(resized)).isEqualTo("fixed_count");
+        assertThat(change(eggs, box, Map.of("holds_qty", 6), ADMIN).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(factor(eggs, box)).isEqualTo("72.000");
+
+        UUID pen = socket(false);
+        ResponseEntity<JsonNode> alone =
+                api.post("/products/" + pen + "/units", Map.of("unit_id", dozen, "factor", "10"), ADMIN);
+        assertThat(alone.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(alone)).isEqualTo("fixed_count");
+        assertThat(api.post("/products/" + pen + "/units", Map.of("unit_id", dozen, "factor", "12"), ADMIN)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+
+        // The unit list says so, and puts the standard units first.
+        List<String> names = new java.util.ArrayList<>();
+        for (JsonNode u : api.get("/units", ADMIN).getBody().get("items")) {
+            names.add(u.get("name").asString());
+            if (u.get("name").asString().equals("Dozen")) {
+                assertThat(u.get("fixed_count").asInt()).isEqualTo(12);
+                assertThat(u.get("standard").asBoolean()).isTrue();
+            }
+        }
+        assertThat(names.subList(0, 5)).containsExactly("Piece", "Dozen", "Box", "Carton", "Bale");
+    }
+
     @Test
     void aBoxOfRollsHoldsRollsOfMetres() {
         UUID metre = api.unit("Metre");

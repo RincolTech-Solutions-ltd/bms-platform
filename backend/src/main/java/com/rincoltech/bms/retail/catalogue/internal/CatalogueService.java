@@ -11,6 +11,7 @@ import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.Search;
 import com.rincoltech.bms.kernel.Versions;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
+import com.rincoltech.bms.retail.catalogue.StandardUnits;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Category;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.CategoryList;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.CategoryRequest;
@@ -208,6 +209,7 @@ class CatalogueService {
         UUID id = UUID.randomUUID();
         String name = r.name().trim();
         Unit of = requireUsualPackOf(id, r.usualPack());
+        requireFixedUsualSize(name, r.usualPack());
         try {
             repo.insertUnit(id, name, CurrentPrincipal.require().userId());
         } catch (DuplicateKeyException e) {
@@ -264,6 +266,17 @@ class CatalogueService {
                     : repo.unit(down.usualPack().ofUnitId()).orElse(null);
         }
         return of;
+    }
+
+    /** Issue #709 (ADR-110, D98): the usual size of a dozen is 12, the only size it may have. */
+    private static void requireFixedUsualSize(String unitName, UsualPackRequest pack) {
+        Integer fixed = StandardUnits.fixedCount(unitName);
+        if (pack != null && fixed != null && pack.size().compareTo(BigDecimal.valueOf(fixed)) != 0) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "usual_pack.size",
+                    "fixed_count",
+                    "A dozen always holds " + fixed + ". For another number, use a box.")));
+        }
     }
 
     /** The audit of a usual pack names the smaller unit, as a person reads it (review of #628): "100.000 Metre both". */
@@ -330,6 +343,7 @@ class CatalogueService {
         String hadText = had == null ? null : usualPackText(new BigDecimal(had.size()), had.ofUnit(), had.purpose());
         if (r.usualPack() != null) {
             Unit of = requireUsualPackOf(id, r.usualPack());
+            requireFixedUsualSize(name, r.usualPack());
             diff(
                     was,
                     now,
@@ -1087,6 +1101,10 @@ class CatalogueService {
             throw ApiException.validation(
                     List.of(new FieldProblem("factor", "required", "Say how many of the item are in one pack.")));
         }
+        ApiException notFixed = fixedCountProblem(unit.name(), holds.qty(), factor);
+        if (notFixed != null) {
+            throw notFixed;
+        }
         if (holds.usualBuy() && purpose.equals(RetailCatalogue.PACK_SELL)) {
             throw usualBuyNotBought();
         }
@@ -1164,6 +1182,12 @@ class CatalogueService {
         }
         Ladder ladder = ladderAfter(product, all, before, r, active);
         java.math.BigDecimal factor = ladder.factor();
+        if (r.factor() != null || r.holdsQty() != null) {
+            ApiException notFixed = fixedCountProblem(before.unit(), ladder.holdsQty(), factor);
+            if (notFixed != null) {
+                throw notFixed;
+            }
+        }
         String purpose = r.purpose() == null ? before.purpose() : r.purpose();
         if (Boolean.TRUE.equals(r.usualBuy()) && (!active || purpose.equals(RetailCatalogue.PACK_SELL))) {
             throw usualBuyNotBought();
@@ -1270,6 +1294,11 @@ class CatalogueService {
             ladder = null;
             refused = e.errors().isEmpty() ? e.code() : e.errors().getFirst().code();
         }
+        // Issue #709 (ADR-110): a dozen keeps its 12 whatever a delivery holds.
+        if (ladder != null && fixedCountProblem(before.unit(), ladder.holdsQty(), ladder.factor()) != null) {
+            ladder = null;
+            refused = "fixed_count";
+        }
         // Review of #624: a pack with its own price sells at it whatever its size, so a new usual size is a
         // price change, as on Edit item. Without retail.price.edit the delivery still saves at its own size, the
         // usual size stays, the skip is audited, and the response says so on the line. The same for a bigger level
@@ -1307,6 +1336,22 @@ class CatalogueService {
     /** What a new pack holds (both null: it holds its factor of the item's unit) and whether Buy stock opens on it. */
     record Holds(UUID unitId, Integer qty, boolean usualBuy) {
         static final Holds NONE = new Holds(null, null, false);
+    }
+
+    /**
+     * Issue #709 (ADR-110, D98): a dozen holds 12 of the level it holds (12 of the item's unit when it names none), never
+     * another number; null when the pack of {@code unitName} keeps its fixed count or has none.
+     */
+    private static ApiException fixedCountProblem(String unitName, Integer holdsQty, BigDecimal factor) {
+        Integer fixed = StandardUnits.fixedCount(unitName);
+        BigDecimal count = holdsQty != null ? BigDecimal.valueOf(holdsQty) : factor;
+        if (fixed == null || count == null || count.compareTo(BigDecimal.valueOf(fixed)) == 0) {
+            return null;
+        }
+        return ApiException.validation(List.of(new FieldProblem(
+                holdsQty != null ? "holds_qty" : "factor",
+                "fixed_count",
+                "A dozen always holds " + fixed + ". For another number, use a box.")));
     }
 
     /** A bigger level that follows a change, with its new factor. */
