@@ -58,7 +58,9 @@ class OperatorScreensIT extends IntegrationTest {
     record Created(UUID id, String slug, UUID adminId, String adminEmail, String invitationUrl) {}
 
     Created create(String prefix, List<String> modules, String plan) {
-        String slug = prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
+        // A slug is a short name of 20 characters at most (ADR-108): the random part shrinks for a long prefix.
+        String slug = prefix + "-"
+                + UUID.randomUUID().toString().substring(0, Math.max(4, Math.min(8, 19 - prefix.length())));
         String adminEmail = Api.email("owner");
         ResponseEntity<JsonNode> created = platform.post(
                 "/api/v1/platform/tenants",

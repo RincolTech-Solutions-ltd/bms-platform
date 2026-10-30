@@ -509,6 +509,7 @@ class OutboxIT extends IntegrationTest {
                 Map.entry("note", "Test note."),
                 Map.entry("expires_at", "9 Oct 2026 08:00 UTC"),
                 Map.entry("sign_in_url", "https://test-bms-staging.rincoltech.test/sign-in"),
+                Map.entry("short_link", "rincoltech.test/testshop"),
                 Map.entry("reference", "A-TEST0001"),
                 Map.entry("modules", "retail"),
                 Map.entry("portal_url", "https://localhost/platform/applications/x"),

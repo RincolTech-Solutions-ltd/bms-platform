@@ -294,7 +294,24 @@ warning. Row-level security is enabled and forced with no policy (`bms_owner` ha
 is granted to `bms_app`: the definer functions owned by `bms_owner` are its only way in (create,
 relink, created since, read by link, reply, list, counts, duplicates, decide, lock, activated,
 expire, purge, and since `V88` set referrer and referrer). Rejected and
-expired rows are deleted 90 days after `closed_at` (FR-ONB-09).
+expired rows are deleted 90 days after `closed_at` (FR-ONB-09). Since `V119` (issue #708, ADR-108): `short_name varchar(63)`,
+the short name the applicant chose (null on older rows, and cleared at the confirmation when someone else has it by then),
+unique over the open statuses whose email is confirmed (`onboarding_applications_one_open_per_short_name`), so the first to
+confirm keeps it and an unconfirmed application holds nothing; read through `onboarding_application_short_name`, replaced
+on a repeat sign-up with a new free name through `onboarding_application_set_short_name` while the email is not
+confirmed; on a confirmed application the new name goes into `pending_short_name varchar(63)` and is applied, if still
+free, only when the applicant presses the change button on the page that fresh link opens (the page reads both names
+through `onboarding_application_names_by_link`; Keep is the default answer); the trigger
+`onboarding_clear_pending_short_name` clears it whenever the application leaves the open statuses (activated, rejected,
+expired). `V119` adds
+`onboarding_application_create` with `p_short_name` as a 16 argument overload; V23's 15 argument one becomes a wrapper
+calling it with NULL, kept for the server still running during a deploy and dropped by a later migration. It replaces
+`onboarding_application_by_link` (defined only in V23 before it), which claims the name under its lock at the
+confirmation and applies a pending name when a link of a confirmed application is opened, taking the names' locks before
+the row's, the order a sign-up takes them. `short_name_taken` says who has
+a name (a business, or a confirmed open application; with `p_lock` it first takes the name's advisory lock, which every
+claim takes: the sign-up, the confirmation, Activate and the operator's tenant creation) and `short_link_target` where a
+short link goes (the active or suspended business with that slug).
 
 ### `referral_commission_rules` and `referral_settings` (platform; no privilege for `bms_app`, definer functions only; `V88`, ADR-069)
 
@@ -417,7 +434,7 @@ last minute), then by due time, and locks the best twenty candidates in that ord
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK | |
-| `slug` | `varchar(63) UNIQUE NOT NULL` | `CHECK (slug ~ '^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])$')`; reserved labels refused by the service (FR-TEN-02). |
+| `slug` | `varchar(63) UNIQUE NOT NULL` | `CHECK (slug ~ '^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])$')`; reserved labels refused by the service (FR-TEN-02). The shop's short name (FR-TEN-12, ADR-108), kept for good. |
 | `name` | `text NOT NULL` | |
 | `status` | `text NOT NULL` | [`active`, `suspended`]. FR-TEN-06. |
 | `currency` | `char(3) NOT NULL` | FK `currencies`. Default `UGX`. |

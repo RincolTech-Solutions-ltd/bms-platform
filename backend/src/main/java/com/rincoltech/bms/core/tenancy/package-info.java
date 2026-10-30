@@ -9,6 +9,7 @@
  * {@link com.rincoltech.bms.core.tenancy.TenantSettings},
  * {@link com.rincoltech.bms.core.tenancy.PlanLimits},
  * {@link com.rincoltech.bms.core.tenancy.PlatformHost},
+ * {@link com.rincoltech.bms.core.tenancy.ShortNames} (the short name and short link of a shop, ADR-108),
  * {@link com.rincoltech.bms.core.tenancy.BranchDeactivationGuard},
  * {@link com.rincoltech.bms.core.tenancy.BranchProvisioning},
  * {@link com.rincoltech.bms.core.tenancy.ModuleManifest},

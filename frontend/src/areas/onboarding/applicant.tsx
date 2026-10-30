@@ -42,6 +42,8 @@ export function ApplicantPage({
   onReply,
   onConfirm,
 }: ApplicantPageProps) {
+  // ADR-108: Keep is the default answer to a pending short name; it changes nothing on the server.
+  const [kept, setKept] = useState(false);
   if (loading) {
     return (
       <main className="card auth-card">
@@ -83,7 +85,32 @@ export function ApplicantPage({
         </dd>
         <dt>Wanted</dt>
         <dd>{modules.join(', ')}</dd>
+        {view.short_name && (
+          <>
+            <dt>Short name</dt>
+            <dd>{view.short_name}</dd>
+          </>
+        )}
       </dl>
+      {/* JUSTIFICATION-A3: without this step a pending short name could never be applied from the page (review of #713). */}
+      {view.email_verified === true && view.pending_short_name && !kept && (
+        // ADR-108: a repeat sign-up asked for a new short name; it changes only when the applicant chooses it here.
+        <section aria-labelledby="rename-heading" className="form-stack">
+          <h2 id="rename-heading">Change your short name?</h2>
+          <p>
+            Your short name will change from <strong>{view.short_name ?? 'none'}</strong> to <strong>{view.pending_short_name}</strong>{' '}
+            only if you choose it. Someone using your email asked for this. If it was not you, keep your name.
+          </p>
+          <div className="cluster">
+            <button type="button" className="btn-brand" onClick={() => setKept(true)}>
+              Keep {view.short_name ?? 'my name'}
+            </button>
+            <BusyButton type="button" busy={confirming} onClick={onConfirm}>
+              Change to {view.pending_short_name}
+            </BusyButton>
+          </div>
+        </section>
+      )}
       {view.email_verified === false && (view.status === 'submitted' || view.status === 'needs_info') ? (
         <section aria-labelledby="confirm-heading" className="form-stack">
           <h2 id="confirm-heading">Confirm your email</h2>

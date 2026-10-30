@@ -206,6 +206,34 @@ second.
 **Production VM.** Add `A <slug>-bms` pointing at the VM (DNS only); the wildcard certificate
 already covers it (`docs/runbooks/provision-host.md` section 3).
 
+## The short link rule (once per environment, and when the reserved list changes)
+
+Every shop's short link `rincoltech.com/<short name>` is served by one Cloudflare single redirect, never one per shop
+(ADR-108). On the rincoltech.com zone, Rules, Redirect Rules, Single Redirects:
+
+1. Have the website's owner confirm `reserved` from the endpoint below lists every page of rincoltech.com; add any missing
+   path to `ShortNames.RESERVED` and release first.
+2. **Gate: each existing shop's slug is its link name.** The names are the paths of the hand-made redirects listed in the
+   zone's Single Redirects (each points at a staging shop host). For each,
+   `curl -sI https://<BMS_PLATFORM_HOST>/api/v1/platform/short-links/<name>` must answer 302 to that shop's own host
+   (`https://<name>-bms-staging.rincoltech.com/`). Then the slug is the name, a business has it, and no sign-up or
+   Activate can claim it. When one lands on `/link-not-found`, that shop's slug is another name: stop here, keep the
+   hand-made redirects, and raise an issue to rename that shop (a rename is done by Rincol Tech on request, not in the app;
+   ADR-108 decision 1). Until then a stranger could claim the printed name at sign-up. Do not go on while any of them
+   fails.
+3. Fetch what to type: `curl -s https://<BMS_PLATFORM_HOST>/api/v1/platform/short-link-rule`.
+4. Create (or edit) one rule named "Shop short links". When incoming requests match: Custom filter expression, paste
+   `expression`. Then: Dynamic, paste `target`, status code 302, Preserve query string off.
+5. Delete the old hand-made redirects once the rule is saved and step 2 passed for every one of them.
+6. Check: `curl -sI https://rincoltech.com/<a shop's short name>` answers 302 to the platform host, which answers 302 to the
+   shop; `curl -sI https://rincoltech.com/about` is the website's own page.
+
+**A shop that wants another short name.** The short name is the shop's host, chosen at sign-up and kept for good; the app has
+no rename. A request is recorded as its own issue and done by Rincol Tech later (ADR-108 decision 1).
+
+At go-live, edit the rule's target to the live platform host (fetch it again from the live platform host). When a page is
+added to the website, add its path to `ShortNames.RESERVED`, release, and repeat steps 1 and 2.
+
 ## Check
 
 ```bash

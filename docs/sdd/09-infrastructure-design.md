@@ -240,7 +240,9 @@ migration) with status only, no details.
   the release's proxy image, never from GitHub directly.
 - Host names: `BMS_TENANT_HOST_PATTERN` and `BMS_PLATFORM_HOST` for the API and the web
   container; on the production VM also `BMS_DNS_ZONE` and `BMS_CALLBACK_HOST` for the proxy; on
-  the staging host `CLOUDFLARE_TUNNEL_TOKEN` and `CLOUDFLARED_IMAGE` for cloudflared.
+  the staging host `CLOUDFLARE_TUNNEL_TOKEN` and `CLOUDFLARED_IMAGE` for cloudflared. Optional for the API:
+  `BMS_SHORT_LINK_HOST` (default `rincoltech.com`), the host of the shops' short links; its one Cloudflare redirect rule
+  is set by the operator from `GET /api/v1/platform/short-link-rule` (ADR-108, `docs/runbooks/onboard-tenant.md`).
 - Sign-in limits (ADR-059, issue #426), optional: `BMS_AUTH_SIGN_IN_FAILURES_PER_IP` (FAILED requests from one client
   IP in 10 minutes on the public sign-in, two-step, invitation and setup routes; 300; a success costs nothing, so a
   mobile carrier's NAT address shared by many users is not used up by their sign-ins) and
