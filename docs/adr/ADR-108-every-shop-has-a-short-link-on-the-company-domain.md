@@ -57,7 +57,7 @@ want the same name, and a shop may want to change its name later without an old 
    endpoint, in that order.
 5. **A change keeps the old link working for 90 days, then holds the name 90 more.** The Owner changes the short name in
    Business set-up (`PUT /settings/short-link`, `core.settings.manage` and the Owner only, 403 `owner_only` otherwise). The
-   old name goes into `short_name_holds` with the shop, `forwards_until` (90 days) and `held_until` (180 days). Until
+   old name goes into `platform_short_name_holds` with the shop, `forwards_until` (90 days) and `held_until` (180 days). Until
    `forwards_until` the old link forwards to the shop's current address; after it the link lands on "No shop uses this
    link"; until `held_until` nobody else can take the name, so an old link never lands in a different shop. The same shop
    may take its own held name back. The change, the hold and the new slug are one transaction under a lock on the name.

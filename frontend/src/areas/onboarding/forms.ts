@@ -1,4 +1,5 @@
 import type { ActivateRequest, ApplicationDetail, SignUpRequest } from '../../api/onboarding';
+import { shortNameProblem } from './short-name';
 
 // Form state and checks for the sign-up page and the Activate form (spec sections 4 and 10). The
 // server checks everything again; these give plain-words feedback before a request is sent.
@@ -28,6 +29,10 @@ export const WAYS_IN = [
 
 export interface SignUpForm {
   business_name: string;
+  /** The shop's town or area, for short name suggestions (ADR-108). */
+  town: string;
+  /** The short name of the shop's link, rincoltech.com/<short name>, which is also its address (ADR-108). */
+  short_name: string;
   contact_name: string;
   contact_email: string;
   contact_phone: string;
@@ -45,6 +50,8 @@ export interface SignUpForm {
 
 export const EMPTY_SIGN_UP: SignUpForm = {
   business_name: '',
+  town: '',
+  short_name: '',
   contact_name: '',
   contact_email: '',
   contact_phone: '',
@@ -70,6 +77,9 @@ export function signUpProblems(form: SignUpForm): Problems {
   const problems: Problems = {};
   if (form.business_name.trim().length < 2) problems.business_name = 'Enter the name of the business.';
   if (form.business_name.length > 200) problems.business_name = 'Use at most 200 characters.';
+  const shortName = shortNameProblem(form.short_name);
+  if (shortName) problems.short_name = shortName;
+  if (form.town.length > 100) problems.town = 'Use at most 100 characters.';
   if (form.contact_name.trim().length < 2) problems.contact_name = 'Enter your name.';
   if (form.contact_name.length > 200) problems.contact_name = 'Use at most 200 characters.';
   if (!EMAIL.test(form.contact_email.trim()) || form.contact_email.length > 254) {
@@ -90,6 +100,8 @@ export function signUpProblems(form: SignUpForm): Problems {
 export function toSignUpRequest(form: SignUpForm): SignUpRequest {
   return {
     business_name: form.business_name.trim(),
+    short_name: form.short_name.trim().toLowerCase(),
+    town: form.town.trim() || undefined,
     contact_name: form.contact_name.trim(),
     contact_email: form.contact_email.trim(),
     contact_phone: form.contact_phone.trim(),

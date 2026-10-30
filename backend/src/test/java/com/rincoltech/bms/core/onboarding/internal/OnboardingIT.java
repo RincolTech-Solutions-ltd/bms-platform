@@ -73,6 +73,7 @@ class OnboardingIT extends IntegrationTest {
         Map<String, Object> form = new LinkedHashMap<>();
         form.put("business_name", business);
         form.put("contact_name", "Test Applicant 01");
+        form.put("short_name", shortName());
         form.put("contact_email", email);
         form.put("contact_phone", phone);
         form.put("country", "UG");
@@ -171,6 +172,11 @@ class OnboardingIT extends IntegrationTest {
 
     static String slug() {
         return "onb-" + UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    /** A free short name (ADR-108): "t" and 8 hex digits, never reserved. */
+    static String shortName() {
+        return "t" + UUID.randomUUID().toString().substring(0, 8);
     }
 
     // ---- Public endpoints ---------------------------------------------------------------------
@@ -533,6 +539,9 @@ class OnboardingIT extends IntegrationTest {
     @Autowired
     com.rincoltech.bms.core.referrals.Referrals referrals;
 
+    @Autowired
+    com.rincoltech.bms.core.tenancy.ShortNames shortNames;
+
     /**
      * Review B2 (c): the global caps. Over the hourly cap of new applications or of confirmation
      * emails a sign-up is answered and nothing is created or sent; the first request over it writes
@@ -559,6 +568,7 @@ class OnboardingIT extends IntegrationTest {
                 new SignUpRateLimiter(clock),
                 new OnboardingProperties(5, 5, 3),
                 referrals,
+                shortNames,
                 manifests);
         String hour = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:00", java.util.Locale.ROOT)
                 .format(future.atOffset(java.time.ZoneOffset.UTC));
@@ -628,6 +638,8 @@ class OnboardingIT extends IntegrationTest {
         return new SignUpController.SignUpRequest(
                 "Test Capped Shop",
                 "Test Applicant 01",
+                shortName(),
+                null,
                 email,
                 "0700000001",
                 "UG",
@@ -769,7 +781,13 @@ class OnboardingIT extends IntegrationTest {
                         .doesNotContain("phone");
             }
         }
-        assertThat(detail.get("suggested_slug").asString()).startsWith("test-duplicate-" + suffix);
+        // ADR-108: the short name the applicant chose comes first while it is free.
+        String chosen = owner().sql("SELECT short_name FROM onboarding_applications WHERE id = ?")
+                .param(second)
+                .query(String.class)
+                .single();
+        assertThat(detail.get("suggested_slug").asString()).isEqualTo(chosen);
+        assertThat(service.suggestSlug("Test Duplicate " + suffix + " Ltd")).startsWith("test-duplicate-" + suffix);
     }
 
     // ---- Activate -------------------------------------------------------------------------------
@@ -867,6 +885,7 @@ class OnboardingIT extends IntegrationTest {
                 .isEqualTo(body.get("admin_invitation_url").asString())
                 .startsWith("https://" + slug + "-bms-staging.rincoltech.test/accept-invitation#token=");
         assertThat(params.get("sign_in_url")).isEqualTo("https://" + slug + "-bms-staging.rincoltech.test/sign-in");
+        assertThat(params.get("short_link")).isEqualTo("rincoltech.com/" + slug);
         Api tenant = Api.tenant(http, slug);
         // Accepting signs the new admin in through the sign-in rules (ADR-025). Two-step sign-in is optional until the
         // tenant requires it (issue #348, ADR-046), so a new tenant's admin gets a session and is offered it later.

@@ -9,6 +9,7 @@ type S = components['schemas'];
 
 export type SignUpRequest = S['SignUpRequest'];
 export type ApplicantView = S['ApplicantView'];
+export type ShortNameCheck = S['SignUpShortNameCheck'];
 export type Application = S['Application'];
 export type ApplicationList = S['ApplicationList'];
 export type ApplicationDetail = S['ApplicationDetail'];
@@ -44,14 +45,16 @@ export class OnboardingError extends Error {
     message: string,
     readonly code?: string,
     readonly fields: { field: string; message: string }[] = [],
+    /** Free short names, with a short_name_taken refusal (ADR-108). */
+    readonly suggestions: string[] = [],
   ) {
     super(message);
   }
 }
 
 function fail(error: unknown, fallback: string): never {
-  const problem = problemOf(error);
-  throw new OnboardingError(problem.detail ?? fallback, problem.code, problem.errors ?? []);
+  const problem = problemOf(error) as ReturnType<typeof problemOf> & { suggestions?: string[] };
+  throw new OnboardingError(problem.detail ?? fallback, problem.code, problem.errors ?? [], problem.suggestions ?? []);
 }
 
 // ---- Public: the applicant ------------------------------------------------------------------
@@ -59,6 +62,15 @@ function fail(error: unknown, fallback: string): never {
 export async function applyForAccount(body: SignUpRequest): Promise<void> {
   const { error } = await api.POST('/api/v1/platform/sign-up/applications', { body });
   if (error) fail(error, 'We could not send your application. Try again.');
+}
+
+/** A short name as it is typed (ADR-108): free, or taken or reserved with free names, the town or area first. */
+export async function checkShortName(name: string, businessName: string, town: string): Promise<ShortNameCheck> {
+  const { data, error } = await api.GET('/api/v1/platform/sign-up/short-name', {
+    params: { query: { name, business_name: businessName || undefined, town: town || undefined } },
+  });
+  if (error || !data) fail(error, 'We could not check the short name.');
+  return data;
 }
 
 export async function verifyApplicant(token: string): Promise<ApplicantView> {

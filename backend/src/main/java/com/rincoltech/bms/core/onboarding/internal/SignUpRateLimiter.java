@@ -32,6 +32,9 @@ class SignUpRateLimiter {
     /** Asks for a staff sign-in page by email (issue #383): 10 an hour from one address. */
     static final Limit FIND_PER_IP = new Limit("find-sign-in-ip", 10, Duration.ofHours(1));
 
+    /** Short name checks as the applicant types (ADR-108): 120 in 10 minutes from one address. */
+    static final Limit SHORT_NAME_PER_IP = new Limit("short-name-ip", 120, Duration.ofMinutes(10));
+
     static final int MAX_KEYS = 10_000;
 
     private final BusinessClock clock;

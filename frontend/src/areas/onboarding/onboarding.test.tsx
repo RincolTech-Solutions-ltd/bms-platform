@@ -31,6 +31,7 @@ async function inRouter(node: ReactElement): Promise<string> {
 const filled: SignUpForm = {
   ...EMPTY_SIGN_UP,
   business_name: 'Test Hardware Shop',
+  short_name: 'testhardware',
   contact_name: 'Test Applicant 01',
   contact_email: 'applicant01@example.test',
   contact_phone: '0700 000 001',
@@ -38,12 +39,13 @@ const filled: SignUpForm = {
 };
 
 const noop = () => undefined;
+const free = () => Promise.resolve({ available: true });
 
 describe('sign-up form checks (FR-ONB-01)', () => {
   it('accepts a complete form and names each missing field', () => {
     expect(signUpProblems(filled)).toEqual({});
     const problems = signUpProblems(EMPTY_SIGN_UP);
-    expect(Object.keys(problems).sort()).toEqual(['business_name', 'contact_email', 'contact_name', 'contact_phone', 'modules']);
+    expect(Object.keys(problems).sort()).toEqual(['business_name', 'contact_email', 'contact_name', 'contact_phone', 'modules', 'short_name']);
   });
 
   it('caps lengths and refuses a bad agent code', () => {
@@ -64,7 +66,7 @@ describe('sign-up form checks (FR-ONB-01)', () => {
 describe('the sign-up page (FR-ONB-01, FR-ONB-03)', () => {
   const view = (patch: Partial<Parameters<typeof SignUpView>[0]> = {}) =>
     renderToStaticMarkup(
-      <SignUpView form={filled} problems={{}} busy={false} error={null} done={false} onChange={noop} onSubmit={noop} {...patch} />,
+      <SignUpView form={filled} problems={{}} busy={false} error={null} done={false} onChange={noop} onSubmit={noop} checkName={free} {...patch} />,
     );
 
   it('labels every field and asks for the phone before the email', () => {

@@ -345,6 +345,10 @@ const signUpRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sign-
 const findSignInRoute = createRoute({ getParentRoute: () => rootRoute, path: '/find-sign-in' }).lazy(() =>
   import('../areas/onboarding/find-sign-in').then((m) => m.Route),
 );
+// Where a short link lands when no shop uses it (issue #708, ADR-108).
+const linkNotFoundRoute = createRoute({ getParentRoute: () => rootRoute, path: '/link-not-found' }).lazy(() =>
+  import('../areas/onboarding/link-not-found').then((m) => m.Route),
+);
 const signUpVerifyRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sign-up/verify' }).lazy(() =>
   import('../areas/onboarding/applicant').then((m) => m.VerifyRoute),
 );
@@ -526,6 +530,7 @@ export const router = createRouter({
     styleRoute,
     signUpRoute,
     findSignInRoute,
+    linkNotFoundRoute,
     signUpVerifyRoute,
     applicationStatusRoute,
     operatorSignInRoute,

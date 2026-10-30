@@ -1,5 +1,6 @@
 package com.rincoltech.bms.core.onboarding.internal;
 
+import com.rincoltech.bms.core.tenancy.ShortNames;
 import com.rincoltech.bms.kernel.PublicEndpoint;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -15,9 +16,11 @@ import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -41,6 +44,16 @@ class SignUpController {
     record SignUpRequest(
             @NotBlank @Size(max = 200) String businessName,
             @NotBlank @Size(max = 200) String contactName,
+
+            @NotBlank
+            @Size(max = 63)
+            @Schema(
+                    description =
+                            "The short name for the shop's link rincoltech.com/<short name>, which is also its address: 3 to 20 lower case letters and digits, a hyphen may join two words. A taken one is 409 short_name_taken with suggestions (ADR-108)")
+            String shortName,
+
+            @Size(max = 100) @Schema(description = "Optional: the shop's town or area, for short name suggestions")
+            String town,
 
             @NotBlank
             @Email
@@ -120,6 +133,33 @@ class SignUpController {
     ResponseEntity<Accepted> apply(@Valid @RequestBody SignUpRequest request) {
         service.submit(request);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(new Accepted("check_your_email"));
+    }
+
+    @Schema(name = "SignUpShortNameCheck")
+    record ShortNameCheck(
+            String name,
+            boolean available,
+
+            @Schema(description = "invalid, reserved or taken; null when available")
+            String problem,
+
+            @Schema(description = "Plain words, for example 'modern is taken.'")
+            String message,
+
+            @Schema(description = "Free names: the town or area first, then a shorter form, then a number")
+            List<String> suggestions) {}
+
+    @GetMapping("/short-name")
+    @PublicEndpoint
+    @Operation(
+            summary = "Check a short name as it is typed, with free suggestions when it is not free (ADR-108)",
+            operationId = "signUpCheckShortName")
+    ShortNameCheck checkShortName(
+            @RequestParam("name") @Size(max = 63) String name,
+            @RequestParam(name = "business_name", required = false) @Size(max = 200) String businessName,
+            @RequestParam(name = "town", required = false) @Size(max = 100) String town) {
+        ShortNames.Check c = service.checkShortName(name, businessName, town);
+        return new ShortNameCheck(c.name(), c.available(), c.problem(), c.message(), c.suggestions());
     }
 
     @PostMapping("/verify")

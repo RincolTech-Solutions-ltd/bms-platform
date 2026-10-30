@@ -220,6 +220,7 @@ class ReferralsIT extends IntegrationTest {
         Map<String, Object> form = new LinkedHashMap<>();
         form.put("business_name", business);
         form.put("contact_name", "Test Applicant 21");
+        form.put("short_name", "t" + UUID.randomUUID().toString().substring(0, 8));
         form.put("contact_email", email);
         form.put("contact_phone", "+2567000002" + String.format("%02d", ADDRESS.get() % 100));
         form.put("country", "UG");

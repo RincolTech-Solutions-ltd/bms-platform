@@ -112,6 +112,8 @@ class OutboxTemplates {
 
                     After that, sign in at {sign_in_url}
 
+                    Your shop's short link is {short_link}. Share it with your customers.
+
                     Rincol Tech
                     """,
                     "Set my password",
@@ -128,6 +130,8 @@ class OutboxTemplates {
                     {link}
 
                     After that, sign in at {sign_in_url}
+
+                    Your shop's short link is {short_link}. Share it with your customers.
 
                     Rincol Tech
                     """,

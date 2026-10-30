@@ -204,7 +204,23 @@ the ingress rule existed, but a correct ingress configuration is still the first
 second.
 
 **Production VM.** Add `A <slug>-bms` pointing at the VM (DNS only); the wildcard certificate
-already covers it (`docs/runbooks/provision-host.md` section 3).
+already covers it (`docs/runbooks/provision-host.md` section 3). A shop whose Owner changes its short name gets a new slug, so
+its new host needs the same record (ADR-108).
+
+## The short link rule (once per environment, and when the reserved list changes)
+
+Every shop's short link `rincoltech.com/<short name>` is served by one Cloudflare single redirect, never one per shop
+(ADR-108). On the rincoltech.com zone, Rules, Redirect Rules, Single Redirects:
+
+1. Fetch what to type: `curl -s https://<BMS_PLATFORM_HOST>/api/v1/platform/short-link-rule`.
+2. Create (or edit) one rule named "Shop short links". When incoming requests match: Custom filter expression, paste
+   `expression`. Then: Dynamic, paste `target`, status code 302, Preserve query string off.
+3. Delete the old hand-made redirects (`/modern`, `/hats`, `/dodos`, `/yasad`) once the rule is saved.
+4. Check: `curl -sI https://rincoltech.com/<a shop's short name>` answers 302 to the platform host, which answers 302 to the
+   shop; `curl -sI https://rincoltech.com/about` is the website's own page.
+
+At go-live, edit the rule's target to the live platform host (fetch it again from the live platform host). When a page is
+added to the website, add its path to `ShortNames.RESERVED`, release, and repeat steps 1 and 2.
 
 ## Check
 

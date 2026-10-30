@@ -13,6 +13,7 @@ import com.rincoltech.bms.core.tenancy.ModuleManifest;
 import com.rincoltech.bms.core.tenancy.ModuleSetUp;
 import com.rincoltech.bms.core.tenancy.ModuleSettingsGroup;
 import com.rincoltech.bms.core.tenancy.PlatformHost;
+import com.rincoltech.bms.core.tenancy.ShortNames;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
@@ -69,6 +70,7 @@ class PlatformService implements TenantProvisioning {
     private final TransactionTemplate transactions;
     private final Set<String> moduleKeys;
     private final GoLiveDate goLive;
+    private final ShortNames shortNames;
     private final Map<String, ModuleSettingsGroup> settingsGroups;
     private final List<ModuleSetUp> setUps;
     private final ObjectMapper mapper;
@@ -84,8 +86,10 @@ class PlatformService implements TenantProvisioning {
             List<ModuleSettingsGroup> settingsGroups,
             List<ModuleSetUp> setUps,
             ObjectMapper mapper,
-            GoLiveDate goLive) {
+            GoLiveDate goLive,
+            ShortNames shortNames) {
         this.goLive = goLive;
+        this.shortNames = shortNames;
         this.jdbc = jdbc;
         this.tenantAdmins = tenantAdmins;
         this.hosts = hosts;
@@ -249,6 +253,17 @@ class PlatformService implements TenantProvisioning {
                         throw new ApiException(
                                 HttpStatus.CONFLICT, "duplicate_slug", "Slug taken", "Another tenant has this slug.");
                     }
+                    // ADR-108: a name a business gave up is held, so its old link never lands in a new business.
+                    if (shortNames
+                            .takenBy(slug, null, null, false)
+                            .filter("held"::equals)
+                            .isPresent()) {
+                        throw new ApiException(
+                                HttpStatus.CONFLICT,
+                                "duplicate_slug",
+                                "Slug taken",
+                                "This name is held after a change.");
+                    }
                     try {
                         jdbc.sql("SELECT platform_create_tenant(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                                 .params(
@@ -320,7 +335,9 @@ class PlatformService implements TenantProvisioning {
                                 .param(slug)
                                 .query(Long.class)
                                 .single()
-                        == 0;
+                        == 0
+                // ADR-108: nor held after a change, nor chosen by an open application.
+                && shortNames.takenBy(slug, null, null, false).isEmpty();
     }
 
     /** In a transaction bound to the tenant, so a module switched on sets itself up there (ADR-098). */

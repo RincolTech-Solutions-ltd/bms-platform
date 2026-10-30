@@ -16,6 +16,7 @@ import com.rincoltech.bms.core.platform.TenantProvisioning.NewTenant;
 import com.rincoltech.bms.core.referrals.Referrals;
 import com.rincoltech.bms.core.tenancy.ModuleManifest;
 import com.rincoltech.bms.core.tenancy.PlatformHost;
+import com.rincoltech.bms.core.tenancy.ShortNames;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.BusinessClock;
@@ -91,6 +92,7 @@ class ApplicationService {
     private final SignUpRateLimiter limiter;
     private final OnboardingProperties caps;
     private final Referrals referrals;
+    private final ShortNames shortNames;
     private final Set<String> moduleKeys;
 
     ApplicationService(
@@ -104,7 +106,9 @@ class ApplicationService {
             SignUpRateLimiter limiter,
             OnboardingProperties caps,
             Referrals referrals,
+            ShortNames shortNames,
             List<ModuleManifest> manifests) {
+        this.shortNames = shortNames;
         this.jdbc = jdbc;
         this.transactions = new TransactionTemplate(transactionManager);
         this.outbox = outbox;
@@ -144,6 +148,11 @@ class ApplicationService {
             throw ApiException.validation(
                     List.of(new FieldProblem("business_name", "required", "Give the business and contact names.")));
         }
+        // ADR-108: the short name is checked for shape here and claimed under its lock below; first to apply keeps it.
+        String shortName = ShortNames.normalise(request.shortName());
+        ShortNames.refusal(shortName).ifPresent(refused -> {
+            throw ShortNames.refused("short_name", refused);
+        });
         // ADR-069: a code typed wrong is refused in plain words before anything is created; it says nothing about the
         // email, so the same-answer rule below still holds. A code of a business the applicant runs (their email or
         // phone is its Owner's or an administrator's) is dropped quietly and the answer is the usual one, so the form
@@ -166,6 +175,15 @@ class ApplicationService {
             if (capReached(now)) {
                 return;
             }
+            String holder = jdbc.sql("SELECT onboarding_short_name_taken(?, ?, ?)")
+                    .params(shortName, email, Timestamp.from(now))
+                    .query(String.class)
+                    .optional()
+                    .orElse(null);
+            if (holder != null) {
+                throw ShortNames.taken(
+                        "short_name", shortName, shortNames.suggestions(shortName, businessName, request.town(), null));
+            }
             String mailbox = jdbc.sql("SELECT onboarding_email_key(?)")
                     .param(email)
                     .query(String.class)
@@ -179,7 +197,7 @@ class ApplicationService {
             UUID id = UUID.randomUUID();
             String reference = reference();
             boolean created = Boolean.TRUE.equals(
-                    jdbc.sql("SELECT onboarding_application_create(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                    jdbc.sql("SELECT onboarding_application_create(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                             .params(
                                     id,
                                     reference,
@@ -195,7 +213,8 @@ class ApplicationService {
                                     blankToNull(text(request.message())),
                                     hash,
                                     Timestamp.from(now.plus(LINK_TTL)),
-                                    Timestamp.from(now))
+                                    Timestamp.from(now),
+                                    shortName)
                             .query(Boolean.class)
                             .single());
             // A repeat goes to the address just submitted, which the key treats as the same mailbox,
@@ -243,6 +262,12 @@ class ApplicationService {
                     throttle,
                     now.plus(LINK_TTL)));
         });
+    }
+
+    /** ADR-108: a short name as the applicant types it, free or with free suggestions, the town or area first. */
+    ShortNames.Check checkShortName(String name, String businessName, String town) {
+        limiter.acquire(SignUpRateLimiter.SHORT_NAME_PER_IP, RequestContext.clientIp());
+        return shortNames.check(name, businessName, town, null, null);
     }
 
     /**
@@ -356,7 +381,20 @@ class ApplicationService {
                             rs.getString("status"),
                             strings(rs.getArray("matched_on"))))
                     .list();
-            String slug = "activated".equals(application.status()) ? null : suggestSlug(application.businessName());
+            // ADR-108: the short name the applicant chose while it is free, else one from the business name.
+            String chosen = jdbc.sql("SELECT onboarding_application_short_name(?)")
+                    .param(id)
+                    .query(String.class)
+                    .optional()
+                    .orElse(null);
+            String slug = "activated".equals(application.status())
+                    ? null
+                    : chosen != null
+                                    && shortNames
+                                            .takenBy(chosen, null, id, false)
+                                            .isEmpty()
+                            ? chosen
+                            : suggestSlug(application.businessName());
             return new ApplicationDetail(
                     application,
                     duplicates,
@@ -448,6 +486,17 @@ class ApplicationService {
             throw notVerified();
         }
         String slug = request.slug().trim().toLowerCase(Locale.ROOT);
+        // ADR-108: a name another open application chose, or one held after a change, is not this one's to take.
+        if (shortNames
+                .takenBy(slug, null, id, false)
+                .filter(by -> !by.equals("tenant"))
+                .isPresent()) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "duplicate_slug",
+                    "Slug taken",
+                    "Another application chose this short name, or it is held after a change.");
+        }
         AtomicReference<Instant> activatedAt = new AtomicReference<>();
         Optional<Created> created = provisioning.create(
                 new NewTenant(
@@ -504,6 +553,7 @@ class ApplicationService {
                                 DateTimeFormatter.ofPattern("d MMM yyyy HH:mm 'UTC'", Locale.ENGLISH)
                                         .format(tenant.invitationExpiresAt().atOffset(ZoneOffset.UTC)));
                         params.put("sign_in_url", hosts.tenantOrigin(tenant.slug()) + "/sign-in");
+                        params.put("short_link", shortNames.link(tenant.slug()));
                         outbox.enqueue(new Outbox.Message(
                                 Outbox.EMAIL,
                                 application.contactEmail(),

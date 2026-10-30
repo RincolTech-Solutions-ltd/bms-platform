@@ -45,6 +45,7 @@ class EmailLayoutTest {
                 "links",
                 "Test Shop: https://shop-bms-staging.rincoltech.test/sign-in\nTest Lender: https://lender-bms-staging.rincoltech.test/sign-in");
         p.put("sign_in_url", "https://test-bms-staging.rincoltech.test/sign-in");
+        p.put("short_link", "rincoltech.test/testshop");
         p.put("portal_url", "https://bms-staging.rincoltech.test/platform/applications/fabricated");
         p.put("note", "Test note, line one.\nLine two.");
         p.put("expires_at", "9 Oct 2026 08:00 UTC");

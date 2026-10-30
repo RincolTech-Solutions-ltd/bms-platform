@@ -294,7 +294,22 @@ warning. Row-level security is enabled and forced with no policy (`bms_owner` ha
 is granted to `bms_app`: the definer functions owned by `bms_owner` are its only way in (create,
 relink, created since, read by link, reply, list, counts, duplicates, decide, lock, activated,
 expire, purge, and since `V88` set referrer and referrer). Rejected and
-expired rows are deleted 90 days after `closed_at` (FR-ONB-09).
+expired rows are deleted 90 days after `closed_at` (FR-ONB-09). Since `V119` (issue #708, ADR-108): `short_name varchar(63)`,
+the short name the applicant chose (null on older rows), unique over the open statuses
+(`onboarding_applications_one_open_per_short_name`), so the first to apply keeps it; read through
+`onboarding_application_short_name`, claimed at the sign-up through `onboarding_short_name_taken`, which takes the name's lock
+and leaves out the open application of the same mailbox.
+
+### `platform_short_name_holds` (platform; no privilege for `bms_app`, definer functions only; `V119`, ADR-108)
+
+A short name a business gave up when its Owner changed it (FR-TEN-12). `name varchar(63) PK`, `tenant_id uuid` (FK `tenants`,
+the business that gave it up), `released_at`, `forwards_until` (90 days later: until then its short link forwards to the
+business's current address), `held_until` (180 days later: until then nobody else may take it). Row-level security enabled and
+forced with no policy. The functions: `short_name_taken` (who has a name: a business, a hold, an open application; with
+`p_lock` it first takes the name's advisory lock, which every claim takes), `short_link_target` (where a short link goes),
+`tenant_short_name_forwards` (the bound business's names that still forward) and `tenant_short_name_change` (refuses any but
+the bound tenant; holds the old slug and sets the new one in one statement sequence). A business may take its own held name
+back, which ends that hold.
 
 ### `referral_commission_rules` and `referral_settings` (platform; no privilege for `bms_app`, definer functions only; `V88`, ADR-069)
 
@@ -417,7 +432,7 @@ last minute), then by due time, and locks the best twenty candidates in that ord
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK | |
-| `slug` | `varchar(63) UNIQUE NOT NULL` | `CHECK (slug ~ '^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])$')`; reserved labels refused by the service (FR-TEN-02). |
+| `slug` | `varchar(63) UNIQUE NOT NULL` | `CHECK (slug ~ '^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])$')`; reserved labels refused by the service (FR-TEN-02). The shop's short name (FR-TEN-12, ADR-108); changed only through `tenant_short_name_change` (`V119`). |
 | `name` | `text NOT NULL` | |
 | `status` | `text NOT NULL` | [`active`, `suspended`]. FR-TEN-06. |
 | `currency` | `char(3) NOT NULL` | FK `currencies`. Default `UGX`. |
