@@ -116,7 +116,7 @@ export function NewItemSizes({ value, onChange }: { value: SizesAnswer; onChange
           )}
           {kind && <OwnOption id={`${id}-own-size`} label={kind.key === 'other' ? 'Type a size or type' : 'Type another size'} onAdd={(s) => set({ sizes: value.sizes.some((c) => c.toLowerCase() === s.toLowerCase()) ? value.sizes : [...value.sizes, s] })} />}
           <p className="field-label">Colours</p>
-          <Hint>Tap the colours it comes in. Tap none if it comes in one colour.</Hint>
+          <Hint>Tap none if it comes in one colour.</Hint>
           <Chips label="Colours" values={colours} chosen={value.colours} onTap={(c) => set({ colours: toggled(value.colours, c) })} />
           <OwnOption id={`${id}-own-colour`} label="Type another colour" onAdd={(c) => set({ colours: value.colours.some((x) => x.toLowerCase() === c.toLowerCase()) ? value.colours : [...value.colours, c] })} />
         </>
