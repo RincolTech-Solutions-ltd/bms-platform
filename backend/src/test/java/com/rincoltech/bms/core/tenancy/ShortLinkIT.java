@@ -196,6 +196,57 @@ class ShortLinkIT extends IntegrationTest {
                 .isTrue();
     }
 
+    // JUSTIFICATION-A3: the owner's round 4 instruction on #713 asks for this race and for the pending name to clear.
+    /**
+     * Review of #713 round 4: a repeat sign-up and a confirmation of the same confirmed application at once never fail
+     * on a deadlock (names' locks before the row's, everywhere); and a pending name clears when the application closes.
+     */
+    @Test
+    void aRepeatAndAConfirmationAtOnceBothAnswerAndPendingClearsOnClose() throws Exception {
+        String email = Api.email("short-race");
+        String held = fresh("theld");
+        assertThat(apply(held, null, email).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        confirm(email);
+        String link = TestDatabase.owner()
+                .sql("SELECT params->>'link' FROM notification_outbox WHERE template_key = 'onboarding.verify_email'"
+                        + " AND recipient = ? ORDER BY created_at DESC, id DESC LIMIT 1")
+                .param(email)
+                .query(String.class)
+                .single();
+        Map<String, String> body = Map.of("token", link.substring(link.indexOf("#token=") + 7));
+        String wanted = fresh("twant");
+        AtomicInteger turn = new AtomicInteger();
+        var statuses = Api.race(
+                2,
+                () -> turn.getAndIncrement() == 0
+                        ? apply(wanted, null, email)
+                        : platform.call(
+                                HttpMethod.POST,
+                                "/api/v1/platform/sign-up/verify",
+                                body,
+                                null,
+                                Map.of("X-Forwarded-For", ip)));
+        // The confirmation may find its link replaced by the repeat (404 link_invalid); nothing fails with a 5xx.
+        assertThat(statuses).allMatch(s -> !s.is5xxServerError());
+        assertThat(shortNameOf(email)).isEqualTo(held);
+        String pending = TestDatabase.owner()
+                .sql("SELECT coalesce(pending_short_name, '') FROM onboarding_applications WHERE contact_email = ?")
+                .param(email)
+                .query(String.class)
+                .single();
+        assertThat(pending).isEqualTo(wanted);
+        TestDatabase.owner()
+                .sql("UPDATE onboarding_applications SET status = 'expired', closed_at = now() WHERE contact_email = ?")
+                .param(email)
+                .update();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT pending_short_name FROM onboarding_applications WHERE contact_email = ?")
+                        .param(email)
+                        .query(String.class)
+                        .optional())
+                .isEmpty();
+    }
+
     /** A sign-up page from before the short name sends none, for one release: a free one comes from the business name. */
     @Test
     void aSignUpWithoutAShortNameGetsAFreeOne() {

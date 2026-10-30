@@ -143,7 +143,10 @@ describe('the applicant page (FR-ONB-02, FR-ONB-04)', () => {
   it('changes a confirmed short name only when the applicant presses the button (ADR-108)', async () => {
     const html = await page({ view: { ...base, short_name: 'testduka', pending_short_name: 'testduka-gulu' } });
     expect(html).toContain('Change your short name?');
-    expect(html).toContain('Change to testduka-gulu');
+    expect(html).toMatch(/Your short name will change from <strong>testduka<\/strong> to <strong>testduka-gulu<\/strong>/);
+    // Keep is the default answer and comes first; only Change applies the new name.
+    expect(html.indexOf('Keep testduka')).toBeGreaterThan(-1);
+    expect(html.indexOf('Keep testduka')).toBeLessThan(html.indexOf('Change to testduka-gulu'));
     expect(await page({ view: { ...base, short_name: 'testduka' } })).not.toContain('Change your short name?');
   });
 

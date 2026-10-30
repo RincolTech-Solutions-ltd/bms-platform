@@ -17,6 +17,21 @@ ALTER TABLE onboarding_applications ADD COLUMN short_name varchar(63);
 -- mailbox is opened, so a stranger who knows the email cannot make the application give up its name (review of #713).
 ALTER TABLE onboarding_applications ADD COLUMN pending_short_name varchar(63);
 
+-- A pending name belongs to an open application only: activating, rejecting or expiring one clears it (review of #713,
+-- round 4), whichever V23 function makes the move.
+CREATE FUNCTION onboarding_clear_pending_short_name() RETURNS trigger
+LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+BEGIN
+    IF NEW.status NOT IN ('submitted', 'needs_info', 'verified') THEN
+        NEW.pending_short_name := NULL;
+    END IF;
+    RETURN NEW;
+END
+$$;
+CREATE TRIGGER onboarding_clear_pending_short_name BEFORE UPDATE OF status ON onboarding_applications
+    FOR EACH ROW EXECUTE FUNCTION onboarding_clear_pending_short_name();
+REVOKE ALL ON FUNCTION onboarding_clear_pending_short_name() FROM PUBLIC;
+
 -- First to confirm keeps it: one confirmed open application per short name. The confirmation clears a name a business or
 -- another confirmed application already has, under the name's lock, so this index is a backstop.
 CREATE UNIQUE INDEX onboarding_applications_one_open_per_short_name ON onboarding_applications (short_name)

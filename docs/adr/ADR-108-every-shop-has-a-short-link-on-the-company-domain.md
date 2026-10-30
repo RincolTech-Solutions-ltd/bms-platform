@@ -38,8 +38,9 @@ want the same name.
    409 says nothing about who applied (FR-ONB-03); a repeat from a mailbox whose own confirmed application holds the name
    gets the same 409. A repeat sign-up with a new free name replaces the name of an unconfirmed application at once (it
    holds nothing); on a confirmed application the new name waits as pending and is applied, if still free under the lock,
-   only when the applicant, on the page the fresh link sent to that mailbox opens, reads "Change your short name? ... from
-   N to X" and presses "Change to X". A stranger who knows the email therefore cannot make a confirmed applicant give up
+   only when the applicant, on the page the fresh link sent to that mailbox opens, reads "Your short name will change from N
+   to X only if you choose it", with Keep N as the first and default answer, and presses "Change to X". A pending name is
+   cleared when the application is activated, rejected or expires. A stranger who knows the email therefore cannot make a confirmed applicant give up
    a name, a blind click cannot either, and a repeat never silently keeps the old one. Every claim takes the name's lock
    before an application's row (the sign-up, the confirmation, Activate and the operator's create), so none of them can
    deadlock another. For one release `short_name` is optional, so a sign-up page cached from before it
