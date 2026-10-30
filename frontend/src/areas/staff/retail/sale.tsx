@@ -430,7 +430,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       drop(h.product.id);
       const words = typeof e.problem?.detail === 'string' ? e.problem.detail : e.message;
       show(`${words} ${name} is not on the sale: use ${WORDS.countStock}, then sell it.`, 'error');
-    } else show(`The count of ${name} is not committed. Try again.`, 'error');
+    } else show(`The count of ${name} is not saved. Try again.`, 'error');
   };
   const notNow = (h: HeldCount) => {
     const draftId = drafts.current.get(h.product.id ?? '');
@@ -499,7 +499,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       } catch (e) {
         // A sale cleared or a screen left meanwhile hears nothing of it (issue #664); the kept draft is dealt with as above.
         if (lost) {
-          if (!stale()) show(`The count of ${name} may not be committed. Check it on ${WORDS.countStock} before you sell it.`, 'error');
+          if (!stale()) show(`The count of ${name} may not be saved. Check it on ${WORDS.countStock} before you sell it.`, 'error');
         } else if (!(e instanceof StaleCount)) show(`${name} is saved, but its count is not. Count it on ${WORDS.countStock}, then sell it.`, 'error');
       }
     }
@@ -657,7 +657,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       ))}
       {stuck && !online && held.length > 0 && (
         <p role="alert" className="alert alert-warning" data-testid="sale-count-offline">
-          A count on this sale is not committed. Connect to the internet, then commit the count or press Not now, before you clear the sale or switch branch.
+          A count on this sale is not saved. Connect to the internet, then save the count or press Not now, before you clear the sale or switch branch.
         </p>
       )}
 
@@ -966,7 +966,7 @@ function HeldCountTick({ held, commit, onCommitted, onFailed, onCancel }: {
           <input type="checkbox" checked={ok} aria-describedby={wordsId} data-needed={ok ? undefined : ''} onChange={(e) => setOk(e.target.checked)} />
           {`Yes, ${name} is right`}
         </label>
-        <BusyButton type="button" className="rt-primary" busy={busy} notReady={!ok} onClick={() => sending.mutate()}>Commit the count</BusyButton>
+        <BusyButton type="button" className="rt-primary" busy={busy} notReady={!ok} onClick={() => sending.mutate()}>Save the count</BusyButton>
         {/* Not now discards a draft whose commit was lost; while the count is on its way it waits. */}
         {!busy && <button type="button" onClick={() => onCancel(held)}>Not now</button>}
       </div>

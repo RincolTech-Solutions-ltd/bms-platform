@@ -281,15 +281,15 @@ describe('a count that wipes or halves stock', () => {
 
   it('commits only once every noted line is ticked, and a press before that goes to the first tick', async () => {
     await review();
-    const commit = screen.getByRole('button', { name: 'Commit the count' });
-    expect(screen.getByText('Tick the 2 lines marked above before you commit the count.')).toBeTruthy();
+    const commit = screen.getByRole('button', { name: 'Save the count' });
+    expect(screen.getByText('Tick the 2 lines marked above before you save the count.')).toBeTruthy();
     // Issue #636: the hint is the button's description, so a screen reader hears why a press goes to a tick.
-    expect(document.getElementById(commit.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Tick the 2 lines marked above before you commit the count.');
+    expect(document.getElementById(commit.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Tick the 2 lines marked above before you save the count.');
     fireEvent.click(commit);
     expect(commitStocktake).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Yes, Test Plug Four Way is right' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Four Way is right' }));
-    expect(screen.getByText('Tick the line marked above before you commit the count.')).toBeTruthy();
+    expect(screen.getByText('Tick the line marked above before you save the count.')).toBeTruthy();
     fireEvent.click(commit);
     expect(commitStocktake).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Yes, Test Plug Two Way is right' }));
@@ -298,6 +298,15 @@ describe('a count that wipes or halves stock', () => {
     fireEvent.click(commit);
     // Issue #636: the commit names the ticked lines, so the server can refuse a big drop nobody ticked.
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('st1', ['A-1', 'A-2']));
+  });
+
+  // Issue #728: the last button says Save, never Commit, and its tip says the stock waits for it.
+  it('names the last button Save the count, with a tip that the stock changes only then', async () => {
+    await review();
+    expect(screen.queryByRole('button', { name: /commit/i })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'More about Save the count' }));
+    expect(await screen.findByText('Your stock changes only when you save the count.')).toBeTruthy();
+    expect(commitStocktake).not.toHaveBeenCalled();
   });
 
   // Issue #636: no screen of the count says Finish, the review and the committed screen included.
@@ -310,7 +319,7 @@ describe('a count that wipes or halves stock', () => {
     noFinish();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Four Way is right' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Two Way is right' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     await screen.findByRole('heading', { name: 'Stock updated for 4 items' });
     noFinish();
   });
@@ -324,21 +333,21 @@ describe('a count that wipes or halves stock', () => {
     expect(document.querySelector('.entry-warning-icon path')?.getAttribute('d')).toBe('M12 3.5 2.5 20h19z');
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Fuse One is right' }));
     expect((screen.getByRole('checkbox', { name: 'Yes, Test Fuse Two is right' }) as HTMLInputElement).checked).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     expect(onCommit).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Fuse Two is right' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     expect(onCommit).toHaveBeenCalledWith([]);
   });
 
   // Issue #664: a cancelled count (status discarded) says cancelled, and asks no tick and no commit, big drops and all.
-  it('shows a cancelled count with no tick and no Commit the count, and never says discarded', () => {
+  it('shows a cancelled count with no tick and no Save the count, and never says discarded', () => {
     render(<StocktakeReview stocktake={{ ...draft, status: 'discarded' }} onCommit={vi.fn()} />);
     expect(screen.getByRole('heading', { name: 'Stock count cancelled' })).toBeTruthy();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
     expect(screen.queryByTestId('count-drop-A-1')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Commit the count' })).toBeNull();
-    expect(screen.queryByText(/before you commit the count/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save the count' })).toBeNull();
+    expect(screen.queryByText(/before you save the count/)).toBeNull();
     expect(document.body.textContent).not.toMatch(/discard/i);
   });
 
@@ -458,10 +467,10 @@ describe('counting in cartons and pieces', () => {
     await screen.findByRole('heading', { name: 'Review the difference' });
     expect(createStocktake.mock.calls[0]?.[0]).toEqual({ branch_id: expect.any(String), lines: [{ product_id: 'S-1', counted_qty: '24.000' }] });
     expect(screen.getByTestId('count-drop-S-1').textContent).toContain('This removes 4 cartons and 10 pieces (106 pieces). Is that right?');
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     expect(commitStocktake).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Soap is right' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('st1', ['S-1']));
   });
 });

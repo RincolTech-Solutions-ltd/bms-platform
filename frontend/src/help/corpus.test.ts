@@ -587,11 +587,14 @@ describe('the count stock words (issue #629)', () => {
   const literals = (file: string) => [...java(file).matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]).join('');
   const refusals = ['retail/stock/internal/StockService.java', 'retail/stock/internal/StockCorrectionService.java', 'core/tenancy/internal/BranchService.java'];
 
-  it('put in bold, and as captions, only labels the count screen shows, Commit the count among them', () => {
+  // Issue #728: the button is Save the count now; commit the count stays a search word for whoever learned the old one.
+  it('put in bold, and as captions, only labels the count screen shows, Save the count among them', () => {
     const count = articleById('count-stock')!;
     const labels = [...new Set([...count.intro, ...count.steps.map((s) => s.text), ...count.notes].flat().filter((r) => r.strong).map((r) => r.text))];
-    expect(labels).toContain('Commit the count');
-    expect(count.steps.map((s) => s.picture?.caption)).toContain('Commit the count');
+    expect(labels).toContain('Save the count');
+    expect(labels).not.toContain('Commit the count');
+    expect(count.steps.map((s) => s.picture?.caption)).toContain('Save the count');
+    expect(count.words).toContain('save the count');
     // Switch branch, Count stock and the warning's Confirm and Change are drawn by the shell, the menu and the entry checks.
     for (const label of labels.filter((l) => !['Switch branch', 'Count stock', 'Confirm', 'Change'].includes(l))) expect(screen, label).toMatch(whole(label));
     expect(count.words).toContain('commit the count');
@@ -604,7 +607,7 @@ describe('the count stock words (issue #629)', () => {
     }
     const tour = stocktakePage.steps.map((s) => `${s.title} ${s.body}`).join('\n');
     expect(tour).not.toMatch(/\bfinish/i);
-    expect(tour).toContain('Commit the count');
+    expect(tour).toContain('Save the count');
   });
 
   it('reads every article that mentions a stock count', () => {
@@ -614,7 +617,7 @@ describe('the count stock words (issue #629)', () => {
   // Issue #636: the server's refusals about a stock count say to commit it, the big drop refusal among them.
   it('never say Finish for a stock count in a server refusal', () => {
     for (const file of refusals) expect(literals(file), file).not.toMatch(/stock counts?[^.]{0,80}\bfinish|\bfinish\w* (the |a |your )?stock count/i);
-    expect(literals(refusals[0]!)).toContain('tick each line marked before you commit the count.');
+    expect(literals(refusals[0]!)).toContain('tick each line marked before you save the count.');
     expect(literals(refusals[2]!)).toContain(' stock counts started and not committed');
   });
 });

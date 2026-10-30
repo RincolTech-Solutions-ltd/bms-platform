@@ -9,7 +9,7 @@ import { countKey, type SavedCount } from './count-save-state';
 
 // Issue #681 (round 2 of its review): Count stock keeps each count on this device as it is typed and says so, brings it back
 // after a reload or a lost connection, merges two tabs item by item, keeps each branch its own count, and ends with a clear
-// success screen after Commit the count. Nothing goes to the server before Review the difference. Fabricated names and amounts.
+// success screen after Save the count. Nothing goes to the server before Review the difference. Fabricated names and amounts.
 
 vi.setConfig({ testTimeout: 20000 });
 
@@ -204,7 +204,7 @@ describe('the end of a count', () => {
     { product_id: 'A-2', description: 'Test Plug', expected_qty: '8.000', counted_qty: '6.000', variance_qty: '-2.000' },
   ];
 
-  it('makes the draft only at Review, commits only on Commit the count, then shows Stock updated with the gains and losses', async () => {
+  it('makes the draft only at Review, commits only on Save the count, then shows Stock updated with the gains and losses', async () => {
     createStocktake.mockResolvedValue({ id: 'st-r', status: 'draft', lines });
     commitStocktake.mockResolvedValue({ id: 'st-r', status: 'committed', lines: lines.map((l) => ({ ...l, committed_variance_qty: l.variance_qty })) });
     await ready();
@@ -215,7 +215,7 @@ describe('the end of a count', () => {
     expect(createStocktake).toHaveBeenCalledTimes(1);
     expect(createStocktake.mock.calls[0]?.[0]).toEqual({ branch_id: branchA, lines: [{ product_id: 'A-1', counted_qty: '7.000' }, { product_id: 'A-2', counted_qty: '6.000' }] });
     expect(commitStocktake).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     await screen.findByRole('heading', { name: 'Stock updated for 2 items' });
     expect(commitStocktake).toHaveBeenCalledWith('st-r', []);
     const detail = document.querySelector('.success-detail')?.textContent ?? '';
@@ -239,7 +239,7 @@ describe('the end of a count', () => {
     await ready();
     fireEvent.change(countBox('A-1'), { target: { value: '7' } });
     await reviewIt(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     await screen.findByRole('heading', { name: 'Stock updated for 1 item' });
     fireEvent.click(screen.getByRole('button', { name: 'Start another count' }));
     expect(countBox('A-1').value).toBe('');
@@ -254,24 +254,24 @@ describe('the end of a count', () => {
     cleanup();
     await ready();
     await reviewIt(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     expect(commitStocktake).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug is right' }));
     commitStocktake.mockResolvedValue({ ...drop, id: 'st-r', status: 'committed', lines: [drop] });
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('st-r', ['A-2']));
   });
 
   // Review of #686, round 5: a review open here when another tab commits the same count is ended, so the same difference is
   // never taken twice; back on the sheet the person sees what went in there.
-  it('ends this tab’s review when another tab commits the count, so Commit the count cannot take it again', async () => {
+  it('ends this tab’s review when another tab commits the count, so Save the count cannot take it again', async () => {
     createStocktake.mockResolvedValue({ id: 'st-r', status: 'draft', lines: [lines[0]] });
     await ready();
     fireEvent.change(countBox('A-1'), { target: { value: '7' } });
     await reviewIt(1);
     const mine = readStored(branchA);
     otherTab(keyOf(branchA), { counts: {}, packCounts: {}, listed: [], done: [], at: { 'A-1': Date.now() + 1000 }, committed: Date.now() + 1000 });
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Commit the count' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save the count' })).toBeNull());
     expect(screen.getByTestId('count-other-tab').textContent).toBe('Counted and saved in another tab');
     expect(commitStocktake).not.toHaveBeenCalled();
     expect(mine.counts['A-1']).toBe('7');
@@ -296,11 +296,11 @@ describe('the end of a count', () => {
     otherTab(keyOf(branchA), committed);
     await act(async () => answer({ id: 'st-r', status: 'draft', lines: [lines[0]] }));
     await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('st-r'));
-    expect(screen.queryByRole('button', { name: 'Commit the count' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save the count' })).toBeNull();
     expect(commitStocktake).not.toHaveBeenCalled();
   });
 
-  it('refuses Commit the count when another tab committed since the review and this tab has not heard yet', async () => {
+  it('refuses Save the count when another tab committed since the review and this tab has not heard yet', async () => {
     createStocktake.mockResolvedValue({ id: 'st-r', status: 'draft', lines: [lines[0]] });
     await ready();
     fireEvent.change(countBox('A-1'), { target: { value: '7' } });
@@ -308,8 +308,8 @@ describe('the end of a count', () => {
     // Written by the other tab, with no storage event heard here yet (a phone tab woken late).
     const later = Date.now() + 1000;
     localStorage.setItem(keyOf(branchA), JSON.stringify({ counts: {}, packCounts: {}, listed: [], done: [], at: { 'A-1': later }, committed: later }));
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Commit the count' })).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save the count' })).toBeNull());
     expect(commitStocktake).not.toHaveBeenCalled();
     // Round 7: the missed commit is taken in, so the count that went in there leaves this sheet and cannot be reviewed again.
     expect(countBox('A-1').value).toBe('');
@@ -361,7 +361,7 @@ describe('a commit and an old count', () => {
     const mine = readStored(branchA);
     const later = (mine.at['A-1'] ?? 0) + 1000;
     otherTab(keyOf(branchA), { ...mine, counts: { 'A-1': '5', 'A-2': '6', 'A-3': '7' }, listed: ['A-1', 'A-2', 'A-3'], done: ['A-1', 'A-2', 'A-3'], at: { ...mine.at, 'A-1': later, 'A-3': later } });
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     await screen.findByRole('heading', { name: 'Stock updated for 2 items' });
     expect(commitStocktake).toHaveBeenCalledWith('st-r', []);
     // Test Plug went in as counted and leaves; Test Lamp's newer 5 and Test Tape's 7 never went in, so they stay.
@@ -469,7 +469,7 @@ describe('a commit and an old count', () => {
     await asked();
     localStorage.removeItem(keyOf(branchA));
     fireEvent.click(screen.getByRole('button', { name: 'Use them' }));
-    expect((await screen.findByTestId('count-gone')).textContent).toBe('Those counts were committed or cleared in another tab, so this count starts empty.');
+    expect((await screen.findByTestId('count-gone')).textContent).toBe('Those counts were saved or cleared in another tab, so this count starts empty.');
   });
 
   it('starts again from the question about an earlier day, clearing the saved count', async () => {

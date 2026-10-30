@@ -280,11 +280,11 @@ describe('a Sell search that finds nothing', () => {
   const holdsTen = () => listProducts.mockImplementation(({ query }: { query?: string }) => Promise.resolve(query === 'DUV-0001' ? [{ ...made, qty: '10.000' }] : []));
   const tickAndCommitPillow = (ask: HTMLElement) => {
     fireEvent.click(within(ask).getByRole('checkbox', { name: 'Yes, Test pillow case is right' }));
-    fireEvent.click(within(ask).getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(within(ask).getByRole('button', { name: 'Save the count' }));
   };
   const tickAndCommit = (ask: HTMLElement) => {
     fireEvent.click(within(ask).getByRole('checkbox', { name: 'Yes, Test duvet cover is right' }));
-    fireEvent.click(within(ask).getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(within(ask).getByRole('button', { name: 'Save the count' }));
   };
 
   it('asks the tick of a big drop before any draft is made, then makes and commits it acknowledged (issues #636, #656)', async () => {
@@ -297,8 +297,8 @@ describe('a Sell search that finds nothing', () => {
     const ask = await screen.findByTestId('sale-count-drop-p9');
     expect(ask.textContent).toContain('The records show 10 of Test duvet cover here, and you counted 4. This removes 6. Is that right?');
     expect(createStocktake).not.toHaveBeenCalled();
-    // Commit the count waits for the tick.
-    fireEvent.click(within(ask).getByRole('button', { name: 'Commit the count' }));
+    // Save the count waits for the tick.
+    fireEvent.click(within(ask).getByRole('button', { name: 'Save the count' }));
     expect(createStocktake).not.toHaveBeenCalled();
     tickAndCommit(ask);
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('s1', ['p9']));
@@ -342,9 +342,9 @@ describe('a Sell search that finds nothing', () => {
     // The first tick stays with the first item: the second asks its own.
     expect((within(first).getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
     expect((within(second).getByRole('checkbox', { name: 'Yes, Test pillow case is right' }) as HTMLInputElement).checked).toBe(false);
-    fireEvent.click(within(second).getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(within(second).getByRole('button', { name: 'Save the count' }));
     expect(createStocktake).not.toHaveBeenCalled();
-    fireEvent.click(within(first).getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(within(first).getByRole('button', { name: 'Save the count' }));
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('s-p9', ['p9']));
     tickAndCommitPillow(await screen.findByTestId('sale-count-drop-p10'));
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('s-p10', ['p10']));
@@ -397,14 +397,14 @@ describe('a Sell search that finds nothing', () => {
     open(<RecordSale />, owner);
     await fill('4');
     tickAndCommit(await screen.findByTestId('sale-count-drop-p9'));
-    expect(await screen.findByText('The count of Test duvet cover is not committed. Try again.')).toBeTruthy();
-    fireEvent.click(within(screen.getByTestId('sale-count-drop-p9')).getByRole('button', { name: 'Commit the count' }));
+    expect(await screen.findByText('The count of Test duvet cover is not saved. Try again.')).toBeTruthy();
+    fireEvent.click(within(screen.getByTestId('sale-count-drop-p9')).getByRole('button', { name: 'Save the count' }));
     expect(await screen.findByRole('button', { name: 'Remove Test duvet cover' })).toBeTruthy();
     expect(createStocktake).toHaveBeenCalledTimes(1);
     expect(commitStocktake.mock.calls).toEqual([['s1', ['p9']], ['s1', ['p9']]]);
   });
 
-  // Issue #656, round 3: a draft exists once Commit the count was pressed; when its commit is lost it is discarded on every way out.
+  // Issue #656, round 3: a draft exists once Save the count was pressed; when its commit is lost it is discarded on every way out.
   const lostCommit = () => {
     holdsTen();
     createProduct.mockResolvedValueOnce(sheet).mockResolvedValue(made);
@@ -418,7 +418,7 @@ describe('a Sell search that finds nothing', () => {
     expect(await screen.findByRole('button', { name: 'Remove Test bed sheet' })).toBeTruthy();
     await fill('4');
     tickAndCommit(await screen.findByTestId('sale-count-drop-p9'));
-    expect(await screen.findByText('The count of Test duvet cover is not committed. Try again.')).toBeTruthy();
+    expect(await screen.findByText('The count of Test duvet cover is not saved. Try again.')).toBeTruthy();
     expect(createStocktake).toHaveBeenCalledTimes(2);
     expect(discardStocktake).not.toHaveBeenCalled();
   };
@@ -490,7 +490,7 @@ describe('a Sell search that finds nothing', () => {
     const started = (await screen.findByTestId('branch-in-use')).textContent;
     await toLostCommit();
     act(() => network.set(false));
-    const words = 'A count on this sale is not committed. Connect to the internet, then commit the count or press Not now, before you clear the sale or switch branch.';
+    const words = 'A count on this sale is not saved. Connect to the internet, then save the count or press Not now, before you clear the sale or switch branch.';
     fireEvent.click(screen.getByRole('button', { name: 'Clear this sale' }));
     expect(await screen.findByText(words)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Remove Test bed sheet' })).toBeTruthy();
@@ -622,8 +622,8 @@ describe('a Sell search that finds nothing', () => {
     open(<RecordSale />, owner);
     await fill('4');
     tickAndCommit(await screen.findByTestId('sale-count-drop-p9'));
-    expect(await screen.findByText('The count of Test duvet cover is not committed. Try again.')).toBeTruthy();
-    fireEvent.click(within(screen.getByTestId('sale-count-drop-p9')).getByRole('button', { name: 'Commit the count' }));
+    expect(await screen.findByText('The count of Test duvet cover is not saved. Try again.')).toBeTruthy();
+    fireEvent.click(within(screen.getByTestId('sale-count-drop-p9')).getByRole('button', { name: 'Save the count' }));
     expect(await screen.findByRole('button', { name: 'Remove Test duvet cover' })).toBeTruthy();
     expect(discardStocktake).not.toHaveBeenCalled();
   });
@@ -712,7 +712,7 @@ describe('a Sell search that finds nothing', () => {
     await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
     expect(commitStocktake).not.toHaveBeenCalledWith('s1');
     expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
-    expect(screen.queryByText(/its count is not|may not be committed/)).toBeNull();
+    expect(screen.queryByText(/its count is not|may not be saved/)).toBeNull();
   };
 
   it('discards the count of a new item that answers after Clear this sale, and puts nothing on the sale (issue #664)', async () => {
@@ -801,7 +801,7 @@ describe('a Sell search that finds nothing', () => {
     commitStocktake.mockRejectedValueOnce(new RetailError('Too many requests', 429, 'rate_limited')).mockRejectedValue(new RetailError('Offline', 503, 'unavailable'));
     open(<RecordSale />, owner);
     await fill('4');
-    expect(await screen.findByText('The count of Test duvet cover may not be committed. Check it on Count stock before you sell it.')).toBeTruthy();
+    expect(await screen.findByText('The count of Test duvet cover may not be saved. Check it on Count stock before you sell it.')).toBeTruthy();
     expect(commitStocktake).toHaveBeenCalledTimes(2);
     expect(discardStocktake).not.toHaveBeenCalled();
     expect(JSON.parse(sessionStorage.getItem('sale-held-counts') ?? '[]')).toEqual(['s1']);
@@ -854,7 +854,7 @@ describe('a Sell search that finds nothing', () => {
     await act(async () => first(new RetailError('Offline', 503, 'unavailable')));
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledTimes(3));
     await act(async () => undefined);
-    expect(screen.queryByText(/may not be committed/)).toBeNull();
+    expect(screen.queryByText(/may not be saved/)).toBeNull();
     expect(screen.queryByText(/its count is not/)).toBeNull();
     expect(JSON.parse(sessionStorage.getItem('sale-held-counts') ?? '[]')).toEqual(['s1']);
     expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();

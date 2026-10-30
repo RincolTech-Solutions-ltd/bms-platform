@@ -39,7 +39,11 @@ export const HELP_TIPS = {
   },
   countItNow: {
     label: 'Count it now',
-    text: 'Opens Count stock with this item ready. Type how many are on the shelf, then review and commit the count.',
+    text: 'Opens Count stock with this item ready. Type how many are on the shelf, then review and save the count.',
+  },
+  saveTheCount: {
+    label: 'Save the count',
+    text: 'Your stock changes only when you save the count.',
   },
   appraisal: {
     label: 'Appraisal',

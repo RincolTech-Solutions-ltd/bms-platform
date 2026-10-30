@@ -1393,7 +1393,7 @@ export function createMockRetail(): RetailApi {
       // Issue #636, as the server: a big drop left out of the acknowledged lines refuses the commit.
       const unticked = (st.lines ?? []).filter((l) => bigDrop(l) && !acknowledged.includes(l.product_id ?? '')).map((l) => l.description ?? l.code);
       if (unticked.length > 0) {
-        const detail = `The count of ${unticked.join(', ')} removes more than half of what was there. Review the difference again and tick each line marked before you commit the count.`;
+        const detail = `The count of ${unticked.join(', ')} removes more than half of what was there. Review the difference again and tick each line marked before you save the count.`;
         return Promise.reject(new RetailError(retailMessage({ code: 'big_drop_not_acknowledged', detail }, 409), 409, 'big_drop_not_acknowledged'));
       }
       (st.lines ?? []).forEach((l) => move(st.branch_id ?? BRANCH_A, l.product_id ?? '', toMilli(l.variance_qty ?? '0')));

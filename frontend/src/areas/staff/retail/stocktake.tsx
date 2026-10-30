@@ -21,6 +21,7 @@ import { ScreenToast, useItemAdded } from './toast';
 import { entryWarnings } from './entry-checks-state';
 import { useEntryChecks, useEntryNorms } from './entry-checks';
 import { SuccessScreen } from '../../../app/ui/SuccessScreen';
+import { HelpTip } from '../../../app/ui/HelpTip';
 import { NextSteps, mayCountAt } from './next-steps';
 import { branchLabel } from '../../../auth/branch';
 import { changeWords, clearCount, countKey, otherTabWords, readCount, savedAt, saveWords, useCountSave, whenSaved, type CountState } from './count-save-state';
@@ -67,7 +68,7 @@ export function StocktakeReview({ stocktake, onCommit, busy, units, packs }: {
   return (
     <form aria-label="Stock count review" noValidate onSubmit={(e) => e.preventDefault()}>
       {/* Issue #656: a discarded count never reads as committed. */}
-      <h2>{stocktake.status === 'committed' ? 'Stock count committed' : stocktake.status === 'discarded' ? 'Stock count cancelled' : 'Review the difference'}</h2>
+      <h2>{stocktake.status === 'committed' ? 'Stock count saved' :stocktake.status === 'discarded' ? 'Stock count cancelled' : 'Review the difference'}</h2>
       {changed.length === 0 ? (
         <p>Every counted item matches the system.</p>
       ) : (
@@ -120,11 +121,15 @@ export function StocktakeReview({ stocktake, onCommit, busy, units, packs }: {
       {draft && onCommit && (
         <>
           {/* Issue #636: the button names its hint, so a press that goes to a tick says why. */}
-          {open > 0 && <p className="hint" id={hintId}>{open === 1 ? 'Tick the line marked above before you commit the count.' : `Tick the ${open} lines marked above before you commit the count.`}</p>}
-          <BusyButton type="button" className="rt-primary" busy={busy === true} notReady={open > 0}
-            aria-describedby={open > 0 ? hintId : undefined} onClick={() => onCommit(changed.flatMap((l, i) => (l.product_id && ticked.has(keyOf(l, i)) ? [l.product_id] : [])))}>
-            Commit the count
-          </BusyButton>
+          {open > 0 && <p className="hint" id={hintId}>{open === 1 ? 'Tick the line marked above before you save the count.' : `Tick the ${open} lines marked above before you save the count.`}</p>}
+          {/* Issue #728: plain words, a shop worker does not know Commit; the tip says the stock waits for this press. */}
+          <p className="cluster">
+            <BusyButton type="button" className="rt-primary" busy={busy === true} notReady={open > 0}
+              aria-describedby={open > 0 ? hintId : undefined} onClick={() => onCommit(changed.flatMap((l, i) => (l.product_id && ticked.has(keyOf(l, i)) ? [l.product_id] : [])))}>
+              Save the count
+            </BusyButton>
+            <HelpTip tip="saveTheCount" />
+          </p>
         </>
       )}
     </form>
@@ -489,7 +494,7 @@ function CountSheet({ branchId, item, from }: { branchId: string; item?: string;
       {/* Issue #681: the person counting always sees that their work is kept, and where. */}
       <p className="hint count-saved-all" role="status" data-testid="count-saved-all">{savedWords}</p>
       {saving.other && <p className="hint" data-testid="count-other-tab">{otherTabWords(saving.other)}</p>}
-      {goneElsewhere && valid.length === 0 && <p className="hint" data-testid="count-gone">Those counts were committed or cleared in another tab, so this count starts empty.</p>}
+      {goneElsewhere && valid.length === 0 && <p className="hint" data-testid="count-gone">Those counts were saved or cleared in another tab, so this count starts empty.</p>}
       {keptLine && kept && valid.length > 0 && (
         <div className="alert alert-info" data-testid="count-kept">
           <p>{kept.earlier ? `Counted on ${kept.day} at ${kept.time}` : `Counted today at ${kept.time}`}</p>

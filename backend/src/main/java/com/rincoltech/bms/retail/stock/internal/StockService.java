@@ -391,10 +391,10 @@ class StockService {
             throw new ApiException(
                     HttpStatus.CONFLICT,
                     "big_drop_not_acknowledged",
-                    "Tick the lines marked before you commit",
+                    "Tick the lines marked before you save",
                     "The count of " + firstNames(unticked)
                             + " removes more than half of what was there. Review the difference again and tick each line marked"
-                            + " before you commit the count.");
+                            + " before you save the count.");
         }
         List<StocktakeLine> lines = new ArrayList<>(s.lines());
         lines.sort(Comparator.comparing(StocktakeLine::productId));

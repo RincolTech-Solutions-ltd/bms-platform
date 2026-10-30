@@ -220,11 +220,11 @@ describe('stock-take review', () => {
     expect(html).toContain('LED bulb 9W screw');
     expect(html).not.toContain('LED bulb 15W screw');
     expect(html).toContain('(less)');
-    expect(html).toContain('Commit the count');
+    expect(html).toContain('Save the count');
   });
 
   it('has no commit button once committed', () => {
-    expect(renderToString(<StocktakeReview stocktake={{ ...st, status: 'committed' }} onCommit={() => undefined} />)).not.toContain('Commit the count');
+    expect(renderToString(<StocktakeReview stocktake={{ ...st, status: 'committed' }} onCommit={() => undefined} />)).not.toContain('Save the count');
   });
 
   // Issue #629: to 0 or below half of what was held asks first; half or more, an item that held nothing, or a rise does not.
