@@ -194,6 +194,9 @@ describe('the loan application form', () => {
     send();
     expect(errorOf('af-guarantors')).toMatch(/at least one guarantor/);
     expect(errorOf('af-collateral')).toMatch(/needs collateral/);
+    // Issue #707: Guarantors carries its help tip, and the group keeps its title alone as its name.
+    expect(screen.getByRole('button', { name: 'More about Guarantor' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Guarantors' })).toBeTruthy();
   });
 
   it('creates the draft, pledges the chosen item, then submits, each with the version the last answer gave', async () => {

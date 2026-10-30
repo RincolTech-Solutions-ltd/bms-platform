@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
 import { BusyButton } from '../../../app/ui/BusyButton';
+import { HelpTip } from '../../../app/ui/HelpTip';
 import { retail, type CustomerGroup, type PriceList } from '../../../api/retail';
 import { AddPanel } from './catalogue';
 import { ScreenLink, addOn } from './screen-link';
@@ -48,7 +49,7 @@ export function GroupCard({ group, lists, listsLoad, busy, onSave, extra }: {
           <input id={`group-name-${group.id}`} value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
           {!(listsLoad ? showsEmptyChoice(listsLoad, listsLoad.data && choosable) : choosable.length === 0) ? (
             <>
-              <label htmlFor={`group-list-${group.id}`}>Price list</label>
+              <span><label htmlFor={`group-list-${group.id}`}>Price list</label> <HelpTip tip="priceList" /></span>
               <select id={`group-list-${group.id}`} value={listId} onChange={(e) => setListId(e.target.value)}>
                 <option value="">No price list</option>
                 {choosable.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}

@@ -22,6 +22,7 @@ import { keptWords } from './orders-state';
 import { CategoryChips, FindBar, NoItem, onlyMatch, useChosenChip, useFindTerm } from './phone-find';
 import { ScreenLink } from './screen-link';
 import { Hint } from '../../../app/ui/Hint';
+import { HelpTip } from '../../../app/ui/HelpTip';
 import { WORDS } from '../../../app/glossary';
 
 // Stock per branch (FR-RET-03): balances with a negative flag and a search box. The cost column
@@ -49,6 +50,16 @@ function PriceLine({ cost, sell }: { cost?: number; sell?: number }) {
       {cost !== undefined && <>{WORDS.buyingPrice} <span className="num">{money(cost)}</span> · </>}
       {sell !== undefined && <>{WORDS.sellingPrice} <span className="num">{money(sell)}</span></>}
     </>
+  );
+}
+
+/** Issue #707: on a phone the prices are on every card, so their help tips stand once above the list. */
+function PriceTips({ cost }: { cost: boolean }) {
+  return (
+    <p className="hint">
+      {cost && <>Average buying price <HelpTip tip="averageBuyingPrice" /> </>}
+      {WORDS.sellingPrice} <HelpTip tip="sellingPrice" />
+    </p>
   );
 }
 
@@ -81,6 +92,7 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
     return (
       <>
         {!flat && <GroupControls state={g} />}
+        <PriceTips cost={showCost} />
         {grouping ? <GroupedCards state={g} renderItem={card} /> : <ul className="stock-cards">{rows.map(card)}</ul>}
       </>
     );
@@ -116,8 +128,9 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
           <th>Item</th>
           {!phone && !grouping && <th>Category</th>}
           <th className="num">In stock</th>
-          {showCost && <th className="num">Average buying price</th>}
-          <th className="num">{WORDS.sellingPrice}</th>
+          {/* The header's own name is its words: the tip's button is not read with every cell of the column. */}
+          {showCost && <th className="num" aria-label="Average buying price">Average buying price <HelpTip tip="averageBuyingPrice" /></th>}
+          <th className="num" aria-label={WORDS.sellingPrice}>{WORDS.sellingPrice} <HelpTip tip="sellingPrice" /></th>
         </tr>
       </thead>
       {grouping ? <GroupedBodies state={g} colSpan={3 + (showCost ? 1 : 0)} renderRow={row} /> : <tbody>{rows.map(row)}</tbody>}
@@ -176,8 +189,8 @@ export function AllBranchesTable({ data, showCost: mayCost, searching = false, f
           <th>Item</th>
           <th className="num">Total</th>
           {data.branches.map((b) => <th key={b.id} className="num">{branchName(b)}</th>)}
-          {showCost && <th className="num">Average buying price</th>}
-          <th className="num">{WORDS.sellingPrice}</th>
+          {showCost && <th className="num" aria-label="Average buying price">Average buying price <HelpTip tip="averageBuyingPrice" /></th>}
+          <th className="num" aria-label={WORDS.sellingPrice}>{WORDS.sellingPrice} <HelpTip tip="sellingPrice" /></th>
         </tr>
       </thead>
       {grouping ? <GroupedBodies state={g} colSpan={3 + data.branches.length + (showCost ? 1 : 0)} renderRow={row} /> : <tbody>{data.items.map(row)}</tbody>}
@@ -225,6 +238,7 @@ export function AllBranchesList({ data, showCost, searching = false, filterKey =
   return (
     <>
       {!flat && <GroupControls state={g} />}
+      <PriceTips cost={showCost} />
       {grouping ? <GroupedCards state={g} renderItem={card} /> : <ul style={{ listStyle: 'none', padding: 0 }}>{data.items.map(card)}</ul>}
     </>
   );

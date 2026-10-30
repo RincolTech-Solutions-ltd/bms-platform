@@ -1270,9 +1270,15 @@ stock list shows it on its own row.
   colour follows). Links to Items, Record a sale, Restock, Move stock, Stock and Sales.
 - **An existing item** gets **Give this item sizes and colours** on its edit form: the owner says which size or colour its stock is
   now; it keeps its code, prices, stock and history, and the others are made at its prices.
-- **Join items as sizes of one item** (`/staff/retail/catalogue/products/sizes/join`, a third button on Items): for a shop that
-  typed one item per size. Name the item, pick the items with Add as a size, type each one's size or colour, Join them as one item.
-  Each keeps its code, price, stock and history. Tour `page-sizes-join`; `page-products` is version 3 with a Join step.
+- **Put items together as sizes of one item** (`/staff/retail/catalogue/products/sizes/join`, a third button on Items): for a shop
+  that typed one item per size. Since issue #707 it is three plain steps with one search: **1. Pick the items** (each match says
+  Tick or Ticked, the ticked items are listed with Remove, 2 or more are needed), **2. Name the item** ("What do customers call
+  it?", suggested from the words the ticked items share, `joinSuggestion`), **3. Check the sizes** (each item's size suggested
+  from the part of its name that differs, editable, with an optional colour or print), then **Put them together**. The success
+  screen says "Twin cable now has 2 sizes" with **Open it** and **Put more together**. **Add more sizes to an item that already
+  has sizes** is a small button under the steps: it asks for one size of that item, then the same three steps add to it (the item
+  keeps its name and category). Each item keeps its code, price, stock and history. Tour `page-sizes-join` version 4 follows the
+  steps; `page-products` is version 3 with a Join step.
 - **A name another item has** (on Add an item with sizes and colours and on Join) is refused in plain words naming the one that
   exists; an administrator may use it anyway with a reason.
 - **A size's own edit form** shows its name, category and unit as the item's, with a link to change them on the item's page, and lets

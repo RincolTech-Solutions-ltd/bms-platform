@@ -177,6 +177,8 @@ describe('the Home cards (issue #471)', () => {
     const lend = await screen.findByRole('article', { name: 'Lending' });
     expect(within(lend).queryByText('Waiting for approval')).toBeNull();
     expect(await within(lend).findByText('In arrears')).toBeTruthy();
+    // Issue #707: In arrears carries its help tip.
+    expect(within(lend).getByRole('button', { name: 'More about In arrears' })).toBeTruthy();
     expect(card('Shop')).toBeNull();
     expect(calls.home).not.toHaveBeenCalled();
     expect(calls.approvals).not.toHaveBeenCalled();

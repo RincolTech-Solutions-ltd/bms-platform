@@ -12,6 +12,11 @@ import { ScreenToast } from './toast';
 import { Gate, ProductPicker, Problem, money, useProfitAccess, useToast } from './ui';
 import { WORDS } from '../../../app/glossary';
 import { Hint } from '../../../app/ui/Hint';
+import { HelpTip } from '../../../app/ui/HelpTip';
+import { ItemCombobox } from '../../../app/ui/ItemCombobox';
+import { SuccessScreen } from '../../../app/ui/SuccessScreen';
+import { useLiveSearch } from '../../../app/ui/useLiveSearch';
+import { icons } from '../../../components/icons';
 import { UnitPicker } from './unit-picker';
 
 // Items with sizes and colours (issue #384, ADR-051): the owner of a baby clothes shop chooses the sizes and the prints once and
@@ -309,42 +314,110 @@ export function MakeFamilyPanel({ product }: { product: Product }) {
   );
 }
 
-/** One item kept apart until now, and the size and colour it becomes. */
+/** One item kept apart until now, and the size and colour it becomes; null is the size the app suggests, not changed yet. */
 interface JoinRow {
   product: Product;
-  size: string;
+  size: string | null;
   colour: string;
 }
 
 /**
- * Items you already have, one per size (FR-RET-51): "Cable 1.5mm" and "Cable 2.5mm" typed as two items become the sizes of one
- * item. Each keeps its code, prices, stock and history; its name becomes the item's with its size and colour. They join a new
- * item, or one that has sizes already (found by picking one of its sizes), which keeps its own name and category (issue #395).
+ * The name and the sizes the join suggests (issue #707): the words every picked item shares at its start and its end are the
+ * item's name, and what is left of each one is its size ("Twin cable 1.5mm" and "Twin cable 2.5mm" give "Twin cable", "1.5mm"
+ * and "2.5mm"). With `base`, the name of the item they join, each size is what is left after that name's words. Every item
+ * keeps at least one word for its size; brackets round a size are dropped, "(S)" is "S".
+ */
+export function joinSuggestion(names: readonly string[], base?: string): { name: string; sizes: string[] } {
+  const items = names.map((n) => n.trim().split(/\s+/).filter((w) => w !== ''));
+  const lists = base === undefined ? items : [base.trim().split(/\s+/).filter((w) => w !== ''), ...items];
+  if (items.length === 0 || lists.length < 2) return { name: '', sizes: names.map(() => '') };
+  const sameAt = (at: (words: string[]) => string | undefined) => {
+    const first = at(lists[0] ?? [])?.toLocaleLowerCase();
+    return first !== undefined && lists.every((words) => at(words)?.toLocaleLowerCase() === first);
+  };
+  const shortest = Math.min(...items.map((words) => words.length));
+  let start = 0;
+  while (start < shortest - 1 && sameAt((words) => words[start])) start += 1;
+  let end = 0;
+  while (start + end < shortest - 1 && sameAt((words) => words[words.length - 1 - end])) end += 1;
+  const first = items[0] ?? [];
+  const name = [...first.slice(0, start), ...first.slice(first.length - end)].join(' ');
+  return {
+    // A name that started mid way ("2.5mm twin cable" gives "cable") starts with a capital, as an item's name does.
+    name: name.charAt(0).toLocaleUpperCase() + name.slice(1),
+    sizes: items.map((words) => words.slice(start, words.length - end).join(' ').replace(/^\((.*)\)$/, '$1').slice(0, 30)),
+  };
+}
+
+/** The step 1 search: each match says whether it is ticked, and a tap ticks it or takes the tick off. */
+function TickPicker({ picked, onToggle }: { picked: readonly JoinRow[]; onToggle: (p: Product) => void }) {
+  const search = useLiveSearch();
+  const products = useQuery({
+    queryKey: ['retail', 'products', undefined, search.term],
+    queryFn: ({ signal }) => retail.listProducts({ query: search.term, signal }),
+    enabled: search.term !== '',
+  });
+  return (
+    <ItemCombobox
+      id="join-search"
+      label="Find an item by name, code or category"
+      search={search}
+      // An item that is a size of another item already cannot be joined again, so it is not offered.
+      results={search.term === '' ? undefined : products.data?.filter((p) => !p.variant)}
+      fetching={products.isPending}
+      error={products.isError ? <Problem error={products.error} /> : undefined}
+      optionKey={(p) => p.id ?? p.code ?? ''}
+      onPick={onToggle}
+      renderOption={(p) => {
+        const ticked = picked.some((r) => r.product.id === p.id);
+        return (
+          <>
+            <span className="cb-text"><strong>{p.description}</strong> ({p.code})</span>
+            <span className="cb-verb">{ticked ? <>{icons.check} Ticked</> : 'Tick'}</span>
+          </>
+        );
+      }}
+    />
+  );
+}
+
+/**
+ * Put items together as sizes of one item (FR-RET-51, issue #707): "Cable 1.5mm" and "Cable 2.5mm" typed as two items become
+ * the sizes of one item, in three plain steps: pick the items, name the item, check the sizes. The name and the sizes are
+ * suggested from the items' names and can be changed. Each item keeps its code, prices, stock and history; its name becomes
+ * the item's with its size and colour. "Add more sizes to an item that already has sizes" starts the same steps from that
+ * item, which keeps its own name and category (issue #395); it has one search of its own, never beside the first step's.
  */
 export function JoinPage() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [name, setName] = useState('');
+  const [typedName, setTypedName] = useState<string | null>(null);
   const [rows, setRows] = useState<JoinRow[]>([]);
+  // Looking for the item with sizes to add to, before it is chosen.
+  const [adding, setAdding] = useState(false);
   // The item they join when it exists already: any one of its sizes names it.
   const [target, setTarget] = useState<{ id: string; name: string } | null>(null);
-  // An item without sizes picked in the "join an item that has sizes" search: said, not ignored.
+  // An item without sizes picked in the "item that already has sizes" search: said, not ignored.
   const [notSized, setNotSized] = useState<string | null>(null);
+  const [done, setDone] = useState<{ id: string; name: string; count: number } | null>(null);
   const targetItem = useQuery({ queryKey: ['retail', 'family', target?.id], queryFn: () => retail.getFamily(target?.id ?? ''), enabled: target !== null });
   const there = targetItem.data?.variants ?? [];
+  const suggested = joinSuggestion(rows.map((r) => r.product.description ?? ''), target?.name);
+  const name = typedName ?? suggested.name;
+  const sizeOf = (r: JoinRow, i: number) => r.size ?? suggested.sizes[i] ?? '';
   const unit = target ? targetItem.data?.unit_id : rows[0]?.product.unit_id;
-  const keys = rows.map((r) => variantKey(r.size.trim() || undefined, r.colour.trim() || undefined));
+  const keys = rows.map((r, i) => variantKey(sizeOf(r, i).trim() || undefined, r.colour.trim() || undefined));
   const taken = new Set(there.map((v) => variantKey(v.variant?.size, v.variant?.colour)));
+  const fewest = target ? 1 : 2;
   // Until the item they join is read, no row is judged against it (its unit is not known yet).
-  const problem = rows.length === 0
-    ? 'Pick the items that are sizes or colours of one thing.'
+  const problem = rows.length < fewest
+    ? fewest === 1 ? 'Tick the items to add as sizes.' : 'Tick 2 or more items.'
     : target && targetItem.isError
       ? `${target.name} could not be read. Try again, or make a new item instead.`
       : target && !targetItem.data
         ? `Reading ${target.name}.`
         : rows.some((r) => r.product.unit_id !== unit)
       ? 'Pick items counted in one unit: the sizes of one item are counted the same way.'
-      : rows.some((r) => r.size.trim() === '' && r.colour.trim() === '')
+      : rows.some((r, i) => sizeOf(r, i).trim() === '' && r.colour.trim() === '')
         ? 'Give each one its size, its colour or both.'
         : new Set(keys).size !== keys.length
           ? 'Two of them have the same size and colour.'
@@ -352,64 +425,107 @@ export function JoinPage() {
             ? `${target?.name} has one of these sizes and colours already.`
             : there.length + rows.length > MAX_VARIANTS
               ? `An item has at most ${MAX_VARIANTS} sizes and colours, and ${target?.name} has ${there.length}.`
-              : !target && name.trim() === '' ? 'Give the item a name.' : null;
+              : !target && name.trim() === '' ? 'Say what customers call the item.' : null;
+  // toast-exempt: success screen
   const save = useMutation({
     mutationFn: (duplicateReason?: string) => retail.joinFamily(target?.id ?? null, {
       // An item that exists keeps its name and category: only the items go with it.
       ...(target ? {} : { name: name.trim() }),
-      items: rows.map((r) => ({ product_id: r.product.id ?? '', ...(r.size.trim() ? { size: r.size.trim() } : {}), ...(r.colour.trim() ? { colour: r.colour.trim() } : {}) })),
+      items: rows.map((r, i) => ({ product_id: r.product.id ?? '', ...(sizeOf(r, i).trim() ? { size: sizeOf(r, i).trim() } : {}), ...(r.colour.trim() ? { colour: r.colour.trim() } : {}) })),
       ...(duplicateReason && !target ? { duplicate_reason: duplicateReason } : {}),
     }),
     onSuccess: (family) => {
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
-      void navigate({ to: familyPath(family.id ?? '') as never });
+      setDone({ id: family.id ?? '', name: family.name ?? target?.name ?? name.trim(), count: there.length + rows.length });
     },
-    meta: { success: 'Items joined' },
   });
   const change = (i: number, patch: Partial<JoinRow>) => setRows((all) => all.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  return (
-    <Gate screen="products" title="Join items as sizes of one item">
-      <p>Use this when you already have one item per size or colour, such as Cable 1.5mm and Cable 2.5mm. Each keeps its code, price, stock and history, and they show together as one item.</p>
-      {target ? (
-        <section data-tour="join-target" aria-label="The item they join">
-          <p>They join <strong>{target.name}</strong>, which keeps its name and category.</p>
-          <button type="button" className="btn-ghost" onClick={() => setTarget(null)}>Make a new item instead</button>
-        </section>
-      ) : (
-        <>
-          <div data-tour="join-name">
-            <label htmlFor="join-name">What is the item called?</label>
-            <input id="join-name" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} autoComplete="off" placeholder="Twin cable" />
-          </div>
-          <section data-tour="join-existing" aria-label="Or join an item that has sizes already">
-            <h2>Or join an item that has sizes already</h2>
-            <Hint>Search for any one of its sizes and add it here; the items you pick below then become more sizes of that item.</Hint>
-            <ProductPicker
-              id="join-target-search" showStock={false} addLabel="Join this item"
-              onAdd={(p) => {
-                if (p.variant?.family_id) {
-                  setNotSized(null);
-                  setTarget({ id: p.variant.family_id, name: p.variant.family_name ?? '' });
-                } else {
-                  setNotSized(`${p.description ?? 'That item'} has no sizes yet. Pick it below as one of the sizes instead, or search for a size of the item to join.`);
-                }
-              }}
-            />
-            {notSized && <p role="note" className="alert alert-warning">{notSized}</p>}
-          </section>
-        </>
-      )}
-      <section data-tour="join-pick" aria-label="Pick the items">
-        <h2>Pick the items</h2>
-        <ProductPicker
-          id="join-search" showStock={false} addLabel="Add as a size"
-          onAdd={(p) => setRows((all) => (p.variant || all.some((r) => r.product.id === p.id) ? all : [...all, { product: p, size: '', colour: '' }]))}
+  const toggle = (p: Product) => setRows((all) => (all.some((r) => r.product.id === p.id) ? all.filter((r) => r.product.id !== p.id) : [...all, { product: p, size: null, colour: '' }]));
+  const startAgain = () => {
+    setRows([]);
+    setTypedName(null);
+    setTarget(null);
+    setAdding(false);
+    setNotSized(null);
+    setDone(null);
+    save.reset();
+  };
+  const title = 'Put items together as sizes of one item';
+  if (done) {
+    return (
+      <Gate screen="products" title={title}>
+        <SuccessScreen
+          level={2}
+          title={`${done.name} now has ${done.count} ${done.count === 1 ? 'size' : 'sizes'}`}
+          detail="Each one keeps its code, stock, price and history."
+          actions={[{ label: 'Open it', to: familyPath(done.id) }, { label: 'Put more together', onClick: startAgain }]}
         />
-        <p className="hint">An item that is a size of another item already is not added.</p>
+      </Gate>
+    );
+  }
+  if (adding && !target) {
+    return (
+      <Gate screen="products" title={title}>
+        <section data-tour="join-existing" aria-label="Add more sizes to an item that already has sizes">
+          <h2>Add more sizes to an item that already has sizes</h2>
+          <p>Search for any one of its sizes and tap it. Then tick the items that become its new sizes.</p>
+          <ProductPicker
+            id="join-target-search" showStock={false} addLabel="Choose"
+            onAdd={(p) => {
+              if (p.variant?.family_id) {
+                setNotSized(null);
+                setTarget({ id: p.variant.family_id, name: p.variant.family_name ?? '' });
+              } else {
+                setNotSized(`${p.description ?? 'That item'} has no sizes yet. Search for one size of the item you want to add to.`);
+              }
+            }}
+          />
+          {notSized && <p role="note" className="alert alert-warning">{notSized}</p>}
+          <button type="button" className="btn-ghost" onClick={startAgain}>Back</button>
+        </section>
+      </Gate>
+    );
+  }
+  return (
+    <Gate screen="products" title={title}>
+      <p>
+        You have Cable 1.5mm and Cable 2.5mm as two items? Put them together as one item, Cable, with two sizes. Each keeps its code, stock, price and history.{' '}
+        <HelpTip tip="joinSizes" />
+      </p>
+      <section data-tour="join-pick" aria-labelledby="join-step-1" className="stack">
+        <h2 id="join-step-1">1. Pick the items</h2>
+        <TickPicker picked={rows} onToggle={toggle} />
+        {rows.length === 0 ? (
+          <p className="hint">{target ? 'Tick the items that become new sizes.' : 'Tick 2 or more items. Type part of a name to find them.'}</p>
+        ) : (
+          <ul className="stack" style={{ listStyle: 'none', padding: 0 }} aria-label="Ticked items">
+            {rows.map((r) => (
+              <li key={r.product.id} className="cluster">
+                <span aria-hidden="true">{icons.check}</span>
+                <span><strong>{r.product.description}</strong> ({r.product.code})</span>
+                <button type="button" className="btn-ghost btn-sm" aria-label={`Remove ${r.product.description}`} onClick={() => toggle(r.product)}>Remove</button>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
-      <section data-tour="join-list" aria-label="Their sizes and colours">
-        <h2>{rows.length === 0 ? 'Their sizes and colours' : `${rows.length} picked`}</h2>
-        {rows.length === 0 && <p className="empty-state">The items you pick show here, each with a box for its size and colour.</p>}
+      <section data-tour="join-name" aria-labelledby="join-step-2" className="stack">
+        <h2 id="join-step-2">2. Name the item</h2>
+        {target ? (
+          <>
+            <p>They become sizes of <strong>{target.name}</strong>, which keeps its name.</p>
+            <button type="button" className="btn-ghost" onClick={() => { setTarget(null); setAdding(false); }}>Make a new item instead</button>
+          </>
+        ) : (
+          <>
+            <label htmlFor="join-name">What do customers call it?</label>
+            <input id="join-name" value={name} maxLength={200} onChange={(e) => setTypedName(e.target.value)} autoComplete="off" placeholder="Twin cable" />
+          </>
+        )}
+      </section>
+      <section data-tour="join-list" aria-labelledby="join-step-3" className="stack">
+        <h2 id="join-step-3">3. Check the sizes</h2>
+        {rows.length === 0 && <p className="empty-state">Each item you tick shows here with its size.</p>}
         <ul style={{ listStyle: 'none', padding: 0 }}>
           {rows.map((r, i) => (
             <li key={r.product.id} className="rt-card">
@@ -417,14 +533,13 @@ export function JoinPage() {
               <div className="rt-row">
                 <div>
                   <label htmlFor={`join-size-${r.product.id}`}>Size</label>
-                  <input id={`join-size-${r.product.id}`} value={r.size} maxLength={30} onChange={(e) => change(i, { size: e.target.value })} autoComplete="off" aria-label={`Size of ${r.product.description}`} />
+                  <input id={`join-size-${r.product.id}`} value={sizeOf(r, i)} maxLength={30} onChange={(e) => change(i, { size: e.target.value })} autoComplete="off" aria-label={`Size of ${r.product.description}`} />
                 </div>
                 <div>
-                  <label htmlFor={`join-colour-${r.product.id}`}>Colour or print</label>
+                  <label htmlFor={`join-colour-${r.product.id}`}>Colour or print, if any</label>
                   <input id={`join-colour-${r.product.id}`} value={r.colour} maxLength={30} onChange={(e) => change(i, { colour: e.target.value })} autoComplete="off" aria-label={`Colour of ${r.product.description}`} />
                 </div>
               </div>
-              <button type="button" className="btn-ghost" onClick={() => setRows((all) => all.filter((_, j) => j !== i))}>Take it off the list</button>
             </li>
           ))}
         </ul>
@@ -432,8 +547,13 @@ export function JoinPage() {
       {problem && rows.length > 0 && <p role="note" className="alert alert-warning">{problem}</p>}
       {save.error && <NameTaken error={save.error} busy={save.isPending} onAnyway={(reason) => save.mutate(reason)} />}
       <BusyButton busy={save.isPending} type="button" className="rt-primary" data-tour="join-save" notReady={problem !== null} onClick={() => save.mutate(undefined)}>
-        Join them as one item
+        Put them together
       </BusyButton>
+      {!target && (
+        <p>
+          <button type="button" className="btn-ghost btn-sm" onClick={() => setAdding(true)}>Add more sizes to an item that already has sizes</button>
+        </p>
+      )}
     </Gate>
   );
 }

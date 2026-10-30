@@ -67,8 +67,11 @@ describe('My stock on a phone (issue #680)', () => {
   it('keeps the table on a wide screen, with the new headers', () => {
     screenAt(false);
     show(<StockTable rows={rows} showCost />);
-    const headers = within(screen.getByRole('table')).getAllByRole('columnheader').map((h) => h.textContent);
+    // The two prices carry a help tip, a question mark after the words (issue #707).
+    const headers = within(screen.getByRole('table')).getAllByRole('columnheader').map((h) => h.textContent?.replace(/\s*\?$/, ''));
     // Grouped by category, as the list starts, so the category is the group's header and not a column.
     expect(headers).toEqual(['Item', 'In stock', 'Average buying price', 'Selling price']);
+    expect(screen.getByRole('button', { name: 'More about Average buying price' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'More about Selling price' })).toBeTruthy();
   });
 });
