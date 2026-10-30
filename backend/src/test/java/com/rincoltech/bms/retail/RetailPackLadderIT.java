@@ -427,6 +427,82 @@ class RetailPackLadderIT extends IntegrationTest {
         assertThat(names.subList(0, 5)).containsExactly("Piece", "Dozen", "Box", "Carton", "Bale");
     }
 
+    /** Review of #722: Quick add, an item with sizes and the CSV import refuse a dozen of another number too. */
+    // JUSTIFICATION-A3: the review of #722 asks each of these paths proven by its own case.
+    @Test
+    void everyWayInRefusesADozenOfAnotherNumber() {
+        UUID dozen = api.unit("Dozen");
+        Map<String, Object> ten = new LinkedHashMap<>();
+        ten.put("unit_id", dozen);
+        ten.put("factor", "10");
+        ten.put("purpose", "both");
+
+        Map<String, Object> quick = new LinkedHashMap<>();
+        quick.put("description", "Test Egg Quick");
+        quick.put("category_id", category);
+        quick.put("unit_id", piece);
+        quick.put("sell_minor", 500);
+        quick.put("cost_minor", 400);
+        quick.put("qty", "24");
+        quick.put("branch_id", t.headOffice());
+        quick.put("packs", List.of(ten));
+        ResponseEntity<JsonNode> quickAdd =
+                api.postKeyed("/quick-add", quick, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(quickAdd.getStatusCode()).as("%s", quickAdd.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(quickAdd.getBody().toString()).contains("fixed_count").contains("A dozen always holds 12.");
+
+        Map<String, Object> family = new LinkedHashMap<>();
+        family.put("name", "Test Egg Sizes");
+        family.put("category_id", category);
+        family.put("unit_id", piece);
+        family.put("cost_minor", 400);
+        family.put("sell_minor", 500);
+        family.put("sizes", List.of("Small", "Large"));
+        family.put("packs", List.of(ten));
+        ResponseEntity<JsonNode> sizes = api.post("/product-families", family, ADMIN);
+        assertThat(sizes.getStatusCode()).as("%s", sizes.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(sizes.getBody().toString()).contains("fixed_count");
+
+        String csv = "code,description,category,unit,sell price,pack unit,pack factor\n"
+                + "EGG-1,Test Egg Ten,Test Sockets,Piece,500,Dozen,10\n"
+                + "EGG-2,Test Egg Twelve,Test Sockets,Piece,500,Doz,12\n";
+        JsonNode rows = api.post("/products/import?dry_run=true", Map.of("csv", csv), ADMIN + ",core.settings.manage")
+                .getBody()
+                .get("rows");
+        assertThat(rows.get(0).get("outcome").asString()).isEqualTo("error");
+        assertThat(rows.get(0).get("message").asString())
+                .isEqualTo("A dozen always holds 12. For another number, use a box.");
+        assertThat(rows.get(1).get("outcome").asString()).isEqualTo("added");
+    }
+
+    /** Review of #722: a unit renamed to a dozen spelling takes the rule on, so not while it holds another number. */
+    // JUSTIFICATION-A3: the review of #722 asks the rename refused while a pack holds another number.
+    @Test
+    void aUnitHoldingAnotherNumberIsNeverRenamedADozen() {
+        socket(false);
+        JsonNode had = null;
+        for (JsonNode u : api.get("/units", ADMIN).getBody().get("items")) {
+            if (u.get("id").asString().equals(box.toString())) {
+                had = u;
+            }
+        }
+        ResponseEntity<JsonNode> renamed = api.call(
+                HttpMethod.PATCH,
+                "/units/" + box,
+                Map.of("name", "Doz"),
+                ADMIN,
+                "*",
+                Map.of("If-Match", had.get("version").asString()));
+        assertThat(renamed.getStatusCode()).as("%s", renamed.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(renamed)).isEqualTo("fixed_count");
+
+        // A unit no item holds another number of may be called a dozen.
+        UUID tray = api.unit("Test Tray");
+        ResponseEntity<JsonNode> free = api.call(
+                HttpMethod.PATCH, "/units/" + tray, Map.of("name", "Dozen"), ADMIN, "*", Map.of("If-Match", "1"));
+        assertThat(free.getStatusCode()).as("%s", free.getBody()).isEqualTo(HttpStatus.OK);
+    }
+
     @Test
     void aBoxOfRollsHoldsRollsOfMetres() {
         UUID metre = api.unit("Metre");

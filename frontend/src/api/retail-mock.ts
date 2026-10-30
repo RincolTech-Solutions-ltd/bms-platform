@@ -209,8 +209,10 @@ const MOCK_PRESETS: Record<string, readonly string[]> = {
   wholesale_and_shops: MOCK_GOVERNED,
 };
 
-/** Issue #493: PREFIX-0001, at least four digits, as bms_next_item_code makes it (V96). */
-/** Issue #709 (ADR-110): StandardUnits on the server, in its order; a shop's own unit comes after them. */
+/**
+ * Issue #709 (ADR-110): StandardUnits on the server, in its order; a shop's own unit comes after them. The mock stands in for
+ * the server's answer here (is_package, standard, fixed_count), so it carries the server's lists; the PWA itself never does.
+ */
 const STANDARD_UNITS = ['Piece', 'Pair', 'Set', 'Metre', 'Kg', 'Gram', 'Litre', 'Ml', 'Dozen', 'Box', 'Carton', 'Packet', 'Bag', 'Roll', 'Bale', 'Crate', 'Bundle'];
 
 /** RetailCatalogue.PACKAGE_WORDS on the server. */
@@ -227,6 +229,7 @@ function unitFlags(name: string): Pick<Unit, 'is_package' | 'standard' | 'fixed_
   return { is_package: PACKAGE_WORDS.test(name.trim()), standard: standardRank(name) < STANDARD_UNITS.length, ...(dozen ? { fixed_count: 12 } : {}) };
 }
 
+/** Issue #493: PREFIX-0001, at least four digits, as bms_next_item_code makes it (V96). */
 export function itemCode(prefix: string, n: number): string {
   return `${prefix}-${String(n).padStart(4, '0')}`;
 }

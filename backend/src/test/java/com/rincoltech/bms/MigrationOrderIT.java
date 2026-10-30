@@ -68,9 +68,7 @@ class MigrationOrderIT {
                     Path.of(MigrationOrderIT.class.getResource("/db/migration").toURI());
             try (Stream<Path> files = Files.list(dir)) {
                 return files.map(f -> f.getFileName().toString())
-                        // A Java migration (V120, ADR-109; V121, ADR-110) is its compiled class here; its records are
-                        // not
-                        // migrations.
+                        // A Java migration (V120, V121) is its compiled class here; its records are not migrations.
                         .filter(n -> n.matches("V\\d+__[^$]*\\.(sql|class)"))
                         .map(n -> n.substring(1, n.indexOf("__")))
                         .sorted(Comparator.comparingInt(Integer::parseInt))

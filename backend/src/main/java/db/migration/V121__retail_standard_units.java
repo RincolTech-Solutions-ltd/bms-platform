@@ -6,9 +6,11 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -31,6 +33,11 @@ import org.flywaydb.core.api.migration.Context;
  * transaction only, on the tables read and written here that force it, and restores exactly those. That takes ACCESS
  * EXCLUSIVE on them until the commit, so {@code lock_timeout} is five seconds and the migration fails and is retried rather
  * than queueing requests.
+ *
+ * <p>A Java migration has no checksum, and {@code StandardUnits.key} reads the shared spellings of
+ * {@code unit-words.json} at run time (review of #722). A spelling added there later can only make two names count as one
+ * unit, so a database migrated later skips at most a unit the shop already has under that spelling, never adds a second one.
+ * {@code StandardUnitsTest} pins the keys of the seventeen standard names.
  */
 public class V121__retail_standard_units extends BaseJavaMigration {
 
@@ -55,10 +62,14 @@ public class V121__retail_standard_units extends BaseJavaMigration {
         forceRowSecurity(c, forced, false);
         Map<UUID, Set<String>> shops = shops(c);
         for (Map.Entry<UUID, Set<String>> shop : shops.entrySet()) {
+            List<String> missing = new ArrayList<>();
             for (String name : StandardUnits.ALL) {
                 if (shop.getValue().add(StandardUnits.key(name))) {
-                    add(c, shop.getKey(), name);
+                    missing.add(name);
                 }
+            }
+            if (!missing.isEmpty()) {
+                add(c, shop.getKey(), missing);
             }
         }
         // Restored only after the work succeeded: on a failure the rollback restores it anyway.
@@ -89,30 +100,26 @@ public class V121__retail_standard_units extends BaseJavaMigration {
         return out;
     }
 
-    private static void add(Connection c, UUID tenant, String name) throws SQLException {
-        UUID id = UUID.randomUUID();
-        int added;
+    /**
+     * One shop's missing units in one statement, and their audit rows in one more (review of #722: two statements per shop,
+     * not two per unit, while the tables may be held). Only the units this insert made are audited.
+     */
+    private static void add(Connection c, UUID tenant, List<String> names) throws SQLException {
         try (PreparedStatement p = c.prepareStatement("""
-                INSERT INTO retail_units (id, tenant_id, name, created_by) VALUES (?, ?, ?, NULL) ON CONFLICT DO NOTHING
-                """)) {
-            p.setObject(1, id);
-            p.setObject(2, tenant);
-            p.setString(3, name);
-            added = p.executeUpdate();
-        }
-        if (added == 0) {
-            return;
-        }
-        try (PreparedStatement p = c.prepareStatement("""
+                WITH made AS (
+                    INSERT INTO retail_units (id, tenant_id, name, created_by)
+                    SELECT gen_random_uuid(), ?, n, NULL FROM unnest(?::text[]) AS n
+                    ON CONFLICT DO NOTHING
+                    RETURNING id, name)
                 INSERT INTO audit_log (id, tenant_id, actor_kind, action, entity_type, entity_id, data)
-                VALUES (?, ?, 'system', 'retail.unit.created', 'retail.unit', ?,
-                        jsonb_build_object('after', jsonb_build_object('name', ?::text, 'source', ?::text)))
+                SELECT gen_random_uuid(), ?, 'system', 'retail.unit.created', 'retail.unit', made.id,
+                       jsonb_build_object('after', jsonb_build_object('name', made.name, 'source', ?::text))
+                  FROM made
                 """)) {
-            p.setObject(1, UUID.randomUUID());
-            p.setObject(2, tenant);
-            p.setObject(3, id);
-            p.setString(4, name);
-            p.setString(5, SOURCE);
+            p.setObject(1, tenant);
+            p.setArray(2, c.createArrayOf("text", names.toArray()));
+            p.setObject(3, tenant);
+            p.setString(4, SOURCE);
             p.executeUpdate();
         }
     }

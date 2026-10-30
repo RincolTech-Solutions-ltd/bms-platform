@@ -52,4 +52,9 @@ public final class StandardUnits {
     public static Integer fixedCount(String name) {
         return key(name).equals("dozen") ? DOZEN : null;
     }
+
+    /** The one refusal of another number for a package of a fixed count, on every path (422 {@code fixed_count}). */
+    public static String fixedCountRefusal(int fixed) {
+        return "A dozen always holds " + fixed + ". For another number, use a box.";
+    }
 }

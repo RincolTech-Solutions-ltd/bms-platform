@@ -896,6 +896,17 @@ class CatalogueRepository {
                         """).params(productId, productId).query(Boolean.class).single();
     }
 
+    /**
+     * Review of #722 (ADR-110): a pack of the unit, on any item and switched on or off, holding another number than
+     * {@code count} of what it holds (its factor when it names no level).
+     */
+    boolean unitHasPackNotHolding(UUID unitId, int count) {
+        return jdbc.sql("""
+                        SELECT EXISTS (SELECT 1 FROM retail_product_units
+                                        WHERE unit_id = ? AND COALESCE(holds_qty::numeric, factor) <> ?)
+                        """).params(unitId, count).query(Boolean.class).single();
+    }
+
     boolean unitHasPacks(UUID unitId) {
         return jdbc.sql("SELECT EXISTS (SELECT 1 FROM retail_product_units WHERE unit_id = ? AND active)")
                 .param(unitId)

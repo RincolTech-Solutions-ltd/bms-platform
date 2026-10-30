@@ -32,6 +32,30 @@ class StandardUnitsTest {
         assertThat(StandardUnits.key("Bulb")).isEqualTo("bulb");
     }
 
+    /** Review of #722: V121 keys a shop's units with this; the keys of the standard names are pinned here. */
+    @Test
+    void theKeysOfTheStandardNamesStayPut() {
+        assertThat(StandardUnits.ALL.stream().map(StandardUnits::key).toList())
+                .containsExactly(
+                        "piece",
+                        "pair",
+                        "set",
+                        "metre",
+                        "kilogram",
+                        "gram",
+                        "litre",
+                        "millilitre",
+                        "dozen",
+                        "box",
+                        "carton",
+                        "packet",
+                        "bag",
+                        "roll",
+                        "bale",
+                        "crate",
+                        "bundle");
+    }
+
     @Test
     void theRankFollowsTheListAndAShopsOwnUnitHasNone() {
         assertThat(StandardUnits.rank("pcs")).isZero();

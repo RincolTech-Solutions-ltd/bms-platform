@@ -127,7 +127,10 @@ function NamedList({ noun, plural, list, create, update, withPrefix = false, sec
   const close = () => { setAdding(null); setName(''); setSuggested(''); setSent(false); setUsual({ ofUnitId: '', size: '', purpose: 'both' }); };
   const asksUsual = sections?.find((s) => s.key === adding)?.usual === true;
   const ofUnitId = usual.ofUnitId || (singles[0]?.id ?? '');
-  const sizeProblem = asksUsual ? usualSizeProblem(usual.size, { name: name.trim() }, singles.find((u) => u.id === ofUnitId) as Unit | undefined) : null;
+  // Review of #722: with no single unit switched on there is nothing for a package to hold, so it says so and sends nothing.
+  const sizeProblem = !asksUsual ? null
+    : ofUnitId === '' ? 'Add a single unit first, such as piece, for this package to hold.'
+      : usualSizeProblem(usual.size, { name: name.trim() }, singles.find((u) => u.id === ofUnitId) as Unit | undefined);
   const add = useMutation({
     mutationFn: () => create(name.trim(), asksUsual ? { size: usual.size.trim(), of_unit_id: ofUnitId, purpose: usual.purpose } : undefined),
     onSuccess: (row) => {
@@ -288,7 +291,6 @@ export function UnitsPage() {
   return (
     <Gate screen="units" title="Units">
       <NamedList noun="unit" plural="units" sections={UNIT_SECTIONS} list={() => retail.listUnits()} create={(n, usual) => orExistingUnit(retail.createUnit(n, usual))} update={(id, v, b) => retail.updateUnit(id, v, b)} />
-
     </Gate>
   );
 }

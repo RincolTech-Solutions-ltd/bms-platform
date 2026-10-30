@@ -93,7 +93,14 @@ export function packChange(pack: Pack, form: { factor: string; purpose: Purpose;
   return body;
 }
 
-function PackSheet({ product, pack, mayPrice, onClose }: { product: Product; pack: Pack; mayPrice: boolean; onClose: () => void }) {
+function PackSheet({ product, pack, mayPrice, onClose, fixed }: {
+  product: Product;
+  pack: Pack;
+  mayPrice: boolean;
+  onClose: () => void;
+  /** Review of #722 (ADR-110): a dozen's 12, which this sheet shows and never changes. */
+  fixed?: number;
+}) {
   const queryClient = useQueryClient();
   const [factor, setFactor] = useState(showQty(pack.factor ?? ''));
   const [purpose, setPurpose] = useState<Purpose>(purposeOf(pack));
@@ -141,11 +148,12 @@ function PackSheet({ product, pack, mayPrice, onClose }: { product: Product; pac
         inputMode="decimal"
         value={factor}
         onChange={(e) => setFactor(e.target.value)}
-        readOnly={locked}
+        readOnly={locked || fixed !== undefined}
         aria-invalid={problem !== null}
         aria-describedby={problem !== null ? `pack-factor-problem-${id}` : undefined}
       />
       {problem !== null && <p id={`pack-factor-problem-${id}`} className="rt-flag">{problem}</p>}
+      {fixed !== undefined && <p className="hint">{`A ${unitWord(pack.unit).toLowerCase()} always holds ${fixed}. For another number, use a box.`}</p>}
       <p className="field-label">Used for</p>
       <Segmented label="Used for" options={locked ? PURPOSES.filter((o) => o.value !== 'buy') : PURPOSES} value={purpose} onChange={setPurpose} />
       {purpose === 'buy' ? (
@@ -307,7 +315,7 @@ export function PackEditor({ product }: { product: Product }) {
           </table>
         </div>
       )}
-      {open && <PackSheet key={`${open.unit_id}-${open.version}`} product={product} pack={open} mayPrice={mayPrice} onClose={() => setEditing(null)} />}
+      {open && <PackSheet key={`${open.unit_id}-${open.version}`} product={product} pack={open} mayPrice={mayPrice} onClose={() => setEditing(null)} fixed={(units.data ?? []).find((u) => u.id === open.unit_id)?.fixed_count} />}
       {/* The pack's unit, with "+ Add a unit" in a sheet over the pack form (issue #688). */}
       <PickerWithAdd
         id="pack-unit"

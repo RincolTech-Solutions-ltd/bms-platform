@@ -54,7 +54,9 @@ fixed at 12 (D98), and for the ladder to be set up from the smallest level up wh
 ones the people who use the app say.
 
 **Worse:** the dozen's rule hangs on the unit's name, as `is_package` does: a unit renamed to Dozen takes it on, and one
-renamed away from it loses it. Seventeen units is a longer list than eight; the sections and the order keep it readable.
+renamed away from it loses it. So a rename to a dozen spelling is refused (422 `fixed_count`) while any pack of the unit,
+or its usual pack, holds another number (review of #722); the CSV import, Quick add and an item with sizes refuse a dozen
+of another number like every other way in. Seventeen units is a longer list than eight; the sections and the order keep it readable.
 
 **Watch for:** a new spelling of a standard unit goes into `unit-words.json`, never into `StandardUnits`;
 `StandardUnitsTest` keeps the cases the key must give.

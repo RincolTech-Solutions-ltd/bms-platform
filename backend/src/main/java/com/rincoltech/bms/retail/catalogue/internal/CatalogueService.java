@@ -300,10 +300,33 @@ class CatalogueService {
     private static void requireFixedUsualSize(String unitName, UsualPackRequest pack) {
         Integer fixed = StandardUnits.fixedCount(unitName);
         if (pack != null && fixed != null && pack.size().compareTo(BigDecimal.valueOf(fixed)) != 0) {
+            throw ApiException.validation(List.of(
+                    new FieldProblem("usual_pack.size", "fixed_count", StandardUnits.fixedCountRefusal(fixed))));
+        }
+    }
+
+    /**
+     * Review of #722: a unit renamed to a fixed-count name (Box to Dozen) takes the rule on, so the rename is refused while a
+     * pack of the unit on any item, or its usual pack, holds another number; those would be dozens of 10 nobody could fix.
+     */
+    // JUSTIFICATION-A3: a must-fix of the review of #722; no existing check sees a rename change a unit's rule.
+    private void requireFixedCountKept(Unit before, String name, UsualPackRequest next, boolean clearUsual) {
+        Integer fixed = StandardUnits.fixedCount(name);
+        if (fixed == null || name.equals(before.name())) {
+            return;
+        }
+        BigDecimal usual = next != null
+                ? next.size()
+                : clearUsual || before.usualPack() == null
+                        ? null
+                        : new BigDecimal(before.usualPack().size());
+        if (repo.unitHasPackNotHolding(before.id(), fixed)
+                || (usual != null && usual.compareTo(BigDecimal.valueOf(fixed)) != 0)) {
             throw ApiException.validation(List.of(new FieldProblem(
-                    "usual_pack.size",
+                    "name",
                     "fixed_count",
-                    "A dozen always holds " + fixed + ". For another number, use a box.")));
+                    StandardUnits.fixedCountRefusal(fixed) + " " + before.name()
+                            + " holds another number on some items, so it cannot be called " + name + ".")));
         }
     }
 
@@ -371,6 +394,7 @@ class CatalogueService {
             throw ApiException.validation(List.of(new FieldProblem(
                     "clear_usual_pack", "invalid", "Set a usual pack or clear it, not both at once.")));
         }
+        requireFixedCountKept(before, name, r.usualPack(), clearUsual);
         UsualPack had = before.usualPack();
         String hadText = had == null ? null : usualPackText(new BigDecimal(had.size()), had.ofUnit(), had.purpose());
         if (r.usualPack() != null) {
@@ -1446,9 +1470,7 @@ class CatalogueService {
             return null;
         }
         return ApiException.validation(List.of(new FieldProblem(
-                holdsQty != null ? "holds_qty" : "factor",
-                "fixed_count",
-                "A dozen always holds " + fixed + ". For another number, use a box.")));
+                holdsQty != null ? "holds_qty" : "factor", "fixed_count", StandardUnits.fixedCountRefusal(fixed))));
     }
 
     /** A bigger level that follows a change, with its new factor. */
