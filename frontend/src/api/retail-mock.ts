@@ -209,6 +209,23 @@ const MOCK_PRESETS: Record<string, readonly string[]> = {
 };
 
 /** Issue #493: PREFIX-0001, at least four digits, as bms_next_item_code makes it (V96). */
+/** Issue #709 (ADR-110): StandardUnits on the server, in its order; a shop's own unit comes after them. */
+const STANDARD_UNITS = ['Piece', 'Pair', 'Set', 'Metre', 'Kg', 'Gram', 'Litre', 'Ml', 'Dozen', 'Box', 'Carton', 'Packet', 'Bag', 'Roll', 'Bale', 'Crate', 'Bundle'];
+
+/** RetailCatalogue.PACKAGE_WORDS on the server. */
+const PACKAGE_WORDS = /^(((box|carton|dozen|pack|packet|bag|sack|crate|case|tray|bundle|bale|roll)(e?s)?|(ctn|pkt)s?|bx|doz|dz)( of \d+.*)?|sets? of \d+.*)$/i;
+
+const standardRank = (name: string) => {
+  const i = STANDARD_UNITS.findIndex((s) => s.toLowerCase() === name.trim().toLowerCase());
+  return i < 0 ? STANDARD_UNITS.length : i;
+};
+
+/** What the server says of a unit by its name: a package, a standard unit, a dozen's fixed 12. */
+function unitFlags(name: string): Pick<Unit, 'is_package' | 'standard' | 'fixed_count'> {
+  const dozen = /^(dozens?|doz|dz)$/i.test(name.trim());
+  return { is_package: PACKAGE_WORDS.test(name.trim()), standard: standardRank(name) < STANDARD_UNITS.length, ...(dozen ? { fixed_count: 12 } : {}) };
+}
+
 export function itemCode(prefix: string, n: number): string {
   return `${prefix}-${String(n).padStart(4, '0')}`;
 }
@@ -975,7 +992,9 @@ export function createMockRetail(): RetailApi {
         return categoryRow(c);
       }),
 
-    listUnits: () => delay(unitRows.map((u) => refreshed(u, 'unit') as Unit)),
+    // Issue #709 (ADR-110): the flags and the order the server gives, the standard units first.
+    listUnits: () => delay(unitRows.map((u) => ({ ...refreshed(u, 'unit'), ...unitFlags(u.name) }) as Unit)
+      .sort((a, b) => standardRank(a.name ?? '') - standardRank(b.name ?? ''))),
 
     createUnit: (name, usualPack) =>
       run(() => {

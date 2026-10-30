@@ -1485,9 +1485,26 @@ td.num.qty-packs {
   overflow-wrap: anywhere;
 }
 
-.pack-size-price > .badge {
+.pack-size-price > .badge,
+.pack-size-price > .btn-sm {
   display: inline-block;
   margin-top: var(--space-1);
+}
+
+/* Two columns that wrap, the pack's badges under its name, so nothing pushes the table past a phone's width. */
+.pack-table th,
+.pack-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.pack-table .badge {
+  white-space: normal;
+}
+
+/* An amount is never broken in the middle of its figures. */
+.pack-table .pack-price .num {
+  white-space: nowrap;
 }
 
 .ladder-says,

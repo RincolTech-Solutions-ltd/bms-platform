@@ -258,14 +258,13 @@ export function PackEditor({ product }: { product: Product }) {
       {packs.data && <ItemLadder product={product} packs={rows} mayManage={allowed} mayPrice={mayPrice} />}
       {rows.length > 0 && (
         <div className="table-wrap" tabIndex={0}>
-          <table data-testid="pack-table">
+          <table data-testid="pack-table" className="pack-table">
             <caption className="visually-hidden">{`The packs of ${product.description}: size and selling price`}</caption>
             {/* Issue #709: the price under the size, so the table fits a phone 412 wide with no amount cut (pack-table.layout.test.ts). */}
             <thead>
               <tr>
                 <th scope="col">Pack</th>
                 <th scope="col" className="num">Size and selling price</th>
-                <th scope="col"><span className="visually-hidden">Change</span></th>
               </tr>
             </thead>
             <tbody>
@@ -275,7 +274,6 @@ export function PackEditor({ product }: { product: Product }) {
                   <span className="pack-size">1</span>
                   {product.sell_minor !== undefined && <span className="pack-price"><Money minor={product.sell_minor} /></span>}
                 </td>
-                <td />
               </tr>
               {rows.map((k) => {
                 const price = shownPackPrice(product, k);
@@ -298,8 +296,6 @@ export function PackEditor({ product }: { product: Product }) {
                         )}
                       </span>
                       {price !== null && k.below_cost === true && <span className="badge badge-warning">Below buying price</span>}
-                    </td>
-                    <td>
                       <button type="button" className="btn-sm" aria-label={`Change the ${unitWord(k.unit)} pack`} onClick={() => setEditing(k.unit_id ?? null)}>
                         Change
                       </button>
