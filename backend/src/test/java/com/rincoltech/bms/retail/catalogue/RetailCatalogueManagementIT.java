@@ -515,9 +515,13 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                     patchIfMatch(target.path(), Map.of("name", "Test Second " + target.table()), ADMIN, "1");
             assertThat(stale.getStatusCode()).as(target.table()).isEqualTo(HttpStatus.CONFLICT);
             assertThat(stale.getBody().get("code").asString()).isEqualTo("version_conflict");
+            // A category name is stored in the display style (issue #698, ADR-109); the others as typed.
+            String stored = target.table().equals("retail_categories")
+                    ? CatalogueNames.display("Test First " + target.table())
+                    : "Test First " + target.table();
             assertThat(target.row())
                     .as(target.table())
-                    .containsEntry("name", "Test First " + target.table())
+                    .containsEntry("name", stored)
                     .containsEntry("version", 2);
         }
     }

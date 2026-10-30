@@ -169,10 +169,11 @@ class CatalogueService {
         // Issue #698 (D86 = A): saved in the one display style.
         String name = CatalogueNames.display(r.name());
         String prefix = r.codePrefix() == null || r.codePrefix().isBlank() ? null : prefix(r.codePrefix());
+        refuseSameCategory(name, null);
         try {
             repo.insertCategory(id, name, prefix, CurrentPrincipal.require().userId());
         } catch (DuplicateKeyException e) {
-            throw duplicateCategory(e, name);
+            throw duplicateCategory(e);
         }
         Category c = repo.category(id).orElseThrow();
         audit.record(AuditLog.Entry.created(
@@ -195,26 +196,31 @@ class CatalogueService {
     }
 
     /**
-     * Which unique index refused the category: its name or its code start. A name names the category that has it, in any
-     * case (issue #698), so the screen can offer it: "You already have BULBS.".
+     * Issue #698: a category name another category has, in any case, is refused before anything is written (a refused
+     * insert would end the transaction), naming the one that has it so the screen can offer it: "You already have BULBS.".
      */
-    ApiException duplicateCategory(DuplicateKeyException e, String name) {
-        if (String.valueOf(e.getMessage()).contains("retail_categories_code_prefix")) {
-            return duplicate(
-                    "duplicate_category_prefix",
-                    "Another category already uses this code start. Choose other letters.");
-        }
-        return repo.categories().stream()
-                .filter(c -> c.name().equalsIgnoreCase(name))
+    private void refuseSameCategory(String name, UUID self) {
+        repo.categories().stream()
+                .filter(c -> !c.id().equals(self) && c.name().equalsIgnoreCase(name))
                 .findFirst()
-                .map(c -> new ApiException(
-                        HttpStatus.CONFLICT,
-                        "duplicate_category",
-                        "Duplicate",
-                        "You already have " + c.name() + ".",
-                        List.of(),
-                        Map.of("existing_id", c.id(), "existing_name", c.name())))
-                .orElseGet(() -> duplicate("duplicate_category", "A category with this name exists."));
+                .ifPresent(c -> {
+                    throw new ApiException(
+                            HttpStatus.CONFLICT,
+                            "duplicate_category",
+                            "Duplicate",
+                            "You already have " + c.name() + ".",
+                            List.of(),
+                            Map.of("existing_id", c.id(), "existing_name", c.name()));
+                });
+    }
+
+    /** Which unique index refused the category: its name (added a moment ago by someone else) or its code start. */
+    static ApiException duplicateCategory(DuplicateKeyException e) {
+        return String.valueOf(e.getMessage()).contains("retail_categories_code_prefix")
+                ? duplicate(
+                        "duplicate_category_prefix",
+                        "Another category already uses this code start. Choose other letters.")
+                : duplicate("duplicate_category", "A category with this name exists.");
     }
 
     @Transactional
@@ -226,7 +232,8 @@ class CatalogueService {
         try {
             repo.insertUnit(id, name, CurrentPrincipal.require().userId());
         } catch (DuplicateKeyException e) {
-            throw unitExists(repo.sameUnit(name, id).orElseThrow());
+            // Only a write that raced the lock above lands here; the transaction is over, so nothing more is read.
+            throw duplicate("unit_exists", "You already have this unit.");
         }
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("name", name);
@@ -309,12 +316,13 @@ class CatalogueService {
         if (now.isEmpty()) {
             return before;
         }
+        refuseSameCategory(name, id);
         try {
             if (repo.updateCategory(id, name, active, codePrefix, expected) == 0) {
                 throw staleCategory(id);
             }
         } catch (DuplicateKeyException e) {
-            throw duplicateCategory(e, name);
+            throw duplicateCategory(e);
         }
         audit.record(new AuditLog.Entry("retail.category.updated", "retail.category", id, null, was, now));
         return repo.category(id).orElseThrow();
@@ -371,7 +379,7 @@ class CatalogueService {
                 throw staleUnit(id);
             }
         } catch (DuplicateKeyException e) {
-            throw unitExists(repo.sameUnit(name, id).orElseThrow());
+            throw duplicate("unit_exists", "You already have this unit.");
         }
         if (now.containsKey("usual_pack")) {
             // Null when clear_usual_pack was sent: the three columns are cleared together (issue #637).
