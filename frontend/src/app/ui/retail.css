@@ -1354,6 +1354,15 @@ th[scope='rowgroup'] .cat-head {
   overflow-wrap: anywhere;
 }
 
+/* Issue #699: a box for every level of a ladder wraps on a phone rather than squeezing each box. */
+.count-levels {
+  flex-wrap: wrap;
+}
+
+.count-levels .count-part {
+  min-width: 88px;
+}
+
 /* Issue #650: stock in cartons and pieces is a short sentence, so its cell wraps between words, the total in pieces on its own line, instead of widening the table. */
 td.num.qty-packs {
   white-space: normal;
@@ -1363,4 +1372,207 @@ td.num.qty-packs {
   display: block;
   white-space: nowrap;
   color: var(--color-text-muted);
+}
+
+/*
+ * Issue #699 (ADR-107): the package ladder, biggest first. A numbered dot per level on a plain grey line, a card per level,
+ * and the pieces in words under it. The dot and the picture take the chart colours by level (data-colour names the role);
+ * no stripe, no gradient, nothing moves.
+ */
+.ladder {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ladder-rung {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.ladder-rung::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 21px;
+  width: 2px;
+  background: var(--color-border);
+}
+
+.ladder-rung:first-child::before {
+  top: 22px;
+}
+
+.ladder-rung:last-child::before {
+  bottom: calc(100% - 22px);
+}
+
+.ladder-dot {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: var(--space-2) 0 0 8px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  color: var(--color-surface);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.ladder-dot[data-colour='--viz-1-value'],
+.ladder-swatch[data-colour='--viz-1-value'] {
+  background: var(--viz-1-value);
+}
+
+.ladder-dot[data-colour='--viz-2-value'],
+.ladder-swatch[data-colour='--viz-2-value'] {
+  background: var(--viz-2-value);
+}
+
+.ladder-dot[data-colour='--viz-3-value'],
+.ladder-swatch[data-colour='--viz-3-value'] {
+  background: var(--viz-3-value);
+}
+
+.ladder-dot[data-colour='--color-link'],
+.ladder-swatch[data-colour='--color-link'] {
+  background: var(--color-link);
+}
+
+.ladder-card {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-bottom: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.ladder-card-changed {
+  background: var(--color-warning-tint);
+}
+
+.ladder-card p {
+  margin: 0;
+}
+
+.ladder-name {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.ladder-tag {
+  margin-left: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.ladder-says,
+.ladder-caption {
+  color: var(--color-text-muted);
+}
+
+.ladder-says strong,
+.ladder-sum strong {
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.ladder-sum {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--color-neutral-tint);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ladder-check {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius);
+  background: var(--color-warning-tint);
+}
+
+.ladder-check p,
+.ladder-check ul {
+  margin: 0;
+}
+
+.ladder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.ladder-actions > button {
+  min-height: 48px;
+}
+
+.ladder-look select {
+  min-height: 48px;
+}
+
+.ladder-picture {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius);
+  background: var(--color-bg);
+}
+
+.ladder-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  margin-bottom: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.ladder-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ladder-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+}
+
+@media (min-width: 900px) {
+  .ladder-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    column-gap: var(--space-5);
+  }
+
+  .ladder-panel > * {
+    grid-column: 1;
+  }
+
+  .ladder-panel > .ladder-look {
+    grid-column: 2;
+    grid-row: 1 / span 8;
+  }
 }

@@ -154,26 +154,27 @@ describe('the restock form with a pack', () => {
 describe('stock in packs and pieces (issue #650)', () => {
   const carton = { unit: 'Carton', factor: '24.000' };
   it('shows whole packs, the pieces left and the total', () => {
-    expect(packsAndPieces('127.000', 'Piece', carton)).toBe('5 Cartons and 7 Pieces (127 Pieces)');
-    expect(packsAndPieces('24.000', 'Piece', carton)).toBe('1 Carton (24 Pieces)');
-    expect(packsAndPieces('25.000', 'Piece', carton)).toBe('1 Carton and 1 Piece (25 Pieces)');
-    expect(packsAndPieces('48.500', 'Piece', carton)).toBe('2 Cartons and 0.5 Pieces (48.5 Pieces)');
+    // Review of #710: one casing, the words of a sentence in lower case whatever the unit is named.
+    expect(packsAndPieces('127.000', 'Piece', carton)).toBe('5 cartons and 7 pieces (127 pieces)');
+    expect(packsAndPieces('24.000', 'Piece', carton)).toBe('1 carton (24 pieces)');
+    expect(packsAndPieces('25.000', 'Piece', carton)).toBe('1 carton and 1 piece (25 pieces)');
+    expect(packsAndPieces('48.500', 'Piece', carton)).toBe('2 cartons and 0.5 pieces (48.5 pieces)');
   });
   it('reads part of a pack and nothing in the base unit only', () => {
-    expect(packsAndPieces('7.000', 'Piece', carton)).toBe('7 Pieces');
-    expect(packsAndPieces('1.000', 'Piece', carton)).toBe('1 Piece');
-    expect(packsAndPieces('0.000', 'Piece', carton)).toBe('0 Pieces');
+    expect(packsAndPieces('7.000', 'Piece', carton)).toBe('7 pieces');
+    expect(packsAndPieces('1.000', 'Piece', carton)).toBe('1 piece');
+    expect(packsAndPieces('0.000', 'Piece', carton)).toBe('0 pieces');
   });
   it('says how far short a negative stock is', () => {
-    expect(packsAndPieces('-27.000', 'Piece', carton)).toBe('1 Carton and 3 Pieces short (27 Pieces short)');
-    expect(packsAndPieces('-3.000', 'Piece', carton)).toBe('3 Pieces short');
+    expect(packsAndPieces('-27.000', 'Piece', carton)).toBe('1 carton and 3 pieces short (27 pieces short)');
+    expect(packsAndPieces('-3.000', 'Piece', carton)).toBe('3 pieces short');
   });
   it('shows an item with no pack in its unit in full words with a correct plural (issue #680)', () => {
-    expect(packsAndPieces('127.000', 'Piece', undefined)).toBe('127 Pieces');
-    expect(packsAndPieces('1.000', 'Piece', undefined)).toBe('1 Piece');
-    expect(packsAndPieces('-1.000', 'Piece', undefined)).toBe('-1 Piece');
+    expect(packsAndPieces('127.000', 'Piece', undefined)).toBe('127 pieces');
+    expect(packsAndPieces('1.000', 'Piece', undefined)).toBe('1 piece');
+    expect(packsAndPieces('-1.000', 'Piece', undefined)).toBe('-1 piece');
     expect(packsAndPieces('8.000', 'piece', undefined)).toBe('8 pieces');
-    expect(packsAndPieces('5.000', 'Piece', { unit: 'Pair', factor: '1.000' })).toBe('5 Pieces');
+    expect(packsAndPieces('5.000', 'Piece', { unit: 'Pair', factor: '1.000' })).toBe('5 pieces');
     expect(packsAndPieces('5.000', undefined, carton)).toBe('5');
     expect(quantityIn('2.500', 'metre')).toBe('2.5 metres');
     expect(quantityIn('3.000', 'box')).toBe('3 boxes');
@@ -193,8 +194,8 @@ describe('stock in packs and pieces (issue #650)', () => {
     expect(unitWords(undefined)).toBe('');
   });
   it('works with a pack of a decimal size', () => {
-    expect(packsAndPieces('26.000', 'Kilogram', { unit: 'Sack', factor: '12.500' })).toBe('2 Sacks and 1 Kilogram (26 Kilograms)');
-    expect(packsAndPieces('26.000', 'kg', { unit: 'Sack', factor: '12.500' })).toBe('2 Sacks and 1 kilogram (26 kilograms)');
+    expect(packsAndPieces('26.000', 'Kilogram', { unit: 'Sack', factor: '12.500' })).toBe('2 sacks and 1 kilogram (26 kilograms)');
+    expect(packsAndPieces('26.000', 'kg', { unit: 'Sack', factor: '12.500' })).toBe('2 sacks and 1 kilogram (26 kilograms)');
   });
   it('reads packs and pieces as one quantity in pieces', () => {
     expect(packsAndPiecesMilli('5', '7', carton)).toBe(127_000);
@@ -208,8 +209,8 @@ describe('stock in packs and pieces (issue #650)', () => {
     expect(packsAndPiecesMilli('99999999999999', '', carton)).toBeNull();
   });
   it('says plainly what cannot be read', () => {
-    expect(packsAndPiecesProblem('1.5', '', 'Piece', 'Carton')).toBe('Type whole Cartons, and the rest in Pieces.');
-    expect(packsAndPiecesProblem('2', 'x', 'Piece', 'Carton')).toBe('Type Pieces as a number, with at most three decimals.');
+    expect(packsAndPiecesProblem('1.5', '', 'Piece', 'Carton')).toBe('Type whole cartons, and the rest in pieces.');
+    expect(packsAndPiecesProblem('2', 'x', 'Piece', 'Carton')).toBe('Type pieces as a number, with at most three decimals.');
     expect(packsAndPiecesProblem('2', '3', 'Piece', 'Carton')).toBeNull();
   });
   it('takes the pack the server marks standard, while it is active and holds more than one', () => {

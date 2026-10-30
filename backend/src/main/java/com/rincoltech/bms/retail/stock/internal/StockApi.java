@@ -64,6 +64,20 @@ final class StockApi {
             String unit,
 
             @Schema(description = "Base units in one pack, three places, for example 24.000")
+            String factor,
+
+            @Schema(
+                    description = "Issue #699 (ADR-107): every active pack of the item holding a whole number of more"
+                            + " than one base unit, biggest first, so stock is shown and counted at every level")
+            List<PackLevel> levels) {}
+
+    @Schema(
+            name = "RetailPackLevel",
+            description = "Issue #699: one level of an item's packages and the base units in one")
+    record PackLevel(
+            String unit,
+
+            @Schema(description = "Base units in one, three places, for example 120.000")
             String factor) {}
 
     @Schema(name = "RetailStockPage")

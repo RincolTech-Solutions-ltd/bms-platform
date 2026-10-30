@@ -282,7 +282,8 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                 .single();
         assertThat(audited).contains("100.000 test-metre sell");
 
-        // One level only: Metre cannot be a pack of Roll while Roll is a pack of Metre, nor a pack of a pack.
+        // Issue #699 (ADR-107): a usual pack may count another pack, a box of 2 rolls of 100 metres; only a loop is
+        // refused, so Metre cannot be a pack of Roll while Roll is a pack of Metre, nor of the box of rolls.
         patch(
                 "/units/" + roll,
                 Map.of("usual_pack", Map.of("size", "100", "of_unit_id", metre, "purpose", "both")),
@@ -292,20 +293,45 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                 Map.of("usual_pack", Map.of("size", "2", "of_unit_id", roll, "purpose", "both")),
                 ADMIN);
         assertThat(cycle.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(cycle.getBody().get("errors").get(0).get("code").asString()).isEqualTo("unit_is_a_pack");
-        UUID piece = api.unit("test-piece");
-        ResponseEntity<JsonNode> counted = patch(
-                "/units/" + metre,
-                Map.of("usual_pack", Map.of("size", "100", "of_unit_id", piece, "purpose", "both")),
-                ADMIN);
-        assertThat(counted.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(counted.getBody().get("errors").get(0).get("code").asString())
-                .isEqualTo("unit_counted_by_pack");
-        ResponseEntity<JsonNode> bale = api.post(
+        assertThat(cycle.getBody().get("errors").get(0).get("code").asString()).isEqualTo("would_loop");
+        ResponseEntity<JsonNode> box = api.post(
                 "/units",
-                Map.of("name", "test-bale", "usual_pack", Map.of("size", "5", "of_unit_id", roll, "purpose", "buy")),
+                Map.of(
+                        "name",
+                        "test-box-of-rolls",
+                        "usual_pack",
+                        Map.of("size", "2", "of_unit_id", roll, "purpose", "buy")),
                 ADMIN);
-        assertThat(bale.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(box.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(box.getBody().get("usual_pack").get("of_unit_id").asString()).isEqualTo(roll.toString());
+        ResponseEntity<JsonNode> deep = patch(
+                "/units/" + metre,
+                Map.of(
+                        "usual_pack",
+                        Map.of(
+                                "size",
+                                "1",
+                                "of_unit_id",
+                                box.getBody().get("id").asString(),
+                                "purpose",
+                                "both")),
+                ADMIN);
+        assertThat(deep.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(deep.getBody().get("errors").get(0).get("code").asString()).isEqualTo("would_loop");
+
+        // Review of #710: a loop already stored (only a direct write could leave one) ends the check in a refusal at
+        // once.
+        UUID bag = api.unit("test-bag");
+        UUID sack = api.unit("test-sack");
+        String loop = "UPDATE retail_units SET pack_size = 2, pack_of_unit_id = ?, pack_purpose = 'buy' WHERE id = ?";
+        TestDatabase.owner().sql(loop).params(sack, bag).update();
+        TestDatabase.owner().sql(loop).params(bag, sack).update();
+        ResponseEntity<JsonNode> stored = patch(
+                "/units/" + api.unit("test-bundle"),
+                Map.of("usual_pack", Map.of("size", "3", "of_unit_id", bag, "purpose", "buy")),
+                ADMIN);
+        assertThat(stored.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(stored.getBody().get("errors").get(0).get("code").asString()).isEqualTo("would_loop");
     }
 
     @Test

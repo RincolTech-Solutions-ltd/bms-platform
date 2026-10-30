@@ -558,6 +558,7 @@ const ADD_IN_PLACE_EXEMPT: Record<string, string> = {
   'areas/staff/retail/restock.tsx packs': ITEM_PACK,
   'areas/staff/retail/sale.tsx packs': ITEM_PACK,
   'areas/staff/retail/unit-usual-pack.tsx choices': 'It holds sits in the Usual pack sheet of the Units page, so a second sheet is not opened over it; with no unit to hold it adds one in place',
+  'areas/staff/retail/new-item-packs.tsx choices': 'the levels of the ladder being typed on this form (issue #699), whose packages are added right above it',
   'areas/staff/retail/price-lists.tsx units': "the item's own unit and its packs, not the list of units; a pack is added on the item's page",
   'areas/staff/retail/expenses.tsx activeCategories(list)': 'expense categories hold the items an expense is booked to; the empty list opens their screen and comes back (rule 25); moves onto PickerWithAdd next',
   'areas/staff/retail/sale.tsx (customers.data ?? [])': 'the credit buyer already adds a buyer in place with a name and a phone, saved with the sale and kept in the draft; moves onto PickerWithAdd next',

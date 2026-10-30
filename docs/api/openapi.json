@@ -15276,6 +15276,20 @@
             "description" : "True when the pack has its own selling price, sent to every caller (the amount only to one who may see prices): a new usual size or making it buy only then needs retail.price.edit (issue #624)",
             "type" : "boolean"
           },
+          "holds_qty" : {
+            "description" : "Issue #699: how many of that level are in one pack; factor is this times its factor",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "holds_unit" : {
+            "description" : "Issue #699: the name of that level's unit",
+            "type" : "string"
+          },
+          "holds_unit_id" : {
+            "description" : "Issue #699 (ADR-107): the level one pack holds, the item's own unit or another pack's unit; absent when the pack holds factor of the item's unit and says no more",
+            "format" : "uuid",
+            "type" : "string"
+          },
           "id" : {
             "format" : "uuid",
             "type" : "string"
@@ -15309,10 +15323,26 @@
             "format" : "uuid",
             "type" : "string"
           },
+          "usual_buy" : {
+            "description" : "Issue #699: true for the level the shop usually buys the item in",
+            "type" : "boolean"
+          },
           "version" : {
             "description" : "Send as If-Match when updating",
             "format" : "int32",
             "type" : "integer"
+          }
+        }
+      },
+      "RetailPackLevel" : {
+        "description" : "Issue #699: one level of an item's packages and the base units in one",
+        "properties" : {
+          "factor" : {
+            "description" : "Base units in one, three places, for example 120.000",
+            "type" : "string"
+          },
+          "unit" : {
+            "type" : "string"
           }
         }
       },
@@ -15327,10 +15357,22 @@
         }
       },
       "RetailPackRequest" : {
-        "description" : "A pack size: factor base units in one pack of the unit",
+        "description" : "A pack size: factor base units in one pack of the unit, or holds_qty of the level holds_unit_id (issue #699)",
         "properties" : {
           "factor" : {
-            "description" : "Base units in one pack, at least 1, up to three places, for example 12 or 12.5",
+            "description" : "Base units in one pack, at least 1, up to three places, for example 12 or 12.5; required unless holds_unit_id and holds_qty are sent, and then it must agree with them",
+            "type" : "string"
+          },
+          "holds_qty" : {
+            "description" : "Issue #699: how many of holds_unit_id are in one pack, a whole number of 2 or more",
+            "format" : "int32",
+            "maximum" : 1000000,
+            "minimum" : 2,
+            "type" : "integer"
+          },
+          "holds_unit_id" : {
+            "description" : "Issue #699 (ADR-107): the level one pack holds, the item's own unit or another pack's unit of the item (in a new item's packs, one of its other packs); sent with holds_qty",
+            "format" : "uuid",
             "type" : "string"
           },
           "purpose" : {
@@ -15348,9 +15390,13 @@
           "unit_id" : {
             "format" : "uuid",
             "type" : "string"
+          },
+          "usual_buy" : {
+            "description" : "Issue #699: true for the level the shop usually buys the item in, which Buy stock opens on; never on a pack only for selling. Clears it on the item's other packs",
+            "type" : "boolean"
           }
         },
-        "required" : [ "factor", "unit_id" ]
+        "required" : [ "unit_id" ]
       },
       "RetailPackUpdate" : {
         "description" : "Omitted fields are unchanged; a pack is never deleted, only switched off",
@@ -15366,6 +15412,18 @@
             "description" : "Base units in one pack, at least 1; required to switch a pack on again",
             "type" : "string"
           },
+          "holds_qty" : {
+            "description" : "Issue #699: how many of the level held are in one pack, a whole number of 2 or more. With factor alone, a pack that holds another level must stay a whole number of it (422 not_whole)",
+            "format" : "int32",
+            "maximum" : 1000000,
+            "minimum" : 2,
+            "type" : "integer"
+          },
+          "holds_unit_id" : {
+            "description" : "Issue #699 (ADR-107): the level one pack holds, the item's own unit or another active pack's unit of the item; sent with holds_qty. Every bigger level that holds this one is worked out again; stock, kept in the item's unit, never changes",
+            "format" : "uuid",
+            "type" : "string"
+          },
           "purpose" : {
             "description" : "buy, sell or both; a pack made buy only loses its selling price (issue #624)",
             "pattern" : "buy|sell|both",
@@ -15377,6 +15435,10 @@
             "maximum" : 10000000000000,
             "minimum" : 0,
             "type" : "integer"
+          },
+          "usual_buy" : {
+            "description" : "Issue #699: true to make this the level Buy stock opens on, false to clear it",
+            "type" : "boolean"
           }
         }
       },
@@ -19130,6 +19192,13 @@
           "factor" : {
             "description" : "Base units in one pack, three places, for example 24.000",
             "type" : "string"
+          },
+          "levels" : {
+            "description" : "Issue #699 (ADR-107): every active pack of the item holding a whole number of more than one base unit, biggest first, so stock is shown and counted at every level",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailPackLevel"
+            },
+            "type" : "array"
           },
           "unit" : {
             "type" : "string"

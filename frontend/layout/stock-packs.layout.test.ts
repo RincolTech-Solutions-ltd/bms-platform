@@ -30,7 +30,7 @@ describe.each([1, 2])('Stock in cartons and pieces at 360px, font scale %i', (fo
   it('Stock fits the phone and the quantity wraps in its card', async () => {
     const page = await browser.newPage({ viewport: { width: WIDTH, height: 900 }, hasTouch: true, isMobile: true });
     await page.goto(`${base}layout/stock-packs.html?screen=stock&font=${font}`);
-    await page.getByText('46 Half cartons and 23 Pieces').waitFor();
+    await page.getByText('46 half cartons and 23 pieces').waitFor();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(WIDTH);
     const quantities = await page.evaluate(() =>
       [...document.querySelectorAll<HTMLElement>('.stock-card-qty')].map((e) => {
@@ -38,7 +38,7 @@ describe.each([1, 2])('Stock in cartons and pieces at 360px, font scale %i', (fo
         return { text: e.textContent ?? '', over: e.scrollWidth - e.clientWidth, right: e.getBoundingClientRect().right, card: card?.right ?? 0 };
       }),
     );
-    expect(quantities.some((q) => q.text.includes('(1127 Pieces)'))).toBe(true);
+    expect(quantities.some((q) => q.text.includes('(1127 pieces)'))).toBe(true);
     for (const q of quantities) {
       expect(q.over, q.text).toBeLessThanOrEqual(0);
       expect(q.right, q.text).toBeLessThanOrEqual(q.card + 0.5);
@@ -49,7 +49,7 @@ describe.each([1, 2])('Stock in cartons and pieces at 360px, font scale %i', (fo
   it('All branches on a phone fits, the total and each branch in packs inside its card', async () => {
     const page = await browser.newPage({ viewport: { width: WIDTH, height: 900 }, hasTouch: true, isMobile: true });
     await page.goto(`${base}layout/stock-packs.html?screen=all&font=${font}`);
-    await page.getByText('46 Half cartons and 23 Pieces').first().waitFor();
+    await page.getByText('46 half cartons and 23 pieces').first().waitFor();
     const show = page.getByRole('button', { name: 'Show branches' });
     while ((await show.count()) > 0) await show.first().click();
     expect(await page.evaluate(() => document.documentElement.scrollWidth), 'page width').toBeLessThanOrEqual(WIDTH);
@@ -61,7 +61,7 @@ describe.each([1, 2])('Stock in cartons and pieces at 360px, font scale %i', (fo
         }));
       }),
     );
-    expect(parts.some((p) => p.what.includes('(1127 Pieces)'))).toBe(true);
+    expect(parts.some((p) => p.what.includes('(1127 pieces)'))).toBe(true);
     for (const p of parts) {
       expect(p.right, p.what).toBeLessThanOrEqual(p.card + 0.5);
       expect(p.over, p.what).toBeLessThanOrEqual(0);
@@ -78,7 +78,7 @@ describe.each([1, 2])('Stock in cartons and pieces at 360px, font scale %i', (fo
       await page.locator(`#${id}-packs`).fill('46');
       await page.locator(`#${id}`).fill('23');
     }
-    await page.getByText('(1127 Pieces)').waitFor();
+    await page.getByText('(1127 pieces)').waitFor();
     expect(await page.evaluate(() => document.documentElement.scrollWidth), 'page width').toBeLessThanOrEqual(WIDTH);
     const parts = await page.evaluate((line) => {
       const card = document.getElementById(line)?.closest('.line-card');

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { RetailError, type Unit } from '../../../api/retail';
 import { Field } from '../../../app/ui/Field';
 import { Hint } from '../../../app/ui/Hint';
@@ -6,6 +7,9 @@ import { Segmented } from '../../../app/ui/Segmented';
 import { icons } from '../../../components/icons';
 import { PURPOSES, factorForUnit, purposeForUnit, usualFactor, type Purpose } from './catalogue-packs';
 import { UnitPicker } from './unit-picker';
+import { perPieceMinor, shown, type Rung } from './ladder-state';
+import { money } from './ui';
+import { LadderRungs, LadderSum, LookInside } from './package-ladder';
 import { unitWord, unitWords } from './units-state';
 
 // Issue #689 (ADR-106): Add an item asks for the smallest unit, then whether the item is bought or sold in packages, and
@@ -23,15 +27,53 @@ const USED_FOR = (['both', 'buy', 'sell'] as const).map((v) => PURPOSES.find((o)
 export type PackageRow = {
   key: number;
   unitId: string;
+  /** How many of what it holds are in one (issue #699): of the smallest unit, or of the package `holdsKey`. */
   factor: string;
+  /** Issue #699 (ADR-107): the row this package holds, or 0 for the smallest unit. */
+  holdsKey: number;
   purpose: Purpose;
   priceMinor: number | null;
   /** The size and Used for last filled in from the unit's usual pack (ADR-100), which another unit replaces. */
   filled: { factor: string; purpose: Purpose };
 };
 
-export function newPackageRow(key: number): PackageRow {
-  return { key, unitId: '', factor: '', purpose: 'both', priceMinor: null, filled: { factor: '', purpose: 'both' } };
+export function newPackageRow(key: number, holdsKey = 0): PackageRow {
+  return { key, unitId: '', factor: '', holdsKey, purpose: 'both', priceMinor: null, filled: { factor: '', purpose: 'both' } };
+}
+
+/** Issue #699: the smallest units in one package of a row, worked out through what it holds; null until it can be. */
+export function rowPieces(rows: PackageRow[], row: PackageRow, seen: Set<number> = new Set()): bigint | null {
+  if (sizeProblem(row.factor) !== null || seen.has(row.key)) return null;
+  const own = BigInt(row.factor.trim());
+  if (row.holdsKey === 0) return own;
+  const held = rows.find((r) => r.key === row.holdsKey);
+  const inner = held ? rowPieces(rows, held, new Set([...seen, row.key])) : null;
+  return inner === null ? null : own * inner;
+}
+
+/** Issue #699: the rows a package may hold: not itself, and not one that holds it, however deep. */
+export function holdable(rows: PackageRow[], row: PackageRow): PackageRow[] {
+  const holdsIt = (r: PackageRow, seen: Set<number> = new Set()): boolean => {
+    if (r.holdsKey === 0 || seen.has(r.key)) return false;
+    if (r.holdsKey === row.key) return true;
+    const next = rows.find((x) => x.key === r.holdsKey);
+    return next ? holdsIt(next, new Set([...seen, r.key])) : false;
+  };
+  return rows.filter((r) => r.key !== row.key && r.unitId !== '' && !holdsIt(r));
+}
+
+/** Issue #699: the rows as a ladder, biggest first, for the picture under them; a row not yet whole is left out. */
+export function rowsAsRungs(rows: PackageRow[], units: Unit[], smallest: Unit | undefined): Rung[] {
+  const name = (id: string) => units.find((u) => u.id === id)?.name ?? '';
+  return rows
+    .flatMap((r): Rung[] => {
+      const pieces = rowPieces(rows, r);
+      if (r.unitId === '' || pieces === null) return [];
+      const held = rows.find((x) => x.key === r.holdsKey);
+      const holdsUnitId = r.holdsKey === 0 || !held ? (smallest?.id ?? '') : held.unitId;
+      return [{ unitId: r.unitId, unit: name(r.unitId), holdsUnitId, holdsUnit: r.holdsKey === 0 ? (smallest?.name ?? '') : name(holdsUnitId), holdsQty: r.factor.trim(), pieces: pieces * 1000n }];
+    })
+    .sort((a, b) => (a.pieces === b.pieces ? 0 : a.pieces > b.pieces ? -1 : 1));
 }
 
 /** "bulb" for a unit named Bulb, "piece" for Pc (the shop words of units-state.ts, #680), or `none` when no unit is chosen. */
@@ -84,17 +126,27 @@ export const MAX_PACKAGES = 10;
 /** The most of the smallest unit one package may hold on this form. */
 export const MAX_PACK_SIZE = 100_000;
 
-export function rowProblem(row: PackageRow): string | null {
-  return row.unitId === '' ? 'Choose the package.' : sizeProblem(row.factor);
+export function rowProblem(row: PackageRow, rows: PackageRow[] = []): string | null {
+  if (row.unitId === '') return 'Choose the package.';
+  const held = rows.find((r) => r.key === row.holdsKey);
+  if (row.holdsKey !== 0 && (!held || held.unitId === '')) return 'Choose the package it holds first.';
+  return sizeProblem(row.factor);
 }
 
-/** The packs the create request sends; a price only from someone who may set one, never on a pack only for buying. */
-export function packsToSend(rows: PackageRow[], mayPrice: boolean) {
+/**
+ * The packs the create request sends; a price only from someone who may set one, never on a pack only for buying. A package
+ * of the smallest unit sends its size as before; one that holds another package sends what it holds (issue #699), and the
+ * server works its size out.
+ */
+export function packsToSend(rows: PackageRow[], mayPrice: boolean, usualBuyKey: number | null = null) {
   return rows.map((r) => ({
     unit_id: r.unitId,
-    factor: r.factor.trim(),
+    ...(r.holdsKey === 0
+      ? { factor: r.factor.trim() }
+      : { holds_unit_id: rows.find((x) => x.key === r.holdsKey)?.unitId ?? '', holds_qty: Number(r.factor.trim()) }),
     purpose: r.purpose,
     ...(mayPrice && r.purpose !== 'buy' && r.priceMinor !== null ? { sell_minor: r.priceMinor } : {}),
+    ...(usualBuyKey === r.key && r.purpose !== 'sell' ? { usual_buy: true } : {}),
   }));
 }
 
@@ -112,12 +164,93 @@ export function packErrorOf(error: unknown): PackError | null {
 
 /** ", with carton of 10 and box of 100", or nothing without packages: the end of "60W bulb added". */
 export function withPackages(rows: PackageRow[], units: Unit[]): string {
-  const said = rows.map((r) => `${oneOf(units.find((u) => u.id === r.unitId), 'package')} of ${r.factor.trim()}`);
+  const unitOf = (key: number) => units.find((u) => u.id === rows.find((r) => r.key === key)?.unitId);
+  // Issue #699: a package of another says so, "carton of 12 boxes"; one of the smallest unit keeps "carton of 10".
+  const said = rows.map((r) => `${oneOf(units.find((u) => u.id === r.unitId), 'package')} of ${r.factor.trim()}${r.holdsKey === 0 ? '' : ` ${manyOf(unitOf(r.holdsKey), 'packages')}`}`);
   if (said.length === 0) return '';
   return `, with ${said.length === 1 ? said[0] : `${said.slice(0, -1).join(', ')} and ${said[said.length - 1]}`}`;
 }
 
-export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows, onRows, mayPrice, showErrors, refused = null }: {
+/**
+ * Issue #699 (owner, 29 Oct 2026): a wholesale shop buys in cartons, so setting up the item asks how it is usually bought and
+ * what one of that level costs, and works the piece out; the same for selling. An answer is a package row's key (0 for the
+ * smallest unit) and the price of one of it.
+ * JUSTIFICATION-A3: the owner's new setup questions; no existing control asks for a level and its price.
+ */
+export type UsualAnswer = { key: number; priceMinor: number | null };
+
+/** The levels a question offers: the smallest unit, then each package used for `use` that is whole, smallest first. */
+export function levelChoices(rows: PackageRow[], units: Unit[], smallest: Unit | undefined, use: 'buy' | 'sell') {
+  const packs = rows
+    .filter((r) => r.unitId !== '' && rowPieces(rows, r) !== null && r.purpose !== (use === 'buy' ? 'sell' : 'buy'))
+    .map((r) => ({ value: String(r.key), label: unitWord(units.find((u) => u.id === r.unitId)?.name), pieces: rowPieces(rows, r) ?? 1n }))
+    .sort((a, b) => (a.pieces < b.pieces ? -1 : 1));
+  return [{ value: '0', label: unitWord(smallest?.name) || 'Piece', pieces: 1n }, ...packs];
+}
+
+/** The smallest units in one of the level answered, or null for the smallest unit itself (or a level no longer offered). */
+export function answeredPieces(rows: PackageRow[], units: Unit[], smallest: Unit | undefined, use: 'buy' | 'sell', answer: UsualAnswer): bigint | null {
+  if (answer.key === 0) return null;
+  return levelChoices(rows, units, smallest, use).find((c) => c.value === String(answer.key))?.pieces ?? null;
+}
+
+/** The price of one of the smallest unit from an answer at a bigger level, rounded half up; null until a price is typed. */
+export function piecePriceOf(answer: UsualAnswer, pieces: bigint): number | null {
+  return answer.priceMinor === null ? null : perPieceMinor(answer.priceMinor, pieces * 1000n);
+}
+
+/** "How do you usually buy it?" with the levels, and for a package "What do you pay for one carton?" with the piece worked out. */
+export function UsualLevel({ id, use, on, rows, units, smallest, answer, onAnswer, showErrors, children }: {
+  id: string;
+  /** Asked only while the item has packages; else the form's own price field alone. */
+  on: boolean;
+  use: 'buy' | 'sell';
+  rows: PackageRow[];
+  units: Unit[];
+  smallest: Unit | undefined;
+  answer: UsualAnswer;
+  onAnswer: (answer: UsualAnswer) => void;
+  showErrors: boolean;
+  /** The question for the smallest unit itself, the form's own price field. */
+  children: ReactNode;
+}) {
+  const choices = levelChoices(rows, units, smallest, use);
+  if (!on || choices.length < 2) return <>{children}</>;
+  const chosen = choices.find((c) => c.value === String(answer.key)) ?? choices[0]!;
+  const question = use === 'buy' ? 'How do you usually buy it?' : 'How do you usually sell it, and at what price?';
+  const one = oneOf(smallest, 'item');
+  const level = chosen.label.toLowerCase();
+  const piece = chosen.value === '0' ? null : piecePriceOf(answer, chosen.pieces);
+  return (
+    <div className="stack" data-testid={`usual-${use}`}>
+      <p className="field-label">{question}</p>
+      {choices.length <= 5 ? (
+        <Segmented label={question} options={choices.map(({ value, label }) => ({ value, label }))} value={chosen.value} onChange={(v) => onAnswer({ key: Number(v), priceMinor: null })} />
+      ) : (
+        // empty: the smallest unit is always the first choice
+        <select id={`${id}-level`} aria-label={question} value={chosen.value} onChange={(e) => onAnswer({ key: Number(e.target.value), priceMinor: null })}>
+          {choices.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+        </select>
+      )}
+      {chosen.value === '0' ? children : (
+        <MoneyInput
+          id={`${id}-price`}
+          label={use === 'buy' ? `What do you pay for one ${level}?` : `Selling price of one ${level}`}
+          required
+          valueMinor={answer.priceMinor}
+          onChange={(priceMinor) => onAnswer({ ...answer, priceMinor })}
+          error={answer.priceMinor === null ? `Type the price of one ${level}.` : null}
+          showError={showErrors}
+          hint={piece !== null ? <span data-testid={`usual-${use}-piece`}>That is {money(piece)} a {one}.</span> : `1 ${level} is ${String(chosen.pieces)} ${manyOf(smallest, 'items')}. The app works out the price of one.`}
+        />
+      )}
+    </div>
+  );
+}
+
+export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows, onRows, mayPrice, showErrors, refused = null, soldAt = 0 }: {
+  /** Issue #699: the row the item is usually sold by, whose price the selling question below asks; 0 for none. */
+  soldAt?: number;
   /** The smallest unit chosen, or none yet. */
   smallest: Unit | undefined;
   /** The switched-on units of the business. */
@@ -137,15 +270,25 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
   const change = (key: number, next: Partial<PackageRow>) => onRows(rows.map((r) => (r.key === key ? { ...r, ...next } : r)));
   const chooseUnit = (row: PackageRow, unitId: string) => {
     const unit = units.find((u) => u.id === unitId);
-    const factor = factorForUnit(row.factor, row.filled.factor, usualFactor(unit, { unit_id: smallest?.id }));
+    // Issue #699: a unit whose usual pack counts another package of this item (a box of 2 rolls) holds that package.
+    const usualOf = rows.find((r) => r.key !== row.key && r.unitId !== '' && r.unitId === unit?.usual_pack?.of_unit_id);
+    const holdsKey = usualOf ? usualOf.key : unit?.usual_pack?.of_unit_id === smallest?.id ? 0 : row.holdsKey;
+    const heldId = holdsKey === 0 ? smallest?.id : rows.find((r) => r.key === holdsKey)?.unitId;
+    const factor = factorForUnit(row.factor, row.filled.factor, usualFactor(unit, { unit_id: heldId }));
     const purpose = purposeForUnit(row.purpose, row.filled.purpose, unit);
     change(row.key, {
       unitId,
       factor,
+      holdsKey,
       purpose,
       filled: { factor: factor === row.factor ? row.filled.factor : factor, purpose: purpose === row.purpose ? row.filled.purpose : purpose },
     });
   };
+  const nextKey = Math.max(0, ...rows.map((r) => r.key)) + 1;
+  // Issue #699: Add a bigger package starts a row holding the biggest package so far.
+  const biggest = rowsAsRungs(rows, units, smallest)[0];
+  const biggestKey = rows.find((r) => r.unitId === biggest?.unitId)?.key ?? 0;
+  const rungs = rowsAsRungs(rows, units, smallest);
   return (
     <div className="stack" data-testid="new-item-packages">
       <p className="field-label">{PACKAGES_QUESTION}</p>
@@ -173,9 +316,25 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
                   error={row.unitId === '' ? 'Choose the package.' : mine && !mine.onSize ? mine.message : null}
                   showError={showErrors || (mine !== null && !mine.onSize)}
                 />
+                {holdable(rows, row).length > 0 && (
+                  <>
+                    <label htmlFor={`item-pack-holds-${row.key}`}>{`What is inside one ${pack}`}</label>
+                    {/* empty: shown only when another package can be held, and the smallest unit is always the first choice */}
+                    <select
+                      id={`item-pack-holds-${row.key}`}
+                      value={row.holdsKey}
+                      onChange={(e) => change(row.key, { holdsKey: Number(e.target.value) })}
+                    >
+                      <option value={0}>{many.charAt(0).toUpperCase() + many.slice(1)}</option>
+                      {holdable(rows, row).map((r) => (
+                        <option key={r.key} value={r.key}>{unitWords(units.find((u) => u.id === r.unitId)?.name)}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
                 <Field
                   id={`item-pack-size-${row.key}`}
-                  label={`How many ${many} in one ${pack}`}
+                  label={`How many ${row.holdsKey === 0 ? many : manyOf(units.find((u) => u.id === rows.find((r) => r.key === row.holdsKey)?.unitId), 'packages')} in one ${pack}`}
                   required
                   inputMode="numeric"
                   autoComplete="off"
@@ -185,25 +344,35 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
                   error={size ?? (mine?.onSize ? mine.message : null)}
                   showError={showErrors || mine?.onSize === true}
                 />
+                {row.unitId !== '' && rowPieces(rows, row) !== null && (
+                  <p className="ladder-says" data-testid="package-pieces">
+                    So 1 {pack} = <strong>{shown((rowPieces(rows, row) ?? 0n) * 1000n)}</strong> {many}
+                  </p>
+                )}
+                {row.holdsKey !== 0 && showErrors && rowProblem(row, rows) === 'Choose the package it holds first.' && (
+                  <p className="rt-flag">Choose the package it holds first.</p>
+                )}
                 <p className="field-label">Used for</p>
                 <Segmented label={`Used for, ${pack}`} options={USED_FOR} value={row.purpose} onChange={(purpose) => change(row.key, { purpose })} />
                 {row.purpose === 'buy' ? (
                   <Hint>A package only for buying is not offered when selling, so it has no selling price.</Hint>
+                ) : row.key === soldAt ? (
+                  <Hint>Its selling price is asked below, under How do you usually sell it.</Hint>
                 ) : mayPrice ? (
                   <MoneyInput
                     id={`item-pack-price-${row.key}`}
                     label={`Selling price of one ${pack}`}
                     valueMinor={row.priceMinor}
                     onChange={(priceMinor) => change(row.key, { priceMinor })}
-                    hint={size === null
-                      ? `Optional. Leave it empty to sell it at ${row.factor.trim()} times the ${one} price.`
+                    hint={size === null && rowPieces(rows, row) !== null
+                      ? `Optional. Leave it empty to sell it at ${String(rowPieces(rows, row))} times the ${one} price.`
                       : `Optional. Leave it empty to sell it at the ${one} price times its size.`}
                   />
                 ) : (
                   <Hint>It sells at the {one} price times its size until someone who may change prices sets its own.</Hint>
                 )}
                 {rows.length > 1 && (
-                  <button type="button" className="btn-ghost" onClick={() => onRows(rows.filter((r) => r.key !== row.key))}>
+                  <button type="button" className="btn-ghost" onClick={() => onRows(rows.filter((r) => r.key !== row.key).map((r) => (r.holdsKey === row.key ? { ...r, holdsKey: 0 } : r)))}>
                     Remove the {pack}
                   </button>
                 )}
@@ -211,12 +380,21 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
             );
           })}
           {rows.length < MAX_PACKAGES ? (
-            <button type="button" className="btn-ghost" onClick={() => onRows([...rows, newPackageRow(Math.max(0, ...rows.map((r) => r.key)) + 1)])}>
+            <button type="button" className="btn-ghost" onClick={() => onRows([...rows, newPackageRow(nextKey, biggestKey)])}>
               {icons.plus}
-              <span>Add another package</span>
+              <span>Add a bigger package</span>
             </button>
           ) : (
             <Hint>Up to 10 packages</Hint>
+          )}
+          {/* Issue #699 (ADR-107): the packages as the ladder they make, biggest first, and one drawn opened up. */}
+          {rungs.length > 0 && (
+            <div className="ladder-panel stack" data-testid="new-item-ladder">
+              <p className="field-label">What one package holds</p>
+              <LadderRungs rungs={rungs} smallest={smallest?.name ?? ''} />
+              <LadderSum rungs={rungs} smallest={smallest?.name ?? ''} />
+              <LookInside rungs={rungs} smallest={smallest?.name ?? ''} />
+            </div>
           )}
         </>
       )}

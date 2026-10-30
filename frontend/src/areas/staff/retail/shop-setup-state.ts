@@ -54,7 +54,8 @@ export function packNeeds(item: SetupItem, ticked: Set<string>, units: Unit[]): 
   if (item.kind !== 'pack' || !item.of) return null;
   const had = units.find((u) => same(u.name, item.of!));
   if (had) return had.active === false ? switchedOffText(item.of) : null;
-  return ticked.has(key('unit', item.of)) ? null : `Tick ${item.of} too, or this pack is left out.`;
+  // Issue #699 (ADR-107): a pack may hold another pack of the set, a Box of rolls of 2 Roll.
+  return ticked.has(key('unit', item.of)) || ticked.has(key('pack', item.of)) ? null : `Tick ${item.of} too, or this pack is left out.`;
 }
 
 export interface SetupResult {
@@ -66,6 +67,16 @@ export interface SetupResult {
 
 export const ADDED_MEANWHILE = 'Your shop has it already.';
 
+/** Issue #699: true when `of`, through the usual packs it counts, already counts the unit `id`, so a pack of it would loop. */
+function loops(units: Unit[], of: Unit, id: string): boolean {
+  const seen = new Set<string>();
+  for (let at: Unit | undefined = of; at?.id && !seen.has(at.id); at = units.find((u) => u.id === at?.usual_pack?.of_unit_id)) {
+    if (at.id === id) return true;
+    seen.add(at.id);
+  }
+  return false;
+}
+
 /**
  * Adds what is ticked, one at a time: categories, then units, then packs, so a pack finds the unit it counts. It stops at the first
  * failure and says what was added before it; running it again adds only what is still missing.
@@ -75,7 +86,14 @@ export async function applySetup(api: Pick<RetailApi, 'createCategory' | 'create
   let known = [...units];
   const chosen = items.filter((i) => i.status !== 'there' && ticked.has(key(i.kind, i.name)));
   const order: ItemKind[] = ['category', 'unit', 'pack'];
-  chosen.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
+  // Issue #699: a pack of another pack of the set (a Box of rolls) comes after the pack it holds.
+  // Review of #710: by how deep it sits, any depth (a pallet of boxes of rolls after the box after the roll); a loop stops.
+  const depth = (i: SetupItem, seen: Set<string> = new Set()): number => {
+    const held = i.kind === 'pack' ? chosen.find((x) => x.kind === 'pack' && same(x.name, i.of ?? '')) : undefined;
+    if (!held || seen.has(held.name)) return 0;
+    return 1 + depth(held, new Set([...seen, i.name]));
+  };
+  chosen.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || depth(a) - depth(b));
   for (const item of chosen) {
     try {
       if (item.kind === 'category') {
@@ -94,17 +112,14 @@ export async function applySetup(api: Pick<RetailApi, 'createCategory' | 'create
         continue;
       }
       const had = known.find((u) => same(u.name, item.name));
-      // Issue #637, ADR-100 note: a usual pack is one level only, as the server holds it.
-      const level = of.usual_pack
-        ? `${of.name ?? ''} is itself a pack, so this pack was left out.`
-        : had?.id && known.some((u) => u.usual_pack?.of_unit_id === had.id) ? `${had.name ?? ''} holds another pack, so this pack was left out.` : null;
-      if (level) {
-        result.skipped.push({ name: item.name, why: level });
+      // Issue #699 (ADR-107, amending the ADR-100 note of #637): a usual pack may count another pack; only a loop is left out.
+      if (had?.id && loops(known, of, had.id)) {
+        result.skipped.push({ name: item.name, why: `${of.name ?? ''} holds ${had.name ?? ''} already, so this pack was left out.` });
         continue;
       }
       const pack = { size: String(item.size), of_unit_id: of.id, purpose: asPurpose(item.purpose) };
       if (had?.id && item.status === 'size') await api.updateUnit(had.id, had.version ?? 1, { usual_pack: pack });
-      else await api.createUnit(item.name, pack);
+      else known.push(await api.createUnit(item.name, pack));
       result.added.push({ kind: 'pack', name: item.name, detail: packText(pack.size, of.name ?? '', pack.purpose) });
     } catch (error) {
       // Added meanwhile, on another phone: it is there, which is what was asked.
@@ -115,10 +130,10 @@ export async function applySetup(api: Pick<RetailApi, 'createCategory' | 'create
           if (item.kind !== 'category') known = await api.listUnits();
           const now = item.kind === 'pack' ? known.find((u) => same(u.name, item.name)) : undefined;
           const of = known.find((u) => same(u.name, item.of ?? ''));
-          if (now?.id && !now.usual_pack && of?.id && !of.usual_pack && of.active !== false) {
-            // Issue #662: the same one level check as above, so a unit another phone made a pack of is skipped, not refused.
-            if (known.some((u) => u.usual_pack?.of_unit_id === now.id)) {
-              result.skipped.push({ name: item.name, why: `${now.name ?? ''} holds another pack, so this pack was left out.` });
+          if (now?.id && !now.usual_pack && of?.id && of.active !== false) {
+            // Issue #662: the same loop check as above, so a unit another phone made a pack of is skipped, not refused.
+            if (loops(known, of, now.id)) {
+              result.skipped.push({ name: item.name, why: `${of.name ?? ''} holds ${now.name ?? ''} already, so this pack was left out.` });
               continue;
             }
             const pack = { size: String(item.size), of_unit_id: of.id, purpose: asPurpose(item.purpose) };

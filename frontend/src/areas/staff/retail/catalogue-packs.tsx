@@ -17,6 +17,7 @@ import { RowChevron } from '../../../app/ui/ListRow';
 import { MoneyInput } from '../../../app/ui/MoneyInput';
 import { Segmented } from '../../../app/ui/Segmented';
 import { Sheet } from '../../../app/ui/Sheet';
+import { ItemLadder } from './package-ladder';
 
 // The packs of an item (ADR-033, issue #194): a unit and the number of base units in one pack, for example a carton of
 // twelve pieces. Issue #624 (ADR-099): each pack says what it is for, and a selling pack has its own selling price, which a
@@ -249,6 +250,9 @@ export function PackEditor({ product }: { product: Product }) {
       {packs.isPending && <p className="loading">Loading</p>}
       <Problem error={packs.error} />
       {packs.data && rows.length === 0 && <p className="empty-state">No cartons, boxes or other packs yet.</p>}
+      {/* Issue #699 (ADR-107): the packs as a ladder, biggest first, each saying what it holds. */}
+      {/* Only someone who manages the catalogue reaches this editor (`allowed` above), so the ladder is editable here. */}
+      {packs.data && <ItemLadder product={product} packs={rows} mayManage={allowed} mayPrice={mayPrice} />}
       {rows.length > 0 && (
         <div className="table-wrap" tabIndex={0}>
           <table data-testid="pack-table">

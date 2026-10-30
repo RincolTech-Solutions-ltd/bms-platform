@@ -33,8 +33,8 @@ function fakeShop(start: { categories?: string[]; units?: string[] } = {}) {
     updateUnit: (id: string, version: number, body: { usual_pack?: UsualPackRequest }) => {
       const u = units.find((x) => x.id === id)!;
       if (u.version !== version) throw new RetailError('stale', 409, 'stale');
-      // One level only, as the server holds it (ADR-100 note).
-      if (body.usual_pack && units.some((x) => x.usual_pack?.of_unit_id === id)) throw new RetailError('counted', 422, 'unit_counted_by_pack');
+      // Only a loop is refused, as the server holds it (ADR-107).
+      if (body.usual_pack && units.find((x) => x.id === body.usual_pack?.of_unit_id)?.usual_pack?.of_unit_id === id) throw new RetailError('loop', 422, 'would_loop');
       if (body.usual_pack) u.usual_pack = usual(body.usual_pack);
       u.version = (u.version ?? 1) + 1;
       return Promise.resolve(u);
@@ -76,7 +76,8 @@ describe('the starting sets', () => {
   it('count every pack in a unit of its own kind of shop, with names that fit and plain words', () => {
     for (const t of SHOP_TYPES) {
       for (const p of t.packs) {
-        expect(t.units, `${t.id}: ${p.name}`).toContain(p.of);
+        // Issue #699: a pack counts a unit of the set, or another pack of it (a Box of rolls of 2 Roll).
+        expect([...t.units, ...t.packs.map((x) => x.name)], `${t.id}: ${p.name}`).toContain(p.of);
         expect(p.size, `${t.id}: ${p.name}`).toBeGreaterThanOrEqual(1);
         expect(t.units, `${t.id}: ${p.name} is a pack, not a unit too`).not.toContain(p.name);
       }
@@ -160,7 +161,9 @@ describe('Set up your shop', () => {
     const roll = plan.find((i) => i.name === 'Roll')!;
     expect(plan.find((i) => i.kind === 'unit' && i.name === 'Metre')?.status).toBe('there');
     expect(packNeeds(roll, allTicked(plan), shop.units)).toBe('Metre is switched off. Switch it on in Units, or this pack is left out.');
-    expect(result.skipped).toEqual([{ name: 'Roll', why: 'Metre is switched off. Switch it on in Units, or this pack is left out.' }]);
+    expect(result.skipped).toContainEqual({ name: 'Roll', why: 'Metre is switched off. Switch it on in Units, or this pack is left out.' });
+    // Issue #699: the packs of rolls go with the roll they hold.
+    expect(result.skipped.map((s) => s.name).sort()).toEqual(['Box of rolls', 'Crate of rolls', 'Roll']);
     expect(shop.units.map((u) => u.name)).not.toContain('Roll');
   });
 
@@ -200,13 +203,37 @@ describe('Set up your shop', () => {
     expect(shop.units.find((u) => u.name === 'Roll')?.usual_pack?.of_unit).toBe('Metre');
   });
 
-  it('leaves out a pack of a unit that is a pack itself, one level only (issue #637)', async () => {
+  it('adds packs inside packs, a box and a crate of rolls of metres, the roll first (issue #699)', async () => {
+    const shop = fakeShop();
+    const { result } = await run(shop, 'electrical');
+    expect(result.error).toBeNull();
+    const added = result.added.map((a) => a.name);
+    expect(added.indexOf('Roll')).toBeLessThan(added.indexOf('Box of rolls'));
+    expect(shop.units.find((u) => u.name === 'Box of rolls')?.usual_pack).toMatchObject({ size: '2.000', of_unit: 'Roll', purpose: 'buy' });
+    expect(shop.units.find((u) => u.name === 'Crate of rolls')?.usual_pack).toMatchObject({ size: '10.000', of_unit: 'Roll', purpose: 'buy' });
+  });
+
+  it('adds a pack of a pack of a pack after what it holds, any depth (review of #710)', async () => {
+    const shop = fakeShop();
+    const items: SetupItem[] = [
+      { kind: 'pack', name: 'Pallet', size: 4, of: 'Box of rolls', purpose: 'buy', status: 'add' },
+      { kind: 'pack', name: 'Box of rolls', size: 2, of: 'Roll', purpose: 'buy', status: 'add' },
+      { kind: 'pack', name: 'Roll', size: 100, of: 'Metre', purpose: 'both', status: 'add' },
+    ];
+    const result = await applySetup(shop.api, items, allTicked(items), [...shop.units]);
+    expect(result.error).toBeNull();
+    expect(result.added.map((a) => a.name)).toEqual(['Roll', 'Box of rolls', 'Pallet']);
+  });
+
+  it('leaves out only a pack that would loop (issue #699)', async () => {
     const shop = fakeShop();
     const metre = shop.units.find((u) => u.name === 'Metre')!;
-    metre.usual_pack = { size: '2.000', of_unit_id: shop.units[0]!.id, of_unit: 'Piece', purpose: 'both' };
-    const { result } = await run(shop, 'hardware');
-    expect(result.skipped).toContainEqual({ name: 'Roll', why: 'Metre is itself a pack, so this pack was left out.' });
-    expect(shop.units.map((u) => u.name)).not.toContain('Roll');
+    const roll = await shop.api.createUnit('Roll');
+    metre.usual_pack = { size: '2.000', of_unit_id: roll.id, of_unit: 'Roll', purpose: 'both' };
+    const plan = planSetup(shopTypeById('hardware')!, [], [...shop.units]).map((i) => (i.name === 'Roll' ? { ...i, status: 'size' as const } : i));
+    const result = await applySetup(shop.api, plan, allTicked(plan), [...shop.units]);
+    expect(result.skipped).toContainEqual({ name: 'Roll', why: 'Metre holds Roll already, so this pack was left out.' });
+    expect(shop.units.find((u) => u.name === 'Roll')?.usual_pack).toBeUndefined();
   });
 
   it("gives a pack's unit another phone added meanwhile, with no usual size, this one (review of #637)", async () => {
@@ -220,26 +247,31 @@ describe('Set up your shop', () => {
     expect(shop.units.find((u) => u.name === 'Roll')?.usual_pack?.of_unit).toBe('Metre');
   });
 
-  it('skips a pack whose unit another phone added and made a pack of meanwhile, with a plain reason, and goes on (issue #662)', async () => {
+  it('gives a pack whose unit another phone added and made a pack of meanwhile its size, and goes on (issues #662, #699)', async () => {
     const shop = fakeShop();
     const plan = planSetup(shopTypeById('hardware')!, [], [...shop.units]);
-    // Another phone adds Roll and makes Bundle a pack of Roll after the plan was read.
+    // Another phone adds Roll and makes Bundle a pack of Roll after the plan was read: a pack of a pack is fine now.
     const roll = await shop.api.createUnit('Roll');
     await shop.api.createUnit('Bundle', { size: '5', of_unit_id: roll.id!, purpose: 'both' });
     const result = await applySetup(shop.api, plan, allTicked(plan), [...shop.units].filter((u) => u.name !== 'Roll' && u.name !== 'Bundle'));
     expect(result.error).toBeNull();
-    expect(result.skipped).toContainEqual({ name: 'Roll', why: 'Roll holds another pack, so this pack was left out.' });
-    expect(shop.units.find((u) => u.name === 'Roll')?.usual_pack).toBeUndefined();
+    expect(result.skipped.map((s) => s.name)).not.toContain('Roll');
+    expect(shop.units.find((u) => u.name === 'Roll')?.usual_pack?.of_unit).toBe('Metre');
     // The other packs are still added.
     const after = plan.filter((i) => i.kind === 'pack' && i.name !== 'Roll').map((i) => i.name);
     expect(after.length).toBeGreaterThan(0);
     for (const name of after) expect(result.added.map((a) => a.name)).toContain(name);
   });
 
-  it('holds no pack in a starting set whose smaller unit is a pack of that set, one level only (ADR-100 note)', () => {
+  it('holds no loop in a starting set: a pack of a pack of the set always ends at a unit (ADR-107)', () => {
     for (const type of SHOP_TYPES) {
-      const packNames = new Set(type.packs.map((p) => p.name.toLowerCase()));
-      for (const p of type.packs) expect(packNames.has(p.of.toLowerCase()), `${type.id}: ${p.name} of ${p.of}`).toBe(false);
+      for (const p of type.packs) {
+        const seen = new Set<string>();
+        for (let at: string | undefined = p.name; at; at = type.packs.find((x) => x.name === at)?.of) {
+          expect(seen.has(at), `${type.id}: ${p.name}`).toBe(false);
+          seen.add(at);
+        }
+      }
     }
   });
 

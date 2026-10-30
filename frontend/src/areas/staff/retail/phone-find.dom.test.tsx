@@ -278,7 +278,7 @@ describe('Items', () => {
     getProduct.mockReturnValue(new Promise(() => undefined));
     show(<ProductsPage />);
     const row = await screen.findByRole('button', { name: /Test cable 2\.5mm/ });
-    expect(row.textContent).toContain('Test Cables · 2 Cartons and 3 pieces (27 pieces)');
+    expect(row.textContent).toContain('Test Cables · 2 cartons and 3 pieces (27 pieces)');
     expect(row.textContent).toContain('Selling price');
     expect(row.textContent).toContain('UGX 4,500');
     expect(screen.queryByRole('button', { name: 'Edit Test cable 2.5mm' })).toBeNull();

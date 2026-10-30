@@ -117,7 +117,7 @@ export function enteredPriceMinor(line: SaleLine): number {
 }
 
 /** Issue #650: an item's standard pack, the one its stock is shown in: a unit and how many base units one holds ("24.000"). */
-export type PackSize = { unit?: string; factor?: string };
+export type PackSize = { unit?: string; factor?: string; levels?: { unit?: string; factor?: string }[] };
 
 /**
  * Issue #650 (ADR-103): the pack an item's stock is shown and counted in, the one the server marks `standard` by its one rule
@@ -130,7 +130,9 @@ export function standardPack(product: Product): Pack | undefined {
 
 /** Issue #650: whether two packs are the same unit and size, so a count typed in one is never read in another. */
 export function samePack(a: PackSize | undefined, b: PackSize | undefined): boolean {
-  return a?.unit === b?.unit && sameFactor(a?.factor, b?.factor);
+  // Issue #699: the levels a count was typed in must be the same sizes too.
+  const sizes = (p: PackSize | undefined) => (ladderLevels(p) ?? []).map((l) => `${l.unit}:${l.size}`).join(',');
+  return a?.unit === b?.unit && sameFactor(a?.factor, b?.factor) && sizes(a) === sizes(b);
 }
 
 /** Issue #680: the full words of the short codes shops give their units, singular and plural. Add a code here when one turns up. */
@@ -176,8 +178,9 @@ export function unitWord(unit: string | undefined): string {
   return words ? words[0] : (unit ?? '');
 }
 
+/** A count in the words of a sentence: lower case, "2 cartons", "5 pieces" (one casing everywhere, review of #710). */
 function counted(milli: bigint, unit: string): string {
-  return quantityIn(qtyString(Number(milli)), unit);
+  return quantityIn(qtyString(Number(milli)), unit).toLowerCase();
 }
 
 /**
@@ -188,14 +191,41 @@ function counted(milli: bigint, unit: string): string {
  */
 export function packsAndPiecesParts(qty: string, unit: string | undefined, pack: PackSize | undefined): { inPacks: string; total?: string } {
   const f = factorMilli(pack?.factor);
-  if (!unit || !pack?.unit || f === null || f <= 1000n) return { inPacks: unit ? quantityIn(qty, unit) : showQty(qty) };
+  if (!unit || !pack?.unit || f === null || f <= 1000n) return { inPacks: unit ? quantityIn(qty, unit).toLowerCase() : showQty(qty) };
+  // Issue #699 (ADR-107): every whole level of the item's ladder, biggest first ("2 Cartons, 3 Boxes and 5 Pieces"); with no
+  // levels sent, the standard pack alone as before.
+  const levels = wholeLevelsOf(pack);
+  if (levels.length === 0) levels.push({ unit: pack.unit, size: f });
   const milli = BigInt(milliOf(qty));
   const size = milli < 0n ? -milli : milli;
-  const packs = size / f;
-  const rest = size - packs * f;
-  const parts = [packs > 0n ? counted(packs * 1000n, pack.unit) : '', rest > 0n || packs === 0n ? counted(rest, unit) : ''].filter(Boolean).join(' and ');
+  let rest = size;
+  const said: string[] = [];
+  for (const l of levels) {
+    const n = rest / l.size;
+    rest -= n * l.size;
+    if (n > 0n) said.push(counted(n * 1000n, l.unit));
+  }
+  const packed = said.length > 0;
+  if (rest > 0n || !packed) said.push(counted(rest, unit));
+  const parts = said.length > 1 ? `${said.slice(0, -1).join(', ')} and ${said[said.length - 1]}` : (said[0] ?? '');
   const inPacks = milli < 0n ? `${parts} short` : parts;
-  return packs > 0n ? { inPacks, total: `${quantityIn(qtyString(Number(size)), unit)}${milli < 0n ? ' short' : ''}` } : { inPacks };
+  return packed ? { inPacks, total: `${counted(size, unit)}${milli < 0n ? ' short' : ''}` } : { inPacks };
+}
+
+/** Issue #699: the whole levels of a pack's ladder holding more than one, biggest first, one per size. */
+function wholeLevelsOf(pack: PackSize | undefined): { unit: string; size: bigint }[] {
+  const levels: { unit: string; size: bigint }[] = [];
+  for (const l of pack?.levels ?? []) {
+    const size = factorMilli(l.factor);
+    if (l.unit && size !== null && size > 1000n && size % 1000n === 0n && !levels.some((x) => x.size === size)) levels.push({ unit: l.unit, size });
+  }
+  return levels.sort((a, b) => (a.size > b.size ? -1 : 1));
+}
+
+/** Issue #699: the levels a count takes a box each for, when the item has two or more; else null (cartons and pieces). */
+export function ladderLevels(pack: PackSize | undefined): { unit: string; size: bigint }[] | null {
+  const levels = wholeLevelsOf(pack);
+  return levels.length > 1 ? levels : null;
 }
 
 /** Issue #650: the same in one line, the one every screen says: "5 Cartons and 7 Pieces (127 Pieces)". */
@@ -205,9 +235,14 @@ export function packsAndPieces(qty: string, unit: string | undefined, pack: Pack
 }
 
 /** Issue #650: why a count or a move typed in packs and pieces cannot be read, or null when it can. */
-export function packsAndPiecesProblem(packs: string, pieces: string, unit: string, pack: string): string | null {
-  if (packs.trim() !== '' && !/^\d+$/.test(packs.trim())) return `Type whole ${plural(pack)}, and the rest in ${plural(unit)}.`;
-  if (pieces.trim() !== '' && parseCount(pieces) === null) return `Type ${plural(unit)} as a number, with at most three decimals.`;
+export function packsAndPiecesProblem(packs: string, pieces: string, unit: string, pack: string | string[]): string | null {
+  // Issue #699: a count at every level is one whole number per level, joined by "|"; the words name the level that is wrong
+  // (review of #710), lower case as in every sentence.
+  const levels = Array.isArray(pack) ? pack : [pack];
+  const bad = packs.split('|').findIndex((p) => p.trim() !== '' && !/^\d+$/.test(p.trim()));
+  const words = (name: string) => unitWords(name).toLowerCase();
+  if (bad >= 0) return `Type whole ${words(levels[bad] ?? levels[0] ?? '')}, and the rest in ${words(unit)}.`;
+  if (pieces.trim() !== '' && parseCount(pieces) === null) return `Type ${words(unit)} as a number, with at most three decimals.`;
   return null;
 }
 
@@ -216,6 +251,17 @@ export function packsAndPiecesProblem(packs: string, pieces: string, unit: strin
  * pieces. Pieces alone is the plain quantity. Null when nothing is typed, a part cannot be read, or the total is too large.
  */
 export function packsAndPiecesMilli(packs: string, pieces: string, pack: PackSize | undefined): number | null {
+  const levels = ladderLevels(pack);
+  if (levels) {
+    // Issue #699: one count per level, biggest first, joined by "|"; nothing typed at any level is the pieces alone.
+    const parts = packs.split('|').map((x) => x.trim());
+    if (parts.every((x) => x === '')) return pieces.trim() === '' ? null : parseCount(pieces);
+    if (parts.some((x) => x !== '' && !/^\d+$/.test(x))) return null;
+    const rest = pieces.trim() === '' ? 0 : parseCount(pieces);
+    if (rest === null) return null;
+    const sum = levels.reduce((t, l, i) => t + BigInt(parts[i] || '0') * l.size, BigInt(rest));
+    return sum > MAX_MILLI || sum > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(sum);
+  }
   const p = packs.trim();
   const f = factorMilli(pack?.factor);
   if (p === '' || f === null) return pieces.trim() === '' ? null : parseCount(pieces);

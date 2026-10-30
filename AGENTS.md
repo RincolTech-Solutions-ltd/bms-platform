@@ -824,7 +824,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `purpose` is for `both` again, as #627 set; the pack form sends the unit's usual Used for itself, and the CSV import makes its packs
   through the same `CatalogueService.createPack` (same checks, same audit). `PATCH /retail/units/{id}` takes `clear_usual_pack`, and the Units page has **Usual pack** on a unit's row: a sheet
   (`unit-usual-pack.tsx`) to change what it holds, the number and Used for, or Remove usual pack; items keep their packs. A usual
-  pack is one level only (422 `unit_is_a_pack`, `unit_counted_by_pack`), so Roll of Metre and Metre of Roll can never both be kept.
+  pack was one level only (422 `unit_is_a_pack`, `unit_counted_by_pack`), until ADR-107 (#699) let it count another pack and refuse only a loop (`would_loop`).
   Set up your shop reads the units back after a `duplicate_unit`, so a unit another phone added meanwhile is not called missing,
   and leaves out a pack of a unit that is a pack itself. `PURPOSES` is the one list of purpose values, labels and words
   (`asPurpose`). Help `add-a-unit` step 6. Tests: `RetailSellingPacksIT.aPackAddedWithNoPurposeIsForBothWhateverItsUnitsUsualPurpose`,
@@ -1290,6 +1290,11 @@ Accepted (this list is the ADR index):
 - ADR-106 A new item is added in its smallest unit, with its packages in one save: a package word (box, carton, dozen, set
   of N and the rest of `RetailCatalogue.PACKAGE_WORDS`) is refused as a new item's unit with 422 `unit_is_package`, every
   unit carries `is_package`, and `POST /retail/products` takes `packs`, made in the item's transaction (#689; no migration)
+- ADR-107 Packages inside packages, any depth: a pack may hold the item's unit or another of its packs (`holds_unit_id`,
+  `holds_qty`), the factor stays on every row and `PackLadder` works every level above a change out again, refusing a size
+  that is not a whole number of the level below (`not_whole`), a loop and a held level switched off; stock rows carry every
+  level, the usual buying level (`usual_buy`) is what Buy stock opens on, and a unit's usual pack may count another pack
+  (#699, D88; migration `V118`)
 
 Pending (cite only as "pending ADR-NNN"):
 

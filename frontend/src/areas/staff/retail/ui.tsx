@@ -13,7 +13,7 @@ import { useStockedBranches } from '../branch-picker';
 import { useStaff } from '../context';
 import { ItemPhoto, shownPhoto } from './item-photo';
 import { parseCount, qtyString, showQty } from './maths';
-import { packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem } from './units-state';
+import { ladderLevels, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, unitWords, type PackSize } from './units-state';
 import { plural } from '../../../app/glossary';
 import { BRANCH_ROLES, branchesWhere, canSeeProfit, canUse, capabilityOn, sellingBranches, type RetailScreen } from './permissions';
 import { keptWords } from './orders-state';
@@ -336,7 +336,8 @@ export function PacksAndPiecesFields({ id, nameId, unit, pack, packs, pieces, on
   id: string;
   nameId: string;
   unit: string;
-  pack: { unit: string; factor?: string };
+  pack: PackSize & { unit: string };
+  /** The packages typed; with every level of a ladder (issue #699), one count per level biggest first, joined by "|". */
   packs: string;
   pieces: string;
   onPacks: (text: string) => void;
@@ -350,10 +351,48 @@ export function PacksAndPiecesFields({ id, nameId, unit, pack, packs, pieces, on
   /** The quantity is refused for a reason of its own, such as more than the branch holds: both boxes are marked. */
   invalid?: boolean;
 }) {
-  const problem = packsAndPiecesProblem(packs, pieces, unit, pack.unit);
+  const problem = packsAndPiecesProblem(packs, pieces, unit, ladderLevels(pack)?.map((l) => l.unit) ?? pack.unit);
   const total = problem === null ? packsAndPiecesMilli(packs, pieces, pack) : null;
   // Going from one box to the other is not leaving the quantity: a count line moves to Counted items only once both are done.
   const leave = (other: string) => (e: FocusEvent<HTMLInputElement>) => { if (e.relatedTarget?.id !== other) onBlur?.(); };
+  // Issue #699 (ADR-107): an item with a ladder is counted with a box for each level, big to small, and the pieces left.
+  // JUSTIFICATION-A3: the count of every level is this field's own job, beside its one pack form below.
+  const levels = ladderLevels(pack);
+  if (levels) {
+    const parts = levels.map((_, i) => packs.split('|')[i] ?? '');
+    const boxId = (i: number) => (i === 0 ? `${id}-packs` : `${id}-packs-${i}`);
+    const others = new Set([id, ...levels.map((_, i) => boxId(i))]);
+    const leaveAll = (e: FocusEvent<HTMLInputElement>) => { if (!others.has(e.relatedTarget?.id ?? '')) onBlur?.(); };
+    return (
+      <>
+        <div className="count-entry count-packs count-levels">
+          {levels.map((l, i) => (
+            <span className="count-part" key={l.unit}>
+              <label id={`${boxId(i)}-label`} htmlFor={boxId(i)}>{plural(l.unit)}</label>
+              <input id={boxId(i)} inputMode="numeric" value={parts[i]} aria-labelledby={`${nameId} ${boxId(i)}-label`}
+                aria-invalid={invalid || ((parts[i] ?? '').trim() !== '' && !/^\d+$/.test((parts[i] ?? '').trim()))}
+                onChange={(e) => {
+                  const next = parts.map((p, j) => (j === i ? e.target.value.replace(/\|/g, '') : p));
+                  onPacks(next.every((p) => p.trim() === '') ? '' : next.join('|'));
+                }} onBlur={leaveAll}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById(i + 1 < levels.length ? boxId(i + 1) : id)?.focus(); } }} />
+            </span>
+          ))}
+          <span className="count-part">
+            <label id={`${id}-label`} htmlFor={id}>{plural(unit)}</label>
+            <input id={id} inputMode="decimal" value={pieces} aria-labelledby={`${nameId} ${id}-label`} aria-describedby={`${id}-total`}
+              aria-invalid={invalid || (pieces.trim() !== '' && parseCount(pieces) === null)} onChange={(e) => onPieces(e.target.value)} onBlur={leaveAll}
+              onKeyDown={onPiecesKeyDown} />
+          </span>
+          {after}
+        </div>
+        <p id={`${id}-total`} className="hint count-total" aria-live="polite">
+          {total !== null ? `${totalWord} ${packsAndPieces(qtyString(total), unit, pack)}` : 'Type what you counted at every level, big to small. The app adds them up.'}
+        </p>
+        {problem && <p role="alert" className="rt-flag">{problem}</p>}
+      </>
+    );
+  }
   return (
     <>
       <div className="count-entry count-packs">
@@ -372,7 +411,7 @@ export function PacksAndPiecesFields({ id, nameId, unit, pack, packs, pieces, on
         {after}
       </div>
       <p id={`${id}-total`} className="hint count-total" aria-live="polite">
-        {total !== null ? `${totalWord} ${packsAndPieces(qtyString(total), unit, pack)}` : `Type the ${plural(pack.unit)} and the ${plural(unit)} left, or all of it in ${plural(unit)}.`}
+        {total !== null ? `${totalWord} ${packsAndPieces(qtyString(total), unit, pack)}` : `Type the ${unitWords(pack.unit).toLowerCase()} and the ${unitWords(unit).toLowerCase()} left, or all of it in ${unitWords(unit).toLowerCase()}.`}
       </p>
       {problem && <p role="alert" className="rt-flag">{problem}</p>}
     </>

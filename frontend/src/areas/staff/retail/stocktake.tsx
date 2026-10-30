@@ -11,7 +11,7 @@ import { PACK_UNUSABLE, plusOne } from './barcode-state';
 import { SkeletonList } from '../../../components/states';
 import { BranchRequired, CategoryLabel, Gate, Note, PacksAndPiecesFields, Problem, useProfitAccess, useStockingBranch } from './ui';
 import { UNITS, capabilityOn, needsOf } from './permissions';
-import { chosenPack, packsAndPieces, packsAndPiecesMilli, samePack, type PackSize } from './units-state';
+import { chosenPack, packsAndPieces, packsAndPiecesMilli, samePack, unitWords, type PackSize } from './units-state';
 import { useStaff } from '../context';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { WORDS, plural } from '../../../app/glossary';
@@ -427,12 +427,12 @@ function CountSheet({ branchId }: { branchId: string }) {
           {flashOf(id)}
           <strong id={`count-${id}-name`}>{r.description}</strong>
           <CategoryLabel category={r.category} />
-          <PacksAndPiecesFields id={`count-${id}`} nameId={`count-${id}-name`} unit={r.unit} pack={{ unit: pack.unit, factor: pack.factor }} totalWord="Counted"
+          <PacksAndPiecesFields id={`count-${id}`} nameId={`count-${id}-name`} unit={r.unit} pack={{ unit: pack.unit, factor: pack.factor, levels: pack.levels }} totalWord="Counted"
             packs={typed?.text ?? ''} pieces={counts[id] ?? ''} onBlur={() => settle(id)} onPiecesKeyDown={enter} after={zero}
-            onPacks={(v) => setPackCounts((c) => ({ ...c, [id]: { text: v, pack: c[id] && c[id].text.trim() !== '' ? c[id].pack : { unit: pack.unit, factor: pack.factor } } }))}
+            onPacks={(v) => setPackCounts((c) => ({ ...c, [id]: { text: v, pack: c[id] && c[id].text.trim() !== '' ? c[id].pack : { unit: pack.unit, factor: pack.factor, levels: pack.levels } } }))}
             onPieces={(v) => setCounts((c) => ({ ...c, [id]: v }))} />
           {typed && typed.text.trim() !== '' && !samePack(typed.pack, r.standard_pack) && (
-            <p className="hint">{`Counted in ${plural(pack.unit ?? '')} of ${showQty(pack.factor ?? '')}, as when you started. This item's pack has changed since.`}</p>
+            <p className="hint">{`Counted in ${unitWords(pack.unit).toLowerCase()} of ${showQty(pack.factor ?? '')}, as when you started. This item's pack has changed since.`}</p>
           )}
           {entry.notes(id)}
           {savedMark(id)}
