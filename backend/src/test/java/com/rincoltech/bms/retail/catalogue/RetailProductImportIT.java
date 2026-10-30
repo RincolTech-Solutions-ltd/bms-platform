@@ -220,6 +220,30 @@ class RetailProductImportIT extends IntegrationTest {
         assertThat(products()).isEqualTo(2);
     }
 
+    /** Review of #715 (issue #698): spaces inside a name and another spelling of a unit find what the shop has. */
+    @Test
+    void anExistingCategoryWithOtherSpacingAndAUnitInAnotherSpellingAreMatched() {
+        api.category("Test Cables");
+        api.unit("Piece");
+        String csv = HEADER + "\nIMP-1,Test flex,Test  Cables,pcs,100\nIMP-2,Test twin,test   cables ,PC,200\n";
+        JsonNode dry = run(csv, true, ADMINISTRATOR).getBody();
+        assertThat(dry.get("errors").asInt()).isZero();
+        assertThat(dry.get("categories_created")).isEmpty();
+        assertThat(dry.get("units_created")).isEmpty();
+        ResponseEntity<JsonNode> applied = run(csv, false, ADMINISTRATOR);
+        assertThat(applied.getStatusCode()).as("%s", applied.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(applied.getBody().get("added").asInt()).isEqualTo(2);
+        assertThat(api.get("/categories", ADMIN).getBody().get("items")).hasSize(1);
+        assertThat(api.get("/units", ADMIN).getBody().get("items")).hasSize(1);
+
+        // Two new spellings in one file, spaces apart, make one category.
+        String two = HEADER + "\nIMP-3,Test glue,Test  Glues,pcs,100\nIMP-4,Test tape,test glues,pcs,200\n";
+        JsonNode planned = run(two, true, ADMINISTRATOR).getBody();
+        assertThat(planned.get("categories_created")).hasSize(1);
+        assertThat(run(two, false, ADMINISTRATOR).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(api.get("/categories", ADMIN).getBody().get("items")).hasSize(2);
+    }
+
     @Test
     void anExistingCategoryAndUnitAreMatchedIgnoringCase() {
         api.category("Drinks");

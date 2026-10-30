@@ -1,6 +1,7 @@
 package com.rincoltech.bms.retail.catalogue.internal;
 
 import com.rincoltech.bms.kernel.Search;
+import com.rincoltech.bms.retail.catalogue.CatalogueNames;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Category;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Pack;
@@ -195,7 +196,9 @@ class CatalogueRepository {
         jdbc.sql("""
                         INSERT INTO retail_categories (id, tenant_id, name, code_prefix, created_by)
                         VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?)
-                        """).params(id, name, codePrefix, createdBy).update();
+                        """)
+                .params(id, CatalogueNames.display(name), codePrefix, createdBy)
+                .update();
     }
 
     void insertUnit(UUID id, String name, UUID createdBy) {
@@ -217,28 +220,71 @@ class CatalogueRepository {
                 == 1;
     }
 
-    /** Lower-cased name to id, for the import's lookups. */
+    /** Name key ({@code CatalogueNames.nameKey}) to id, for the import's lookups. */
     Map<String, UUID> categoryIdsByName() {
         return namesToIds("retail_categories");
     }
 
+    // JUSTIFICATION-A3: the unit lookups by key replace lower(name) in one place, so every caller finds Piece.
+    /**
+     * Issue #698 (ADR-109): the units by their key ({@code CatalogueNames.unitKey}), so "pcs" finds Piece; where two units
+     * share a key (stored before issue #698, left for the owner to join), the one {@link #sameUnit} would answer.
+     */
     Map<String, UUID> unitIdsByName() {
-        return namesToIds("retail_units");
+        Map<String, UUID> ids = new java.util.HashMap<>();
+        unitsByPreference().forEach(u -> ids.putIfAbsent(CatalogueNames.unitKey(u.name()), u.id()));
+        return ids;
     }
 
-    /** Lower-cased names of switched-off categories, which an import must not add items to. */
+    /**
+     * Issue #698: the unit another name already stands for, other than {@code self}: of the units with its key, the switched
+     * on one first, then the one named as the unit's word ("Piece" before "Pcs"), then by name.
+     */
+    Optional<Unit> sameUnit(String name, UUID self) {
+        String key = CatalogueNames.unitKey(name);
+        return unitsByPreference()
+                .filter(u ->
+                        !u.id().equals(self) && CatalogueNames.unitKey(u.name()).equals(key))
+                .findFirst();
+    }
+
+    private java.util.stream.Stream<Unit> unitsByPreference() {
+        return units().stream()
+                .sorted(java.util.Comparator.comparing((Unit u) -> !u.active())
+                        .thenComparing(u -> !CatalogueNames.unitKey(u.name())
+                                .equalsIgnoreCase(u.name().trim())));
+    }
+
+    /** Issue #698: the tenant's lock for one unit key, so two people adding "pc" and "pcs" at once make one unit. */
+    void lockUnitKey(String name) {
+        jdbc.sql(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(current_setting('app.tenant_id') || ':unit:' || :k, 0))")
+                .param("k", CatalogueNames.unitKey(name))
+                .query(rs -> {});
+    }
+
+    /** Name keys of switched-off categories, which an import must not add items to. */
     Set<String> inactiveCategoryNames() {
         return inactiveNames("retail_categories");
     }
 
+    /** Issue #698: the unit keys whose unit ({@link #unitIdsByName}) is switched off. */
     Set<String> inactiveUnitNames() {
-        return inactiveNames("retail_units");
+        Set<String> off = new java.util.HashSet<>();
+        Set<String> seen = new java.util.HashSet<>();
+        unitsByPreference().forEach(u -> {
+            if (seen.add(CatalogueNames.unitKey(u.name())) && !u.active()) {
+                off.add(CatalogueNames.unitKey(u.name()));
+            }
+        });
+        return off;
     }
 
     private Set<String> inactiveNames(String table) {
-        return new java.util.HashSet<>(jdbc.sql("SELECT lower(name) FROM " + table + " WHERE NOT active")
-                .query(String.class)
-                .list());
+        return new java.util.HashSet<>(
+                jdbc.sql("SELECT name FROM " + table + " WHERE NOT active").query(String.class).list().stream()
+                        .map(CatalogueNames::nameKey)
+                        .toList());
     }
 
     /** Decimal places of a currency (UGX 0, KES 2), from the currencies table. */
@@ -251,9 +297,10 @@ class CatalogueRepository {
 
     private Map<String, UUID> namesToIds(String table) {
         Map<String, UUID> ids = new java.util.HashMap<>();
-        jdbc.sql("SELECT id, lower(name) AS n FROM " + table)
+        // Issue #698: keyed as names are compared, spaces inside counted once, so "Test  Cables" finds "Test Cables".
+        jdbc.sql("SELECT id, name FROM " + table + " ORDER BY created_at, id")
                 .query((rs, n) -> {
-                    ids.put(rs.getString("n"), rs.getObject("id", UUID.class));
+                    ids.putIfAbsent(CatalogueNames.nameKey(rs.getString("name")), rs.getObject("id", UUID.class));
                     return 0;
                 })
                 .list();
@@ -354,9 +401,12 @@ class CatalogueRepository {
     Map<String, String> productNames() {
         Map<String, String> out = new java.util.HashMap<>();
         jdbc.sql(
-                        "SELECT p.name_key, lower(btrim(u.name)) AS unit, p.code FROM retail_products p JOIN retail_units u ON u.id = p.unit_id ORDER BY p.code")
+                        "SELECT p.name_key, u.name AS unit, p.code FROM retail_products p JOIN retail_units u ON u.id = p.unit_id ORDER BY p.code")
                 .query((rs, n) -> {
-                    out.putIfAbsent(rs.getString("name_key") + NAME_SEP + rs.getString("unit"), rs.getString("code"));
+                    // Issue #698: the unit by its key, as the import keys a row's unit.
+                    out.putIfAbsent(
+                            rs.getString("name_key") + NAME_SEP + CatalogueNames.unitKey(rs.getString("unit")),
+                            rs.getString("code"));
                     return 0;
                 })
                 .list();
@@ -542,7 +592,8 @@ class CatalogueRepository {
                 .param("active", p.active())
                 .param("id", p.id())
                 .param("code", p.code())
-                .param("description", p.description())
+                // Issue #698 (D86 = A): every item name is stored in the one display style, whichever way it was added.
+                .param("description", CatalogueNames.display(p.description()))
                 .param("categoryId", p.categoryId())
                 .param("unitId", p.unitId())
                 .param("costMinor", p.costMinor())
@@ -563,7 +614,8 @@ class CatalogueRepository {
                 .param("nameChanged", nameChanged)
                 .param("id", p.id())
                 .param("code", p.code())
-                .param("description", p.description())
+                // A name is restyled only when it is changed: an edit of a price never moves it unaudited.
+                .param("description", nameChanged ? CatalogueNames.display(p.description()) : p.description())
                 .param("categoryId", p.categoryId())
                 .param("unitId", p.unitId())
                 .param("active", p.active())
@@ -700,7 +752,6 @@ class CatalogueRepository {
                 .query(CatalogueRepository::pack)
                 .optional();
     }
-
     /** The sell price in force at {@code at} (see {@link com.rincoltech.bms.retail.catalogue.RetailCatalogue#sellMinorAt}). */
     long sellMinorAt(UUID productId, java.time.Instant at) {
         return jdbc.sql("""
@@ -980,7 +1031,7 @@ class CatalogueRepository {
                         VALUES (:id, current_setting('app.tenant_id')::uuid, :name, :base, :category, :unit, :by, :reason)
                         """)
                 .param("id", id)
-                .param("name", name)
+                .param("name", CatalogueNames.display(name))
                 .param("base", baseCode)
                 .param("category", categoryId)
                 .param("unit", unitId)
@@ -998,7 +1049,7 @@ class CatalogueRepository {
                                duplicate_reason = CASE WHEN :renamed THEN :reason ELSE duplicate_reason END
                          WHERE id = :id AND version = :version
                         """)
-                .param("name", name)
+                .param("name", CatalogueNames.display(name))
                 .param("category", categoryId)
                 .param("renamed", renamed)
                 .param("reason", duplicateReason, java.sql.Types.VARCHAR)
@@ -1052,7 +1103,7 @@ class CatalogueRepository {
                 .param("size", size, java.sql.Types.VARCHAR)
                 .param("colour", colour, java.sql.Types.VARCHAR)
                 .param("position", position)
-                .param("description", description)
+                .param("description", CatalogueNames.display(description))
                 .param("id", productId)
                 .update();
     }
@@ -1148,7 +1199,7 @@ class CatalogueRepository {
                 .param("bump", bump)
                 .param("size", size, java.sql.Types.VARCHAR)
                 .param("colour", colour, java.sql.Types.VARCHAR)
-                .param("description", description)
+                .param("description", CatalogueNames.display(description))
                 .param("id", productId)
                 .update();
     }

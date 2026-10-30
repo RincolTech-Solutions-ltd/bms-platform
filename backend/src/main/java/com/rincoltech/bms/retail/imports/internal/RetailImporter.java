@@ -324,9 +324,15 @@ public class RetailImporter {
                         case "branches.jsonl" -> run.branches(file);
                         case "categories.jsonl" ->
                             run.named(file, n -> catalogue.ensureCategory(n).created(), 100, run.namedCategories);
-                        case "units.jsonl" ->
+                        case "units.jsonl" -> {
+                            // Issue #698: every unit key of the file locked first, in key order, as in the CSV import.
+                            catalogue.lockUnits(texts(file, "name"));
                             run.named(file, n -> catalogue.ensureUnit(n).created(), 30, run.namedUnits);
-                        case "products.jsonl" -> run.products(file);
+                        }
+                        case "products.jsonl" -> {
+                            catalogue.lockUnits(texts(file, "unit"));
+                            run.products(file);
+                        }
                         case "suppliers.jsonl" ->
                             run.named(file, n -> purchases.ensureSupplier(n).created(), 200, run.namedSuppliers);
                         case "customers.jsonl" -> run.customers(file);
@@ -381,6 +387,22 @@ public class RetailImporter {
     private static final java.util.regex.Pattern TRAILING_NUMBER = java.util.regex.Pattern.compile("^(.*?)(\\d+)$");
 
     /** Source ids in natural order: the same prefix, then the trailing number as a number (ADV-9 before ADV-10). */
+    /** The text of one field on every row that has it as text; a row where it is not text is reported by its own read. */
+    static List<String> texts(ExportFile file, String field) {
+        List<String> out = new ArrayList<>();
+        for (ExportFile.Row row : file.rows) {
+            try {
+                String s = row.text(field);
+                if (s != null) {
+                    out.add(s);
+                }
+            } catch (RuntimeException e) {
+                // Left to the row's own read, which reports it in its place.
+            }
+        }
+        return out;
+    }
+
     static int naturalOrder(String a, String b) {
         java.util.regex.Matcher x = TRAILING_NUMBER.matcher(a);
         java.util.regex.Matcher y = TRAILING_NUMBER.matcher(b);

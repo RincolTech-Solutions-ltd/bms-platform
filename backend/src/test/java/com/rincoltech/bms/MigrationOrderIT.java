@@ -68,7 +68,8 @@ class MigrationOrderIT {
                     Path.of(MigrationOrderIT.class.getResource("/db/migration").toURI());
             try (Stream<Path> files = Files.list(dir)) {
                 return files.map(f -> f.getFileName().toString())
-                        .filter(n -> n.matches("V\\d+__.*\\.sql"))
+                        // A Java migration (V120, ADR-109) is its compiled class here; its records are not migrations.
+                        .filter(n -> n.matches("V\\d+__[^$]*\\.(sql|class)"))
                         .map(n -> n.substring(1, n.indexOf("__")))
                         .sorted(Comparator.comparingInt(Integer::parseInt))
                         .toList();
@@ -1647,9 +1648,10 @@ class MigrationOrderIT {
             assertThat(owner.sql("""
                                     SELECT count(*) FROM retail_products
                                      WHERE id = ? AND family_id IS NULL AND variant_size IS NULL AND variant_colour IS NULL
-                                       AND variant_sort IS NULL AND description = 'Test romper' AND code = 'T1' AND version = 1
+                                       AND variant_sort IS NULL AND description = 'Test Romper' AND code = 'T1' AND version = 2
                                     """).param(product).query(Long.class).single())
-                    .as("the item is its own single variant, untouched")
+                    // V120 (issue #698) moved only the case of its name, and its version with it.
+                    .as("the item is its own single variant, untouched but for the case of its name")
                     .isEqualTo(1);
             assertThat(owner.sql("SELECT qty::text FROM retail_stock_balances WHERE product_id = ?")
                             .param(product)
@@ -2339,7 +2341,8 @@ class MigrationOrderIT {
                             .param(tenant)
                             .query(String.class)
                             .list())
-                    .containsExactly("Blub BLBA", "Bulbs BLB", "Phone accessories PHA");
+                    // V120 (issue #698, ADR-109) puts the name in the display style, by case only.
+                    .containsExactly("Blub BLBA", "Bulbs BLB", "Phone Accessories PHA");
             assertThat(owner.sql("SELECT code_prefix FROM retail_categories WHERE tenant_id = ?")
                             .param(other)
                             .query(String.class)

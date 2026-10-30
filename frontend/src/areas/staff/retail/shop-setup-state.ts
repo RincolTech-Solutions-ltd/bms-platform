@@ -1,6 +1,7 @@
 import { RetailError, type Category, type RetailApi, type Unit } from '../../../api/retail';
 import { PURPOSES, asPurpose, type Purpose } from './catalogue-packs';
 import type { ShopType } from './shop-starters';
+import { listedWord } from './units-state';
 
 // Set up your shop (issue #625): what a starting set would add to this shop, and adding it through the routes that add one
 // category or one unit, so no new endpoint is needed. A name the shop has already, in any case and switched on or off, is
@@ -21,7 +22,8 @@ export interface SetupItem {
 }
 
 export const key = (kind: ItemKind, name: string) => `${kind}:${name.toLowerCase()}`;
-const same = (a: string | undefined, b: string) => (a ?? '').trim().toLowerCase() === b.trim().toLowerCase();
+// Issue #698: a unit in another spelling of the one list is the same ("Pcs" is Piece), as the server holds it.
+const same = (a: string | undefined, b: string) => listedWord(a ?? '') === listedWord(b);
 
 /** The starting set against what the shop has: each category, unit and pack, with what adding it would do. */
 export function planSetup(type: ShopType, categories: Category[], units: Unit[]): SetupItem[] {
@@ -123,7 +125,8 @@ export async function applySetup(api: Pick<RetailApi, 'createCategory' | 'create
       result.added.push({ kind: 'pack', name: item.name, detail: packText(pack.size, of.name ?? '', pack.purpose) });
     } catch (error) {
       // Added meanwhile, on another phone: it is there, which is what was asked.
-      if (error instanceof RetailError && (error.code === 'duplicate_category' || error.code === 'duplicate_unit')) {
+      // Issue #698: a unit the shop has under another spelling ("Pcs" for Piece) answers unit_exists, which is the same.
+      if (error instanceof RetailError && (error.code === 'duplicate_category' || error.code === 'unit_exists')) {
         // Review of #628 (issue #637): a unit added meanwhile is read back, so its packs find it and are not skipped as missing,
         // and a pack's unit added there with no usual size gets this one.
         try {

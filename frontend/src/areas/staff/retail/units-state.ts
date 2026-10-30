@@ -1,5 +1,6 @@
-import type { Pack, Product, SaleLine } from '../../../api/retail';
+import { RetailError, type Pack, type Product, type SaleLine, type Unit } from '../../../api/retail';
 import { plural } from '../../../app/glossary';
+import unitWordList from '../../../words/unit-words.json';
 import { milliOf, parseCount, qtyString, showQty } from './maths';
 
 // Units of measure (ADR-033, issue #194): the pure conversions the sale and restock forms show before
@@ -135,23 +136,51 @@ export function samePack(a: PackSize | undefined, b: PackSize | undefined): bool
   return a?.unit === b?.unit && sameFactor(a?.factor, b?.factor) && sizes(a) === sizes(b);
 }
 
-/** Issue #680: the full words of the short codes shops give their units, singular and plural. Add a code here when one turns up. */
-const UNIT_WORDS: Record<string, [string, string]> = {
-  pc: ['piece', 'pieces'],
-  pcs: ['piece', 'pieces'],
-  ltr: ['litre', 'litres'],
-  ltrs: ['litre', 'litres'],
-  kg: ['kilogram', 'kilograms'],
-  kgs: ['kilogram', 'kilograms'],
-  ctn: ['carton', 'cartons'],
-  ctns: ['carton', 'cartons'],
-  pkt: ['packet', 'packets'],
-  pkts: ['packet', 'packets'],
-  bx: ['box', 'boxes'],
-  doz: ['dozen', 'dozens'],
-  dz: ['dozen', 'dozens'],
-  mtr: ['metre', 'metres'],
-};
+/**
+ * Issue #680: the full words of the short codes shops give their units, singular and plural. Issue #698 (ADR-109): built from
+ * the one list, src/words/unit-words.json, which the server reads too; add a code there.
+ */
+const UNIT_WORDS: Record<string, [string, string]> = Object.fromEntries(
+  unitWordList.units.flatMap((u) => u.codes.map((code) => [code, [u.word, u.plural]] as const)),
+);
+
+// JUSTIFICATION-A3: one helper the six add-a-unit forms share, so each needs a one-line change (issue #698).
+/** Issue #698: every spelling the one list gives a unit, its word first ("piece", "pieces", "pc", "pcs", "pce"). */
+export function spellingsOf(word: string): string[] {
+  const u = unitWordList.units.find((x) => x.word === word);
+  return u ? [u.word, u.plural, ...u.codes, ...u.also] : [word];
+}
+
+/** A unit name as the word of the one list when it is one of its spellings ("PCS" is "piece"), else lower case and trimmed. */
+export function listedWord(name: string): string {
+  const n = name.trim().toLowerCase();
+  return unitWordList.units.find((u) => spellingsOf(u.word).includes(n))?.word ?? n;
+}
+
+/** A unit the shop added, or one it already had under another spelling or case (`reused`, from 409 unit_exists). */
+export type AddedUnit = Unit & { reused?: boolean };
+
+/**
+ * Issue #698 (ADR-109): the add of a unit, answering the unit the shop already has when the server says it exists ("pcs" when
+ * Piece exists), so the form chooses it instead of showing an error. Any other failure is passed on.
+ */
+export function orExistingUnit(added: Promise<Unit>): Promise<AddedUnit> {
+  return added.catch((error: unknown) => {
+    const p = error instanceof RetailError ? (error.problem ?? {}) : {};
+    // Only a refusal that names the unit can choose it; one added a moment ago elsewhere stays an error (review of #715).
+    if (!(error instanceof RetailError) || error.code !== 'unit_exists' || !p['existing_id']) throw error;
+    // A switched-off unit cannot be chosen for an item, so it is said, not chosen (review of #715).
+    if (p['existing_active'] === false) {
+      throw new RetailError(`You already have ${String(p['existing_name'] ?? '')}, switched off. Switch it on in Units.`, 409, 'unit_exists', p);
+    }
+    return { id: String(p['existing_id'] ?? ''), name: String(p['existing_name'] ?? ''), active: p['existing_active'] !== false, reused: true };
+  });
+}
+
+/** The plain message after adding a unit: "Added the unit Tray." or "You already have Piece. It is chosen." */
+export function unitAddedText(unit: AddedUnit): string {
+  return unit.reused ? `You already have ${unit.name ?? ''}. It is chosen.` : `Added the unit ${unit.name ?? ''}.`;
+}
 
 /**
  * Issue #680: a quantity with its unit in full words, as a person says it: "1 piece", "8 pieces", "1 Carton", "3 Cartons". A

@@ -9,6 +9,7 @@ import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.Versions;
+import com.rincoltech.bms.retail.catalogue.CatalogueNames;
 import com.rincoltech.bms.retail.catalogue.RetailPricing;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.AddVariantsRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.BranchStock;
@@ -86,7 +87,8 @@ class FamilyService {
         catalogue.requireCategoryAndUnit(r.categoryId(), r.unitId(), null, null);
         // Issue #689 (ADR-106): a new item with sizes is never counted in a package either.
         catalogue.refusePackageUnit(r.unitId());
-        String name = r.name().trim();
+        // Issue #698 (D86 = A): the one display style, as the repository stores it.
+        String name = CatalogueNames.display(r.name());
         // Issue #562: the item's base code is the category's next code, such as BLB-0007, and never typed.
         if (r.baseCode() != null && !r.baseCode().isBlank()) {
             throw CatalogueService.codeMadeByApp("base_code", CatalogueService.MADE_BY_APP);
@@ -305,7 +307,7 @@ class FamilyService {
                 throw ApiException.validation(
                         List.of(new FieldProblem("name", "required", "Give the item a name, such as Twin cable.")));
             }
-            name = r.name().trim();
+            name = CatalogueNames.display(r.name());
             catalogue.requireCategoryAndUnit(categoryId, unitId, null, null);
             // Issue #562: later sizes take the first item's code, the one the app gave it; a typed base code is
             // refused.
@@ -434,7 +436,7 @@ class FamilyService {
         if (before.version() != expected) {
             throw Versions.conflict(before.version());
         }
-        String name = r.name() == null ? before.name() : r.name().trim();
+        String name = r.name() == null ? before.name() : CatalogueNames.display(r.name());
         UUID categoryId = r.categoryId() == null ? before.categoryId() : r.categoryId();
         if (name.isEmpty()) {
             throw ApiException.validation(List.of(new FieldProblem("name", "invalid", "The name must not be blank.")));
