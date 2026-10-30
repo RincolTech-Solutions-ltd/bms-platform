@@ -22,8 +22,9 @@ import { PacksTurnOn } from './catalogue-packs';
 import { NewItemPackages, UsualLevel, answeredPieces, forSmallest, newPackageRow, packErrorOf, packageAsUnit, packsToSend, piecePriceOf, rowProblem, rowsAsRungs, type PackageRow, type UsualAnswer } from './new-item-packs';
 import { UNITS, branchesWhere, canUse, capabilityOn, holds, holdsAt } from './permissions';
 import { ladderOfProduct, perPieceMinor, type Rung } from './ladder-state';
-import { factorMilli, ladderLevels, packsAndPiecesMilli, packsAndPiecesParts, packsAndPiecesProblem, type PackSize } from './units-state';
+import { factorMilli, ladderLevels, packsAndPiecesMilli, packsAndPiecesParts, packsAndPiecesProblem, spellingsOf, type PackSize } from './units-state';
 import { UnitPicker } from './unit-picker';
+import { QuickAddedNext } from './next-steps';
 import { Gate, PacksAndPiecesFields, Problem, money, useProfitAccess, useStockingBranch } from './ui';
 
 // Quick add (issue #632): a shop owner needed nine steps on four screens to add one item and its stock, and said AppSheet was
@@ -47,8 +48,8 @@ const BUY = 'retail.purchase.create';
 export const PAID_TICK = 'I just bought these, take the money from cash';
 type PaidFrom = 'cash' | 'mobile_money';
 const PAID_FROM: { value: PaidFrom; label: string }[] = [{ value: 'cash', label: 'Cash' }, { value: 'mobile_money', label: 'Mobile money' }];
-/** The piece unit a shop may already have, lower case, in the order the server prefers them. */
-const PIECE_NAMES = ['piece', 'pc', 'pcs'];
+/** The piece unit a shop may already have, lower case, in the order the server prefers them (the one list, issue #698). */
+const PIECE_NAMES = spellingsOf('piece');
 
 /** The shop's piece unit, which the form starts with; undefined when the shop has none yet (the server makes Piece). */
 export function pieceUnit(units: Unit[]): Unit | undefined {
@@ -402,10 +403,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
         )}
         {done.note && <p className="hint" data-testid="qa-photo-note">{done.note}</p>}
         {notHere && <p className="hint" data-testid="qa-not-here">{sellsThere ? `You do not sell at ${atName}, so Sell it is not offered here.` : `${atName} is a store, so the item is sold from a shop.`}</p>}
-        <p className="cluster">
-          <button type="button" className="rt-primary" onClick={another}>Add another</button>
-          {canSell && <button type="button" onClick={() => onSell(done.added.product_id ?? '', at)}>Sell it</button>}
-        </p>
+        <QuickAddedNext added={done.added} onAnother={another} onSell={canSell ? () => onSell(done.added.product_id ?? '', at) : undefined} />
       </section>
     );
   }

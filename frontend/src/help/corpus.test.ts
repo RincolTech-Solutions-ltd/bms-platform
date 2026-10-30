@@ -625,7 +625,8 @@ describe('adding an item quickly (issue #632)', () => {
     ['areas/staff/retail/quick-add.tsx', 'app/glossary.ts'],
     // Issue #695: the packages questions are the shared rows of Add an item.
     ['areas/staff/retail/quick-add.tsx', 'areas/staff/retail/item-photo.tsx', 'areas/staff/retail/new-item-packs.tsx'],
-    ['areas/staff/retail/quick-add.tsx'],
+    // Issue #700: the buttons after the add (Add another, Sell it, Count it now) are the Next row in next-steps.tsx.
+    ['areas/staff/retail/quick-add.tsx', 'areas/staff/retail/next-steps.tsx'],
     ['areas/staff/retail/quick-add.tsx'],
   ];
   const source = (files: string[]) => files.map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')).join('\n');

@@ -398,20 +398,21 @@ class EntryChecksIT extends IntegrationTest {
         item("Twin and earth cable 4 mm", cables);
         item("LED bulb 9W screw", lighting);
 
-        assertThat(descriptions(hints("SINGLECABLE"))).containsExactly("Single cable 1.5mm", "Single Cable 2.5 mm");
+        // Names are stored in the display style (issue #698, ADR-109).
+        assertThat(descriptions(hints("SINGLECABLE"))).containsExactly("Single Cable 1.5mm", "Single Cable 2.5 mm");
         // The same name with other spacing comes first; a name one letter apart follows it.
         assertThat(descriptions(hints("single  cable 2.5mm")))
-                .containsExactly("Single Cable 2.5 mm", "Single cable 1.5mm");
+                .containsExactly("Single Cable 2.5 mm", "Single Cable 1.5mm");
         assertThat(descriptions(hints("Singel Cable 2.5 mm"))).containsExactly("Single Cable 2.5 mm");
-        assertThat(descriptions(hints("led bulb"))).containsExactly("LED bulb 9W screw");
+        assertThat(descriptions(hints("led bulb"))).containsExactly("LED Bulb 9W Screw");
         assertThat(hints("le").get("did_you_mean")).isEmpty();
         // Only the first 200 characters are read: what follows them changes nothing.
         String first200 = "LED bulb" + " ".repeat(192);
         assertThat(first200).hasSize(200);
-        assertThat(descriptions(hints(first200 + "z".repeat(100)))).containsExactly("LED bulb 9W screw");
+        assertThat(descriptions(hints(first200 + "z".repeat(100)))).containsExactly("LED Bulb 9W Screw");
         assertThat(hints("  ").get("did_you_mean")).isEmpty();
         JsonNode first = hints("SINGLECABLE").get("did_you_mean").get(0);
-        assertThat(first.get("category").asString()).isEqualTo("Cables and wires");
+        assertThat(first.get("category").asString()).isEqualTo("Cables and Wires");
         assertThat(first.get("code").asString()).isNotBlank();
     }
 
@@ -428,12 +429,12 @@ class EntryChecksIT extends IntegrationTest {
 
         JsonNode c = hints("Armoured cable 16mm").get("category");
         assertThat(c.get("id").asString()).isEqualTo(cables.toString());
-        assertThat(c.get("name").asString()).isEqualTo("Cables and wires");
+        assertThat(c.get("name").asString()).isEqualTo("Cables and Wires");
         assertThat(c.get("items_like").asInt()).isEqualTo(2);
         // The most shared words win: "LED bulb" shares two words with one item and one with another.
         JsonNode bulb = hints("LED bulb 12W").get("category");
         assertThat(bulb.get("name").asString()).isEqualTo("Lighting");
-        assertThat(bulb.get("example").asString()).isEqualTo("LED bulb 9W screw");
+        assertThat(bulb.get("example").asString()).isEqualTo("LED Bulb 9W Screw");
         assertThat(hints("Padlock 40mm").has("category")).isFalse();
     }
 

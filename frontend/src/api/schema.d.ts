@@ -3632,6 +3632,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/short-link-rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The reserved names and the one Cloudflare single redirect built from them, for the operator (ADR-108) */
+        get: operations["getShortLinkRule"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/short-links/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Follow a short link: 302 to the shop, to its new address while an old name forwards, or to the page 'No shop uses this link' (ADR-108) */
+        get: operations["followShortLink"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/short-links/{name}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Follow a short link: 302 to the shop, to its new address while an old name forwards, or to the page 'No shop uses this link' (ADR-108) */
+        get: operations["followShortLink_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/sign-up/applications": {
         parameters: {
             query?: never;
@@ -3660,6 +3711,23 @@ export interface paths {
         put?: never;
         /** Answer the operator's question; the application returns to the queue (FR-ONB-04) */
         post: operations["signUpReply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/sign-up/short-name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Check a short name as it is typed, with free suggestions when it is not free (ADR-108) */
+        get: operations["signUpCheckShortName"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7593,6 +7661,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/short-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The business's short link (ADR-108) */
+        get: operations["getShortLink"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/sms": {
         parameters: {
             query?: never;
@@ -8049,9 +8134,13 @@ export interface components {
             modules?: string[];
             /** @description The operator's question, while the status is needs_info */
             operator_note?: string;
+            /** @description A new name a repeat sign-up asked for, applied by the confirm call */
+            pending_short_name?: string;
             reference?: string;
             /** @description The reason, when rejected */
             reject_reason?: string;
+            /** @description The short name asked for, or null (ADR-108) */
+            short_name?: string;
             /** @description submitted, needs_info, verified, activated, rejected or expired */
             status?: string;
             term?: string;
@@ -19250,6 +19339,26 @@ export interface components {
             /** @description A photo can be read too (a provider that reads pictures is set) */
             photos?: boolean;
         };
+        ShortLink: {
+            /** @description As a person types it, for example rincoltech.com/testduka */
+            link?: string;
+            /** @description The short name, which is also the app's address (the slug) */
+            short_name?: string;
+            /** @description The same with https://, for the Copy button */
+            url?: string;
+        };
+        ShortLinkRule: {
+            /** @description The single redirect's custom filter expression */
+            expression?: string;
+            /** @description Names the rule leaves to the website and sign-up refuses */
+            reserved?: string[];
+            /** @description The host the short links are on, for example rincoltech.com */
+            short_link_host?: string;
+            /** Format: int32 */
+            status_code?: number;
+            /** @description The dynamic target URL expression */
+            target?: string;
+        };
         SignInRequest: {
             /** @description Email, or phone for staff */
             login: string;
@@ -19294,11 +19403,25 @@ export interface components {
             modules: string[];
             /** @description Optional: the referral code of the business that referred the applicant (the ?ref= of its link). An unknown code is 422 referral_code_unknown (ADR-069) */
             referral_code?: string;
+            /** @description The short name for the shop's link rincoltech.com/<short name>, which is also its address: 3 to 20 lower case letters and digits, a hyphen may join two words. A taken one is 409 short_name_taken with suggestions (ADR-108). Optional for one release, for a sign-up page from before it: the server then picks a free one from the business name */
+            short_name?: string;
             term: string;
+            /** @description Optional: the shop's town or area, for short name suggestions */
+            town?: string;
             /** @description trial: one month free; paid: subscribe now */
             way_in: string;
             /** @description Leave empty. A hidden field: a value marks the request as automated */
             website?: string;
+        };
+        SignUpShortNameCheck: {
+            available?: boolean;
+            /** @description Plain words, for example 'testduka is taken.' */
+            message?: string;
+            name?: string;
+            /** @description invalid, reserved or taken; null when available */
+            problem?: string;
+            /** @description Free names: the town or area first, then a shorter form, then a number */
+            suggestions?: string[];
         };
         /** @description The text to show before switching on, and its version */
         SmsAcknowledgement: {
@@ -26363,6 +26486,66 @@ export interface operations {
             };
         };
     };
+    getShortLinkRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShortLinkRule"];
+                };
+            };
+        };
+    };
+    followShortLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Location is the shop's address or the not found page */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    followShortLink_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Location is the shop's address or the not found page */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     signUpApply: {
         parameters: {
             query?: never;
@@ -26407,6 +26590,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicantView"];
+                };
+            };
+        };
+    };
+    signUpCheckShortName: {
+        parameters: {
+            query: {
+                name: string;
+                business_name?: string;
+                town?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignUpShortNameCheck"];
                 };
             };
         };
@@ -33389,6 +33596,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotificationSettings"];
+                };
+            };
+        };
+    };
+    getShortLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShortLink"];
                 };
             };
         };

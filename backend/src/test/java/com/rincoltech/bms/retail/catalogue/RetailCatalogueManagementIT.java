@@ -76,6 +76,32 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                 .list();
     }
 
+    // JUSTIFICATION-A3: the review of #715 asks for this switch-off of a stored duplicate to be proven by an IT.
+    /**
+     * Review of #715 (issue #698): a pair stored before names compared spaces inside ("Test Cables" and "test  cables") can
+     * still have one switched off, which is the only way to retire it; only a new name is checked.
+     */
+    @Test
+    void aDuplicateStoredBeforeCanStillBeSwitchedOff() {
+        UUID kept = api.category("Test Cables");
+        UUID spaced = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql(
+                        "INSERT INTO retail_categories (id, tenant_id, name, code_prefix) VALUES (?, ?, 'test  cables', 'TCX')")
+                .params(spaced, t.tenantId())
+                .update();
+        ResponseEntity<JsonNode> off = patch("/categories/" + spaced, Map.of("active", false), ADMIN);
+        assertThat(off.getStatusCode()).as("%s", off.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(off.getBody().get("active").asBoolean()).isFalse();
+        ResponseEntity<JsonNode> recoded = patch("/categories/" + spaced, Map.of("code_prefix", "TCY"), ADMIN);
+        assertThat(recoded.getStatusCode()).as("%s", recoded.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(recoded.getBody().get("code_prefix").asString()).isEqualTo("TCY");
+        // Renaming it to the other spelling is still a duplicate.
+        ResponseEntity<JsonNode> renamed = patch("/categories/" + spaced, Map.of("name", "TEST CABLES"), ADMIN);
+        assertThat(renamed.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(renamed.getBody().get("existing_id").asString()).isEqualTo(kept.toString());
+    }
+
     @Test
     void aCategoryIsRenamedAndDeactivatedNeverDeleted() {
         UUID product = api.product("MGT-1", 1_000, 1_500);
@@ -515,9 +541,13 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                     patchIfMatch(target.path(), Map.of("name", "Test Second " + target.table()), ADMIN, "1");
             assertThat(stale.getStatusCode()).as(target.table()).isEqualTo(HttpStatus.CONFLICT);
             assertThat(stale.getBody().get("code").asString()).isEqualTo("version_conflict");
+            // A category name is stored in the display style (issue #698, ADR-109); the others as typed.
+            String stored = target.table().equals("retail_categories")
+                    ? CatalogueNames.display("Test First " + target.table())
+                    : "Test First " + target.table();
             assertThat(target.row())
                     .as(target.table())
-                    .containsEntry("name", "Test First " + target.table())
+                    .containsEntry("name", stored)
                     .containsEntry("version", 2);
         }
     }

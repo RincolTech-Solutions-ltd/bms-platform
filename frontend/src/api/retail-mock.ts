@@ -19,6 +19,7 @@ import { createReturnsMock } from './retail-returns-mock';
 import { createPurchasingMock } from './retail-purchasing-mock';
 import { barcodeKey, checkBarcode, scanKeys, shopEan } from '../areas/staff/retail/barcode-state';
 import { bigDrop } from '../areas/staff/retail/maths';
+import { listedWord } from '../areas/staff/retail/units-state';
 import { MAX_VARIANTS, cleanOption, planVariants, variantDescription, variantKey, variantLabel } from './retail-variants';
 
 // Fabricated retail data for VITE_RETAIL_MOCK and for tests: invented products, branches and
@@ -344,8 +345,13 @@ export function createMockRetail(): RetailApi {
     const levels = own.filter((k) => Number.isInteger(Number(k.factor))).map((k) => ({ unit: k.unit, factor: k.factor }));
     return top ? { standard_pack: { unit: top.unit, factor: top.factor, levels } } : {};
   };
-  const clash = (list: { id: string; name: string }[], id: string, name: string, code: string, what: string) => {
-    if (list.some((x) => x.id !== id && x.name.toLowerCase() === name.trim().toLowerCase())) refuse(409, code, `A ${what} with this name exists.`);
+  // Issue #698: the refusal names the row that exists; a unit compares by the one list's spellings ("pcs" is Piece).
+  const clash = (list: { id: string; name: string; active?: boolean }[], id: string, name: string, code: string, what: string) => {
+    const key = (n: string) => (what === 'unit' ? listedWord(n) : n.trim().toLowerCase());
+    const hit = list.find((x) => x.id !== id && key(x.name) === key(name));
+    if (!hit) return;
+    if (what === 'unit') refuse(409, 'unit_exists', `You already have ${hit.name}.`, { existing_id: hit.id, existing_name: hit.name, existing_active: hit.active !== false });
+    refuse(409, code, `A ${what} with this name exists.`, { existing_id: hit.id, existing_name: hit.name });
   };
   const staleRow = (row: { version?: number }, version: number) => {
     if ((row.version ?? 1) !== version) refuse(409, 'version_conflict', 'This was changed by someone else. Reload and try again.');

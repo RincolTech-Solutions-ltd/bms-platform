@@ -33,6 +33,10 @@ export const HELP_TIPS = {
     label: 'Put items together as sizes',
     text: 'Use it when each size was added as its own item. Each one keeps its code too, so its labels and past sales still match.',
   },
+  countItNow: {
+    label: 'Count it now',
+    text: 'Opens Count stock with this item ready. Type how many are on the shelf, then review and commit the count.',
+  },
   appraisal: {
     label: 'Appraisal',
     text: 'The check of whether the member can repay, done before the loan is decided. Its score only advises, and a person decides.',

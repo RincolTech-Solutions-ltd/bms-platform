@@ -16,6 +16,7 @@ import com.rincoltech.bms.core.platform.TenantProvisioning.NewTenant;
 import com.rincoltech.bms.core.referrals.Referrals;
 import com.rincoltech.bms.core.tenancy.ModuleManifest;
 import com.rincoltech.bms.core.tenancy.PlatformHost;
+import com.rincoltech.bms.core.tenancy.ShortNames;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.BusinessClock;
@@ -91,6 +92,7 @@ class ApplicationService {
     private final SignUpRateLimiter limiter;
     private final OnboardingProperties caps;
     private final Referrals referrals;
+    private final ShortNames shortNames;
     private final Set<String> moduleKeys;
 
     ApplicationService(
@@ -104,7 +106,9 @@ class ApplicationService {
             SignUpRateLimiter limiter,
             OnboardingProperties caps,
             Referrals referrals,
+            ShortNames shortNames,
             List<ModuleManifest> manifests) {
+        this.shortNames = shortNames;
         this.jdbc = jdbc;
         this.transactions = new TransactionTemplate(transactionManager);
         this.outbox = outbox;
@@ -144,6 +148,17 @@ class ApplicationService {
             throw ApiException.validation(
                     List.of(new FieldProblem("business_name", "required", "Give the business and contact names.")));
         }
+        // ADR-108: the short name is checked for shape here and claimed under its lock below; the first to confirm
+        // keeps
+        // it. A form from before this release sends none (for one release): a free one is picked from the business
+        // name.
+        String typed = ShortNames.normalise(request.shortName());
+        if (!typed.isEmpty()) {
+            ShortNames.refusal(typed).ifPresent(refused -> {
+                throw ShortNames.refused("short_name", refused);
+            });
+        }
+        String shortName = typed.isEmpty() ? pickShortName(businessName, request.town()) : typed;
         // ADR-069: a code typed wrong is refused in plain words before anything is created; it says nothing about the
         // email, so the same-answer rule below still holds. A code of a business the applicant runs (their email or
         // phone is its Owner's or an administrator's) is dropped quietly and the answer is the usual one, so the form
@@ -166,6 +181,12 @@ class ApplicationService {
             if (capReached(now)) {
                 return;
             }
+            // Who holds a name never depends on the email given, so a 409 says nothing about who applied (FR-ONB-03).
+            // A picked name taken meanwhile is kept unclaimed: the confirmation clears it if it is still taken then.
+            if (!typed.isEmpty() && shortNames.takenBy(typed, null, true).isPresent()) {
+                throw ShortNames.taken(
+                        "short_name", typed, shortNames.suggestions(typed, businessName, request.town()));
+            }
             String mailbox = jdbc.sql("SELECT onboarding_email_key(?)")
                     .param(email)
                     .query(String.class)
@@ -179,7 +200,7 @@ class ApplicationService {
             UUID id = UUID.randomUUID();
             String reference = reference();
             boolean created = Boolean.TRUE.equals(
-                    jdbc.sql("SELECT onboarding_application_create(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                    jdbc.sql("SELECT onboarding_application_create(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                             .params(
                                     id,
                                     reference,
@@ -195,7 +216,8 @@ class ApplicationService {
                                     blankToNull(text(request.message())),
                                     hash,
                                     Timestamp.from(now.plus(LINK_TTL)),
-                                    Timestamp.from(now))
+                                    Timestamp.from(now),
+                                    shortName)
                             .query(Boolean.class)
                             .single());
             // A repeat goes to the address just submitted, which the key treats as the same mailbox,
@@ -223,6 +245,15 @@ class ApplicationService {
                     return;
                 }
                 reference = open.get().reference();
+                // ADR-108: a repeat's short name, just claimed as free, replaces the name of an unconfirmed application
+                // (which holds nothing). On a confirmed one it waits as pending until the fresh link just sent to the
+                // mailbox is opened, so a stranger who knows the email cannot release a name (review of #713, round 3).
+                if (!typed.isEmpty()) {
+                    jdbc.sql("SELECT onboarding_application_set_short_name(?, ?, ?)")
+                            .params(email, typed, Timestamp.from(now))
+                            .query()
+                            .singleRow();
+                }
                 // ADR-069 decision 13: a returning applicant's code goes on the open application while it has no
                 // referrer
                 // and is still submitted; the database leaves an earlier code, or one in review, as it is.
@@ -243,6 +274,25 @@ class ApplicationService {
                     throttle,
                     now.plus(LINK_TTL)));
         });
+    }
+
+    /** ADR-108: a short name as the applicant types it, free or with free suggestions, the town or area first. */
+    ShortNames.Check checkShortName(String name, String businessName, String town) {
+        limiter.acquire(SignUpRateLimiter.SHORT_NAME_PER_IP, RequestContext.clientIp());
+        return shortNames.check(name, businessName, town, null);
+    }
+
+    /** A free short name from the business name, its first word or the first free suggestion; null when none is free. */
+    private String pickShortName(String businessName, String town) {
+        // Accents dropped first, as the suggestions and the form do, so "Tèstduka" gives testduka.
+        String first = ShortNames.normalise(
+                        Normalizer.normalize(businessName, Normalizer.Form.NFD).replaceAll("\\p{M}", ""))
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim()
+                .split(" ")[0];
+        ShortNames.Check c =
+                shortNames.check(first.length() > 20 ? first.substring(0, 20) : first, businessName, town, null);
+        return c.available() ? c.name() : c.suggestions().stream().findFirst().orElse(null);
     }
 
     /**
@@ -356,7 +406,17 @@ class ApplicationService {
                             rs.getString("status"),
                             strings(rs.getArray("matched_on"))))
                     .list();
-            String slug = "activated".equals(application.status()) ? null : suggestSlug(application.businessName());
+            // ADR-108: the short name the applicant chose while it is free, else one from the business name.
+            String chosen = jdbc.sql("SELECT onboarding_application_short_name(?)")
+                    .param(id)
+                    .query(String.class)
+                    .optional()
+                    .orElse(null);
+            String slug = "activated".equals(application.status())
+                    ? null
+                    : chosen != null && shortNames.takenBy(chosen, id, false).isEmpty()
+                            ? chosen
+                            : suggestSlug(application.businessName());
             return new ApplicationDetail(
                     application,
                     duplicates,
@@ -448,6 +508,10 @@ class ApplicationService {
             throw notVerified();
         }
         String slug = request.slug().trim().toLowerCase(Locale.ROOT);
+        // ADR-108 decision 4: the slug is the short link, so its shape and the reserved list apply here too.
+        ShortNames.refusal(slug).ifPresent(refused -> {
+            throw ShortNames.refused("slug", refused);
+        });
         AtomicReference<Instant> activatedAt = new AtomicReference<>();
         Optional<Created> created = provisioning.create(
                 new NewTenant(
@@ -466,6 +530,10 @@ class ApplicationService {
                 new TenantProvisioning.Steps() {
                     @Override
                     public boolean before() {
+                        // ADR-108: the name's lock first, then the application's row, the order a sign-up and a
+                        // confirmation take them, so none of the three can deadlock another (review of #713, round 4).
+                        // A name another confirmed application chose is not this one's to take.
+                        Optional<String> holder = shortNames.takenBy(slug, id, true);
                         Lock lock = jdbc.sql("SELECT * FROM onboarding_application_lock(?)")
                                 .param(id)
                                 .query((rs, n) -> new Lock(rs.getString("status")))
@@ -477,7 +545,19 @@ class ApplicationService {
                         if (!"verified".equals(lock.status())) {
                             throw notVerified();
                         }
+                        if (holder.filter(by -> !by.equals("tenant")).isPresent()) {
+                            throw new ApiException(
+                                    HttpStatus.CONFLICT,
+                                    "duplicate_slug",
+                                    "Slug taken",
+                                    "Another application chose this short name.");
+                        }
                         return true;
+                    }
+
+                    @Override
+                    public UUID application() {
+                        return id;
                     }
 
                     @Override
@@ -504,6 +584,7 @@ class ApplicationService {
                                 DateTimeFormatter.ofPattern("d MMM yyyy HH:mm 'UTC'", Locale.ENGLISH)
                                         .format(tenant.invitationExpiresAt().atOffset(ZoneOffset.UTC)));
                         params.put("sign_in_url", hosts.tenantOrigin(tenant.slug()) + "/sign-in");
+                        params.put("short_link", shortNames.link(tenant.slug()));
                         outbox.enqueue(new Outbox.Message(
                                 Outbox.EMAIL,
                                 application.contactEmail(),
@@ -615,12 +696,41 @@ class ApplicationService {
                                 rs.getString("operator_note"),
                                 rs.getString("reject_reason"),
                                 rs.getBoolean("email_verified"),
-                                rs.getTimestamp("created_at").toInstant())))
+                                rs.getTimestamp("created_at").toInstant(),
+                                null,
+                                null)))
                 .optional()
                 // The row was found by its hash; the digests are compared again in constant time
                 // so no code path depends on a byte-by-byte comparison of secret material.
                 .filter(link -> MessageDigest.isEqual(
-                        link.hash().getBytes(StandardCharsets.US_ASCII), hash.getBytes(StandardCharsets.US_ASCII)));
+                        link.hash().getBytes(StandardCharsets.US_ASCII), hash.getBytes(StandardCharsets.US_ASCII)))
+                // ADR-108: the short name and a pending one, for the applicant page.
+                .map(link -> jdbc.sql(
+                                "SELECT short_name, pending_short_name FROM onboarding_application_names_by_link(?, ?)")
+                        .params(hash, Timestamp.from(clock.now()))
+                        .query((rs, n) -> new Link(
+                                link.id(),
+                                link.hash(),
+                                link.newlyVerified(),
+                                withNames(link.view(), rs.getString("short_name"), rs.getString("pending_short_name"))))
+                        .optional()
+                        .orElse(link));
+    }
+
+    private static ApplicantView withNames(ApplicantView v, String shortName, String pending) {
+        return new ApplicantView(
+                v.reference(),
+                v.status(),
+                v.businessName(),
+                v.modules(),
+                v.term(),
+                v.wayIn(),
+                v.operatorNote(),
+                v.rejectReason(),
+                v.emailVerified(),
+                v.createdAt(),
+                shortName,
+                pending);
     }
 
     /** Rate limit, then shape: a malformed token gets the same answer as an unknown one. */
@@ -634,7 +744,8 @@ class ApplicationService {
 
     /**
      * A free slug from the business name (FR-TEN-02): lower case letters, digits and hyphens, at
-     * most 40 characters, with a number appended when taken; null when none of the first ten is free.
+     * most 17 characters so that with a number appended when taken it is still a short name of 20 at most (ADR-108);
+     * null when none of the first ten is free.
      */
     String suggestSlug(String businessName) {
         String base = Normalizer.normalize(businessName, Normalizer.Form.NFD)
@@ -642,8 +753,8 @@ class ApplicationService {
                 .toLowerCase(Locale.ROOT)
                 .replaceAll("[^a-z0-9]+", "-")
                 .replaceAll("(^-+|-+$)", "");
-        if (base.length() > 40) {
-            base = base.substring(0, 40).replaceAll("-+$", "");
+        if (base.length() > 17) {
+            base = base.substring(0, 17).replaceAll("-+$", "");
         }
         if (base.length() < 3) {
             base = (base + "-shop").replaceAll("^-+", "");

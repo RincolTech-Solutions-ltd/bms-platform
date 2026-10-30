@@ -7,6 +7,7 @@ import { retail, type Category, type Product } from '../../../api/retail';
 import { useCrumbLabel, useCrumbTail } from '../../../components/breadcrumbs';
 import { useStaff } from '../context';
 import { Editing, ProductCard, ProductForm } from './catalogue-products';
+import { ItemAddedNext } from './next-steps';
 import { ScreenLink } from './screen-link';
 import { ScreenToast } from './toast';
 import { Gate, Problem, changeFailureText, requireVersion, useProfitAccess, useToast } from './ui';
@@ -88,12 +89,15 @@ export function CategoryPage({ categoryId }: { categoryId: string }) {
   const canManage = (me.permissions ?? []).includes(MANAGE);
   const canPrice = (me.permissions ?? []).includes('retail.price.edit');
   const back = () => setView({ mode: 'list' });
-  const saved = (text: string) => {
+  // Issue #700: the item Add an item just saved, whose next steps lead the list.
+  const [added, setAdded] = useState<Product | undefined>(undefined);
+  const saved = (text: string, item?: Product) => {
+    setAdded(item);
     show(text, 'success');
     void queryClient.invalidateQueries({ queryKey: ['retail'] });
     back();
   };
-  const open = (id: string) => setView({ mode: 'edit', id });
+  const open = (id: string) => { setAdded(undefined); setView({ mode: 'edit', id }); };
   useCrumbTail(view.mode === 'new' ? 'Add an item' : undefined, back);
   const card = (p: Product) => (
     <ProductCard
@@ -114,6 +118,7 @@ export function CategoryPage({ categoryId }: { categoryId: string }) {
       {view.mode === 'list' && (categories.isPending || category) && (
         // The anchors of the page tour are drawn before the category arrives, so they are there when the tour starts.
         <>
+          {added && <ItemAddedNext item={added} onAnother={() => setView({ mode: 'new' })} />}
           {category?.active === false && <p><span className="badge badge-warning">Switched off</span></p>}
           <p className="hint" data-tour="category-codes">{category ? codeLine(category) : 'Loading'}</p>
           {canManage && (

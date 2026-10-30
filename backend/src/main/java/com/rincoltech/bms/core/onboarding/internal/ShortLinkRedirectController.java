@@ -1,0 +1,84 @@
+package com.rincoltech.bms.core.onboarding.internal;
+
+import com.rincoltech.bms.core.tenancy.PlatformHost;
+import com.rincoltech.bms.core.tenancy.ShortNames;
+import com.rincoltech.bms.kernel.PublicEndpoint;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * Where the one Cloudflare rule on rincoltech.com sends a short link (issue #708, ADR-108 decision 3), on the platform host,
+ * with no sign-in: {@code /platform/short-links/<name>} answers a 302 to the shop's current address, to the new address
+ * while an old name still forwards, and otherwise to the page "No shop uses this link". {@code /platform/short-link-rule}
+ * gives the operator the reserved names and the rule built from them, to copy into the Cloudflare dashboard.
+ */
+@RestController
+@Tag(name = "sign-up")
+class ShortLinkRedirectController {
+
+    private final ShortNames names;
+    private final PlatformHost hosts;
+
+    ShortLinkRedirectController(ShortNames names, PlatformHost hosts) {
+        this.names = names;
+        this.hosts = hosts;
+    }
+
+    @Schema(name = "ShortLinkRule")
+    record Rule(
+            @Schema(description = "The host the short links are on, for example rincoltech.com")
+            String shortLinkHost,
+
+            @Schema(description = "Names the rule leaves to the website and sign-up refuses")
+            List<String> reserved,
+
+            @Schema(description = "The single redirect's custom filter expression")
+            String expression,
+
+            @Schema(description = "The dynamic target URL expression")
+            String target,
+
+            int statusCode) {}
+
+    // The rule forwards /name/ as typed, so the trailing slash form is the same link.
+    @GetMapping({"/api/v1/platform/short-links/{name}", "/api/v1/platform/short-links/{name}/"})
+    @PublicEndpoint
+    @Operation(
+            summary =
+                    "Follow a short link: 302 to the shop, to its new address while an old name forwards, or to the page 'No shop uses this link' (ADR-108)",
+            operationId = "followShortLink")
+    @ApiResponse(responseCode = "302", description = "Location is the shop's address or the not found page")
+    ResponseEntity<Void> follow(@PathVariable("name") String name) {
+        String location = names.target(name)
+                .map(slug -> hosts.tenantOrigin(slug) + "/")
+                .orElseGet(() -> hosts.platformOrigin() + "/link-not-found?name="
+                        + URLEncoder.encode(ShortNames.normalise(name), StandardCharsets.UTF_8));
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(URI.create(location))
+                .header("Cache-Control", "no-store")
+                .build();
+    }
+
+    @GetMapping(path = "/api/v1/platform/short-link-rule", produces = MediaType.APPLICATION_JSON_VALUE)
+    @PublicEndpoint
+    @Operation(
+            summary =
+                    "The reserved names and the one Cloudflare single redirect built from them, for the operator (ADR-108)",
+            operationId = "getShortLinkRule")
+    Rule rule() {
+        ShortNames.Rule r = names.rule(hosts.platformOrigin());
+        return new Rule(r.shortLinkHost(), r.reserved(), r.expression(), r.target(), r.statusCode());
+    }
+}

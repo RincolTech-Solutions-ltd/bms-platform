@@ -1,27 +1,20 @@
-import react from '@vitejs/plugin-react';
 import { chromium, type Browser } from 'playwright';
-import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { openLayout } from './open';
 
 // Quick add laid out in Chromium (issue #642): on a phone 360, 390 and 412 wide, at the default and a large font size, the page
 // never scrolls sideways and every field, its label, its control and its hint or error ends inside the form. Before the fix the
 // photo's one uncut hint line widened the whole .stack column to 429px on a 412px phone. The page is layout/quick-add.html under
 // the app's own stylesheets.
 
-let server: ViteDevServer;
 let browser: Browser;
-let base = '';
 
 beforeAll(async () => {
-  server = await createServer({ configFile: false, root: process.cwd(), plugins: [react()], logLevel: 'error', server: { port: 0, host: '127.0.0.1' } });
-  await server.listen();
-  base = server.resolvedUrls?.local[0] ?? '';
   browser = await chromium.launch();
 });
 
 afterAll(async () => {
   await browser?.close();
-  await server?.close();
 });
 
 // Issue #695: with cartons on, Yes, a carton of 24 and How many in cartons and pieces fit a 412px phone and a laptop, and on
@@ -30,7 +23,7 @@ afterAll(async () => {
 describe.each([412, 1280])('Quick add in cartons at %ipx wide', (width) => {
   it('fits, with the package rows, full cartons and loose pieces', async () => {
     const page = await browser.newPage({ viewport: { width, height: 900 }, ...(width < 720 ? { hasTouch: true, isMobile: true } : {}) });
-    await page.goto(`${base}layout/quick-add.html?packs=1`);
+    await openLayout(page, 'layout/quick-add.html?packs=1', page.getByRole('radio', { name: 'Yes' }));
     await page.getByRole('radio', { name: 'Yes' }).click();
     await page.locator('#item-pack-unit-1').selectOption('u9');
     await page.fill('#item-pack-size-1', '24');
@@ -49,8 +42,7 @@ describe.each([412, 1280])('Quick add in cartons at %ipx wide', (width) => {
 describe.each([360, 390, 412])('Quick add at %ipx wide', (width) => {
   it.each([1, 2])('fits the phone at font scale %i, before and after Add shows the errors', async (font) => {
     const page = await browser.newPage({ viewport: { width, height: 900 }, hasTouch: true, isMobile: true });
-    await page.goto(`${base}layout/quick-add.html?font=${font}`);
-    await page.locator('#qa-name').waitFor();
+    await openLayout(page, `layout/quick-add.html?font=${font}`, page.locator('#qa-name'));
     for (const step of ['open', 'after Add'] as const) {
       if (step === 'after Add') {
         await page.getByRole('button', { name: 'Add', exact: true }).click();

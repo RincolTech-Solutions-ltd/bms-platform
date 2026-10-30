@@ -4,9 +4,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
-import type { Unit } from '../../../api/retail';
+import { RetailError, type Unit } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
+import { ScreenToast } from './toast';
 
 // Issue #619: Counted in on both item forms never leaves a person stuck. With no units it says so and adds one by its name, which
 // is then chosen; with units there is still "Add a new unit"; someone who may not add one is told to ask the owner. Fabricated
@@ -97,6 +98,25 @@ describe('Counted in (issue #619)', () => {
     fireEvent.keyDown(select, { key: 'Enter' });
     fireEvent.change(select, { target: { value: ADD_CHOICE } });
     expect(await screen.findByRole('dialog', { name: 'Add a unit' })).toBeTruthy();
+  });
+
+  it('chooses Piece when "pcs" is typed and the shop has Piece, and says so plainly (issue #698)', async () => {
+    createUnit.mockRejectedValue(new RetailError('You already have Piece.', 409, 'unit_exists', { code: 'unit_exists', existing_id: 'u1', existing_name: 'Piece', existing_active: true }));
+    const toast = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <StaffContext.Provider value={{ me: mockMe('admin'), branch: '' }}>
+          <ScreenToast.Provider value={toast}><Harness units={[{ ...piece, name: 'Piece' }]} /></ScreenToast.Provider>
+        </StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    fireEvent.change(screen.getByLabelText(/^Counted in/), { target: { value: ADD_CHOICE } });
+    fireEvent.change(await screen.findByLabelText(/^Name of the new unit/), { target: { value: 'pcs' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add unit' }));
+    await waitFor(() => expect(screen.getByTestId('chosen').textContent).toBe('u1'));
+    expect(createUnit).toHaveBeenCalledWith('pcs');
+    expect(toast).toHaveBeenCalledWith('You already have Piece. It is chosen.', 'success');
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('keeps the form open with the server words when the unit cannot be added', async () => {

@@ -112,6 +112,8 @@ class OutboxTemplates {
 
                     After that, sign in at {sign_in_url}
 
+                    Your shop's short link is {short_link}. Share it with your customers.
+
                     Rincol Tech
                     """,
                     "Set my password",
@@ -128,6 +130,8 @@ class OutboxTemplates {
                     {link}
 
                     After that, sign in at {sign_in_url}
+
+                    Your shop's short link is {short_link}. Share it with your customers.
 
                     Rincol Tech
                     """,
@@ -919,7 +923,24 @@ class OutboxTemplates {
             throw new IllegalArgumentException("no " + channel + " template " + templateKey);
         }
         return new Rendered(
-                template.subject() == null ? null : fill(template.subject(), params), fill(template.text(), params));
+                template.subject() == null ? null : fill(template.subject(), params),
+                fill(withoutMissingOptional(template.text(), params), params));
+    }
+
+    /**
+     * Parameters a row queued before they existed may lack (ADR-108: an activation email queued before the short link
+     * release): the paragraph holding one is left out instead of failing the message.
+     */
+    static final java.util.Set<String> OPTIONAL = java.util.Set.of("short_link");
+
+    private static String withoutMissingOptional(String text, Map<String, String> params) {
+        String out = text;
+        for (String name : OPTIONAL) {
+            if (!params.containsKey(name)) {
+                out = out.replaceAll("(?m)^[^\\n]*\\{" + name + "}[^\\n]*\\n\\n?", "");
+            }
+        }
+        return out;
     }
 
     /**
@@ -935,7 +956,7 @@ class OutboxTemplates {
         }
         return EmailLayout.content(
                 fill(template.subject(), params),
-                template.text(),
+                withoutMissingOptional(template.text(), params),
                 params,
                 template.button(),
                 template.reason(),

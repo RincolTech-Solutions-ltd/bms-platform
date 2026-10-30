@@ -294,7 +294,24 @@ warning. Row-level security is enabled and forced with no policy (`bms_owner` ha
 is granted to `bms_app`: the definer functions owned by `bms_owner` are its only way in (create,
 relink, created since, read by link, reply, list, counts, duplicates, decide, lock, activated,
 expire, purge, and since `V88` set referrer and referrer). Rejected and
-expired rows are deleted 90 days after `closed_at` (FR-ONB-09).
+expired rows are deleted 90 days after `closed_at` (FR-ONB-09). Since `V119` (issue #708, ADR-108): `short_name varchar(63)`,
+the short name the applicant chose (null on older rows, and cleared at the confirmation when someone else has it by then),
+unique over the open statuses whose email is confirmed (`onboarding_applications_one_open_per_short_name`), so the first to
+confirm keeps it and an unconfirmed application holds nothing; read through `onboarding_application_short_name`, replaced
+on a repeat sign-up with a new free name through `onboarding_application_set_short_name` while the email is not
+confirmed; on a confirmed application the new name goes into `pending_short_name varchar(63)` and is applied, if still
+free, only when the applicant presses the change button on the page that fresh link opens (the page reads both names
+through `onboarding_application_names_by_link`; Keep is the default answer); the trigger
+`onboarding_clear_pending_short_name` clears it whenever the application leaves the open statuses (activated, rejected,
+expired). `V119` adds
+`onboarding_application_create` with `p_short_name` as a 16 argument overload; V23's 15 argument one becomes a wrapper
+calling it with NULL, kept for the server still running during a deploy and dropped by a later migration. It replaces
+`onboarding_application_by_link` (defined only in V23 before it), which claims the name under its lock at the
+confirmation and applies a pending name when a link of a confirmed application is opened, taking the names' locks before
+the row's, the order a sign-up takes them. `short_name_taken` says who has
+a name (a business, or a confirmed open application; with `p_lock` it first takes the name's advisory lock, which every
+claim takes: the sign-up, the confirmation, Activate and the operator's tenant creation) and `short_link_target` where a
+short link goes (the active or suspended business with that slug).
 
 ### `referral_commission_rules` and `referral_settings` (platform; no privilege for `bms_app`, definer functions only; `V88`, ADR-069)
 
@@ -417,7 +434,7 @@ last minute), then by due time, and locks the best twenty candidates in that ord
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK | |
-| `slug` | `varchar(63) UNIQUE NOT NULL` | `CHECK (slug ~ '^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])$')`; reserved labels refused by the service (FR-TEN-02). |
+| `slug` | `varchar(63) UNIQUE NOT NULL` | `CHECK (slug ~ '^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])$')`; reserved labels refused by the service (FR-TEN-02). The shop's short name (FR-TEN-12, ADR-108), kept for good. |
 | `name` | `text NOT NULL` | |
 | `status` | `text NOT NULL` | [`active`, `suspended`]. FR-TEN-06. |
 | `currency` | `char(3) NOT NULL` | FK `currencies`. Default `UGX`. |
@@ -2471,6 +2488,8 @@ Built: units of measure (issue #194, migration V39). `retail_product_units` (`id
 Built: a buying pack's size per delivery (issue #554, ADR-082, no migration). `unit_factor` on `retail_purchase_lines` and `retail_goods_receipt_lines` is the size each pack held in that delivery, which may differ from the pack's usual `retail_product_units.factor`; the existing checks (`qty_total = unit_qty_total x unit_factor`, `qty = unit_qty x unit_factor`, `unit_factor >= 1`) hold it. "Use from now on" updates `retail_product_units.factor` (version raised, audited) under the product row lock. Every reading of a stored line converts with its own `unit_factor`.
 
 Built: selling packs with their own prices (issue #624, owner decision D23, ADR-099, migration V110). `retail_product_units` gains `purpose text NOT NULL DEFAULT 'both'` (`buy`, `sell` or `both`) and `sell_minor bigint` (null, or 0 to 10^13: the selling price of one pack for a walk-in sale; null is the piece price times the size, rounded half up once), with the check `retail_product_units_buy_unpriced_chk` (a pack only for buying has no selling price), and the partial index `retail_stock_balances_product_held` on `(tenant_id, product_id) WHERE qty > 0` for the item's average cost per piece that Edit item's Below cost reads. Every existing row reads `both` and null, so it sells and buys exactly as before. A sale line still keeps what it charged (`sale_unit_price_minor`, `line_total_minor`) and the average cost per piece (`unit_cost_minor`, ADR-079), so profit stays per piece. A new size of an item copies the packs' purpose, and their own prices only when it sells at the same piece price.
+
+Built: one unit for many spellings and one display style for names (issue #698, owner decision D86 = A, ADR-109, migration V120). No table, column, constraint, grant or policy changes. `V120` is the first Java migration (`backend/src/main/java/db/migration`), so it uses the application's own display rule (`CatalogueNames.display`). Category, item and item-with-sizes names take the display style where that changes only their case, each with `version` and `updated_at` moved (so delta sync reads them again) and audited with the name before and after and `source` `V120`; a name with extra spaces keeps them until it is next saved. Units are not touched: duplicates already stored ("pc" beside "Piece") are left for the owner to join (owner decision on pull request #715), and where two share a key the name lookups use the switched-on one, then the one named as the unit's word. Row security is dropped, when the owner cannot bypass it, only on the written tables that force it, and restored on exactly those. Nothing is deleted. The unique name indexes are unchanged: they already ignore case, and a key match across spellings is the catalogue service's check under a per-key advisory lock.
 
 Built: packages inside packages, any depth (issue #699, owner decision D88, ADR-107, migration V118). `retail_product_units` gains `holds_unit_id uuid` (the level one pack holds: the item's own unit or another pack's unit of the same item; no foreign key, since that rule is narrower than a key and the catalogue service checks it on every write, and every constraint of the table stays validated) and `holds_qty integer` (how many of it, at least 2, review of #710: one would be the size of the level below), both or neither and never the pack's own unit (CHECK `retail_product_units_holds_chk`), and `usual_buy boolean NOT NULL DEFAULT false`, the level Buy stock opens on (CHECK `retail_product_units_usual_buy_chk`: never on a pack only for selling; at most one per item, the partial unique index `retail_product_units_usual_buy` on `(tenant_id, product_id) WHERE usual_buy`). `factor` stays on every row and is still what stock, sales, purchases and counts read; the catalogue service keeps `factor = holds_qty x` the factor of the level held, any depth, because the rule spans rows. Every existing row reads null and false, so it holds its factor of the item's unit as before. The stock rows' `standard_pack.levels` read every active whole pack biggest first (`RetailCatalogue.packLevelsSql`); no stock table changes.
 

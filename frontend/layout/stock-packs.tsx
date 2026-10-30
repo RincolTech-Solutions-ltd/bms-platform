@@ -1,10 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
+import { RouterContextProvider } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
 import type { Me } from '../src/api/client';
 import type { AllBranchesStock, Product, StockRow } from '../src/api/retail';
 import { mockMe } from '../src/api/retail-mock';
-import { router as appRouter } from '../src/app/router';
 import { StaffContext } from '../src/areas/staff/context';
 import { AllBranchesList, StockTable } from '../src/areas/staff/retail/stock';
 import { StocktakePage } from '../src/areas/staff/retail/stocktake';
@@ -13,6 +12,7 @@ import { Gate } from '../src/areas/staff/retail/ui';
 import { StaffTabBar } from '../src/areas/staff/tabs';
 import '../src/app/theme.css';
 import '../src/app/ui/index.css';
+import { layoutRouter } from './router';
 
 // The page stock-packs.layout.test.ts lays out in a real browser (issue #650): ?screen=stock, all, count or move shows Stock (one shop, or All branches on a phone), Count
 // stock or Move stock with items kept in cartons and pieces, inside the app shell and the staff layout, under the app's own stylesheets.
@@ -44,7 +44,7 @@ sessionStorage.setItem(`retail-draft:transfer:${me.user_id ?? ''}:${branch}`, JS
 }));
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
 client.setQueryData(['retail', 'stock', branch, '', false], rows);
-const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/retail/stock'] }) });
+const router = layoutRouter('/staff/retail/stock');
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <RouterContextProvider router={router}>

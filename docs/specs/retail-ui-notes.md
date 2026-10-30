@@ -1783,3 +1783,15 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
   its identifier.
 - **Retail settings** returns Hint (#575) now links to the returns row of the approval rules ("Set a returns limit in Approval
   rules").
+
+## Next steps as big buttons (issue #700)
+
+- After **Add an item** saves (on Items and on a category), a card under the toast offers **Count it now** (the one primary
+  action, with a help tip), **Add another** and **Sell it**. Count it now opens Count stock at the branch in use with the item at
+  the top of the sheet and its count box focused (`/staff/retail/stocktake?item=<id>&from=items`); the sheet then shows
+  **Back to Items** next to Review the difference. Quick add keeps Add another and Sell it and adds Count it now when no
+  quantity was typed.
+- **Items**, **Buy stock** done, **Count stock** done and **Move stock** done each show a Next row of plain full size buttons
+  (`NextSteps`, `.next-steps`; a stack of full width buttons on a phone), each only for someone who may use it there.
+- The list, with who sees each button, is `docs/ui/next-steps.md`, the single source; `next-steps.dom.test.tsx` holds the code
+  to it and fails on a success screen drawn with no next step.

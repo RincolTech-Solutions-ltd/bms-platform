@@ -445,11 +445,19 @@
             "description" : "The operator's question, while the status is needs_info",
             "type" : "string"
           },
+          "pending_short_name" : {
+            "description" : "A new name a repeat sign-up asked for, applied by the confirm call",
+            "type" : "string"
+          },
           "reference" : {
             "type" : "string"
           },
           "reject_reason" : {
             "description" : "The reason, when rejected",
+            "type" : "string"
+          },
+          "short_name" : {
+            "description" : "The short name asked for, or null (ADR-108)",
             "type" : "string"
           },
           "status" : {
@@ -23181,6 +23189,50 @@
           }
         }
       },
+      "ShortLink" : {
+        "properties" : {
+          "link" : {
+            "description" : "As a person types it, for example rincoltech.com/testduka",
+            "type" : "string"
+          },
+          "short_name" : {
+            "description" : "The short name, which is also the app's address (the slug)",
+            "type" : "string"
+          },
+          "url" : {
+            "description" : "The same with https://, for the Copy button",
+            "type" : "string"
+          }
+        }
+      },
+      "ShortLinkRule" : {
+        "properties" : {
+          "expression" : {
+            "description" : "The single redirect's custom filter expression",
+            "type" : "string"
+          },
+          "reserved" : {
+            "description" : "Names the rule leaves to the website and sign-up refuses",
+            "items" : {
+              "description" : "Names the rule leaves to the website and sign-up refuses",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "short_link_host" : {
+            "description" : "The host the short links are on, for example rincoltech.com",
+            "type" : "string"
+          },
+          "status_code" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "target" : {
+            "description" : "The dynamic target URL expression",
+            "type" : "string"
+          }
+        }
+      },
       "SignInRequest" : {
         "properties" : {
           "login" : {
@@ -23309,9 +23361,21 @@
             "minLength" : 0,
             "type" : "string"
           },
+          "short_name" : {
+            "description" : "The short name for the shop's link rincoltech.com/<short name>, which is also its address: 3 to 20 lower case letters and digits, a hyphen may join two words. A taken one is 409 short_name_taken with suggestions (ADR-108). Optional for one release, for a sign-up page from before it: the server then picks a free one from the business name",
+            "maxLength" : 63,
+            "minLength" : 0,
+            "type" : "string"
+          },
           "term" : {
             "minLength" : 1,
             "pattern" : "monthly|annual",
+            "type" : "string"
+          },
+          "town" : {
+            "description" : "Optional: the shop's town or area, for short name suggestions",
+            "maxLength" : 100,
+            "minLength" : 0,
             "type" : "string"
           },
           "way_in" : {
@@ -23328,6 +23392,32 @@
           }
         },
         "required" : [ "business_name", "contact_email", "contact_name", "contact_phone", "country", "modules", "term", "way_in" ]
+      },
+      "SignUpShortNameCheck" : {
+        "properties" : {
+          "available" : {
+            "type" : "boolean"
+          },
+          "message" : {
+            "description" : "Plain words, for example 'testduka is taken.'",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "problem" : {
+            "description" : "invalid, reserved or taken; null when available",
+            "type" : "string"
+          },
+          "suggestions" : {
+            "description" : "Free names: the town or area first, then a shorter form, then a number",
+            "items" : {
+              "description" : "Free names: the town or area first, then a shorter form, then a number",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        }
       },
       "SmsAcknowledgement" : {
         "description" : "The text to show before switching on, and its version",
@@ -34072,6 +34162,65 @@
         "tags" : [ "platform" ]
       }
     },
+    "/api/v1/platform/short-link-rule" : {
+      "get" : {
+        "operationId" : "getShortLinkRule",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ShortLinkRule"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The reserved names and the one Cloudflare single redirect built from them, for the operator (ADR-108)",
+        "tags" : [ "sign-up" ]
+      }
+    },
+    "/api/v1/platform/short-links/{name}" : {
+      "get" : {
+        "operationId" : "followShortLink",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "name",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "302" : {
+            "description" : "Location is the shop's address or the not found page"
+          }
+        },
+        "summary" : "Follow a short link: 302 to the shop, to its new address while an old name forwards, or to the page 'No shop uses this link' (ADR-108)",
+        "tags" : [ "sign-up" ]
+      }
+    },
+    "/api/v1/platform/short-links/{name}/" : {
+      "get" : {
+        "operationId" : "followShortLink_1",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "name",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "302" : {
+            "description" : "Location is the shop's address or the not found page"
+          }
+        },
+        "summary" : "Follow a short link: 302 to the shop, to its new address while an old name forwards, or to the page 'No shop uses this link' (ADR-108)",
+        "tags" : [ "sign-up" ]
+      }
+    },
     "/api/v1/platform/sign-up/applications" : {
       "post" : {
         "operationId" : "signUpApply",
@@ -34127,6 +34276,53 @@
           }
         },
         "summary" : "Answer the operator's question; the application returns to the queue (FR-ONB-04)",
+        "tags" : [ "sign-up" ]
+      }
+    },
+    "/api/v1/platform/sign-up/short-name" : {
+      "get" : {
+        "operationId" : "signUpCheckShortName",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "name",
+          "required" : true,
+          "schema" : {
+            "maxLength" : 63,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "business_name",
+          "required" : false,
+          "schema" : {
+            "maxLength" : 200,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "town",
+          "required" : false,
+          "schema" : {
+            "maxLength" : 100,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SignUpShortNameCheck"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Check a short name as it is typed, with free suggestions when it is not free (ADR-108)",
         "tags" : [ "sign-up" ]
       }
     },
@@ -45551,6 +45747,25 @@
           }
         },
         "summary" : "Change which everyday push notices the business sends, audited with before and after (issue #412)",
+        "tags" : [ "settings" ]
+      }
+    },
+    "/api/v1/settings/short-link" : {
+      "get" : {
+        "operationId" : "getShortLink",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ShortLink"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The business's short link (ADR-108)",
         "tags" : [ "settings" ]
       }
     },

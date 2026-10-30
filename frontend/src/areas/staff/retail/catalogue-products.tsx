@@ -16,6 +16,7 @@ import { PackEditor, PacksTurnOn } from './catalogue-packs';
 import { BarcodeEditor } from './catalogue-barcodes';
 import { MakeFamilyPanel, SIZES_JOIN, SIZES_NEW, VariantNote } from './catalogue-variants';
 import { ItemPhoto, PhotoChoice, PhotoEditor, sendNewPhoto, shownPhoto } from './item-photo';
+import { ItemAddedNext, NextSteps } from './next-steps';
 import { ScreenLink } from './screen-link';
 import { UNITS, canUse, capabilityOn, holds, holdsAt } from './permissions';
 import { NewItemPackages, UsualLevel, answeredPieces, forSmallest, newPackageRow, packErrorOf, packageAsUnit, oneOf, packsToSend, piecePriceOf, rowProblem, withPackages, type PackageRow, type UsualAnswer } from './new-item-packs';
@@ -517,6 +518,10 @@ export function ProductList({ onEdit, onPrice, onAdd, added }: { onEdit: (id: st
         <button type="button" onClick={onAdd} data-tour="product-add">Add an item</button>
         {!phone && sizes}
       </p>
+      <NextSteps at="items" steps={[
+        { label: 'Count stock', screen: 'stocktake', to: '/staff/retail/stocktake' },
+        { label: 'Buy stock', screen: 'restock', to: '/staff/retail/restock' },
+      ]} />
       <div className="rt-row" data-tour="product-filters">
         <div>
           <label htmlFor="items-active">Show</label>
@@ -563,10 +568,12 @@ export function ProductsPage() {
   const [added, setAdded] = useState<Product | undefined>(undefined);
   const { show, toast } = useToast();
   const back = () => setView({ mode: 'list' });
-  const open = (id: string) => setView({ mode: 'edit', id });
+  const open = (id: string) => { setAdded(undefined); setView({ mode: 'edit', id }); };
   const saved = (text: string, item?: Product) => { setAdded(item); show(text, 'success'); back(); };
   return (
     <Gate screen="products" title="Items">
+      {/* Issue #700: once Add an item saves, its next steps lead the list until another item is saved or opened. */}
+      {view.mode === 'list' && added && <ItemAddedNext item={added} onAnother={() => setView({ mode: 'new' })} />}
       {view.mode === 'list' && <ProductList added={added} onAdd={() => setView({ mode: 'new' })} onEdit={open} onPrice={(id) => setView({ mode: 'price', id })} />}
       {/* Issue #690: a phone row opens the item, so its price is changed from here as well as from the list. */}
       {view.mode === 'edit' && (me.permissions ?? []).includes(PRICE) && (
