@@ -91,7 +91,7 @@ for (const width of [412, 1366]) {
   const anyway = page.getByRole('button', { name: 'Review the difference anyway' });
   // The other items of the mock are not counted, so the sheet asks first.
   await anyway.waitFor({ timeout: 5000 }).then(() => anyway.evaluate((e) => e.click()), () => undefined);
-  await page.getByRole('button', { name: 'Commit the count' }).evaluate((e) => e.click());
+  await page.getByRole('button', { name: 'Save the count' }).evaluate((e) => e.click());
   await page.getByRole('heading', { name: /^Stock updated/ }).waitFor();
   await toastGone(page);
   await shot(page, '06-count-done-next', width);

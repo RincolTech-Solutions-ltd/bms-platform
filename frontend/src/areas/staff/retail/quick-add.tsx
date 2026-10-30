@@ -5,7 +5,7 @@ import { RETAIL_CURRENCY, RetailError, retail, type QuickAdd, type QuickAddReque
 import { IDEMPOTENCY_UNSURE_CODES } from '../../../api/retail-errors';
 import { branchLabel } from '../../../auth/branch';
 import { AddsTo } from '../branch-picker';
-import { WORDS } from '../../../app/glossary';
+import { WORDS, plural } from '../../../app/glossary';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { EmptyChoice } from '../../../app/ui/EmptyChoice';
 import { Field, FieldsNeededNote, focusFirstMissing } from '../../../app/ui/Field';
@@ -65,7 +65,7 @@ export function pieceUnit(units: Unit[]): Unit | undefined {
 export function addedLine(done: QuickAdd, where: string): string {
   const name = done.description ?? 'The item';
   if (done.qty === undefined) return `${name} added.`;
-  const of = (qty: string | undefined) => `${qty ?? ''} ${done.unit ?? ''}`.trim();
+  const of = (qty: string | undefined) => `${qty ?? ''} ${done.unit && Number(qty) !== 1 ? plural(done.unit) : (done.unit ?? '')}`.trim();
   return done.item_made ? `Added ${of(done.qty)} at ${where}. ${name} is saved.` : `Added ${of(done.qty)} of ${name} at ${where}. ${of(done.total_qty)} there now.`;
 }
 

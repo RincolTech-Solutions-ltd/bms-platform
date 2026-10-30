@@ -120,7 +120,7 @@ describe('quick add', () => {
     const [body, key] = quickAdd.mock.calls[0] as [Record<string, unknown>, string];
     expect(body).toEqual({ description: 'Test Bulb 60W', sell_minor: 6000, cost_minor: 4000, category_id: 'c1', unit_id: 'u1', qty: '600.000', branch_id: branch?.id });
     expect(key).toMatch(/^[0-9a-f-]{36}$/);
-    expect(screen.getByTestId('qa-done').textContent).toBe(`Added 600 pc at ${branchLabel(branch)}. Test Bulb 60W is saved.`);
+    expect(screen.getByTestId('qa-done').textContent).toBe(`Added 600 pcs at ${branchLabel(branch)}. Test Bulb 60W is saved.`);
     fireEvent.click(screen.getByRole('button', { name: 'Sell it' }));
     expect(onSell).toHaveBeenCalledWith('p1', branch?.id);
   });
@@ -176,7 +176,7 @@ describe('quick add', () => {
     expect(body).toEqual({ product_id: 'p9', qty: '8.000', branch_id: branch?.id });
     // The server answered the first request, so the second is a new one.
     expect(key).not.toBe((quickAdd.mock.calls[0] as [unknown, string])[1]);
-    expect(screen.getByTestId('qa-done').textContent).toBe(`Added 8 pc of Test Rice 1kg at ${branchLabel(branch)}. 58 pc there now.`);
+    expect(screen.getByTestId('qa-done').textContent).toBe(`Added 8 pcs of Test Rice 1kg at ${branchLabel(branch)}. 58 pcs there now.`);
     expect(screen.queryByTestId('qa-adds-to')).toBeNull();
   });
 
@@ -310,7 +310,7 @@ describe('quick add', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     await screen.findByTestId('qa-done');
     expect((quickAdd.mock.calls[1] as [Record<string, unknown>])[0]).toMatchObject({ branch_id: branch?.id });
-    expect(screen.getByTestId('qa-done').textContent).toBe(`Added 10 pc at ${branchLabel(branch)}. Test Kettle is saved.`);
+    expect(screen.getByTestId('qa-done').textContent).toBe(`Added 10 pcs at ${branchLabel(branch)}. Test Kettle is saved.`);
   });
 
   it('offers Start again only after the server refused for certain, and it clears the form', async () => {
@@ -914,9 +914,10 @@ describe('the words and defaults', () => {
 
   // Issue #728: the line leads with where the stock went, so an owner looking at another shop knows where to find it.
   it('says what was added and where, and nothing about stock when none was added', () => {
-    expect(addedLine({ description: 'Test Bulb', unit: 'pc', item_made: true, qty: '600' }, 'Test Store')).toBe('Added 600 pc at Test Store. Test Bulb is saved.');
+    expect(addedLine({ description: 'Test Bulb', unit: 'piece', item_made: true, qty: '600' }, 'Test Store')).toBe('Added 600 pieces at Test Store. Test Bulb is saved.');
+    expect(addedLine({ description: 'Test Bulb', unit: 'piece', item_made: true, qty: '1' }, 'Test Store')).toBe('Added 1 piece at Test Store. Test Bulb is saved.');
     expect(addedLine({ description: 'Test Bulb', item_made: true }, 'Test Store')).toBe('Test Bulb added.');
-    expect(addedLine({ description: 'Test Bulb', unit: 'pc', item_made: false, qty: '10', total_qty: '60' }, 'Test Store')).toBe('Added 10 pc of Test Bulb at Test Store. 60 pc there now.');
+    expect(addedLine({ description: 'Test Bulb', unit: 'piece', item_made: false, qty: '10', total_qty: '60' }, 'Test Store')).toBe('Added 10 pieces of Test Bulb at Test Store. 60 pieces there now.');
   });
 });
 

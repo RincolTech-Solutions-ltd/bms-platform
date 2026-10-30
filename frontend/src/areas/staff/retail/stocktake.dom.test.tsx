@@ -27,7 +27,8 @@ vi.mock('../../../api/retail', async (original) => {
     getStocktake: (...a: unknown[]) => getStocktake(...a), unfinishedStocktakes: (...a: unknown[]) => unfinishedStocktakes(...a) } };
 });
 const getStocktake = vi.fn();
-const unfinishedStocktakes = vi.fn(() => Promise.resolve([] as unknown[]));
+const unfinishedStocktakes = vi.fn();
+unfinishedStocktakes.mockResolvedValue([]);
 
 const { StocktakePage, StocktakeReview } = await import('./stocktake');
 

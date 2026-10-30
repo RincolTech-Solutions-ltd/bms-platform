@@ -293,13 +293,13 @@ const SHOTS = {
       }
       // The question shows Review the difference anyway; the ring stays on Review the difference, the button the caption names.
       await shoot(page, 'count-stock-3.webp', tour(page, 'count-review'));
-      const commit = button(page, 'Commit the count');
+      const commit = button(page, 'Save the count');
       for (let i = 0; i < 6 && !(await commit.isVisible()); i++) {
         const next = ['Confirm', 'Review the difference anyway'].map((name) => button(page, name));
         await ((await next[0].isVisible()) ? next[0] : next[1]).click();
         await page.waitForTimeout(900);
       }
-      // Commit the count waits for a tick on every line that takes an item to 0 or below half: tick each, then ring the button.
+      // Save the count waits for a tick on every line that takes an item to 0 or below half: tick each, then ring the button.
       const ticks = page.locator('.count-drop-tick input');
       for (const tick of await ticks.all()) await tick.check();
       await page.waitForTimeout(300);

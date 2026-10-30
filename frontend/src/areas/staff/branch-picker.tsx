@@ -195,6 +195,7 @@ export function AddsTo({ id, lead = 'Adds to', value, places, onChoose }: {
   return (
     <p className="adds-to" data-testid={`${id}-adds-to`}>
       <span>{lead} <strong>{name}</strong></span>
+      {/* empty: drawn only with more than one place to choose; the form shows its EmptyChoice when it has none. */}
       {onChoose && places.length > 1 && (
         <span className="btn adds-to-change">
           Change

@@ -58,7 +58,8 @@ function UnfinishedCount({ count, branchId, onFinish, onThrown }: { count: OpenS
     },
   });
   return (
-    <div className="alert alert-warning stack" data-testid={`unfinished-${id}`}>
+    <div className="alert alert-warning" data-testid={`unfinished-${id}`}>
+      <div className="stack">
       <p>{unfinishedWords(count, me.user_id, businessZone())}</p>
       {asking ? (
         <div role="group" aria-label="Throw this count away?" className="stack">
@@ -77,6 +78,7 @@ function UnfinishedCount({ count, branchId, onFinish, onThrown }: { count: OpenS
         </p>
       )}
       <Problem error={drop.error} />
+      </div>
     </div>
   );
 }

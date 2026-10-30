@@ -1572,7 +1572,7 @@ the items show only while you search, and go away once one is picked. Every item
   later discard never takes a draft whose commit is still on its way, so a connection that comes back between the two tries
   leaves the count to be sent again, and Sell opened again (the screen left and come back to, or a branch switch) leaves the
   commit of the Sell it replaced to land and stand (issue #664). A sale cleared or a screen left before the lost answer hears nothing of it.
-  Count stock shows a discarded count as cancelled, never as committed, with no tick and no Commit the count; the refusal of
+  Count stock shows a discarded count as cancelled, never as committed, with no tick and no Save the count; the refusal of
   a commit on it (409 `stocktake_discarded`) says cancelled too, so the owner reads one word for it (issue #664).
 - **Scan box.** Unchanged (ADR-070 decision 11, owner decision D7): a scanner types only into the Scan box, which adds the item or one more.
 - **Tours.** `retail-sales` version 16, `page-stocktake` 3 (the search on top and the list Not counted yet), `page-restock` 3, `page-usage` 2, `page-transfer` 3,
@@ -1802,3 +1802,27 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
   (`NextSteps`, `.next-steps`; a stack of full width buttons on a phone), each only for someone who may use it there.
 - The list, with who sees each button, is `docs/ui/next-steps.md`, the single source; `next-steps.dom.test.tsx` holds the code
   to it and fails on a success screen drawn with no next step.
+
+## Where is my stock (issue #728)
+
+A shop owner added his items with Quick add at his store, looked at My stock in his main shop, saw 0 and thought his numbers
+were lost; he also left two counts at Review the difference, because the last step said Commit. Pictures in
+`docs/ui/where-is-my-stock`.
+
+- **My stock and the item's page** say where an item is when the shop in use has none of it and another shop has some:
+  "0 here. 456 at Test Store", with **Switch to Test Store**, which changes the shop in use with the house toast (issue #680).
+  The other shops are those the all-branches stock list returns (cut by the server to the shops the person may read stock at)
+  that are in the person's own branch list; the one holding the most is named. A negative balance keeps its own flag.
+- **Quick add** shows the shop beside How many: "Adds to Test Store", with **Change** (the phone's own picker in one tap,
+  `AddsTo` in `branch-picker.tsx`, laid out as the shop under the title). Once added the line names it: "Added 70 pieces at Test
+  Store. Test bulb is saved." **Add an item** inside Count stock ("Counted at") and Sell ("Adds to", no Change: a sale keeps its
+  shop) shows the same line under its quantity; on Count stock Change switches the shop in use.
+- **Counts not saved.** A count reviewed and left without saving (a draft, `GET /retail/stocktakes/unfinished`) shows on My stock
+  and Count stock, to someone who may count at the shop: "You started a count here on 29 Oct and did not finish it" (today, or
+  a weekday within the week; "Someone" for another person's count), with **Finish it** (its review again, ready to save; from My
+  stock it opens `/staff/retail/stocktake?finish=<id>`) and **Throw it away**, which asks "Throw this count away? Your stock stays
+  as it is." with **Yes, throw it away** and **Keep it**. **Back to the count** throws away the review it leaves, so going back
+  and reviewing again never leaves a count behind; a count opened with Finish it stays as it was.
+- **Plain words.** The last step of a count, on Count stock and on Sell's count of a new item, is **Save the count**, with a help
+  tip: "Your stock changes only when you save the count." Review the difference stays the step before. The tour
+  `page-stocktake` is version 8.

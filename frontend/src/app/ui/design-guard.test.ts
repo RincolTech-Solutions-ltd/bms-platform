@@ -552,7 +552,8 @@ const ADD_IN_PLACE_EXEMPT: Record<string, string> = {
   'areas/staff/retail/account.tsx branches': BRANCH,
   'areas/staff/retail/purchasing-ui.tsx branches': BRANCH,
   'areas/staff/retail/return-new.tsx branches.filter((b) => b.stocks_goods !== false)': BRANCH,
-  'areas/staff/retail/quick-add.tsx places': `Where holds only the branches this person may add stock at; ${BRANCH}`,
+  // Issue #728: Quick add's Where became AddsTo, the shop beside How many with Change, shared with Add an item.
+  'areas/staff/branch-picker.tsx places': `Where holds only the branches this person may add stock at; ${BRANCH}`,
   'areas/staff/retail/catalogue-barcodes.tsx packs': ITEM_PACK,
   'areas/staff/retail/goods-receive.tsx line.packs': ITEM_PACK,
   'areas/staff/retail/purchase-order-form.tsx line.packs': ITEM_PACK,
