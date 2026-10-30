@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { renderToString as render } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
 import type { InFlightReport, StockByLocation, Transfer } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
@@ -14,6 +14,12 @@ import { ShortageWarning, TransferList, arrivedShort, statusBadge } from './tran
 import { Gate } from './ui';
 
 const renderToString = (node: ReactElement) => render(node).replaceAll('<!-- -->', '');
+
+// A past move offers Move more stock as a link (issue #700); drawn here without a router, so a plain anchor stands in.
+vi.mock('@tanstack/react-router', async (original) => {
+  const real = await original<typeof import('@tanstack/react-router')>();
+  return { ...real, Link: ({ children, to, className }: { children: unknown; to: string; className?: string }) => <a href={to} className={className}>{children as never}</a> };
+});
 
 // The trade screens of ADR-033 (issue #193): stock by store and shop, stock on its way, and the
 // transfer statuses. Static markup, as the other screen tests: what each screen shows, and above all

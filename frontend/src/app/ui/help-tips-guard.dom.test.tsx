@@ -31,6 +31,7 @@ const ELSEWHERE: Partial<Record<HelpTipKey, string>> = {
   lowStockLevel: 'areas/staff/retail/stock-minimum.dom.test.tsx',
   onCredit: 'areas/staff/retail/credit-recognition.test.tsx',
   joinSizes: 'areas/staff/retail/catalogue-variants.dom.test.tsx',
+  countItNow: 'areas/staff/retail/next-steps.dom.test.tsx',
   guarantor: 'areas/staff/lending/application.dom.test.tsx',
   inArrears: 'areas/staff/home-cards.dom.test.tsx',
 };

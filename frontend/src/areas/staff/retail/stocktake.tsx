@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createLazyRoute } from '@tanstack/react-router';
+import { createLazyRoute, useRouter } from '@tanstack/react-router';
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Highlight } from '../../../app/ui/SearchBox';
 import { ItemCombobox } from '../../../app/ui/ItemCombobox';
@@ -21,6 +21,8 @@ import { ScreenToast, useItemAdded } from './toast';
 import { entryWarnings } from './entry-checks-state';
 import { useEntryChecks, useEntryNorms } from './entry-checks';
 import { SuccessScreen } from '../../../app/ui/SuccessScreen';
+import { NextSteps, mayCountAt } from './next-steps';
+import { branchLabel } from '../../../auth/branch';
 import { changeWords, clearCount, countKey, otherTabWords, readCount, savedAt, saveWords, useCountSave, whenSaved, type CountState } from './count-save-state';
 
 // Stock-take (FR-RET-08): count the products of a branch, review the variance the server works
@@ -139,9 +141,12 @@ export async function countableStock(branchId: string, api: Pick<typeof retail, 
   return [...active, ...withInactive.filter((r) => !shown.has(r.product_id) && Number(r.qty) !== 0)].sort((x, y) => (x.code ?? '').localeCompare(y.code ?? ''));
 }
 
-function CountSheet({ branchId }: { branchId: string }) {
+function CountSheet({ branchId, item, from }: { branchId: string; item?: string; from?: string }) {
   const queryClient = useQueryClient();
-  const { me } = useStaff();
+  const { me, chooseBranch } = useStaff();
+  // Issue #700: once a count is committed, Count another branch offers the others that keep goods where this person counts.
+  const others = (me.branches ?? []).filter((b) => b.id && b.id !== branchId && mayCountAt(me, b.id));
+  const [choosing, setChoosing] = useState(false);
   // Issue #681: a count in progress is kept on this device for this business, branch and person, and comes back on a reload.
   const saveKey = countKey(typeof window === 'undefined' ? '' : window.location.host, branchId, me.user_id ?? me.email ?? 'staff');
   const unitsOn = capabilityOn(me, 'retail', UNITS);
@@ -190,6 +195,15 @@ function CountSheet({ branchId }: { branchId: string }) {
     if (focusOn) (document.getElementById(`count-${focusOn.id}-packs`) ?? document.getElementById(`count-${focusOn.id}`))?.focus();
   }, [focusOn]);
   const stock = useQuery({ queryKey: ['retail', 'stock', branchId, '', false], queryFn: () => countableStock(branchId) });
+  // Issue #700: Count it now brings the item just added; once the sheet is read it heads the list, its box focused to type.
+  const brought = useRef(false);
+  useEffect(() => {
+    if (brought.current || !item || !stock.data?.some((r) => r.product_id === item)) return;
+    brought.current = true;
+    setListed((l) => (l.includes(item) ? l : [...l, item]));
+    setScanned(item);
+    setFocusOn({ id: item, pick: 1 });
+  }, [item, stock.data]);
   const packOf = useMemo(() => new Map((stock.data ?? []).map((r) => [r.product_id ?? '', r.standard_pack])), [stock.data]);
   // Each count as it is sent, in pieces (issue #650): the cartons and pieces of an item with a standard pack added up, or the
   // pieces typed. A count that cannot be read stays as typed, so it is marked as not valid and never sent.
@@ -346,7 +360,18 @@ function CountSheet({ branchId }: { branchId: string }) {
       <>
         <SuccessScreen level={2} title={`Stock updated for ${n} ${n === 1 ? 'item' : 'items'}`}
           detail={<>{summary}{changes.map((c, i) => <Fragment key={i}><br />{c}</Fragment>)}</>}
-          actions={[{ label: 'Start another count', onClick: () => setDraft(null) }, { label: 'Back to My stock', to: '/staff/retail/stock' }]} />
+          actions={[
+            { label: 'Start another count', onClick: () => setDraft(null) },
+            { label: 'Back to My stock', to: '/staff/retail/stock' },
+            ...(chooseBranch && others.length > 0
+              ? [{ label: 'Count another branch', onClick: () => (others.length === 1 ? chooseBranch(others[0]?.id ?? '') : setChoosing(true)) }]
+              : []),
+          ]} />
+        {choosing && chooseBranch && (
+          <div role="group" aria-label="Count another branch" className="next-steps">
+            {others.map((b) => <button key={b.id} type="button" onClick={() => chooseBranch(b.id ?? '')}>{`Count stock at ${branchLabel(b)}`}</button>)}
+          </div>
+        )}
         {toast}
       </>
     );
@@ -528,6 +553,7 @@ function CountSheet({ branchId }: { branchId: string }) {
       <BusyButton type="button" className="rt-primary" busy={review.isPending} notReady={entered.length === 0 || bad} onClick={finish} data-tour="count-review">
         {`Review the difference (${entered.length} counted)`}
       </BusyButton>
+      {from === 'items' && <NextSteps at="countFromAdd" steps={[{ label: 'Back to Items', screen: 'products', to: '/staff/retail/catalogue/products' }]} />}
       {toast}
 
     </>
@@ -536,6 +562,11 @@ function CountSheet({ branchId }: { branchId: string }) {
 
 export function StocktakePage() {
   const { branchId } = useStockingBranch();
+  const { item, from } = (useRouter({ warn: false })?.state.location.search ?? {}) as { item?: string; from?: string };
+  // The item and where it came from belong to the branch the count first opened at: Count another branch starts a plain count.
+  const [opened, setOpened] = useState<string | null>(branchId);
+  if (opened === null && branchId !== null) setOpened(branchId);
+  const fresh = branchId !== null && branchId === (opened ?? branchId);
   return (
     <Gate screen="stocktake" title={WORDS.countStock}>
       {branchId === null ? (
@@ -543,7 +574,7 @@ export function StocktakePage() {
       ) : (
         <>
           {/* Keyed by branch, so a branch switch starts afresh from that branch's own saved count (review of #681). */}
-          <CountSheet key={branchId} branchId={branchId} />
+          <CountSheet key={branchId} branchId={branchId} item={fresh && typeof item === 'string' ? item : undefined} from={fresh && typeof from === 'string' ? from : undefined} />
         </>
       )}
     </Gate>
