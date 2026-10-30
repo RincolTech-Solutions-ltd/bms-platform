@@ -1419,10 +1419,22 @@ export function createMockRetail(): RetailApi {
         // The quantity is added to what the branch holds, never set (ADR-101).
         const added = body.qty === undefined ? null : toMilli(body.qty);
         if (body.product_id && !(added !== null && added > 0)) refuse(422, 'validation_failed', 'Type how many you are adding, more than 0.');
+        // Issue #724: paid by a package, the whole packages at its price and only the loose pieces at the piece cost, as
+        // the server books it; a level that is no active package the item is bought in is refused.
+        let paid: { paid_from: string; paid_minor: number; purchase_no: string } | null = null;
+        if (body.paid_from && added !== null && added > 0) {
+          const level = body.paid_level_unit_id ? (packs.get(p.id) ?? []).find((k) => k.unit_id === body.paid_level_unit_id && k.active !== false && k.purpose !== 'sell') : undefined;
+          if (body.paid_level_unit_id && !level && !body.product_id) [products, packs, history].forEach((m) => m.delete(p.id));
+          if (body.paid_level_unit_id && !level) refuse(422, 'unknown_pack_unit', 'The item has no such package. Choose how you bought it again.');
+          const whole = level ? Math.floor(added / toMilli(level.factor ?? '1')) : 0;
+          const loose = added - whole * (level ? toMilli(level.factor ?? '1') : 0);
+          paid = { paid_from: body.paid_from, paid_minor: whole * (body.paid_level_cost_minor ?? 0) + lineTotal(body.cost_minor ?? 0, loose), purchase_no: `P-${String(seq).padStart(6, '0')}` };
+        }
         if (added !== null && added > 0) move(branchId, p.id, added);
         return {
           product_id: p.id, code: p.code, description: p.description, unit: p.unit, item_made: !body.product_id, category_made: categoryMade, unit_made: unitMade,
-          ...(added !== null ? { branch_id: branchId, qty: plainQty(fromMilli(added)), total_qty: plainQty(fromMilli(bal(branchId, p.id))), ...(added > 0 ? { movement_id: nextId('9') } : {}) } : {}),
+          ...(added !== null ? { branch_id: branchId, qty: plainQty(fromMilli(added)), total_qty: plainQty(fromMilli(bal(branchId, p.id))), ...(added > 0 && !paid ? { movement_id: nextId('9') } : {}) } : {}),
+          ...(paid ?? {}),
         };
       })),
 
