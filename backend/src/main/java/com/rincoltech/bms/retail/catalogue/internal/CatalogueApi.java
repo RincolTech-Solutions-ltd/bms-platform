@@ -912,7 +912,21 @@ final class CatalogueApi {
             @Size(max = VariantGrid.MAX_VARIANTS) List<@Valid VariantLine> variants,
 
             @Size(max = 300) @Schema(description = ITEM_DUPLICATE_REASON)
-            String duplicateReason) {}
+            String duplicateReason,
+
+            @Size(max = 10)
+            @Schema(
+                    description = "Issue #697 (ADR-111): packages every size and colour gets, made in its transaction,"
+                            + " checked as on POST /products; all are saved with the item or none is")
+            List<PackRequest> packs) {}
+
+    @Schema(name = "RetailVariantOptions", description = "Issue #697: the sizes and colours the business has used")
+    record VariantOptions(
+            @Schema(description = "Sizes of the business's items, each once ignoring case, most used first")
+            List<String> sizes,
+
+            @Schema(description = "Colours of the business's items, each once ignoring case, most used first")
+            List<String> colours) {}
 
     @Schema(
             name = "AddRetailVariantsRequest",

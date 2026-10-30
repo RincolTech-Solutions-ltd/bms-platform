@@ -17,11 +17,13 @@ import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Family;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.JoinItem;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.JoinRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.MakeFamilyRequest;
+import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PackRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceChange;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceNotCopied;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Product;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.TermsCopied;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdateFamilyRequest;
+import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.VariantOptions;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueRepository.FamilyRow;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueRepository.PriceItemTerms;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueRepository.VariantBalance;
@@ -93,22 +95,36 @@ class FamilyService {
         List<Planned> plan =
                 VariantGrid.plan(base, r.sizes(), r.colours(), r.variants(), r.costMinor(), r.sellMinor(), Set.of(), 0);
         requireSome(plan);
+        // Issue #697 (ADR-111): Add an item's packages, checked before anything is written, then made on every size.
+        List<PackRequest> packs = r.packs() == null ? List.of() : r.packs();
+        List<String> purposes = catalogue.checkPacks(packs);
         String duplicateReason = catalogue.acceptItemName(name, r.unitId(), null, Set.of(), r.duplicateReason());
         UUID id = UUID.randomUUID();
         UUID by = CurrentPrincipal.require().userId();
         repo.insertFamily(id, name, base, r.categoryId(), r.unitId(), by, duplicateReason);
-        insertVariants(id, name, r.categoryId(), r.unitId(), plan, by, true);
+        for (UUID variant : insertVariants(id, name, r.categoryId(), r.unitId(), plan, by, true)) {
+            catalogue.makePacks(repo.find(variant).orElseThrow(), packs, purposes, by);
+        }
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("name", name);
         after.put("base_code", base);
         after.put("category_id", r.categoryId());
         after.put("unit_id", r.unitId());
         after.put("variants", plan.size());
+        if (!packs.isEmpty()) {
+            after.put("packs_each", packs.size());
+        }
         if (duplicateReason != null) {
             after.put("duplicate_reason", duplicateReason);
         }
         audit.record(AuditLog.Entry.created("retail.product_family.created", FAMILY, id, null, after));
         return get(id);
+    }
+
+    /** Issue #697 (ADR-111): the sizes and colours the shop typed before, offered again beside the app's ready lists. */
+    @Transactional(readOnly = true)
+    VariantOptions options() {
+        return new VariantOptions(repo.variantOptions(true), repo.variantOptions(false));
     }
 
     /**

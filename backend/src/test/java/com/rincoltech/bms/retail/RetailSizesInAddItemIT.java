@@ -1,0 +1,172 @@
+package com.rincoltech.bms.retail;
+
+import static com.rincoltech.bms.retail.RetailTestSupport.ADMIN;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.rincoltech.bms.IntegrationTest;
+import com.rincoltech.bms.TestDatabase;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import tools.jackson.databind.JsonNode;
+
+/**
+ * Issue #697 (ADR-111): Add an item makes an item with sizes and its packages in one request and one transaction; every size
+ * gets the packages, and a refused package saves nothing. The sizes and colours a shop used are offered again. Every name
+ * and amount is fabricated.
+ */
+class RetailSizesInAddItemIT extends IntegrationTest {
+
+    static final String SETTINGS = "core.settings.manage";
+
+    @Autowired
+    TestRestTemplate http;
+
+    TestDatabase.Fixture t;
+    RetailTestSupport api;
+    UUID category;
+    UUID bulb;
+    UUID carton;
+
+    @BeforeEach
+    void setUp() {
+        t = TestDatabase.tenant("retail-sizes-in-add-item", false, true);
+        api = new RetailTestSupport(http, t);
+        category = api.category("Test Lighting");
+        bulb = api.unit("Bulb");
+        carton = api.unit("Carton");
+        String etag = api.get("/settings/capabilities", SETTINGS).getHeaders().getETag();
+        ResponseEntity<JsonNode> on = api.call(
+                HttpMethod.PUT,
+                "/settings/capabilities",
+                Map.of("units", true),
+                SETTINGS,
+                "*",
+                etag == null ? Map.of() : Map.of("If-Match", etag));
+        assertThat(on.getStatusCode()).as("%s", on.getBody()).isEqualTo(HttpStatus.OK);
+    }
+
+    Map<String, Object> item(String name, List<Map<String, Object>> packs) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("name", name);
+        body.put("category_id", category);
+        body.put("unit_id", bulb);
+        body.put("cost_minor", 2_000);
+        body.put("sell_minor", 4_000);
+        body.put(
+                "variants",
+                List.of(
+                        Map.of("size", "40W", "sell_minor", 3_000),
+                        Map.of("size", "60W"),
+                        Map.of("size", "100W", "sell_minor", 6_000, "cost_minor", 3_500)));
+        body.put("packs", packs);
+        return body;
+    }
+
+    static Map<String, Object> pack(UUID unit, String factor) {
+        Map<String, Object> k = new LinkedHashMap<>();
+        k.put("unit_id", unit);
+        k.put("factor", factor);
+        k.put("purpose", "both");
+        return k;
+    }
+
+    long count(String sql) {
+        return TestDatabase.owner()
+                .sql(sql)
+                .params(t.tenantId())
+                .query(Long.class)
+                .single();
+    }
+
+    @Test
+    void threeSizesAndACartonAreMadeInOneRequest() {
+        Map<String, Object> body = item("Test Longlife Bulb", List.of(pack(carton, "24")));
+        ResponseEntity<JsonNode> r = api.post("/product-families", body, ADMIN);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode variants = r.getBody().get("variants");
+        assertThat(variants).hasSize(3);
+        List<Long> prices = new ArrayList<>();
+        for (JsonNode v : variants) {
+            prices.add(v.get("sell_minor").asLong());
+            // Each size is its own product with its own packs (ADR-051), so its stock is counted on its own.
+            JsonNode packs = api.get("/products/" + v.get("id").asString() + "/units", ADMIN)
+                    .getBody()
+                    .get("items");
+            assertThat(packs).hasSize(1);
+            assertThat(packs.get(0).get("unit_id").asString()).isEqualTo(carton.toString());
+            assertThat(packs.get(0).get("factor").asString()).isEqualTo("24.000");
+        }
+        assertThat(prices).containsExactly(3_000L, 4_000L, 6_000L);
+        assertThat(variants.get(2).get("cost_minor").asLong()).isEqualTo(3_500);
+        String packsAudited = "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.product_unit.created'";
+        assertThat(count(packsAudited)).isEqualTo(3);
+    }
+
+    @Test
+    void aRefusedPackageSavesNothing() {
+        // The item's own unit as its package is refused only once the sizes are written: all of it goes back.
+        ResponseEntity<JsonNode> r = api.post(
+                "/product-families", item("Test Longlife Bulb", List.of(pack(carton, "24"), pack(bulb, "10"))), ADMIN);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().get("pack_index").asInt()).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM retail_product_families WHERE tenant_id = ?"))
+                .isZero();
+        assertThat(count("SELECT count(*) FROM retail_products WHERE tenant_id = ?"))
+                .isZero();
+        assertThat(count("SELECT count(*) FROM retail_product_units WHERE tenant_id = ?"))
+                .isZero();
+        assertThat(count("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action LIKE 'retail.product%'"))
+                .isZero();
+
+        // A size out of bounds is refused before anything is written, on its own row too.
+        ResponseEntity<JsonNode> big = api.post(
+                "/product-families", item("Test Longlife Bulb", List.of(pack(carton, "1000000000000"))), ADMIN);
+        assertThat(big.getStatusCode()).as("%s", big.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(big.getBody().toString()).contains("packs[0].factor");
+        assertThat(count("SELECT count(*) FROM retail_products WHERE tenant_id = ?"))
+                .isZero();
+    }
+
+    @Test
+    void theSizesAndColoursAShopUsedAreOfferedAgain() {
+        assertThat(api.get("/product-families/options", ADMIN).getBody().get("sizes"))
+                .isEmpty();
+        Map<String, Object> shirt = new LinkedHashMap<>();
+        shirt.put("name", "Test Work Shirt");
+        shirt.put("category_id", category);
+        shirt.put("unit_id", bulb);
+        shirt.put("cost_minor", 0);
+        shirt.put("sell_minor", 9_000);
+        shirt.put("sizes", List.of("Size 7", "M"));
+        shirt.put("colours", List.of("Sky Blue"));
+        assertThat(api.post("/product-families", shirt, ADMIN).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        shirt.put("name", "Test Work Trousers");
+        shirt.put("sizes", List.of("m"));
+        shirt.put("colours", List.of("sky blue", "Red"));
+        assertThat(api.post("/product-families", shirt, ADMIN).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        ResponseEntity<JsonNode> r = api.get("/product-families/options", ADMIN);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+        List<String> sizes = new ArrayList<>();
+        r.getBody().get("sizes").forEach(s -> sizes.add(s.asString()));
+        List<String> colours = new ArrayList<>();
+        r.getBody().get("colours").forEach(c -> colours.add(c.asString()));
+        // Each once ignoring case, the most used first.
+        assertThat(sizes).hasSize(2);
+        assertThat(sizes.getFirst()).isEqualToIgnoringCase("M");
+        assertThat(sizes).contains("Size 7");
+        assertThat(colours).hasSize(2);
+        assertThat(colours.getFirst()).isEqualToIgnoringCase("Sky Blue");
+        assertThat(colours).contains("Red");
+    }
+}
