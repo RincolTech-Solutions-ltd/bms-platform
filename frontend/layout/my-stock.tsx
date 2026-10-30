@@ -1,11 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
+import { RouterContextProvider } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Me } from '../src/api/client';
 import type { StockRow } from '../src/api/retail';
 import { mockMe } from '../src/api/retail-mock';
-import { router as appRouter } from '../src/app/router';
 import { ShopHere, useBranchSwitch } from '../src/areas/staff/branch-picker';
 import { StaffContext } from '../src/areas/staff/context';
 import { StockTable } from '../src/areas/staff/retail/stock';
@@ -14,6 +13,7 @@ import { Gate } from '../src/areas/staff/retail/ui';
 import { StaffTabBar } from '../src/areas/staff/tabs';
 import '../src/app/theme.css';
 import '../src/app/ui/index.css';
+import { layoutRouter } from './router';
 
 // The page my-stock.layout.test.ts lays out in a real browser (issue #680): My stock on a phone as a card per item, below the shop
 // label the staff layout draws above every page, and the toast a switch shows. ?font= scales the root font size as a phone's large text setting does,
@@ -30,7 +30,7 @@ const rows: StockRow[] = [
   { product_id: 'p3', code: 'BL-2', description: 'Test tube light 4 ft', category: 'Bulbs', unit: 'piece', qty: '-2.000', negative: true, sell_minor: 15000, cost_minor: 11000 },
 ];
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
-const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/retail/stock'] }) });
+const router = layoutRouter('/staff/retail/stock');
 
 /** The screen's own toast, shown as the page opens, as a save just before a switch would leave it. */
 function CorrectedToast() {

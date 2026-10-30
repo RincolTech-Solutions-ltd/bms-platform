@@ -1,7 +1,6 @@
-import react from '@vitejs/plugin-react';
 import { chromium, type Browser, type Page } from 'playwright';
-import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { openLayout } from './open';
 
 // Finding items on a phone (issue #690) laid out in Chromium at 360, 390 and 412 wide, at the default and a large font size, with My
 // stock's Items and Categories entries above the find bar: the
@@ -9,20 +8,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // 56px; scrolled, the search and the chips stay right under the staff bar, never under it; a chosen chip far along the row is
 // brought into the row's view without the page moving sideways. The page is layout/phone-find.html under the app's stylesheets.
 
-let server: ViteDevServer;
 let browser: Browser;
-let base = '';
 
 beforeAll(async () => {
-  server = await createServer({ configFile: false, root: process.cwd(), plugins: [react()], logLevel: 'error', server: { port: 0, host: '127.0.0.1' } });
-  await server.listen();
-  base = server.resolvedUrls?.local[0] ?? '';
   browser = await chromium.launch();
 });
 
 afterAll(async () => {
   await browser?.close();
-  await server?.close();
 });
 
 type Box = { x: number; y: number; width: number; height: number };
@@ -30,9 +23,7 @@ const box = async (page: Page, selector: string) => (await page.locator(selector
 
 async function open(width: number, font: number, chip = ''): Promise<Page> {
   const page = await browser.newPage({ viewport: { width, height: 800 }, hasTouch: true, isMobile: true, reducedMotion: 'reduce' });
-  await page.goto(`${base}layout/phone-find.html?font=${font}${chip ? `&chip=${chip}` : ''}`);
-  await page.locator('.list-row').first().waitFor();
-  return page;
+  return openLayout(page, `layout/phone-find.html?font=${font}${chip ? `&chip=${chip}` : ''}`, page.locator('.list-row'));
 }
 
 const sideways = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
