@@ -7,6 +7,7 @@ import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Family;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.JoinRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.MakeFamilyRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdateFamilyRequest;
+import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.VariantOptions;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -49,6 +50,15 @@ class FamilyController {
         return ResponseEntity.created(URI.create("/api/v1/retail/product-families/" + created.id()))
                 .eTag(String.valueOf(created.version()))
                 .body(created);
+    }
+
+    @GetMapping("/product-families/options")
+    @RequiresPermission("retail.catalogue.manage")
+    @Operation(
+            summary = "The sizes and colours the business's items have, offered again on Add an item (issue #697)",
+            operationId = "listRetailVariantOptions")
+    VariantOptions options() {
+        return service.options();
     }
 
     @GetMapping("/product-families/{family_id}")

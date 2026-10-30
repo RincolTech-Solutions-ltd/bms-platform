@@ -236,6 +236,13 @@
   outline-offset: 2px;
 }
 
+/* Issue #697: the ready sizes and colours on Add an item, the same 48px chips, wrapping onto more rows instead of scrolling. */
+.option-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 /* The words over the price at the right of an item's row: Selling price, small and muted. */
 .find-row-word {
   display: block;

@@ -1300,6 +1300,9 @@ Accepted (this list is the ADR index):
   `unit_exists` naming it and the screens choose it; item and category names are stored in Title Case keeping codes as typed
   (D86 = A); `V120` restyles stored names by case only, moving their version, all audited; duplicate units already
   stored are left for the owner to join (#698)
+- ADR-111 Sizes, colours and types in Add an item, picked from ready lists shipped with the app: the same one form asks
+  about sizes, `POST /retail/product-families` takes `packs` made on every size in its transaction, and `GET
+  /retail/product-families/options` offers the sizes and colours a shop used before (#697, D81, D98; no migration)
 
 Pending (cite only as "pending ADR-NNN"):
 
