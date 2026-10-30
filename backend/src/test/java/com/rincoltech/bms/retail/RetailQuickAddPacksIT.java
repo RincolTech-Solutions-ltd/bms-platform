@@ -208,6 +208,22 @@ class RetailQuickAddPacksIT extends IntegrationTest {
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
         assertThat(r.getBody().get("paid_minor").asLong()).isEqualTo(100_000);
         assertThat(stock(productOf(r))).isEqualByComparingTo("24");
+        // Issue #724: the audit says the carton and its price, and the 100,000 that left, not only 4,167 a piece.
+        Map<String, Object> after = TestDatabase.owner()
+                .sql("SELECT data -> 'after' ->> 'paid_level_unit_id' AS level,"
+                        + " (data -> 'after' ->> 'paid_level_cost_minor')::bigint AS level_cost,"
+                        + " (data -> 'after' ->> 'paid_minor')::bigint AS paid,"
+                        + " (data -> 'after' ->> 'unit_cost_minor')::bigint AS piece"
+                        + " FROM audit_log WHERE tenant_id = ? AND action = 'retail.stock.quick_added'"
+                        + " AND data -> 'after' ->> 'product_id' = ?")
+                .params(t.tenantId(), productOf(r).toString())
+                .query()
+                .singleRow();
+        assertThat(after)
+                .containsEntry("level", carton.toString())
+                .containsEntry("level_cost", 100_000L)
+                .containsEntry("paid", 100_000L)
+                .containsEntry("piece", 4_167L);
     }
 
     @Test
