@@ -416,7 +416,7 @@ export function JoinPage() {
       : target && !targetItem.data
         ? `Reading ${target.name}.`
         : rows.some((r) => r.product.unit_id !== unit)
-      ? 'Pick items counted in one unit: the sizes of one item are counted the same way.'
+      ? 'Pick items with the same single unit: the sizes of one item are kept the same way.'
       : rows.some((r, i) => sizeOf(r, i).trim() === '' && r.colour.trim() === '')
         ? 'Give each one its size, its colour or both.'
         : new Set(keys).size !== keys.length

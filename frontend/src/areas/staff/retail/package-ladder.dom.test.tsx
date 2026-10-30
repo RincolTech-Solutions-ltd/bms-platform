@@ -7,7 +7,7 @@ import type { Pack, Product, Unit } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 
-// Issue #699 (ADR-107): the package ladder on the item page. Biggest first, each level says what it holds and the pieces in
+// Issue #699 (ADR-107): the package ladder on the item page. Single unit first since issue #709 (D99 = A), each level says what it holds and the pieces in
 // words; a change shows the before and after in words before it is saved; a size that is not whole is refused in plain words;
 // a bigger package is added on top and the biggest removed. Example items, not a real shop.
 
@@ -17,6 +17,7 @@ const piece: Unit = { id: 'u-pc', name: 'Piece', active: true, version: 1 };
 const box: Unit = { id: 'u-box', name: 'Box', active: true, version: 1 };
 const carton: Unit = { id: 'u-ctn', name: 'Carton', active: true, version: 1 };
 const bale: Unit = { id: 'u-bale', name: 'Bale', active: true, version: 1 };
+const dozen: Unit = { id: 'u-dz', name: 'Dozen', active: true, version: 1, is_package: true, standard: true, fixed_count: 12 };
 const socket: Product = { id: 'p-1', description: 'Test 13A Socket', unit: 'Piece', unit_id: 'u-pc', sell_minor: 6_500, stock_on_hand: '275.000', version: 1 };
 const packs: Pack[] = [
   { unit_id: 'u-box', unit: 'Box', factor: '10.000', active: true, version: 2, purpose: 'both', holds_unit_id: 'u-pc', holds_unit: 'Piece', holds_qty: 10 },
@@ -31,7 +32,7 @@ vi.mock('../../../api/retail', async (original) => {
     ...real,
     retail: {
       ...real.retail,
-      listUnits: () => Promise.resolve([piece, box, carton, bale]),
+      listUnits: () => Promise.resolve([piece, dozen, box, carton, bale]),
       listPacks: () => Promise.resolve(packs),
       updatePack: (...a: unknown[]) => updatePack(...a),
       addPack: (...a: unknown[]) => addPack(...a),
@@ -59,14 +60,38 @@ afterEach(() => {
 });
 
 describe('the package ladder on the item page (issue #699)', () => {
-  it('shows every level biggest first with the pieces in words, and the chain', () => {
+  // Issue #709 (D99 = A, ADR-107 rule 8): built smallest first, the single unit with its HelpTip, then each bigger package.
+  it('shows the single unit first, then every bigger level with the pieces in words, and the chain', () => {
     draw(<ItemLadder product={socket} packs={packs} mayManage />);
-    const names = screen.getAllByText(/^1 (Carton|Box|Piece)/).map((n) => n.textContent);
-    expect(names[0]).toBe('1 Carton');
-    expect(names[1]).toBe('1 Box');
+    const names = [...document.querySelectorAll('.ladder-name')].map((n) => n.textContent);
+    expect(names).toEqual(['1 Piece Single unit', '1 Box', '1 Carton']);
+    expect(screen.getByRole('list', { name: 'What one package holds, single unit first' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'More about Single unit' })).toBeTruthy();
     expect(screen.getByLabelText('So 1 carton = 120 pieces')).toBeTruthy();
     expect(screen.getByText(/1 carton → 12 boxes → each 10 pieces/)).toBeTruthy();
-    expect(screen.getByText('The single thing a customer can buy. Stock is kept in pieces.')).toBeTruthy();
+    expect(screen.getByText('The one thing a customer can buy on its own. Stock is kept in pieces.')).toBeTruthy();
+    expect(screen.getByText('Does it come in a bigger pack?')).toBeTruthy();
+  });
+
+  // Issue #709 (ADR-110, D98): a dozen always holds 12, filled in and never typed.
+  it('adds a dozen holding 12 of the biggest, with no number to type', async () => {
+    addPack.mockResolvedValue({});
+    draw(<ItemLadder product={socket} packs={packs} mayManage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add a bigger package' }));
+    const form = screen.getByTestId('ladder-add');
+    const picker = await within(form).findByLabelText(/^The bigger package/);
+    await waitFor(() => expect(within(picker).queryByRole('option', { name: 'Dozen' })).toBeTruthy());
+    fireEvent.change(picker, { target: { value: 'u-dz' } });
+    expect(within(form).getByTestId('ladder-add-fixed').textContent).toBe('1 dozen holds 12 cartons. A dozen always holds 12.');
+    expect(within(form).queryByLabelText('How many cartons in one dozen')).toBeNull();
+    fireEvent.click(within(form).getByRole('button', { name: 'Add it' }));
+    await waitFor(() => expect(addPack).toHaveBeenCalledWith('p-1', { unit_id: 'u-dz', holds_unit_id: 'u-ctn', holds_qty: 12, purpose: 'both' }));
+  });
+
+  it('keeps Look inside biggest first (D99 = A)', () => {
+    draw(<ItemLadder product={socket} packs={packs} mayManage />);
+    const open = screen.getByLabelText('Open one');
+    expect(within(open).getAllByRole('option').map((o) => o.textContent)).toEqual(['1 Carton', '1 Box']);
   });
 
   it('shows the before and after of a change, then saves what one box holds', async () => {

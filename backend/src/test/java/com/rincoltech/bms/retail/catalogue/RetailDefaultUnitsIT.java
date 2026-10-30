@@ -25,7 +25,10 @@ import tools.jackson.databind.JsonNode;
  */
 class RetailDefaultUnitsIT extends IntegrationTest {
 
-    static final List<String> DEFAULTS = List.of("Box", "Kg", "Litre", "Metre", "Pack", "Pair", "Piece", "Set");
+    /** Issue #709 (ADR-110, D98): the standard single units and packages, by name. */
+    static final List<String> DEFAULTS = List.of(
+            "Bag", "Bale", "Box", "Bundle", "Carton", "Crate", "Dozen", "Gram", "Kg", "Litre", "Metre", "Ml", "Packet",
+            "Pair", "Piece", "Roll", "Set");
 
     @Autowired
     TestRestTemplate http;
@@ -122,5 +125,24 @@ class RetailDefaultUnitsIT extends IntegrationTest {
 
         assertThat(units(tenantId)).isEqualTo(names);
         assertThat(systemUnitAudits(tenantId)).isEqualTo(DEFAULTS.size() - 1);
+    }
+
+    /** Issue #709 (ADR-110): a shop's own spelling of a standard unit is that unit, so it gets no second one. */
+    @Test
+    void aShopsOwnSpellingOfAStandardUnitIsNotAddedAgain() {
+        UUID tenantId = create(List.of("lending"));
+        for (String own : List.of("Pcs", "Doz", "Kgs", "Ctns", "Pack")) {
+            TestDatabase.owner()
+                    .sql("INSERT INTO retail_units (id, tenant_id, name) VALUES (?, ?, ?)")
+                    .params(UUID.randomUUID(), tenantId, own)
+                    .update();
+        }
+
+        switchModules(tenantId, List.of("lending", "retail"));
+
+        List<String> names = units(tenantId);
+        assertThat(names).contains("Pcs", "Doz", "Kgs", "Ctns", "Pack", "Packet", "Gram");
+        assertThat(names).doesNotContain("Piece", "Dozen", "Kg", "Carton");
+        assertThat(systemUnitAudits(tenantId)).isEqualTo(DEFAULTS.size() - 4);
     }
 }

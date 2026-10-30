@@ -123,13 +123,13 @@ for (const width of [412, 1366]) {
   await category.click();
   await page.getByRole('listbox', { name: 'Categories' }).getByRole('option').first().click();
   await page.getByLabel(/^Description/).fill('Test LED Bulb 60W');
-  await page.getByLabel(/^Smallest unit you sell/).selectOption({ label: 'piece' });
+  await page.getByLabel(/^Single unit/).selectOption({ label: 'piece' });
   await page.getByRole('radio', { name: 'Yes' }).click();
   const rows = page.locator('[data-testid="package-row"]');
-  await rows.nth(0).getByLabel(/^Package unit/).selectOption({ label: 'Box' });
+  await rows.nth(0).getByLabel(/^Package/).selectOption({ label: 'Box' });
   await rows.nth(0).getByLabel(/^How many pieces in one box/).fill('10');
   await page.getByRole('button', { name: 'Add a bigger package' }).click();
-  await rows.nth(1).getByLabel(/^Package unit/).selectOption({ label: 'Carton' });
+  await rows.nth(1).getByLabel(/^Package/).selectOption({ label: 'Carton' });
   await rows.nth(1).getByLabel(/^How many boxes in one carton/).fill('12');
   await at('[data-testid="new-item-ladder"]', page, -120);
   await shot(page, '05-add-an-item-ladder', width);

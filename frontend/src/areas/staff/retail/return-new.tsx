@@ -62,7 +62,7 @@ export function ReturnRow({ line, row, back, branches, onChange }: {
           <input id={`qty-${id}`} inputMode="decimal" value={row.qty} onChange={(e) => onChange({ ...row, qty: e.target.value })} aria-invalid={problem !== null} />
           {unit && (
             <>
-              <label htmlFor={`unit-${id}`}>Counted in</label>
+              <label htmlFor={`unit-${id}`}>Returned in</label>
               <select id={`unit-${id}`} value={row.entered} onChange={(e) => onChange({ ...row, entered: e.target.value as RowForm['entered'] })}>
                 <option value="line">{unit}</option>
                 <option value="base">single units</option>

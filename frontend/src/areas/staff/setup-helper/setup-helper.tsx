@@ -2,7 +2,9 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { setupHelper, type DraftReason, type Given, type SetupHelperApi } from '../../../api/setup-helper';
 import { BusyButton } from '../../../app/ui/BusyButton';
+import { WORDS } from '../../../app/glossary';
 import { Field } from '../../../app/ui/Field';
+import { HelpTip } from '../../../app/ui/HelpTip';
 import { Hint } from '../../../app/ui/Hint';
 import { Card } from '../../../app/ui/ListRow';
 import { Segmented } from '../../../app/ui/Segmented';
@@ -143,7 +145,7 @@ export function ItemDraftList({ rows, withCost, onChange }: { rows: ItemEdit[]; 
         <div key={i} className="stack" data-testid={`draft-item-${i}`}>
           <Field id={slug(i, 'name')} label="Name" value={r.description} onChange={(e) => set(i, { description: e.target.value })} error={r.description.trim() === '' ? 'Add the name.' : null} />
           <Field id={slug(i, 'category')} label="Category" value={r.category} onChange={(e) => set(i, { category: e.target.value })} />
-          <Field id={slug(i, 'unit')} label="Counted in" value={r.unit} onChange={(e) => set(i, { unit: e.target.value })} />
+          <Field id={slug(i, 'unit')} label={WORDS.singleUnit} tip={<HelpTip tip="singleUnit" />} value={r.unit} onChange={(e) => set(i, { unit: e.target.value })} />
           <Field id={slug(i, 'sell')} label="Selling price" inputMode="decimal" value={r.sell} onChange={(e) => set(i, { sell: e.target.value })} error={r.sell.trim() === '' ? 'Add the selling price.' : null} />
           {withCost && <Field id={slug(i, 'cost')} label="Buying price" optional inputMode="decimal" value={r.cost} onChange={(e) => set(i, { cost: e.target.value })} />}
           {(r.packUnit !== '' || r.packFactor !== '') && (

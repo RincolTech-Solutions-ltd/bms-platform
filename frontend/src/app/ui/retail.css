@@ -1478,12 +1478,40 @@ td.num.qty-packs {
   font-weight: 600;
 }
 
+/* Issue #709: "Single unit" as the glossary writes it, never in capitals. */
 .ladder-tag {
   margin-left: var(--space-2);
   color: var(--color-text-muted);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   font-weight: 600;
-  text-transform: uppercase;
+}
+
+/* Issue #709: an item's pack table on a phone, the selling price under the size, each on its own line, wrapping in its cell. */
+.pack-size-price > span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.pack-size-price > .badge,
+.pack-size-price > .btn-sm {
+  display: inline-block;
+  margin-top: var(--space-1);
+}
+
+/* Two columns that wrap, the pack's badges under its name, so nothing pushes the table past a phone's width. */
+.pack-table th,
+.pack-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.pack-table .badge {
+  white-space: normal;
+}
+
+/* An amount is never broken in the middle of its figures. */
+.pack-table .pack-price .num {
+  white-space: nowrap;
 }
 
 .ladder-says,

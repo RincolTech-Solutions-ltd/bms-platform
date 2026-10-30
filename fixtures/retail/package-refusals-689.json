@@ -1,16 +1,16 @@
 {
-  "about": "Issue #689 (ADR-106), review of #692: the refusal of a package as a new item's smallest unit, by unit name. RetailNewItemPacksIT checks RetailCatalogue.packageAsUnit against it and new-item-packs.dom.test.tsx checks the PWA's packageAsUnit, so the server and the screen word it the same. Every short code PACKAGE_WORDS refuses reads as its word.",
+  "about": "Issue #689 (ADR-106), review of #692: the refusal of a package as a new item's single unit, by unit name. RetailNewItemPacksIT checks RetailCatalogue.packageAsUnit against it and new-item-packs.dom.test.tsx checks the PWA's packageAsUnit, so the server and the screen word it the same. Every short code PACKAGE_WORDS refuses reads as its word. Issue #709 (ADR-110): 'Choose a single unit'; Roll may be a single unit, so it is never refused here.",
   "cases": [
-    { "unit": "Box", "sentence": "A box is a package. Choose the smallest unit, like piece, then add the box below." },
-    { "unit": "Boxes", "sentence": "Boxes is a package. Choose the smallest unit, like piece, then add the boxes below." },
-    { "unit": "Cartons", "sentence": "Cartons is a package. Choose the smallest unit, like piece, then add the cartons below." },
-    { "unit": "Set of 4", "sentence": "A set of 4 is a package. Choose the smallest unit, like piece, then add the set of 4 below." },
-    { "unit": "Ctn", "sentence": "A carton is a package. Choose the smallest unit, like piece, then add the carton below." },
-    { "unit": "Ctns", "sentence": "A carton is a package. Choose the smallest unit, like piece, then add the carton below." },
-    { "unit": "PKT", "sentence": "A packet is a package. Choose the smallest unit, like piece, then add the packet below." },
-    { "unit": "Pkts", "sentence": "A packet is a package. Choose the smallest unit, like piece, then add the packet below." },
-    { "unit": "Bx", "sentence": "A box is a package. Choose the smallest unit, like piece, then add the box below." },
-    { "unit": "Doz", "sentence": "A dozen is a package. Choose the smallest unit, like piece, then add the dozen below." },
-    { "unit": "dz", "sentence": "A dozen is a package. Choose the smallest unit, like piece, then add the dozen below." }
+    { "unit": "Box", "sentence": "A box is a package. Choose a single unit, like piece, then add the box below." },
+    { "unit": "Boxes", "sentence": "Boxes is a package. Choose a single unit, like piece, then add the boxes below." },
+    { "unit": "Cartons", "sentence": "Cartons is a package. Choose a single unit, like piece, then add the cartons below." },
+    { "unit": "Set of 4", "sentence": "A set of 4 is a package. Choose a single unit, like piece, then add the set of 4 below." },
+    { "unit": "Ctn", "sentence": "A carton is a package. Choose a single unit, like piece, then add the carton below." },
+    { "unit": "Ctns", "sentence": "A carton is a package. Choose a single unit, like piece, then add the carton below." },
+    { "unit": "PKT", "sentence": "A packet is a package. Choose a single unit, like piece, then add the packet below." },
+    { "unit": "Pkts", "sentence": "A packet is a package. Choose a single unit, like piece, then add the packet below." },
+    { "unit": "Bx", "sentence": "A box is a package. Choose a single unit, like piece, then add the box below." },
+    { "unit": "Doz", "sentence": "A dozen is a package. Choose a single unit, like piece, then add the dozen below." },
+    { "unit": "dz", "sentence": "A dozen is a package. Choose a single unit, like piece, then add the dozen below." }
   ]
 }

@@ -35,6 +35,9 @@ const ELSEWHERE: Partial<Record<HelpTipKey, string>> = {
   itemSizes: 'areas/staff/retail/new-item-sizes.dom.test.tsx',
   guarantor: 'areas/staff/lending/application.dom.test.tsx',
   inArrears: 'areas/staff/home-cards.dom.test.tsx',
+  // Issue #709 (ADR-110): on the Units page's two parts, and on the item forms and the ladder.
+  singleUnit: 'areas/staff/retail/units-sections.dom.test.tsx',
+  package: 'areas/staff/retail/units-sections.dom.test.tsx',
 };
 const HERE: HelpTipKey[] = ['averageBuyingPrice', 'sellingPrice', 'priceList', 'appraisal', 'outstanding', 'collateral'];
 

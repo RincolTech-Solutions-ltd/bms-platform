@@ -18521,9 +18521,14 @@ export interface components {
         };
         RetailUnit: {
             active?: boolean;
+            /**
+             * Format: int32
+             * @description Issue #709 (ADR-110, D98): present only for a package of a fixed size, 12 for a dozen; every pack of it holds exactly this many of the level it holds
+             */
+            fixed_count?: number;
             /** Format: uuid */
             id?: string;
-            /** @description Issue #689 (ADR-106): the name is a package word, such as Box or Carton, so it can be a pack but never the smallest unit of a new item */
+            /** @description Issue #689 (ADR-106): the name is a package word, such as Box or Carton, so it can be a pack but never the single unit of a new item */
             is_package?: boolean;
             name?: string;
             /**
@@ -18531,6 +18536,8 @@ export interface components {
              * @description Products (active or not) that use this unit
              */
             product_count?: number;
+            /** @description Issue #709 (ADR-110): one of the standard units every shop gets, under any spelling; the list shows them first, in the standard order */
+            standard?: boolean;
             usual_pack?: components["schemas"]["RetailUsualPack"];
             /**
              * Format: int32

@@ -20,6 +20,7 @@ import { createPurchasingMock } from './retail-purchasing-mock';
 import { barcodeKey, checkBarcode, scanKeys, shopEan } from '../areas/staff/retail/barcode-state';
 import { bigDrop } from '../areas/staff/retail/maths';
 import { listedWord } from '../areas/staff/retail/units-state';
+import standardUnits from '../words/standard-units.json';
 import { MAX_VARIANTS, cleanOption, planVariants, variantDescription, variantKey, variantLabel } from './retail-variants';
 
 // Fabricated retail data for VITE_RETAIL_MOCK and for tests: invented products, branches and
@@ -208,6 +209,23 @@ const MOCK_PRESETS: Record<string, readonly string[]> = {
   wholesale: ['units', 'price_lists', 'customer_accounts', 'documents', 'purchasing'],
   wholesale_and_shops: MOCK_GOVERNED,
 };
+
+/**
+ * Issue #709 (ADR-110): what the server says of a unit by its name, from the shared files the server reads too
+ * (src/words/standard-units.json and unit-words.json): a package word, a standard unit in its order, a dozen's fixed 12.
+ */
+const STANDARD_UNITS = [...standardUnits.single_units, ...standardUnits.packages];
+const PACKAGE_WORDS = new RegExp(`^(${standardUnits.package_words})$`, 'i');
+
+const standardRank = (name: string) => {
+  const i = STANDARD_UNITS.findIndex((s) => listedWord(s) === listedWord(name));
+  return i < 0 ? STANDARD_UNITS.length : i;
+};
+
+function unitFlags(name: string): Pick<Unit, 'is_package' | 'standard' | 'fixed_count'> {
+  const fixed = (standardUnits.fixed_counts as Record<string, number>)[listedWord(name)];
+  return { is_package: PACKAGE_WORDS.test(name.trim()), standard: standardRank(name) < STANDARD_UNITS.length, ...(fixed ? { fixed_count: fixed } : {}) };
+}
 
 /** Issue #493: PREFIX-0001, at least four digits, as bms_next_item_code makes it (V96). */
 export function itemCode(prefix: string, n: number): string {
@@ -762,7 +780,7 @@ export function createMockRetail(): RetailApi {
         const picked = items.map((i) => find(i.product_id ?? ''));
         if (picked.some((p) => p.familyId)) refuse(422, 'already_has_variants', 'One of these is a size or colour of an item already.');
         const first = picked[0] ?? refuse(422, 'validation_failed', 'Pick at least one item.');
-        if (picked.some((p) => p.unit !== first.unit)) refuse(422, 'unit_differs', 'The sizes of one item are counted in one unit.');
+        if (picked.some((p) => p.unit !== first.unit)) refuse(422, 'unit_differs', 'The sizes of one item have one single unit.');
         let id = familyId;
         if (!id) {
           id = nextId('f');
@@ -842,7 +860,7 @@ export function createMockRetail(): RetailApi {
         const p = find(productId);
         const unit = unitRows.find((u) => u.id === body.unit_id);
         if (!unit) refuse(422, 'validation_failed', 'No such unit.');
-        if (unit?.name === p.unit) refuse(422, 'pack_unit_is_base_unit', 'A pack must be a different unit from the one the item is counted in.');
+        if (unit?.name === p.unit) refuse(422, 'pack_unit_is_base_unit', 'A pack must be a different unit from the item\'s single unit.');
         const rows = packs.get(p.id) ?? [];
         if (rows.some((k) => k.unit_id === body.unit_id)) refuse(409, 'duplicate_pack', 'The item has a pack of this unit already.');
         const sell = body.purpose === 'buy' ? undefined : body.sell_minor;
@@ -998,7 +1016,9 @@ export function createMockRetail(): RetailApi {
         return categoryRow(c);
       }),
 
-    listUnits: () => delay(unitRows.map((u) => refreshed(u, 'unit') as Unit)),
+    // Issue #709 (ADR-110): the flags and the order the server gives, the standard units first.
+    listUnits: () => delay(unitRows.map((u) => ({ ...refreshed(u, 'unit'), ...unitFlags(u.name) }) as Unit)
+      .sort((a, b) => standardRank(a.name ?? '') - standardRank(b.name ?? ''))),
 
     createUnit: (name, usualPack) =>
       run(() => {

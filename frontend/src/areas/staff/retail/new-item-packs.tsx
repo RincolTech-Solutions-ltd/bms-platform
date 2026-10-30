@@ -9,7 +9,7 @@ import { PURPOSES, factorForUnit, purposeForUnit, usualFactor, type Purpose } fr
 import { UnitPicker } from './unit-picker';
 import { perPieceMinor, shown, type Rung } from './ladder-state';
 import { money } from './ui';
-import { LadderRungs, LadderSum, LookInside } from './package-ladder';
+import { BIGGER_QUESTION, LadderRungs, LadderSum, LookInside } from './package-ladder';
 import { unitWord, unitWords } from './units-state';
 
 // Issue #689 (ADR-106): Add an item asks for the smallest unit, then whether the item is bought or sold in packages, and
@@ -98,7 +98,7 @@ export function packageAsUnit(unit: Unit | undefined): string | null {
   const word = unitWord((unit.name ?? '').trim()).toLowerCase();
   const head = word.split(' ')[0] ?? '';
   const named = head.endsWith('s') && !head.endsWith('ss') ? word.charAt(0).toUpperCase() + word.slice(1) : `A ${word}`;
-  return `${named} is a package. Choose the smallest unit, like piece, then add the ${word} below.`;
+  return `${named} is a package. Choose a single unit, like piece, then add the ${word} below.`;
 }
 
 /**
@@ -280,7 +280,8 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
     const usualOf = rows.find((r) => r.key !== row.key && r.unitId !== '' && r.unitId === unit?.usual_pack?.of_unit_id);
     const holdsKey = usualOf ? usualOf.key : unit?.usual_pack?.of_unit_id === smallest?.id ? 0 : row.holdsKey;
     const heldId = holdsKey === 0 ? smallest?.id : rows.find((r) => r.key === holdsKey)?.unitId;
-    const factor = factorForUnit(row.factor, row.filled.factor, usualFactor(unit, { unit_id: heldId }));
+    // Issue #709 (ADR-110): a dozen always holds 12, filled in and not changed.
+    const factor = unit?.fixed_count ? String(unit.fixed_count) : factorForUnit(row.factor, row.filled.factor, usualFactor(unit, { unit_id: heldId }));
     const purpose = purposeForUnit(row.purpose, row.filled.purpose, unit);
     change(row.key, {
       unitId,
@@ -305,6 +306,7 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
             const used = new Set(rows.filter((r) => r.key !== row.key).map((r) => r.unitId));
             const choices = units.filter((u) => u.id !== smallest?.id && !used.has(u.id ?? ''));
             const pack = oneOf(units.find((u) => u.id === row.unitId), 'package');
+            const fixed = units.find((u) => u.id === row.unitId)?.fixed_count;
             const size = sizeProblem(row.factor);
             const mine = refused?.index === i ? refused : null;
             return (
@@ -312,7 +314,7 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
                 <legend>{rows.length > 1 ? `Package ${i + 1}` : 'Package'}</legend>
                 <UnitPicker
                   id={`item-pack-unit-${row.key}`}
-                  label="Package unit"
+                  kind="package"
                   hint="For example carton, box or dozen."
                   units={choices}
                   loading={false}
@@ -346,6 +348,8 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
                   autoComplete="off"
                   placeholder="10"
                   value={row.factor}
+                  readOnly={fixed !== undefined}
+                  hint={fixed ? `A ${pack} always holds ${fixed}. For another number, use a box.` : undefined}
                   onChange={(e) => change(row.key, { factor: e.target.value })}
                   error={size ?? (mine?.onSize ? mine.message : null)}
                   showError={showErrors || mine?.onSize === true}
@@ -386,14 +390,17 @@ export function NewItemPackages({ smallest, units, load, answer, onAnswer, rows,
             );
           })}
           {rows.length < MAX_PACKAGES ? (
-            <button type="button" className="btn-ghost" onClick={() => onRows([...rows, newPackageRow(nextKey, biggestKey)])}>
-              {icons.plus}
-              <span>Add a bigger package</span>
-            </button>
+            <>
+              <p className="field-label">{BIGGER_QUESTION}</p>
+              <button type="button" className="btn-ghost" onClick={() => onRows([...rows, newPackageRow(nextKey, biggestKey)])}>
+                {icons.plus}
+                <span>Add a bigger package</span>
+              </button>
+            </>
           ) : (
             <Hint>Up to 10 packages</Hint>
           )}
-          {/* Issue #699 (ADR-107): the packages as the ladder they make, biggest first, and one drawn opened up. */}
+          {/* Issue #699 (ADR-107): the packages as the ladder they make, single unit first (D99), and one drawn opened up. */}
           {rungs.length > 0 && (
             <div className="ladder-panel stack" data-testid="new-item-ladder">
               <p className="field-label">What one package holds</p>

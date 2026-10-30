@@ -72,8 +72,9 @@ describe('Counted in (issue #619)', () => {
         </StaffContext.Provider>
       </QueryClientProvider>,
     );
-    const select = screen.getByLabelText(/^Counted in/) as HTMLSelectElement;
-    expect([...select.options].map((o) => o.text)).toEqual(['Choose a unit', 'piece', '+ Add a unit']);
+    const select = screen.getByLabelText(/^Single unit/) as HTMLSelectElement;
+    // Issue #709 (ADR-110): the standard units are listed first, so the add is "+ Add your own".
+    expect([...select.options].map((o) => o.text)).toEqual(['Choose a unit', 'piece', '+ Add your own']);
     fireEvent.change(select, { target: { value: ADD_CHOICE } });
     expect(await screen.findByRole('dialog', { name: 'Add a unit' })).toBeTruthy();
     const name = screen.getByLabelText(/^Name of the new unit/);
@@ -83,12 +84,12 @@ describe('Counted in (issue #619)', () => {
     expect(submitted).not.toHaveBeenCalled();
     // Back on the form, with the new unit chosen and named at once.
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect((screen.getByLabelText(/^Counted in/) as HTMLSelectElement).selectedOptions[0]?.text).toBe('dozen');
+    expect((screen.getByLabelText(/^Single unit/) as HTMLSelectElement).selectedOptions[0]?.text).toBe('dozen');
   });
 
   it('never opens the add sheet when an arrow key on the closed list lands on + Add a unit (review of #691)', async () => {
     open([piece]);
-    const select = screen.getByLabelText(/^Counted in/) as HTMLSelectElement;
+    const select = screen.getByLabelText(/^Single unit/) as HTMLSelectElement;
     fireEvent.keyDown(select, { key: 'ArrowDown' });
     fireEvent.change(select, { target: { value: ADD_CHOICE } });
     fireEvent.keyUp(select, { key: 'ArrowDown' });
@@ -110,7 +111,7 @@ describe('Counted in (issue #619)', () => {
         </StaffContext.Provider>
       </QueryClientProvider>,
     );
-    fireEvent.change(screen.getByLabelText(/^Counted in/), { target: { value: ADD_CHOICE } });
+    fireEvent.change(screen.getByLabelText(/^Single unit/), { target: { value: ADD_CHOICE } });
     fireEvent.change(await screen.findByLabelText(/^Name of the new unit/), { target: { value: 'pcs' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add unit' }));
     await waitFor(() => expect(screen.getByTestId('chosen').textContent).toBe('u1'));

@@ -263,7 +263,8 @@ function NewItemForm({ id, qtyLabel, qtyError, counting, askCost, initial = '', 
       )}
       <UnitPicker
         id={`${id}-unit`}
-        units={(units.data ?? []).filter((u) => u.active !== false)}
+        // Round 2 of #709: a new item's Single unit lists no package (the server refuses one anyway).
+        units={(units.data ?? []).filter((u) => u.active !== false && (u.is_package !== true || u.id === unitId))}
         loading={units.data === undefined} load={units}
         value={unitId}
         onChange={(next) => { setUnitId(next); forget(); }}

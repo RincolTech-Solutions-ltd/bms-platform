@@ -3,6 +3,8 @@
   "units": [
     { "word": "piece", "plural": "pieces", "codes": ["pc", "pcs", "pce"], "also": [] },
     { "word": "kilogram", "plural": "kilograms", "codes": ["kg", "kgs"], "also": ["kilo", "kilos"] },
+    { "word": "gram", "plural": "grams", "codes": ["gm", "gms"], "also": ["g", "gramme", "grammes"] },
+    { "word": "millilitre", "plural": "millilitres", "codes": ["ml", "mls"], "also": ["milliliter", "milliliters"] },
     { "word": "litre", "plural": "litres", "codes": ["ltr", "ltrs"], "also": ["l", "liter", "liters"] },
     { "word": "metre", "plural": "metres", "codes": ["mtr", "mtrs"], "also": ["m", "meter", "meters"] },
     { "word": "carton", "plural": "cartons", "codes": ["ctn", "ctns"], "also": [] },

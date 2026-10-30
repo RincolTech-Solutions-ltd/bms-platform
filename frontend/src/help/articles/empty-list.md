@@ -11,4 +11,4 @@ When a list a form needs has nothing in it yet, the form says so in one line and
 3. For a price list, a branch, an expense category, a product or a member, the button opens the screen that adds it, such as **Add a price list**. Once you add it there, the app takes you back to your form; for an expense, once its category has an item. Sell, Move stock and Record an expense keep what you typed. A loan application, collateral and an existing loan do not, so add the member or product first, then fill in the form.
 4. If the line says **Ask the owner to add a unit first.**, you may not add it yourself. Ask the owner or an administrator to add it, then open the form again.
 
-> **Counted in** ends its list with + Add a unit even when it has units, so you can add the one you need while you add an item.
+> **Single unit** ends its list with + Add your own even when it has units, so you can add the one you need while you add an item.

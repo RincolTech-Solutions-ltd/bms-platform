@@ -3,6 +3,7 @@ package com.rincoltech.bms.retail.catalogue.internal;
 import com.rincoltech.bms.kernel.Search;
 import com.rincoltech.bms.retail.catalogue.CatalogueNames;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
+import com.rincoltech.bms.retail.catalogue.StandardUnits;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Category;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Pack;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceChange;
@@ -72,7 +73,8 @@ class CatalogueRepository {
     }
 
     List<Unit> units() {
-        return jdbc.sql("""
+        return jdbc
+                .sql("""
                         SELECT u.id, u.name, u.active, u.version, (SELECT count(*) FROM retail_products p WHERE p.unit_id = u.id) AS used,
                                u.pack_size, u.pack_of_unit_id, o.name AS pack_of, u.pack_purpose
                           FROM retail_units u
@@ -94,8 +96,17 @@ class CatalogueRepository {
                                         rs.getObject("pack_of_unit_id", UUID.class),
                                         rs.getString("pack_of"),
                                         rs.getString("pack_purpose")),
-                        RetailCatalogue.isPackageWord(rs.getString("name"))))
-                .list();
+                        RetailCatalogue.isPackageWord(rs.getString("name")),
+                        StandardUnits.rank(rs.getString("name")) >= 0,
+                        StandardUnits.fixedCount(rs.getString("name"))))
+                .list()
+                .stream()
+                // Issue #709 (ADR-110): the standard units first, in their order, then the shop's own by name.
+                .sorted(java.util.Comparator.comparingInt((Unit u) -> {
+                    int rank = StandardUnits.rank(u.name());
+                    return rank < 0 ? Integer.MAX_VALUE : rank;
+                }))
+                .toList();
     }
 
     Optional<Category> category(UUID id) {
@@ -885,6 +896,17 @@ class CatalogueRepository {
                         SELECT EXISTS (SELECT 1 FROM retail_stock_movements WHERE product_id = ?)
                             OR EXISTS (SELECT 1 FROM retail_stock_balances WHERE product_id = ? AND qty <> 0)
                         """).params(productId, productId).query(Boolean.class).single();
+    }
+
+    /**
+     * Review of #722 (ADR-110): a pack of the unit, on any item and switched on or off, holding another number than
+     * {@code count} of what it holds (its factor when it names no level).
+     */
+    boolean unitHasPackNotHolding(UUID unitId, int count) {
+        return jdbc.sql("""
+                        SELECT EXISTS (SELECT 1 FROM retail_product_units
+                                        WHERE unit_id = ? AND COALESCE(holds_qty::numeric, factor) <> ?)
+                        """).params(unitId, count).query(Boolean.class).single();
     }
 
     boolean unitHasPacks(UUID unitId) {

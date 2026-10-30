@@ -449,7 +449,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
         showError={showErrors || unitProblem !== null}
       />
       {units.data !== undefined && piece === undefined && !pieceOff && unitId === '' && (
-        <p className="hint" data-testid="qa-piece-made">Left empty, the item is counted in Piece, made for you.</p>
+        <p className="hint" data-testid="qa-piece-made">Left empty, the single unit is Piece, made for you.</p>
       )}
       {packsOn ? (
         <NewItemPackages
@@ -593,7 +593,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
       )}
       {exists && packages.length > 0 && (
         // Review of #716: the existing item keeps its own packages, and How many is counted in them.
-        <p className="hint" data-testid="qa-packs-not-added">The packages you typed are not added to {exists.name}. How many is counted in its own packages.</p>
+        <p className="hint" data-testid="qa-packs-not-added">The packages you typed are not added to {exists.name}. How many is taken in its own packages.</p>
       )}
       {exists && panelNote && <p role="alert" className="alert alert-warning" data-testid="qa-panel-note">{panelNote}</p>}
       {exists && !panelNote && forExisting && existing.isError && (

@@ -7,7 +7,7 @@ needs: retail.catalogue.manage, retail.stock.read
 screens: /staff/retail/catalogue/products
 words: carton, cartons, box, boxes, turn on cartons, buy by the carton, sell by the carton, buy in cartons, packs off, no packs, cannot find packs
 ---
-An item can also be sold or bought in cartons, boxes and other packs, while its stock is still counted in pieces. A new shop starts with cartons turned on.
+An item can also be sold or bought in cartons, boxes and other packs, while its stock is still kept in its single unit, such as pieces. A new shop starts with cartons turned on.
 
 1. Open the item with **Edit**, or start **Add an item**. If the form asks **Also sold or bought in cartons or boxes?**, cartons are off for your shop.
 2. Tap **Turn on cartons**. The section **Cartons, boxes and other packs** shows on the item at once. Only the owner, or someone who may change settings, can turn it on; anyone else asks them.

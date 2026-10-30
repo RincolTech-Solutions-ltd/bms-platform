@@ -1625,7 +1625,8 @@ export const transferReceiptCapability: Tour = {
 export const unitsCapability: Tour = {
   id: 'capability-units',
   // Version 2 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
-  version: 2,
+  // Version 3: stock is kept in the single unit (issue #709, ADR-110).
+  version: 3,
   title: 'New: cartons, boxes and other packs',
   audience: (me) => held(me, 'retail.catalogue.manage'),
   autoStart: true,
@@ -1634,7 +1635,7 @@ export const unitsCapability: Tour = {
     {
       id: 'intro',
       title: 'Packs are on',
-      body: 'An item can now have packs, like a carton of 12. Stock is still counted in single items; a sale or a purchase can be entered by the pack.',
+      body: 'An item can now have packs, like a carton of 12. Stock is still kept in the single unit, such as pieces; a sale or a purchase can be entered by the pack.',
     },
     {
       id: 'tile',

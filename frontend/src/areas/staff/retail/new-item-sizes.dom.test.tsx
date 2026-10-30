@@ -76,7 +76,7 @@ async function fill() {
   await chooseCategory(screen.getByLabelText(/^Category/), 'Test lighting');
   fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Test longlife bulb' } });
   await screen.findByRole('option', { name: 'Bulb' });
-  fireEvent.change(screen.getByLabelText(/^Smallest unit you sell/), { target: { value: 'u1' } });
+  fireEvent.change(screen.getByLabelText(/^Single unit/), { target: { value: 'u1' } });
   fireEvent.change(screen.getByLabelText(/^Selling price/), { target: { value: '4000' } });
 }
 
@@ -125,7 +125,7 @@ describe('sizes on Add an item', () => {
     // A size the shop typed before is offered again.
     expect(await screen.findByRole('button', { name: 'Size 7' })).toBeTruthy();
     fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
-    fireEvent.change(screen.getByLabelText(/^Package unit/), { target: { value: 'u2' } });
+    fireEvent.change(screen.getByLabelText(/^Package/), { target: { value: 'u2' } });
     fireEvent.change(screen.getByLabelText(/^How many bulbs in one carton/), { target: { value: '24' } });
     fireEvent.change(screen.getByLabelText(/^Selling price of one carton/), { target: { value: '96000' } });
     fireEvent.change(screen.getByLabelText('Selling price of 40W'), { target: { value: '3000' } });
@@ -165,7 +165,7 @@ describe('sizes on Add an item', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Bulbs (watts)' }));
     for (const s of ['40W', '60W', '100W']) fireEvent.click(chip('Sizes', s));
     fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
-    fireEvent.change(screen.getByLabelText(/^Package unit/), { target: { value: 'u2' } });
+    fireEvent.change(screen.getByLabelText(/^Package/), { target: { value: 'u2' } });
     fireEvent.change(screen.getByLabelText(/^How many bulbs in one carton/), { target: { value: '24' } });
     fireEvent.change(screen.getByLabelText(/^Selling price of one carton/), { target: { value: '96000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));

@@ -10,6 +10,7 @@ import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.retail.catalogue.CatalogueNames;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
+import com.rincoltech.bms.retail.catalogue.StandardUnits;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.ImportResult;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.ImportRow;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceChange;
@@ -184,6 +185,11 @@ class ProductImportService {
                                 + " three decimals and no commas, for example 12 or 12.5.";
             } else if (hasPack && packUnit.equalsIgnoreCase(unit)) {
                 problem = "The pack unit must differ from the unit.";
+            } else if (hasPack
+                    && StandardUnits.fixedCount(packUnit) != null
+                    && packFactor.compareTo(java.math.BigDecimal.valueOf(StandardUnits.fixedCount(packUnit))) != 0) {
+                // Review of #722 (ADR-110): a dozen holds 12 on the import too, an error row like any other.
+                problem = StandardUnits.fixedCountRefusal(StandardUnits.fixedCount(packUnit));
             } else if (sell == null) {
                 problem = "The selling price must be " + example(exponent, 12000) + ".";
             } else if (cost == null && !costBlank) {

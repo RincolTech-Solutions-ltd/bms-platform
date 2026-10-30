@@ -12,6 +12,7 @@ import com.rincoltech.bms.kernel.Search;
 import com.rincoltech.bms.kernel.Versions;
 import com.rincoltech.bms.retail.catalogue.CatalogueNames;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
+import com.rincoltech.bms.retail.catalogue.StandardUnits;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Category;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.CategoryList;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.CategoryRequest;
@@ -233,6 +234,7 @@ class CatalogueService {
         String name = r.name().trim();
         refuseSameUnit(name, null);
         Unit of = requireUsualPackOf(id, r.usualPack());
+        requireFixedUsualSize(name, r.usualPack());
         // Only a write that raced the lock above is refused here: back to the savepoint, the unit made meanwhile is
         // read and named, so the refusal always carries existing_id (review of #715).
         Object savepoint = TransactionAspectSupport.currentTransactionStatus().createSavepoint();
@@ -292,6 +294,40 @@ class CatalogueService {
                     : repo.unit(down.usualPack().ofUnitId()).orElse(null);
         }
         return of;
+    }
+
+    /** Issue #709 (ADR-110, D98): the usual size of a dozen is 12, the only size it may have. */
+    private static void requireFixedUsualSize(String unitName, UsualPackRequest pack) {
+        Integer fixed = StandardUnits.fixedCount(unitName);
+        if (pack != null && fixed != null && pack.size().compareTo(BigDecimal.valueOf(fixed)) != 0) {
+            throw ApiException.validation(List.of(
+                    new FieldProblem("usual_pack.size", "fixed_count", StandardUnits.fixedCountRefusal(fixed))));
+        }
+    }
+
+    /**
+     * Review of #722: a unit renamed to a fixed-count name (Box to Dozen) takes the rule on, so the rename is refused while a
+     * pack of the unit on any item, or its usual pack, holds another number; those would be dozens of 10 nobody could fix.
+     */
+    // JUSTIFICATION-A3: a must-fix of the review of #722; no existing check sees a rename change a unit's rule.
+    private void requireFixedCountKept(Unit before, String name, UsualPackRequest next, boolean clearUsual) {
+        Integer fixed = StandardUnits.fixedCount(name);
+        if (fixed == null || name.equals(before.name())) {
+            return;
+        }
+        BigDecimal usual = next != null
+                ? next.size()
+                : clearUsual || before.usualPack() == null
+                        ? null
+                        : new BigDecimal(before.usualPack().size());
+        if (repo.unitHasPackNotHolding(before.id(), fixed)
+                || (usual != null && usual.compareTo(BigDecimal.valueOf(fixed)) != 0)) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "name",
+                    "fixed_count",
+                    StandardUnits.fixedCountRefusal(fixed) + " " + before.name()
+                            + " holds another number on some items, so it cannot be called " + name + ".")));
+        }
     }
 
     /** The audit of a usual pack names the smaller unit, as a person reads it (review of #628): "100.000 Metre both". */
@@ -358,10 +394,12 @@ class CatalogueService {
             throw ApiException.validation(List.of(new FieldProblem(
                     "clear_usual_pack", "invalid", "Set a usual pack or clear it, not both at once.")));
         }
+        requireFixedCountKept(before, name, r.usualPack(), clearUsual);
         UsualPack had = before.usualPack();
         String hadText = had == null ? null : usualPackText(new BigDecimal(had.size()), had.ofUnit(), had.purpose());
         if (r.usualPack() != null) {
             Unit of = requireUsualPackOf(id, r.usualPack());
+            requireFixedUsualSize(name, r.usualPack());
             diff(
                     was,
                     now,
@@ -1154,8 +1192,7 @@ class CatalogueService {
         }
         if (unit.id().equals(product.unitId())) {
             throw ApiException.rule(
-                    "pack_unit_is_base_unit",
-                    "A pack must be a different unit from the one the product is counted in.");
+                    "pack_unit_is_base_unit", "A pack must be a different unit from the item's single unit.");
         }
         // Issue #699 (ADR-107): a pack may say what it holds, one level down, and its size is worked out from that.
         if ((holds.unitId() == null) != (holds.qty() == null)) {
@@ -1184,6 +1221,10 @@ class CatalogueService {
         } else if (factor == null) {
             throw ApiException.validation(
                     List.of(new FieldProblem("factor", "required", "Say how many of the item are in one pack.")));
+        }
+        ApiException notFixed = fixedCountProblem(unit.name(), holds.qty(), factor);
+        if (notFixed != null) {
+            throw notFixed;
         }
         if (holds.usualBuy() && purpose.equals(RetailCatalogue.PACK_SELL)) {
             throw usualBuyNotBought();
@@ -1244,7 +1285,7 @@ class CatalogueService {
             if (unitId.equals(product.unitId())) {
                 throw ApiException.rule(
                         "pack_unit_is_base_unit",
-                        "This unit is now the one the item is counted in, so it cannot also be a pack.");
+                        "This unit is now the item's single unit, so it cannot also be a pack.");
             }
         }
         List<Pack> all = repo.packs(productId);
@@ -1262,6 +1303,12 @@ class CatalogueService {
         }
         Ladder ladder = ladderAfter(product, all, before, r, active);
         java.math.BigDecimal factor = ladder.factor();
+        if (r.factor() != null || r.holdsQty() != null) {
+            ApiException notFixed = fixedCountProblem(before.unit(), ladder.holdsQty(), factor);
+            if (notFixed != null) {
+                throw notFixed;
+            }
+        }
         String purpose = r.purpose() == null ? before.purpose() : r.purpose();
         if (Boolean.TRUE.equals(r.usualBuy()) && (!active || purpose.equals(RetailCatalogue.PACK_SELL))) {
             throw usualBuyNotBought();
@@ -1368,6 +1415,11 @@ class CatalogueService {
             ladder = null;
             refused = e.errors().isEmpty() ? e.code() : e.errors().getFirst().code();
         }
+        // Issue #709 (ADR-110): a dozen keeps its 12 whatever a delivery holds.
+        if (ladder != null && fixedCountProblem(before.unit(), ladder.holdsQty(), ladder.factor()) != null) {
+            ladder = null;
+            refused = "fixed_count";
+        }
         // Review of #624: a pack with its own price sells at it whatever its size, so a new usual size is a
         // price change, as on Edit item. Without retail.price.edit the delivery still saves at its own size, the
         // usual size stays, the skip is audited, and the response says so on the line. The same for a bigger level
@@ -1405,6 +1457,20 @@ class CatalogueService {
     /** What a new pack holds (both null: it holds its factor of the item's unit) and whether Buy stock opens on it. */
     record Holds(UUID unitId, Integer qty, boolean usualBuy) {
         static final Holds NONE = new Holds(null, null, false);
+    }
+
+    /**
+     * Issue #709 (ADR-110, D98): a dozen holds 12 of the level it holds (12 of the item's unit when it names none), never
+     * another number; null when the pack of {@code unitName} keeps its fixed count or has none.
+     */
+    private static ApiException fixedCountProblem(String unitName, Integer holdsQty, BigDecimal factor) {
+        Integer fixed = StandardUnits.fixedCount(unitName);
+        BigDecimal count = holdsQty != null ? BigDecimal.valueOf(holdsQty) : factor;
+        if (fixed == null || count == null || count.compareTo(BigDecimal.valueOf(fixed)) == 0) {
+            return null;
+        }
+        return ApiException.validation(List.of(new FieldProblem(
+                holdsQty != null ? "holds_qty" : "factor", "fixed_count", StandardUnits.fixedCountRefusal(fixed))));
     }
 
     /** A bigger level that follows a change, with its new factor. */
@@ -1559,7 +1625,7 @@ class CatalogueService {
                 ApiException.validation(List.of(new FieldProblem(
                         "holds_unit_id",
                         "holds_unknown",
-                        "Choose what one " + pack + " holds: the smallest unit or another package of this item.")));
+                        "Choose what one " + pack + " holds: the single unit or another package of this item.")));
         };
     }
 

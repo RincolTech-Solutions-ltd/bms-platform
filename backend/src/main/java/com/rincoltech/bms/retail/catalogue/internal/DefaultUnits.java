@@ -3,6 +3,7 @@ package com.rincoltech.bms.retail.catalogue.internal;
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.tenancy.ModuleSetUp;
 import com.rincoltech.bms.retail.catalogue.CatalogueNames;
+import com.rincoltech.bms.retail.catalogue.StandardUnits;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -13,13 +14,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Issue #618 (ADR-098): a business that gets the retail module starts with the units most shops count in, so its first item
- * can be saved without a trip to Units. A name the business already has, in any case, is skipped, so switching retail off and
- * on again adds only what is missing. Migration V109 gives the same names to every retail business that had no unit.
+ * can be saved without a trip to Units. Issue #709 (ADR-110, D98): those are the standard single units and packages. A unit
+ * the business already has under any spelling of the same unit (Pcs for Piece) is skipped, so switching retail off and on
+ * again adds only what is missing. Migration V121 gives the missing ones to every retail business made before.
  */
 @Component
 class DefaultUnits implements ModuleSetUp {
 
-    static final List<String> NAMES = List.of("Piece", "Pair", "Set", "Box", "Pack", "Kg", "Litre", "Metre");
+    static final List<String> NAMES = StandardUnits.ALL;
 
     private final CatalogueRepository repo;
     private final AuditLog audit;

@@ -43,12 +43,10 @@ public interface RetailCatalogue {
      * Issue #689 (ADR-106): the names that are a package, never an item's smallest unit, in any case, one or many, with or
      * without a size ("Box", "cartons", "Pack of 6", "Set of 4"), and their short codes ("Ctn", "pkts", "Bx", "doz"). The
      * one list: every unit carries {@code is_package} from it, which the PWA reads, so the screens and the server cannot
-     * disagree.
+     * disagree. Issue #709 (ADR-110): read from the shared {@code standard-units.json}, which the retail mock reads too. Roll
+     * is a standard package but not a package word, so an item may be counted in rolls.
      */
-    Pattern PACKAGE_WORDS = Pattern.compile(
-            "((box|carton|dozen|pack|packet|bag|sack|crate|case|tray|bundle|bale)(e?s)?|(ctn|pkt)s?|bx|doz|dz)( of \\d+.*)?"
-                    + "|sets? of \\d+.*",
-            Pattern.CASE_INSENSITIVE);
+    Pattern PACKAGE_WORDS = StandardUnits.PACKAGE_WORDS;
 
     /** True when the unit's name is a package word of {@link #PACKAGE_WORDS}. */
     static boolean isPackageWord(String unitName) {
@@ -68,7 +66,7 @@ public interface RetailCatalogue {
         String named = head.endsWith("s") && !head.endsWith("ss")
                 ? Character.toUpperCase(word.charAt(0)) + word.substring(1)
                 : "A " + word;
-        return named + " is a package. Choose the smallest unit, like piece, then add the " + word + " below.";
+        return named + " is a package. Choose a single unit, like piece, then add the " + word + " below.";
     }
 
     /**

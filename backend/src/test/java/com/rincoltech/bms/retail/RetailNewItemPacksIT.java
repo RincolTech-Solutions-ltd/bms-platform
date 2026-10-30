@@ -138,6 +138,9 @@ class RetailNewItemPacksIT extends IntegrationTest {
                 "Litre",
                 "Set",
                 "Boxer",
+                // Issue #709 round 2: Roll is a standard package that may also be an item's single unit.
+                "Roll",
+                "rolls",
                 "Kg",
                 "Packing tape",
                 "Bag of cement",
@@ -148,7 +151,7 @@ class RetailNewItemPacksIT extends IntegrationTest {
         assertThat(RetailCatalogue.packageAsUnit("Sets of 4")).startsWith("Sets of 4 is a package.");
         assertThat(RetailCatalogue.packageAsUnit("Set of 4")).startsWith("A set of 4 is a package.");
         assertThat(RetailCatalogue.packageAsUnit("Ctn"))
-                .isEqualTo("A carton is a package. Choose the smallest unit, like piece, then add the carton below.");
+                .isEqualTo("A carton is a package. Choose a single unit, like piece, then add the carton below.");
         assertThat(RetailCatalogue.packageAsUnit("PKT")).startsWith("A packet is a package.");
         // Every short code the word list refuses reads as its word, as unitWord says it in the PWA (round 4 review of
         // #692).
@@ -209,13 +212,28 @@ class RetailNewItemPacksIT extends IntegrationTest {
         assertThat(api.post("/product-families", body, ADMIN).getStatusCode()).isEqualTo(HttpStatus.CREATED);
     }
 
+    /** Round 2 of #709: Roll is a standard package, yet an item may be counted in rolls (tape, tissue, wire). */
+    // JUSTIFICATION-A3: the owner's round 2 instruction asks an IT for an item with single unit Roll.
+    @Test
+    void anItemMayBeCountedInRolls() {
+        UUID roll = api.unit("Roll");
+        ResponseEntity<JsonNode> r = api.post("/products", item("Test Insulation Tape", roll, null), ADMIN);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        for (JsonNode u : api.get("/units", ADMIN).getBody().get("items")) {
+            if (u.get("id").asString().equals(roll.toString())) {
+                assertThat(u.get("is_package").asBoolean()).isFalse();
+                assertThat(u.get("standard").asBoolean()).isTrue();
+            }
+        }
+    }
+
     @Test
     void aPackageIsNeverTheSmallestUnit() {
         ResponseEntity<JsonNode> r = api.post("/products", item("Test Bulb 60W", box, null), ADMIN);
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(r.getBody().toString())
                 .contains("unit_is_package")
-                .contains("A box is a package. Choose the smallest unit, like piece, then add the box below.");
+                .contains("A box is a package. Choose a single unit, like piece, then add the box below.");
         ResponseEntity<JsonNode> cartons = api.post("/products", item("Test Bulb 60W", carton, null), ADMIN);
         assertThat(cartons.getBody().toString()).contains("A carton is a package.");
         assertThat(products("Test Bulb 60W")).isZero();
