@@ -1,6 +1,8 @@
 import type { CollateralItem } from '../../../api/collateral';
 import type { FieldMessages } from '../../../api/lending-forms';
-import type { Loan } from '../../../api/lending';
+import type { Loan, LoanListItem } from '../../../api/lending';
+import { businessToday } from '../../../api/retail';
+import { clockTime } from '../retail/cash-state';
 import type { CreateLoanBody, DecisionBody, GuarantorInput, LoanAppraisal, LoanProduct, PledgeInput, UpdateLoanBody } from '../../../api/loan-applications';
 import { parseMinor } from '../../../components/money';
 import { amountRule, amountText, currencyOf, money, words } from './loan-state';
@@ -110,6 +112,14 @@ const minor = (text: string, currency: string): number | null => {
 /** An item the borrower can pledge to a loan in `currency`: held for them, in that currency and valued (the server's rules). */
 export function pledgeable(item: CollateralItem, currency: string): boolean {
   return ['pledged', 'in_custody'].includes(item.custody_status ?? '') && currencyOf(item.currency) === currency && item.collateral_value_minor != null;
+}
+
+/** The question a second start asks (issue #704): "started at 20:58" today, "started on 27 Oct at 20:58" on an earlier day. */
+export function draftQuestion(l: LoanListItem, today: string, zone: string): string {
+  const t = Date.parse(l.created_at ?? '');
+  const day = Number.isNaN(t) ? '' : businessToday(new Date(t), zone);
+  const on = day && day !== today ? ` on ${new Intl.DateTimeFormat('en-GB', { timeZone: zone, day: 'numeric', month: 'short' }).format(t)}` : '';
+  return `This member already has a draft loan${l.loan_no ? `, ${l.loan_no}` : ''}${day ? `, started${on} at ${clockTime(l.created_at, zone)}` : ''}. Continue it?`;
 }
 
 /** Field keys the form ties its messages to, in the order the form shows them. Guarantor and pledge keys are the API's. */

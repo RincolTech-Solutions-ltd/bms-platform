@@ -7,7 +7,7 @@ import { lending, type LoanListItem } from '../../../api/lending';
 import { branchFilter } from '../../../auth/branch';
 import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
-import { money, statusBadge, words } from './loan-state';
+import { loanStatusWords, money, statusBadge, words } from './loan-state';
 import { canBringIn } from './existing-loans-state';
 import { mayApply, showLending } from './permissions';
 import { NoAccess } from '../../../app/ui/EmptyState';
@@ -38,7 +38,7 @@ export function LoanRows({ items, term = '' }: { items: LoanListItem[]; term?: s
           <Link className="ln-item" to="/staff/lending/loans/$loanId" params={{ loanId: l.id ?? '' }}>
             <span className="ln-item-head">
               <strong><Highlight text={l.loan_no ?? ''} term={term} /></strong>
-              <span className={statusBadge(l.status)}>{words(l.status)}</span>
+              <span className={statusBadge(l.status)}>{loanStatusWords(l.status)}</span>
             </span>
             <span>
               <Highlight text={l.member_name ?? ''} term={term} /> (<Highlight text={l.member_no ?? ''} term={term} />)

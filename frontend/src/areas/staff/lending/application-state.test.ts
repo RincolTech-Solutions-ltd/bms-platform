@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import type { Loan } from '../../../api/lending';
 import type { LoanProduct } from '../../../api/loan-applications';
-import { applicationProblems, blankApplication, decisionBody, draftOf, partiesChanged, pledgeable, rateWords, selfApproval, termWords, updateBody } from './application-state';
+import { applicationProblems, blankApplication, decisionBody, draftOf, draftQuestion, partiesChanged, pledgeable, rateWords, selfApproval, termWords, updateBody } from './application-state';
 import { applicationSteps, mayApply } from './permissions';
 
 // The pure rules of the loan application screens (issue #280 slices 3 and 4, FR-ORG-01, FR-ORG-06, FR-APR-03). Fabricated values.
+
+describe('the question a second start asks (issue #704)', () => {
+  it('names the draft and when it was started, on the business clock', () => {
+    const d = { loan_no: 'LN000902', created_at: '2026-10-29T17:58:00Z' };
+    expect(draftQuestion(d, '2026-10-29', 'Africa/Kampala')).toBe('This member already has a draft loan, LN000902, started at 20:58. Continue it?');
+    expect(draftQuestion(d, '2026-10-31', 'Africa/Kampala')).toBe('This member already has a draft loan, LN000902, started on 29 Oct at 20:58. Continue it?');
+    expect(draftQuestion({ loan_no: 'LN000902' }, '2026-10-29', 'Africa/Kampala')).toBe('This member already has a draft loan, LN000902. Continue it?');
+    expect(draftQuestion({}, '2026-10-29', 'Africa/Kampala')).toBe('This member already has a draft loan. Continue it?');
+  });
+});
 
 const product: LoanProduct = {
   id: 'p1', status: 'active',

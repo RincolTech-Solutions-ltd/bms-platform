@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute, getRouteApi, useNavigate } from '@tanstack/react-router';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { asFormError, unknownOutcome, type FormError } from '../../../api/lending-forms';
 import { useApplicationsApi, useCollateralApi, useMembersApi } from '../../../api/lending-context';
 import type { Loan, LoanListItem } from '../../../api/lending';
@@ -11,14 +11,14 @@ import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
 import { sayDone } from '../retail/toast';
 import {
-  applicationOrder, applicationProblems, blankApplication, createBody, draftOf, guarantorsBody, partiesChanged, pledgeable, pledgesBody,
+  applicationOrder, applicationProblems, blankApplication, createBody, draftOf, draftQuestion, guarantorsBody, partiesChanged, pledgeable, pledgesBody,
   PURPOSES, rateWords, termsOf, termWords, updateBody, type ApplicationDraft, type GuarantorDraft,
 } from './application-state';
 import { typeWords } from './collateral-state';
 import { Group, SaveBar, SelectField, TextField, useFormErrors, type FormErrors } from './form-fields';
 import { LendingGate } from './loans';
-import { businessToday } from '../../../api/retail';
-import { amountText, currencyOf, money, tenantCurrency } from './loan-state';
+import { businessToday, businessZone } from '../../../api/retail';
+import { amountText, currencyOf, draftsFirst, money, tenantCurrency } from './loan-state';
 import { mayManageCollateral } from './member-permissions';
 import { MemberPicker } from './member-picker';
 import { applicationSteps, mayApply } from './permissions';
@@ -74,6 +74,22 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
     queryFn: () => collateralApi.list({ memberId: draft.memberId }),
     enabled: draft.memberId !== '',
   });
+  // A member who already has a draft (issue #704): the newest one is offered first, until "Start a new one" is chosen for them.
+  const [startNew, setStartNew] = useState('');
+  const drafts = useQuery({ queryKey: ['lending', 'loans', 'drafts', draft.memberId], queryFn: () => api.drafts(draft.memberId), enabled: !editing && draft.memberId !== '' });
+  const open = editing || startNew === draft.memberId ? undefined : draftsFirst(drafts.data ?? [])[0];
+  // Sending waits for the question above (review of #711): while the drafts are still being looked up, or a draft is offered
+  // and not yet answered, Send is held and the save bar says why, so a second draft is never made unseen on a slow phone and
+  // Continue that draft is the one primary action. A failed look does not hold it.
+  const asking = !editing && draft.memberId !== '' && startNew !== draft.memberId && (drafts.isPending || open !== undefined);
+  const held = guard.blocked ? 'Wait for the check above before sending again.'
+    : asking ? (open ? 'Choose one first: continue that draft, or start a new one.' : 'Looking for this member\'s other drafts.') : undefined;
+  // When a draft is found after the person has started (a slow phone), its question is brought into view (review of #711):
+  // Send is held until it is answered, so the two choices must never be off screen.
+  const openId = open?.id;
+  useEffect(() => {
+    if (openId) document.getElementById('af-open-draft')?.scrollIntoView?.({ block: 'center' });
+  }, [openId]);
   const set = <K extends keyof ApplicationDraft>(key: K, value: ApplicationDraft[K]) => setDraft((d) => ({ ...d, [key]: value }));
   const inputMode = exponentOf(currency) ? 'decimal' : 'numeric';
 
@@ -87,7 +103,7 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (busy || guard.blocked) return;
+    if (busy || held) return;
     setFailure(null);
     setTried(true);
     if (!form.attempt(order)) return;
@@ -150,6 +166,13 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
 
   return (
     <form className="mf" onSubmit={(e) => void submit(e)} noValidate aria-label={editing ? 'Change the application' : 'New loan application'} data-tour="application-form">
+      {open && (
+        <section className="rt-card stack" aria-labelledby="af-open-draft">
+          <p id="af-open-draft" role="status">{draftQuestion(open, today, businessZone())}</p>
+          <Link to="/staff/lending/loans/$loanId/edit" params={{ loanId: open.id ?? '' }} className="btn rt-primary btn-block">Continue that draft</Link>
+          <button type="button" className="btn btn-block" onClick={() => setStartNew(draft.memberId)}>Start a new one</button>
+        </section>
+      )}
       <FieldsNeededNote />
       {tried && form.count(order) > 0 && <p role="alert" className="alert alert-danger">Some entries need a look. They are marked below.</p>}
       <SaveGuardNotice guard={guard} what="application" found={(l) => <Link to="/staff/lending/loans/$loanId" params={{ loanId: l.id ?? '' }}>Open draft {l.loan_no}</Link>} />
@@ -256,7 +279,7 @@ export function ApplicationForm({ loan: loaded, memberId }: Props) {
         )}
       </Group>
       <Problem error={failure ? new Error(failure) : null} />
-      <SaveBar label="Send for appraisal" busy={busy} blocked={guard.blocked ? 'Wait for the check above before sending again.' : undefined} tourId="application-send"
+      <SaveBar label="Send for appraisal" busy={busy} blocked={held} tourId="application-send"
         cancel={editing ? <Link to="/staff/lending/loans/$loanId" params={{ loanId: base?.id ?? '' }} className="btn btn-ghost">Cancel</Link> : <Link to="/staff/lending" className="btn btn-ghost">Cancel</Link>} />
     </form>
   );
