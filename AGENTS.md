@@ -1298,7 +1298,8 @@ Accepted (this list is the ADR index):
 - ADR-109 One unit, many spellings, and one display style for names: `frontend/src/words/unit-words.json` is the one list of
   unit words, read by the PWA and by the server (`CatalogueNames`); a unit whose key matches another is refused with 409
   `unit_exists` naming it and the screens choose it; item and category names are stored in Title Case keeping codes as typed
-  (D86 = A); `V120` merges duplicate units used only by the catalogue and restyles names by case only, all audited (#698)
+  (D86 = A); `V120` restyles stored names by case only, moving their version, all audited; duplicate units already
+  stored are left for the owner to join (#698)
 
 Pending (cite only as "pending ADR-NNN"):
 

@@ -50,6 +50,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
 
 /**
  * The retail catalogue (FR-RET-01, FR-RET-02, FR-RET-14). One {@code @Transactional} method per
@@ -232,12 +233,13 @@ class CatalogueService {
         String name = r.name().trim();
         refuseSameUnit(name, null);
         Unit of = requireUsualPackOf(id, r.usualPack());
+        // Only a write that raced the lock above is refused here: back to the savepoint, the unit made meanwhile is
+        // read and named, so the refusal always carries existing_id (review of #715).
+        Object savepoint = TransactionAspectSupport.currentTransactionStatus().createSavepoint();
         try {
             repo.insertUnit(id, name, CurrentPrincipal.require().userId());
         } catch (DuplicateKeyException e) {
-            // Only a write that raced the lock above lands here; the transaction is over, so nothing more is read, and
-            // the refusal names no unit (the screens then show it as it is).
-            throw duplicate("unit_exists", "A unit with this name was added a moment ago. Reload the units.");
+            throw unitMadeMeanwhile(savepoint, name, id);
         }
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("name", name);
@@ -378,12 +380,13 @@ class CatalogueService {
         if (now.containsKey("name")) {
             refuseSameUnit(name, id);
         }
+        Object savepoint = TransactionAspectSupport.currentTransactionStatus().createSavepoint();
         try {
             if (repo.updateUnit(id, name, active, expected) == 0) {
                 throw staleUnit(id);
             }
         } catch (DuplicateKeyException e) {
-            throw duplicate("unit_exists", "A unit with this name was added a moment ago. Reload the units.");
+            throw unitMadeMeanwhile(savepoint, name, id);
         }
         if (now.containsKey("usual_pack")) {
             // Null when clear_usual_pack was sent: the three columns are cleared together (issue #637).
@@ -403,6 +406,12 @@ class CatalogueService {
         repo.sameUnit(name, self).ifPresent(u -> {
             throw unitExists(u);
         });
+    }
+
+    /** The unit another request made under the same name a moment ago, read after going back to the savepoint. */
+    private ApiException unitMadeMeanwhile(Object savepoint, String name, UUID self) {
+        TransactionAspectSupport.currentTransactionStatus().rollbackToSavepoint(savepoint);
+        return unitExists(repo.sameUnit(name, self).orElseThrow());
     }
 
     private static ApiException unitExists(Unit u) {
@@ -609,6 +618,8 @@ class CatalogueService {
             // Piece is not switched back on: the person chooses a unit.
             // Issue #698: Piece, pc and pcs share one key, so the lookup finds whichever spelling the shop has.
             String piece = CatalogueNames.unitKey(PIECE);
+            // The key's lock, as POST /units takes it, so "pcs" added at this moment and Piece made here are one unit.
+            repo.lockUnitKey(PIECE);
             Set<String> off = repo.inactiveUnitNames();
             unit = off.contains(piece) ? null : repo.unitIdsByName().get(piece);
             if (unit == null && off.contains(piece)) {

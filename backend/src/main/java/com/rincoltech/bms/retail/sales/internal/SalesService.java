@@ -941,8 +941,7 @@ class SalesService {
             boolean agreed,
             List<PendingClash> clashes,
             int lineNo) {
-        // Issue #698: a unit merged into the item's own unit is the item's own unit.
-        if (unitId == null || catalogue.unitNow(unitId).equals(p.unitId())) {
+        if (unitId == null || unitId.equals(p.unitId())) {
             return new SaleUnit(null, qty);
         }
         boolean unitsOff = !capabilities.enabled(RetailCapabilities.UNITS);

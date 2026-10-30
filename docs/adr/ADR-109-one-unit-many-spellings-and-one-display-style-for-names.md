@@ -47,26 +47,19 @@ side on every screen and receipt. The owner decided D86 = A: Title Case for item
    other word takes a capital first letter and keeps the rest as typed. Only case and spaces change; the words are the
    person's. Every screen, receipt and report reads the stored name, so all show the same. Units, suppliers and customers
    keep their names as typed.
-6. **Existing rows (`V120`, a Java migration so it uses the same two rules).** Per business:
-   - Units with the same key are merged into one: the switched-on one first, then the one whose name is the unit's word,
-     then the oldest. A unit is merged only when nothing but the catalogue uses it (items, items with sizes, packages and
-     a unit's usual pack; every other foreign key, and every column named `unit_id` or `*_unit_id` with or without a key,
-     is checked) and moving those to the kept unit clashes with nothing (no item would hold both as packages or as its unit
-     and a package, and no usual pack chain would loop at any depth). Those references are moved, the merged unit is
-     switched off and kept, never deleted, `merged_into_id` names the kept unit, and `retail.unit.merged` is audited with
-     what moved. A sale, a return or a purchase sent later with the merged unit's id (a phone that was offline, a draft)
-     is read in the kept unit (`RetailCatalogue.unitNow` and the pack lookup follow `merged_into_id`). A unit used by a sale, a purchase, a
-     return, a quotation, an order or a price list, or one that would clash, is left as it is and audited as
-     `retail.unit.merge_skipped` with the reason, for the owner to look at.
+6. **Existing rows (`V120`, a Java migration so it uses the same display rule).** Owner decision on pull request #715:
+   - **Duplicate units already stored are left as they are.** No unit is merged, moved or switched off: history rows hold
+     unit ids, some with no foreign key, phones may hold queued offline sales with a unit's id, and usual packs form chains,
+     so a merge on live data risks more than it gains. A future owner action may join them (on staging one shop has "pc"
+     beside "Piece", to be joined by hand). Where two stored units share a key, lookups by name use the switched-on one,
+     then the one named as the unit's word. Only new duplicates are refused (decision 3).
    - Item, item with sizes and category names are put in the display style where that changes only their case
      (`retail.product.updated`, `retail.product_family.updated`, `retail.category.updated`, each with the name before and
-     after and `source` `V120`); each moves its `version` and `updated_at`, so every client reads it again. A name with
-     extra spaces keeps them until it is next saved.
-   - The schema gains only the nullable `retail_units.merged_into_id`; no row is deleted. Row security is dropped only on
-     the tables that force it, and restored on exactly those. The audit rows are written by the migration as `system`.
-   - Merging only what the catalogue alone uses is narrower than repointing sales, purchases, counts and price lists to the
-     kept unit: history keeps the unit it was made in, and the owner merges the rest from the skipped list. Repointing
-     history is left for a decision of its own.
+     after and `source` `V120`). Each moves its `version` and `updated_at`, so every client, delta sync included, reads
+     it again. A name with extra spaces keeps them until it is next saved. Names are stored in the style, not only shown in
+     it, so receipts, reports and exports agree with the screens.
+   - No table, column, constraint, grant or policy changes, and no row is deleted. Row security is dropped only on the
+     tables written that force it, and restored on exactly those. The audit rows are written by the migration as `system`.
 
 ## Consequences
 
@@ -75,7 +68,8 @@ who types a unit or category that exists is taken to it, and names read the same
 
 **Worse:** the server image is built with one more named context (`words`), as for the help articles; the migration reads the
 rules from the application, so a later change to the list or the style would also apply if `V120` ever runs on an old copy of
-the data. Two duplicate items that differ only by spelling of their unit are not merged: they show as close names (ADR-044).
+the data. Duplicate units stored before this change stay until the owner joins them, and two items that differ only by the
+spelling of their unit show as close names (ADR-044).
 
 **Watch for:** a new place that saves an item or category name must call `CatalogueNames.display`, and a new place that finds a
 unit by name must use `CatalogueNames.unitKey`.

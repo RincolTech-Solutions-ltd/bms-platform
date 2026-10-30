@@ -146,8 +146,20 @@ public final class RetailTestSupport {
         return id(post("/categories", Map.of("name", name), ADMIN));
     }
 
-    /** The unit of this name, or the one the business has already under another spelling (409 unit_exists, issue #698). */
+    /**
+     * A new unit of this name; fails loudly when the business has it already in any spelling (409 unit_exists, issue #698), so
+     * a test that means two units never shares one without noticing.
+     */
     public UUID unit(String name) {
+        ResponseEntity<JsonNode> made = post("/units", Map.of("name", name), ADMIN);
+        if (made.getStatusCode() != HttpStatus.CREATED) {
+            throw new AssertionError("The unit " + name + " was not made: " + made.getBody());
+        }
+        return id(made);
+    }
+
+    /** The unit of this name, or the one the business already has in another spelling, for a test that means to reuse it. */
+    public UUID unitOrExisting(String name) {
         ResponseEntity<JsonNode> made = post("/units", Map.of("name", name), ADMIN);
         if (made.getStatusCode() == HttpStatus.CONFLICT
                 && "unit_exists".equals(made.getBody().get("code").asString())) {

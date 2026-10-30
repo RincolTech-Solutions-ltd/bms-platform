@@ -228,7 +228,7 @@ class CatalogueRepository {
     // JUSTIFICATION-A3: the unit lookups by key replace lower(name) in one place, so every caller finds Piece.
     /**
      * Issue #698 (ADR-109): the units by their key ({@code CatalogueNames.unitKey}), so "pcs" finds Piece; where two units
-     * share a key (one {@code V120} could not merge), the one {@link #sameUnit} would answer.
+     * share a key (stored before issue #698, left for the owner to join), the one {@link #sameUnit} would answer.
      */
     Map<String, UUID> unitIdsByName() {
         Map<String, UUID> ids = new java.util.HashMap<>();
@@ -738,15 +738,6 @@ class CatalogueRepository {
                 .query(CatalogueRepository::pack)
                 .optional();
     }
-
-    /** Issue #698: the unit V120 merged this one into, if it did. */
-    Optional<UUID> mergedInto(UUID unitId) {
-        return jdbc.sql("SELECT merged_into_id FROM retail_units WHERE id = ? AND merged_into_id IS NOT NULL")
-                .param(unitId)
-                .query(UUID.class)
-                .optional();
-    }
-
     /** The sell price in force at {@code at} (see {@link com.rincoltech.bms.retail.catalogue.RetailCatalogue#sellMinorAt}). */
     long sellMinorAt(UUID productId, java.time.Instant at) {
         return jdbc.sql("""

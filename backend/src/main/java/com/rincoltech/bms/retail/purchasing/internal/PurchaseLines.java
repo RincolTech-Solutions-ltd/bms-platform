@@ -120,8 +120,7 @@ class PurchaseLines {
             return null;
         }
         PackUnit pack = null;
-        // Issue #698: a unit merged into the item's own unit is the item's own unit.
-        if (unitId != null && !catalogue.unitNow(unitId).equals(p.unitId())) {
+        if (unitId != null && !unitId.equals(p.unitId())) {
             if (!capabilities.enabled(RetailCapabilities.UNITS)) {
                 problems.add(new FieldProblem(
                         field + ".unit_id", "capability_not_enabled", "Pack sizes are not enabled for this business."));
