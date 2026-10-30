@@ -206,7 +206,7 @@ describe('sizes on Add an item', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Bulbs (watts)' }));
     for (const s of ['40W', '60W', '100W']) fireEvent.click(chip('Sizes', s));
     fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
-    fireEvent.change(screen.getByLabelText(/^Package unit/), { target: { value: 'u2' } });
+    fireEvent.change(screen.getByLabelText(/^Package/), { target: { value: 'u2' } });
     fireEvent.change(screen.getByLabelText(/^How many bulbs in one carton/), { target: { value: '24' } });
     fireEvent.change(screen.getByLabelText(/^Selling price of one carton/), { target: { value: '96000' } });
     fireEvent.change(screen.getByLabelText(/^Carton of 100W/), { target: { value: '170000' } });
