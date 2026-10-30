@@ -148,7 +148,11 @@ describe('the package ladder on the item page (issue #699)', () => {
       { unit_id: 'u-ctn', unit: 'Carton', factor: '120.000', active: true, version: 1, purpose: 'both', holds_unit_id: 'u-box', holds_unit: 'Box', holds_qty: 12 },
     ];
     draw(<ItemLadder product={socket} packs={looped} mayManage />);
+    expect(screen.getByTestId('ladder-loop').textContent).toBe('These packages point at each other. Fix the sizes on this page.');
     expect(screen.getByText(/1 carton → 12 boxes → each 2 cartons/)).toBeTruthy();
+    cleanup();
+    draw(<ItemLadder product={socket} packs={packs} mayManage />);
+    expect(screen.queryByTestId('ladder-loop')).toBeNull();
     expect(lookInsideWords(ladderOf(socket, looped), 'u-ctn', 'Piece')).toBe('1 carton holds 12 boxes, each holding 2 cartons. That is 120 pieces.');
   });
 

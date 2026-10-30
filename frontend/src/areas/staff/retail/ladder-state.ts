@@ -73,6 +73,18 @@ export function holdsChain(rungs: Rung[], top: Rung): Rung[] {
   return out;
 }
 
+/** Review of #710: true when a level's chain comes back to a level it has passed, which only a direct write could store. */
+export function hasLoop(rungs: Rung[]): boolean {
+  return rungs.some((top) => {
+    const walked = holdsChain(rungs, top);
+    const last = walked[walked.length - 1];
+    return last !== undefined && walked.some((r) => r.unitId === last.holdsUnitId);
+  });
+}
+
+/** What the page says over a stored loop instead of freezing (review of #710, round 3). */
+export const LOOP_WORDS = 'These packages point at each other. Fix the sizes on this page.';
+
 /** "So 1 carton = 120 pieces." */
 export function soOne(rung: Pick<Rung, 'unit' | 'pieces'>, smallest: string): string {
   return `So 1 ${one(rung.unit)} = ${shown(rung.pieces)} ${rung.pieces === 1000n ? one(smallest) : many(smallest)}`;

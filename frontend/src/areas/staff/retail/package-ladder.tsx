@@ -6,7 +6,7 @@ import { Hint } from '../../../app/ui/Hint';
 import { Stepper } from '../../../app/ui/Stepper';
 import { icons } from '../../../components/icons';
 import { asPurpose, usualFactor } from './catalogue-packs';
-import { chain, changeWords, changesOf, holdsChain, holdsProblem, ladderOf, many, one, shown, soOne, type Rung } from './ladder-state';
+import { LOOP_WORDS, chain, changeWords, changesOf, hasLoop, holdsChain, holdsProblem, ladderOf, many, one, shown, soOne, type Rung } from './ladder-state';
 import { Problem } from './ui';
 import { UnitPicker } from './unit-picker';
 import { showQty } from './maths';
@@ -287,6 +287,7 @@ export function ItemLadder({ product, packs, mayManage, mayPrice = true }: {
     <section className="ladder-panel stack" data-testid="item-ladder" aria-labelledby={`ladder-${id}`}>
       <h3 id={`ladder-${id}`}>What one package holds</h3>
       <Hint>Biggest first. Change a number and the bigger packages follow. Your stock is kept in {many(smallest)} and never changes.</Hint>
+      {hasLoop(rungs) && <p role="alert" className="alert alert-warning" data-testid="ladder-loop">{LOOP_WORDS}</p>}
       <LadderRungs
         rungs={rungs}
         smallest={smallest}
