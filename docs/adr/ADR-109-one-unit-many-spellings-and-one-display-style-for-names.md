@@ -40,7 +40,8 @@ side on every screen and receipt. The owner decided D86 = A: Title Case for item
    (`retail_product_families.name`) and category names are stored in Title Case on every save: the API, Quick add, the CSV
    import and `import-retail`. `CatalogueNames.display` is the one rule: spaces are collapsed and trimmed; a word that holds
    a digit keeps its letters as typed, except that a number followed by one letter takes a capital (60w is 60W, 13a is 13A,
-   2.5mm stays 2.5mm); a word of two or more letters typed all in capitals stays as typed (LED, USB-C); a short joining word
+   2.5mm stays 2.5mm), and a word of one or two letters right after a number is a measure and stays as typed (2.5 mm,
+   9 W); a word of two or more letters typed all in capitals stays as typed (LED, USB-C); a short joining word
    typed in lower case after the first word stays (an, and, at, by, for, in, of, on, or, per, the, to, with, x; not "a", which
    is a grade more often than a word: Grade A); every
    other word takes a capital first letter and keeps the rest as typed. Only case and spaces change; the words are the

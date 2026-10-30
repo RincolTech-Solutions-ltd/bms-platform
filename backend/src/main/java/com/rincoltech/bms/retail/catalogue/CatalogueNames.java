@@ -94,7 +94,8 @@ public final class CatalogueNames {
 
     /**
      * D86 = A: an item or category name in Title Case, keeping codes as typed. Spaces are collapsed and trimmed; a word with a
-     * digit keeps its letters, except that a number and one letter takes a capital ("60w" is "60W", "2.5mm" stays); a word of
+     * digit keeps its letters, except that a number and one letter takes a capital ("60w" is "60W", "2.5mm" stays), and a
+     * word of one or two letters after a number stays as typed ("2.5 mm"); a word of
      * two or more letters all in capitals stays ("LED", "USB-C"); a short joining word typed in lower case after the first
      * word stays; every other word takes a capital first letter and keeps the rest as typed. Only case and spaces change.
      */
@@ -108,7 +109,10 @@ public final class CatalogueNames {
             if (i > 0) {
                 out.append(' ');
             }
-            out.append(styled(words[i], i == 0));
+            // A measure of one or two letters written after a number stays as typed: "2.5 mm", "9 W".
+            boolean measure =
+                    i > 0 && words[i - 1].chars().anyMatch(Character::isDigit) && words[i].matches("\\p{L}{1,2}");
+            out.append(measure ? words[i] : styled(words[i], i == 0));
         }
         return out.toString();
     }
