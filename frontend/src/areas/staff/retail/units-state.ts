@@ -235,10 +235,14 @@ export function packsAndPieces(qty: string, unit: string | undefined, pack: Pack
 }
 
 /** Issue #650: why a count or a move typed in packs and pieces cannot be read, or null when it can. */
-export function packsAndPiecesProblem(packs: string, pieces: string, unit: string, pack: string): string | null {
-  // Issue #699: a count at every level is one whole number per level, joined by "|".
-  if (packs.split('|').some((p) => p.trim() !== '' && !/^\d+$/.test(p.trim()))) return `Type whole ${plural(pack)}, and the rest in ${plural(unit)}.`;
-  if (pieces.trim() !== '' && parseCount(pieces) === null) return `Type ${plural(unit)} as a number, with at most three decimals.`;
+export function packsAndPiecesProblem(packs: string, pieces: string, unit: string, pack: string | string[]): string | null {
+  // Issue #699: a count at every level is one whole number per level, joined by "|"; the words name the level that is wrong
+  // (review of #710), lower case as in every sentence.
+  const levels = Array.isArray(pack) ? pack : [pack];
+  const bad = packs.split('|').findIndex((p) => p.trim() !== '' && !/^\d+$/.test(p.trim()));
+  const words = (name: string) => unitWords(name).toLowerCase();
+  if (bad >= 0) return `Type whole ${words(levels[bad] ?? levels[0] ?? '')}, and the rest in ${words(unit)}.`;
+  if (pieces.trim() !== '' && parseCount(pieces) === null) return `Type ${words(unit)} as a number, with at most three decimals.`;
   return null;
 }
 

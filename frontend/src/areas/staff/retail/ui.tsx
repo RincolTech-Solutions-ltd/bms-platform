@@ -13,7 +13,7 @@ import { useStockedBranches } from '../branch-picker';
 import { useStaff } from '../context';
 import { ItemPhoto, shownPhoto } from './item-photo';
 import { parseCount, qtyString, showQty } from './maths';
-import { ladderLevels, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, type PackSize } from './units-state';
+import { ladderLevels, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, unitWords, type PackSize } from './units-state';
 import { plural } from '../../../app/glossary';
 import { BRANCH_ROLES, branchesWhere, canSeeProfit, canUse, capabilityOn, sellingBranches, type RetailScreen } from './permissions';
 import { keptWords } from './orders-state';
@@ -351,7 +351,7 @@ export function PacksAndPiecesFields({ id, nameId, unit, pack, packs, pieces, on
   /** The quantity is refused for a reason of its own, such as more than the branch holds: both boxes are marked. */
   invalid?: boolean;
 }) {
-  const problem = packsAndPiecesProblem(packs, pieces, unit, pack.unit);
+  const problem = packsAndPiecesProblem(packs, pieces, unit, ladderLevels(pack)?.map((l) => l.unit) ?? pack.unit);
   const total = problem === null ? packsAndPiecesMilli(packs, pieces, pack) : null;
   // Going from one box to the other is not leaving the quantity: a count line moves to Counted items only once both are done.
   const leave = (other: string) => (e: FocusEvent<HTMLInputElement>) => { if (e.relatedTarget?.id !== other) onBlur?.(); };
@@ -411,7 +411,7 @@ export function PacksAndPiecesFields({ id, nameId, unit, pack, packs, pieces, on
         {after}
       </div>
       <p id={`${id}-total`} className="hint count-total" aria-live="polite">
-        {total !== null ? `${totalWord} ${packsAndPieces(qtyString(total), unit, pack)}` : `Type the ${plural(pack.unit)} and the ${plural(unit)} left, or all of it in ${plural(unit)}.`}
+        {total !== null ? `${totalWord} ${packsAndPieces(qtyString(total), unit, pack)}` : `Type the ${unitWords(pack.unit).toLowerCase()} and the ${unitWords(unit).toLowerCase()} left, or all of it in ${unitWords(unit).toLowerCase()}.`}
       </p>
       {problem && <p role="alert" className="rt-flag">{problem}</p>}
     </>

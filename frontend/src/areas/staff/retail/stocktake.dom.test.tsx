@@ -387,7 +387,7 @@ describe('counting in cartons and pieces', () => {
     await screen.findByText(EMPTY);
     const cartons = screen.getByRole('textbox', { name: 'Test Soap Cartons' }) as HTMLInputElement;
     const pieces = screen.getByRole('textbox', { name: 'Test Soap Pieces' }) as HTMLInputElement;
-    expect(document.getElementById('count-S-1-total')?.textContent).toBe('Type the Cartons and the Pieces left, or all of it in Pieces.');
+    expect(document.getElementById('count-S-1-total')?.textContent).toBe('Type the cartons and the pieces left, or all of it in pieces.');
     fireEvent.change(cartons, { target: { value: '5' } });
     fireEvent.change(pieces, { target: { value: '7' } });
     expect(document.getElementById('count-S-1-total')?.textContent).toBe('Counted 5 cartons and 7 pieces (127 pieces)');
@@ -408,7 +408,7 @@ describe('counting in cartons and pieces', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Test Soap Pieces' }), { target: { value: '130' } });
     expect(document.getElementById('count-S-1-total')?.textContent).toBe('Counted 5 cartons and 10 pieces (130 pieces)');
     fireEvent.change(cartons, { target: { value: '1.5' } });
-    expect(screen.getByText('Type whole Cartons, and the rest in Pieces.').getAttribute('role')).toBe('alert');
+    expect(screen.getByText('Type whole cartons, and the rest in pieces.').getAttribute('role')).toBe('alert');
     expect(cartons.getAttribute('aria-invalid')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: 'Review the difference (1 counted)' }));
     expect(createStocktake).not.toHaveBeenCalled();
@@ -491,7 +491,7 @@ describe('a pack that changes while counting', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Test Soap Pieces' }), { target: { value: '7' } });
     listStock.mockResolvedValue([after]);
     await client.refetchQueries({ queryKey: ['retail', 'stock'] });
-    await screen.findByText('Counted in Cartons of 24, as when you started. This item\'s pack has changed since.');
+    await screen.findByText('Counted in cartons of 24, as when you started. This item\'s pack has changed since.');
     expect((screen.getByRole('textbox', { name: 'Test Soap Cartons' }) as HTMLInputElement).value).toBe('5');
     expect(document.getElementById('count-S-1-total')?.textContent).toBe('Counted 5 cartons and 7 pieces (127 pieces)');
     fireEvent.click(screen.getByRole('button', { name: 'Review the difference (1 counted)' }));

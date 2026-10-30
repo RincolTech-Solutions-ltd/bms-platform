@@ -209,8 +209,8 @@ describe('stock in packs and pieces (issue #650)', () => {
     expect(packsAndPiecesMilli('99999999999999', '', carton)).toBeNull();
   });
   it('says plainly what cannot be read', () => {
-    expect(packsAndPiecesProblem('1.5', '', 'Piece', 'Carton')).toBe('Type whole Cartons, and the rest in Pieces.');
-    expect(packsAndPiecesProblem('2', 'x', 'Piece', 'Carton')).toBe('Type Pieces as a number, with at most three decimals.');
+    expect(packsAndPiecesProblem('1.5', '', 'Piece', 'Carton')).toBe('Type whole cartons, and the rest in pieces.');
+    expect(packsAndPiecesProblem('2', 'x', 'Piece', 'Carton')).toBe('Type pieces as a number, with at most three decimals.');
     expect(packsAndPiecesProblem('2', '3', 'Piece', 'Carton')).toBeNull();
   });
   it('takes the pack the server marks standard, while it is active and holds more than one', () => {

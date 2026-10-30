@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
@@ -186,7 +187,10 @@ class RetailPackLadderIT extends IntegrationTest {
         }
     }
 
-    @Test
+    // Round 3 of the review of #710: a latch only lines up the two sends, so the race runs eight times, each in a fresh
+    // tenant; without the item's row lock (CatalogueService.updatePack, repo.lock FOR NO KEY UPDATE) a loop gets
+    // through.
+    @RepeatedTest(8)
     void twoOpposingPackEditsAtOnceNeverStoreALoop() throws Exception {
         // A box of 10 pieces and a carton of 120 pieces; one phone makes the box hold cartons, the other the carton
         // hold
@@ -232,7 +236,7 @@ class RetailPackLadderIT extends IntegrationTest {
                 .isFalse();
     }
 
-    @Test
+    @RepeatedTest(8)
     void twoOpposingUsualPacksAtOnceNeverStoreALoop() throws Exception {
         UUID bag = api.unit("Test Bag");
         UUID sack = api.unit("Test Sack");

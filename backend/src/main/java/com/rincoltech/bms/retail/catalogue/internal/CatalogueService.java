@@ -1342,7 +1342,7 @@ class CatalogueService {
             } else {
                 holdsQty = PackLadder.wholeOf(factor, held);
                 if (holdsQty == null) {
-                    throw notWhole(before.unit(), held, product);
+                    throw notWhole(before.unit(), before.holdsUnit(), held, product);
                 }
             }
         }
@@ -1464,12 +1464,14 @@ class CatalogueService {
     }
 
     /** 422 not_whole: "A carton must hold a whole number of the level below it, which is 10 piece." */
-    private static ApiException notWhole(String unit, BigDecimal held, Product product) {
+    /** 422 not_whole: "A carton must hold 2 or more whole boxes of 10 pieces." (review of #710). */
+    private static ApiException notWhole(String unit, String heldUnit, BigDecimal held, Product product) {
         return ApiException.validation(List.of(new FieldProblem(
                 "factor",
                 "not_whole",
-                "A " + unitWord(unit) + " must hold 2 or more whole of the level below it, which is " + plain(held)
-                        + " " + plural(unitWord(product.unit())) + ". Type a size that is a whole number of it.")));
+                "A " + unitWord(unit) + " must hold 2 or more whole " + plural(unitWord(heldUnit)) + " of "
+                        + plain(held) + " " + plural(unitWord(product.unit()))
+                        + ". Type a size that is a whole number of them.")));
     }
 
     private static ApiException usualBuyNotBought() {
@@ -1487,8 +1489,16 @@ class CatalogueService {
 
     /** "pieces", "boxes", "metres": a unit's word in the plural for a number other than one (review of #710). */
     static String plural(String word) {
+        // A name with "of" takes the plural on its head: "box of rolls" is "boxes of rolls" (review of #710).
+        int of = word.indexOf(" of ");
+        if (of > 0) {
+            return plural(word.substring(0, of)) + word.substring(of);
+        }
         if (word.isEmpty() || word.endsWith("s")) {
             return word;
+        }
+        if (word.matches(".*[^aeiou]y$")) {
+            return word.substring(0, word.length() - 1) + "ies";
         }
         return word.matches(".*(x|ch|sh)$") ? word + "es" : word + "s";
     }

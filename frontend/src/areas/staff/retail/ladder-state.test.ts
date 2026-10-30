@@ -83,7 +83,9 @@ describe('stock at every level', () => {
     expect(packsAndPiecesMilli('', '2.5', ladder)).toBe(2_500);
     expect(packsAndPiecesMilli('', '', ladder)).toBeNull();
     expect(packsAndPiecesMilli('1.5|', '', ladder)).toBeNull();
-    expect(packsAndPiecesProblem('2|x', '', 'Piece', 'Carton')).toBe('Type whole Cartons, and the rest in Pieces.');
+    // Review of #710: on a ladder the words name the level that is wrong, the boxes here, in lower case.
+    expect(packsAndPiecesProblem('2|x', '', 'Piece', ['Carton', 'Box'])).toBe('Type whole boxes, and the rest in pieces.');
+    expect(packsAndPiecesProblem('x|3', '', 'Piece', ['Carton', 'Box'])).toBe('Type whole cartons, and the rest in pieces.');
     expect(samePack(ladder, { unit: 'Carton', factor: '120.000' })).toBe(false);
     expect(samePack(ladder, { ...ladder })).toBe(true);
   });

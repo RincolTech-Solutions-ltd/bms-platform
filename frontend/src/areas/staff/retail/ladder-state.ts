@@ -58,6 +58,21 @@ export function ladderOfProduct(product: Product): Rung[] {
   return ladderOf(product, activePacks(product));
 }
 
+/**
+ * A rung and the rungs it holds, one level down each time, ending at the smallest unit. Review of #710: it keeps what it has
+ * seen, so a loop written straight to the table (a box holding the carton that holds it) ends the walk instead of freezing
+ * the page; every walk of what a level holds goes through here.
+ */
+export function holdsChain(rungs: Rung[], top: Rung): Rung[] {
+  const out: Rung[] = [];
+  const seen = new Set<string>();
+  for (let at: Rung | undefined = top; at && !seen.has(at.unitId); at = rungs.find((r) => r.unitId === at?.holdsUnitId)) {
+    seen.add(at.unitId);
+    out.push(at);
+  }
+  return out;
+}
+
 /** "So 1 carton = 120 pieces." */
 export function soOne(rung: Pick<Rung, 'unit' | 'pieces'>, smallest: string): string {
   return `So 1 ${one(rung.unit)} = ${shown(rung.pieces)} ${rung.pieces === 1000n ? one(smallest) : many(smallest)}`;
@@ -71,7 +86,7 @@ export function chain(rungs: Rung[], smallest: string): { words: string; total: 
   const top = rungs[0];
   if (!top) return null;
   const steps = [`1 ${one(top.unit)}`];
-  for (let at: Rung | undefined = top; at; at = rungs.find((r) => r.unitId === at?.holdsUnitId)) {
+  for (const at of holdsChain(rungs, top)) {
     const qty = at.holdsQty;
     steps.push(`${steps.length > 1 ? 'each ' : ''}${quantityIn(qty, unitWord(at.holdsUnit)).toLowerCase()}`);
   }

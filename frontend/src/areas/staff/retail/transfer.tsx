@@ -7,7 +7,6 @@ import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
 import { ToStock } from './analytics-ui';
 import { parseQty, showQty } from './maths';
-import { plural } from '../../../app/glossary';
 import { buildTransfer, lineMilli, linePack, transferLineHint, transferProblem, withPacks, type TransferDraft } from './transfer-state';
 import { milliOf } from './maths';
 import { TRANSFER, TRANSFER_RECEIPT, UNITS, capabilityOn, holdsAt, needsOf } from './permissions';
@@ -15,7 +14,7 @@ import { BranchRequired, Gate, NoStockHere, PacksAndPiecesFields, ProductPicker,
 import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne, scanInto } from './barcode-state';
 import { useItemAdded } from './toast';
-import { chosenPack, packsAndPiecesProblem, samePack, standardPack } from './units-state';
+import { chosenPack, packsAndPiecesProblem, samePack, standardPack, unitWords } from './units-state';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { ActionBar } from '../../../app/ui/ActionBar';
 import { showDate } from './maths';
@@ -176,7 +175,7 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
               </>
             )}
             {inPacks && unit && (l.packs ?? '').trim() !== '' && !samePack(inPacks, now ? { unit: now.unit, factor: now.factor } : undefined) && (
-              <p className="hint">{`Moving in ${plural(inPacks.unit)} of ${showQty(inPacks.factor ?? '')}, as when you typed them. This item's pack has changed since.`}</p>
+              <p className="hint">{`Moving in ${unitWords(inPacks.unit).toLowerCase()} of ${showQty(inPacks.factor ?? '')}, as when you typed them. This item's pack has changed since.`}</p>
             )}
             {hint && !unreadable && <p role="alert" className="rt-flag">{hint}</p>}
             {entry.notes(l.product.id ?? String(i))}

@@ -85,7 +85,7 @@ describe('Move stock in cartons and pieces', () => {
 
   it('refuses part of a carton in plain words, once', async () => {
     open([{ product: soap, qty: '', packs: '1.5' }]);
-    expect(screen.getAllByRole('alert').map((a) => a.textContent)).toEqual(['Type whole Cartons, and the rest in Pieces.']);
+    expect(screen.getAllByRole('alert').map((a) => a.textContent)).toEqual(['Type whole cartons, and the rest in pieces.']);
     fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
     expect(createTransfer).not.toHaveBeenCalled();
   });
@@ -104,7 +104,7 @@ describe('a pack that changes while moving', () => {
     createTransfer.mockReturnValue(new Promise(() => undefined));
     open([{ product, qty: '6', packs: '2', pack: { unit: 'Carton', factor: '24.000' } }]);
     expect(document.getElementById('tq-0-total')?.textContent).toBe('Moving 2 cartons and 6 pieces (54 pieces)');
-    expect(screen.getByText("Moving in Cartons of 24, as when you typed them. This item's pack has changed since.")).toBeTruthy();
+    expect(screen.getByText("Moving in cartons of 24, as when you typed them. This item's pack has changed since.")).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
     await waitFor(() => expect(createTransfer).toHaveBeenCalledTimes(1));
     expect(createTransfer.mock.calls[0]?.[0].lines).toEqual([{ product_id: 'p1', qty: '54.000' }]);

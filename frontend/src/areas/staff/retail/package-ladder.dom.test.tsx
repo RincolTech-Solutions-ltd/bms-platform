@@ -142,6 +142,16 @@ describe('the package ladder on the item page (issue #699)', () => {
     expect(within(screen.getByTestId('ladder-check')).getByRole('button', { name: 'OK, save' }).hasAttribute('disabled')).toBe(true);
   });
 
+  it('opens an item whose stored packs loop, a box holding the carton that holds it, without freezing (review of #710)', () => {
+    const looped: Pack[] = [
+      { unit_id: 'u-box', unit: 'Box', factor: '10.000', active: true, version: 1, purpose: 'both', holds_unit_id: 'u-ctn', holds_unit: 'Carton', holds_qty: 2 },
+      { unit_id: 'u-ctn', unit: 'Carton', factor: '120.000', active: true, version: 1, purpose: 'both', holds_unit_id: 'u-box', holds_unit: 'Box', holds_qty: 12 },
+    ];
+    draw(<ItemLadder product={socket} packs={looped} mayManage />);
+    expect(screen.getByText(/1 carton → 12 boxes → each 2 cartons/)).toBeTruthy();
+    expect(lookInsideWords(ladderOf(socket, looped), 'u-ctn', 'Piece')).toBe('1 carton holds 12 boxes, each holding 2 cartons. That is 120 pieces.');
+  });
+
   it('says what one package holds when it is opened up', () => {
     expect(lookInsideWords(ladderOf(socket, packs), 'u-ctn', 'Piece')).toBe('1 carton holds 12 boxes, each holding 10 pieces. That is 120 pieces.');
     draw(<ItemLadder product={socket} packs={packs} mayManage />);

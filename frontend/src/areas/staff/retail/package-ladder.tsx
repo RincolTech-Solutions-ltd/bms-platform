@@ -6,7 +6,7 @@ import { Hint } from '../../../app/ui/Hint';
 import { Stepper } from '../../../app/ui/Stepper';
 import { icons } from '../../../components/icons';
 import { asPurpose, usualFactor } from './catalogue-packs';
-import { chain, changeWords, changesOf, holdsProblem, ladderOf, many, one, shown, soOne, type Rung } from './ladder-state';
+import { chain, changeWords, changesOf, holdsChain, holdsProblem, ladderOf, many, one, shown, soOne, type Rung } from './ladder-state';
 import { Problem } from './ui';
 import { UnitPicker } from './unit-picker';
 import { showQty } from './maths';
@@ -166,12 +166,14 @@ export function drawPackage(canvas: HTMLCanvasElement, rungs: Rung[], open: numb
       const cx = x + pad + (k % cols) * gw;
       const cy = y + pad + Math.floor(k / cols) * gh;
       marks += 1;
-      if (held > CAP && k === n - 1) {
+      // The last cell drawn says how many more there are: past the cap, or where the budget ran out (review of #710).
+      const last = k === n - 1 || marks >= BUDGET;
+      if (last && held > k + 1) {
         ctx.fillStyle = roleColour(canvas, '--color-text');
         ctx.font = `600 ${Math.max(10, Math.min(28, gh / 2.5))}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(`+${(held - n + 1).toLocaleString('en-GB')}`, cx + gw / 2, cy + gh / 2, gw - 4);
+        ctx.fillText(`+${(held - k).toLocaleString('en-GB')}`, cx + gw / 2, cy + gh / 2, gw - 4);
       } else if (tiny) {
         ctx.fillStyle = roleColour(canvas, colourOf(child - 1));
         ctx.beginPath();
@@ -190,7 +192,7 @@ export function lookInsideWords(rungs: Rung[], unitId: string, smallest: string)
   const top = rungs.find((r) => r.unitId === unitId);
   if (!top) return '';
   const parts: string[] = [];
-  for (let at: Rung | undefined = top; at; at = rungs.find((r) => r.unitId === at?.holdsUnitId)) {
+  for (const at of holdsChain(rungs, top)) {
     parts.push(`${showQty(at.holdsQty)} ${Number(at.holdsQty) === 1 ? one(at.holdsUnit) : many(at.holdsUnit)}`);
   }
   return `1 ${one(top.unit)} holds ${parts.join(', each holding ')}. That is ${shown(top.pieces)} ${many(smallest)}.`;
@@ -210,7 +212,7 @@ export function LookInside({ rungs, smallest }: { rungs: Rung[]; smallest: strin
   if (!chosen) return <p className="hint">Add a bigger package to see what it holds.</p>;
   const words = lookInsideWords(rungs, chosen.unitId, smallest);
   const shownLevels: { name: string; level: number }[] = [];
-  for (let at: Rung | undefined = chosen; at; at = rungs.find((r) => r.unitId === at?.holdsUnitId)) {
+  for (const at of holdsChain(rungs, chosen)) {
     shownLevels.push({ name: unitWord(at.unit), level: levelOf(rungs, at.unitId) });
   }
   shownLevels.push({ name: unitWord(smallest), level: 1 });
@@ -268,7 +270,10 @@ export function ItemLadder({ product, packs, mayManage, mayPrice = true }: {
     onSuccess: refresh,
     meta: {
       success: (_r: unknown, r: Rung) => `${unitWord(r.unit)} removed. Stock is unchanged`,
-      undo: (done: Pack, r: Rung) => () => retail.updatePack(id, r.unitId, done.version ?? 1, { active: true, holds_unit_id: r.holdsUnitId, holds_qty: Number(r.holdsQty) }),
+      // A pack made before ADR-107 says nothing of what it holds and may be 12.5 pieces: it comes back with its own factor.
+      undo: (done: Pack, r: Rung) => () => retail.updatePack(id, r.unitId, done.version ?? 1, r.pack?.holds_qty === undefined
+        ? { active: true, factor: r.pack?.factor ?? '' }
+        : { active: true, holds_unit_id: r.holdsUnitId, holds_qty: r.pack.holds_qty }),
     },
   });
   const changes = pending && holdsProblem(pending.value, pending.rung) === null

@@ -62,6 +62,16 @@ class PackLadderTest {
     }
 
     @Test
+    void theRefusalsSayTheUnitInThePlural() {
+        assertThat(CatalogueService.plural("piece")).isEqualTo("pieces");
+        assertThat(CatalogueService.plural("box")).isEqualTo("boxes");
+        assertThat(CatalogueService.plural("battery")).isEqualTo("batteries");
+        assertThat(CatalogueService.plural("tray")).isEqualTo("trays");
+        assertThat(CatalogueService.plural("box of rolls")).isEqualTo("boxes of rolls");
+        assertThat(CatalogueService.plural("pieces")).isEqualTo("pieces");
+    }
+
+    @Test
     void aSizeIsAWholeNumberOfALevelOrNot() {
         assertThat(PackLadder.wholeOf(n("120"), n("10"))).isEqualTo(12);
         assertThat(PackLadder.wholeOf(n("125"), n("10"))).isNull();
