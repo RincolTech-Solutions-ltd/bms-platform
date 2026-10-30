@@ -394,6 +394,21 @@ final class StockApi {
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = COST_ONLY)
             Long unitCostMinor) {}
 
+    @Schema(
+            name = "RetailOpenStocktake",
+            description = "Issue #728: a count started at a branch and neither saved nor thrown away (a draft)")
+    record OpenStocktake(
+            UUID id,
+            UUID branchId,
+            Instant createdAt,
+            UUID createdBy,
+
+            @Schema(description = "How many items it counted")
+            int lines,
+
+            @Schema(description = "The count's note; Sell's count of a new item carries its own (review of #729)")
+            String note) {}
+
     @Schema(name = "RetailStocktake")
     record Stocktake(
             UUID id,

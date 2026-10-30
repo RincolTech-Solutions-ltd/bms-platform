@@ -208,7 +208,8 @@ class RetailStockIT extends IntegrationTest {
             assertThat(refused.getBody().get("detail").asString())
                     .contains("Test Product SKT-14B")
                     .contains("more than half")
-                    .contains("commit the count")
+                    .contains("save the count")
+                    .doesNotContainIgnoringCase("commit")
                     .doesNotContainIgnoringCase("finish");
         }
         assertThat(refused(id, Map.of()).get("detail").asString()).contains("SKT-13A");
@@ -331,6 +332,56 @@ class RetailStockIT extends IntegrationTest {
         assertThat(late.getBody().get("code").asString()).isEqualTo("stocktake_committed");
         assertThat(api.get("/stocktakes/" + done, ADMIN).getBody().get("status").asString())
                 .isEqualTo("committed");
+    }
+
+    // JUSTIFICATION-A3: one test of the new read route, which no existing test can carry.
+    /**
+     * Issue #728: the counts started at a branch and neither saved nor thrown away are listed, newest first, to someone who
+     * may count there; a saved or thrown away one leaves the list, and someone who may count only elsewhere is refused.
+     */
+    @Test
+    void theUnfinishedCountsOfABranchAreListedToWhoeverMayCountThere() {
+        api.stockUp(t.headOffice(), product, "10");
+        UUID first = count(Map.of("product_id", product, "counted_qty", "9"));
+        UUID second = count(Map.of("product_id", product, "counted_qty", "8"));
+        UUID saved = count(Map.of("product_id", product, "counted_qty", "10"));
+        api.post("/stocktakes/" + saved + "/commit", Map.of(), ADMIN);
+        UUID thrown = count(Map.of("product_id", product, "counted_qty", "7"));
+        api.post("/stocktakes/" + thrown + "/discard", null, ADMIN);
+
+        String path = "/stocktakes/unfinished?branch_id=" + t.headOffice();
+        ResponseEntity<JsonNode> open = api.get(path, ADMIN);
+        assertThat(open.getStatusCode()).as("%s", open.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(open.getBody().valueStream().map(n -> n.get("id").asString()).toList())
+                .containsExactly(second.toString(), first.toString());
+        assertThat(open.getBody().get(0).get("lines").asInt()).isEqualTo(1);
+        // Review of #729: Sell's count of a new item says where it came from, by its note.
+        api.post(
+                "/stocktakes",
+                Map.of(
+                        "branch_id",
+                        t.headOffice(),
+                        "note",
+                        "Counted when the item was added on Sell",
+                        "lines",
+                        List.of(Map.of("product_id", product, "counted_qty", "6"))),
+                ADMIN);
+        assertThat(api.get(path, ADMIN).getBody().get(0).get("note").asString())
+                .isEqualTo("Counted when the item was added on Sell");
+        assertThat(open.getBody().get(0).get("branch_id").asString())
+                .isEqualTo(t.headOffice().toString());
+
+        RetailTestSupport other = new RetailTestSupport(http, t);
+        assertThat(other.call(
+                                HttpMethod.GET,
+                                path,
+                                null,
+                                ADMIN,
+                                t.secondBranch().toString(),
+                                Map.of())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(api.get(path, SALES).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     /** Issue #656: a discarded count is as final as a committed one, for the application and the owner alike. */

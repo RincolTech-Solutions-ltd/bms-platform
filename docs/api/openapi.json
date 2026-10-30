@@ -14605,6 +14605,36 @@
           }
         }
       },
+      "RetailOpenStocktake" : {
+        "description" : "Issue #728: a count started at a branch and neither saved nor thrown away (a draft)",
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "created_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "created_by" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "lines" : {
+            "description" : "How many items it counted",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "note" : {
+            "description" : "The count's note; Sell's count of a new item carries its own (review of #729)",
+            "type" : "string"
+          }
+        }
+      },
       "RetailOrder" : {
         "properties" : {
           "branch_id" : {
@@ -44089,6 +44119,37 @@
           }
         },
         "summary" : "Record a count; returns the variance per line (FR-RET-08)",
+        "tags" : [ "retail-stock" ]
+      }
+    },
+    "/api/v1/retail/stocktakes/unfinished" : {
+      "get" : {
+        "operationId" : "listRetailUnfinishedStocktakes",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/RetailOpenStocktake"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The counts started at a branch and neither saved nor thrown away, newest first, at most 20 (issue #728); needs retail.stocktake.commit at that branch",
         "tags" : [ "retail-stock" ]
       }
     },

@@ -959,7 +959,8 @@ export const stocktakePage: Tour = {
   // Version 5 says a count far from the records is asked about before the review (issue #353, ADR-093).
   // Version 6 says an empty box is not counted and a count that removes most of an item asks for a tick (issue #629).
   // Version 7 says each count is saved as it is typed and comes back after a reload (issue #681).
-  version: 7,
+  // Version 8 names the last button Save the count (issue #728).
+  version: 8,
   title: 'This page: count stock',
   audience: (me) => STOCKTAKE.every((p) => held(me, p)),
   autoStart: false,
@@ -981,7 +982,7 @@ export const stocktakePage: Tour = {
       id: 'review',
       target: 'count-review',
       title: 'Check before saving',
-      body: 'Tap Review the difference to see what differs. A count far from what the records hold is asked about first: Confirm or Change it. A line that takes an item to 0 or removes more than half needs a tick. Nothing changes until you tap Commit the count.',
+      body: 'Tap Review the difference to see what differs. A count far from what the records hold is asked about first: Confirm or Change it. A line that takes an item to 0 or removes more than half needs a tick. Nothing changes until you tap Save the count.',
     },
   ],
 };

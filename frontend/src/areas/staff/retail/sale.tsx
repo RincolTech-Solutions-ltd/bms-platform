@@ -43,6 +43,7 @@ import { ScreenLink, addOn } from './screen-link';
 import { CustomerPicker } from './customer-picker';
 import { dropWords } from './stocktake';
 import { useBranchHold } from '../branch-picker';
+import { SELL_COUNT_NOTE, unfinishedKey } from './unfinished-counts';
 import { icons } from '../../../components/icons';
 
 // Record a sale (FR-RET-04, FR-RET-05). One idempotency key per draft, kept with the draft in this
@@ -396,7 +397,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       // A draft whose commit was lost is sent again, never made twice.
       let draftId = drafts.current.get(id);
       if (draftId === undefined) {
-        draftId = (await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: id, counted_qty: qtyString(h.counted) }], note: 'Counted when the item was added on Sell' })).id ?? '';
+        draftId = (await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: id, counted_qty: qtyString(h.counted) }], note: SELL_COUNT_NOTE })).id ?? '';
         keepCount(draftId, true);
         drafts.current.set(id, draftId);
       }
@@ -414,8 +415,11 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     // Committed after the sale was cleared or the screen closed: the count stands, the item goes on no sale.
     if (stale()) throw new StaleCount();
   };
+  // Issue #728, review of #729: a count saved or thrown away here leaves the list of counts not saved.
+  const countsChanged = () => void queryClient.invalidateQueries({ queryKey: unfinishedKey(branchId) });
   const countCommitted = (h: HeldCount) => {
     drop(h.product.id);
+    countsChanged();
     for (const key of [['retail', 'products'], ['retail', 'stocked-branches']]) void queryClient.invalidateQueries({ queryKey: key });
     add({ ...h.product, qty: qtyString(h.counted) });
   };
@@ -426,11 +430,11 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     if (refused(e)) {
       const draftId = drafts.current.get(h.product.id ?? '');
       drafts.current.delete(h.product.id ?? '');
-      if (draftId !== undefined) discardCount(draftId);
+      if (draftId !== undefined) discardCount(draftId, countsChanged);
       drop(h.product.id);
       const words = typeof e.problem?.detail === 'string' ? e.problem.detail : e.message;
       show(`${words} ${name} is not on the sale: use ${WORDS.countStock}, then sell it.`, 'error');
-    } else show(`The count of ${name} is not committed. Try again.`, 'error');
+    } else show(`The count of ${name} is not saved. Try again.`, 'error');
   };
   const notNow = (h: HeldCount) => {
     const draftId = drafts.current.get(h.product.id ?? '');
@@ -440,7 +444,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         return;
       }
       drafts.current.delete(h.product.id ?? '');
-      discardCount(draftId);
+      discardCount(draftId, countsChanged);
     }
     drop(h.product.id);
     show(`${h.product.description ?? 'The item'} is saved. It is not on the sale: count it on ${WORDS.countStock}, then sell it.`, 'info');
@@ -467,7 +471,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
           setHeld((l) => [...l.filter((x) => x.product.id !== product.id), { product, counted, expected }]);
           asks = true;
         } else {
-          const count = await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: product.id ?? '', counted_qty: qtyString(counted) }], note: 'Counted when the item was added on Sell' });
+          const count = await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: product.id ?? '', counted_qty: qtyString(counted) }], note: SELL_COUNT_NOTE });
           const draftId = count.id ?? '';
           keepCount(draftId, true);
           // Stock that arrived between the read and the count (or a balance the search did not return): never sent to be
@@ -499,7 +503,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       } catch (e) {
         // A sale cleared or a screen left meanwhile hears nothing of it (issue #664); the kept draft is dealt with as above.
         if (lost) {
-          if (!stale()) show(`The count of ${name} may not be committed. Check it on ${WORDS.countStock} before you sell it.`, 'error');
+          if (!stale()) show(`The count of ${name} may not be saved. Check it on ${WORDS.countStock} before you sell it.`, 'error');
         } else if (!(e instanceof StaleCount)) show(`${name} is saved, but its count is not. Count it on ${WORDS.countStock}, then sell it.`, 'error');
       }
     }
@@ -644,7 +648,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
             notFound={(term, clear, hold) => (
               <ScreenToast.Provider value={show}>
                 <NewItemHere id="sale-new" description={term} ask={ASK_OWNER_ITEM} askCost={profit} qtyLabel={mayCount ? 'How many you have here' : undefined}
-                  qtyError="Type how many you have here, more than 0." onOpenChange={hold} onAdded={(added) => addNew(added, clear)} />
+                  qtyError="Type how many you have here, more than 0." onOpenChange={hold} onAdded={(added) => addNew(added, clear)}
+                  at={{ value: branchId, places: (me.branches ?? []).filter((b) => b.id === branchId) }} />
                 <ScreenLink screen="quickAdd" to="/staff/retail/quick-add" search={{ name: term }}>Quick add "{term}" with its prices and stock</ScreenLink>
               </ScreenToast.Provider>
             )}
@@ -657,7 +662,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       ))}
       {stuck && !online && held.length > 0 && (
         <p role="alert" className="alert alert-warning" data-testid="sale-count-offline">
-          A count on this sale is not committed. Connect to the internet, then commit the count or press Not now, before you clear the sale or switch branch.
+          A count on this sale is not saved. Connect to the internet, then save the count or press Not now, before you clear the sale or switch branch.
         </p>
       )}
 
@@ -926,20 +931,23 @@ async function commitMade(id: string, acknowledged?: string[]) {
   });
 }
 
-/** Issue #656: ends a draft Sell made; one already committed or discarded, or not found, is forgotten too. */
-function discardCount(id: string) {
+/**
+ * Issue #656: ends a draft Sell made; one already committed or discarded, or not found, is forgotten too. `onDone` is told once
+ * the server answers, so the list of counts not saved is read again (review of #729).
+ */
+function discardCount(id: string, onDone?: () => void) {
   keepCount(id, true);
   retail.discardStocktake(id).then(
     () => keepCount(id, false),
     (e: unknown) => {
       if (e instanceof RetailError && (e.status === 404 || e.status === 409)) keepCount(id, false);
     },
-  );
+  ).finally(onDone);
 }
 
 /**
  * Issue #656: the count Sell would make of a new item is a big drop, so the records already hold more of it here. The line asks
- * its tick first, as on Count stock; Commit the count then makes the count and sends it acknowledged. Not now leaves nothing open.
+ * its tick first, as on Count stock; Save the count then makes the count and sends it acknowledged. Not now leaves nothing open.
  */
 function HeldCountTick({ held, commit, onCommitted, onFailed, onCancel }: {
   held: HeldCount;
@@ -966,7 +974,7 @@ function HeldCountTick({ held, commit, onCommitted, onFailed, onCancel }: {
           <input type="checkbox" checked={ok} aria-describedby={wordsId} data-needed={ok ? undefined : ''} onChange={(e) => setOk(e.target.checked)} />
           {`Yes, ${name} is right`}
         </label>
-        <BusyButton type="button" className="rt-primary" busy={busy} notReady={!ok} onClick={() => sending.mutate()}>Commit the count</BusyButton>
+        <BusyButton type="button" className="rt-primary" busy={busy} notReady={!ok} onClick={() => sending.mutate()}>Save the count</BusyButton>
         {/* Not now discards a draft whose commit was lost; while the count is on its way it waits. */}
         {!busy && <button type="button" onClick={() => onCancel(held)}>Not now</button>}
       </div>

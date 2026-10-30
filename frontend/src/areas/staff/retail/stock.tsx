@@ -24,6 +24,8 @@ import { ScreenLink } from './screen-link';
 import { Hint } from '../../../app/ui/Hint';
 import { HelpTip } from '../../../app/ui/HelpTip';
 import { WORDS } from '../../../app/glossary';
+import { ElsewhereNote, allBranchesKey, noneHere, useStockElsewhere, type Elsewhere } from './stock-elsewhere';
+import { UnfinishedCounts } from './unfinished-counts';
 
 // Stock per branch (FR-RET-03): balances with a negative flag and a search box. The cost column
 // exists only for a session holding retail.profit.read: showCost is the screen's choice and the server
@@ -63,7 +65,17 @@ function PriceTips({ cost }: { cost: boolean }) {
   );
 }
 
-export function StockTable({ rows, showCost, searching = false, filterKey = '', pending = false, flat = false, correctable }: { rows: StockRow[]; showCost: boolean; correctable?: Correctable } & Narrowing) {
+export function StockTable({ rows, showCost, searching = false, filterKey = '', pending = false, flat = false, correctable, elsewhere }: {
+  rows: StockRow[];
+  showCost: boolean;
+  correctable?: Correctable;
+  /** Issue #728: the other shop holding each item, said under an item with none here. */
+  elsewhere?: ReadonlyMap<string, Elsewhere>;
+} & Narrowing) {
+  const away = (r: StockRow) => {
+    const at = noneHere(r.qty) ? elsewhere?.get(r.product_id ?? '') : undefined;
+    return at && <ElsewhereNote at={at} id={r.product_id ?? ''} />;
+  };
   // On a phone the category sits under the item's name, so the table keeps room for the quantity and price.
   const phone = useIsPhone();
   const [corrected, setCorrected] = useState<string | null>(null);
@@ -83,6 +95,7 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
         {showCategory && r.category && <CategoryLabel category={r.category} />}
         <p className="stock-card-qty">In stock: <span className={r.standard_pack ? 'num qty-packs' : 'num'}><InPacks qty={r.qty ?? '0'} unit={r.unit} pack={r.standard_pack} /></span></p>
         {r.negative && <p className="rt-flag">Negative</p>}
+        {away(r)}
         {keptWords(r.qty, r.reserved_qty) && <p className="hint">{keptWords(r.qty, r.reserved_qty)}</p>}
         {(r.sell_minor !== undefined || (showCost && r.cost_minor !== undefined)) && <p className="hint"><PriceLine cost={showCost ? r.cost_minor : undefined} sell={r.sell_minor} /></p>}
         {correctable && correct(r)}
@@ -109,6 +122,7 @@ export function StockTable({ rows, showCost, searching = false, filterKey = '', 
         <td className={r.standard_pack ? 'num qty-packs' : 'num'}>
           <InPacks qty={r.qty ?? '0'} unit={r.unit} pack={r.standard_pack} />
           {r.negative && <div className="rt-flag">Negative</div>}
+          {away(r)}
           {keptWords(r.qty, r.reserved_qty) && <div className="hint">{keptWords(r.qty, r.reserved_qty)}</div>}
         </td>
         {showCost && <td className="num">{r.cost_minor !== undefined ? money(r.cost_minor) : ''}</td>}
@@ -278,17 +292,19 @@ function StockRows({ sel, filter, all, branchId }: { sel: ListSelection; filter:
     enabled: branch !== null,
   });
   const many = useQuery({
-    queryKey: ['retail', 'stock', 'all-branches', filter.query, categoryId, filter.negativeOnly, level ?? '', filter.includeClosed, filter.includeInactive],
+    queryKey: allBranchesKey({ query: filter.query, categoryId, negativeOnly: filter.negativeOnly, level: level ?? '', includeClosed: filter.includeClosed, includeInactive: filter.includeInactive }),
     queryFn: ({ signal }) => retail.listStockAllBranches({ query: filter.query, categoryId, negativeOnly: filter.negativeOnly, level, includeClosed: filter.includeClosed, includeInactive: filter.includeInactive, signal }),
     enabled: branch === null,
   });
   const result = branch === null ? many : one;
+  // Review of #729: the grouped view says where an item at 0 here is, as the flat list does.
+  const elsewhere = useStockElsewhere(branch, one.data, { query: filter.query, categoryId, includeInactive: filter.includeInactive });
   const key = [branch ?? 'all', filter.query, categoryId, filter.negativeOnly, level ?? ''].join('|');
   return (
     <>
       {result.isPending && <SkeletonList label="Loading stock" />}
       <Problem error={result.error} />
-      {branch !== null && one.data && <StockTable rows={one.data} showCost={canProfit} flat filterKey={key} correctable={mayCorrect(me, branch) ? { branchId: branch } : undefined} />}
+      {branch !== null && one.data && <StockTable rows={one.data} showCost={canProfit} flat filterKey={key} correctable={mayCorrect(me, branch) ? { branchId: branch } : undefined} elsewhere={elsewhere} />}
       {branch === null && many.data && (phone ? <AllBranchesList data={many.data} showCost={canProfit} flat filterKey={key} /> : <AllBranchesTable data={many.data} showCost={canProfit} flat filterKey={key} />)}
     </>
   );
@@ -319,11 +335,13 @@ export function StockPage() {
     placeholderData: keepPreviousData,
   });
   const many = useQuery({
-    queryKey: ['retail', 'stock', 'all-branches', query, categoryId, negativeOnly, level, showClosed, showInactive],
+    queryKey: allBranchesKey({ query, categoryId, negativeOnly, level, includeClosed: showClosed, includeInactive: showInactive }),
     queryFn: ({ signal }) => retail.listStockAllBranches({ query, categoryId, negativeOnly, level: level || undefined, includeClosed: showClosed, includeInactive: showInactive, signal }),
     enabled: all && !grouped && chipReady,
     placeholderData: keepPreviousData,
   });
+  // Issue #728: with an item at 0 here, the other shops this person may read are asked what they hold.
+  const elsewhere = useStockElsewhere(all ? null : branchId, one.data, { query, categoryId, includeInactive: showInactive }, !grouped && chipReady);
   const result = all ? many : one;
   const finding = result.isPlaceholderData || (result.isFetching && result.fetchStatus !== 'idle');
   // A known barcode shows its own item alone, not the items whose code only begins the same.
@@ -348,6 +366,7 @@ export function StockPage() {
         <CategoryChips categories={categories.data ?? []} value={categoryId} onChange={setCategoryId} />
       </FindBar>
       {!all && branchId !== null && <NoStockHere branchId={branchId} />}
+      {!all && branchId !== null && <UnfinishedCounts branchId={branchId} />}
       <ViewSwitch view={list.view} onChange={list.setView} />
       <StockLevelFilter level={level} onChange={setLevel} />
       <label style={{ fontWeight: 400 }}>
@@ -396,7 +415,7 @@ export function StockPage() {
       {!grouped && (
       <div data-tour="stock-list">
       <SearchResults fetching={finding}>
-        {!all && oneRows && <StockTable rows={oneRows} showCost={canProfit} correctable={mayCorrect(me, branchId) && branchId !== null ? { branchId } : undefined} {...narrowing} />}
+        {!all && oneRows && <StockTable rows={oneRows} showCost={canProfit} correctable={mayCorrect(me, branchId) && branchId !== null ? { branchId } : undefined} elsewhere={elsewhere} {...narrowing} />}
         {all && manyData && (phone ? <AllBranchesList data={manyData} showCost={canProfit} {...narrowing} /> : <AllBranchesTable data={manyData} showCost={canProfit} {...narrowing} />)}
       </SearchResults>
       </div>

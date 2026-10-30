@@ -77,6 +77,24 @@
   cursor: pointer;
 }
 
+/* Issue #728: the shop a form adds stock to, beside its quantity, and Change, a 48px button with the picker laid over it. */
+.adds-to {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-2) 0;
+}
+
+.adds-to-change {
+  position: relative;
+}
+
+.adds-to-change:has(.shop-here-select:focus-visible) {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
 .rt label {
   margin: var(--space-4) 0 6px;
 }
@@ -159,6 +177,22 @@
 
 .stock-card .hint .num {
   font-variant-numeric: tabular-nums;
+}
+
+/* Issue #728: "0 here. 456 at Test Store" and its switch, under the quantity; in a table cell it reads from the left. */
+.stock-elsewhere {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  text-align: start;
+  font-size: var(--text-base);
+  font-weight: var(--weight-regular);
+}
+
+.stock-elsewhere p {
+  margin: 0;
 }
 
 /* Issue #690: finding an item on a phone. The search and the category chips stay under the 56px top bar while the list scrolls,

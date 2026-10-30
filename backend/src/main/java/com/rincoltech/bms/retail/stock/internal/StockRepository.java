@@ -7,6 +7,7 @@ import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.internal.StockApi.Correction;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementCorrection;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementRow;
+import com.rincoltech.bms.retail.stock.internal.StockApi.OpenStocktake;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StandardPack;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockRow;
 import com.rincoltech.bms.retail.stock.internal.StockApi.Stocktake;
@@ -536,6 +537,29 @@ class StockRepository {
                                updated_at = now(), version = version + 1
                          WHERE id = ? AND status = 'draft'
                         """).params(by, id).update();
+    }
+
+    // JUSTIFICATION-A3: no query lists a branch's draft counts; the one read the issue needs.
+    /** Issue #728: the draft counts of a branch, newest first, at most 20. */
+    List<OpenStocktake> openStocktakes(UUID branchId) {
+        return jdbc.sql("""
+                        SELECT s.id, s.branch_id, s.created_at, s.created_by, s.note,
+                               (SELECT count(*) FROM retail_stocktake_lines l
+                                 WHERE l.tenant_id = s.tenant_id AND l.stocktake_id = s.id) AS lines
+                          FROM retail_stocktakes s
+                         WHERE s.branch_id = ? AND s.status = 'draft'
+                         ORDER BY s.created_at DESC, s.id
+                         LIMIT 20
+                        """)
+                .param(branchId)
+                .query((rs, n) -> new OpenStocktake(
+                        rs.getObject("id", UUID.class),
+                        rs.getObject("branch_id", UUID.class),
+                        instant(rs, "created_at"),
+                        rs.getObject("created_by", UUID.class),
+                        rs.getInt("lines"),
+                        rs.getString("note")))
+                .list();
     }
 
     Optional<Stocktake> stocktake(UUID id, boolean lock) {

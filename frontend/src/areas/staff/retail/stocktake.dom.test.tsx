@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { StockRow } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
@@ -23,8 +23,12 @@ vi.mock('@tanstack/react-router', async (original) => {
 
 vi.mock('../../../api/retail', async (original) => {
   const real = await original<typeof import('../../../api/retail')>();
-  return { ...real, retail: { ...real.retail, listStock: (...a: unknown[]) => listStock(...a), createStocktake: (...a: unknown[]) => createStocktake(...a), commitStocktake: (...a: unknown[]) => commitStocktake(...a), discardStocktake: (...a: unknown[]) => discardStocktake(...a) } };
+  return { ...real, retail: { ...real.retail, listStock: (...a: unknown[]) => listStock(...a), createStocktake: (...a: unknown[]) => createStocktake(...a), commitStocktake: (...a: unknown[]) => commitStocktake(...a), discardStocktake: (...a: unknown[]) => discardStocktake(...a),
+    getStocktake: (...a: unknown[]) => getStocktake(...a), unfinishedStocktakes: (...a: unknown[]) => unfinishedStocktakes(...a) } };
 });
+const getStocktake = vi.fn();
+const unfinishedStocktakes = vi.fn();
+unfinishedStocktakes.mockResolvedValue([]);
 
 const { StocktakePage, StocktakeReview } = await import('./stocktake');
 
@@ -34,6 +38,9 @@ afterEach(() => {
   createStocktake.mockReset();
   commitStocktake.mockReset();
   discardStocktake.mockReset();
+  getStocktake.mockReset();
+  unfinishedStocktakes.mockReset();
+  unfinishedStocktakes.mockResolvedValue([]);
   // Issue #681: the count is kept on the device, so each test starts with none.
   localStorage.clear();
 });
@@ -281,15 +288,15 @@ describe('a count that wipes or halves stock', () => {
 
   it('commits only once every noted line is ticked, and a press before that goes to the first tick', async () => {
     await review();
-    const commit = screen.getByRole('button', { name: 'Commit the count' });
-    expect(screen.getByText('Tick the 2 lines marked above before you commit the count.')).toBeTruthy();
+    const commit = screen.getByRole('button', { name: 'Save the count' });
+    expect(screen.getByText('Tick the 2 lines marked above before you save the count.')).toBeTruthy();
     // Issue #636: the hint is the button's description, so a screen reader hears why a press goes to a tick.
-    expect(document.getElementById(commit.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Tick the 2 lines marked above before you commit the count.');
+    expect(document.getElementById(commit.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Tick the 2 lines marked above before you save the count.');
     fireEvent.click(commit);
     expect(commitStocktake).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Yes, Test Plug Four Way is right' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Four Way is right' }));
-    expect(screen.getByText('Tick the line marked above before you commit the count.')).toBeTruthy();
+    expect(screen.getByText('Tick the line marked above before you save the count.')).toBeTruthy();
     fireEvent.click(commit);
     expect(commitStocktake).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Yes, Test Plug Two Way is right' }));
@@ -310,7 +317,7 @@ describe('a count that wipes or halves stock', () => {
     noFinish();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Four Way is right' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Two Way is right' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     await screen.findByRole('heading', { name: 'Stock updated for 4 items' });
     noFinish();
   });
@@ -324,28 +331,85 @@ describe('a count that wipes or halves stock', () => {
     expect(document.querySelector('.entry-warning-icon path')?.getAttribute('d')).toBe('M12 3.5 2.5 20h19z');
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Fuse One is right' }));
     expect((screen.getByRole('checkbox', { name: 'Yes, Test Fuse Two is right' }) as HTMLInputElement).checked).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     expect(onCommit).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Fuse Two is right' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     expect(onCommit).toHaveBeenCalledWith([]);
   });
 
   // Issue #664: a cancelled count (status discarded) says cancelled, and asks no tick and no commit, big drops and all.
-  it('shows a cancelled count with no tick and no Commit the count, and never says discarded', () => {
+  it('shows a cancelled count with no tick and no Save the count, and never says discarded', () => {
     render(<StocktakeReview stocktake={{ ...draft, status: 'discarded' }} onCommit={vi.fn()} />);
     expect(screen.getByRole('heading', { name: 'Stock count cancelled' })).toBeTruthy();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
     expect(screen.queryByTestId('count-drop-A-1')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Commit the count' })).toBeNull();
-    expect(screen.queryByText(/before you commit the count/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save the count' })).toBeNull();
+    expect(screen.queryByText(/before you save the count/)).toBeNull();
     expect(document.body.textContent).not.toMatch(/discard/i);
   });
 
-  it('asks again after Back to the count, since the review is a new one', async () => {
+  // Issue #728: a count left at Review the difference is named on the sheet; Finish it brings its review back to save it.
+  it('names a count left unsaved and brings its review back with Finish it, ready to save', async () => {
+    listStock.mockResolvedValue(sheet);
+    unfinishedStocktakes.mockResolvedValue([{ id: 'st-old', branch_id: 'b', created_at: '2026-10-29T09:00:00Z', lines: 4 }]);
+    getStocktake.mockResolvedValue({ ...draft, id: 'st-old' });
+    open();
+    const card = await screen.findByTestId('unfinished-st-old');
+    expect(card.textContent).toContain('started a count here');
+    fireEvent.click(within(card).getByRole('button', { name: 'Finish it' }));
+    expect(await screen.findByRole('heading', { name: 'Review the difference' })).toBeTruthy();
+    expect(getStocktake).toHaveBeenCalledWith('st-old');
+    expect(screen.getByRole('button', { name: 'Save the count' })).toBeTruthy();
+    // Back to the count leaves a count opened this way as it was: only a review made here is thrown away.
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the count' }));
+    expect(discardStocktake).not.toHaveBeenCalled();
+  });
+
+  // Review of #729: a discard sent after Save the count could reach the server first and cancel the save.
+  it('hides Back to the count while the save is on its way, and never throws away a count whose save was sent', async () => {
     await review();
+    let answer: (v: unknown) => void = () => undefined;
+    commitStocktake.mockReturnValue(new Promise((_, reject) => { answer = reject; }));
+    for (const name of ['Yes, Test Plug Four Way is right', 'Yes, Test Plug Two Way is right']) fireEvent.click(screen.getByRole('checkbox', { name }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: 'Back to the count' })).toBeNull();
+    answer(new TypeError('Failed to fetch'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to the count' }));
+    expect(discardStocktake).not.toHaveBeenCalled();
+  });
+
+  it('lets a save on its way complete, with no discard sent', async () => {
+    await review();
+    let answer: (v: unknown) => void = () => undefined;
+    commitStocktake.mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+    for (const name of ['Yes, Test Plug Four Way is right', 'Yes, Test Plug Two Way is right']) fireEvent.click(screen.getByRole('checkbox', { name }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: 'Back to the count' })).toBeNull();
+    answer({ ...draft, status: 'committed', lines: draft.lines.map((l) => ({ ...l, committed_variance_qty: l.variance_qty })) });
+    expect(await screen.findByRole('heading', { name: /^Stock updated/ })).toBeTruthy();
+    expect(discardStocktake).not.toHaveBeenCalled();
+  });
+
+  // Issue #728: Save, the word a shop worker knows, and a tip that nothing changes before it; Review the difference stays before it.
+  it('names the last step Save the count, with a tip that stock changes only then', async () => {
+    await review();
+    expect(screen.getByRole('heading', { name: 'Review the difference' })).toBeTruthy();
+    expect(screen.queryByText(/commit/i)).toBeNull();
+    const tip = screen.getByRole('button', { name: 'More about Save the count' });
+    fireEvent.click(tip);
+    expect(await screen.findByText('Your stock changes only when you save the count.')).toBeTruthy();
+  });
+
+  it('asks again after Back to the count, since the review is a new one, and throws the old one away', async () => {
+    await review();
+    discardStocktake.mockResolvedValue({ ...draft, status: 'discarded' });
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Four Way is right' }));
     fireEvent.click(screen.getByRole('button', { name: 'Back to the count' }));
+    // Issue #728: the review left this way never shows later as a count not finished.
+    expect(discardStocktake).toHaveBeenCalledWith(draft.id);
     createStocktake.mockResolvedValue({ ...draft, id: 'st2' });
     fireEvent.click(screen.getByRole('button', { name: 'Review the difference (4 counted)' }));
     await screen.findByRole('heading', { name: 'Review the difference' });
@@ -458,10 +522,10 @@ describe('counting in cartons and pieces', () => {
     await screen.findByRole('heading', { name: 'Review the difference' });
     expect(createStocktake.mock.calls[0]?.[0]).toEqual({ branch_id: expect.any(String), lines: [{ product_id: 'S-1', counted_qty: '24.000' }] });
     expect(screen.getByTestId('count-drop-S-1').textContent).toContain('This removes 4 cartons and 10 pieces (106 pieces). Is that right?');
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     expect(commitStocktake).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Soap is right' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('st1', ['S-1']));
   });
 });

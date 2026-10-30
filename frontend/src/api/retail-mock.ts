@@ -1375,7 +1375,7 @@ export function createMockRetail(): RetailApi {
     createStocktake: (body) => {
       const branchId = body.branch_id ?? BRANCH_A;
       const st: Stocktake = {
-        id: nextId('8'), branch_id: branchId, status: 'draft',
+        id: nextId('8'), branch_id: branchId, status: 'draft', created_at: new Date().toISOString(),
         lines: body.lines.map((l) => {
           const expected = bal(branchId, l.product_id);
           const p = find(l.product_id);
@@ -1393,7 +1393,7 @@ export function createMockRetail(): RetailApi {
       // Issue #636, as the server: a big drop left out of the acknowledged lines refuses the commit.
       const unticked = (st.lines ?? []).filter((l) => bigDrop(l) && !acknowledged.includes(l.product_id ?? '')).map((l) => l.description ?? l.code);
       if (unticked.length > 0) {
-        const detail = `The count of ${unticked.join(', ')} removes more than half of what was there. Review the difference again and tick each line marked before you commit the count.`;
+        const detail = `The count of ${unticked.join(', ')} removes more than half of what was there. Review the difference again and tick each line marked before you save the count.`;
         return Promise.reject(new RetailError(retailMessage({ code: 'big_drop_not_acknowledged', detail }, 409), 409, 'big_drop_not_acknowledged'));
       }
       (st.lines ?? []).forEach((l) => move(st.branch_id ?? BRANCH_A, l.product_id ?? '', toMilli(l.variance_qty ?? '0')));
@@ -1408,6 +1408,13 @@ export function createMockRetail(): RetailApi {
       st.status = 'discarded';
       return delay({ ...st });
     },
+    getStocktake: (id) => {
+      const st = stocktakes.get(id);
+      return st ? delay({ ...st }) : Promise.reject(new RetailError('That could not be found.', 404, 'not_found'));
+    },
+    // Issue #728, as the server: the drafts of a branch, newest first.
+    unfinishedStocktakes: (branchId) => delay([...stocktakes.values()].filter((s) => s.branch_id === branchId && s.status === 'draft').reverse()
+      .map((s) => ({ id: s.id, branch_id: s.branch_id, created_at: s.created_at, lines: s.lines?.length ?? 0 }))),
 
     // Quick add (issue #632, ADR-101): the item as createProduct makes it, General and Piece made when missing, then the quantity
     // added to the branch's stock as opening stock, as the server does.

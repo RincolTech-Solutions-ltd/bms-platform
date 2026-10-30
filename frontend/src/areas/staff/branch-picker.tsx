@@ -178,6 +178,36 @@ export function ShopHere({ me, branch, onChoose }: { me: Me; branch: string | nu
   );
 }
 
+// JUSTIFICATION-A3: one component for Quick add and Add an item, as the issue asks, beside ShopHere whose picker it reuses.
+/**
+ * The shop a form adds stock to (issue #728), beside its quantity: "Adds to Test Store", and with more than one place to choose
+ * a Change button that opens the phone's own picker in one tap, a native select laid over it as in ShopHere. The select is named
+ * Where, the field it stands for.
+ */
+export function AddsTo({ id, lead = 'Adds to', value, places, onChoose }: {
+  id: string;
+  lead?: string;
+  value: string;
+  places: { id?: string; name?: string; code?: string; sells_goods?: boolean }[];
+  onChoose?: (branchId: string) => void;
+}) {
+  const name = branchLabel(places.find((b) => b.id === value)) || 'this place';
+  return (
+    <p className="adds-to" data-testid={`${id}-adds-to`}>
+      <span>{lead} <strong>{name}</strong></span>
+      {/* empty: drawn only with more than one place to choose; the form shows its EmptyChoice when it has none. */}
+      {onChoose && places.length > 1 && (
+        <span className="btn adds-to-change">
+          Change
+          <select id={id} className="shop-here-select" aria-label={`Where: ${name}. Change`} aria-required="true" value={value} onChange={(e) => onChoose(e.target.value)}>
+            {places.map((b) => <option key={b.id} value={b.id}>{branchLabel(b)}{b.sells_goods === false ? ' (store)' : ''}</option>)}
+          </select>
+        </span>
+      )}
+    </p>
+  );
+}
+
 /** Up to two capitals from a name, for a business with no logo: "Test Shop 01" gives "TS". */
 export function initials(name: string): string {
   return name
