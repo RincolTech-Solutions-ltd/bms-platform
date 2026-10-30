@@ -1295,6 +1295,9 @@ Accepted (this list is the ADR index):
   that is not a whole number of the level below (`not_whole`), a loop and a held level switched off; stock rows carry every
   level, the usual buying level (`usual_buy`) is what Buy stock opens on, and a unit's usual pack may count another pack
   (#699, D88; migration `V118`)
+- ADR-111 Sizes, colours and types in Add an item, picked from ready lists shipped with the app: the same one form asks
+  about sizes, `POST /retail/product-families` takes `packs` made on every size in its transaction, and `GET
+  /retail/product-families/options` offers the sizes and colours a shop used before (#697, D81, D98; no migration)
 
 Pending (cite only as "pending ADR-NNN"):
 
