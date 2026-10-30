@@ -10,6 +10,7 @@ import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.Versions;
 import com.rincoltech.bms.retail.catalogue.CatalogueNames;
+import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.RetailPricing;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.AddVariantsRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.BranchStock;
@@ -42,6 +43,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.stream.IntStream;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -130,12 +132,14 @@ class FamilyService {
      * Owner, clarification on #723: a package's selling price is given for the item's price, so a size priced differently
      * gets it in the same proportion, rounded half up (a carton at 96,000 for 4,000 a piece is 144,000 for the size at
      * 6,000), unless {@code pack_prices} names that size's own price for the package, which the form shows and lets the owner
-     * change. A pack with no price stays without one.
+     * change. A pack with no price stays without one. Issue #726: a price worked out or sent above
+     * {@link RetailCatalogue#MAX_AMOUNT_MINOR} is refused on its package's row (422) before the package is made.
      */
     static List<PackRequest> pricedFor(List<PackRequest> packs, Product size, long itemSell, List<SizePackPrice> own) {
         String key = Planned.key(size.variant().size(), size.variant().colour());
-        return packs.stream()
-                .map(k -> {
+        return IntStream.range(0, packs.size())
+                .mapToObj(i -> {
+                    PackRequest k = packs.get(i);
                     if (k == null || k.sellMinor() == null) {
                         return k;
                     }
@@ -148,14 +152,23 @@ class FamilyService {
                                     .map(SizePackPrice::sellMinor)
                                     .findFirst()
                                     .orElse(null);
-                    long price = typed != null
-                            ? typed
+                    BigDecimal worked = typed != null
+                            ? BigDecimal.valueOf(typed)
                             : itemSell <= 0 || size.sellMinor() == itemSell
-                                    ? k.sellMinor()
+                                    ? BigDecimal.valueOf(k.sellMinor())
                                     : BigDecimal.valueOf(k.sellMinor())
                                             .multiply(BigDecimal.valueOf(size.sellMinor()))
-                                            .divide(BigDecimal.valueOf(itemSell), 0, RoundingMode.HALF_UP)
-                                            .longValueExact();
+                                            .divide(BigDecimal.valueOf(itemSell), 0, RoundingMode.HALF_UP);
+                    if (worked.compareTo(BigDecimal.valueOf(RetailCatalogue.MAX_AMOUNT_MINOR)) > 0) {
+                        throw CatalogueService.ofPack(
+                                ApiException.validation(List.of(new FieldProblem(
+                                        "sell_minor",
+                                        "invalid",
+                                        "This package's price for " + size.description()
+                                                + " is too large. Lower the package's price or the size's price."))),
+                                i);
+                    }
+                    long price = worked.longValueExact();
                     return new PackRequest(
                             k.unitId(), k.factor(), k.purpose(), price, k.holdsUnitId(), k.holdsQty(), k.usualBuy());
                 })

@@ -319,7 +319,13 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
             error={unitProblem}
             showError={showErrors || (smallest?.is_package === true && !product)}
           />
-          {!product && canManage && <NewItemSizes value={sizing} onChange={(next) => { setSizing(next); save.reset(); }} />}
+          {!product && canManage && <NewItemSizes value={sizing} onChange={(next) => {
+            // Issue #726: a size taken off loses its edited package prices, so tapped again it starts at the worked-out price.
+            const left = new Set(planVariants({ baseCode: '', ...chosenOptions(next), costMinor: 0, sellMinor: 0 }).map((v) => variantKey(v.size, v.colour)));
+            setPackEdits((e) => Object.fromEntries(Object.entries(e).filter(([k]) => left.has(k.slice(0, k.lastIndexOf('|'))))));
+            setSizing(next);
+            save.reset();
+          }} />}
           {packsOn && (
             <NewItemPackages
               smallest={smallest}

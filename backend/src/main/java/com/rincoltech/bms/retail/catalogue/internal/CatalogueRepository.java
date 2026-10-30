@@ -320,8 +320,10 @@ class CatalogueRepository {
      */
     List<String> variantOptions(boolean sizes) {
         String column = sizes ? "variant_size" : "variant_colour";
-        String sql = "SELECT min(" + column + ") FROM retail_products WHERE btrim(coalesce(" + column + ", '')) <> ''"
-                + " GROUP BY lower(btrim(" + column + ")) ORDER BY count(*) DESC, 1 LIMIT 60";
+        // Issue #726: byte order, so the spelling kept and the order of a tie are those of the mock.
+        String first = "min(" + column + " COLLATE \"C\")";
+        String sql = "SELECT " + first + " FROM retail_products WHERE btrim(coalesce(" + column + ", '')) <> ''"
+                + " GROUP BY lower(btrim(" + column + ")) ORDER BY count(*) DESC, " + first + " COLLATE \"C\" LIMIT 60";
         return jdbc.sql(sql).query(String.class).list();
     }
 
