@@ -83,7 +83,7 @@ describe('an item with sizes and colours', () => {
     fireEvent.change(screen.getByLabelText('Sizes'), { target: { value: '0-3m' } });
     expect(document.getElementById('variant-0-code')?.textContent).toBe('Item code: made by the app once you choose the category');
     await chooseCategory(screen.getByLabelText('Category'), 'Baby wear');
-    fireEvent.change(screen.getByLabelText('Counted in'), { target: { value: 'u1' } });
+    fireEvent.change(screen.getByLabelText('Single unit'), { target: { value: 'u1' } });
     fireEvent.change(document.getElementById('sizes-item-sell') as HTMLInputElement, { target: { value: '9000' } });
     fireEvent.change(screen.getByLabelText('Sizes'), { target: { value: '0-3m, 3-6m' } });
     fireEvent.change(screen.getByLabelText('Colours or prints'), { target: { value: 'Blue, Pink' } });

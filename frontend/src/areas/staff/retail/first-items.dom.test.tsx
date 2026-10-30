@@ -158,7 +158,7 @@ describe('a Sell search that finds nothing', () => {
     await search('Test duvet cover');
     fireEvent.click(await screen.findByRole('button', { name: 'Not in the list? Add it here' }));
     await chooseCategory(within(form()).getByLabelText(/^Category/), 'Duvets');
-    fireEvent.change(within(form()).getByLabelText(/^Counted in/), { target: { value: 'u1' } });
+    fireEvent.change(within(form()).getByLabelText(/^Single unit/), { target: { value: 'u1' } });
     const cost = within(form()).queryByLabelText(/^Buying price/);
     if (cost) fireEvent.change(cost, { target: { value: '30000' } });
     fireEvent.change(within(form()).getByLabelText(/^Selling price/), { target: { value: '45000' } });
@@ -186,7 +186,7 @@ describe('a Sell search that finds nothing', () => {
     await waitFor(() => expect(within(form()).getByLabelText(/^Category/).textContent).toBe('Duvets'));
     expect(createCategory).toHaveBeenCalledWith('Duvets');
 
-    fireEvent.change(within(form()).getByLabelText(/^Counted in/), { target: { value: 'u1' } });
+    fireEvent.change(within(form()).getByLabelText(/^Single unit/), { target: { value: 'u1' } });
     fireEvent.change(within(form()).getByLabelText(/^Buying price/), { target: { value: '30000' } });
     fireEvent.change(within(form()).getByLabelText(/^Selling price/), { target: { value: '45000' } });
     fireEvent.change(within(form()).getByLabelText(/^How many you have here/), { target: { value: '4' } });

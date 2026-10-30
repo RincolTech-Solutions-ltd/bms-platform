@@ -115,8 +115,8 @@ describe('the pack table on Edit item', () => {
 
   it('lists each pack with its size and price, the piece first', () => {
     expect(html).toContain('data-testid="pack-table"');
-    expect(html).toContain('>Size<');
-    expect(html).toContain('>Selling price<');
+    // Issue #709: the price under the size, so the table fits a phone (layout/pack-table.layout.test.ts).
+    expect(html).toContain('>Size and selling price<');
     expect(html).toContain('UGX 20,000');
     expect(html).toContain('UGX 12,000');
     expect(html).toContain('suggested');

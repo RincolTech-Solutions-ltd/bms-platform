@@ -88,7 +88,7 @@ async function fillItem(how?: 'Take a picture' | 'Choose a photo', file: File = 
   await chooseCategory(screen.getByLabelText(/^Category/), 'Bulbs');
   fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Test bulb 12W' } });
   await screen.findByRole('option', { name: 'piece' });
-  fireEvent.change(screen.getByLabelText(/^Smallest unit you sell/), { target: { value: 'u1' } });
+  fireEvent.change(screen.getByLabelText(/^Single unit/), { target: { value: 'u1' } });
   fireEvent.change(screen.getByLabelText(/^Selling price/), { target: { value: '9000' } });
   if (how) fireEvent.change(screen.getByLabelText(how), { target: { files: [file] } });
 }
@@ -175,7 +175,7 @@ describe('a photo with Add it here', () => {
     await chooseCategory(within(form).getByLabelText(/^Category/), 'Bulbs');
     fireEvent.change(within(form).getByLabelText(/^Description/), { target: { value: 'Test bulb 12W' } });
     await within(form).findByRole('option', { name: 'piece' });
-    fireEvent.change(within(form).getByLabelText(/^Counted in/), { target: { value: 'u1' } });
+    fireEvent.change(within(form).getByLabelText(/^Single unit/), { target: { value: 'u1' } });
     fireEvent.change(within(form).getByLabelText(/^Buying price/), { target: { value: '6000' } });
     fireEvent.change(within(form).getByLabelText(/^Selling price/), { target: { value: '9000' } });
     const qty = within(form).queryByLabelText(/^Quantity bought/);
@@ -197,7 +197,7 @@ describe('a photo with Add it here', () => {
     await chooseCategory(within(form).getByLabelText(/^Category/), 'Bulbs');
     fireEvent.change(within(form).getByLabelText(/^Description/), { target: { value: 'Test bulb 12W' } });
     await within(form).findByRole('option', { name: 'piece' });
-    fireEvent.change(within(form).getByLabelText(/^Counted in/), { target: { value: 'u1' } });
+    fireEvent.change(within(form).getByLabelText(/^Single unit/), { target: { value: 'u1' } });
     fireEvent.change(within(form).getByLabelText(/^Buying price/), { target: { value: '6000' } });
     fireEvent.change(within(form).getByLabelText(/^Selling price/), { target: { value: '9000' } });
     const qty = within(form).queryByLabelText(/^Quantity bought/);

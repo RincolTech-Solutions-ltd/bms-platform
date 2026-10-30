@@ -59,7 +59,7 @@ export function FamilyScreen({ familyId }: { familyId: string }) {
       <p className="hint">Each size and colour is an item of its own when you sell, buy, move or count stock: look for its name with the size and colour, such as {f?.variants?.[0]?.description ?? 'Baby romper (0-3m, Blue)'}.</p>
       {family.isPending && <p className="loading">Loading</p>}
       <Problem error={family.error} />
-      {f && <p>{f.category}, counted in {f.unit}. {f.variants?.length ?? 0} sizes and colours.</p>}
+      {f && <p>{f.category}. Single unit: {f.unit}. {f.variants?.length ?? 0} sizes and colours.</p>}
       {editing?.kind === 'price' && <PriceForm product={editing.product} onSaved={done} onCancel={() => setEditing(null)} />}
       {editing?.kind === 'variant' && <VariantForm product={editing.product} onSaved={done} onCancel={() => setEditing(null)} />}
       {!editing && (

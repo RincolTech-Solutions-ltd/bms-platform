@@ -457,7 +457,7 @@ function CountSheet({ branchId, item, from }: { branchId: string; item?: string;
             onPacks={(v) => setPackCounts((c) => ({ ...c, [id]: { text: v, pack: c[id] && c[id].text.trim() !== '' ? c[id].pack : { unit: pack.unit, factor: pack.factor, levels: pack.levels } } }))}
             onPieces={(v) => setCounts((c) => ({ ...c, [id]: v }))} />
           {typed && typed.text.trim() !== '' && !samePack(typed.pack, r.standard_pack) && (
-            <p className="hint">{`Counted in ${unitWords(pack.unit).toLowerCase()} of ${showQty(pack.factor ?? '')}, as when you started. This item's pack has changed since.`}</p>
+            <p className="hint">{`Your count uses ${unitWords(pack.unit).toLowerCase()} of ${showQty(pack.factor ?? '')}, as when you started. This item's pack has changed since.`}</p>
           )}
           {entry.notes(id)}
           {savedMark(id)}

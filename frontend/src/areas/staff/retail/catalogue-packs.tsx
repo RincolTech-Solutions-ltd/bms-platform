@@ -12,6 +12,7 @@ import { factorMilli, hasOwnPrice, packPriceMinor, quantityIn, unitWord, unitWor
 import { WORDS } from '../../../app/glossary';
 import { AddByName } from '../../../app/ui/EmptyChoice';
 import { PickerWithAdd } from '../../../app/ui/PickerWithAdd';
+import { HelpTip } from '../../../app/ui/HelpTip';
 import { Hint } from '../../../app/ui/Hint';
 import { RowChevron } from '../../../app/ui/ListRow';
 import { MoneyInput } from '../../../app/ui/MoneyInput';
@@ -210,7 +211,8 @@ export function PackEditor({ product }: { product: Product }) {
   const [filled, setFilled] = useState<{ factor: string; purpose: Purpose }>({ factor: '', purpose: 'both' });
   const chooseUnit = (unit: Unit | undefined) => {
     setUnitId(unit?.id ?? '');
-    const nextFactor = factorForUnit(factor, filled.factor, usualFactor(unit, product));
+    // Issue #709 (ADR-110): a dozen always holds 12, filled in and not changed.
+    const nextFactor = unit?.fixed_count ? String(unit.fixed_count) : factorForUnit(factor, filled.factor, usualFactor(unit, product));
     const nextPurpose = purposeForUnit(purpose, filled.purpose, unit);
     setFactor(nextFactor);
     setPurpose(nextPurpose);
@@ -241,35 +243,38 @@ export function PackEditor({ product }: { product: Product }) {
   // The item's own unit and the units that are packs already are not offered; a switched-off unit cannot be chosen.
   const choices = (units.data ?? []).filter((u) => u.active !== false && u.id !== product.unit_id && !used.has(u.id));
   const problem = factorProblem(factor);
+  const fixed = choices.find((u) => u.id === unitId)?.fixed_count;
   const open = rows.find((k) => k.unit_id === editing);
   const low = purpose === 'buy' ? null : packBelowCostHint(product, factor, mayPrice ? priceMinor : null);
   return (
     <fieldset data-testid="pack-editor" onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}>
       <legend>{WORDS.packs}</legend>
-      <Hint>Sell or buy this item by the pack, each with its own price. Stock is always counted in {unitWords(product.unit ?? '')}.</Hint>
+      <Hint full>Sell or buy this item by the pack, each with its own price. Stock is always kept in {unitWords(product.unit ?? '')}.</Hint>
       {packs.isPending && <p className="loading">Loading</p>}
       <Problem error={packs.error} />
       {packs.data && rows.length === 0 && <p className="empty-state">No cartons, boxes or other packs yet.</p>}
-      {/* Issue #699 (ADR-107): the packs as a ladder, biggest first, each saying what it holds. */}
+      {/* Issue #699 (ADR-107): the packs as a ladder, single unit first since issue #709 (D99), each saying what it holds. */}
       {/* Only someone who manages the catalogue reaches this editor (`allowed` above), so the ladder is editable here. */}
       {packs.data && <ItemLadder product={product} packs={rows} mayManage={allowed} mayPrice={mayPrice} />}
       {rows.length > 0 && (
         <div className="table-wrap" tabIndex={0}>
           <table data-testid="pack-table">
             <caption className="visually-hidden">{`The packs of ${product.description}: size and selling price`}</caption>
+            {/* Issue #709: the price under the size, so the table fits a phone 412 wide with no amount cut (pack-table.layout.test.ts). */}
             <thead>
               <tr>
                 <th scope="col">Pack</th>
-                <th scope="col" className="num">Size</th>
-                <th scope="col" className="num">Selling price</th>
+                <th scope="col" className="num">Size and selling price</th>
                 <th scope="col"><span className="visually-hidden">Change</span></th>
               </tr>
             </thead>
             <tbody>
               <tr>
                 <th scope="row">{unitWord(product.unit)}</th>
-                <td className="num">1</td>
-                <td className="num">{product.sell_minor === undefined ? '' : <Money minor={product.sell_minor} />}</td>
+                <td className="num pack-size-price">
+                  <span className="pack-size">1</span>
+                  {product.sell_minor !== undefined && <span className="pack-price"><Money minor={product.sell_minor} /></span>}
+                </td>
                 <td />
               </tr>
               {rows.map((k) => {
@@ -282,15 +287,17 @@ export function PackEditor({ product }: { product: Product }) {
                       {purposeOf(k) === 'buy' && <> <span className="badge">Buying only</span></>}
                       {purposeOf(k) === 'sell' && <> <span className="badge">Selling only</span></>}
                     </th>
-                    <td className="num">{quantityIn(k.factor ?? '', product.unit ?? '')}</td>
-                    <td className="num">
-                      {price === null ? 'Not sold' : (
-                        <>
-                          <Money minor={price.minor} />
-                          {!price.own && <span className="hint"> suggested</span>}
-                          {k.below_cost === true && <> <span className="badge badge-warning">Below buying price</span></>}
-                        </>
-                      )}
+                    <td className="num pack-size-price">
+                      <span className="pack-size">{quantityIn(k.factor ?? '', product.unit ?? '')}</span>
+                      <span className="pack-price">
+                        {price === null ? 'Not sold' : (
+                          <>
+                            <Money minor={price.minor} />
+                            {!price.own && <span className="hint"> suggested</span>}
+                          </>
+                        )}
+                      </span>
+                      {price !== null && k.below_cost === true && <span className="badge badge-warning">Below buying price</span>}
                     </td>
                     <td>
                       <button type="button" className="btn-sm" aria-label={`Change the ${unitWord(k.unit)} pack`} onClick={() => setEditing(k.unit_id ?? null)}>
@@ -309,6 +316,8 @@ export function PackEditor({ product }: { product: Product }) {
       <PickerWithAdd
         id="pack-unit"
         label="Add a pack"
+        tip={<HelpTip tip="package" />}
+        addText="+ Add your own"
         thing="unit"
         placeholder="Choose a unit"
         options={choices.map((u) => ({ value: u.id ?? '', label: u.name ?? '' }))}
@@ -335,12 +344,14 @@ export function PackEditor({ product }: { product: Product }) {
         id="pack-factor"
         inputMode="decimal"
         value={factor}
+        readOnly={fixed !== undefined}
         onChange={(e) => setFactor(e.target.value)}
         aria-invalid={factor.trim() !== '' && problem !== null}
         aria-describedby={factor.trim() !== '' && problem !== null ? 'pack-factor-problem' : undefined}
         placeholder="12"
       />
       {factor.trim() !== '' && problem !== null && <p id="pack-factor-problem" className="rt-flag">{problem}</p>}
+      {fixed && <p className="hint">{`A ${unitWord(choices.find((u) => u.id === unitId)?.name).toLowerCase()} always holds ${fixed}. For another number, use a box.`}</p>}
       <p className="field-label">Used for</p>
       <Segmented label="Used for" options={PURPOSES} value={purpose} onChange={setPurpose} />
       {mayPrice && purpose !== 'buy' && (

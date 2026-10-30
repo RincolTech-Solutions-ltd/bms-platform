@@ -52,9 +52,13 @@ export function useAddInPlace({ thing, form, onAdded }: {
  * suppliers yet." and only "+ Add a supplier", or who to ask ("Ask the owner to add a supplier first."). A record added here is
  * named at once, before the screen's own list has read it again.
  */
-export function PickerWithAdd({ id, label, thing, options, value, onChange, placeholder, canAdd, form, required = false, error = null, showError = false, hint, disabled = false, addOnlyWhenEmpty = false, loading = false, load, empty, ask }: {
+export function PickerWithAdd({ id, label, thing, options, value, onChange, placeholder, canAdd, form, required = false, error = null, showError = false, hint, tip, addText, disabled = false, addOnlyWhenEmpty = false, loading = false, load, empty, ask }: {
   id: string;
   label: ReactNode;
+  /** A HelpTip after the label (issue #709). */
+  tip?: ReactNode;
+  /** The add option's words when the list is a standard one the person picks from (issue #709): "+ Add your own". */
+  addText?: string;
   /** The record in a few plain words, such as "supplier": the option says "+ Add a supplier". */
   thing: string;
   options: Picked[];
@@ -100,6 +104,7 @@ export function PickerWithAdd({ id, label, thing, options, value, onChange, plac
         error={error}
         showError={showError}
         hint={hint}
+        tip={tip}
         control={(props) => (
           // empty: drawn only while the list has records or is on its way; with none, the EmptyChoice above stands in.
           <select
@@ -115,7 +120,7 @@ export function PickerWithAdd({ id, label, thing, options, value, onChange, plac
           >
             <option value="">{placeholder}</option>
             {list.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            {canAdd && !disabled && <option value={ADD_CHOICE}>{addChoice(thing)}</option>}
+            {canAdd && !disabled && <option value={ADD_CHOICE}>{addText ?? addChoice(thing)}</option>}
           </select>
         )}
       />

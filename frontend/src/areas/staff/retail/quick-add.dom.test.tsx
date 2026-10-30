@@ -104,7 +104,7 @@ describe('quick add', () => {
     quickAdd.mockResolvedValue({ product_id: 'p1', code: 'GNR-0001', description: 'Test Bulb 60W', unit: 'pc', item_made: true, category_made: true, unit_made: false, branch_id: branch?.id, qty: '600' });
     const onSell = open(owner);
     // The shop's piece unit is chosen once the units are read.
-    await waitFor(() => expect((screen.getByLabelText(/Counted in|Unit/) as HTMLSelectElement).value).toBe('u1'));
+    await waitFor(() => expect((screen.getByLabelText(/^Single unit/) as HTMLSelectElement).value).toBe('u1'));
     type(/^Name/, 'Test Bulb 60W');
     type(/^Selling price/, '6,000');
     type(/^Buying price/, '4000');
@@ -585,8 +585,8 @@ describe('comes in cartons of (issue #688, D76)', () => {
     createUnit.mockImplementation(async () => { units = [...units, dozen]; return dozen; });
     open(packsOn);
     await screen.findByRole('option', { name: 'Piece' });
-    const unit = screen.getByLabelText(/^Counted in/) as HTMLSelectElement;
-    expect([...unit.options].map((o) => o.text)).toEqual(['Choose a unit', 'Piece', '+ Add a unit']);
+    const unit = screen.getByLabelText(/^Single unit/) as HTMLSelectElement;
+    expect([...unit.options].map((o) => o.text)).toEqual(['Choose a unit', 'Piece', '+ Add your own']);
     fireEvent.change(unit, { target: { value: ADD_CHOICE } });
     const sheet = await screen.findByRole('dialog', { name: 'Add a unit' });
     fireEvent.change(within(sheet).getByLabelText(/^Name of the new unit/), { target: { value: 'Dozen' } });
@@ -597,7 +597,7 @@ describe('comes in cartons of (issue #688, D76)', () => {
     type(/^Selling price/, '500');
     type(/How many do you have here now/, '12');
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    expect(document.activeElement).toBe(screen.getByLabelText(/^Counted in/));
+    expect(document.activeElement).toBe(screen.getByLabelText(/^Single unit/));
     expect(quickAdd).not.toHaveBeenCalled();
   });
 

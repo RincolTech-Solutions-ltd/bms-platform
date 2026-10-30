@@ -134,7 +134,7 @@ describe('Add an item, then Count it now', () => {
     await chooseCategory(screen.getByLabelText(/^Category/), 'Test lighting');
     fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Test bulb 60W' } });
     await screen.findByRole('option', { name: 'Piece' });
-    fireEvent.change(screen.getByLabelText(/^Smallest unit you sell/), { target: { value: 'u1' } });
+    fireEvent.change(screen.getByLabelText(/^Single unit/), { target: { value: 'u1' } });
     fireEvent.change(screen.getByLabelText(/^Selling price/), { target: { value: '5000' } });
     fireEvent.change(screen.getByLabelText(/^Buying price/), { target: { value: '3000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
@@ -170,7 +170,7 @@ describe('Add an item, then Count it now', () => {
     await chooseCategory(screen.getByLabelText(/^Category/), 'Test lighting');
     fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Test bulb 60W' } });
     await screen.findByRole('option', { name: 'Piece' });
-    fireEvent.change(screen.getByLabelText(/^Smallest unit you sell/), { target: { value: 'u1' } });
+    fireEvent.change(screen.getByLabelText(/^Single unit/), { target: { value: 'u1' } });
     fireEvent.change(screen.getByLabelText(/^Selling price/), { target: { value: '5000' } });
     fireEvent.change(screen.getByLabelText(/^Buying price/), { target: { value: '3000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));

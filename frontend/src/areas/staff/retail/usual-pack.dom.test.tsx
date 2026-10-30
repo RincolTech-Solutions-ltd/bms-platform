@@ -18,7 +18,8 @@ const metre: Unit = { id: 'u-m', name: 'Metre', active: true, version: 1 };
 const roll: Unit = { id: 'u-roll', name: 'Roll', active: true, version: 3, usual_pack: { size: '50.000', of_unit_id: 'u-m', of_unit: 'Metre', purpose: 'both' } };
 const carton: Unit = { id: 'u-ctn', name: 'Carton', active: true, version: 1, usual_pack: { size: '24.000', of_unit_id: 'u-pc', of_unit: 'Piece', purpose: 'buy' } };
 const box: Unit = { id: 'u-box', name: 'Box', active: true, version: 1, usual_pack: { size: '10.000', of_unit_id: 'u-pc', of_unit: 'Piece', purpose: 'sell' } };
-const dozen: Unit = { id: 'u-dz', name: 'Dozen', active: true, version: 1 };
+// A package word with no usual number yet, so the Units page shows it under Packages (issue #709).
+const dozen: Unit = { id: 'u-dz', name: 'Dozen', active: true, version: 1, is_package: true };
 let units: Unit[] = [];
 const updateUnit = vi.fn();
 const addPack = vi.fn();
@@ -69,10 +70,10 @@ describe('a usual pack on the Units page (issue #637)', () => {
     units = [metre, roll];
     updateUnit.mockResolvedValue({ ...roll, version: 4 });
     draw(<UnitsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Usual pack of Roll' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'What one Roll usually holds' }));
     const sheet = await screen.findByRole('dialog');
     expect((within(sheet).getByLabelText(/^It holds/) as HTMLSelectElement).value).toBe('u-m');
-    fireEvent.change(within(sheet).getByLabelText(/^How many in one Roll/), { target: { value: '100' } });
+    fireEvent.change(within(sheet).getByLabelText(/^How many does it usually hold/), { target: { value: '100' } });
     fireEvent.click(within(sheet).getByRole('radio', { name: 'Selling' }));
     fireEvent.click(within(sheet).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(updateUnit).toHaveBeenCalledTimes(1));
@@ -83,22 +84,22 @@ describe('a usual pack on the Units page (issue #637)', () => {
     units = [metre, roll];
     updateUnit.mockResolvedValue({ ...metre, id: 'u-roll', name: 'Roll', version: 4 });
     draw(<UnitsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Usual pack of Roll' }));
-    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove usual pack' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'What one Roll usually holds' }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove the usual number' }));
     await waitFor(() => expect(updateUnit).toHaveBeenCalledWith('u-roll', 3, { clear_usual_pack: true }));
-    expect(await screen.findAllByText('Roll has no usual pack now. Items keep their packs.')).not.toHaveLength(0);
+    expect(await screen.findAllByText('Roll has no usual number now. Items keep their packages.')).not.toHaveLength(0);
   });
 
   it('offers only units that are not packs themselves, and sends nothing while the size is wrong', async () => {
     units = [metre, roll, dozen];
     draw(<UnitsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Usual pack of Dozen' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'What one Dozen usually holds' }));
     const sheet = await screen.findByRole('dialog');
     const options = within(within(sheet).getByLabelText(/^It holds/)).getAllByRole('option').map((o) => o.textContent);
     expect(options).toEqual(['Choose a unit', 'Metre']);
-    expect(within(sheet).queryByRole('button', { name: 'Remove usual pack' })).toBeNull();
+    expect(within(sheet).queryByRole('button', { name: 'Remove the usual number' })).toBeNull();
     fireEvent.change(within(sheet).getByLabelText(/^It holds/), { target: { value: 'u-m' } });
-    const many = within(sheet).getByLabelText(/^How many in one Dozen/);
+    const many = within(sheet).getByLabelText(/^How many does it usually hold/);
     fireEvent.change(many, { target: { value: '0.5' } });
     fireEvent.blur(many);
     // Rule 10: the error shows on leaving the field, before Save is pressed.
@@ -113,27 +114,27 @@ describe('a usual pack on the Units page (issue #637)', () => {
     units = [metre, roll, bundle, { ...carton, active: false }, piece];
     updateUnit.mockResolvedValue({ ...carton, active: false, usual_pack: undefined, version: 2 });
     draw(<UnitsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Usual pack of Roll' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'What one Roll usually holds' }));
     let sheet = await screen.findByRole('dialog');
-    expect(within(sheet).getByText('Bundle is a pack of Roll, so Roll cannot be a pack too. You can remove its usual pack.')).toBeTruthy();
+    expect(within(sheet).getByText('Bundle holds Roll, so Roll cannot hold another unit too. You can remove what it usually holds.')).toBeTruthy();
     expect(within(sheet).queryByRole('button', { name: 'Save' })).toBeNull();
     expect(within(sheet).queryByLabelText(/^It holds/)).toBeNull();
-    expect(within(sheet).getByRole('button', { name: 'Remove usual pack' })).toBeTruthy();
+    expect(within(sheet).getByRole('button', { name: 'Remove the usual number' })).toBeTruthy();
     fireEvent.keyDown(sheet, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Usual pack of Carton' }));
+    fireEvent.click(screen.getByRole('button', { name: 'What one Carton usually holds' }));
     sheet = await screen.findByRole('dialog');
-    expect(within(sheet).getByText('Carton is switched off, so its usual pack can only be removed.')).toBeTruthy();
+    expect(within(sheet).getByText('Carton is switched off, so what it usually holds can only be removed.')).toBeTruthy();
     expect(within(sheet).queryByRole('button', { name: 'Save' })).toBeNull();
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Remove usual pack' }));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Remove the usual number' }));
     await waitFor(() => expect(updateUnit).toHaveBeenCalledWith('u-ctn', 1, { clear_usual_pack: true }));
   });
 
   it('names Used for once, by the choice itself, with no loose label beside it (issue #662)', async () => {
     units = [metre, roll];
     draw(<UnitsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Usual pack of Roll' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'What one Roll usually holds' }));
     const sheet = await screen.findByRole('dialog');
     expect(within(sheet).getByRole('radiogroup', { name: 'Used for' })).toBeTruthy();
     expect(within(sheet).queryByText('Used for')).toBeNull();
@@ -142,14 +143,14 @@ describe('a usual pack on the Units page (issue #637)', () => {
   it('never offers a usual pack on a unit another usual pack counts, as the server refuses it', async () => {
     units = [metre, roll, dozen];
     draw(<UnitsPage />);
-    await screen.findByRole('button', { name: 'Usual pack of Roll' });
-    expect(screen.queryByRole('button', { name: 'Usual pack of Metre' })).toBeNull();
+    await screen.findByRole('button', { name: 'What one Roll usually holds' });
+    expect(screen.queryByRole('button', { name: 'What one Metre usually holds' })).toBeNull();
   });
 
   it('says so and offers to add a unit when the one it held is switched off, never a blank choice', async () => {
     units = [{ ...metre, active: false }, roll];
     draw(<UnitsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Usual pack of Roll' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'What one Roll usually holds' }));
     const sheet = await screen.findByRole('dialog');
     expect(within(sheet).getByText('No other unit for this pack to hold yet.')).toBeTruthy();
     expect(within(sheet).getByRole('button', { name: 'Add a new unit' })).toBeTruthy();

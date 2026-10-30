@@ -513,7 +513,7 @@ export function QuickAddForm({ initialName = '', onSell }: {
         showError={showErrors || unitIsPackage}
       />
       {units.data !== undefined && piece === undefined && !pieceOff && unitId === '' && (
-        <p className="hint" data-testid="qa-piece-made">Left empty, the item is counted in Piece, made for you.</p>
+        <p className="hint" data-testid="qa-piece-made">Left empty, the single unit is Piece, made for you.</p>
       )}
       {packsOn ? (
         <Field

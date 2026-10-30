@@ -285,7 +285,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
           )}
           <UnitPicker
             id="item-unit"
-            {...(product ? {} : { label: WORDS.smallestUnit, hint: 'The single thing a customer can buy. For example piece, bulb, metre, litre.' })}
+            {...(product ? {} : { hint: 'For example piece, bulb, metre, litre. Never a box or a carton.' })}
             units={unitChoices}
             loading={units.data === undefined} load={units}
             value={unitId}

@@ -491,7 +491,7 @@ describe('a pack that changes while counting', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Test Soap Pieces' }), { target: { value: '7' } });
     listStock.mockResolvedValue([after]);
     await client.refetchQueries({ queryKey: ['retail', 'stock'] });
-    await screen.findByText('Counted in cartons of 24, as when you started. This item\'s pack has changed since.');
+    await screen.findByText('Your count uses cartons of 24, as when you started. This item\'s pack has changed since.');
     expect((screen.getByRole('textbox', { name: 'Test Soap Cartons' }) as HTMLInputElement).value).toBe('5');
     expect(document.getElementById('count-S-1-total')?.textContent).toBe('Counted 5 cartons and 7 pieces (127 pieces)');
     fireEvent.click(screen.getByRole('button', { name: 'Review the difference (1 counted)' }));

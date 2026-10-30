@@ -57,6 +57,15 @@ export const HELP_TIPS = {
     label: 'In arrears',
     text: 'Money that was due and was not paid on time. These loans need a follow up.',
   },
+  // Issue #709 (D93, ADR-110): after every Single unit and Package label.
+  singleUnit: {
+    label: 'Single unit',
+    text: 'The one thing a customer can buy on its own, like one piece, one metre or one litre.',
+  },
+  package: {
+    label: 'Package',
+    text: 'Something that holds several single units, like a box of 10 pieces.',
+  },
 } as const satisfies Record<string, HelpTipWords>;
 
 export type HelpTipKey = keyof typeof HELP_TIPS;

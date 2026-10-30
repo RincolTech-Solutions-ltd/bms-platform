@@ -71,14 +71,14 @@ async function fill(unitId: string) {
   await chooseCategory(screen.getByLabelText(/^Category/), 'Test lighting');
   fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Test bulb 60W' } });
   await screen.findByRole('option', { name: 'Bulb' });
-  fireEvent.change(screen.getByLabelText(/^Smallest unit you sell/), { target: { value: unitId } });
+  fireEvent.change(screen.getByLabelText(/^Single unit/), { target: { value: unitId } });
   fireEvent.change(screen.getByLabelText(/^Selling price/), { target: { value: '5000' } });
 }
 
 describe('the words of Add an item', () => {
   it('names a package as the smallest unit in the words the server uses', () => {
-    expect(packageAsUnit(units[2])).toBe('A box is a package. Choose the smallest unit, like piece, then add the box below.');
-    expect(packageAsUnit({ ...units[1]!, name: 'Cartons' })).toBe('Cartons is a package. Choose the smallest unit, like piece, then add the cartons below.');
+    expect(packageAsUnit(units[2])).toBe('A box is a package. Choose a single unit, like piece, then add the box below.');
+    expect(packageAsUnit({ ...units[1]!, name: 'Cartons' })).toBe('Cartons is a package. Choose a single unit, like piece, then add the cartons below.');
     // Every short code reads as its word, the same as the server's sentence (round 4 review of #692).
     for (const [code, word] of [['Ctns', 'carton'], ['pkts', 'packet'], ['Bx', 'box'], ['DOZ', 'dozen'], ['dz', 'dozen']]) {
       expect(packageAsUnit({ ...units[1]!, name: code, is_package: true })).toMatch(new RegExp(`^A ${word} is a package\.`));
@@ -87,7 +87,7 @@ describe('the words of Add an item', () => {
     expect(packageAsUnit(units[0])).toBeNull();
     expect(packageAsUnit(undefined)).toBeNull();
     // A short code reads in the shop's words, as the rest of the form names it (review of #692).
-    expect(packageAsUnit({ name: 'Ctn', is_package: true })).toBe('A carton is a package. Choose the smallest unit, like piece, then add the carton below.');
+    expect(packageAsUnit({ name: 'Ctn', is_package: true })).toBe('A carton is a package. Choose a single unit, like piece, then add the carton below.');
     // The sentences RetailNewItemPacksIT checks on the server, from one file, so the screen and the API agree.
     const contract = JSON.parse(readFileSync('../fixtures/retail/package-refusals-689.json', 'utf8')) as { cases: { unit: string; sentence: string }[] };
     for (const c of contract.cases) expect(packageAsUnit({ name: c.unit, is_package: true }), c.unit).toBe(c.sentence);
@@ -125,12 +125,13 @@ describe('the words of Add an item', () => {
 });
 
 describe('Add an item (issue #689)', () => {
-  it('calls the unit Smallest unit you sell, with its hint, and names the prices by it', async () => {
+  it('calls the unit Single unit, with its hint and its HelpTip, and names the prices by it (issue #709)', async () => {
     open();
     await fill('u1');
-    const unit = screen.getByLabelText(/^Smallest unit you sell/);
+    const unit = screen.getByLabelText(/^Single unit/);
     expect(unit.getAttribute('aria-required')).toBe('true');
-    expect(screen.getByText('The single thing a customer can buy. For example piece, bulb, metre, litre.')).toBeTruthy();
+    expect(screen.getByText('For example piece, bulb, metre, litre. Never a box or a carton.')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'More about Single unit' }).length).toBeGreaterThan(0);
     expect(screen.getByLabelText(/^Buying price of one bulb/)).toBeTruthy();
     expect(screen.getByLabelText(/^Selling price of one bulb/)).toBeTruthy();
   });
@@ -138,13 +139,13 @@ describe('Add an item (issue #689)', () => {
   it('refuses Box as the smallest unit with a field message and sends nothing', async () => {
     open();
     await fill('u3');
-    const said = 'A box is a package. Choose the smallest unit, like piece, then add the box below.';
+    const said = 'A box is a package. Choose a single unit, like piece, then add the box below.';
     expect(screen.getByText(said)).toBeTruthy();
-    expect(screen.getByLabelText(/^Smallest unit you sell/).getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByLabelText(/^Single unit/).getAttribute('aria-invalid')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     await new Promise((r) => setTimeout(r, 50));
     expect(createProduct).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(screen.getByLabelText(/^Smallest unit you sell/));
+    expect(document.activeElement).toBe(screen.getByLabelText(/^Single unit/));
   });
 
   it('asks No or Yes about packages, No first, and sends none on No', async () => {
@@ -214,13 +215,13 @@ describe('Add an item (issue #689)', () => {
     expect(createProduct).not.toHaveBeenCalled();
   });
 
-  it('puts Used for in the owner\'s order, Both, Buying, Selling, and names the picker Package unit', async () => {
+  it('puts Used for in the owner\'s order, Both, Buying, Selling, and names the picker Package, with its HelpTip (issue #709)', async () => {
     open();
     await fill('u1');
     fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
     const row = screen.getByTestId('package-row');
     expect(within(row).getAllByRole('radio').map((r) => r.textContent)).toEqual(['Both', 'Buying', 'Selling']);
-    expect(within(row).getByLabelText(/^Package unit/)).toBeTruthy();
+    expect(within(row).getByLabelText(/^Package/)).toBeTruthy();
   });
 
   it('fills a usual pack size again when the smallest unit changes, and keeps a typed one', async () => {
@@ -230,12 +231,12 @@ describe('Add an item (issue #689)', () => {
     fireEvent.change(within(screen.getByTestId('package-row')).getByLabelText(/^Package/), { target: { value: 'u3' } });
     expect((screen.getByLabelText(/^How many bulbs in one box/) as HTMLInputElement).value).toBe('100');
     // The box's usual pack is 100 bulbs, not 100 pieces.
-    fireEvent.change(screen.getByLabelText(/^Smallest unit you sell/), { target: { value: 'u4' } });
+    fireEvent.change(screen.getByLabelText(/^Single unit/), { target: { value: 'u4' } });
     expect((screen.getByLabelText(/^How many pieces in one box/) as HTMLInputElement).value).toBe('');
-    fireEvent.change(screen.getByLabelText(/^Smallest unit you sell/), { target: { value: 'u1' } });
+    fireEvent.change(screen.getByLabelText(/^Single unit/), { target: { value: 'u1' } });
     expect((screen.getByLabelText(/^How many bulbs in one box/) as HTMLInputElement).value).toBe('100');
     fireEvent.change(screen.getByLabelText(/^How many bulbs in one box/), { target: { value: '50' } });
-    fireEvent.change(screen.getByLabelText(/^Smallest unit you sell/), { target: { value: 'u4' } });
+    fireEvent.change(screen.getByLabelText(/^Single unit/), { target: { value: 'u4' } });
     expect((screen.getByLabelText(/^How many pieces in one box/) as HTMLInputElement).value).toBe('50');
   });
 
@@ -323,7 +324,7 @@ describe('Add an item (issue #689)', () => {
     await fill('u1');
     fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
     const row = screen.getByTestId('package-row');
-    fireEvent.change(within(row).getByLabelText(/^Package unit/), { target: { value: 'u2' } });
+    fireEvent.change(within(row).getByLabelText(/^Package/), { target: { value: 'u2' } });
     const size = within(row).getByLabelText(/^How many bulbs in one carton/);
     // At the cap the form sends it; a refusal of the size lands on that size field, once.
     fireEvent.change(size, { target: { value: '100000' } });

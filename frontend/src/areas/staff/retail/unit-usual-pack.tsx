@@ -9,11 +9,26 @@ import { Sheet } from '../../../app/ui/Sheet';
 import { retail, type Unit, type UsualPackRequest } from '../../../api/retail';
 import { PURPOSES, asPurpose, factorProblem, type Purpose } from './catalogue-packs';
 import { showQty } from './maths';
+import { quantityIn, unitWord } from './units-state';
 import { Problem, requireVersion } from './ui';
 
 // Issue #637 (ADR-100 note): the owner changes or removes a unit's usual pack on the Units page, so a size set by mistake in Set
 // up your shop does not fill in every item's pack form. Items' packs never follow. A usual pack is one level only: its smaller
-// unit is one with no usual pack of its own.
+// unit is one with no usual pack of its own. Issue #709 (ADR-110): the screen says it in plain words, "Usually holds 10
+// pieces. Each item can be different.", and a dozen always holds 12, which cannot be changed.
+
+/** What a package row on the Units page says it holds, or null for a single unit. */
+export function holdsText(unit: Unit): string | null {
+  if (unit.fixed_count) return `Always holds ${unit.fixed_count}. It cannot change.`;
+  const u = unit.usual_pack;
+  if (u) return `Usually holds ${quantityIn(showQty(u.size ?? ''), u.of_unit ?? '').toLowerCase()}. Each item can be different.`;
+  return unit.is_package ? 'Each item says how many it holds.' : null;
+}
+
+/** "Used for: buying and selling", in the words of PURPOSES. */
+export function usedForText(purpose: string | undefined): string {
+  return `Used for: ${(PURPOSES.find((o) => o.value === asPurpose(purpose)) ?? PURPOSES[0]).use.replace(/^for /, '')}`;
+}
 
 /** The units a usual pack of `unit` may count: switched on, not itself, and not a pack themselves. */
 export function usualPackChoices(unit: Unit, units: Unit[]): Unit[] {
@@ -31,13 +46,14 @@ export function mayHaveUsualPack(unit: Unit, units: Unit[]): boolean {
  */
 export function removeOnlyReason(unit: Unit, units: Unit[]): string | null {
   if (mayHaveUsualPack(unit, units)) return null;
-  if (unit.active === false) return `${unit.name ?? ''} is switched off, so its usual pack can only be removed.`;
+  if (unit.active === false) return `${unit.name ?? ''} is switched off, so what it usually holds can only be removed.`;
   const counting = units.find((u) => u.id !== unit.id && u.usual_pack?.of_unit_id === unit.id);
-  return `${counting?.name ?? ''} is a pack of ${unit.name ?? ''}, so ${unit.name ?? ''} cannot be a pack too. You can remove its usual pack.`;
+  return `${counting?.name ?? ''} holds ${unit.name ?? ''}, so ${unit.name ?? ''} cannot hold another unit too. You can remove what it usually holds.`;
 }
 
 /** The size's problem in the words of units, or null: at least 1, at most three places, as an item's pack (factorProblem). */
 export function usualSizeProblem(size: string, unit: Unit, of: Unit | undefined): string | null {
+  if (unit.fixed_count && size.trim() !== String(unit.fixed_count)) return `A ${unitWord(unit.name).toLowerCase()} always holds ${unit.fixed_count}.`;
   return factorProblem(size) === null ? null : `Enter how many ${of?.name ?? 'of the smaller unit'} are in one ${unit.name ?? ''}: 1 or more, for example 12 or 12.5.`;
 }
 
@@ -61,7 +77,7 @@ export function UsualPackSheet({ unit, units, onClose, onSaved }: {
   const [picked, setOfUnitId] = useState(had?.of_unit_id ?? '');
   // Review of #637: a smaller unit that is no longer a choice (switched off, or a pack now) counts as not chosen.
   const ofUnitId = choices.some((u) => u.id === picked) ? picked : '';
-  const [size, setSize] = useState(had?.size ? showQty(had.size) : '');
+  const [size, setSize] = useState(unit.fixed_count ? String(unit.fixed_count) : had?.size ? showQty(had.size) : '');
   const [purpose, setPurpose] = useState<Purpose>(asPurpose(had?.purpose));
   const [sent, setSent] = useState(false);
   // toast-exempt: the Units list in catalogue-lists shows the success toast through onSaved
@@ -69,7 +85,7 @@ export function UsualPackSheet({ unit, units, onClose, onSaved }: {
     mutationFn: (body: { usual_pack?: UsualPackRequest; clear_usual_pack?: boolean }) => retail.updateUnit(unit.id ?? '', requireVersion(unit.version), body),
     onSuccess: (row, body) => {
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
-      onSaved(body.clear_usual_pack ? `${row.name} has no usual pack now. Items keep their packs.` : `Saved the usual pack of ${row.name}. Items keep their packs.`);
+      onSaved(body.clear_usual_pack ? `${row.name} has no usual number now. Items keep their packages.` : `Saved what one ${row.name} usually holds. Items keep their packages.`);
       onClose();
     },
   });
@@ -80,7 +96,7 @@ export function UsualPackSheet({ unit, units, onClose, onSaved }: {
     <Sheet
       open
       onClose={onClose}
-      title={`Usual pack of ${unit.name ?? ''}`}
+      title={`What one ${unit.name ?? ''} usually holds`}
       actions={
         <>
           {removeOnly === null && <BusyButton
@@ -95,7 +111,7 @@ export function UsualPackSheet({ unit, units, onClose, onSaved }: {
           </BusyButton>}
           {had && (
             <BusyButton busy={save.isPending && save.variables?.clear_usual_pack === true} type="button" disabled={save.isPending} onClick={() => save.mutate({ clear_usual_pack: true })}>
-              Remove usual pack
+              Remove the usual number
             </BusyButton>
           )}
         </>
@@ -117,7 +133,7 @@ export function UsualPackSheet({ unit, units, onClose, onSaved }: {
         }}
       >
         <FieldsNeededNote />
-        <Hint>A starting number for an item&apos;s pack form; items keep their own size.</Hint>
+        <Hint>A starting number for an item&apos;s package. Each item can be different.</Hint>
         {choices.length === 0 ? (
           <EmptyChoice
             id={`${formId}-of`}
@@ -151,12 +167,14 @@ export function UsualPackSheet({ unit, units, onClose, onSaved }: {
         )}
         <Field
           id={`${formId}-size`}
-          label={`How many in one ${unit.name ?? ''}`}
+          label="How many does it usually hold?"
           required
           error={sizeProblem}
           showError={sent}
           inputMode="decimal"
           value={size}
+          readOnly={unit.fixed_count !== undefined}
+          hint={unit.fixed_count ? `A ${unitWord(unit.name).toLowerCase()} always holds ${unit.fixed_count}. For another number, use a box.` : undefined}
           onChange={(e) => setSize(e.target.value)}
           autoComplete="off"
         />

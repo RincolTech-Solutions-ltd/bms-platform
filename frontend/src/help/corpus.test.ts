@@ -379,12 +379,14 @@ describe('setting up a shop quickly (issue #625)', () => {
 describe('adding a unit (a tester asked, issue #625)', () => {
   const UNIT = 'add-a-unit';
   // The code of the screens each part walks through (its steps in order, then its note).
+  // Issue #709 (ADR-110): Units in two parts, Single units and Packages, and Single unit on the item forms.
   const PARTS = [
-    ['areas/staff/menu.tsx', 'areas/staff/retail/permissions.ts'],
+    ['areas/staff/menu.tsx', 'areas/staff/retail/permissions.ts', 'areas/staff/retail/catalogue-lists.tsx'],
+    ['areas/staff/retail/catalogue-lists.tsx'],
     ['areas/staff/retail/catalogue-lists.tsx'],
     ['app/glossary.ts', 'areas/staff/retail/unit-picker.tsx'],
     ['app/glossary.ts'],
-    ['areas/staff/retail/catalogue-products.tsx', 'app/glossary.ts', 'areas/staff/retail/catalogue-packs.tsx'],
+    ['app/glossary.ts', 'areas/staff/retail/catalogue-packs.tsx'],
     ['areas/staff/retail/catalogue-lists.tsx', 'areas/staff/retail/unit-usual-pack.tsx'],
     ['areas/staff/retail/catalogue-lists.tsx'],
   ];

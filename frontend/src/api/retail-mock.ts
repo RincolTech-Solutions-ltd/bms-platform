@@ -739,7 +739,7 @@ export function createMockRetail(): RetailApi {
         const picked = items.map((i) => find(i.product_id ?? ''));
         if (picked.some((p) => p.familyId)) refuse(422, 'already_has_variants', 'One of these is a size or colour of an item already.');
         const first = picked[0] ?? refuse(422, 'validation_failed', 'Pick at least one item.');
-        if (picked.some((p) => p.unit !== first.unit)) refuse(422, 'unit_differs', 'The sizes of one item are counted in one unit.');
+        if (picked.some((p) => p.unit !== first.unit)) refuse(422, 'unit_differs', 'The sizes of one item have one single unit.');
         let id = familyId;
         if (!id) {
           id = nextId('f');
@@ -819,7 +819,7 @@ export function createMockRetail(): RetailApi {
         const p = find(productId);
         const unit = unitRows.find((u) => u.id === body.unit_id);
         if (!unit) refuse(422, 'validation_failed', 'No such unit.');
-        if (unit?.name === p.unit) refuse(422, 'pack_unit_is_base_unit', 'A pack must be a different unit from the one the item is counted in.');
+        if (unit?.name === p.unit) refuse(422, 'pack_unit_is_base_unit', 'A pack must be a different unit from the item\'s single unit.');
         const rows = packs.get(p.id) ?? [];
         if (rows.some((k) => k.unit_id === body.unit_id)) refuse(409, 'duplicate_pack', 'The item has a pack of this unit already.');
         const sell = body.purpose === 'buy' ? undefined : body.sell_minor;

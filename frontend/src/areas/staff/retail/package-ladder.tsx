@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState } from 'react';
 import { retail, type Pack, type Product, type Unit } from '../../../api/retail';
 import { BusyButton } from '../../../app/ui/BusyButton';
+import { WORDS } from '../../../app/glossary';
+import { HelpTip } from '../../../app/ui/HelpTip';
 import { Hint } from '../../../app/ui/Hint';
 import { Stepper } from '../../../app/ui/Stepper';
 import { icons } from '../../../components/icons';
@@ -12,11 +14,15 @@ import { UnitPicker } from './unit-picker';
 import { showQty } from './maths';
 import { hasOwnPrice, unitWord } from './units-state';
 
-// Issue #699 (ADR-107): the package ladder, the same on the item page and on Add an item. Biggest first, one line per level,
+// Issue #699 (ADR-107): the package ladder, the same on the item page and on Add an item. Since issue #709 (D99 = A, ADR-107
+// rule 8) it is built smallest first: the single unit, then each bigger package, one line per level,
 // a dot with its number down a plain line, what one holds, and the pieces worked out in words under it: "So 1 carton = 120
 // pieces". On the item page each number has a stepper; a change shows a check sheet with the before and after in words
 // before it is saved, and the server works every level above out again. Look inside draws one package and what it holds.
 // Words follow the owner's prototype (issue #699, package-ladder.html); colours are the theme's chart roles.
+
+/** Issue #709 (D99 = A): the question that adds the next level up, on the item page and on Add an item. */
+export const BIGGER_QUESTION = 'Does it come in a bigger pack?';
 
 /** The colour role of a level: the smallest unit is muted, the packages take the chart colours in turn. */
 const LEVEL_COLOURS = ['--color-text-muted', '--viz-1-value', '--viz-2-value', '--viz-3-value', '--color-link'];
@@ -32,9 +38,14 @@ export type RungEdit = {
   /** The number shown for each level being changed, by unit id. */
   values: Record<string, string>;
   onChange: (rung: Rung, value: string) => void;
+  /** Issue #709 (ADR-110): the units whose count is fixed, a dozen's 12, by unit id; their number has no stepper. */
+  fixed?: Record<string, number>;
 };
 
-/** The rungs, biggest first, ending with the smallest unit. With `edit`, each number has a stepper. */
+/**
+ * The rungs as the ladder is built (D99 = A, ADR-107 rule 8): the single unit first, then each bigger package, each with its
+ * total in single units. With `edit`, each number has a stepper.
+ */
 export function LadderRungs({ rungs, smallest, edit, changed, after }: {
   rungs: Rung[];
   smallest: string;
@@ -45,8 +56,18 @@ export function LadderRungs({ rungs, smallest, edit, changed, after }: {
 }) {
   const id = useId();
   return (
-    <ol className="ladder" aria-label="What one package holds, biggest first">
-      {rungs.map((r0) => {
+    <ol className="ladder" aria-label="What one package holds, single unit first">
+      <li className="ladder-rung" data-level={1}>
+        <span className="ladder-dot" data-colour={colourOf(0)} aria-hidden="true">1</span>
+        <div className="ladder-card">
+          <div className="help-tip-heading">
+            <p className="ladder-name">1 {unitWord(smallest)} <span className="ladder-tag">{WORDS.singleUnit}</span></p>
+            <HelpTip tip="singleUnit" />
+          </div>
+          <p className="ladder-says">The one thing a customer can buy on its own. Stock is kept in {many(smallest)}.</p>
+        </div>
+      </li>
+      {[...rungs].reverse().map((r0) => {
         const r = after?.[r0.unitId] !== undefined ? { ...r0, pieces: after[r0.unitId] as bigint } : r0;
         const level = levelOf(rungs, r.unitId);
         const value = edit?.values[r.unitId] ?? r.holdsQty;
@@ -55,7 +76,7 @@ export function LadderRungs({ rungs, smallest, edit, changed, after }: {
             <span className="ladder-dot" data-colour={colourOf(level - 1)} aria-hidden="true">{level}</span>
             <div className={`ladder-card${changed === r.unitId ? ' ladder-card-changed' : ''}`}>
               <p className="ladder-name">1 {unitWord(r.unit)}</p>
-              {edit ? (
+              {edit && !edit.fixed?.[r.unitId] ? (
                 <div className="ladder-holds">
                   <Stepper
                     id={`${id}-holds-${r.unitId}`}
@@ -76,13 +97,6 @@ export function LadderRungs({ rungs, smallest, edit, changed, after }: {
           </li>
         );
       })}
-      <li className="ladder-rung" data-level={1}>
-        <span className="ladder-dot" data-colour={colourOf(0)} aria-hidden="true">1</span>
-        <div className="ladder-card">
-          <p className="ladder-name">1 {unitWord(smallest)} <span className="ladder-tag">Smallest you sell</span></p>
-          <p className="ladder-says">The single thing a customer can buy. Stock is kept in {many(smallest)}.</p>
-        </div>
-      </li>
     </ol>
   );
 }
@@ -248,7 +262,7 @@ export function LookInside({ rungs, smallest }: { rungs: Rung[]; smallest: strin
 type Pending = { rung: Rung; holdsUnitId: string; value: string };
 
 /**
- * The item page's ladder (issue #699): the item's packages, biggest first, each number with a stepper, a check sheet before a
+ * The item page's ladder (issue #699): the item's packages, single unit first (D99), each number with a stepper, a check sheet before a
  * change is saved, Add a bigger package and Remove the biggest. Shown with the item's packs while the units capability is on.
  */
 export function ItemLadder({ product, packs, mayManage, mayPrice = true }: {
@@ -262,6 +276,8 @@ export function ItemLadder({ product, packs, mayManage, mayPrice = true }: {
   const smallest = product.unit ?? '';
   const smallestId = product.unit_id ?? '';
   const rungs = ladderOf(product, packs);
+  const units = useQuery({ queryKey: ['retail', 'catalogue', 'units'], queryFn: () => retail.listUnits(), enabled: mayManage });
+  const fixed = Object.fromEntries((units.data ?? []).filter((u) => u.fixed_count).map((u) => [u.id ?? '', u.fixed_count ?? 0]));
   const [pending, setPending] = useState<Pending | null>(null);
   const [adding, setAdding] = useState(false);
   const id = product.id ?? '';
@@ -295,7 +311,7 @@ export function ItemLadder({ product, packs, mayManage, mayPrice = true }: {
   return (
     <section className="ladder-panel stack" data-testid="item-ladder" aria-labelledby={`ladder-${id}`}>
       <h3 id={`ladder-${id}`}>What one package holds</h3>
-      <Hint>Biggest first. Change a number and the bigger packages follow. Your stock is kept in {many(smallest)} and never changes.</Hint>
+      <Hint full>Single unit first, then each bigger package. Change a number and the bigger packages follow. Your stock is kept in {many(smallest)} and never changes.</Hint>
       {hasLoop(rungs) && <p role="alert" className="alert alert-warning" data-testid="ladder-loop">{LOOP_WORDS}</p>}
       <LadderRungs
         rungs={rungs}
@@ -303,6 +319,7 @@ export function ItemLadder({ product, packs, mayManage, mayPrice = true }: {
         changed={pending?.rung.unitId ?? null}
         after={Object.fromEntries(changes.map((c) => [c.unitId, c.after]))}
         edit={mayManage ? {
+          fixed,
           values: pending ? { [pending.rung.unitId]: pending.value } : {},
           onChange: (rung, value) => {
             save.reset();
@@ -334,6 +351,7 @@ export function ItemLadder({ product, packs, mayManage, mayPrice = true }: {
         </div>
       )}
       <LadderSum rungs={rungs} smallest={smallest} />
+      {mayManage && !adding && <p className="field-label">{BIGGER_QUESTION}</p>}
       {mayManage && (
         <div className="ladder-actions">
           {!adding && (
@@ -362,12 +380,15 @@ function AddBigger({ product, rungs, onDone }: { product: Product; rungs: Rung[]
   const holdsUnitId = top?.unitId ?? product.unit_id ?? '';
   const holdsUnit = top?.unit ?? product.unit ?? '';
   const [unitId, setUnitId] = useState('');
-  const [value, setValue] = useState('');
+  const [typed, setValue] = useState('');
   const [tried, setTried] = useState(false);
   const used = new Set([product.unit_id, ...rungs.map((r) => r.unitId)]);
   const choices = (units.data ?? []).filter((u) => u.active !== false && !used.has(u.id));
   const chosen = choices.find((u) => u.id === unitId);
   const name = one(chosen?.name) || 'package';
+  // Issue #709 (ADR-110): a dozen always holds 12, filled in and not changed.
+  const fixed = chosen?.fixed_count;
+  const value = fixed ? String(fixed) : typed;
   const problem = holdsProblem(value, { unit: name, holdsUnit });
   const add = useMutation({
     mutationFn: () => retail.addPack(product.id ?? '', { unit_id: unitId, holds_unit_id: holdsUnitId, holds_qty: Number(value.trim()), purpose: asPurpose(chosen?.usual_pack?.purpose) }),
@@ -381,12 +402,13 @@ function AddBigger({ product, rungs, onDone }: { product: Product; rungs: Rung[]
     setUnitId(next);
     const unit: Unit | undefined = choices.find((u) => u.id === next);
     const usual = usualFactor(unit, { unit_id: holdsUnitId });
-    if (usual && value.trim() === '') setValue(usual);
+    if (usual && typed.trim() === '') setValue(usual);
   };
   return (
     <div className="stack ladder-add" data-testid="ladder-add">
       <UnitPicker
         id={`ladder-add-unit-${product.id ?? ''}`}
+        kind="package"
         label="The bigger package"
         hint="For example carton, bale or crate."
         units={choices}
@@ -397,7 +419,9 @@ function AddBigger({ product, rungs, onDone }: { product: Product; rungs: Rung[]
         error={unitId === '' ? 'Choose the package.' : null}
         showError={tried}
       />
-      <Stepper id={`ladder-add-holds-${product.id ?? ''}`} label={`How many ${many(holdsUnit)} in one ${name}`} value={value} min={2} onChange={setValue} invalid={tried && problem !== null} />
+      {fixed
+        ? <p data-testid="ladder-add-fixed">{`1 ${name} holds ${fixed} ${many(holdsUnit)}. A ${name} always holds ${fixed}.`}</p>
+        : <Stepper id={`ladder-add-holds-${product.id ?? ''}`} label={`How many ${many(holdsUnit)} in one ${name}`} value={value} min={2} onChange={setValue} invalid={tried && problem !== null} />}
       {tried && problem !== null && <p className="rt-flag">{problem}</p>}
       {problem === null && <p className="ladder-says">So 1 {name} = <strong>{shown((top?.pieces ?? 1000n) * BigInt(value.trim()))}</strong> {many(product.unit)}</p>}
       <Problem error={add.error} />
