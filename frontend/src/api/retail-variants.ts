@@ -20,12 +20,15 @@ export const VARIANT_TOKEN = 7;
 /** Issue #697 (D98): the colours every shop is offered as chips on Add an item, shipped with the app. */
 export const READY_COLOURS = ['Black', 'White', 'Red', 'Blue', 'Green', 'Yellow', 'Orange', 'Brown', 'Grey', 'Pink', 'Purple', 'Silver', 'Gold', 'Clear'] as const;
 
-/** Issue #697 (D98): the kinds of size, each with its ready sizes; Other has none, the shop types its own. */
+/**
+ * Issue #697 (D98): the kinds of size, each with its ready sizes; Other has none, the shop types its own. Cable starts at 1mm,
+ * not 1.0mm, so it never shares the code 10MM with 10mm (owner, round 2 of #723).
+ */
 export const SIZE_KINDS = [
   { key: 'clothes', label: 'Clothes', sizes: ['XS', 'S', 'M', 'L', 'XL', 'XXL'] },
   { key: 'shoes', label: 'Shoes', sizes: Array.from({ length: 11 }, (_, i) => String(36 + i)) },
   { key: 'bulbs', label: 'Bulbs (watts)', sizes: ['5W', '7W', '9W', '12W', '15W', '18W', '20W', '40W', '60W', '100W'] },
-  { key: 'cable', label: 'Cable (mm)', sizes: ['1.0mm', '1.5mm', '2.5mm', '4mm', '6mm', '10mm'] },
+  { key: 'cable', label: 'Cable (mm)', sizes: ['1mm', '1.5mm', '2.5mm', '4mm', '6mm', '10mm'] },
   { key: 'other', label: 'Other', sizes: [] },
 ] as const satisfies readonly { key: string; label: string; sizes: readonly string[] }[];
 

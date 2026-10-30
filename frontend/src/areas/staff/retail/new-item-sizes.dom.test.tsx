@@ -127,7 +127,12 @@ describe('sizes on Add an item', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
     fireEvent.change(screen.getByLabelText(/^Package unit/), { target: { value: 'u2' } });
     fireEvent.change(screen.getByLabelText(/^How many bulbs in one carton/), { target: { value: '24' } });
+    fireEvent.change(screen.getByLabelText(/^Selling price of one carton/), { target: { value: '96000' } });
+    expect(screen.queryByTestId('size-pack-note')).toBeNull();
     fireEvent.change(screen.getByLabelText('Selling price of 40W'), { target: { value: '3000' } });
+    fireEvent.change(screen.getByLabelText('Selling price of 100W'), { target: { value: '6000' } });
+    // Round 2 of #723: sizes priced apart get no carton price, and the form says where to set it.
+    expect(screen.getByTestId('size-pack-note').textContent).toBe("Sizes have different prices, so set the carton price on each size's page after saving.");
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
     await waitFor(() => expect(createFamily).toHaveBeenCalledTimes(1));
     expect(createProduct).not.toHaveBeenCalled();
@@ -136,10 +141,43 @@ describe('sizes on Add an item', () => {
       category_id: 'c1',
       unit_id: 'u1',
       sell_minor: 4000,
-      variants: [{ size: '40W', sell_minor: 3000 }, { size: '60W', sell_minor: 4000 }, { size: '100W', sell_minor: 4000 }],
+      variants: [{ size: '40W', sell_minor: 3000 }, { size: '60W', sell_minor: 4000 }, { size: '100W', sell_minor: 6000 }],
       packs: [{ unit_id: 'u2', factor: '24', purpose: 'both' }],
     });
+    expect((createFamily.mock.calls[0]?.[0] as { packs: object[] }).packs[0]).not.toHaveProperty('sell_minor');
     expect((await screen.findAllByText('Test longlife bulb added in 3 sizes, with carton of 24.')).length).toBeGreaterThan(0);
+  });
+
+  // JUSTIFICATION-A3: round 2 of #723 asks a DOM test of one price with a carton price, and of a kind switch.
+  it('saves the carton price on every size while all keep the item\'s price', async () => {
+    createFamily.mockImplementation(async () => family);
+    open();
+    await fill();
+    fireEvent.click(screen.getByRole('radio', { name: 'Yes, sizes, colours or types' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Bulbs (watts)' }));
+    for (const s of ['40W', '60W', '100W']) fireEvent.click(chip('Sizes', s));
+    fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
+    fireEvent.change(screen.getByLabelText(/^Package unit/), { target: { value: 'u2' } });
+    fireEvent.change(screen.getByLabelText(/^How many bulbs in one carton/), { target: { value: '24' } });
+    fireEvent.change(screen.getByLabelText(/^Selling price of one carton/), { target: { value: '96000' } });
+    expect(screen.queryByTestId('size-pack-note')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+    await waitFor(() => expect(createFamily).toHaveBeenCalledTimes(1));
+    expect(createFamily.mock.calls[0]?.[0]).toMatchObject({ packs: [{ unit_id: 'u2', factor: '24', purpose: 'both', sell_minor: 96000 }] });
+  });
+
+  it('drops the ready sizes of the kind left, and keeps the shop\'s own', async () => {
+    open();
+    await fill();
+    fireEvent.click(screen.getByRole('radio', { name: 'Yes, sizes, colours or types' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Bulbs (watts)' }));
+    fireEvent.click(chip('Sizes', '40W'));
+    fireEvent.change(screen.getByLabelText('Type another size'), { target: { value: 'Long neck' } });
+    fireEvent.keyDown(screen.getByLabelText('Type another size'), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: 'Clothes' }));
+    expect(screen.queryByRole('button', { name: '40W' })).toBeNull();
+    expect(chip('Your sizes', 'Long neck').getAttribute('aria-pressed')).toBe('true');
+    expect(SIZE_KINDS.find((k) => k.key === 'cable')?.sizes[0]).toBe('1mm');
   });
 
   it('takes colours alone, typed ones too, and asks for at least two', async () => {

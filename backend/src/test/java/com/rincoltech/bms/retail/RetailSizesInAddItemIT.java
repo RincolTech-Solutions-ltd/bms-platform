@@ -113,24 +113,37 @@ class RetailSizesInAddItemIT extends IntegrationTest {
         assertThat(count(packsAudited)).isEqualTo(3);
     }
 
-    // JUSTIFICATION-A3: the review of #723 asks a test of a priced carton on sizes priced differently.
-    /** Review of #723: a carton priced for the item's 4,000 a piece is priced for each size in the same proportion. */
+    // JUSTIFICATION-A3: round 2 of #723 asks this test of a priced carton, sizes priced apart and at one price.
+    /** Owner, round 2 of #723: a carton price is saved on every size only while every size keeps the item's price. */
     @Test
-    void aPricedCartonFollowsEachSizesOwnPrice() {
+    void aCartonPriceIsSavedOnlyWhileEverySizeKeepsTheItemsPrice() {
         Map<String, Object> carton24 = pack(carton, "24");
         carton24.put("sell_minor", 96_000);
-        ResponseEntity<JsonNode> r =
+        // 40W at 3,000, 60W at the item's 4,000 and 100W at 6,000 a piece: no carton price on any size.
+        ResponseEntity<JsonNode> apart =
                 api.post("/product-families", item("Test Longlife Bulb", List.of(carton24)), ADMIN);
-        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
-        List<Long> cartons = new ArrayList<>();
-        for (JsonNode v : r.getBody().get("variants")) {
-            JsonNode packs = api.get("/products/" + v.get("id").asString() + "/units", ADMIN)
+        assertThat(apart.getStatusCode()).as("%s", apart.getBody()).isEqualTo(HttpStatus.CREATED);
+        for (JsonNode v : apart.getBody().get("variants")) {
+            JsonNode k = api.get("/products/" + v.get("id").asString() + "/units", ADMIN)
                     .getBody()
-                    .get("items");
-            cartons.add(packs.get(0).get("sell_minor").asLong());
+                    .get("items")
+                    .get(0);
+            assertThat(k.get("factor").asString()).isEqualTo("24.000");
+            assertThat(k.has("sell_minor")).as("%s", k).isFalse();
         }
-        // 40W at 3,000, 60W at the item's 4,000 and 100W at 6,000 a piece.
-        assertThat(cartons).containsExactly(72_000L, 96_000L, 144_000L);
+        // All at one price: the carton price is saved on each.
+        Map<String, Object> same = item("Test Steady Bulb", List.of(carton24));
+        same.remove("variants");
+        same.put("sizes", List.of("40W", "60W", "100W"));
+        ResponseEntity<JsonNode> one = api.post("/product-families", same, ADMIN);
+        assertThat(one.getStatusCode()).as("%s", one.getBody()).isEqualTo(HttpStatus.CREATED);
+        for (JsonNode v : one.getBody().get("variants")) {
+            JsonNode k = api.get("/products/" + v.get("id").asString() + "/units", ADMIN)
+                    .getBody()
+                    .get("items")
+                    .get(0);
+            assertThat(k.get("sell_minor").asLong()).isEqualTo(96_000);
+        }
     }
 
     @Test

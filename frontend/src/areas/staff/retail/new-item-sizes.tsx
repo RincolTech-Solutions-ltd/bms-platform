@@ -133,7 +133,9 @@ export function chosenOptions(value: SizesAnswer) {
 }
 
 /** The price of each size, under the item's own prices, which every size starts at. */
-export function SizePrices({ rows, profit, onEdit, codesKnown, problem, showErrors }: {
+export function SizePrices({ rows, profit, onEdit, codesKnown, problem, showErrors, note = null }: {
+  /** Round 2 of #723: why the packages are saved without a price. */
+  note?: string | null;
   rows: PreviewRow[];
   profit: boolean;
   onEdit: Parameters<typeof VariantPreview>[0]['onEdit'];
@@ -144,8 +146,9 @@ export function SizePrices({ rows, profit, onEdit, codesKnown, problem, showErro
   return (
     <section aria-label="Price of each size" data-testid="size-prices">
       <h3>{rows.length === 0 ? 'Price of each size' : `Price of each of the ${rows.length}`}</h3>
-      <Hint full>Each one starts at the prices above. Change one if it costs more or less. A package of a dearer size costs more in the same way.</Hint>
+      <Hint full>Each one starts at the prices above. Change one if it costs more or less.</Hint>
       {rows.length > 0 && <VariantPreview rows={rows} profit={profit} onEdit={onEdit} codesKnown={codesKnown} />}
+      {note && <p role="note" className="alert alert-info" data-testid="size-pack-note">{note}</p>}
       {problem && (showErrors || rows.length > 0) && <p role="note" className="alert alert-warning">{problem}</p>}
     </section>
   );

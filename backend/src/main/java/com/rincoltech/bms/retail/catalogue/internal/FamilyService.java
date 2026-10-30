@@ -98,15 +98,20 @@ class FamilyService {
                 VariantGrid.plan(base, r.sizes(), r.colours(), r.variants(), r.costMinor(), r.sellMinor(), Set.of(), 0);
         requireSome(plan);
         // Issue #697 (ADR-111): Add an item's packages, checked before anything is written, then made on every size.
-        List<PackRequest> packs = r.packs() == null ? List.of() : r.packs();
+        List<PackRequest> asked = r.packs() == null ? List.of() : r.packs();
+        // Owner, round 2 of #723: a package price is never copied to a size priced differently, nor guessed for it;
+        // while any size has its own price, the packages are made with no price of their own.
+        boolean onePrice =
+                plan.stream().allMatch(v -> v.sellMinor() == r.sellMinor() && v.costMinor() == r.costMinor());
+        List<PackRequest> packs =
+                onePrice ? asked : asked.stream().map(FamilyService::unpriced).toList();
         List<String> purposes = catalogue.checkPacks(packs);
         String duplicateReason = catalogue.acceptItemName(name, r.unitId(), null, Set.of(), r.duplicateReason());
         UUID id = UUID.randomUUID();
         UUID by = CurrentPrincipal.require().userId();
         repo.insertFamily(id, name, base, r.categoryId(), r.unitId(), by, duplicateReason);
         for (UUID variant : insertVariants(id, name, r.categoryId(), r.unitId(), plan, by, true)) {
-            Product size = repo.find(variant).orElseThrow();
-            catalogue.makePacks(size, pricedFor(packs, size.sellMinor(), r.sellMinor()), purposes, by);
+            catalogue.makePacks(repo.find(variant).orElseThrow(), packs, purposes, by);
         }
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("name", name);
@@ -124,31 +129,12 @@ class FamilyService {
         return get(id);
     }
 
-    // JUSTIFICATION-A3: the review of #723 asks each size's package price in proportion; nothing scales one yet.
-    /**
-     * Review of #723: a package's selling price is given for the item's price, so a size priced differently gets it in the
-     * same proportion, rounded half up (a carton at 96,000 for 4,000 a piece is 144,000 for the size at 6,000). A pack with
-     * no price, or an item priced at 0, keeps what was sent.
-     */
-    static List<PackRequest> pricedFor(List<PackRequest> packs, long sizeSell, long itemSell) {
-        if (sizeSell == itemSell || itemSell <= 0) {
-            return packs;
-        }
-        return packs.stream()
-                .map(k -> k.sellMinor() == null
-                        ? k
-                        : new PackRequest(
-                                k.unitId(),
-                                k.factor(),
-                                k.purpose(),
-                                BigDecimal.valueOf(k.sellMinor())
-                                        .multiply(BigDecimal.valueOf(sizeSell))
-                                        .divide(BigDecimal.valueOf(itemSell), 0, RoundingMode.HALF_UP)
-                                        .longValueExact(),
-                                k.holdsUnitId(),
-                                k.holdsQty(),
-                                k.usualBuy()))
-                .toList();
+    /** The package as sent, without a selling price of its own (round 2 of #723). */
+    private static PackRequest unpriced(PackRequest k) {
+        return k == null
+                ? null
+                : new PackRequest(
+                        k.unitId(), k.factor(), k.purpose(), null, k.holdsUnitId(), k.holdsQty(), k.usualBuy());
     }
 
     /** Issue #697 (ADR-111): the sizes and colours the shop typed before, offered again beside the app's ready lists. */

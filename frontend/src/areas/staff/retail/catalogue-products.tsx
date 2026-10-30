@@ -170,6 +170,9 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
   const options = chosenOptions(sizing);
   const preview = usePreview(planVariants({ baseCode: chosen ? chosen.next_code ?? `${chosen.code_prefix ?? ''}-0001` : 'ITEM', ...options, costMinor: profit ? (costOf ?? 0) : 0, sellMinor: sellOf ?? 0 }));
   const sized = !product && canManage && sizing.answer === 'yes';
+  // Owner, round 2 of #723: while any size has its own price, the packages are saved with no price; never a guessed one.
+  const onePrice = !sized || preview.rows.every((r) => parseMinor(r.sellText, RETAIL_CURRENCY) === (sellOf ?? 0) && (!profit || parseMinor(r.costText, RETAIL_CURRENCY) === (costOf ?? 0)));
+  const packWord = oneOf((units.data ?? []).find((u) => u.id === packages[0]?.unitId), 'package');
   const sizeProblem = sized ? sizesProblem(preview.rows) : null;
   const complete = description.trim() !== '' && categoryId !== '' && unitProblem === null && (product ? true : sellOf !== null && (!profit || costOf !== null))
     && (!variant || size.trim() !== '' || colour.trim() !== '') && packages.every((r) => rowProblem(r, packages) === null) && sizeProblem === null;
@@ -190,7 +193,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
       if (product) return { saved: await retail.updateProduct(product.id ?? '', product.version ?? 1, { description: description.trim(), category_id: categoryId, unit_id: unitId, active, ...reason }), photoNote: null };
       // Issue #699: the level it is usually sold at keeps the price typed for one of it; Buy stock opens on the usual buying level.
       const priced = packages.map((r) => (sellPieces !== null && r.key === sellAt.key ? { ...r, priceMinor: sellAt.priceMinor } : r));
-      const packs = packages.length > 0 ? { packs: packsToSend(priced, mayPrice, buyPieces !== null ? buyAt.key : null) } : {};
+      const packs = packages.length > 0 ? { packs: packsToSend(priced, mayPrice && onePrice, buyPieces !== null ? buyAt.key : null) } : {};
       if (sized) {
         // Issue #697: one save makes the item, each size as its product and each size's packages; all of it or none.
         const family = await retail.createFamily({ name: description.trim(), category_id: categoryId, unit_id: unitId, sell_minor: sellOf ?? 0, cost_minor: profit ? (costOf ?? 0) : 0, variants: linesOf(preview.rows, profit), ...reason, ...packs });
@@ -379,7 +382,8 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
             />
           </UsualLevel>
           {!profit && <p className="hint">The buying price is set when you buy stock.</p>}
-          {sized && <SizePrices rows={preview.rows} profit={profit} onEdit={preview.edit} codesKnown={chosen !== undefined} problem={sizeProblem} showErrors={showErrors} />}
+          {sized && <SizePrices rows={preview.rows} profit={profit} onEdit={preview.edit} codesKnown={chosen !== undefined} problem={sizeProblem} showErrors={showErrors}
+            note={!onePrice && packages.length > 0 ? `Sizes have different prices, so set the ${packWord} price on each size's page after saving.` : null} />}
           <PhotoChoice id="item-photo" file={photo} onChange={setPhoto} />
           <PacksTurnOn />
         </>

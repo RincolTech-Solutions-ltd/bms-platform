@@ -21,7 +21,7 @@ sizes and colors and packages."
    catalogue sees it, as only they may add items.
 2. **Ready lists ship with the app.** Colours: Black, White, Red, Blue, Green, Yellow, Orange, Brown, Grey, Pink, Purple,
    Silver, Gold, Clear. Sizes are picked by kind first: Clothes XS to XXL; Shoes 36 to 46; Bulbs (watts) 5W to 100W; Cable
-   (mm) 1.0mm to 10mm; Other, typed. They are one list in the PWA (`READY_COLOURS` and `SIZE_KINDS` in
+   (mm) 1mm to 10mm (1mm, not 1.0mm, so it never shares the code `10MM` with 10mm; owner, round 2 of #723); Other, typed. They are one list in the PWA (`READY_COLOURS` and `SIZE_KINDS` in
    `frontend/src/api/retail-variants.ts`, beside the code rules), the same for every shop, with no setup and no table. Each
    is a 48px chip that turns on and off; a box beside each list takes a size or colour of the shop's own.
 3. **What a shop typed before is offered again.** `GET /retail/product-families/options` (permission
@@ -35,10 +35,11 @@ sizes and colors and packages."
    body of ADR-106's `packs`, at most ten). The packs are checked once before anything is written and then made on every
    size in the same transaction through the same `createPack`; a refusal names its row (`pack_index`, `packs[i].factor`) and
    saves nothing: no item, no size, no pack, no audit entry. The checks and the making are `CatalogueService.checkPacks` and
-   `makePacks`, shared with `POST /retail/products`, so the two routes cannot drift. A package's selling price is given for
-   the item's price; a size priced differently gets it in the same proportion, rounded half up (review of #723: a carton at
-   96,000 for 4,000 a piece is 144,000 for the size at 6,000 and 72,000 for the size at 3,000), so no size's carton sells
-   below its own pieces' worth.
+   `makePacks`, shared with `POST /retail/products`, so the two routes cannot drift. A package price is never copied to a size
+   priced differently and never guessed for it (owner, round 2 of #723): while every size keeps the item's selling and
+   buying price, each size's package gets the price sent; once any size has its own price, the packages are made with no
+   price of their own on every size, and the form says "Sizes have different prices, so set the carton price on each size's
+   page after saving."
 6. **The words.** The toast says "Longtime bulb added in 3 sizes, with carton of 24" (or "in 2 colours", "in 6 sizes and
    colours"). A HelpTip explains the question. The photo, if any, goes to the item.
 
@@ -50,6 +51,6 @@ Sell, Count stock, Buy stock and My stock already find the item and then the siz
 **Worse:** every size gets the same packages; a size with a different carton is changed on its own page afterwards. The
 ready lists are English only and change only with the app.
 
-**Watch for:** a code keeps only the letters and digits of a size, so 1.0mm and 10mm of the cable list both give `10MM`. The
-form says so before saving ("Two of them would have the code ..."), and the shop spells one differently, for example 1mm.
-Changing the code rule would change ADR-051's codes and is left to a later decision.
+**Watch for:** a code keeps only the letters and digits of a size, so two typed sizes such as 1.0mm and 10mm still give the
+same code. The form says so before saving ("Two of them would have the code ..."). A new ready size must not clash with
+another of its list. Sizes priced apart need their package prices set on each size's page after saving.
