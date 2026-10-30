@@ -214,7 +214,8 @@ function NamedList({ noun, plural, list, create, update, withPrefix = false, sec
         : (
           <>
             <ScreenLink screen="products" to="/staff/retail/catalogue/products" label={`See the items of ${r.name}`}>Items</ScreenLink>
-            {isPackageRow(r) && ('usual_pack' in r && r.usual_pack || mayHaveUsualPack(r as Unit, all as Unit[])) && (
+            {/* A dozen always holds 12 (ADR-110): there is nothing to change. */}
+            {isPackageRow(r) && !(r as Unit).fixed_count && ('usual_pack' in r && r.usual_pack || mayHaveUsualPack(r as Unit, all as Unit[])) && (
               <button type="button" className="btn-sm" onClick={() => setPackFor(r.id ?? null)} aria-label={`What one ${r.name} usually holds`}>
                 Usually holds
               </button>

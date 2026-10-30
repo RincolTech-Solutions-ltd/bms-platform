@@ -71,6 +71,9 @@ describe('the Units page in two parts (issue #709)', () => {
     expect(within(packages).getByText('Used for: buying and selling')).toBeTruthy();
     expect(within(packages).getByText('Each item says how many it holds.')).toBeTruthy();
     expect(screen.queryByText(/Usual pack/)).toBeNull();
+    // A dozen's 12 is fixed, so it has no Usually holds to change; a roll has.
+    expect(screen.queryByRole('button', { name: 'What one Dozen usually holds' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'What one Roll usually holds' })).toBeTruthy();
   });
 
   it('adds a single unit by its name alone', async () => {
