@@ -34,7 +34,7 @@ const ELSEWHERE: Partial<Record<HelpTipKey, string>> = {
   guarantor: 'areas/staff/lending/application.dom.test.tsx',
   inArrears: 'areas/staff/home-cards.dom.test.tsx',
 };
-const HERE: HelpTipKey[] = ['averageBuyingPrice', 'sellingPrice', 'buyingPrice', 'priceList', 'appraisal', 'outstanding', 'collateral'];
+const HERE: HelpTipKey[] = ['averageBuyingPrice', 'sellingPrice', 'priceList', 'appraisal', 'outstanding', 'collateral'];
 
 afterEach(() => {
   cleanup();
@@ -85,13 +85,14 @@ describe('the help tips guard', () => {
     expect(screen.getAllByRole('columnheader', { name: 'Average buying price' })).toHaveLength(2);
   });
 
-  it('draws the price tips once above each list of cards on a phone', () => {
+  it('draws the same two price tips once above each list of cards on a phone', () => {
     screenAt(true);
     show(<><StockTable rows={rows} showCost flat /><AllBranchesList data={everywhere} showCost flat /></>);
-    expect(tips('buyingPrice')).toHaveLength(2);
+    expect(tips('averageBuyingPrice')).toHaveLength(2);
     expect(tips('sellingPrice')).toHaveLength(2);
+    // Without the buying price, only Selling price.
     show(<StockTable rows={rows} showCost={false} flat />);
-    expect(tips('buyingPrice')).toHaveLength(2);
+    expect(tips('averageBuyingPrice')).toHaveLength(2);
     expect(tips('sellingPrice')).toHaveLength(3);
   });
 

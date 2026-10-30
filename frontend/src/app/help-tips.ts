@@ -13,10 +13,6 @@ export const HELP_TIPS = {
     label: 'Average buying price',
     text: 'What one of this item has cost you on average, across all the stock you bought. The app works it out each time you buy stock.',
   },
-  buyingPrice: {
-    label: 'Buying price',
-    text: 'What one of this item has cost you on average, across all the stock you bought. The app works it out each time you buy stock.',
-  },
   sellingPrice: {
     label: 'Selling price',
     text: 'What a customer pays you for one. Change it on the item\'s page.',

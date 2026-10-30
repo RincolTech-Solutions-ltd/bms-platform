@@ -61,11 +61,26 @@ describe('the help tip', () => {
   });
 
   // JUSTIFICATION-A3: one test per finding of the #712 review (scroll, blur, live region, Enter after focus).
-  it('stays open when the page or a table scrolls, as the browser does to show a focused header', () => {
-    const tip = page();
+  it('stays open when a sideways scrolling table scrolls to show its focused header, or the screen resizes', () => {
+    render(
+      <div className="table-wrap" data-testid="wrap">
+        <table><thead><tr><th aria-label="On credit">On credit <HelpTip tip="onCredit" /></th></tr></thead></table>
+      </div>,
+    );
+    const tip = screen.getByRole('button', { name: 'More about On credit' });
     fireEvent.focus(tip);
+    fireEvent.scroll(screen.getByTestId('wrap'), { target: { scrollLeft: 200 } });
     fireEvent.scroll(window);
+    fireEvent(window, new Event('resize'));
     expect(screen.getByText(WORDS)).toBeTruthy();
+    expect(tip.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('gives the button its words as its accessible description once open', () => {
+    const tip = page();
+    expect(screen.getByRole('button', { name: 'More about On credit', description: '' })).toBe(tip);
+    fireEvent.focus(tip);
+    expect(screen.getByRole('button', { name: 'More about On credit', description: WORDS })).toBe(tip);
   });
 
   it('closes when focus moves away, so two tips never stay open together', () => {

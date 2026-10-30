@@ -122,10 +122,16 @@ describe('stock screen', () => {
     const table = renderToString(<AllBranchesTable data={data} showCost />);
     expect(table.indexOf('>Average buying price <')).toBeGreaterThan(-1);
     expect(table.indexOf('>Average buying price <')).toBeLessThan(table.indexOf('>Selling price <'));
-    expect(renderToString(<AllBranchesList data={data} showCost />)).toContain('Buying price <span class="num">UGX 3,500</span> · Selling price <span class="num">UGX 6,000</span>');
+    const cards = renderToString(<AllBranchesList data={data} showCost />);
+    expect(cards).toContain('Buying price <span class="num">UGX 3,500</span> · Selling price <span class="num">UGX 6,000</span>');
+    // Issue #707: the phone cards carry the same two tips as the table headers, once above the list.
+    expect(cards).toContain('aria-label="More about Average buying price"');
+    expect(cards).toContain('aria-label="More about Selling price"');
     const sales = renderToString(<AllBranchesList data={data} showCost={false} />);
     expect(sales).toContain('Selling price <span class="num">UGX 6,000</span>');
+    expect(sales).toContain('aria-label="More about Selling price"');
     expect(sales).not.toContain('Buying');
+    expect(sales).not.toContain('buying');
   });
 
   it('shows the category of each item in a Category column when the list is not grouped', () => {

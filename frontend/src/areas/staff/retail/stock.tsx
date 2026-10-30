@@ -57,7 +57,7 @@ function PriceLine({ cost, sell }: { cost?: number; sell?: number }) {
 function PriceTips({ cost }: { cost: boolean }) {
   return (
     <p className="hint">
-      {cost && <>{WORDS.buyingPrice} <HelpTip tip="buyingPrice" /> </>}
+      {cost && <>Average buying price <HelpTip tip="averageBuyingPrice" /> </>}
       {WORDS.sellingPrice} <HelpTip tip="sellingPrice" />
     </p>
   );
