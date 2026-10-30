@@ -207,7 +207,7 @@ class RetailNewItemPacksIT extends IntegrationTest {
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(r.getBody().toString())
                 .contains("unit_is_package")
-                .contains("A box is a package. Choose the smallest unit, like piece, then add the box below.");
+                .contains("A box is a package. Choose a single unit, like piece, then add the box below.");
         ResponseEntity<JsonNode> cartons = api.post("/products", item("Test Bulb 60W", carton, null), ADMIN);
         assertThat(cartons.getBody().toString()).contains("A carton is a package.");
         assertThat(products("Test Bulb 60W")).isZero();

@@ -21379,12 +21379,17 @@
           "active" : {
             "type" : "boolean"
           },
+          "fixed_count" : {
+            "description" : "Issue #709 (ADR-110, D98): present only for a package of a fixed size, 12 for a dozen; every pack of it holds exactly this many of the level it holds",
+            "format" : "int32",
+            "type" : "integer"
+          },
           "id" : {
             "format" : "uuid",
             "type" : "string"
           },
           "is_package" : {
-            "description" : "Issue #689 (ADR-106): the name is a package word, such as Box or Carton, so it can be a pack but never the smallest unit of a new item",
+            "description" : "Issue #689 (ADR-106): the name is a package word, such as Box or Carton, so it can be a pack but never the single unit of a new item",
             "type" : "boolean"
           },
           "name" : {
@@ -21394,6 +21399,10 @@
             "description" : "Products (active or not) that use this unit",
             "format" : "int32",
             "type" : "integer"
+          },
+          "standard" : {
+            "description" : "Issue #709 (ADR-110): one of the standard units every shop gets, under any spelling; the list shows them first, in the standard order",
+            "type" : "boolean"
           },
           "usual_pack" : {
             "$ref" : "#/components/schemas/RetailUsualPack"

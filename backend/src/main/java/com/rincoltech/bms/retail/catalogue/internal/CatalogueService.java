@@ -1070,8 +1070,7 @@ class CatalogueService {
         }
         if (unit.id().equals(product.unitId())) {
             throw ApiException.rule(
-                    "pack_unit_is_base_unit",
-                    "A pack must be a different unit from the one the product is counted in.");
+                    "pack_unit_is_base_unit", "A pack must be a different unit from the item's single unit.");
         }
         // Issue #699 (ADR-107): a pack may say what it holds, one level down, and its size is worked out from that.
         if ((holds.unitId() == null) != (holds.qty() == null)) {
@@ -1164,7 +1163,7 @@ class CatalogueService {
             if (unitId.equals(product.unitId())) {
                 throw ApiException.rule(
                         "pack_unit_is_base_unit",
-                        "This unit is now the one the item is counted in, so it cannot also be a pack.");
+                        "This unit is now the item's single unit, so it cannot also be a pack.");
             }
         }
         List<Pack> all = repo.packs(productId);
@@ -1506,7 +1505,7 @@ class CatalogueService {
                 ApiException.validation(List.of(new FieldProblem(
                         "holds_unit_id",
                         "holds_unknown",
-                        "Choose what one " + pack + " holds: the smallest unit or another package of this item.")));
+                        "Choose what one " + pack + " holds: the single unit or another package of this item.")));
         };
     }
 
