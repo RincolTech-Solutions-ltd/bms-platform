@@ -322,7 +322,10 @@ class CatalogueService {
         if (now.isEmpty()) {
             return before;
         }
-        refuseSameCategory(name, id);
+        // Only a new name is checked, so a duplicate stored before #698 can still be switched off (review of #715).
+        if (now.containsKey("name")) {
+            refuseSameCategory(name, id);
+        }
         try {
             if (repo.updateCategory(id, name, active, codePrefix, expected) == 0) {
                 throw staleCategory(id);

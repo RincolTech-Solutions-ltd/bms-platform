@@ -76,6 +76,29 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                 .list();
     }
 
+    // JUSTIFICATION-A3: the review of #715 asks for this switch-off of a stored duplicate to be proven by an IT.
+    /**
+     * Review of #715 (issue #698): a pair stored before names compared spaces inside ("Test Cables" and "test  cables") can
+     * still have one switched off, which is the only way to retire it; only a new name is checked.
+     */
+    @Test
+    void aDuplicateStoredBeforeCanStillBeSwitchedOff() {
+        UUID kept = api.category("Test Cables");
+        UUID spaced = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql(
+                        "INSERT INTO retail_categories (id, tenant_id, name, code_prefix) VALUES (?, ?, 'test  cables', 'TCX')")
+                .params(spaced, t.tenantId())
+                .update();
+        ResponseEntity<JsonNode> off = patch("/categories/" + spaced, Map.of("active", false), ADMIN);
+        assertThat(off.getStatusCode()).as("%s", off.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(off.getBody().get("active").asBoolean()).isFalse();
+        // Renaming it to the other spelling is still a duplicate.
+        ResponseEntity<JsonNode> renamed = patch("/categories/" + spaced, Map.of("name", "TEST CABLES"), ADMIN);
+        assertThat(renamed.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(renamed.getBody().get("existing_id").asString()).isEqualTo(kept.toString());
+    }
+
     @Test
     void aCategoryIsRenamedAndDeactivatedNeverDeleted() {
         UUID product = api.product("MGT-1", 1_000, 1_500);

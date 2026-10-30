@@ -396,7 +396,8 @@ class ProductImportService {
         Map<String, UUID> categoryIds = new HashMap<>(categories);
         Map<String, UUID> unitIds = new HashMap<>(units);
         for (Map.Entry<String, String> e : newCategories.entrySet()) {
-            String name = e.getValue();
+            // The name as it is stored (issue #698), so the audit says what the screens show.
+            String name = CatalogueNames.display(e.getValue());
             UUID id = UUID.randomUUID();
             repo.insertCategory(id, name, null, by);
             categoryIds.put(e.getKey(), id);
@@ -408,10 +409,18 @@ class ProductImportService {
         for (Map.Entry<String, String> e : new java.util.TreeMap<>(newUnits).entrySet()) {
             String name = e.getValue();
             repo.lockUnitKey(name);
-            UUID meanwhile =
-                    repo.sameUnit(name, null).map(CatalogueApi.Unit::id).orElse(null);
+            CatalogueApi.Unit meanwhile = repo.sameUnit(name, null).orElse(null);
+            if (meanwhile != null && !meanwhile.active()) {
+                // Issue #662: a unit added and switched off meanwhile is a change made meanwhile, as for a pack unit.
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        "import_conflict",
+                        "Import conflict",
+                        "Another change added the unit " + meanwhile.name()
+                                + ", switched off, while this file was being applied. Nothing was added. Run the check again and apply the file again.");
+            }
             if (meanwhile != null) {
-                unitIds.put(e.getKey(), meanwhile);
+                unitIds.put(e.getKey(), meanwhile.id());
                 continue;
             }
             UUID id = UUID.randomUUID();

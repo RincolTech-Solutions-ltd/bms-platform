@@ -78,10 +78,6 @@ class RetailCatalogueIT extends IntegrationTest {
     }
 
     /**
-     * Data dictionary rule 1: codes are unique ignoring case and surrounding spaces. Issue #562: an add never takes a typed
-     * code, and the database still refuses a second item holding one in other capitals.
-     */
-    /**
      * Review of #715 (issue #698): an import holding the key's lock while it adds "pcs" and a POST of "Piece" at the same
      * moment end with one unit. The import is played by an open owner transaction that does what the import does: it takes
      * the key's lock, then inserts.
@@ -107,7 +103,8 @@ class RetailCatalogueIT extends IntegrationTest {
                     CompletableFuture.supplyAsync(() -> api.post("/units", Map.of("name", "Piece"), ADMIN));
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
             while (TestDatabase.owner()
-                                    .sql("SELECT count(*) FROM pg_locks WHERE NOT granted")
+                                    // Only an advisory lock waits: the POST behind the key's lock, not another test.
+                                    .sql("SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype = 'advisory'")
                                     .query(Long.class)
                                     .single()
                             == 0
@@ -130,6 +127,10 @@ class RetailCatalogueIT extends IntegrationTest {
                 .isEqualTo(1);
     }
 
+    /**
+     * Data dictionary rule 1: codes are unique ignoring case and surrounding spaces. Issue #562: an add never takes a typed
+     * code, and the database still refuses a second item holding one in other capitals.
+     */
     @Test
     void productCodesAreUniqueIgnoringCase() {
         api.product("SW-01", 1_000, 1_200);

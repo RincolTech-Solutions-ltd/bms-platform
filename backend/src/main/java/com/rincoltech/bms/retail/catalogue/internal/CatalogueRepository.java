@@ -603,7 +603,8 @@ class CatalogueRepository {
                 .param("nameChanged", nameChanged)
                 .param("id", p.id())
                 .param("code", p.code())
-                .param("description", CatalogueNames.display(p.description()))
+                // A name is restyled only when it is changed: an edit of a price never moves it unaudited.
+                .param("description", nameChanged ? CatalogueNames.display(p.description()) : p.description())
                 .param("categoryId", p.categoryId())
                 .param("unitId", p.unitId())
                 .param("active", p.active())
