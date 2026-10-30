@@ -71,12 +71,16 @@ class ShortLinkIT extends IntegrationTest {
     }
 
     ResponseEntity<JsonNode> apply(String shortName, String town) {
+        return apply(shortName, town, Api.email("short-apply"));
+    }
+
+    ResponseEntity<JsonNode> apply(String shortName, String town, String email) {
         Map<String, Object> form = new LinkedHashMap<>();
         form.put("business_name", "Test Electricals Shop");
         form.put("contact_name", "Test Applicant 31");
         form.put("short_name", shortName);
         form.put("town", town);
-        form.put("contact_email", Api.email("short-apply"));
+        form.put("contact_email", email);
         form.put("contact_phone", "+256700000031");
         form.put("country", "UG");
         form.put("modules", List.of("retail"));
@@ -90,6 +94,30 @@ class ShortLinkIT extends IntegrationTest {
         ResponseEntity<JsonNode> r = platform.get("/api/v1/platform/short-links/" + name, null);
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.FOUND);
         return r.getHeaders().getLocation().toString();
+    }
+
+    // JUSTIFICATION-A3: review item 3 needs confirmed applications in this test; OnboardingIT's helpers are instance
+    // methods.
+    /** Opens the newest confirmation link sent to the address: the application's email is confirmed. */
+    void confirm(String email) {
+        String link = TestDatabase.owner()
+                .sql("SELECT params->>'link' FROM notification_outbox WHERE template_key = 'onboarding.verify_email'"
+                        + " AND recipient = ? ORDER BY created_at DESC, id DESC LIMIT 1")
+                .param(email)
+                .query(String.class)
+                .single();
+        Map<String, String> body = Map.of("token", link.substring(link.indexOf("#token=") + 7));
+        ResponseEntity<JsonNode> verified = platform.call(
+                HttpMethod.POST, "/api/v1/platform/sign-up/verify", body, null, Map.of("X-Forwarded-For", ip));
+        assertThat(verified.getStatusCode()).as("%s", verified.getBody()).isEqualTo(HttpStatus.OK);
+    }
+
+    static String shortNameOf(String email) {
+        return TestDatabase.owner()
+                .sql("SELECT coalesce(short_name, '') FROM onboarding_applications WHERE contact_email = ?")
+                .param(email)
+                .query(String.class)
+                .single();
     }
 
     ResponseEntity<JsonNode> change(Api on, Session who, String name) {
@@ -113,15 +141,41 @@ class ShortLinkIT extends IntegrationTest {
         assertThat(refused.getBody().get("code").asString()).isEqualTo("short_name_taken");
         assertThat(refused.getBody().get("suggestions").get(0).asString()).endsWith("-kampala");
 
-        // First to apply keeps it: an open application holds its name against the next applicant.
+        // An unconfirmed application holds nothing, so a throwaway address cannot squat a name; the first to confirm
+        // keeps it, and the next applicant is refused whatever email they give.
         String mine = fresh("tmine");
-        assertThat(apply(mine, null).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        String email = Api.email("short-mine");
+        String rival = Api.email("short-rival");
+        assertThat(apply(mine, null, email).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(apply(mine, null, rival).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(check(mine, "Test Electricals Shop", null)
+                        .getBody()
+                        .get("available")
+                        .asBoolean())
+                .isTrue();
+        confirm(email);
         assertThat(check(mine, "Test Electricals Shop", null)
                         .getBody()
                         .get("problem")
                         .asString())
                 .isEqualTo("taken");
         assertThat(apply(mine, null).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(apply(mine, null, email).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        // The rival confirms second: its application loses the name, and the operator chooses its slug at Activate.
+        confirm(rival);
+        assertThat(shortNameOf(email)).isEqualTo(mine);
+        assertThat(shortNameOf(rival)).isEmpty();
+    }
+
+    /** A repeat from a mailbox whose email is not confirmed changes the name its application asks for. */
+    @Test
+    void aRepeatBeforeTheConfirmationChangesTheName() {
+        String again = Api.email("short-again");
+        String first = fresh("tfirst");
+        String second = fresh("tsecond");
+        assertThat(apply(first, null, again).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(apply(second, null, again).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(shortNameOf(again)).isEqualTo(second);
 
         JsonNode free = check(fresh("tfree"), "Test Electricals Shop", null).getBody();
         assertThat(free.get("available").asBoolean()).isTrue();
@@ -190,6 +244,11 @@ class ShortLinkIT extends IntegrationTest {
         String newHost = "https://" + renamed + "-bms-staging.rincoltech.test/";
         assertThat(follow(old)).isEqualTo(newHost);
         assertThat(follow(renamed)).isEqualTo(newHost);
+        // The old address answers where the business went, so a bookmark or an installed app follows it.
+        ResponseEntity<JsonNode> oldHost = api.get("/api/v1/branding", null);
+        assertThat(oldHost.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(oldHost.getHeaders().getFirst("Bms-Moved-To"))
+                .isEqualTo("https://" + renamed + "-bms-staging.rincoltech.test");
         // The hold: forwards 90 days, held 180 days after the change.
         Map<String, Object> hold =
                 TestDatabase.owner().sql("""
@@ -221,6 +280,8 @@ class ShortLinkIT extends IntegrationTest {
                 .param(old)
                 .update();
         assertThat(follow(old)).endsWith("/link-not-found?name=" + old);
+        assertThat(api.get("/api/v1/branding", null).getHeaders().getFirst("Bms-Moved-To"))
+                .isNull();
         assertThat(change(otherApi, otherSession, old).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
 
         // After 180 days the name is free again.

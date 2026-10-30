@@ -6,6 +6,7 @@ import com.rincoltech.bms.core.tenancy.PlatformHost;
 import com.rincoltech.bms.core.tenancy.PolicyChangeGuard;
 import com.rincoltech.bms.core.tenancy.ShortNames;
 import com.rincoltech.bms.core.tenancy.ShortNames.Check;
+import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import io.swagger.v3.oas.annotations.Operation;
@@ -21,7 +22,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,6 +56,7 @@ class ShortLinkController {
     private final AuditLog audit;
     private final JdbcClient jdbc;
     private final BusinessClock clock;
+    private final boolean changeEnabled;
 
     ShortLinkController(
             ShortNames names,
@@ -60,7 +65,9 @@ class ShortLinkController {
             @Lazy PolicyChangeGuard guard,
             AuditLog audit,
             JdbcClient jdbc,
-            BusinessClock clock) {
+            BusinessClock clock,
+            @Value("${bms.tenancy.short-name-change:false}") boolean changeEnabled) {
+        this.changeEnabled = changeEnabled;
         this.names = names;
         this.tenant = tenant;
         this.hosts = hosts;
@@ -85,7 +92,12 @@ class ShortLinkController {
             String signInUrl,
 
             @Schema(description = "Old names that still forward here, newest first")
-            List<Forwarding> forwarding) {}
+            List<Forwarding> forwarding,
+
+            @Schema(
+                    description =
+                            "Whether the short name can be changed here (BMS_SHORT_NAME_CHANGE): a change moves the app's address, so it is off where new tenant hosts need a DNS record by hand")
+            boolean canChange) {}
 
     @Schema(name = "ShortLinkForwarding")
     record Forwarding(String shortName, String link, Instant forwardsUntil) {}
@@ -135,6 +147,13 @@ class ShortLinkController {
             operationId = "changeShortName")
     @Transactional
     public ShortLink change(@Valid @RequestBody ChangeRequest request) {
+        if (!changeEnabled) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "short_name_change_unavailable",
+                    "Not available here yet",
+                    "Changing the short name is not available yet. Ask Rincol Tech to change it for you.");
+        }
         guard.requireOwner("change the short name");
         CurrentTenant.Profile profile = tenant.profile();
         String name = ShortNames.normalise(request.shortName());
@@ -149,15 +168,21 @@ class ShortLinkController {
             throw ShortNames.taken("short_name", name, names.suggestions(name, profile.name(), null, profile.id()));
         }
         Instant now = clock.now();
-        String old = jdbc.sql("SELECT tenant_short_name_change(?, ?, ?, ?, ?)")
-                .params(
-                        profile.id(),
-                        name,
-                        Timestamp.from(now),
-                        Timestamp.from(now.plus(FORWARDS_FOR)),
-                        Timestamp.from(now.plus(HELD_FOR)))
-                .query(String.class)
-                .single();
+        String old;
+        try {
+            old = jdbc.sql("SELECT tenant_short_name_change(?, ?, ?, ?, ?)")
+                    .params(
+                            profile.id(),
+                            name,
+                            Timestamp.from(now),
+                            Timestamp.from(now.plus(FORWARDS_FOR)),
+                            Timestamp.from(now.plus(HELD_FOR)))
+                    .query(String.class)
+                    .single();
+        } catch (DataIntegrityViolationException e) {
+            // A business created with the name between the check and here (tenants_slug_key): the same 409.
+            throw ShortNames.taken("short_name", name, List.of());
+        }
         Map<String, Object> before = new LinkedHashMap<>();
         before.put("short_name", old);
         Map<String, Object> after = new LinkedHashMap<>();
@@ -177,7 +202,8 @@ class ShortLinkController {
                         rs.getTimestamp("forwards_until").toInstant()))
                 .list();
         String link = names.link(slug);
-        return new ShortLink(slug, link, "https://" + link, hosts.tenantOrigin(slug) + "/sign-in", forwarding);
+        return new ShortLink(
+                slug, link, "https://" + link, hosts.tenantOrigin(slug) + "/sign-in", forwarding, changeEnabled);
     }
 
     static CheckResponse response(Check check) {

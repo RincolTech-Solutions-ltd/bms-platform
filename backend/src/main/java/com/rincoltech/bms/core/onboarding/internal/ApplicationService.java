@@ -175,12 +175,8 @@ class ApplicationService {
             if (capReached(now)) {
                 return;
             }
-            String holder = jdbc.sql("SELECT onboarding_short_name_taken(?, ?, ?)")
-                    .params(shortName, email, Timestamp.from(now))
-                    .query(String.class)
-                    .optional()
-                    .orElse(null);
-            if (holder != null) {
+            // Who holds a name never depends on the email given, so a 409 says nothing about who applied (FR-ONB-03).
+            if (shortNames.takenBy(shortName, null, null, true).isPresent()) {
                 throw ShortNames.taken(
                         "short_name", shortName, shortNames.suggestions(shortName, businessName, request.town(), null));
             }
@@ -242,6 +238,11 @@ class ApplicationService {
                     return;
                 }
                 reference = open.get().reference();
+                // ADR-108: a repeat's short name replaces the open application's own while its email is unconfirmed.
+                jdbc.sql("SELECT onboarding_application_set_short_name(?, ?, ?)")
+                        .params(email, shortName, Timestamp.from(now))
+                        .query()
+                        .singleRow();
                 // ADR-069 decision 13: a returning applicant's code goes on the open application while it has no
                 // referrer
                 // and is still submitted; the database leaves an earlier code, or one in review, as it is.
@@ -486,17 +487,10 @@ class ApplicationService {
             throw notVerified();
         }
         String slug = request.slug().trim().toLowerCase(Locale.ROOT);
-        // ADR-108: a name another open application chose, or one held after a change, is not this one's to take.
-        if (shortNames
-                .takenBy(slug, null, id, false)
-                .filter(by -> !by.equals("tenant"))
-                .isPresent()) {
-            throw new ApiException(
-                    HttpStatus.CONFLICT,
-                    "duplicate_slug",
-                    "Slug taken",
-                    "Another application chose this short name, or it is held after a change.");
-        }
+        // ADR-108 decision 4: the slug is the short link, so its shape and the reserved list apply here too.
+        ShortNames.refusal(slug).ifPresent(refused -> {
+            throw ShortNames.refused("slug", refused);
+        });
         AtomicReference<Instant> activatedAt = new AtomicReference<>();
         Optional<Created> created = provisioning.create(
                 new NewTenant(
@@ -525,6 +519,18 @@ class ApplicationService {
                         }
                         if (!"verified".equals(lock.status())) {
                             throw notVerified();
+                        }
+                        // ADR-108: claimed under the name's lock, in the creating transaction; a name another
+                        // confirmed application chose, or one held after a change, is not this one's to take.
+                        if (shortNames
+                                .takenBy(slug, null, id, true)
+                                .filter(by -> !by.equals("tenant"))
+                                .isPresent()) {
+                            throw new ApiException(
+                                    HttpStatus.CONFLICT,
+                                    "duplicate_slug",
+                                    "Slug taken",
+                                    "Another application chose this short name, or it is held after a change.");
                         }
                         return true;
                     }
@@ -684,7 +690,8 @@ class ApplicationService {
 
     /**
      * A free slug from the business name (FR-TEN-02): lower case letters, digits and hyphens, at
-     * most 40 characters, with a number appended when taken; null when none of the first ten is free.
+     * most 17 characters so that with a number appended when taken it is still a short name of 20 at most (ADR-108);
+     * null when none of the first ten is free.
      */
     String suggestSlug(String businessName) {
         String base = Normalizer.normalize(businessName, Normalizer.Form.NFD)
@@ -692,8 +699,8 @@ class ApplicationService {
                 .toLowerCase(Locale.ROOT)
                 .replaceAll("[^a-z0-9]+", "-")
                 .replaceAll("(^-+|-+$)", "");
-        if (base.length() > 40) {
-            base = base.substring(0, 40).replaceAll("-+$", "");
+        if (base.length() > 17) {
+            base = base.substring(0, 17).replaceAll("-+$", "");
         }
         if (base.length() < 3) {
             base = (base + "-shop").replaceAll("^-+", "");

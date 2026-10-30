@@ -126,8 +126,9 @@ export function ShortLinkCard({ isOwner, canManage, load = fetchShortLink }: { i
           </a>
         </div>
       )}
-      {canManage && !isOwner && <Hint full>Only the owner of the business changes the short name.</Hint>}
-      {isOwner && !editing && !moved && (
+      {canManage && !isOwner && link.can_change && <Hint full>Only the owner of the business changes the short name.</Hint>}
+      {canManage && !link.can_change && <Hint full>To change your short name, ask Rincol Tech. It also changes your app's address.</Hint>}
+      {isOwner && link.can_change && !editing && !moved && (
         <button type="button" onClick={() => { setEditing(true); setName(link.short_name ?? ''); setProblem(undefined); setOffers([]); }}>
           Change short name
         </button>
@@ -141,6 +142,7 @@ export function ShortLinkCard({ isOwner, canManage, load = fetchShortLink }: { i
             onChange={(v) => { setName(v); setProblem(undefined); setOffers([]); }}
             check={checkName}
             current={link.short_name}
+            host={(link.link ?? '').split('/')[0] || undefined}
             problem={problem}
             suggestions={offers}
           />

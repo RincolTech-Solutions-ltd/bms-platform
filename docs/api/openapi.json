@@ -23066,6 +23066,10 @@
       },
       "ShortLink" : {
         "properties" : {
+          "can_change" : {
+            "description" : "Whether the short name can be changed here (BMS_SHORT_NAME_CHANGE): a change moves the app's address, so it is off where new tenant hosts need a DNS record by hand",
+            "type" : "boolean"
+          },
           "forwarding" : {
             "description" : "Old names that still forward here, newest first",
             "items" : {

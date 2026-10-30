@@ -787,7 +787,10 @@ class OnboardingIT extends IntegrationTest {
                 .query(String.class)
                 .single();
         assertThat(detail.get("suggested_slug").asString()).isEqualTo(chosen);
-        assertThat(service.suggestSlug("Test Duplicate " + suffix + " Ltd")).startsWith("test-duplicate-" + suffix);
+        // From the business name, cut to 17 so a numbered one stays a short name of 20 at most.
+        assertThat(service.suggestSlug("Test Duplicate " + suffix + " Ltd"))
+                .startsWith("test-duplicate-" + suffix.substring(0, 2))
+                .hasSizeLessThanOrEqualTo(20);
     }
 
     // ---- Activate -------------------------------------------------------------------------------
@@ -982,6 +985,15 @@ class OnboardingIT extends IntegrationTest {
                         .get("code")
                         .asString())
                 .isEqualTo("validation_failed");
+        // ADR-108: the website's paths and names longer than a short name are refused too.
+        for (String slug : List.of("pricing", "help", "a-slug-of-21-letters1")) {
+            assertThat(activate(id, activation(slug, "trial", null))
+                            .getBody()
+                            .get("code")
+                            .asString())
+                    .as(slug)
+                    .isEqualTo("validation_failed");
+        }
         Map<String, Object> unknownModule = activation(slug(), "trial", null);
         unknownModule.put("modules", List.of("hospitality"));
         assertThat(activate(id, unknownModule).getBody().get("code").asString()).isEqualTo("validation_failed");

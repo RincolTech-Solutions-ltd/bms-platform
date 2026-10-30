@@ -216,7 +216,8 @@ class PlatformService implements TenantProvisioning {
     public Optional<Created> create(NewTenant request, Steps steps) {
         UUID operator = CurrentPrincipal.require().userId();
         String slug = request.slug() == null ? "" : request.slug().trim();
-        if (!hosts.isValidSlug(slug)) {
+        // ADR-108 decision 4: the website's paths are refused as slugs too, since the slug is the shop's short link.
+        if (!hosts.isValidSlug(slug) || ShortNames.RESERVED.contains(slug)) {
             throw ApiException.validation(List.of(new FieldProblem(
                     "slug", "invalid_slug", "3 to 63 lower case letters, digits or hyphens; not a reserved name.")));
         }
@@ -253,9 +254,10 @@ class PlatformService implements TenantProvisioning {
                         throw new ApiException(
                                 HttpStatus.CONFLICT, "duplicate_slug", "Slug taken", "Another tenant has this slug.");
                     }
-                    // ADR-108: a name a business gave up is held, so its old link never lands in a new business.
+                    // ADR-108: claimed under the name's lock; a name a business gave up is held, so its old link
+                    // never lands in a new business.
                     if (shortNames
-                            .takenBy(slug, null, null, false)
+                            .takenBy(slug, null, null, true)
                             .filter("held"::equals)
                             .isPresent()) {
                         throw new ApiException(
@@ -329,8 +331,10 @@ class PlatformService implements TenantProvisioning {
     @Override
     @Transactional(readOnly = true)
     public boolean slugAvailable(String slug) {
+        // ADR-108: a suggestion is a short name, so its shape and the reserved list apply.
         return slug != null
                 && hosts.isValidSlug(slug)
+                && ShortNames.refusal(slug).isEmpty()
                 && jdbc.sql("SELECT count(*) FROM platform_list_tenants() WHERE slug = ?")
                                 .param(slug)
                                 .query(Long.class)

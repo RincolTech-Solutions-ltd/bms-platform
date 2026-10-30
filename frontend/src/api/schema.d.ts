@@ -19267,6 +19267,8 @@ export interface components {
             photos?: boolean;
         };
         ShortLink: {
+            /** @description Whether the short name can be changed here (BMS_SHORT_NAME_CHANGE): a change moves the app's address, so it is off where new tenant hosts need a DNS record by hand */
+            can_change?: boolean;
             /** @description Old names that still forward here, newest first */
             forwarding?: components["schemas"]["ShortLinkForwarding"][];
             /** @description As a person types it, for example rincoltech.com/modern */

@@ -17,6 +17,7 @@ vi.mock('../../api/client', async (original) => {
 const { ShortNameField, shortNameFrom, shortNameProblem, cleanShortName } = await import('../onboarding/short-name');
 const { linkNameFrom } = await import('../onboarding/link-not-found');
 const { ShortLinkCard } = await import('./short-link');
+const { followMove } = await import('../../api/client');
 
 afterEach(() => {
   cleanup();
@@ -34,7 +35,29 @@ const link = {
   url: 'https://rincoltech.com/testduka',
   sign_in_url: 'https://testduka-bms.rincoltech.test/sign-in',
   forwarding: [{ short_name: 'oldduka', link: 'rincoltech.com/oldduka', forwards_until: '2027-01-28T10:00:00Z' }],
+  can_change: true,
 };
+
+// JUSTIFICATION-A3: review of #713 item 2 adds two behaviours (the moved header, the switch) that each need a test.
+describe('an old address of a business that changed its short name', () => {
+  it('sends the app to the new address on the same page, and only to a plain origin', () => {
+    const go = vi.fn();
+    const moved = (to: string, status = 404) => new Response('{}', { status, headers: { 'Bms-Moved-To': to } });
+    window.history.replaceState(null, '', '/staff/retail/sale?x=1');
+    expect(followMove(moved('https://newduka-bms.rincoltech.test'), go)).toBe(true);
+    expect(go).toHaveBeenCalledWith('https://newduka-bms.rincoltech.test/staff/retail/sale?x=1');
+    expect(followMove(moved('javascript:alert(1)'), go)).toBe(false);
+    expect(followMove(moved('https://evil.test/path'), go)).toBe(false);
+    expect(followMove(moved('https://newduka-bms.rincoltech.test', 200), go)).toBe(false);
+    expect(go).toHaveBeenCalledTimes(1);
+  });
+
+  it('says to ask Rincol Tech where the short name cannot be changed yet', async () => {
+    render(wrap(<ShortLinkCard isOwner={true} canManage={true} load={async () => ({ ...link, can_change: false })} />));
+    expect(await screen.findByText(/To change your short name, ask Rincol Tech/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Change short name' })).toBeNull();
+  });
+});
 
 describe('the short name rules in the form', () => {
   it('takes 3 to 20 letters and digits with single inner hyphens, and starts from the business name', () => {

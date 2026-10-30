@@ -212,12 +212,24 @@ its new host needs the same record (ADR-108).
 Every shop's short link `rincoltech.com/<short name>` is served by one Cloudflare single redirect, never one per shop
 (ADR-108). On the rincoltech.com zone, Rules, Redirect Rules, Single Redirects:
 
-1. Fetch what to type: `curl -s https://<BMS_PLATFORM_HOST>/api/v1/platform/short-link-rule`.
-2. Create (or edit) one rule named "Shop short links". When incoming requests match: Custom filter expression, paste
+1. Have the website's owner confirm `reserved` from the endpoint below lists every page of rincoltech.com; add any missing
+   path to `ShortNames.RESERVED` and release first.
+2. **Gate: every hand-made link reaches its shop through the app.** For each of `/modern`, `/hats`, `/dodos` and `/yasad`,
+   `curl -sI https://<BMS_PLATFORM_HOST>/api/v1/platform/short-links/<name>` must answer 302 to that shop's own host. When
+   it lands on `/link-not-found` (the shop's slug is another name), change that shop's short name to the printed one
+   first (its Owner in Business set-up where `BMS_SHORT_NAME_CHANGE` is on; on the production VM see below): until then a
+   stranger could claim the printed name at sign-up. Do not go on while any of the four fails.
+3. Fetch what to type: `curl -s https://<BMS_PLATFORM_HOST>/api/v1/platform/short-link-rule`.
+4. Create (or edit) one rule named "Shop short links". When incoming requests match: Custom filter expression, paste
    `expression`. Then: Dynamic, paste `target`, status code 302, Preserve query string off.
-3. Delete the old hand-made redirects (`/modern`, `/hats`, `/dodos`, `/yasad`) once the rule is saved.
-4. Check: `curl -sI https://rincoltech.com/<a shop's short name>` answers 302 to the platform host, which answers 302 to the
+5. Delete the old hand-made redirects (`/modern`, `/hats`, `/dodos`, `/yasad`) once the rule is saved and step 2 passed.
+6. Check: `curl -sI https://rincoltech.com/<a shop's short name>` answers 302 to the platform host, which answers 302 to the
    shop; `curl -sI https://rincoltech.com/about` is the website's own page.
+
+**A shop's short name on the production VM.** `BMS_SHORT_NAME_CHANGE` is off there, because a renamed shop's new host has no
+DNS record until one is added (`tenant_slugs`). To rename on the Owner's request: add the new host's record and wait for it
+to resolve, set `BMS_SHORT_NAME_CHANGE=true` and redeploy, let the Owner make the change in Business set-up, then set it
+back to false and redeploy. Keep the old host's record for the 90 days it forwards.
 
 At go-live, edit the rule's target to the live platform host (fetch it again from the live platform host). When a page is
 added to the website, add its path to `ShortNames.RESERVED`, release, and repeat steps 1 and 2.

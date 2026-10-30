@@ -31,6 +31,7 @@ const auth: Middleware = {
   },
   // An expired access token is refreshed once and a read is retried; writes are not replayed.
   async onResponse({ request, response }) {
+    followMove(response);
     const authPath = ['/api/v1/auth/', '/api/v1/platform/auth/', '/api/v1/platform/sign-up/'].some((p) => request.url.includes(p));
     if (response.status !== 401 || authPath || request.method !== 'GET') {
       return response;
@@ -41,6 +42,17 @@ const auth: Middleware = {
     return fetch(retry);
   },
 };
+
+/**
+ * A business that changed its short name (ADR-108) moved to a new address; for 90 days its old address answers 404 with
+ * `Bms-Moved-To`, the new origin, and the app goes there on the same page. Only a plain origin is followed.
+ */
+export function followMove(response: Response, go: (url: string) => void = (url) => window.location.replace(url)): boolean {
+  const moved = response.status === 404 ? response.headers.get('Bms-Moved-To') : null;
+  if (!moved || !/^https?:\/\/[a-z0-9.-]+(:\d{1,5})?$/.test(moved) || typeof window === 'undefined') return false;
+  go(moved + window.location.pathname + window.location.search + window.location.hash);
+  return true;
+}
 
 /** How long a request with an Idempotency-Key waits before its one retry; tests shorten it. */
 export const updatingRetry = { delayMs: 4000 };

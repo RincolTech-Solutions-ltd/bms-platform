@@ -7,6 +7,8 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.Set;
@@ -28,6 +30,8 @@ import tools.jackson.databind.ObjectMapper;
 class TenantResolutionFilter extends OncePerRequestFilter {
 
     static final String TENANT_HEADER = "X-Tenant";
+    /** On the 404 of an old short name that still forwards: the business's new origin (ADR-108). */
+    static final String MOVED_HEADER = "Bms-Moved-To";
     /** Request attribute holding the resolved tenant's status: {@code active}, {@code suspended}, {@code ended} (ADR-073) or {@code closing} (ADR-090). */
     static final String STATUS_ATTRIBUTE = "bms.tenant.status";
 
@@ -77,6 +81,9 @@ class TenantResolutionFilter extends OncePerRequestFilter {
             return;
         }
         if (tenant.isEmpty()) {
+            // ADR-108: a name its business gave up still forwards for 90 days; the app follows the header to the new
+            // address, so a bookmark or an installed app on the old host finds the shop.
+            slugFrom(request).flatMap(this::movedTo).ifPresent(origin -> response.setHeader(MOVED_HEADER, origin));
             Problems.write(
                     response,
                     mapper,
@@ -118,6 +125,16 @@ class TenantResolutionFilter extends OncePerRequestFilter {
                 .param(slug)
                 .query((rs, n) -> new Resolved(rs.getObject("id", UUID.class), rs.getString("status")))
                 .optional();
+    }
+
+    /** The origin of the business a forwarding old name now belongs to, from the host pattern, never the request. */
+    private Optional<String> movedTo(String slug) {
+        return jdbc.sql("SELECT slug FROM short_link_target(?, ?) WHERE forwarded")
+                .params(slug, Timestamp.from(Instant.now()))
+                .query(String.class)
+                .optional()
+                .map(moved -> properties.linkScheme() + "://" + hosts.hostFor(moved)
+                        + (properties.linkPort() == null ? "" : ":" + properties.linkPort()));
     }
 
     private record Resolved(UUID id, String status) {}

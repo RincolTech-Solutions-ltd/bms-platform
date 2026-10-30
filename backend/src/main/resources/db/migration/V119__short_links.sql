@@ -1,21 +1,24 @@
 -- V119: every shop has a short link, rincoltech.com/<short name> (issue #708, ADR-108). V118 is the pack ladder (#710).
 --
 -- The short name is the tenant's slug. This adds what the slug needs to be chosen at sign-up and changed later:
---   * onboarding_applications.short_name, the name an applicant chose; an open application holds it.
+--   * onboarding_applications.short_name, the name an applicant chose; an open application holds it once its email is
+--     confirmed, so throwaway addresses cannot squat names (review of #713, item 3).
 --   * platform_short_name_holds, a platform table: a name a shop gave up, which forwards to that shop for 90 days and is then held
 --     90 more, so an old link never lands in a different shop. No privilege for bms_app; definer functions only (ADR-016).
 --   * the definer functions that check a name, claim it under a lock, change a shop's slug and find where a link goes.
 -- Times come from the caller (the kernel clock), never from now().
 --
--- Additive: a nullable column, a new table and new functions. onboarding_application_create gains p_short_name, so the
--- 15 argument version of V23 is dropped and the 16 argument one created with the same body plus the column; nothing else
--- calls it (checked against every migration up to V118).
+-- Expand only: a nullable column, a new table and new functions. onboarding_application_create gains p_short_name as a
+-- 16 argument overload beside the 15 argument one of V23, which stays for the server still running during a deploy and
+-- goes in a later migration. onboarding_application_by_link (V23, never replaced since) is replaced with the same
+-- signature and its V23 body plus the short name check at the confirmation.
 
 ALTER TABLE onboarding_applications ADD COLUMN short_name varchar(63);
 
--- First to apply keeps it: one open application per short name.
+-- First to confirm keeps it: one confirmed open application per short name. The confirmation clears a name another
+-- business, hold or confirmed application already has, under the name's lock, so this index is a backstop.
 CREATE UNIQUE INDEX onboarding_applications_one_open_per_short_name ON onboarding_applications (short_name)
-    WHERE status IN ('submitted', 'needs_info', 'verified') AND short_name IS NOT NULL;
+    WHERE status IN ('submitted', 'needs_info', 'verified') AND email_verified_at IS NOT NULL AND short_name IS NOT NULL;
 
 CREATE TABLE platform_short_name_holds (
     name           varchar(63) NOT NULL PRIMARY KEY,
@@ -33,7 +36,7 @@ ALTER TABLE platform_short_name_holds FORCE ROW LEVEL SECURITY;
 REVOKE ALL ON platform_short_name_holds FROM PUBLIC;
 
 -- Who has the name: 'tenant' (a business has it as its slug), 'held' (given up, still held), 'applied' (an open
--- application chose it), or null when it is free. p_tenant leaves out that business's own slug and holds (a shop may take
+-- application whose email is confirmed chose it), or null when it is free. p_tenant leaves out that business's own slug and holds (a shop may take
 -- its own old name back); p_application leaves out that application. With p_lock the caller's transaction first takes the
 -- lock on the name, which every claim takes, so two claims of one name never both see it free.
 CREATE FUNCTION short_name_taken(p_name text, p_now timestamptz, p_tenant uuid, p_application uuid, p_lock boolean)
@@ -52,26 +55,55 @@ BEGIN
     END IF;
     IF EXISTS (SELECT 1 FROM onboarding_applications a
                 WHERE a.short_name = p_name AND a.status IN ('submitted', 'needs_info', 'verified')
-                  AND a.id IS DISTINCT FROM p_application) THEN
+                  AND a.email_verified_at IS NOT NULL AND a.id IS DISTINCT FROM p_application) THEN
         RETURN 'applied';
     END IF;
     RETURN NULL;
 END
 $$;
 
--- The sign-up's claim: as short_name_taken with the lock, leaving out the open application of the same mailbox, so a
--- repeated sign-up does not find its own name taken.
-CREATE FUNCTION onboarding_short_name_taken(p_name text, p_email text, p_now timestamptz)
-RETURNS text
+-- A repeated sign-up from the same mailbox: the short name it chose replaces the one of its open application while that
+-- email is not confirmed yet (a confirmed application keeps the name it holds).
+CREATE FUNCTION onboarding_application_set_short_name(p_email text, p_short_name text, p_now timestamptz)
+RETURNS void
 LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-    SELECT short_name_taken(p_name, p_now, NULL,
-               (SELECT a.id FROM onboarding_applications a
-                 WHERE a.contact_email_key = onboarding_email_key(p_email)
-                   AND a.status IN ('submitted', 'needs_info', 'verified')),
-               true)
+    UPDATE onboarding_applications SET short_name = p_short_name, updated_at = p_now
+     WHERE contact_email_key = onboarding_email_key(p_email) AND status IN ('submitted', 'needs_info', 'verified')
+       AND email_verified_at IS NULL
 $$;
 
-DROP FUNCTION onboarding_application_create(uuid, text, text, text, text, text, text, text[], text, text, text, text, text, timestamptz, timestamptz);
+-- V23's body, plus: at the first confirmation the short name is claimed under its lock; when a business, a hold or another
+-- confirmed application has it by then, it is cleared and the operator chooses the slug at Activate.
+CREATE OR REPLACE FUNCTION onboarding_application_by_link(p_link_hash text, p_now timestamptz, p_verify boolean)
+RETURNS TABLE (
+    id uuid, reference text, status text, business_name text, modules text[], term text, way_in text,
+    operator_note text, reject_reason text, link_token_hash text, email_verified boolean,
+    newly_verified boolean, created_at timestamptz)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+    v onboarding_applications%ROWTYPE;
+    v_new boolean := false;
+BEGIN
+    SELECT * INTO v FROM onboarding_applications a
+     WHERE a.link_token_hash = p_link_hash AND a.link_token_expires_at > p_now
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
+    IF p_verify AND v.email_verified_at IS NULL AND v.status IN ('submitted', 'needs_info') THEN
+        IF v.short_name IS NOT NULL AND short_name_taken(v.short_name, p_now, NULL, v.id, true) IS NOT NULL THEN
+            v.short_name := NULL;
+        END IF;
+        UPDATE onboarding_applications SET email_verified_at = p_now, updated_at = p_now, short_name = v.short_name
+         WHERE onboarding_applications.id = v.id;
+        v.email_verified_at := p_now;
+        v_new := true;
+    END IF;
+    RETURN QUERY SELECT v.id, v.reference::text, v.status, v.business_name::text, v.modules, v.term, v.way_in,
+                        v.operator_note::text, v.reject_reason::text, v.link_token_hash::text,
+                        v.email_verified_at IS NOT NULL, v_new, v.created_at;
+END
+$$;
 
 -- Returns true when the application was created, false when the email already has an open one (V23, plus the short name).
 CREATE FUNCTION onboarding_application_create(
@@ -154,14 +186,14 @@ END
 $$;
 
 REVOKE ALL ON FUNCTION short_name_taken(text, timestamptz, uuid, uuid, boolean) FROM PUBLIC;
-REVOKE ALL ON FUNCTION onboarding_short_name_taken(text, text, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION onboarding_application_set_short_name(text, text, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION onboarding_application_create(uuid, text, text, text, text, text, text, text[], text, text, text, text, text, timestamptz, timestamptz, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION onboarding_application_short_name(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION short_link_target(text, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION tenant_short_name_forwards(uuid, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION tenant_short_name_change(uuid, text, timestamptz, timestamptz, timestamptz) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION short_name_taken(text, timestamptz, uuid, uuid, boolean) TO bms_app;
-GRANT EXECUTE ON FUNCTION onboarding_short_name_taken(text, text, timestamptz) TO bms_app;
+GRANT EXECUTE ON FUNCTION onboarding_application_set_short_name(text, text, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION onboarding_application_create(uuid, text, text, text, text, text, text, text[], text, text, text, text, text, timestamptz, timestamptz, text) TO bms_app;
 GRANT EXECUTE ON FUNCTION onboarding_application_short_name(uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION short_link_target(text, timestamptz) TO bms_app;

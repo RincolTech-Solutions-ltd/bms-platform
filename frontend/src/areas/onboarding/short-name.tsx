@@ -60,9 +60,11 @@ export interface ShortNameFieldProps {
   suggestions?: string[];
   /** The name the shop has now (Settings): not checked, nothing said. */
   current?: string;
+  /** The short link host the server gave (Settings); the sign-up uses the usual one. */
+  host?: string;
 }
 
-export function ShortNameField({ id, label, value, onChange, check, problem, suggestions, current }: ShortNameFieldProps) {
+export function ShortNameField({ id, label, value, onChange, check, problem, suggestions, current, host = SHORT_LINK_HOST }: ShortNameFieldProps) {
   const [answer, setAnswer] = useState<ShortNameCheck | null>(null);
   const asked = useRef(0);
   // The latest check without making a new function from the parent ask again.
@@ -94,7 +96,7 @@ export function ShortNameField({ id, label, value, onChange, check, problem, sug
     <div className="stack">
       <label htmlFor={id}>{label}</label>
       <div className="cluster">
-        <span aria-hidden="true">{SHORT_LINK_HOST}/</span>
+        <span aria-hidden="true">{host}/</span>
         <input
           id={id}
           value={value}
@@ -110,7 +112,7 @@ export function ShortNameField({ id, label, value, onChange, check, problem, sug
         />
       </div>
       <span id={`${id}-hint`} className="hint">
-        Your customers type {SHORT_LINK_HOST}/{value.trim() || 'yourshop'} to reach your shop. 3 to 20 letters and digits.
+        Your customers type {host}/{value.trim() || 'yourshop'} to reach your shop. 3 to 20 letters and digits.
       </span>
       {shown && (
         <span id={`${id}-problem`} className="field-error">
@@ -119,7 +121,7 @@ export function ShortNameField({ id, label, value, onChange, check, problem, sug
       )}
       {free && (
         <span role="status" className="hint">
-          {SHORT_LINK_HOST}/{free} is free.
+          {host}/{free} is free.
         </span>
       )}
       {offers.length > 0 && (
