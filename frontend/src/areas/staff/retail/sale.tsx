@@ -43,7 +43,7 @@ import { ScreenLink, addOn } from './screen-link';
 import { CustomerPicker } from './customer-picker';
 import { dropWords } from './stocktake';
 import { useBranchHold } from '../branch-picker';
-import { SELL_COUNT_NOTE, unfinishedKey } from './unfinished-counts';
+import { SELL_COUNT_NOTE, savingCount, unfinishedKey } from './unfinished-counts';
 import { icons } from '../../../components/icons';
 
 // Record a sale (FR-RET-04, FR-RET-05). One idempotency key per draft, kept with the draft in this
@@ -926,7 +926,8 @@ const refused = (e: unknown): e is RetailError => e instanceof RetailError && e.
 
 /** Issue #656: commits a count Sell made; one the server already took (409 stocktake_committed, its first answer lost) stands. */
 async function commitMade(id: string, acknowledged?: string[]) {
-  await (acknowledged ? retail.commitStocktake(id, acknowledged) : retail.commitStocktake(id)).catch((e: unknown) => {
+  // Issue #730: marked as saving, so it is never offered to be thrown away meanwhile.
+  await savingCount(id, acknowledged ? retail.commitStocktake(id, acknowledged) : retail.commitStocktake(id)).catch((e: unknown) => {
     if (!(e instanceof RetailError && e.code === 'stocktake_committed')) throw e;
   });
 }
