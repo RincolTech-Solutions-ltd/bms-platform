@@ -357,7 +357,9 @@ function CountSheet({ branchId, item, from, reopen }: { branchId: string; item?:
       setKeptLine(false);
       const n = st.lines?.length ?? 0;
       show(`Stock updated for ${n} ${n === 1 ? 'item' : 'items'}`, 'success');
+      // Everything retail is read again, the list of counts not saved among it (issue #728).
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
+      void queryClient.invalidateQueries({ queryKey: unfinishedKey(branchId) });
     },
   });
   const units = new Map((stock.data ?? []).map((r) => [r.product_id ?? '', r.unit]));
@@ -557,7 +559,7 @@ function CountSheet({ branchId, item, from, reopen }: { branchId: string; item?:
       </div>
       <ScreenToast.Provider value={show}>
         <NewItemHere id="count-new" counting askCost={profit} qtyLabel="How many you counted" onAdded={addNew}
-          at={{ value: branchId, lead: 'Counted at', places: (me.branches ?? []).filter((b) => mayCountAt(me, b.id)) }} />
+          at={{ value: branchId, lead: 'Counted at', places: (me.branches ?? []).filter((b) => b.stocks_goods !== false && mayCountAt(me, b.id)) }} />
       </ScreenToast.Provider>
       <ScanBar id="count-scan" branchId={branchId} onFound={scanAdd} autoFocus toasts />
       {stock.isPending && <SkeletonList label="Loading stock" />}

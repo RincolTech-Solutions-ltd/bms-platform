@@ -14975,6 +14975,8 @@ export interface components {
              * @description How many items it counted
              */
             lines?: number;
+            /** @description The count's note; Sell's count of a new item carries its own (review of #729) */
+            note?: string;
         };
         RetailOrder: {
             /** Format: uuid */

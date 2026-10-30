@@ -380,6 +380,19 @@ describe('a count that wipes or halves stock', () => {
     expect(discardStocktake).not.toHaveBeenCalled();
   });
 
+  it('lets a save on its way complete, with no discard sent', async () => {
+    await review();
+    let answer: (v: unknown) => void = () => undefined;
+    commitStocktake.mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+    for (const name of ['Yes, Test Plug Four Way is right', 'Yes, Test Plug Two Way is right']) fireEvent.click(screen.getByRole('checkbox', { name }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: 'Back to the count' })).toBeNull();
+    answer({ ...draft, status: 'committed', lines: draft.lines.map((l) => ({ ...l, committed_variance_qty: l.variance_qty })) });
+    expect(await screen.findByRole('heading', { name: /^Stock updated/ })).toBeTruthy();
+    expect(discardStocktake).not.toHaveBeenCalled();
+  });
+
   // Issue #728: Save, the word a shop worker knows, and a tip that nothing changes before it; Review the difference stays before it.
   it('names the last step Save the count, with a tip that stock changes only then', async () => {
     await review();

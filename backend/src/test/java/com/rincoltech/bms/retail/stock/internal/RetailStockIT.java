@@ -355,6 +355,19 @@ class RetailStockIT extends IntegrationTest {
         assertThat(open.getBody().valueStream().map(n -> n.get("id").asString()).toList())
                 .containsExactly(second.toString(), first.toString());
         assertThat(open.getBody().get(0).get("lines").asInt()).isEqualTo(1);
+        // Review of #729: Sell's count of a new item says where it came from, by its note.
+        api.post(
+                "/stocktakes",
+                Map.of(
+                        "branch_id",
+                        t.headOffice(),
+                        "note",
+                        "Counted when the item was added on Sell",
+                        "lines",
+                        List.of(Map.of("product_id", product, "counted_qty", "6"))),
+                ADMIN);
+        assertThat(api.get(path, ADMIN).getBody().get(0).get("note").asString())
+                .isEqualTo("Counted when the item was added on Sell");
         assertThat(open.getBody().get(0).get("branch_id").asString())
                 .isEqualTo(t.headOffice().toString());
 

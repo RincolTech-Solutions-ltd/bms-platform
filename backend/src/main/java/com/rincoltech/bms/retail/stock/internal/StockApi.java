@@ -404,7 +404,10 @@ final class StockApi {
             UUID createdBy,
 
             @Schema(description = "How many items it counted")
-            int lines) {}
+            int lines,
+
+            @Schema(description = "The count's note; Sell's count of a new item carries its own (review of #729)")
+            String note) {}
 
     @Schema(name = "RetailStocktake")
     record Stocktake(

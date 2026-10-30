@@ -43,6 +43,7 @@ import { ScreenLink, addOn } from './screen-link';
 import { CustomerPicker } from './customer-picker';
 import { dropWords } from './stocktake';
 import { useBranchHold } from '../branch-picker';
+import { SELL_COUNT_NOTE, unfinishedKey } from './unfinished-counts';
 import { icons } from '../../../components/icons';
 
 // Record a sale (FR-RET-04, FR-RET-05). One idempotency key per draft, kept with the draft in this
@@ -396,7 +397,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       // A draft whose commit was lost is sent again, never made twice.
       let draftId = drafts.current.get(id);
       if (draftId === undefined) {
-        draftId = (await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: id, counted_qty: qtyString(h.counted) }], note: 'Counted when the item was added on Sell' })).id ?? '';
+        draftId = (await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: id, counted_qty: qtyString(h.counted) }], note: SELL_COUNT_NOTE })).id ?? '';
         keepCount(draftId, true);
         drafts.current.set(id, draftId);
       }
@@ -414,10 +415,12 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     // Committed after the sale was cleared or the screen closed: the count stands, the item goes on no sale.
     if (stale()) throw new StaleCount();
   };
+  // Issue #728, review of #729: a count saved or thrown away here leaves the list of counts not saved.
+  const countsChanged = () => void queryClient.invalidateQueries({ queryKey: unfinishedKey(branchId) });
   const countCommitted = (h: HeldCount) => {
     drop(h.product.id);
-    // Issue #728: the saved count leaves the list of counts not saved.
-    for (const key of [['retail', 'products'], ['retail', 'stocked-branches'], ['retail', 'stocktakes']]) void queryClient.invalidateQueries({ queryKey: key });
+    countsChanged();
+    for (const key of [['retail', 'products'], ['retail', 'stocked-branches']]) void queryClient.invalidateQueries({ queryKey: key });
     add({ ...h.product, qty: qtyString(h.counted) });
   };
   const countFailed = (h: HeldCount, e: unknown) => {
@@ -427,7 +430,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     if (refused(e)) {
       const draftId = drafts.current.get(h.product.id ?? '');
       drafts.current.delete(h.product.id ?? '');
-      if (draftId !== undefined) discardCount(draftId);
+      if (draftId !== undefined) discardCount(draftId, countsChanged);
       drop(h.product.id);
       const words = typeof e.problem?.detail === 'string' ? e.problem.detail : e.message;
       show(`${words} ${name} is not on the sale: use ${WORDS.countStock}, then sell it.`, 'error');
@@ -441,7 +444,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         return;
       }
       drafts.current.delete(h.product.id ?? '');
-      discardCount(draftId);
+      discardCount(draftId, countsChanged);
     }
     drop(h.product.id);
     show(`${h.product.description ?? 'The item'} is saved. It is not on the sale: count it on ${WORDS.countStock}, then sell it.`, 'info');
@@ -468,7 +471,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
           setHeld((l) => [...l.filter((x) => x.product.id !== product.id), { product, counted, expected }]);
           asks = true;
         } else {
-          const count = await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: product.id ?? '', counted_qty: qtyString(counted) }], note: 'Counted when the item was added on Sell' });
+          const count = await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: product.id ?? '', counted_qty: qtyString(counted) }], note: SELL_COUNT_NOTE });
           const draftId = count.id ?? '';
           keepCount(draftId, true);
           // Stock that arrived between the read and the count (or a balance the search did not return): never sent to be
@@ -928,15 +931,18 @@ async function commitMade(id: string, acknowledged?: string[]) {
   });
 }
 
-/** Issue #656: ends a draft Sell made; one already committed or discarded, or not found, is forgotten too. */
-function discardCount(id: string) {
+/**
+ * Issue #656: ends a draft Sell made; one already committed or discarded, or not found, is forgotten too. `onDone` is told once
+ * the server answers, so the list of counts not saved is read again (review of #729).
+ */
+function discardCount(id: string, onDone?: () => void) {
   keepCount(id, true);
   retail.discardStocktake(id).then(
     () => keepCount(id, false),
     (e: unknown) => {
       if (e instanceof RetailError && (e.status === 404 || e.status === 409)) keepCount(id, false);
     },
-  );
+  ).finally(onDone);
 }
 
 /**

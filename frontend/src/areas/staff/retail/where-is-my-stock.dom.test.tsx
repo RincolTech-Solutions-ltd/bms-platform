@@ -158,6 +158,17 @@ describe('counts left unsaved (issue #728)', () => {
     await waitFor(() => expect(screen.queryByTestId('unfinished-st-9')).toBeNull());
   });
 
+  // Review of #729: a count Sell started says so, and throwing it away says the sale cannot save it any more.
+  it('says when a count came from a sale, and what throwing it away does to the sale', async () => {
+    const sale = { ...open, id: 'st-sale', note: 'Counted when the item was added on Sell' };
+    expect(unfinishedWords(sale, owner.user_id, 'Africa/Kampala', Date.parse('2026-11-12T10:00:00Z'))).toBe('You started a count here from a sale on 29 Oct and did not finish it.');
+    unfinishedStocktakes.mockResolvedValue([sale]);
+    show(<UnfinishedCounts branchId={shop} />);
+    const card = await screen.findByTestId('unfinished-st-sale');
+    fireEvent.click(within(card).getByRole('button', { name: 'Throw it away' }));
+    expect(card.textContent).toContain('the sale that started it cannot save it any more');
+  });
+
   it('on My stock, Finish it opens Count stock with the count', async () => {
     unfinishedStocktakes.mockResolvedValue([open]);
     show(<UnfinishedCounts branchId={shop} />);

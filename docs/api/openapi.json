@@ -14628,6 +14628,10 @@
             "description" : "How many items it counted",
             "format" : "int32",
             "type" : "integer"
+          },
+          "note" : {
+            "description" : "The count's note; Sell's count of a new item carries its own (review of #729)",
+            "type" : "string"
           }
         }
       },

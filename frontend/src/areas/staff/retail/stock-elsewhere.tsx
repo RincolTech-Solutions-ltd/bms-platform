@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import type { Me } from '../../../api/client';
-import { retail, type AllBranchesStock, type Product } from '../../../api/retail';
+import { retail, type AllBranchesStock, type Product, type StockLevel, type StockRow } from '../../../api/retail';
 import { branchLabel } from '../../../auth/branch';
 import { useStaff } from '../context';
 import { milliOf, showQty } from './maths';
@@ -35,6 +35,28 @@ export function stockElsewhere(data: AllBranchesStock | undefined, here: string,
 
 /** True for a quantity of exactly none, the one "0 here" speaks of; a negative balance keeps its own flag. */
 export const noneHere = (qty: string | undefined) => milliOf(qty ?? '0') === 0;
+
+// JUSTIFICATION-A3: the review of #729 asks for one shared key and the note in the grouped view; one hook serves both lists.
+/** The filters of the all-branches stock list. */
+export type AllBranchesFilter = { query: string; categoryId: string; negativeOnly: boolean; level: StockLevel | ''; includeClosed: boolean; includeInactive: boolean };
+
+/** The one cache key of the all-branches stock list (review of #729): All branches, its groups and the "0 here" note share it. */
+export const allBranchesKey = (f: AllBranchesFilter) => ['retail', 'stock', 'all-branches', f.query, f.categoryId, f.negativeOnly, f.level, f.includeClosed, f.includeInactive];
+
+/**
+ * The other shop holding each of `rows` with none here, for My stock's flat list and its grouped view. The all-branches list is
+ * read, every page of it, only when a row is at 0 and this person may read stock at another shop.
+ */
+export function useStockElsewhere(branchId: string | null, rows: StockRow[] | undefined, f: Pick<AllBranchesFilter, 'query' | 'categoryId' | 'includeInactive'>, enabled = true) {
+  const { me } = useStaff();
+  const shops = otherStockShops(me, branchId);
+  const read = useQuery({
+    queryKey: allBranchesKey({ ...f, negativeOnly: false, level: '', includeClosed: false }),
+    queryFn: ({ signal }) => retail.listStockAllBranches({ query: f.query, categoryId: f.categoryId, includeInactive: f.includeInactive, signal }),
+    enabled: enabled && branchId !== null && shops.length > 0 && (rows ?? []).some((r) => noneHere(r.qty)),
+  });
+  return branchId === null ? undefined : stockElsewhere(read.data, branchId, shops);
+}
 
 /** "0 here. 456 at Test Store" and Switch to Test Store, which makes that shop the one in use. */
 export function ElsewhereNote({ at, id }: { at: Elsewhere; id: string }) {

@@ -1812,7 +1812,8 @@ were lost; he also left two counts at Review the difference, because the last st
 - **My stock and the item's page** say where an item is when the shop in use has none of it and another shop has some:
   "0 here. 456 at Test Store", with **Switch to Test Store**, which changes the shop in use with the house toast (issue #680).
   The other shops are those the all-branches stock list returns (cut by the server to the shops the person may read stock at)
-  that are in the person's own branch list; the one holding the most is named. A negative balance keeps its own flag.
+  that are in the person's own branch list; the one holding the most is named. A negative balance keeps its own flag. The flat
+  list and the grouped view both say it, and both read the all-branches list under one cache key (`allBranchesKey`).
 - **Quick add** shows the shop beside How many: "Adds to Test Store", with **Change** (the phone's own picker in one tap,
   `AddsTo` in `branch-picker.tsx`, laid out as the shop under the title). Once added the line names it: "Added 70 pieces at Test
   Store. Test bulb is saved." **Add an item** inside Count stock ("Counted at") and Sell ("Adds to", no Change: a sale keeps its
@@ -1821,8 +1822,10 @@ were lost; he also left two counts at Review the difference, because the last st
   and Count stock, to someone who may count at the shop: "You started a count here on 29 Oct and did not finish it" (today, or
   a weekday within the week; "Someone" for another person's count), with **Finish it** (its review again, ready to save; from My
   stock it opens `/staff/retail/stocktake?finish=<id>`) and **Throw it away**, which asks "Throw this count away? Your stock stays
-  as it is." with **Yes, throw it away** and **Keep it**. **Back to the count** throws away the review it leaves, so going back
-  and reviewing again never leaves a count behind; a count opened with Finish it stays as it was.
+  as it is." with **Yes, throw it away** and **Keep it**. A count Sell started of a new item says "from a sale", and throwing it
+  away adds that the sale cannot save it any more. **Back to the count** throws away the review it leaves, so going back and
+  reviewing again never leaves a count behind; a count opened with Finish it stays as it was. While Save the count is on its way
+  Back to the count is not shown, and after a save whose answer failed it leaves the count, since the save may have landed.
 - **Plain words.** The last step of a count, on Count stock and on Sell's count of a new item, is **Save the count**, with a help
   tip: "Your stock changes only when you save the count." Review the difference stays the step before. The tour
   `page-stocktake` is version 8.

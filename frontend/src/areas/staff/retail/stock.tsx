@@ -24,7 +24,7 @@ import { ScreenLink } from './screen-link';
 import { Hint } from '../../../app/ui/Hint';
 import { HelpTip } from '../../../app/ui/HelpTip';
 import { WORDS } from '../../../app/glossary';
-import { ElsewhereNote, noneHere, otherStockShops, stockElsewhere, type Elsewhere } from './stock-elsewhere';
+import { ElsewhereNote, allBranchesKey, noneHere, useStockElsewhere, type Elsewhere } from './stock-elsewhere';
 import { UnfinishedCounts } from './unfinished-counts';
 
 // Stock per branch (FR-RET-03): balances with a negative flag and a search box. The cost column
@@ -292,17 +292,19 @@ function StockRows({ sel, filter, all, branchId }: { sel: ListSelection; filter:
     enabled: branch !== null,
   });
   const many = useQuery({
-    queryKey: ['retail', 'stock', 'all-branches', filter.query, categoryId, filter.negativeOnly, level ?? '', filter.includeClosed, filter.includeInactive],
+    queryKey: allBranchesKey({ query: filter.query, categoryId, negativeOnly: filter.negativeOnly, level: level ?? '', includeClosed: filter.includeClosed, includeInactive: filter.includeInactive }),
     queryFn: ({ signal }) => retail.listStockAllBranches({ query: filter.query, categoryId, negativeOnly: filter.negativeOnly, level, includeClosed: filter.includeClosed, includeInactive: filter.includeInactive, signal }),
     enabled: branch === null,
   });
   const result = branch === null ? many : one;
+  // Review of #729: the grouped view says where an item at 0 here is, as the flat list does.
+  const elsewhere = useStockElsewhere(branch, one.data, { query: filter.query, categoryId, includeInactive: filter.includeInactive });
   const key = [branch ?? 'all', filter.query, categoryId, filter.negativeOnly, level ?? ''].join('|');
   return (
     <>
       {result.isPending && <SkeletonList label="Loading stock" />}
       <Problem error={result.error} />
-      {branch !== null && one.data && <StockTable rows={one.data} showCost={canProfit} flat filterKey={key} correctable={mayCorrect(me, branch) ? { branchId: branch } : undefined} />}
+      {branch !== null && one.data && <StockTable rows={one.data} showCost={canProfit} flat filterKey={key} correctable={mayCorrect(me, branch) ? { branchId: branch } : undefined} elsewhere={elsewhere} />}
       {branch === null && many.data && (phone ? <AllBranchesList data={many.data} showCost={canProfit} flat filterKey={key} /> : <AllBranchesTable data={many.data} showCost={canProfit} flat filterKey={key} />)}
     </>
   );
@@ -333,20 +335,13 @@ export function StockPage() {
     placeholderData: keepPreviousData,
   });
   const many = useQuery({
-    queryKey: ['retail', 'stock', 'all-branches', query, categoryId, negativeOnly, level, showClosed, showInactive],
+    queryKey: allBranchesKey({ query, categoryId, negativeOnly, level, includeClosed: showClosed, includeInactive: showInactive }),
     queryFn: ({ signal }) => retail.listStockAllBranches({ query, categoryId, negativeOnly, level: level || undefined, includeClosed: showClosed, includeInactive: showInactive, signal }),
     enabled: all && !grouped && chipReady,
     placeholderData: keepPreviousData,
   });
-  // Issue #728: with an item at 0 here, the other shops this person may read are asked what they hold, in the cache key of the
-  // all-branches list with no filter, so switching to All branches reads it from there.
-  const shops = otherStockShops(me, branchId);
-  const elsewhereRead = useQuery({
-    queryKey: ['retail', 'stock', 'all-branches', query, categoryId, false, '', false, showInactive],
-    queryFn: ({ signal }) => retail.listStockAllBranches({ query, categoryId, includeInactive: showInactive, signal }),
-    enabled: !all && branchId !== null && !grouped && chipReady && shops.length > 0 && (one.data ?? []).some((r) => noneHere(r.qty)),
-  });
-  const elsewhere = branchId === null ? undefined : stockElsewhere(elsewhereRead.data, branchId, shops);
+  // Issue #728: with an item at 0 here, the other shops this person may read are asked what they hold.
+  const elsewhere = useStockElsewhere(all ? null : branchId, one.data, { query, categoryId, includeInactive: showInactive }, !grouped && chipReady);
   const result = all ? many : one;
   const finding = result.isPlaceholderData || (result.isFetching && result.fetchStatus !== 'idle');
   // A known barcode shows its own item alone, not the items whose code only begins the same.
