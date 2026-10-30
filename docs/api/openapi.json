@@ -2384,6 +2384,15 @@
             "minLength" : 0,
             "type" : "string"
           },
+          "packs" : {
+            "description" : "Issue #697 (ADR-111): packages every size and colour gets, made in its transaction, checked as on POST /products; all are saved with the item or none is",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailPackRequest"
+            },
+            "maxItems" : 10,
+            "minItems" : 0,
+            "type" : "array"
+          },
           "sell_minor" : {
             "description" : "Each variant's selling price unless it has its own",
             "format" : "int64",
@@ -21832,6 +21841,27 @@
           }
         }
       },
+      "RetailVariantOptions" : {
+        "description" : "Issue #697: the sizes and colours the business has used",
+        "properties" : {
+          "colours" : {
+            "description" : "Colours of the business's items, each once ignoring case, most used first",
+            "items" : {
+              "description" : "Colours of the business's items, each once ignoring case, most used first",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "sizes" : {
+            "description" : "Sizes of the business's items, each once ignoring case, most used first",
+            "items" : {
+              "description" : "Sizes of the business's items, each once ignoring case, most used first",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        }
+      },
       "RetailVoidRequest" : {
         "properties" : {
           "reason" : {
@@ -39347,6 +39377,25 @@
           }
         },
         "summary" : "Make items kept apart (one per size) the sizes and colours of one new item; each keeps its stock and history (issue #384)",
+        "tags" : [ "retail-catalogue" ]
+      }
+    },
+    "/api/v1/retail/product-families/options" : {
+      "get" : {
+        "operationId" : "listRetailVariantOptions",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailVariantOptions"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The sizes and colours the business's items have, offered again on Add an item (issue #697)",
         "tags" : [ "retail-catalogue" ]
       }
     },

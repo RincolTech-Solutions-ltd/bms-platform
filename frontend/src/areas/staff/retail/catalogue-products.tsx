@@ -14,7 +14,9 @@ import { NameHintsPanel, useNameHints } from './name-hints';
 import { ItemCodeLine } from './new-item-here';
 import { PackEditor, PacksTurnOn } from './catalogue-packs';
 import { BarcodeEditor } from './catalogue-barcodes';
-import { MakeFamilyPanel, SIZES_JOIN, SIZES_NEW, VariantNote } from './catalogue-variants';
+import { MakeFamilyPanel, SIZES_JOIN, SIZES_NEW, VariantNote, linesOf, usePreview } from './catalogue-variants';
+import { NO_SIZES, NewItemSizes, SizePrices, chosenOptions, inSizes, sizesProblem, type SizesAnswer } from './new-item-sizes';
+import { planVariants } from '../../../api/retail-variants';
 import { ItemPhoto, PhotoChoice, PhotoEditor, sendNewPhoto, shownPhoto } from './item-photo';
 import { ItemAddedNext, NextSteps } from './next-steps';
 import { ScreenLink } from './screen-link';
@@ -162,9 +164,15 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
   const sellPieces = answeredPieces(packages, units.data ?? [], smallest, 'sell', sellAt);
   const costOf = buyPieces === null ? costMinor : piecePriceOf(buyAt, buyPieces);
   const sellOf = sellPieces === null ? sellMinor : piecePriceOf(sellAt, sellPieces);
-  const complete = description.trim() !== '' && categoryId !== '' && unitProblem === null && (product ? true : sellOf !== null && (!profit || costOf !== null))
-    && (!variant || size.trim() !== '' || colour.trim() !== '') && packages.every((r) => rowProblem(r, packages) === null);
   const chosen = fixed ?? (categories.data ?? []).find((c) => c.id === categoryId);
+  // Issue #697 (ADR-111): sizes, colours or types in the same form; each starts at the item's prices and is one product (ADR-051).
+  const [sizing, setSizing] = useState<SizesAnswer>(NO_SIZES);
+  const options = chosenOptions(sizing);
+  const preview = usePreview(planVariants({ baseCode: chosen ? chosen.next_code ?? `${chosen.code_prefix ?? ''}-0001` : 'ITEM', ...options, costMinor: profit ? (costOf ?? 0) : 0, sellMinor: sellOf ?? 0 }));
+  const sized = !product && canManage && sizing.answer === 'yes';
+  const sizeProblem = sized ? sizesProblem(preview.rows) : null;
+  const complete = description.trim() !== '' && categoryId !== '' && unitProblem === null && (product ? true : sellOf !== null && (!profit || costOf !== null))
+    && (!variant || size.trim() !== '' || colour.trim() !== '') && packages.every((r) => rowProblem(r, packages) === null) && sizeProblem === null;
   const movedFrom = product && !variant && categoryId !== product.category_id ? product.category : null;
   // The name is kept once per unit (issue #352): a close name is a warning, the same name is refused, an administrator may add it anyway.
   const [similar, setSimilar] = useState<SimilarProduct[] | null>(null);
@@ -176,21 +184,27 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
   // A second press before the first request has started must not send another: the ref answers at once, the mutation state a render later.
   const sending = useRef(false);
   const save = useMutation({
-    mutationFn: async (duplicateReason?: string): Promise<{ saved: Product; photoNote: string | null }> => {
+    mutationFn: async (duplicateReason?: string): Promise<{ saved: Product; made?: number; photoNote: string | null }> => {
       const reason = duplicateReason ? { duplicate_reason: duplicateReason } : {};
       if (product && variant) return { saved: await retail.updateProduct(product.id ?? '', product.version ?? 1, { active, variant_size: size.trim(), variant_colour: colour.trim() }), photoNote: null };
       if (product) return { saved: await retail.updateProduct(product.id ?? '', product.version ?? 1, { description: description.trim(), category_id: categoryId, unit_id: unitId, active, ...reason }), photoNote: null };
       // Issue #699: the level it is usually sold at keeps the price typed for one of it; Buy stock opens on the usual buying level.
       const priced = packages.map((r) => (sellPieces !== null && r.key === sellAt.key ? { ...r, priceMinor: sellAt.priceMinor } : r));
       const packs = packages.length > 0 ? { packs: packsToSend(priced, mayPrice, buyPieces !== null ? buyAt.key : null) } : {};
+      if (sized) {
+        // Issue #697: one save makes the item, each size as its product and each size's packages; all of it or none.
+        const family = await retail.createFamily({ name: description.trim(), category_id: categoryId, unit_id: unitId, sell_minor: sellOf ?? 0, cost_minor: profit ? (costOf ?? 0) : 0, variants: linesOf(preview.rows, profit), ...reason, ...packs });
+        const first = (family.variants ?? [])[0] ?? {};
+        return { saved: { ...first, description: family.name }, made: family.variants?.length ?? 0, photoNote: await sendNewPhoto(family.id ?? '', photo, (id, f) => retail.setFamilyPhoto(id, f)) };
+      }
       const saved = await retail.createProduct({ description: description.trim(), category_id: categoryId, unit_id: unitId, sell_minor: sellOf ?? 0, cost_minor: profit ? (costOf ?? 0) : 0, ...reason, ...packs });
       // The item stands whatever happens to its photo: a failed upload only adds a line to the message.
       return { saved, photoNote: await sendNewPhoto(saved.id ?? '', photo) };
     },
-    onSuccess: ({ saved, photoNote }) => {
+    onSuccess: ({ saved, made, photoNote }) => {
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       if (product) onSaved(`Saved the changes to "${saved.description}".`);
-      else onSaved(`${saved.description} added as ${saved.code}${withPackages(packages, units.data ?? [])}.${photoNote ? ` ${photoNote}` : ''}`, saved);
+      else onSaved(`${saved.description} added ${made !== undefined ? inSizes(made, options.sizes.length, options.colours.length) : `as ${saved.code}`}${withPackages(packages, units.data ?? [])}.${photoNote ? ` ${photoNote}` : ''}`, saved);
     },
     onError: (error) => {
       const found = existingOf(error);
@@ -293,6 +307,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
             error={unitProblem}
             showError={showErrors || (smallest?.is_package === true && !product)}
           />
+          {!product && canManage && <NewItemSizes value={sizing} onChange={(next) => { setSizing(next); save.reset(); }} />}
           {packsOn && (
             <NewItemPackages
               smallest={smallest}
@@ -364,6 +379,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
             />
           </UsualLevel>
           {!profit && <p className="hint">The buying price is set when you buy stock.</p>}
+          {sized && <SizePrices rows={preview.rows} profit={profit} onEdit={preview.edit} codesKnown={chosen !== undefined} problem={sizeProblem} showErrors={showErrors} />}
           <PhotoChoice id="item-photo" file={photo} onChange={setPhoto} />
           <PacksTurnOn />
         </>

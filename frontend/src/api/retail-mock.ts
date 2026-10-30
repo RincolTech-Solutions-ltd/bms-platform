@@ -703,6 +703,22 @@ export function createMockRetail(): RetailApi {
         return familyOf(id);
       }),
 
+    // Issue #697: the sizes and colours the items have, each once ignoring case, the most used first, as the server answers.
+    variantOptions: () =>
+      run(() => {
+        const used = (pick: (p: MockProduct) => string | undefined) => {
+          const counts = new Map<string, { value: string; n: number }>();
+          for (const p of products.values()) {
+            const v = pick(p)?.trim();
+            if (!v) continue;
+            const c = counts.get(v.toLowerCase()) ?? { value: v, n: 0 };
+            counts.set(v.toLowerCase(), { ...c, n: c.n + 1 });
+          }
+          return [...counts.values()].sort((a, b) => b.n - a.n).map((c) => c.value);
+        };
+        return { sizes: used((p) => p.size), colours: used((p) => p.colour) };
+      }),
+
     updateFamily: (id, version, body) =>
       run(() => {
         const f = families.get(id) ?? refuse(404, 'not_found', 'That could not be found.');
