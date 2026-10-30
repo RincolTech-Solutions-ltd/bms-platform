@@ -104,7 +104,7 @@ export function NewItemSizes({ value, onChange }: { value: SizesAnswer; onChange
           <p className="field-label" id={`${id}-kind`}>What kind of size?</p>
           <div className="option-chips" role="group" aria-labelledby={`${id}-kind`}>
             {SIZE_KINDS.map((k) => (
-              <button key={k.key} type="button" className="find-chip" aria-pressed={value.kind === k.key} onClick={() => set({ kind: k.key })}>{k.label}</button>
+              <button key={k.key} type="button" className="find-chip" aria-pressed={value.kind === k.key} onClick={() => set({ kind: k.key, sizes: value.sizes.filter((s) => !(kind?.sizes as readonly string[] | undefined)?.some((r) => r.toLowerCase() === s.toLowerCase())) })}>{k.label}</button>
             ))}
           </div>
           {kind && kind.sizes.length > 0 && <Chips label="Sizes" values={kind.sizes} chosen={value.sizes} onTap={(s) => set({ sizes: toggled(value.sizes, s) })} />}
@@ -144,7 +144,7 @@ export function SizePrices({ rows, profit, onEdit, codesKnown, problem, showErro
   return (
     <section aria-label="Price of each size" data-testid="size-prices">
       <h3>{rows.length === 0 ? 'Price of each size' : `Price of each of the ${rows.length}`}</h3>
-      <Hint full>Each one starts at the prices above. Change one if it costs more or less.</Hint>
+      <Hint full>Each one starts at the prices above. Change one if it costs more or less. A package of a dearer size costs more in the same way.</Hint>
       {rows.length > 0 && <VariantPreview rows={rows} profit={profit} onEdit={onEdit} codesKnown={codesKnown} />}
       {problem && (showErrors || rows.length > 0) && <p role="note" className="alert alert-warning">{problem}</p>}
     </section>

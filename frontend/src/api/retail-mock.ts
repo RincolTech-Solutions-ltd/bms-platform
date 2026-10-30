@@ -717,10 +717,11 @@ export function createMockRetail(): RetailApi {
           for (const p of products.values()) {
             const v = pick(p)?.trim();
             if (!v) continue;
+            // The spelling first in order, as the server's min() keeps it.
             const c = counts.get(v.toLowerCase()) ?? { value: v, n: 0 };
-            counts.set(v.toLowerCase(), { ...c, n: c.n + 1 });
+            counts.set(v.toLowerCase(), { value: v < c.value ? v : c.value, n: c.n + 1 });
           }
-          return [...counts.values()].sort((a, b) => b.n - a.n).map((c) => c.value);
+          return [...counts.values()].sort((a, b) => b.n - a.n || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0)).slice(0, 60).map((c) => c.value);
         };
         return { sizes: used((p) => p.size), colours: used((p) => p.colour) };
       }),

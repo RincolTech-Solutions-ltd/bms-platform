@@ -105,7 +105,8 @@ class FamilyService {
         UUID by = CurrentPrincipal.require().userId();
         repo.insertFamily(id, name, base, r.categoryId(), r.unitId(), by, duplicateReason);
         for (UUID variant : insertVariants(id, name, r.categoryId(), r.unitId(), plan, by, true)) {
-            catalogue.makePacks(repo.find(variant).orElseThrow(), packs, purposes, by);
+            Product size = repo.find(variant).orElseThrow();
+            catalogue.makePacks(size, pricedFor(packs, size.sellMinor(), r.sellMinor()), purposes, by);
         }
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("name", name);
@@ -121,6 +122,33 @@ class FamilyService {
         }
         audit.record(AuditLog.Entry.created("retail.product_family.created", FAMILY, id, null, after));
         return get(id);
+    }
+
+    // JUSTIFICATION-A3: the review of #723 asks each size's package price in proportion; nothing scales one yet.
+    /**
+     * Review of #723: a package's selling price is given for the item's price, so a size priced differently gets it in the
+     * same proportion, rounded half up (a carton at 96,000 for 4,000 a piece is 144,000 for the size at 6,000). A pack with
+     * no price, or an item priced at 0, keeps what was sent.
+     */
+    static List<PackRequest> pricedFor(List<PackRequest> packs, long sizeSell, long itemSell) {
+        if (sizeSell == itemSell || itemSell <= 0) {
+            return packs;
+        }
+        return packs.stream()
+                .map(k -> k.sellMinor() == null
+                        ? k
+                        : new PackRequest(
+                                k.unitId(),
+                                k.factor(),
+                                k.purpose(),
+                                BigDecimal.valueOf(k.sellMinor())
+                                        .multiply(BigDecimal.valueOf(sizeSell))
+                                        .divide(BigDecimal.valueOf(itemSell), 0, RoundingMode.HALF_UP)
+                                        .longValueExact(),
+                                k.holdsUnitId(),
+                                k.holdsQty(),
+                                k.usualBuy()))
+                .toList();
     }
 
     /** Issue #697 (ADR-111): the sizes and colours the shop typed before, offered again beside the app's ready lists. */

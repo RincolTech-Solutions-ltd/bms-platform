@@ -35,7 +35,10 @@ sizes and colors and packages."
    body of ADR-106's `packs`, at most ten). The packs are checked once before anything is written and then made on every
    size in the same transaction through the same `createPack`; a refusal names its row (`pack_index`, `packs[i].factor`) and
    saves nothing: no item, no size, no pack, no audit entry. The checks and the making are `CatalogueService.checkPacks` and
-   `makePacks`, shared with `POST /retail/products`, so the two routes cannot drift.
+   `makePacks`, shared with `POST /retail/products`, so the two routes cannot drift. A package's selling price is given for
+   the item's price; a size priced differently gets it in the same proportion, rounded half up (review of #723: a carton at
+   96,000 for 4,000 a piece is 144,000 for the size at 6,000 and 72,000 for the size at 3,000), so no size's carton sells
+   below its own pieces' worth.
 6. **The words.** The toast says "Longtime bulb added in 3 sizes, with carton of 24" (or "in 2 colours", "in 6 sizes and
    colours"). A HelpTip explains the question. The photo, if any, goes to the item.
 

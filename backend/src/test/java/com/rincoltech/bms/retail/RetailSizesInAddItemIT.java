@@ -113,6 +113,26 @@ class RetailSizesInAddItemIT extends IntegrationTest {
         assertThat(count(packsAudited)).isEqualTo(3);
     }
 
+    // JUSTIFICATION-A3: the review of #723 asks a test of a priced carton on sizes priced differently.
+    /** Review of #723: a carton priced for the item's 4,000 a piece is priced for each size in the same proportion. */
+    @Test
+    void aPricedCartonFollowsEachSizesOwnPrice() {
+        Map<String, Object> carton24 = pack(carton, "24");
+        carton24.put("sell_minor", 96_000);
+        ResponseEntity<JsonNode> r =
+                api.post("/product-families", item("Test Longlife Bulb", List.of(carton24)), ADMIN);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        List<Long> cartons = new ArrayList<>();
+        for (JsonNode v : r.getBody().get("variants")) {
+            JsonNode packs = api.get("/products/" + v.get("id").asString() + "/units", ADMIN)
+                    .getBody()
+                    .get("items");
+            cartons.add(packs.get(0).get("sell_minor").asLong());
+        }
+        // 40W at 3,000, 60W at the item's 4,000 and 100W at 6,000 a piece.
+        assertThat(cartons).containsExactly(72_000L, 96_000L, 144_000L);
+    }
+
     @Test
     void aRefusedPackageSavesNothing() {
         // The item's own unit as its package is refused only once the sizes are written: all of it goes back.
@@ -169,5 +189,17 @@ class RetailSizesInAddItemIT extends IntegrationTest {
         assertThat(colours).hasSize(2);
         assertThat(colours.getFirst()).isEqualToIgnoringCase("Sky Blue");
         assertThat(colours).contains("Red");
+
+        // Review of #723: another shop's sizes and colours are never offered here.
+        TestDatabase.Fixture other = TestDatabase.tenant("retail-sizes-in-add-item-other", false, true);
+        RetailTestSupport elsewhere = new RetailTestSupport(http, other);
+        shirt.put("category_id", elsewhere.category("Test Clothing"));
+        shirt.put("unit_id", elsewhere.unit("Piece"));
+        shirt.put("sizes", List.of("Size 99"));
+        shirt.put("colours", List.of("Test Ochre"));
+        assertThat(elsewhere.post("/product-families", shirt, ADMIN).getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        JsonNode mine = api.get("/product-families/options", ADMIN).getBody();
+        assertThat(mine.toString()).doesNotContain("Size 99").doesNotContain("Test Ochre");
     }
 }
