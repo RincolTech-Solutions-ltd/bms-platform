@@ -1,0 +1,38 @@
+{
+  "about": "Issue #698, ADR-109: the cases CatalogueNames must give. units: names that are the same unit share a key. display: an item or category name as typed, and as it is stored (D86 = A). Fabricated names only.",
+  "units": [
+    { "names": ["Piece", "piece", "PIECE", " Pieces ", "pc", "PC.", "pcs", "Pce"], "key": "piece" },
+    { "names": ["Kg", "kg", "KGS", "kilo", "Kilos", "Kilogram", "kilograms"], "key": "kilogram" },
+    { "names": ["Litre", "ltr", "Ltrs", "L", "liter", "Liters"], "key": "litre" },
+    { "names": ["Metre", "m", "mtr", "Meter", "metres"], "key": "metre" },
+    { "names": ["Carton", "ctn", "CTNS", "cartons"], "key": "carton" },
+    { "names": ["Packet", "pkt", "pkts", "Packets"], "key": "packet" },
+    { "names": ["Dozen", "dz", "Doz", "dozens"], "key": "dozen" },
+    { "names": ["Box", "bx", "Boxes", "BOX"], "key": "box" },
+    { "names": ["Tray", "trays", "TRAY"], "key": "tray" },
+    { "names": ["Bunch", "Bunches"], "key": "bunch" },
+    { "names": ["Glass", "glasses"], "key": "glass" },
+    { "names": ["Pack of 6", "pack  of 6"], "key": "pack of 6" },
+    { "names": ["Pair"], "key": "pair" },
+    { "names": ["Pack"], "key": "pack" }
+  ],
+  "display": [
+    { "typed": "longtime led bulb 60w", "stored": "Longtime Led Bulb 60W" },
+    { "typed": "longtime LED bulb 60W", "stored": "Longtime LED Bulb 60W" },
+    { "typed": "  twin   cable 2.5mm ", "stored": "Twin Cable 2.5mm" },
+    { "typed": "BULBS", "stored": "BULBS" },
+    { "typed": "bulbs", "stored": "Bulbs" },
+    { "typed": "usb-c charger", "stored": "Usb-c Charger" },
+    { "typed": "USB-C charger", "stored": "USB-C Charger" },
+    { "typed": "double socket 13a", "stored": "Double Socket 13A" },
+    { "typed": "3PIN plug", "stored": "3PIN Plug" },
+    { "typed": "box of 12 nails", "stored": "Box of 12 Nails" },
+    { "typed": "of the shelf", "stored": "Of the Shelf" },
+    { "typed": "grade a cement", "stored": "Grade A Cement" },
+    { "typed": "cable 2 x 4", "stored": "Cable 2 x 4" },
+    { "typed": "Grade A cement", "stored": "Grade A Cement" },
+    { "typed": "McCoy paint (blue)", "stored": "McCoy Paint (Blue)" },
+    { "typed": "2x4 timber", "stored": "2x4 Timber" },
+    { "typed": "General", "stored": "General" }
+  ]
+}

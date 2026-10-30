@@ -10,6 +10,7 @@ import { retail, type Unit, type UsualPackRequest } from '../../../api/retail';
 import { PURPOSES, asPurpose, factorProblem, type Purpose } from './catalogue-packs';
 import { showQty } from './maths';
 import { Problem, requireVersion } from './ui';
+import { orExistingUnit } from './units-state';
 
 // Issue #637 (ADR-100 note): the owner changes or removes a unit's usual pack on the Units page, so a size set by mistake in Set
 // up your shop does not fill in every item's pack form. Items' packs never follow. A usual pack is one level only: its smaller
@@ -126,7 +127,7 @@ export function UsualPackSheet({ unit, units, onClose, onSaved }: {
             text="No other unit for this pack to hold yet."
             add={{
               label: 'Add a new unit', name: 'Name of the new unit, such as piece', send: 'Add unit', maxLength: 30,
-              create: (name) => retail.createUnit(name),
+              create: (name) => orExistingUnit(retail.createUnit(name)),
               onAdded: (added) => {
                 setOfUnitId(added.id ?? '');
                 void queryClient.invalidateQueries({ queryKey: ['retail', 'catalogue', 'units'] });

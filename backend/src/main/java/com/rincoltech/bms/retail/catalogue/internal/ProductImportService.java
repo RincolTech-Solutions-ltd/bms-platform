@@ -8,6 +8,7 @@ import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.CsvTable;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
+import com.rincoltech.bms.retail.catalogue.CatalogueNames;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.ImportResult;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.ImportRow;
@@ -218,8 +219,9 @@ class ProductImportService {
                 continue;
             }
             String categoryKey = category.toLowerCase(Locale.ROOT);
-            String unitKey = unit.toLowerCase(Locale.ROOT);
-            String packKey = packUnit.toLowerCase(Locale.ROOT);
+            // Issue #698 (ADR-109): "pcs" in a file is the shop's Piece; two spellings in one file make one unit.
+            String unitKey = CatalogueNames.unitKey(unit);
+            String packKey = CatalogueNames.unitKey(packUnit);
             // JUSTIFICATION-A3: the two duplicate-name skips of issue #352 sit beside the existing duplicate-code
             // skips, in this loop.
             String nameKey = repo.nameKey(description.strip()) + CatalogueRepository.NAME_SEP + unitKey;
@@ -422,7 +424,7 @@ class ProductImportService {
         Map<Integer, String> made = new HashMap<>();
         for (Pending p : ordered) {
             UUID categoryId = categoryIds.get(p.category().toLowerCase(Locale.ROOT));
-            UUID unitId = unitIds.get(p.unit().toLowerCase(Locale.ROOT));
+            UUID unitId = unitIds.get(CatalogueNames.unitKey(p.unit()));
             String code = p.code() == null ? repo.nextItemCode(categoryId) : p.code();
             if (p.code() == null) {
                 made.put(p.row(), code);
@@ -463,7 +465,7 @@ class ProductImportService {
             if (p.packUnit() != null) {
                 // Issue #637: made by the one pack path of POST /products/{id}/units, its checks and its audit: for
                 // both, with no price of its own, whatever the unit's usual purpose.
-                packUnitId = unitIds.get(p.packUnit().toLowerCase(Locale.ROOT));
+                packUnitId = unitIds.get(CatalogueNames.unitKey(p.packUnit()));
                 try {
                     catalogue.createPack(
                             product,

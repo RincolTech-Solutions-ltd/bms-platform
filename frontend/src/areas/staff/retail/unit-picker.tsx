@@ -6,6 +6,7 @@ import { PickerWithAdd } from '../../../app/ui/PickerWithAdd';
 import { WORDS } from '../../../app/glossary';
 import { useStaff } from '../context';
 import { ScreenToast } from './toast';
+import { orExistingUnit, unitAddedText, type AddedUnit } from './units-state';
 
 // The Counted in field of both item forms, Items and Add it here (issue #619, after a tester found no units), and Quick add: the
 // units to choose from, and "+ Add a unit" at the foot of the list for whoever manages the catalogue (issue #688, the shared
@@ -63,11 +64,11 @@ export function UnitPicker({ id, units, loading, load, value, onChange, error, s
             name: 'Name of the new unit',
             send: 'Add unit',
             maxLength: 50,
-            create: (name) => retail.createUnit(name),
-            onAdded: (unit: Unit) => {
-              queryClient.setQueryData<Unit[]>(UNITS, (was) => [...(was ?? []).filter((u) => u.id !== unit.id), unit]);
+            create: (name) => orExistingUnit(retail.createUnit(name)),
+            onAdded: (unit: AddedUnit) => {
+              if (!unit.reused) queryClient.setQueryData<Unit[]>(UNITS, (was) => [...(was ?? []).filter((u) => u.id !== unit.id), unit]);
               void queryClient.invalidateQueries({ queryKey: UNITS });
-              screenToast?.(`Added the unit ${unit.name ?? ''}.`, 'success');
+              screenToast?.(unitAddedText(unit), 'success');
               done({ value: unit.id ?? '', label: unit.name ?? '' });
             },
           }}

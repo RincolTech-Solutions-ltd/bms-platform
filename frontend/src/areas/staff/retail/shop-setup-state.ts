@@ -123,7 +123,8 @@ export async function applySetup(api: Pick<RetailApi, 'createCategory' | 'create
       result.added.push({ kind: 'pack', name: item.name, detail: packText(pack.size, of.name ?? '', pack.purpose) });
     } catch (error) {
       // Added meanwhile, on another phone: it is there, which is what was asked.
-      if (error instanceof RetailError && (error.code === 'duplicate_category' || error.code === 'duplicate_unit')) {
+      // Issue #698: a unit the shop has under another spelling ("Pcs" for Piece) answers unit_exists, which is the same.
+      if (error instanceof RetailError && (error.code === 'duplicate_category' || error.code === 'unit_exists')) {
         // Review of #628 (issue #637): a unit added meanwhile is read back, so its packs find it and are not skipped as missing,
         // and a pack's unit added there with no usual size gets this one.
         try {

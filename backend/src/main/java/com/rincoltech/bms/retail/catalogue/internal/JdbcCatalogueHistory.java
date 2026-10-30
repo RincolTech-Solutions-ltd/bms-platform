@@ -2,6 +2,7 @@ package com.rincoltech.bms.retail.catalogue.internal;
 
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.retail.catalogue.CatalogueHistory;
+import com.rincoltech.bms.retail.catalogue.CatalogueNames;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceChange;
 import java.sql.Timestamp;
@@ -47,7 +48,8 @@ class JdbcCatalogueHistory implements CatalogueHistory {
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public Ensured ensureUnit(String name) {
-        UUID existing = idByName("retail_units", name);
+        // Issue #698 (ADR-109): "pcs" in a file is the shop's Piece, whatever spelling it has.
+        UUID existing = repo.unitIdsByName().get(CatalogueNames.unitKey(name));
         if (existing != null) {
             return new Ensured(existing, false, false);
         }
@@ -98,7 +100,7 @@ class JdbcCatalogueHistory implements CatalogueHistory {
                 .params(
                         id,
                         normal,
-                        description,
+                        CatalogueNames.display(description),
                         categoryId,
                         unitId,
                         costMinor,

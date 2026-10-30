@@ -25,7 +25,7 @@ function fakeShop(start: { categories?: string[]; units?: string[] } = {}) {
       return Promise.resolve(c);
     },
     createUnit: (name: string, pack?: UsualPackRequest) => {
-      clash(units, name, 'duplicate_unit');
+      clash(units, name, 'unit_exists');
       const u: Unit = { id: `u${++n}`, name, active: true, version: 1, ...(pack ? { usual_pack: usual(pack) } : {}) };
       units.push(u);
       return Promise.resolve(u);

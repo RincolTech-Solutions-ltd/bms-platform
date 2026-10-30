@@ -233,6 +233,9 @@ describe('the category picker on a laptop', () => {
   it('says plainly that a name is taken, whatever the case, and offers that category instead of sending', async () => {
     expect(sameName([...list, torches], '  bULBS ')?.id).toBe('c1');
     expect(sameName([...list, torches], 'Bulb')).toBeUndefined();
+    // Issue #698: "bulbs" offers BULBS, and extra spaces inside the name are no different either.
+    expect(sameName([{ id: 'c9', name: 'BULBS', active: true, version: 1 }], 'bulbs')?.name).toBe('BULBS');
+    expect(sameName([{ id: 'c8', name: 'Led Bulbs', active: true, version: 1 }], ' led   bulbs ')?.id).toBe('c8');
     open(<Harness />);
     fireEvent.click(field());
     fireEvent.change(search(), { target: { value: 'LED' } });

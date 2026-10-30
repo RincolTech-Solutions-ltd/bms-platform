@@ -8,6 +8,7 @@ import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
 
@@ -145,8 +146,14 @@ public final class RetailTestSupport {
         return id(post("/categories", Map.of("name", name), ADMIN));
     }
 
+    /** The unit of this name, or the one the business has already under another spelling (409 unit_exists, issue #698). */
     public UUID unit(String name) {
-        return id(post("/units", Map.of("name", name), ADMIN));
+        ResponseEntity<JsonNode> made = post("/units", Map.of("name", name), ADMIN);
+        if (made.getStatusCode() == HttpStatus.CONFLICT
+                && "unit_exists".equals(made.getBody().get("code").asString())) {
+            return UUID.fromString(made.getBody().get("existing_id").asString());
+        }
+        return id(made);
     }
 
     /**

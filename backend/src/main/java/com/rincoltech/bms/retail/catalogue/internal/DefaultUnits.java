@@ -2,8 +2,8 @@ package com.rincoltech.bms.retail.catalogue.internal;
 
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.tenancy.ModuleSetUp;
+import com.rincoltech.bms.retail.catalogue.CatalogueNames;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -39,7 +39,8 @@ class DefaultUnits implements ModuleSetUp {
     public void switchedOn() {
         Set<String> existing = repo.unitIdsByName().keySet();
         for (String name : NAMES) {
-            if (existing.contains(name.toLowerCase(Locale.ROOT))) {
+            // Issue #698: keyed as the units are, so a shop with Pcs gets no second Piece.
+            if (existing.contains(CatalogueNames.unitKey(name))) {
                 continue;
             }
             UUID id = UUID.randomUUID();

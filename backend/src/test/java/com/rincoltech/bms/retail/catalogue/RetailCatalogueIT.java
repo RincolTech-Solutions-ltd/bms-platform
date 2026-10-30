@@ -99,11 +99,15 @@ class RetailCatalogueIT extends IntegrationTest {
         assertThatThrownBy(() -> api.existingCode(second, "sw-01"))
                 .isInstanceOf(org.springframework.dao.DuplicateKeyException.class);
 
-        assertThat(api.post("/units", Map.of("name", "PCS"), ADMIN)
-                        .getBody()
-                        .get("code")
-                        .asString())
-                .isEqualTo("duplicate_unit");
+        // Issue #698 (ADR-109): the same unit in another case or spelling is refused, naming the one that exists.
+        for (String same : List.of("PCS", "pc", "Pieces")) {
+            ResponseEntity<JsonNode> again2 = api.post("/units", Map.of("name", same), ADMIN);
+            assertThat(again2.getStatusCode()).as(same).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(again2.getBody().get("code").asString()).isEqualTo("unit_exists");
+            assertThat(again2.getBody().get("existing_id").asString()).isEqualTo(unit.toString());
+            assertThat(again2.getBody().get("detail").asString())
+                    .isEqualTo("You already have " + again2.getBody().get("existing_name").asString() + ".");
+        }
         body.put("description", "Test switch three");
         body.put("category_id", UUID.randomUUID());
         assertThat(api.post("/products", body, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);

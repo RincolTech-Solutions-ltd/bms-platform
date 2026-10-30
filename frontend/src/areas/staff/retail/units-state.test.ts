@@ -3,7 +3,7 @@ import type { Pack, Product, SaleLine } from '../../../api/retail';
 import { buildPurchase, restockLineProblem, restockTotal, withUnit as restockWithUnit, type RestockLine } from './restock';
 import { buildSaleRequest, defaultPrice, draftTotal, lineHint, newLine, withUnit, type Draft } from './sale-state';
 import { factorProblem } from './catalogue-packs';
-import { baseCostMinor, baseQtyMilli, enteredPriceMinor, enteredQty, packPriceMinor, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, quantityIn, samePack, standardPack, unitWord, unitWords } from './units-state';
+import { baseCostMinor, baseQtyMilli, enteredPriceMinor, enteredQty, packPriceMinor, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, quantityIn, samePack, spellingsOf, standardPack, listedWord, unitWord, unitWords } from './units-state';
 
 // Units of measure (ADR-033, issue #194): the forms convert with the same rules as the server
 // (Quantities.java) so a line is judged before it is sent. Names and amounts are fabricated.
@@ -191,6 +191,13 @@ describe('stock in packs and pieces (issue #650)', () => {
     expect(unitWord('ctn')).toBe('carton');
     expect(unitWord('Bulb')).toBe('Bulb');
     expect(unitWords('pc')).toBe('pieces');
+    // Issue #698: from the one list the server reads too; "pce" and "mtrs" are new there, "liter" names litre but is shown as typed.
+    expect(unitWord('PCE')).toBe('piece');
+    expect(unitWords('mtrs')).toBe('metres');
+    expect(unitWord('liter')).toBe('liter');
+    expect(listedWord(' Liters ')).toBe('litre');
+    expect(listedWord('Tray')).toBe('tray');
+    expect(spellingsOf('carton')).toEqual(['carton', 'cartons', 'ctn', 'ctns']);
     expect(unitWords(undefined)).toBe('');
   });
   it('works with a pack of a decimal size', () => {

@@ -20,7 +20,7 @@ import { PhotoChoice, sendNewPhoto } from './item-photo';
 import { parseCount, qtyString, showQty } from './maths';
 import { PacksTurnOn, factorProblem } from './catalogue-packs';
 import { UNITS, branchesWhere, canUse, capabilityOn, holdsAt } from './permissions';
-import { factorMilli } from './units-state';
+import { factorMilli, spellingsOf } from './units-state';
 import { UnitPicker } from './unit-picker';
 import { Gate, Problem, money, useProfitAccess, useStockingBranch } from './ui';
 
@@ -45,8 +45,8 @@ const BUY = 'retail.purchase.create';
 export const PAID_TICK = 'I just bought these, take the money from cash';
 type PaidFrom = 'cash' | 'mobile_money';
 const PAID_FROM: { value: PaidFrom; label: string }[] = [{ value: 'cash', label: 'Cash' }, { value: 'mobile_money', label: 'Mobile money' }];
-/** The piece unit a shop may already have, lower case, in the order the server prefers them. */
-const PIECE_NAMES = ['piece', 'pc', 'pcs'];
+/** The piece unit a shop may already have, lower case, in the order the server prefers them (the one list, issue #698). */
+const PIECE_NAMES = spellingsOf('piece');
 
 /** The shop's piece unit, which the form starts with; undefined when the shop has none yet (the server makes Piece). */
 export function pieceUnit(units: Unit[]): Unit | undefined {
@@ -80,7 +80,7 @@ export function writeLastGroup(userId: string, branchId: string, categoryId: str
 // buying, through the existing pack route (#627, #628, #654), so a carton of bulbs (24) and a carton of pacos (6) each keep their
 // own number. The Carton unit is made in place when the shop has none. How many then takes full cartons and loose ones.
 // JUSTIFICATION-A3: D76 was added to issue #688 and asks for this field on the same screen; it adds no route and no table.
-const CARTON_NAMES = ['carton', 'cartons', 'ctn'];
+const CARTON_NAMES = spellingsOf('carton');
 // A package is never the item's own unit here (round 3 of the #691 review): stock is counted in the smallest unit, and the
 // carton goes in Comes in cartons of. A unit the server marks `is_package` (the one list, RetailCatalogue.PACKAGE_WORDS, issue
 // #689, ADR-106) is left out of the unit list, and one added in place is refused.
