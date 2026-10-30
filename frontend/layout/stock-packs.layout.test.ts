@@ -1,26 +1,19 @@
-import react from '@vitejs/plugin-react';
 import { chromium, type Browser } from 'playwright';
-import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { openLayout } from './open';
 
 // Stock in cartons and pieces laid out in Chromium (issue #650): Stock (one shop and All branches), Count stock and Move stock on a phone 360 wide, at the
 // default and a large font size. The page never scrolls sideways, the quantity in packs and pieces wraps inside its cell, and on
 // a count or a move line the two boxes, their labels, the 0 button and the total end inside the card, every box a full tap.
 
-let server: ViteDevServer;
 let browser: Browser;
-let base = '';
 
 beforeAll(async () => {
-  server = await createServer({ configFile: false, root: process.cwd(), plugins: [react()], logLevel: 'error', server: { port: 0, host: '127.0.0.1' } });
-  await server.listen();
-  base = server.resolvedUrls?.local[0] ?? '';
   browser = await chromium.launch();
 });
 
 afterAll(async () => {
   await browser?.close();
-  await server?.close();
 });
 
 const WIDTH = 360;
@@ -29,8 +22,7 @@ describe.each([1, 2])('Stock in cartons and pieces at 360px, font scale %i', (fo
   // Since issue #680 one shop's stock on a phone is a card per item, the quantity large on its own line.
   it('Stock fits the phone and the quantity wraps in its card', async () => {
     const page = await browser.newPage({ viewport: { width: WIDTH, height: 900 }, hasTouch: true, isMobile: true });
-    await page.goto(`${base}layout/stock-packs.html?screen=stock&font=${font}`);
-    await page.getByText('46 half cartons and 23 pieces').waitFor();
+    await openLayout(page, `layout/stock-packs.html?screen=stock&font=${font}`, page.getByText('46 half cartons and 23 pieces'));
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(WIDTH);
     const quantities = await page.evaluate(() =>
       [...document.querySelectorAll<HTMLElement>('.stock-card-qty')].map((e) => {
@@ -48,8 +40,7 @@ describe.each([1, 2])('Stock in cartons and pieces at 360px, font scale %i', (fo
 
   it('All branches on a phone fits, the total and each branch in packs inside its card', async () => {
     const page = await browser.newPage({ viewport: { width: WIDTH, height: 900 }, hasTouch: true, isMobile: true });
-    await page.goto(`${base}layout/stock-packs.html?screen=all&font=${font}`);
-    await page.getByText('46 half cartons and 23 pieces').first().waitFor();
+    await openLayout(page, `layout/stock-packs.html?screen=all&font=${font}`, page.getByText('46 half cartons and 23 pieces'));
     const show = page.getByRole('button', { name: 'Show branches' });
     while ((await show.count()) > 0) await show.first().click();
     expect(await page.evaluate(() => document.documentElement.scrollWidth), 'page width').toBeLessThanOrEqual(WIDTH);
@@ -71,9 +62,8 @@ describe.each([1, 2])('Stock in cartons and pieces at 360px, font scale %i', (fo
 
   it.each(['count', 'move'])('%s fits the phone with both boxes inside the card', async (screen) => {
     const page = await browser.newPage({ viewport: { width: WIDTH, height: 900 }, hasTouch: true, isMobile: true });
-    await page.goto(`${base}layout/stock-packs.html?screen=${screen}&font=${font}`);
     const id = screen === 'count' ? 'count-p1' : 'tq-0';
-    await page.locator(`#${id}-packs`).waitFor();
+    await openLayout(page, `layout/stock-packs.html?screen=${screen}&font=${font}`, page.locator(`#${id}-packs`));
     if (screen === 'count') {
       await page.locator(`#${id}-packs`).fill('46');
       await page.locator(`#${id}`).fill('23');
