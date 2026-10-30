@@ -206,8 +206,13 @@ class RetailSizesInAddItemIT extends IntegrationTest {
         shirt.put("colours", List.of("Sky Blue"));
         assertThat(api.post("/product-families", shirt, ADMIN).getStatusCode()).isEqualTo(HttpStatus.CREATED);
         shirt.put("name", "Test Work Trousers");
-        shirt.put("sizes", List.of("m", "large"));
+        shirt.put("sizes", List.of("m"));
         shirt.put("colours", List.of("sky blue", "Red"));
+        assertThat(api.post("/product-families", shirt, ADMIN).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        // Issue #726: Size 7, large and small are each on one product, a tie only byte order puts in this order.
+        shirt.put("name", "Test Work Cap");
+        shirt.put("sizes", List.of("small", "large"));
+        shirt.put("colours", List.of());
         assertThat(api.post("/product-families", shirt, ADMIN).getStatusCode()).isEqualTo(HttpStatus.CREATED);
 
         ResponseEntity<JsonNode> r = api.get("/product-families/options", ADMIN);
@@ -218,7 +223,7 @@ class RetailSizesInAddItemIT extends IntegrationTest {
         r.getBody().get("colours").forEach(c -> colours.add(c.asString()));
         // Each once ignoring case, the most used first; issue #726: in byte order, as the mock, so a capital comes
         // first.
-        assertThat(sizes).containsExactly("M", "Size 7", "large");
+        assertThat(sizes).containsExactly("M", "Size 7", "large", "small");
         assertThat(colours).containsExactly("Sky Blue", "Red");
 
         // Review of #723: another shop's sizes and colours are never offered here.
