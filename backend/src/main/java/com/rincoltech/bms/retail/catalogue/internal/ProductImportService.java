@@ -403,12 +403,13 @@ class ProductImportService {
             audit.record(AuditLog.Entry.created(
                     "retail.category.created", "retail.category", id, null, Map.of("name", name)));
         }
-        // Issue #698: each new unit under its key's lock, taken in key order so two imports queue and never deadlock; one
-        // added meanwhile in another spelling is used, never made twice.
+        // Issue #698: each new unit under its key's lock, taken in key order so two imports queue and never
+        // deadlock; one added meanwhile in another spelling is used, never made twice.
         for (Map.Entry<String, String> e : new java.util.TreeMap<>(newUnits).entrySet()) {
             String name = e.getValue();
             repo.lockUnitKey(name);
-            UUID meanwhile = repo.sameUnit(name, null).map(CatalogueApi.Unit::id).orElse(null);
+            UUID meanwhile =
+                    repo.sameUnit(name, null).map(CatalogueApi.Unit::id).orElse(null);
             if (meanwhile != null) {
                 unitIds.put(e.getKey(), meanwhile);
                 continue;

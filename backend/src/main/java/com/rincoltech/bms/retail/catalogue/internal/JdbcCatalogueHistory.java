@@ -49,8 +49,8 @@ class JdbcCatalogueHistory implements CatalogueHistory {
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public Ensured ensureUnit(String name) {
-        // Issue #698 (ADR-109): "pcs" in a file is the shop's Piece, whatever spelling it has; read under the key's lock,
-        // so a unit added on a screen at this moment is never made twice.
+        // Issue #698 (ADR-109): "pcs" in a file is the shop's Piece, whatever spelling it has. It is read under the
+        // key's lock, so a unit added on a screen at this moment is never made twice.
         repo.lockUnitKey(name);
         UUID existing = repo.unitIdsByName().get(CatalogueNames.unitKey(name));
         if (existing != null) {

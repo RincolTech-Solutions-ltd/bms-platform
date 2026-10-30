@@ -281,12 +281,10 @@ class CatalogueRepository {
     }
 
     private Set<String> inactiveNames(String table) {
-        return new java.util.HashSet<>(jdbc.sql("SELECT name FROM " + table + " WHERE NOT active")
-                .query(String.class)
-                .list()
-                .stream()
-                .map(CatalogueNames::nameKey)
-                .toList());
+        return new java.util.HashSet<>(
+                jdbc.sql("SELECT name FROM " + table + " WHERE NOT active").query(String.class).list().stream()
+                        .map(CatalogueNames::nameKey)
+                        .toList());
     }
 
     /** Decimal places of a currency (UGX 0, KES 2), from the currencies table. */

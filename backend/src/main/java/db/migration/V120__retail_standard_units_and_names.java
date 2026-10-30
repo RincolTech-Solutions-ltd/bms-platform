@@ -57,13 +57,7 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
         forceRowSecurity(c, forced, false);
         restyle(c, "retail_categories", "name", "retail.category.updated", "retail.category", "name");
         restyle(c, "retail_products", "description", "retail.product.updated", "retail.product", "description");
-        restyle(
-                c,
-                "retail_product_families",
-                "name",
-                "retail.product_family.updated",
-                "retail.product_family",
-                "name");
+        restyle(c, "retail_product_families", "name", "retail.product_family.updated", "retail.product_family", "name");
         // Restored only after the work succeeded: on a failure the rollback restores it anyway, and the first error
         // stays the one reported (review of #715).
         forceRowSecurity(c, forced, true);
