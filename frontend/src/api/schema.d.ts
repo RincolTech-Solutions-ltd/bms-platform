@@ -5608,6 +5608,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/product-families/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The sizes and colours the business's items have, offered again on Add an item (issue #697) */
+        get: operations["listRetailVariantOptions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/product-families/{family_id}": {
         parameters: {
             query?: never;
@@ -8996,6 +9013,10 @@ export interface components {
             duplicate_reason?: string;
             /** @description The item's name, as Baby romper */
             name: string;
+            /** @description Issue #697: a size's own selling price for one of its packages; a package price not named here is the one sent, in proportion to the size's selling price */
+            pack_prices?: components["schemas"]["RetailSizePackPrice"][];
+            /** @description Issue #697 (ADR-111): packages every size and colour gets, made in its transaction, checked as on POST /products; all are saved with the item or none is */
+            packs?: components["schemas"]["RetailPackRequest"][];
             /**
              * Format: int64
              * @description Each variant's selling price unless it has its own
@@ -17333,6 +17354,15 @@ export interface components {
             exact?: components["schemas"]["RetailSimilarProduct"][];
             similar?: components["schemas"]["RetailSimilarProduct"][];
         };
+        /** @description Issue #697: one size's own selling price of one of its packages */
+        RetailSizePackPrice: {
+            colour?: string;
+            /** Format: int64 */
+            sell_minor: number;
+            size?: string;
+            /** Format: uuid */
+            unit_id: string;
+        };
         /** @description An item that sold in the branch in the last 90 days, but slowly */
         RetailSlowMover: {
             better_at?: components["schemas"]["RetailSellsBetterAt"];
@@ -18771,6 +18801,13 @@ export interface components {
              */
             sell_minor?: number;
             size?: string;
+        };
+        /** @description Issue #697: the sizes and colours the business has used */
+        RetailVariantOptions: {
+            /** @description Colours of the business's items, each once ignoring case, most used first */
+            colours?: string[];
+            /** @description Sizes of the business's items, each once ignoring case, most used first */
+            sizes?: string[];
         };
         RetailVoidRequest: {
             reason: string;
@@ -29848,6 +29885,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailFamily"];
+                };
+            };
+        };
+    };
+    listRetailVariantOptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailVariantOptions"];
                 };
             };
         };

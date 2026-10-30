@@ -460,38 +460,7 @@ class CatalogueService {
         requireCategoryAndUnit(r.categoryId(), r.unitId(), null, null);
         refusePackageUnit(r.unitId());
         List<PackRequest> packs = r.packs() == null ? List.of() : r.packs();
-        if (!packs.isEmpty()) {
-            requireUnits();
-        }
-        // Review of #692: each pack's bounds (the rules of POST /products/{id}/units) and price checks, before anything
-        // is
-        // written; a refusal names the pack (pack_index, packs[i].factor), never the item's own fields.
-        List<String> purposes = new ArrayList<>();
-        for (int i = 0; i < packs.size(); i++) {
-            if (packs.get(i) == null) {
-                throw ofPack(
-                        ApiException.validation(
-                                List.of(new FieldProblem("unit_id", "required", "Choose the package."))),
-                        i);
-            }
-            List<FieldProblem> bad = validator.validate(packs.get(i)).stream()
-                    .map(v -> new FieldProblem(
-                            v.getPropertyPath()
-                                    .toString()
-                                    .replaceAll("([a-z0-9])([A-Z])", "$1_$2")
-                                    .toLowerCase(Locale.ROOT),
-                            "invalid",
-                            v.getMessage()))
-                    .toList();
-            try {
-                if (!bad.isEmpty()) {
-                    throw ApiException.validation(bad);
-                }
-                purposes.add(packPurpose(packs.get(i)));
-            } catch (ApiException e) {
-                throw ofPack(e, i);
-            }
-        }
+        List<String> purposes = checkPacks(packs);
         // Issue #698 (D86 = A): the name is checked, saved, audited and answered in the one display style.
         String description = CatalogueNames.display(r.description());
         String duplicateReason = acceptName(description, r.unitId(), null, r.duplicateReason());
@@ -547,9 +516,55 @@ class CatalogueService {
             after.put("duplicate_reason", duplicateReason);
         }
         audit.record(AuditLog.Entry.created("retail.product.created", PRODUCT, p.id(), null, after));
-        // Issue #699 (ADR-107): a package may hold another of the same request, so a held one is made first; one that
-        // holds
-        // nothing made is refused on its own row.
+        makePacks(p, packs, purposes, by);
+        return withPacks(visible(repo.find(p.id()).orElseThrow()));
+    }
+
+    /**
+     * Review of #692: each pack's bounds (the rules of POST /products/{id}/units) and price checks, before anything is
+     * written; a refusal names the pack (pack_index, packs[i].factor), never the item's own fields. Gives each pack's
+     * purpose. Issue #697 (ADR-111): an item with sizes checks its packages here once too.
+     */
+    // JUSTIFICATION-A3: the checks of create moved unchanged, so POST /product-families shares them.
+    List<String> checkPacks(List<PackRequest> packs) {
+        if (!packs.isEmpty()) {
+            requireUnits();
+        }
+        List<String> purposes = new ArrayList<>();
+        for (int i = 0; i < packs.size(); i++) {
+            if (packs.get(i) == null) {
+                throw ofPack(
+                        ApiException.validation(
+                                List.of(new FieldProblem("unit_id", "required", "Choose the package."))),
+                        i);
+            }
+            List<FieldProblem> bad = validator.validate(packs.get(i)).stream()
+                    .map(v -> new FieldProblem(
+                            v.getPropertyPath()
+                                    .toString()
+                                    .replaceAll("([a-z0-9])([A-Z])", "$1_$2")
+                                    .toLowerCase(Locale.ROOT),
+                            "invalid",
+                            v.getMessage()))
+                    .toList();
+            try {
+                if (!bad.isEmpty()) {
+                    throw ApiException.validation(bad);
+                }
+                purposes.add(packPurpose(packs.get(i)));
+            } catch (ApiException e) {
+                throw ofPack(e, i);
+            }
+        }
+        return purposes;
+    }
+
+    /**
+     * The packs {@link #checkPacks} passed, made on the new product {@code p}; issue #697 makes them on every size. Issue
+     * #699 (ADR-107): a package may hold another of the same request, so a held one is made first; one that holds nothing
+     * made is refused on its own row.
+     */
+    void makePacks(Product p, List<PackRequest> packs, List<String> purposes, UUID by) {
         Set<UUID> made = new java.util.HashSet<>(Set.of(p.unitId()));
         List<Integer> left = new ArrayList<>(
                 java.util.stream.IntStream.range(0, packs.size()).boxed().toList());
@@ -576,7 +591,6 @@ class CatalogueService {
             }
             made.add(k.unitId());
         }
-        return withPacks(visible(repo.find(p.id()).orElseThrow()));
     }
 
     /** Issue #689 (ADR-106): a new item is never counted in a package (422 unit_is_package on unit_id). */

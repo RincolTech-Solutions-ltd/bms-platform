@@ -29,6 +29,10 @@ export const HELP_TIPS = {
     label: 'On credit',
     text: 'Sales the customer has not paid for yet. They count as profit only when the money comes in.',
   },
+  itemSizes: {
+    label: 'Does it come in different sizes, colours or types?',
+    text: 'Say Yes when one item comes in several sizes or colours, such as bulbs of 40W and 60W. Each one gets its own price and stock.',
+  },
   joinSizes: {
     label: 'Put items together as sizes',
     text: 'Use it when each size was added as its own item. Each one keeps its code too, so its labels and past sales still match.',

@@ -160,17 +160,12 @@ class QuickAddService {
         QuickAddPurchase.Bought bought = null;
         if (paid) {
             // The purchase locks the item, then its balance row (ADR-079 lock order); the total is read after it.
-            bought = purchases.buy(
-                    branch,
-                    product.id(),
-                    r.qty(),
-                    r.costMinor(),
-                    r.paidFrom(),
-                    r.paidLevelUnitId() == null
-                            ? null
-                            : new QuickAddPurchase.Level(r.paidLevelUnitId(), r.paidLevelCostMinor()));
+            QuickAddPurchase.Level level = r.paidLevelUnitId() == null
+                    ? null
+                    : new QuickAddPurchase.Level(r.paidLevelUnitId(), r.paidLevelCostMinor());
+            bought = purchases.buy(branch, product.id(), r.qty(), r.costMinor(), r.paidFrom(), level);
             total = Quantities.format(ledger.lock(branch, product.id()));
-            audited(id, branch, product, r.qty(), r.costMinor(), r.paidFrom(), bought.purchaseId());
+            audited(id, branch, product, r.qty(), r.costMinor(), r.paidFrom(), bought, level);
         } else if (branch != null) {
             // Under the balance row's lock: the quantity typed is added to what the branch holds now, exactly.
             BigDecimal before = ledger.lock(branch, product.id());
@@ -216,7 +211,7 @@ class QuickAddService {
                 id,
                 SOURCE + ":" + id,
                 List.of(Leg.debit("inventory", value), Leg.credit("opening_balance_equity", value))));
-        audited(id, branch, product, qty, cost, null, null);
+        audited(id, branch, product, qty, cost, null, null, null);
         return movementId;
     }
 
@@ -227,14 +222,21 @@ class QuickAddService {
             BigDecimal qty,
             long cost,
             String paidFrom,
-            UUID purchaseId) {
+            QuickAddPurchase.Bought bought,
+            QuickAddPurchase.Level level) {
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("product_id", product.id());
         after.put("qty", Quantities.format(qty));
         after.put("unit_cost_minor", cost);
         if (paidFrom != null) {
             after.put("paid_from", paidFrom);
-            after.put("purchase_id", purchaseId);
+            after.put("purchase_id", bought.purchaseId());
+            // Issue #724: bought by a package, its level and price, and the cash that left, so the entry reconciles.
+            if (level != null) {
+                after.put("paid_level_unit_id", level.unitId());
+                after.put("paid_level_cost_minor", level.costMinor());
+            }
+            after.put("paid_minor", bought.totalMinor());
         }
         audit.record(AuditLog.Entry.created("retail.stock.quick_added", SOURCE, id, branch, after));
     }

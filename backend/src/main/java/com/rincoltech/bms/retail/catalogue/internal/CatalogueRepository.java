@@ -325,6 +325,17 @@ class CatalogueRepository {
                 .list());
     }
 
+    /**
+     * Issue #697: the sizes ({@code variant_size}) or colours ({@code variant_colour}) the business's items have, each once
+     * ignoring case, the most used first.
+     */
+    List<String> variantOptions(boolean sizes) {
+        String column = sizes ? "variant_size" : "variant_colour";
+        String sql = "SELECT min(" + column + ") FROM retail_products WHERE btrim(coalesce(" + column + ", '')) <> ''"
+                + " GROUP BY lower(btrim(" + column + ")) ORDER BY count(*) DESC, 1 LIMIT 60";
+        return jdbc.sql(sql).query(String.class).list();
+    }
+
     // ---- Names (issue #352) ---------------------------------------------------------------
 
     /** A product found by its name key, for the duplicate refusal and the near-duplicate warning. */

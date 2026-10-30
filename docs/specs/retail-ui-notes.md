@@ -1268,6 +1268,13 @@ stock list shows it on its own row.
   (with cost read) and stock, with **Change price** and **Change** (its size, colour, on sale; the code never changes); **Add more sizes or colours** (a
   new print is made in every size the item has, at the price of its first size); **Change the name or category** (every size and
   colour follows). Links to Items, Record a sale, Restock, Move stock, Stock and Sales.
+- **Add an item asks too** (issue #697, ADR-111, FR-RET-83): after the smallest unit, "Does it come in different sizes, colours or
+  types?" No or Yes. Yes shows "What kind of size?" (Clothes, Shoes, Bulbs (watts), Cable (mm), Other) as chips, that kind's
+  ready sizes as chips, the sizes the shop typed before (Your sizes), the ready colours and the shop's own as chips, and beside
+  each list a box with **Add** to type one more. Every chip is a 48px toggle (`.find-chip` in `.option-chips`), filled when
+  chosen, with no stripe. Under the prices, "Price of each of the 3" is the preview of the sizes screen, each starting at the
+  item's prices; at least two. The packages apply to every size and **Add item** saves it all in one request. Files:
+  `new-item-sizes.tsx`, the ready lists in `api/retail-variants.ts`. Screenshots in `docs/ui/sizes-colours-697`.
 - **An existing item** gets **Give this item sizes and colours** on its edit form: the owner says which size or colour its stock is
   now; it keeps its code, prices, stock and history, and the others are made at its prices.
 - **Put items together as sizes of one item** (`/staff/retail/catalogue/products/sizes/join`, a third button on Items): for a shop

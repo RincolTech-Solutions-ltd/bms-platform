@@ -46,6 +46,8 @@ export type NewFamily = S['CreateRetailFamilyRequest'];
 export type FamilyChange = S['UpdateRetailFamilyRequest'];
 export type AddVariants = S['AddRetailVariantsRequest'];
 export type MakeFamily = S['RetailMakeFamilyRequest'];
+/** Issue #697: the sizes and colours the shop's items have, offered again on Add an item. */
+export type VariantOptions = S['RetailVariantOptions'];
 export type VariantLine = S['RetailVariantLine'];
 /** Items kept apart until now (one per size) becoming the sizes and colours of one item (issue #384). */
 export type JoinRequest = S['RetailJoinRequest'];
@@ -424,6 +426,8 @@ export interface RetailApi {
   getFamily(id: string): Promise<Family>;
   /** Makes the item and every combination of the sizes and colours chosen once (or the variants named). */
   createFamily(body: NewFamily): Promise<Family>;
+  /** The sizes and colours the shop typed before, most used first (issue #697). */
+  variantOptions(): Promise<VariantOptions>;
   /** A new name renames every variant, a new category moves every variant; under If-Match. */
   updateFamily(id: string, version: number, body: FamilyChange): Promise<Family>;
   /** More sizes or colours; a combination the item has is skipped. */
@@ -806,6 +810,10 @@ const realRetail: RetailApi = {
 
   async createFamily(body) {
     return unwrap(await api.POST('/api/v1/retail/product-families', { body }));
+  },
+
+  async variantOptions() {
+    return unwrap(await api.GET('/api/v1/retail/product-families/options'));
   },
 
   async updateFamily(id, version, body) {
