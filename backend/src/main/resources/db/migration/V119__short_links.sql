@@ -13,6 +13,9 @@
 -- same signature and its V23 body plus the short name claim at the confirmation.
 
 ALTER TABLE onboarding_applications ADD COLUMN short_name varchar(63);
+-- A new name asked for by a repeat sign-up of a confirmed application: applied only when the fresh link sent to the
+-- mailbox is opened, so a stranger who knows the email cannot make the application give up its name (review of #713).
+ALTER TABLE onboarding_applications ADD COLUMN pending_short_name varchar(63);
 
 -- First to confirm keeps it: one confirmed open application per short name. The confirmation clears a name a business or
 -- another confirmed application already has, under the name's lock, so this index is a backstop.
@@ -41,17 +44,24 @@ BEGIN
 END
 $$;
 
--- A repeated sign-up from the same mailbox: the short name it chose, which the caller has just claimed as free under the
--- lock, replaces the one of its open application, so a repeat never silently keeps the old name.
+-- A repeated sign-up from the same mailbox, with a short name the caller has just claimed as free under the lock: it
+-- replaces the name of an unconfirmed application, which holds nothing; on a confirmed one it is kept as pending and
+-- applied only when the fresh link is opened (onboarding_application_by_link), so a repeat never silently keeps the old
+-- name and nobody but the mailbox can change a held one.
 CREATE FUNCTION onboarding_application_set_short_name(p_email text, p_short_name text, p_now timestamptz)
 RETURNS void
 LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-    UPDATE onboarding_applications SET short_name = p_short_name, updated_at = p_now
+    UPDATE onboarding_applications
+       SET short_name = CASE WHEN email_verified_at IS NULL THEN p_short_name ELSE short_name END,
+           pending_short_name = CASE WHEN email_verified_at IS NULL THEN NULL ELSE p_short_name END,
+           updated_at = p_now
      WHERE contact_email_key = onboarding_email_key(p_email) AND status IN ('submitted', 'needs_info', 'verified')
 $$;
 
 -- V23's body, plus: at the first confirmation the short name is claimed under its lock; when a business or another
--- confirmed application has it by then, it is cleared and the operator chooses the slug at Activate.
+-- confirmed application has it by then, it is cleared and the operator chooses the slug at Activate. Opening a link of a
+-- confirmed application applies its pending name, when still free. The names' locks are taken before the row's, the
+-- order a sign-up takes them, so a confirmation and a repeat sign-up of the same name never deadlock.
 CREATE OR REPLACE FUNCTION onboarding_application_by_link(p_link_hash text, p_now timestamptz, p_verify boolean)
 RETURNS TABLE (
     id uuid, reference text, status text, business_name text, modules text[], term text, way_in text,
@@ -62,6 +72,13 @@ DECLARE
     v onboarding_applications%ROWTYPE;
     v_new boolean := false;
 BEGIN
+    IF p_verify THEN
+        PERFORM pg_advisory_xact_lock(hashtext('bms.short-name:' || n.name))
+           FROM (SELECT x.name FROM onboarding_applications a,
+                        unnest(ARRAY[a.short_name::text, a.pending_short_name::text]) AS x(name)
+                  WHERE a.link_token_hash = p_link_hash AND a.link_token_expires_at > p_now AND x.name IS NOT NULL
+                  ORDER BY x.name) n;
+    END IF;
     SELECT * INTO v FROM onboarding_applications a
      WHERE a.link_token_hash = p_link_hash AND a.link_token_expires_at > p_now
      FOR UPDATE;
@@ -76,6 +93,12 @@ BEGIN
          WHERE onboarding_applications.id = v.id;
         v.email_verified_at := p_now;
         v_new := true;
+    ELSIF p_verify AND v.pending_short_name IS NOT NULL AND v.status IN ('submitted', 'needs_info', 'verified') THEN
+        IF short_name_taken(v.pending_short_name, v.id, true) IS NULL THEN
+            v.short_name := v.pending_short_name;
+        END IF;
+        UPDATE onboarding_applications SET short_name = v.short_name, pending_short_name = NULL, updated_at = p_now
+         WHERE onboarding_applications.id = v.id;
     END IF;
     RETURN QUERY SELECT v.id, v.reference::text, v.status, v.business_name::text, v.modules, v.term, v.way_in,
                         v.operator_note::text, v.reject_reason::text, v.link_token_hash::text,

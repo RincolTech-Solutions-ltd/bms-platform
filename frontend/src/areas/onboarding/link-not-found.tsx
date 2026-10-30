@@ -1,8 +1,8 @@
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { SHORT_NAME } from './short-name';
 
-// Where a short link lands when no shop uses it (issue #708, ADR-108): a name never taken, mistyped, or given up more than 90 days
-// ago. On the platform host, no sign-in. The name in the address is shown only when it has the shape of a short name.
+// Where a short link lands when no shop uses it (issue #708, ADR-108): a name never taken, mistyped, or of a shop that is closed.
+// On the platform host, no sign-in. The name in the address is shown only when it has the shape of a short name.
 
 /** The name from `?name=`, or null when it is missing or not a short name. */
 export function linkNameFrom(search: string): string | null {

@@ -245,8 +245,9 @@ class ApplicationService {
                     return;
                 }
                 reference = open.get().reference();
-                // ADR-108: a repeat's short name, just claimed as free, replaces the open application's own, so a
-                // repeat never silently keeps the old name.
+                // ADR-108: a repeat's short name, just claimed as free, replaces the name of an unconfirmed application
+                // (which holds nothing). On a confirmed one it waits as pending until the fresh link just sent to the
+                // mailbox is opened, so a stranger who knows the email cannot release a name (review of #713, round 3).
                 if (!typed.isEmpty()) {
                     jdbc.sql("SELECT onboarding_application_set_short_name(?, ?, ?)")
                             .params(email, typed, Timestamp.from(now))
@@ -283,7 +284,9 @@ class ApplicationService {
 
     /** A free short name from the business name, its first word or the first free suggestion; null when none is free. */
     private String pickShortName(String businessName, String town) {
-        String first = ShortNames.normalise(businessName)
+        // Accents dropped first, as the suggestions and the form do, so "Tèstduka" gives testduka.
+        String first = ShortNames.normalise(
+                        Normalizer.normalize(businessName, Normalizer.Form.NFD).replaceAll("\\p{M}", ""))
                 .replaceAll("[^a-z0-9]+", " ")
                 .trim()
                 .split(" ")[0];

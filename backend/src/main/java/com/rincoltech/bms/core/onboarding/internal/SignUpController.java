@@ -142,7 +142,7 @@ class SignUpController {
             @Schema(description = "invalid, reserved or taken; null when available")
             String problem,
 
-            @Schema(description = "Plain words, for example 'modern is taken.'")
+            @Schema(description = "Plain words, for example 'testduka is taken.'")
             String message,
 
             @Schema(description = "Free names: the town or area first, then a shorter form, then a number")

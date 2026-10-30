@@ -8,8 +8,9 @@ does not rename itself; FR-TEN-02 amended, FR-TEN-12). Builds on ADR-018 (one la
 
 ## Context
 
-Four shops are reached today through short links the operator set by hand as Cloudflare single redirects on
-rincoltech.com: `/modern`, `/hats`, `/dodos` and `/yasad`, each a 302 to that shop's staging host. Customers type these
+A few shops are reached today through short links the operator set by hand as Cloudflare single redirects on
+rincoltech.com (the hand-made redirects listed in the zone's Single Redirects), each a 302 to that shop's staging host.
+Customers type these
 links and staff share them. The owner wants every shop to get one at sign-up, without a hand step, and wants the link to
 stay the same when a shop moves from staging to live.
 
@@ -21,7 +22,7 @@ want the same name.
 1. **The short name is the slug, chosen at sign-up and kept for good.** A shop's short link is `rincoltech.com/<slug>`
    (the host is `BMS_SHORT_LINK_HOST`, default `rincoltech.com`). There is one name per shop: its host and its short link
    always agree. A new short name is 3 to 20 lower case letters and digits, with single hyphens inside allowed (so the
-   suggestions `modern-kampala` work); it is not one of the reserved names (decision 4). Slugs made before this ADR keep
+   suggestions `testduka-gulu` work); it is not one of the reserved names (decision 4). Slugs made before this ADR keep
    working as short links whatever their length. There is no self-service rename: the name is the shop's host, and a
    change would move its sign-in address, its installed apps and every link already sent. When a shop needs another name,
    Rincol Tech does it on request, later, under its own issue.
@@ -31,16 +32,21 @@ want the same name.
    throwaway addresses cannot squat names; at the confirmation its name is claimed under the name's lock, and if a business
    or another confirmed application has it by then, it is cleared and the operator chooses the slug at Activate. A taken
    name answers "<name> is taken." with free suggestions: the name with the applicant's town or area first
-   (`modern-kampala`), then a shorter form of the business name (`modernelec`), then the name with a number. The applicant
+   (`testduka-gulu`), then a shorter form of the business name (`testdukahard`), then the name with a number. The applicant
    picks one with one tap or types another. `POST /platform/sign-up/applications` checks again under the lock and refuses a
    taken one with 409 `short_name_taken`, with the suggestions. Who holds a name never depends on the email given, so the
    409 says nothing about who applied (FR-ONB-03); a repeat from a mailbox whose own confirmed application holds the name
-   gets the same 409. A repeat sign-up with a new free name replaces the name its open application asks for, so a repeat
-   never silently keeps the old one. For one release `short_name` is optional, so a sign-up page cached from before it
+   gets the same 409. A repeat sign-up with a new free name replaces the name of an unconfirmed application at once (it
+   holds nothing); on a confirmed application the new name waits as pending and is applied, if still free under the lock,
+   only when the fresh link sent to that mailbox is opened, so a stranger who knows the email cannot make a confirmed
+   applicant give up a name, and a repeat never silently keeps the old one. For one release `short_name` is optional, so a sign-up page cached from before it
    still works: the server then picks a free name from the business name. Activate suggests the application's short name
    as the slug while it is free, refuses a badly shaped or reserved slug (422), and claims it under the lock in the
    creating transaction, refusing one another confirmed application chose (409 `duplicate_slug`). The operator's
-   `POST /platform/tenants` takes the same lock and answers a slug that meets `tenants_slug_key` with 409.
+   `POST /platform/tenants` takes the same lock and answers a slug that meets `tenants_slug_key` with 409. It refuses the
+   reserved list but keeps FR-TEN-02's 3 to 63 characters and does not refuse a name a confirmed application chose (it
+   has no application to compare with); the operator's suggestions (`slugAvailable`) leave such names out. Both are left
+   so for the owner to decide.
 3. **One Cloudflare rule serves every shop, and the app does the forwarding.** The operator replaces the per-shop
    redirects with one single redirect on rincoltech.com: a path of one segment that is not reserved goes, as a 302, to
    `https://<platform host>/api/v1/platform/short-links<path>`. That endpoint answers a 302 to the shop's address
@@ -59,8 +65,8 @@ want the same name.
 
    `GET /api/v1/platform/short-link-rule` returns the reserved names and this expression and target already filled in for
    the host it is called on, with `short_link_host`, so the operator copies them and never types the list by hand. At
-   go-live the operator changes the platform host in the target from the staging one to the live one; the four existing
-   links then reach the live shops, and customers keep typing the same link.
+   go-live the operator changes the platform host in the target from the staging one to the live one; the existing
+   hand-made links then reach the live shops, and customers keep typing the same link.
 4. **A reserved list keeps the website's own paths.** `ShortNames.RESERVED` holds the website's pages and the words a site
    or the platform uses (about, contact, pricing, blog, login, signup, sign-in, app, www, api, admin, help, terms, privacy,
    and the like, plus the reserved host labels of FR-TEN-02). Sign-up and Activate refuse them, the operator's
@@ -82,9 +88,10 @@ goes through the platform host before the shop's host.
 
 **Watch for:** a website page added at rincoltech.com without adding its path to `ShortNames.RESERVED` and updating the
 rule is caught by the rule and shown "No shop uses this link". The list was written from the issue and common site paths,
-not from the website's sitemap: the website's owner confirms it before the rule goes live (runbook). The four hand-made
+not from the website's sitemap: the website's owner confirms it before the rule goes live (runbook). The hand-made
 links must each reach their shop through the app before their redirects are deleted (runbook), or a stranger could claim
-a printed name. A later release makes `short_name` required again and a later migration drops the 15 argument
+a printed name. A link typed with a trailing slash (`rincoltech.com/<name>/`) is left to the website by the rule's
+`/*/*` test; printed links have none. A later release makes `short_name` required again and a later migration drops the 15 argument
 `onboarding_application_create`. The Cloudflare `wildcard` operator and `lower()` must be on the zone's plan; if the
 dashboard refuses either, `not substring(http.request.uri.path, 1) contains "/"` replaces the wildcard test, and the
 endpoint lower-cases the name in any case.

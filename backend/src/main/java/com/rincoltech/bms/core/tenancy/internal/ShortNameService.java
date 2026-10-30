@@ -64,8 +64,8 @@ class ShortNameService implements ShortNames {
     }
 
     /**
-     * The order of ADR-108 decision 2: the name with the town or area (modern-kampala), a shorter form of the business name
-     * (modernelec), the business name in one word, then the name with a number. Only well shaped, unreserved names
+     * The order of ADR-108 decision 2: the name with the town or area (testduka-gulu), a shorter form of the business name
+     * (testdukahard), the business name in one word, then the name with a number. Only well shaped, unreserved names
      * different from the one asked for.
      */
     static List<String> candidates(String name, String businessName, String town) {

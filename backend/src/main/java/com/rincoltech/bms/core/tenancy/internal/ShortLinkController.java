@@ -35,7 +35,7 @@ class ShortLinkController {
             @Schema(description = "The short name, which is also the app's address (the slug)")
             String shortName,
 
-            @Schema(description = "As a person types it, for example rincoltech.com/modern")
+            @Schema(description = "As a person types it, for example rincoltech.com/testduka")
             String link,
 
             @Schema(description = "The same with https://, for the Copy button")

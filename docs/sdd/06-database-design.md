@@ -298,10 +298,14 @@ expired rows are deleted 90 days after `closed_at` (FR-ONB-09). Since `V119` (is
 the short name the applicant chose (null on older rows, and cleared at the confirmation when someone else has it by then),
 unique over the open statuses whose email is confirmed (`onboarding_applications_one_open_per_short_name`), so the first to
 confirm keeps it and an unconfirmed application holds nothing; read through `onboarding_application_short_name`, replaced
-on a repeat sign-up with a new free name through `onboarding_application_set_short_name`. `V119` adds
+on a repeat sign-up with a new free name through `onboarding_application_set_short_name` while the email is not
+confirmed; on a confirmed application the new name goes into `pending_short_name varchar(63)` and is applied, if still
+free, only when the fresh link sent to the mailbox is opened. `V119` adds
 `onboarding_application_create` with `p_short_name` as a 16 argument overload; V23's 15 argument one becomes a wrapper
 calling it with NULL, kept for the server still running during a deploy and dropped by a later migration. It replaces
-`onboarding_application_by_link`, which claims the name under its lock at the confirmation. `short_name_taken` says who has
+`onboarding_application_by_link` (defined only in V23 before it), which claims the name under its lock at the
+confirmation and applies a pending name when a link of a confirmed application is opened, taking the names' locks before
+the row's, the order a sign-up takes them. `short_name_taken` says who has
 a name (a business, or a confirmed open application; with `p_lock` it first takes the name's advisory lock, which every
 claim takes: the sign-up, the confirmation, Activate and the operator's tenant creation) and `short_link_target` where a
 short link goes (the active or suspended business with that slug).

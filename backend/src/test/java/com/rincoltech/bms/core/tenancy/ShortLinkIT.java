@@ -177,7 +177,16 @@ class ShortLinkIT extends IntegrationTest {
         assertThat(apply(second, null, again).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(shortNameOf(again)).isEqualTo(second);
         confirm(again);
+        // Review of #713 round 3: anyone may post the confirmed applicant's email with a new name, and gets the usual
+        // 202, but the held name stays until the fresh link sent to that mailbox is opened.
         assertThat(apply(third, null, again).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(shortNameOf(again)).isEqualTo(second);
+        assertThat(check(second, "Test Electricals Shop", null)
+                        .getBody()
+                        .get("problem")
+                        .asString())
+                .isEqualTo("taken");
+        confirm(again);
         assertThat(shortNameOf(again)).isEqualTo(third);
         assertThat(check(second, "Test Electricals Shop", null)
                         .getBody()

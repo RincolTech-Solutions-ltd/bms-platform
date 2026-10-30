@@ -6,23 +6,23 @@ import com.rincoltech.bms.core.tenancy.ShortNames;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** The short name rules and the order of the suggestions (issue #708, ADR-108), without a database. */
+/** The short name rules and the order of the suggestions (issue #708, ADR-108), without a database. Fabricated names. */
 class ShortNameRulesTest {
 
     @Test
     void aShortNameIsThreeToTwentyLettersAndDigitsWithSingleInnerHyphens() {
-        for (String ok : List.of("abc", "modern", "modern-kampala", "a1b2c3", "x".repeat(20), "dodos7k")) {
+        for (String ok : List.of("abc", "testduka", "testduka-gulu", "a1b2c3", "x".repeat(20), "testduka7k")) {
             assertThat(ShortNames.refusal(ok)).as(ok).isEmpty();
         }
-        for (String bad :
-                List.of("ab", "x".repeat(21), "-abc", "abc-", "ab--cd", "Modern", "mod ern", "duka_la", "xn--abc")) {
+        for (String bad : List.of(
+                "ab", "x".repeat(21), "-abc", "abc-", "ab--cd", "Testduka", "test duka", "duka_la", "xn--abc")) {
             assertThat(ShortNames.refusal(bad))
                     .as(bad)
                     .get()
                     .extracting(ShortNames.Check::problem)
                     .isEqualTo("invalid");
         }
-        assertThat(ShortNames.normalise("  Modern ")).isEqualTo("modern");
+        assertThat(ShortNames.normalise("  Testduka ")).isEqualTo("testduka");
     }
 
     @Test
@@ -42,13 +42,13 @@ class ShortNameRulesTest {
 
     @Test
     void suggestionsPutTheTownFirstThenAShorterFormThenANumber() {
-        List<String> c = ShortNameService.candidates("modern", "Modern Electricals", "Kampala");
-        assertThat(c.getFirst()).isEqualTo("modern-kampala");
-        assertThat(c.get(1)).isEqualTo("modernelec");
-        assertThat(c).contains("modernelectricals", "modern2").doesNotContain("modern");
-        assertThat(ShortNameService.candidates("modern", "Modern Electricals", "Mbarara Town")
+        List<String> c = ShortNameService.candidates("testduka", "Testduka Hardware", "Gulu");
+        assertThat(c.getFirst()).isEqualTo("testduka-gulu");
+        assertThat(c.get(1)).isEqualTo("testdukahard");
+        assertThat(c).contains("testdukahardware", "testduka2").doesNotContain("testduka");
+        assertThat(ShortNameService.candidates("testduka", "Testduka Hardware", "Gulu Town")
                         .subList(0, 2))
-                .containsExactly("modern-mbarara-town", "modern-mbarara");
+                .containsExactly("testduka-gulu-town", "testduka-gulu");
         // A long name keeps the town whole.
         assertThat(ShortNameService.candidates("short-ab12cd34", "Test Shop", "Kampala")
                         .getFirst())

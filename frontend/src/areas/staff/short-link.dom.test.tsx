@@ -22,14 +22,14 @@ const link = { short_name: 'testduka', link: 'rincoltech.test/testduka', url: 'h
 
 describe('the short name rules in the form', () => {
   it('takes 3 to 20 letters and digits with single inner hyphens, and starts from the business name', () => {
-    expect(shortNameProblem('modern')).toBeNull();
-    expect(shortNameProblem('modern-kampala')).toBeNull();
+    expect(shortNameProblem('testduka')).toBeNull();
+    expect(shortNameProblem('testduka-gulu')).toBeNull();
     expect(shortNameProblem('ab')).toMatch(/3 to 20/);
     expect(shortNameProblem('a--b')).toMatch(/3 to 20/);
     expect(shortNameProblem('')).toBe('Choose a short name for your link.');
-    expect(shortNameFrom('Modèrn Electricals Ltd')).toBe('modern');
+    expect(shortNameFrom('Tèstduka Hardware Ltd')).toBe('testduka');
     expect(shortNameFrom('A1')).toBe('');
-    expect(cleanShortName('Modern Kampala!')).toBe('modern-kampala');
+    expect(cleanShortName('Testduka Gulu!')).toBe('testduka-gulu');
     expect(linkNameFrom('?name=oldduka')).toBe('oldduka');
     expect(linkNameFrom('?name=<b>')).toBeNull();
   });
@@ -43,20 +43,20 @@ describe('the short name field', () => {
 
   it('says a taken name is taken and puts its free names, the town first, one tap away', async () => {
     const check = vi.fn(async (name: string) =>
-      name === 'modern'
-        ? { name, available: false, problem: 'taken', message: 'modern is taken.', suggestions: ['modern-kampala', 'modernelec'] }
+      name === 'testduka'
+        ? { name, available: false, problem: 'taken', message: 'testduka is taken.', suggestions: ['testduka-gulu', 'testdukahard'] }
         : { name, available: true, suggestions: [] },
     );
     render(<Field check={check} />);
     expect(screen.getByText('rincoltech.test/')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Short name for your link'), { target: { value: 'Modern' } });
-    expect(await screen.findByText('modern is taken.', {}, { timeout: 2000 })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Short name for your link'), { target: { value: 'Testduka' } });
+    expect(await screen.findByText('testduka is taken.', {}, { timeout: 2000 })).toBeTruthy();
     const offers = screen.getAllByRole('button').map((b) => b.textContent);
-    expect(offers).toEqual(['modern-kampala', 'modernelec']);
-    fireEvent.click(screen.getByRole('button', { name: 'modern-kampala' }));
-    expect((screen.getByLabelText('Short name for your link') as HTMLInputElement).value).toBe('modern-kampala');
-    expect(await screen.findByText('rincoltech.test/modern-kampala is free.', {}, { timeout: 2000 })).toBeTruthy();
-    expect(check).toHaveBeenLastCalledWith('modern-kampala');
+    expect(offers).toEqual(['testduka-gulu', 'testdukahard']);
+    fireEvent.click(screen.getByRole('button', { name: 'testduka-gulu' }));
+    expect((screen.getByLabelText('Short name for your link') as HTMLInputElement).value).toBe('testduka-gulu');
+    expect(await screen.findByText('rincoltech.test/testduka-gulu is free.', {}, { timeout: 2000 })).toBeTruthy();
+    expect(check).toHaveBeenLastCalledWith('testduka-gulu');
   });
 });
 

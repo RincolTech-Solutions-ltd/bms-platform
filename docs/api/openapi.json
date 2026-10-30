@@ -23057,7 +23057,7 @@
       "ShortLink" : {
         "properties" : {
           "link" : {
-            "description" : "As a person types it, for example rincoltech.com/modern",
+            "description" : "As a person types it, for example rincoltech.com/testduka",
             "type" : "string"
           },
           "short_name" : {
@@ -23264,7 +23264,7 @@
             "type" : "boolean"
           },
           "message" : {
-            "description" : "Plain words, for example 'modern is taken.'",
+            "description" : "Plain words, for example 'testduka is taken.'",
             "type" : "string"
           },
           "name" : {

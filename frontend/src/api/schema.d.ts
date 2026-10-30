@@ -19246,7 +19246,7 @@ export interface components {
             photos?: boolean;
         };
         ShortLink: {
-            /** @description As a person types it, for example rincoltech.com/modern */
+            /** @description As a person types it, for example rincoltech.com/testduka */
             link?: string;
             /** @description The short name, which is also the app's address (the slug) */
             short_name?: string;
@@ -19321,7 +19321,7 @@ export interface components {
         };
         SignUpShortNameCheck: {
             available?: boolean;
-            /** @description Plain words, for example 'modern is taken.' */
+            /** @description Plain words, for example 'testduka is taken.' */
             message?: string;
             name?: string;
             /** @description invalid, reserved or taken; null when available */
