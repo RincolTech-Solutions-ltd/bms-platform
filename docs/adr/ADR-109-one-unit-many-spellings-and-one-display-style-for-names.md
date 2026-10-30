@@ -35,7 +35,8 @@ side on every screen and receipt. The owner decided D86 = A: Title Case for item
    a unit (the routes, Quick add, both imports and the default units) first takes a transaction lock on the key, so two
    spellings added at the same moment make one unit; a refusal raced past that lock is read again after a savepoint and
    still names the unit. Categories are looked up the same way everywhere by `CatalogueNames.nameKey` (case and inner
-   spaces ignored), and a form never chooses a switched-off unit: it says "You already have Piece, switched off.". `duplicate_unit` is
+   spaces ignored), and a form never chooses a switched-off unit: it says "You already have Piece, switched off. Switch it on in Units.", and a usual pack is never offered, or given in
+   place, the unit being edited. `duplicate_unit` is
    no longer sent.
 4. **Categories say which one exists.** A category that exists ignoring case and extra spaces is refused with 409
    `duplicate_category` that now carries `existing_id` and `existing_name`; the Categories screen says "You already have

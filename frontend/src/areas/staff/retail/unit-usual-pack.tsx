@@ -127,7 +127,11 @@ export function UsualPackSheet({ unit, units, onClose, onSaved }: {
             text="No other unit for this pack to hold yet."
             add={{
               label: 'Add a new unit', name: 'Name of the new unit, such as piece', send: 'Add unit', maxLength: 30,
-              create: (name) => orExistingUnit(retail.createUnit(name)),
+              // Issue #698: "ctn" while editing Carton is this unit, which never holds itself (review of #715).
+              create: (name) => orExistingUnit(retail.createUnit(name)).then((added) => {
+                if (added.id === unit.id) throw new Error(`${name.trim()} is ${unit.name ?? ''} itself. Type the unit one ${unit.name ?? ''} holds, such as piece.`);
+                return added;
+              }),
               onAdded: (added) => {
                 setOfUnitId(added.id ?? '');
                 void queryClient.invalidateQueries({ queryKey: ['retail', 'catalogue', 'units'] });

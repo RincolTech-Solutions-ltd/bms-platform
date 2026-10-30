@@ -235,6 +235,13 @@ class RetailProductImportIT extends IntegrationTest {
         assertThat(applied.getBody().get("added").asInt()).isEqualTo(2);
         assertThat(api.get("/categories", ADMIN).getBody().get("items")).hasSize(1);
         assertThat(api.get("/units", ADMIN).getBody().get("items")).hasSize(1);
+
+        // Two new spellings in one file, spaces apart, make one category.
+        String two = HEADER + "\nIMP-3,Test glue,Test  Glues,pcs,100\nIMP-4,Test tape,test glues,pcs,200\n";
+        JsonNode planned = run(two, true, ADMINISTRATOR).getBody();
+        assertThat(planned.get("categories_created")).hasSize(1);
+        assertThat(run(two, false, ADMINISTRATOR).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(api.get("/categories", ADMIN).getBody().get("items")).hasSize(2);
     }
 
     @Test

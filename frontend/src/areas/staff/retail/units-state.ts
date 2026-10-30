@@ -171,7 +171,7 @@ export function orExistingUnit(added: Promise<Unit>): Promise<AddedUnit> {
     if (!(error instanceof RetailError) || error.code !== 'unit_exists' || !p['existing_id']) throw error;
     // A switched-off unit cannot be chosen for an item, so it is said, not chosen (review of #715).
     if (p['existing_active'] === false) {
-      throw new RetailError(`You already have ${String(p['existing_name'] ?? '')}, switched off. Switch it on in Units to use it.`, 409, 'unit_exists', p);
+      throw new RetailError(`You already have ${String(p['existing_name'] ?? '')}, switched off. Switch it on in Units.`, 409, 'unit_exists', p);
     }
     return { id: String(p['existing_id'] ?? ''), name: String(p['existing_name'] ?? ''), active: p['existing_active'] !== false, reused: true };
   });

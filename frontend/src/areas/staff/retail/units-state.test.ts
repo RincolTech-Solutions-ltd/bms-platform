@@ -206,7 +206,7 @@ describe('stock in packs and pieces (issue #650)', () => {
     const unnamed = new RetailError('A unit with this name was added a moment ago. Reload the units.', 409, 'unit_exists', {});
     await expect(orExistingUnit(Promise.reject(unnamed))).rejects.toBe(unnamed);
     const off = new RetailError('You already have Piece.', 409, 'unit_exists', { existing_id: 'u1', existing_name: 'Piece', existing_active: false });
-    await expect(orExistingUnit(Promise.reject(off))).rejects.toThrow('You already have Piece, switched off. Switch it on in Units to use it.');
+    await expect(orExistingUnit(Promise.reject(off))).rejects.toThrow('You already have Piece, switched off. Switch it on in Units.');
     expect(unitWords(undefined)).toBe('');
   });
   it('works with a pack of a decimal size', () => {
