@@ -4,7 +4,9 @@ import { api, problemOf } from '../../api/client';
 import type { components } from '../../api/schema';
 import { BusyButton } from '../../app/ui/BusyButton';
 import { Hint } from '../../app/ui/Hint';
+import { businessZone } from '../../api/retail';
 import { ShortNameField, shortNameProblem } from '../onboarding/short-name';
+import { sayDone } from './retail/toast';
 
 // The shop's short link in Business set-up (issue #708, ADR-108): rincoltech.com/<short name> with a Copy button, the old links that
 // still forward, and for the Owner, Change short name with the same as-typed check as the sign-up. The short name is also the app's
@@ -29,7 +31,7 @@ async function checkName(name: string) {
 function day(iso?: string) {
   if (!iso) return '';
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: businessZone() });
 }
 
 /** Copies the link; an older phone browser without clipboard permission gets the field selected instead. */
@@ -92,6 +94,7 @@ export function ShortLinkCard({ isOwner, canManage, load = fetchShortLink }: { i
         setOffers(p.suggestions ?? []);
         return;
       }
+      sayDone(`Short link changed to ${data.link ?? typed}`);
       setMoved(data);
       setEditing(false);
       queryClient.setQueryData(SHORT_LINK_QUERY, data);

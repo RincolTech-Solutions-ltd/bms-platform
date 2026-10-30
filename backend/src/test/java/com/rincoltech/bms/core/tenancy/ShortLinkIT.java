@@ -140,8 +140,8 @@ class ShortLinkIT extends IntegrationTest {
                     .isEqualTo("reserved");
         }
         ResponseEntity<JsonNode> refused = apply("pricing", null);
-        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
-        assertThat(change(api, ownerSession, "about").getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(refused.getStatusCode().value()).isEqualTo(422);
+        assertThat(change(api, ownerSession, "about").getStatusCode().value()).isEqualTo(422);
 
         JsonNode rule = platform.get("/api/v1/platform/short-link-rule", null).getBody();
         assertThat(rule.get("reserved").toString()).contains("\"about\"").contains("\"privacy\"");
