@@ -4,7 +4,7 @@ import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanst
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../../api/client';
 import type { Product, Purchase, StockRow, Transfer, Unit } from '../../../api/retail';
@@ -58,7 +58,7 @@ vi.mock('../../../api/retail', async (original) => {
   };
 });
 
-const { NEXT_STEPS, QuickAddedNext } = await import('./next-steps');
+const { ItemAddedNext, NEXT_STEPS, QuickAddedNext } = await import('./next-steps');
 const { ProductsPage } = await import('./catalogue-products');
 const { StocktakePage } = await import('./stocktake');
 const { RestockSaved } = await import('./restock');
@@ -104,10 +104,22 @@ describe('the next steps list', () => {
       const p = join(dir, n);
       return statSync(p).isDirectory() ? files(p) : /\.tsx$/.test(n) && !/\.test\.tsx$/.test(n) ? [p] : [];
     });
-    const screens = files(src).flatMap((f) => [...readFileSync(f, 'utf8').matchAll(/<SuccessScreen\b[\s\S]*?actions=\{\s*([^\s])/g)].map((m) => ({ f, first: m[1] })));
+    // The first thing inside the action list: ] is an empty list, a success screen with nowhere to go next; anything that is
+    // not an array literal is refused too, so a list the guard cannot read never passes unseen.
+    // Spaces and comments inside the list are skipped.
+    const firsts = (code: string) => [...code.matchAll(/<SuccessScreen\b[\s\S]*?actions=\{\s*(\[(?:\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*(.)|[^\s[])/g)].map((m) => m[2] ?? m[1]);
+    // A list opens with a step ({) or a spread of steps (.); anything else is refused.
+    const empty = (code: string) => firsts(code).filter((c) => c !== '{' && c !== '.');
+    // The guard catches what it is for.
+    expect(empty('<SuccessScreen title="x" actions={[]} />')).toEqual([']']);
+    expect(empty('<SuccessScreen title="x" actions={ [ ] } />')).toEqual([']']);
+    expect(empty('<SuccessScreen title="x" actions={none} />')).toEqual(['n']);
+    expect(empty('<SuccessScreen title="x" actions={[\n  // nothing yet\n]} />')).toEqual([']']);
+    expect(empty("<SuccessScreen actions={[\n  // a step\n  ...(on ? [{ label: 'A', to: '/a' }] : []),\n]} />")).toEqual([]);
+    expect(empty("<SuccessScreen title=\"x\" actions={[{ label: 'Again', onClick: go }]} />")).toEqual([]);
+    const screens = files(src).flatMap((f) => firsts(readFileSync(f, 'utf8')).map((first) => ({ f, first })));
     expect(screens.length).toBeGreaterThan(3);
-    // An action list that opens with ] is empty: a success screen with nowhere to go next.
-    expect(screens.filter((s) => s.first === ']')).toEqual([]);
+    expect(screens.filter((s) => s.first !== '{' && s.first !== '.')).toEqual([]);
   });
 });
 
@@ -167,6 +179,16 @@ describe('Add an item, then Count it now', () => {
     expect(screen.getByLabelText(/^Description/)).toHaveProperty('value', '');
   });
 
+  it('keeps Count it now from someone who counts only at another branch, or at an office that keeps no goods', () => {
+    const scopes = { ...(owner.permission_scopes ?? {}), 'retail.stocktake.commit': { all_branches: false, branch_ids: [B] } };
+    const office: Me = { ...owner, branches: (owner.branches ?? []).map((b) => (b.id === A ? { ...b, stocks_goods: false } : b)) };
+    for (const me of [{ ...owner, permission_scopes: scopes } as Me, office]) {
+      show(<ItemAddedNext item={made} onAnother={vi.fn()} />, { me });
+      expect(within(row('itemAdded')).queryByRole('link', { name: 'Count it now' })).toBeNull();
+      cleanup();
+    }
+  });
+
   it('puts Count stock and Buy stock on Items as plain buttons, only for someone who may open them', async () => {
     show(<ProductsPage />);
     const steps = within(await screen.findByTestId('next-items')).getAllByRole('link');
@@ -184,7 +206,10 @@ describe('Quick add', () => {
   it('adds Count it now only when no quantity was typed, at the branch the item was added at', () => {
     const chooseBranch = show(<QuickAddedNext added={{ ...added, branch_id: B }} onAnother={vi.fn()} onSell={vi.fn()} />);
     expect(names('quickAdded')).toEqual(['Count it now', 'Add another', 'Sell it']);
-    fireEvent.click(screen.getByRole('link', { name: 'Count it now' }));
+    const count = screen.getByRole('link', { name: 'Count it now' });
+    // No Back to Items from a count Quick add opened: Quick add is often reached from Sell.
+    expect(count.getAttribute('href')).toBe('/staff/retail/stocktake?item=p1');
+    fireEvent.click(count);
     expect(chooseBranch).toHaveBeenCalledWith(B);
     cleanup();
     show(<QuickAddedNext added={{ ...added, branch_id: A, qty: '4.000' }} onAnother={vi.fn()} />);
@@ -216,6 +241,21 @@ describe('the done screens', () => {
     // The owner has one other branch that keeps goods, so the tap goes straight there.
     fireEvent.click(screen.getByRole('button', { name: 'Count another branch' }));
     expect(chooseBranch).toHaveBeenCalledWith(B);
+  });
+
+  it('starts a plain count after a switch to another branch: no item brought, no Back to Items', async () => {
+    listStock.mockResolvedValue(sheet);
+    function Switching() {
+      const [branch, setBranch] = useState<string | null>(A);
+      return <StaffContext.Provider value={{ me: owner, branch, chooseBranch: setBranch }}><StocktakePage /><button type="button" onClick={() => setBranch(B)}>Switch</button></StaffContext.Provider>;
+    }
+    show(<Switching />, { at: '/staff/retail/stocktake?item=p1&from=items' });
+    await screen.findByTestId('scan-hit');
+    expect(screen.getByTestId('next-countFromAdd')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Switch' }));
+    await screen.findByRole('heading', { name: /^Not counted yet/ });
+    expect(screen.queryByTestId('scan-hit')).toBeNull();
+    expect(screen.queryByTestId('next-countFromAdd')).toBeNull();
   });
 
   it('Buy stock done offers Move to the shop from a store, and My stock', () => {

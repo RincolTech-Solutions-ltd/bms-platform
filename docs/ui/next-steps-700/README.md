@@ -12,6 +12,8 @@ No page scrolls sideways. The list of every next step is `docs/ui/next-steps.md`
 | `04-count-stock-item-ready-*.png` | Count it now opened Count stock with the new item at the top of Not counted yet, marked, its Counted box focused |
 | `05-count-stock-back-to-items-*.png` | The end of that sheet: Back to Items under Review the difference |
 | `06-count-done-next-*.png` | The count committed: Start another count, Back to My stock and Count another branch |
+| `07-buy-stock-done-next-*.png` | Buy stock done, bought into a shop: Buy more stock (primary) and My stock |
+| `08-move-stock-done-next-*.png` | Move stock done: Move more stock (primary) and Count stock at Test Branch B (BR2), the branch that took the goods in |
 
-Buy stock done (Buy more stock, Move to the shop from a store, My stock) and Move stock done (Move more stock, Count stock at
-the receiving branch) use the same Next row; `next-steps.dom.test.tsx` draws them.
+Move to the shop shows on Buy stock done only when the purchase went into a store. The mock's session marks no branch as a
+store, so that case is drawn by `next-steps.dom.test.tsx` instead of a picture.

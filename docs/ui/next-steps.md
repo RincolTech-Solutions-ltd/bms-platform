@@ -20,14 +20,19 @@ Each button shows only to someone who may use it: the screen it opens is checked
 | `quickAdded` | Quick add | the item is added | Count it now; Add another; Sell it | Count it now, else Add another |
 | `countFromAdd` | Count stock | opened from Count it now | Back to Items | none |
 | `countDone` | Count stock | the count is committed | Start another count; Back to My stock; Count another branch | Start another count |
-| `buyDone` | Buy stock | the purchase is saved | Buy more stock; Move to the shop; My stock | Buy more stock |
-| `moveDone` | Move stock | the stock is moved or received | Move more stock; Count stock at the receiving branch | Move more stock |
+| `buyDone` | Buy stock | the purchase is saved | Buy more stock; Move to the shop; My stock | Buy more stock, else none |
+| `moveDone` | Move stock | the stock is moved or received | Move more stock; Count stock at the receiving branch | Move more stock, else none |
+
+Where a screen shows a past purchase or move (Stock moves opens one), there is no Buy more stock or Move more stock, and then
+no step is primary. Count stock done draws its buttons in the success screen (`SuccessScreen`), one under another.
 
 ## What each button does
 
 - **Count it now** opens Count stock at the branch in use (on Quick add, at the branch the item was added at) with the new
-  item already on the sheet and its box focused, ready to type how many. Quick add shows it only when no quantity was typed,
-  since a typed quantity is already the count. A help tip beside it says what it does.
+  item already on the sheet and its box focused, ready to type how many. It shows only where the person may count at that
+  branch and it keeps goods. Quick add shows it only when no quantity was typed, since a typed quantity is already the count;
+  its count has no Back to Items, since Quick add is often reached from Sell. A help tip beside it says what it does. A switch
+  to another branch on Count stock starts a plain count there, without the item.
 - **Add another** opens a clear Add an item form (on Quick add, keeping the category and where).
 - **Sell it** opens Record a sale with the item on it, where the person may sell at that branch and it sells goods.
 - **Back to Items** returns to the Items list from a count opened by Count it now. It sits next to Review the difference.
@@ -39,5 +44,6 @@ Each button shows only to someone who may use it: the screen it opens is checked
 
 ## The guard
 
-`next-steps.dom.test.tsx` also scans every staff screen for the one success screen (`SuccessScreen`) and fails when one is
-drawn with no next step: every success screen or success line of a write offers at least one next step button.
+`next-steps.dom.test.tsx` also scans every screen for the one success screen (`SuccessScreen`) and fails when its list of
+next steps is empty, or is anything but a list that opens with a step or a spread of steps; it checks itself on an empty list
+first. The other done screens of this list are each drawn by the test with their buttons.

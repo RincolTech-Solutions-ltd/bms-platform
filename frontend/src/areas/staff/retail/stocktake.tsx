@@ -563,6 +563,10 @@ function CountSheet({ branchId, item, from }: { branchId: string; item?: string;
 export function StocktakePage() {
   const { branchId } = useStockingBranch();
   const { item, from } = (useRouter({ warn: false })?.state.location.search ?? {}) as { item?: string; from?: string };
+  // The item and where it came from belong to the branch the count first opened at: Count another branch starts a plain count.
+  const [opened, setOpened] = useState<string | null>(branchId);
+  if (opened === null && branchId !== null) setOpened(branchId);
+  const fresh = branchId !== null && branchId === (opened ?? branchId);
   return (
     <Gate screen="stocktake" title={WORDS.countStock}>
       {branchId === null ? (
@@ -570,7 +574,7 @@ export function StocktakePage() {
       ) : (
         <>
           {/* Keyed by branch, so a branch switch starts afresh from that branch's own saved count (review of #681). */}
-          <CountSheet key={branchId} branchId={branchId} item={typeof item === 'string' ? item : undefined} from={typeof from === 'string' ? from : undefined} />
+          <CountSheet key={branchId} branchId={branchId} item={fresh && typeof item === 'string' ? item : undefined} from={fresh && typeof from === 'string' ? from : undefined} />
         </>
       )}
     </Gate>

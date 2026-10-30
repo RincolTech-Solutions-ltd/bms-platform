@@ -93,7 +93,7 @@ export function ItemAddedNext({ item, onAnother }: { item: Product; onAnother: (
     <section className="rt-card" aria-label={`Next for ${item.description ?? 'the item'}`} data-testid="item-added">
       <p><strong>{item.description}</strong> is saved. What next?</p>
       <NextSteps at="itemAdded" lead steps={[
-        { label: 'Count it now', screen: 'stocktake', to: '/staff/retail/stocktake', search: { item: id, from: 'items' }, tip: <HelpTip tip="countItNow" /> },
+        { label: 'Count it now', screen: 'stocktake', to: '/staff/retail/stocktake', search: { item: id, from: 'items' }, show: mayCountAt(me, branch ?? undefined), tip: <HelpTip tip="countItNow" /> },
         { label: 'Add another', onClick: onAnother },
         { label: 'Sell it', screen: 'sale', to: '/staff/retail/sale', search: { item: id, branch: branch ?? '' }, show: maySellAt(me, branch ?? undefined) },
       ]} />
@@ -112,8 +112,9 @@ export function QuickAddedNext({ added, onAnother, onSell }: { added: QuickAdd; 
   return (
     <NextSteps at="quickAdded" lead steps={[
       {
-        label: 'Count it now', screen: 'stocktake', to: '/staff/retail/stocktake', search: { item: added.product_id ?? '', from: 'items' },
-        onClick: () => { if (at !== branch) chooseBranch?.(at); }, show: added.qty === undefined && mayCountAt(me, at), tip: <HelpTip tip="countItNow" />,
+        // No `from`: Quick add is often reached from Sell, so Back to Items would send the person somewhere they never were.
+        label: 'Count it now', screen: 'stocktake', to: '/staff/retail/stocktake', search: { item: added.product_id ?? '' },
+        onClick: () => { if (at !== branch) chooseBranch?.(at); }, show: added.qty == null && mayCountAt(me, at), tip: <HelpTip tip="countItNow" />,
       },
       { label: 'Add another', onClick: onAnother },
       { label: 'Sell it', onClick: onSell, show: onSell !== undefined },

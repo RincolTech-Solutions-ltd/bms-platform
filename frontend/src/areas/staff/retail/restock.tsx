@@ -465,7 +465,7 @@ export function RestockSaved({ purchase, context, onNew }: { purchase: Purchase;
         <p>No price changed.</p>
       )}
       {/* Issue #700: the next jobs. Goods bought into a store are moved to a shop from that store, so the store is chosen first. */}
-      <NextSteps at="buyDone" lead steps={[
+      <NextSteps at="buyDone" lead={onNew !== undefined} steps={[
         { label: 'Buy more stock', onClick: onNew, show: onNew !== undefined },
         { label: 'Move to the shop', screen: 'transfer', to: '/staff/retail/transfer', onClick: () => chooseBranch?.(store?.id ?? ''), show: store !== undefined && chooseBranch !== undefined && holdsAt(me, TRANSFER, store.id) },
         { label: 'My stock', screen: 'stock', to: '/staff/retail/stock' },

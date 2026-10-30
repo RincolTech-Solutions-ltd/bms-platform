@@ -96,6 +96,37 @@ for (const width of [412, 1366]) {
   await toastGone(page);
   await shot(page, '06-count-done-next', width);
 
+  // 6. Buy stock done, bought into a shop: Buy more stock and My stock. The mock's session has no store, so Move to the shop
+  // (only from a store) is drawn by next-steps.dom.test.tsx instead.
+  await page.goto(`${BASE}/staff/retail/restock`);
+  await page.waitForLoadState('networkidle');
+  await noTour(page);
+  await page.getByLabel('Find an item by name, code or category').fill('LED bulb 9W');
+  await page.getByRole('listbox').getByRole('option').first().click();
+  await page.locator('#cost-0').fill('3000');
+  await page.locator('[id^="q-0-"]').first().fill('20');
+  await toastGone(page);
+  await page.getByRole('button', { name: 'Save the purchase' }).evaluate((e) => e.click());
+  await page.locator('[data-testid="next-buyDone"]').waitFor();
+  await page.locator('[data-testid="next-buyDone"]').evaluate((e) => e.scrollIntoView({ block: 'center' }));
+  await toastGone(page);
+  await shot(page, '07-buy-stock-done-next', width);
+
+  // 7. Move stock done: Move more stock and Count stock at the branch that took the goods in.
+  await page.goto(`${BASE}/staff/retail/transfer`);
+  await page.waitForLoadState('networkidle');
+  await noTour(page);
+  await page.getByLabel('To branch').selectOption({ index: 1 });
+  await page.getByLabel('Find an item by name, code or category').fill('LED bulb 9W');
+  await page.getByRole('listbox').getByRole('option').first().click();
+  await page.locator('#tq-0').fill('5');
+  await toastGone(page);
+  await page.getByRole('button', { name: 'Move stock', exact: true }).evaluate((e) => e.click());
+  await page.locator('[data-testid="next-moveDone"]').waitFor();
+  await page.locator('[data-testid="next-moveDone"]').evaluate((e) => e.scrollIntoView({ block: 'center' }));
+  await toastGone(page);
+  await shot(page, '08-move-stock-done-next', width);
+
   await ctx.close();
 }
 
