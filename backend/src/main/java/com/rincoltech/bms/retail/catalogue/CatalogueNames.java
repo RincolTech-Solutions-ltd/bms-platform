@@ -61,6 +61,11 @@ public final class CatalogueNames {
         return CODE_WORDS.getOrDefault(lower, lower);
     }
 
+    /** The key two category names share: trimmed, spaces inside counted once, lower case ("Test  Cables" is "test cables"). */
+    public static String nameKey(String name) {
+        return name == null ? "" : name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+    }
+
     /**
      * The key two unit names share when they are the same unit: lower case, spaces collapsed, a trailing full stop dropped, a
      * spelling of the list read as its word, else a plural read as its singular. "PCS", "pc." and "Pieces" are all "piece";

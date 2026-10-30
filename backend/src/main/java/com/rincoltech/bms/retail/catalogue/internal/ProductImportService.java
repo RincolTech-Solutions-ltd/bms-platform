@@ -218,7 +218,8 @@ class ProductImportService {
                         "This code is repeated in the file; the first row is used."));
                 continue;
             }
-            String categoryKey = category.toLowerCase(Locale.ROOT);
+            // Issue #698: as categories are stored and compared, spaces inside counted once.
+            String categoryKey = CatalogueNames.nameKey(category);
             // Issue #698 (ADR-109): "pcs" in a file is the shop's Piece; two spellings in one file make one unit.
             String unitKey = CatalogueNames.unitKey(unit);
             String packKey = CatalogueNames.unitKey(packUnit);
@@ -402,8 +403,16 @@ class ProductImportService {
             audit.record(AuditLog.Entry.created(
                     "retail.category.created", "retail.category", id, null, Map.of("name", name)));
         }
-        for (Map.Entry<String, String> e : newUnits.entrySet()) {
+        // Issue #698: each new unit under its key's lock, taken in key order so two imports queue and never deadlock; one
+        // added meanwhile in another spelling is used, never made twice.
+        for (Map.Entry<String, String> e : new java.util.TreeMap<>(newUnits).entrySet()) {
             String name = e.getValue();
+            repo.lockUnitKey(name);
+            UUID meanwhile = repo.sameUnit(name, null).map(CatalogueApi.Unit::id).orElse(null);
+            if (meanwhile != null) {
+                unitIds.put(e.getKey(), meanwhile);
+                continue;
+            }
             UUID id = UUID.randomUUID();
             repo.insertUnit(id, name, by);
             unitIds.put(e.getKey(), id);
@@ -417,13 +426,13 @@ class ProductImportService {
         ordered.sort(Comparator.comparing((Pending p) -> p.code() == null));
         ordered.stream()
                 .filter(p -> p.code() == null)
-                .map(p -> categoryIds.get(p.category().toLowerCase(Locale.ROOT)))
+                .map(p -> categoryIds.get(CatalogueNames.nameKey(p.category())))
                 .distinct()
                 .sorted()
                 .forEach(repo::lockCategory);
         Map<Integer, String> made = new HashMap<>();
         for (Pending p : ordered) {
-            UUID categoryId = categoryIds.get(p.category().toLowerCase(Locale.ROOT));
+            UUID categoryId = categoryIds.get(CatalogueNames.nameKey(p.category()));
             UUID unitId = unitIds.get(CatalogueNames.unitKey(p.unit()));
             String code = p.code() == null ? repo.nextItemCode(categoryId) : p.code();
             if (p.code() == null) {

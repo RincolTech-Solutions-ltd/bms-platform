@@ -55,19 +55,18 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
         // Only the tables that force row security now drop it, and only those get it back.
         Set<String> forced = bypass ? Set.of() : forced(c);
         forceRowSecurity(c, forced, false);
-        try {
-            restyle(c, "retail_categories", "name", "retail.category.updated", "retail.category", "name");
-            restyle(c, "retail_products", "description", "retail.product.updated", "retail.product", "description");
-            restyle(
-                    c,
-                    "retail_product_families",
-                    "name",
-                    "retail.product_family.updated",
-                    "retail.product_family",
-                    "name");
-        } finally {
-            forceRowSecurity(c, forced, true);
-        }
+        restyle(c, "retail_categories", "name", "retail.category.updated", "retail.category", "name");
+        restyle(c, "retail_products", "description", "retail.product.updated", "retail.product", "description");
+        restyle(
+                c,
+                "retail_product_families",
+                "name",
+                "retail.product_family.updated",
+                "retail.product_family",
+                "name");
+        // Restored only after the work succeeded: on a failure the rollback restores it anyway, and the first error
+        // stays the one reported (review of #715).
+        forceRowSecurity(c, forced, true);
     }
 
     /** The tables written here that force row level security now. */

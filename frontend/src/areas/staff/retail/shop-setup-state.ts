@@ -1,6 +1,7 @@
 import { RetailError, type Category, type RetailApi, type Unit } from '../../../api/retail';
 import { PURPOSES, asPurpose, type Purpose } from './catalogue-packs';
 import type { ShopType } from './shop-starters';
+import { listedWord } from './units-state';
 
 // Set up your shop (issue #625): what a starting set would add to this shop, and adding it through the routes that add one
 // category or one unit, so no new endpoint is needed. A name the shop has already, in any case and switched on or off, is
@@ -21,7 +22,8 @@ export interface SetupItem {
 }
 
 export const key = (kind: ItemKind, name: string) => `${kind}:${name.toLowerCase()}`;
-const same = (a: string | undefined, b: string) => (a ?? '').trim().toLowerCase() === b.trim().toLowerCase();
+// Issue #698: a unit in another spelling of the one list is the same ("Pcs" is Piece), as the server holds it.
+const same = (a: string | undefined, b: string) => listedWord(a ?? '') === listedWord(b);
 
 /** The starting set against what the shop has: each category, unit and pack, with what adding it would do. */
 export function planSetup(type: ShopType, categories: Category[], units: Unit[]): SetupItem[] {

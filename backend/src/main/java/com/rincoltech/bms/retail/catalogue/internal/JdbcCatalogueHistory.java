@@ -36,7 +36,8 @@ class JdbcCatalogueHistory implements CatalogueHistory {
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public Ensured ensureCategory(String name) {
-        UUID existing = idByName("retail_categories", name);
+        // Issue #698: as categories are stored and compared, spaces inside counted once.
+        UUID existing = repo.categoryIdsByName().get(CatalogueNames.nameKey(name));
         if (existing != null) {
             return new Ensured(existing, false, false);
         }
@@ -48,7 +49,9 @@ class JdbcCatalogueHistory implements CatalogueHistory {
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public Ensured ensureUnit(String name) {
-        // Issue #698 (ADR-109): "pcs" in a file is the shop's Piece, whatever spelling it has.
+        // Issue #698 (ADR-109): "pcs" in a file is the shop's Piece, whatever spelling it has; read under the key's lock,
+        // so a unit added on a screen at this moment is never made twice.
+        repo.lockUnitKey(name);
         UUID existing = repo.unitIdsByName().get(CatalogueNames.unitKey(name));
         if (existing != null) {
             return new Ensured(existing, false, false);
@@ -56,14 +59,6 @@ class JdbcCatalogueHistory implements CatalogueHistory {
         UUID id = UUID.randomUUID();
         repo.insertUnit(id, name, IMPORT_ACTOR);
         return new Ensured(id, true, false);
-    }
-
-    private UUID idByName(String table, String name) {
-        return jdbc.sql("SELECT id FROM " + table + " WHERE lower(name) = lower(?)")
-                .param(name)
-                .query(UUID.class)
-                .optional()
-                .orElse(null);
     }
 
     @Override

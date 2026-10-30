@@ -37,6 +37,9 @@ class DefaultUnits implements ModuleSetUp {
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public void switchedOn() {
+        // Issue #698: every default's key locked first, in key order, so "pcs" added on a screen at this moment and the
+        // Piece made here are never two units.
+        NAMES.stream().map(CatalogueNames::unitKey).sorted().forEach(repo::lockUnitKey);
         Set<String> existing = repo.unitIdsByName().keySet();
         for (String name : NAMES) {
             // Issue #698: keyed as the units are, so a shop with Pcs gets no second Piece.

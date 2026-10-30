@@ -137,6 +137,15 @@ describe('Set up your shop', () => {
     expect(shop.units.find((u) => u.name === 'Roll')).toMatchObject({ version: 3, usual_pack: { size: '25.000' } });
   });
 
+  it('counts a unit the shop has in another spelling as there (issue #698): Pcs is Piece, Mtr is Metre', () => {
+    const plan = planSetup(shopTypeById('hardware')!, [], [
+      { id: 'u1', name: 'Pcs', active: true, version: 1 },
+      { id: 'u2', name: 'Mtr', active: true, version: 1 },
+    ]);
+    expect(plan.find((i) => i.kind === 'unit' && i.name === 'Piece')?.status).toBe('there');
+    expect(plan.find((i) => i.kind === 'unit' && i.name === 'Metre')?.status).toBe('there');
+  });
+
   it('adds only what is ticked, and leaves out a pack whose smaller unit is neither there nor ticked', async () => {
     const shop = fakeShop({ units: [] });
     const type = shopTypeById('hardware')!;

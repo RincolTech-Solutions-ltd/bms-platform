@@ -220,7 +220,7 @@ class CatalogueRepository {
                 == 1;
     }
 
-    /** Lower-cased name to id, for the import's lookups. */
+    /** Name key ({@code CatalogueNames.nameKey}) to id, for the import's lookups. */
     Map<String, UUID> categoryIdsByName() {
         return namesToIds("retail_categories");
     }
@@ -263,7 +263,7 @@ class CatalogueRepository {
                 .query(rs -> {});
     }
 
-    /** Lower-cased names of switched-off categories, which an import must not add items to. */
+    /** Name keys of switched-off categories, which an import must not add items to. */
     Set<String> inactiveCategoryNames() {
         return inactiveNames("retail_categories");
     }
@@ -281,9 +281,12 @@ class CatalogueRepository {
     }
 
     private Set<String> inactiveNames(String table) {
-        return new java.util.HashSet<>(jdbc.sql("SELECT lower(name) FROM " + table + " WHERE NOT active")
+        return new java.util.HashSet<>(jdbc.sql("SELECT name FROM " + table + " WHERE NOT active")
                 .query(String.class)
-                .list());
+                .list()
+                .stream()
+                .map(CatalogueNames::nameKey)
+                .toList());
     }
 
     /** Decimal places of a currency (UGX 0, KES 2), from the currencies table. */
@@ -296,9 +299,10 @@ class CatalogueRepository {
 
     private Map<String, UUID> namesToIds(String table) {
         Map<String, UUID> ids = new java.util.HashMap<>();
-        jdbc.sql("SELECT id, lower(name) AS n FROM " + table)
+        // Issue #698: keyed as names are compared, spaces inside counted once, so "Test  Cables" finds "Test Cables".
+        jdbc.sql("SELECT id, name FROM " + table + " ORDER BY created_at, id")
                 .query((rs, n) -> {
-                    ids.put(rs.getString("n"), rs.getObject("id", UUID.class));
+                    ids.putIfAbsent(CatalogueNames.nameKey(rs.getString("name")), rs.getObject("id", UUID.class));
                     return 0;
                 })
                 .list();
