@@ -50,15 +50,23 @@ side on every screen and receipt. The owner decided D86 = A: Title Case for item
 6. **Existing rows (`V120`, a Java migration so it uses the same two rules).** Per business:
    - Units with the same key are merged into one: the switched-on one first, then the one whose name is the unit's word,
      then the oldest. A unit is merged only when nothing but the catalogue uses it (items, items with sizes, packages and
-     a unit's usual pack) and moving those to the kept unit clashes with nothing (no item would hold both as packages or as
-     its unit and a package, and no usual pack would count itself). Those references are moved, the merged unit is switched
-     off and kept, never deleted, and `retail.unit.merged` is audited with what moved. A unit used by a sale, a purchase, a
+     a unit's usual pack; every other foreign key, and every column named `unit_id` or `*_unit_id` with or without a key,
+     is checked) and moving those to the kept unit clashes with nothing (no item would hold both as packages or as its unit
+     and a package, and no usual pack chain would loop at any depth). Those references are moved, the merged unit is
+     switched off and kept, never deleted, `merged_into_id` names the kept unit, and `retail.unit.merged` is audited with
+     what moved. A sale, a return or a purchase sent later with the merged unit's id (a phone that was offline, a draft)
+     is read in the kept unit (`RetailCatalogue.unitNow` and the pack lookup follow `merged_into_id`). A unit used by a sale, a purchase, a
      return, a quotation, an order or a price list, or one that would clash, is left as it is and audited as
      `retail.unit.merge_skipped` with the reason, for the owner to look at.
    - Item, item with sizes and category names are put in the display style where that changes only their case
      (`retail.product.updated`, `retail.product_family.updated`, `retail.category.updated`, each with the name before and
-     after and `source` `V120`). A name with extra spaces keeps them until it is next saved.
-   - Nothing else is changed and no row is deleted. The audit rows are written by the migration as `system`.
+     after and `source` `V120`); each moves its `version` and `updated_at`, so every client reads it again. A name with
+     extra spaces keeps them until it is next saved.
+   - The schema gains only the nullable `retail_units.merged_into_id`; no row is deleted. Row security is dropped only on
+     the tables that force it, and restored on exactly those. The audit rows are written by the migration as `system`.
+   - Merging only what the catalogue alone uses is narrower than repointing sales, purchases, counts and price lists to the
+     kept unit: history keeps the unit it was made in, and the owner merges the rest from the skipped list. Repointing
+     history is left for a decision of its own.
 
 ## Consequences
 
