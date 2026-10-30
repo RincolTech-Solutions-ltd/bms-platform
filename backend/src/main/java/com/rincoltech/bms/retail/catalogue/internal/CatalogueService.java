@@ -594,7 +594,13 @@ class CatalogueService {
      */
     @Transactional
     RetailCatalogue.NewItem createItem(
-            String description, UUID categoryId, UUID unitId, long costMinor, long sellMinor, String duplicateReason) {
+            String description,
+            UUID categoryId,
+            UUID unitId,
+            long costMinor,
+            long sellMinor,
+            String duplicateReason,
+            List<RetailCatalogue.NewPack> packs) {
         UUID by = CurrentPrincipal.require().userId();
         boolean categoryMade = false;
         UUID category = categoryId;
@@ -635,8 +641,23 @@ class CatalogueService {
             unitMade = madeForQuickAdd("retail_units", "retail.unit", unit, PIECE, by);
             unit = unitMade ? unit : repo.unitIdsByName().get(CatalogueNames.unitKey(PIECE));
         }
+        // Issue #695: the packages go through create, so each is checked and refused on its own row as on Items.
+        List<PackRequest> asked = packs == null
+                ? null
+                : packs.stream()
+                        .map(k -> k == null
+                                ? null
+                                : new PackRequest(
+                                        k.unitId(),
+                                        k.factor(),
+                                        k.purpose(),
+                                        k.sellMinor(),
+                                        k.holdsUnitId(),
+                                        k.holdsQty(),
+                                        k.usualBuy()))
+                        .toList();
         Product p = create(new CreateProductRequest(
-                null, description, category, unit, costMinor, sellMinor, duplicateReason, null));
+                null, description, category, unit, costMinor, sellMinor, duplicateReason, asked));
         // Read again: the answer of create leaves out the cost for someone who may not read it.
         return new RetailCatalogue.NewItem(
                 CatalogueLookup.snapshot(repo.find(p.id()).orElseThrow()), categoryMade, unitMade);

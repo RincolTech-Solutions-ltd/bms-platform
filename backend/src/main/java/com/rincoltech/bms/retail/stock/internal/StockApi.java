@@ -2,6 +2,7 @@ package com.rincoltech.bms.retail.stock.internal;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
+import com.rincoltech.bms.retail.catalogue.RetailCatalogue.NewPack;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Digits;
@@ -9,6 +10,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
@@ -234,7 +236,29 @@ final class StockApi {
                                     + " (retail.purchase.create there). qty above 0 and cost_minor above 0 are then needed, and the"
                                     + " stock is recorded as a purchase, as Buy stock does, never against opening balance equity."
                                     + " Left out: opening stock, as before")
-            String paidFrom) {}
+            String paidFrom,
+
+            @Size(max = 10)
+            @Schema(
+                    description =
+                            "Issue #695: the new item's packages, as packs of POST /retail/products (issue #689, ADR-106,"
+                                    + " ADR-107), made in the same transaction; a refused package names its pack_index and"
+                                    + " saves nothing. Ignored with product_id. qty stays in the item's smallest unit")
+            @Valid
+            List<@NotNull @Valid NewPack> packs,
+
+            @Schema(
+                    description =
+                            "Issue #695: with paid_from, the package the goods were bought in (one of packs, or a pack of"
+                                    + " product_id); sent with paid_level_cost_minor. The whole packages are then one line at"
+                                    + " that price, as Buy stock records a pack, and only the pieces left over are at"
+                                    + " cost_minor, so the money that leaves is what was paid")
+            UUID paidLevelUnitId,
+
+            @Positive
+            @Max(RetailCatalogue.MAX_AMOUNT_MINOR)
+            @Schema(description = "Issue #695: what one package of paid_level_unit_id cost")
+            Long paidLevelCostMinor) {}
 
     @Schema(name = "RetailQuickAdd")
     record QuickAdd(
