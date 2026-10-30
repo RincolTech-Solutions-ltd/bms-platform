@@ -20,6 +20,7 @@ import { createPurchasingMock } from './retail-purchasing-mock';
 import { barcodeKey, checkBarcode, scanKeys, shopEan } from '../areas/staff/retail/barcode-state';
 import { bigDrop } from '../areas/staff/retail/maths';
 import { listedWord } from '../areas/staff/retail/units-state';
+import standardUnits from '../words/standard-units.json';
 import { MAX_VARIANTS, cleanOption, planVariants, variantDescription, variantKey, variantLabel } from './retail-variants';
 
 // Fabricated retail data for VITE_RETAIL_MOCK and for tests: invented products, branches and
@@ -210,23 +211,20 @@ const MOCK_PRESETS: Record<string, readonly string[]> = {
 };
 
 /**
- * Issue #709 (ADR-110): StandardUnits on the server, in its order; a shop's own unit comes after them. The mock stands in for
- * the server's answer here (is_package, standard, fixed_count), so it carries the server's lists; the PWA itself never does.
+ * Issue #709 (ADR-110): what the server says of a unit by its name, from the shared files the server reads too
+ * (src/words/standard-units.json and unit-words.json): a package word, a standard unit in its order, a dozen's fixed 12.
  */
-const STANDARD_UNITS = ['Piece', 'Pair', 'Set', 'Metre', 'Kg', 'Gram', 'Litre', 'Ml', 'Dozen', 'Box', 'Carton', 'Packet', 'Bag', 'Roll', 'Bale', 'Crate', 'Bundle'];
-
-/** RetailCatalogue.PACKAGE_WORDS on the server. */
-const PACKAGE_WORDS = /^(((box|carton|dozen|pack|packet|bag|sack|crate|case|tray|bundle|bale|roll)(e?s)?|(ctn|pkt)s?|bx|doz|dz)( of \d+.*)?|sets? of \d+.*)$/i;
+const STANDARD_UNITS = [...standardUnits.single_units, ...standardUnits.packages];
+const PACKAGE_WORDS = new RegExp(`^(${standardUnits.package_words})$`, 'i');
 
 const standardRank = (name: string) => {
-  const i = STANDARD_UNITS.findIndex((s) => s.toLowerCase() === name.trim().toLowerCase());
+  const i = STANDARD_UNITS.findIndex((s) => listedWord(s) === listedWord(name));
   return i < 0 ? STANDARD_UNITS.length : i;
 };
 
-/** What the server says of a unit by its name: a package, a standard unit, a dozen's fixed 12. */
 function unitFlags(name: string): Pick<Unit, 'is_package' | 'standard' | 'fixed_count'> {
-  const dozen = /^(dozens?|doz|dz)$/i.test(name.trim());
-  return { is_package: PACKAGE_WORDS.test(name.trim()), standard: standardRank(name) < STANDARD_UNITS.length, ...(dozen ? { fixed_count: 12 } : {}) };
+  const fixed = (standardUnits.fixed_counts as Record<string, number>)[listedWord(name)];
+  return { is_package: PACKAGE_WORDS.test(name.trim()), standard: standardRank(name) < STANDARD_UNITS.length, ...(fixed ? { fixed_count: fixed } : {}) };
 }
 
 /** Issue #493: PREFIX-0001, at least four digits, as bms_next_item_code makes it (V96). */

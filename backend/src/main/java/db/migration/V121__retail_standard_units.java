@@ -1,6 +1,5 @@
 package db.migration;
 
-import com.rincoltech.bms.retail.catalogue.StandardUnits;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -21,7 +20,7 @@ import org.flywaydb.core.api.migration.Context;
  * V121: the standard units every shop gets (issue #709, ADR-110, D98), after V120 (#715, ADR-109), which holds the number
  * above V119 (#713).
  *
- * <p>A Java migration so it matches a shop's own spellings by the very rule the application uses ({@code StandardUnits.key}):
+ * <p>A Java migration so it matches a shop's own spellings by the application's rule, frozen below:
  * every retail business that is not closed gets each standard single unit and package it does not have under any spelling
  * (a shop with Pcs gets no Piece, one with Doz no Dozen). Nothing a shop made is touched or renamed, and two units of its own
  * that are the same unit are left as they are. A unit is inserted only: {@code ON CONFLICT DO NOTHING} on the unique name
@@ -34,14 +33,100 @@ import org.flywaydb.core.api.migration.Context;
  * EXCLUSIVE on them until the commit, so {@code lock_timeout} is five seconds and the migration fails and is retried rather
  * than queueing requests.
  *
- * <p>A Java migration has no checksum, and {@code StandardUnits.key} reads the shared spellings of
- * {@code unit-words.json} at run time (review of #722). A spelling added there later can only make two names count as one
- * unit, so a database migrated later skips at most a unit the shop already has under that spelling, never adds a second one.
- * {@code StandardUnitsTest} pins the keys of the seventeen standard names.
+ * <p>Frozen (round 2 of the review of #722): a Java migration has no checksum, so the names it adds and the rule that matches
+ * a shop's own spellings are copied here as they stood when it was written ({@code standard-units.json} and
+ * {@code unit-words.json} of issue #709, read through {@code CatalogueNames.unitKey}); a later change to those files never
+ * changes what V121 inserts. {@code V121FrozenKeyTest} proves the copy gives the application's keys today.
  */
+// JUSTIFICATION-A3: the owner's round 2 instruction asks V121 frozen with a copy of its key rule inside the migration.
 public class V121__retail_standard_units extends BaseJavaMigration {
 
     private static final String SOURCE = "V121";
+
+    /** The standard units as of V121, in order. */
+    public static final List<String> NAMES = List.of(
+            "Piece", "Pair", "Set", "Metre", "Kg", "Gram", "Litre", "Ml", "Dozen", "Box", "Carton", "Packet", "Bag",
+            "Roll", "Bale", "Crate", "Bundle");
+
+    /** Every spelling of the shared list as of V121 to its unit's word: words, plurals, codes and other spellings. */
+    public static final Map<String, String> SPELLINGS = Map.ofEntries(
+            Map.entry("piece", "piece"),
+            Map.entry("pieces", "piece"),
+            Map.entry("pc", "piece"),
+            Map.entry("pcs", "piece"),
+            Map.entry("pce", "piece"),
+            Map.entry("kilogram", "kilogram"),
+            Map.entry("kilograms", "kilogram"),
+            Map.entry("kg", "kilogram"),
+            Map.entry("kgs", "kilogram"),
+            Map.entry("kilo", "kilogram"),
+            Map.entry("kilos", "kilogram"),
+            Map.entry("gram", "gram"),
+            Map.entry("grams", "gram"),
+            Map.entry("gm", "gram"),
+            Map.entry("gms", "gram"),
+            Map.entry("g", "gram"),
+            Map.entry("gramme", "gram"),
+            Map.entry("grammes", "gram"),
+            Map.entry("millilitre", "millilitre"),
+            Map.entry("millilitres", "millilitre"),
+            Map.entry("ml", "millilitre"),
+            Map.entry("mls", "millilitre"),
+            Map.entry("milliliter", "millilitre"),
+            Map.entry("milliliters", "millilitre"),
+            Map.entry("litre", "litre"),
+            Map.entry("litres", "litre"),
+            Map.entry("ltr", "litre"),
+            Map.entry("ltrs", "litre"),
+            Map.entry("l", "litre"),
+            Map.entry("liter", "litre"),
+            Map.entry("liters", "litre"),
+            Map.entry("metre", "metre"),
+            Map.entry("metres", "metre"),
+            Map.entry("mtr", "metre"),
+            Map.entry("mtrs", "metre"),
+            Map.entry("m", "metre"),
+            Map.entry("meter", "metre"),
+            Map.entry("meters", "metre"),
+            Map.entry("carton", "carton"),
+            Map.entry("cartons", "carton"),
+            Map.entry("ctn", "carton"),
+            Map.entry("ctns", "carton"),
+            Map.entry("packet", "packet"),
+            Map.entry("packets", "packet"),
+            Map.entry("pkt", "packet"),
+            Map.entry("pkts", "packet"),
+            Map.entry("dozen", "dozen"),
+            Map.entry("dozens", "dozen"),
+            Map.entry("doz", "dozen"),
+            Map.entry("dz", "dozen"),
+            Map.entry("box", "box"),
+            Map.entry("boxes", "box"),
+            Map.entry("bx", "box"));
+
+    /** {@code CatalogueNames.unitKey} as of V121, over {@link #SPELLINGS}. */
+    public static String key(String name) {
+        String s = name == null ? "" : name.trim().replaceAll("\\s+", " ").toLowerCase(java.util.Locale.ROOT);
+        if (s.endsWith(".")) {
+            s = s.substring(0, s.length() - 1).trim();
+        }
+        String listed = SPELLINGS.get(s);
+        if (listed != null) {
+            return listed;
+        }
+        String one = s;
+        if (s.length() > 4 && s.endsWith("ies")) {
+            one = s.substring(0, s.length() - 3) + "y";
+        } else if (s.matches(".*(ch|sh|x|z|ss)es")) {
+            one = s.substring(0, s.length() - 2);
+        } else if (s.length() > 3
+                && s.endsWith("s")
+                && !s.endsWith("ss")
+                && Character.isLetter(s.charAt(s.length() - 2))) {
+            one = s.substring(0, s.length() - 1);
+        }
+        return SPELLINGS.getOrDefault(one, one);
+    }
 
     private static final Set<String> TABLES = Set.of("retail_units", "tenant_modules", "tenants", "audit_log");
 
@@ -63,8 +148,8 @@ public class V121__retail_standard_units extends BaseJavaMigration {
         Map<UUID, Set<String>> shops = shops(c);
         for (Map.Entry<UUID, Set<String>> shop : shops.entrySet()) {
             List<String> missing = new ArrayList<>();
-            for (String name : StandardUnits.ALL) {
-                if (shop.getValue().add(StandardUnits.key(name))) {
+            for (String name : NAMES) {
+                if (shop.getValue().add(key(name))) {
                     missing.add(name);
                 }
             }
@@ -93,7 +178,7 @@ public class V121__retail_standard_units extends BaseJavaMigration {
             while (rs.next()) {
                 Set<String> keys = out.get(rs.getObject(1, UUID.class));
                 if (keys != null) {
-                    keys.add(StandardUnits.key(rs.getString(2)));
+                    keys.add(key(rs.getString(2)));
                 }
             }
         }

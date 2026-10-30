@@ -15,8 +15,10 @@ class StandardUnitsTest {
                 .containsExactly("Dozen", "Box", "Carton", "Packet", "Bag", "Roll", "Bale", "Crate", "Bundle");
         StandardUnits.SINGLE_UNITS.forEach(
                 n -> assertThat(RetailCatalogue.isPackageWord(n)).as(n).isFalse());
+        // Round 2 of #709: Roll is a standard package that may also be an item's single unit, so it is no package word.
         StandardUnits.PACKAGES.forEach(
-                n -> assertThat(RetailCatalogue.isPackageWord(n)).as(n).isTrue());
+                n -> assertThat(RetailCatalogue.isPackageWord(n)).as(n).isEqualTo(!n.equals("Roll")));
+        assertThat(StandardUnits.fixedCount("Dozen")).isEqualTo(12);
     }
 
     @Test

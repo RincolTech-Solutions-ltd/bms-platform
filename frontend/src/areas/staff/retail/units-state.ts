@@ -1,5 +1,6 @@
 import { RetailError, type Pack, type Product, type SaleLine, type Unit } from '../../../api/retail';
 import { plural } from '../../../app/glossary';
+import standardUnits from '../../../words/standard-units.json';
 import unitWordList from '../../../words/unit-words.json';
 import { milliOf, parseCount, qtyString, showQty } from './maths';
 
@@ -155,6 +156,15 @@ export function spellingsOf(word: string): string[] {
 export function listedWord(name: string): string {
   const n = name.trim().toLowerCase();
   return unitWordList.units.find((u) => spellingsOf(u.word).includes(n))?.word ?? n;
+}
+
+/**
+ * Issue #709 (ADR-110): one of the standard packages of the shared list (src/words/standard-units.json, which the server
+ * reads too), under any spelling: Roll is one, though it is no package word, so the Units page shows it under Packages.
+ */
+export function isStandardPackage(name: string | undefined): boolean {
+  const word = listedWord(name ?? '');
+  return standardUnits.packages.some((p) => listedWord(p) === word || `${listedWord(p)}s` === word);
 }
 
 /** A unit the shop added, or one it already had under another spelling or case (`reused`, from 409 unit_exists). */

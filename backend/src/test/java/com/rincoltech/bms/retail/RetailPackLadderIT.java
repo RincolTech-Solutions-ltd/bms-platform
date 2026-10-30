@@ -495,6 +495,22 @@ class RetailPackLadderIT extends IntegrationTest {
                 Map.of("If-Match", had.get("version").asString()));
         assertThat(renamed.getStatusCode()).as("%s", renamed.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(renamed)).isEqualTo("fixed_count");
+        ResponseEntity<JsonNode> dozen = api.call(
+                HttpMethod.PATCH,
+                "/units/" + box,
+                Map.of("name", "Dozen"),
+                ADMIN,
+                "*",
+                Map.of("If-Match", had.get("version").asString()));
+        assertThat(dozen.getStatusCode()).as("%s", dozen.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(dozen)).isEqualTo("fixed_count");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT name || ' ' || version FROM retail_units WHERE id = ?")
+                        .param(box)
+                        .query(String.class)
+                        .single())
+                .as("nothing changes")
+                .isEqualTo("Box " + had.get("version").asString());
 
         // A unit no item holds another number of may be called a dozen.
         UUID tray = api.unit("Test Tray");

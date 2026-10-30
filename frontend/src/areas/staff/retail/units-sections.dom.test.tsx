@@ -76,6 +76,13 @@ describe('the Units page in two parts (issue #709)', () => {
     expect(screen.getByRole('button', { name: 'What one Roll usually holds' })).toBeTruthy();
   });
 
+  it('keeps Roll under Packages though it may be a single unit, and a shop\'s own unit under Single units (round 2)', async () => {
+    const { isPackageRow } = await import('./catalogue-lists');
+    expect(isPackageRow({ id: 'r', name: 'Roll', active: true, is_package: false, standard: true })).toBe(true);
+    expect(isPackageRow({ id: 'r', name: 'Rolls', active: true, is_package: false })).toBe(true);
+    expect(isPackageRow({ id: 'b', name: 'Bulb', active: true, is_package: false })).toBe(false);
+  });
+
   it('adds a single unit by its name alone', async () => {
     createUnit.mockResolvedValue({ id: 'u-tray', name: 'Tray', active: true, version: 1 });
     draw();
@@ -96,10 +103,20 @@ describe('the Units page in two parts (issue #709)', () => {
     fireEvent.change(within(packages).getByLabelText('Name of the new package'), { target: { value: 'Sack' } });
     const of = within(packages).getByLabelText('Of which single unit') as HTMLSelectElement;
     expect([...of.options].map((o) => o.text)).toEqual(['Piece', 'Metre', 'Bulb']);
-    fireEvent.click(within(packages).getAllByRole('button', { name: 'Add a package' }).at(-1)!);
-    expect(createUnit).not.toHaveBeenCalled();
     fireEvent.change(within(packages).getByLabelText(/^How many does it usually hold/), { target: { value: '50' } });
     fireEvent.click(within(packages).getAllByRole('button', { name: 'Add a package' }).at(-1)!);
     await waitFor(() => expect(createUnit).toHaveBeenCalledWith('Sack', { size: '50', of_unit_id: 'u-pc', purpose: 'both' }));
+  });
+
+  // Round 2 of #709: a package each item says the size of needs no usual size.
+  it('adds a package with no usual size when it is left empty', async () => {
+    createUnit.mockResolvedValue({ id: 'u-sack', name: 'Sack', active: true, version: 1 });
+    draw();
+    const packages = await screen.findByRole('region', { name: 'Packages' });
+    await waitFor(() => expect(names(packages)).toHaveLength(3));
+    fireEvent.click(within(packages).getByRole('button', { name: 'Add a package' }));
+    fireEvent.change(within(packages).getByLabelText('Name of the new package'), { target: { value: 'Sack' } });
+    fireEvent.click(within(packages).getAllByRole('button', { name: 'Add a package' }).at(-1)!);
+    await waitFor(() => expect(createUnit).toHaveBeenCalledWith('Sack', undefined));
   });
 });

@@ -20,7 +20,7 @@ COPY --from=help . /frontend/src/help/articles/
 RUN ls /frontend/src/help/articles/*.md > /dev/null
 # The one list of unit words (ADR-109), from the `words` build context (frontend/src/words), where pom.xml looks for it.
 COPY --from=words . /frontend/src/words/
-RUN ls /frontend/src/words/unit-words.json > /dev/null
+RUN ls /frontend/src/words/unit-words.json /frontend/src/words/standard-units.json > /dev/null
 # Tests, formatting and the architecture checks run in CI (mvn verify) before any image is built.
 RUN --mount=type=cache,target=/root/.m2 mvn -B -q package -DskipTests -Dspotless.check.skip=true \
     && java -Djarmode=tools -jar target/bms-api.jar extract --layers --destination /extracted

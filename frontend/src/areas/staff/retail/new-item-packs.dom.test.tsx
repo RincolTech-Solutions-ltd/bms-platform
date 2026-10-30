@@ -22,6 +22,8 @@ const units: Unit[] = [
   { id: 'u2', name: 'Carton', active: true, product_count: 0, version: 1, is_package: true },
   { id: 'u3', name: 'Box', active: true, product_count: 0, version: 1, is_package: true, usual_pack: { size: '100.000', of_unit_id: 'u1', of_unit: 'Bulb', purpose: 'buy' } },
   { id: 'u4', name: 'Piece', active: true, product_count: 0, version: 1, is_package: false },
+  // Round 2 of #709: a standard package that may also be a single unit.
+  { id: 'u5', name: 'Roll', active: true, product_count: 0, version: 1, is_package: false, standard: true },
 ];
 const made: Product = { id: 'p1', code: 'TLG-0001', description: 'Test bulb 60W', category_id: 'c1', category: 'Test lighting', unit_id: 'u1', unit: 'Bulb', sell_minor: 5000, active: true, version: 1 };
 
@@ -136,16 +138,26 @@ describe('Add an item (issue #689)', () => {
     expect(screen.getByLabelText(/^Selling price of one bulb/)).toBeTruthy();
   });
 
-  it('refuses Box as the smallest unit with a field message and sends nothing', async () => {
+  // Round 2 of #709: the Single unit picker offers no package at all, but Roll, which may be a single unit, is offered.
+  it('offers no package as the single unit, and offers Roll', async () => {
     open();
-    await fill('u3');
-    const said = 'A box is a package. Choose a single unit, like piece, then add the box below.';
-    expect(screen.getByText(said)).toBeTruthy();
-    expect(screen.getByLabelText(/^Single unit/).getAttribute('aria-invalid')).toBe('true');
+    await fill('u1');
+    const single = screen.getByLabelText(/^Single unit/) as HTMLSelectElement;
+    const offered = [...single.options].map((o) => o.text);
+    expect(offered).toContain('Bulb');
+    expect(offered).toContain('Roll');
+    expect(offered).not.toContain('Box');
+    expect(offered).not.toContain('Carton');
+  });
+
+  it('saves an item counted in rolls (round 2 of #709)', async () => {
+    createProduct.mockResolvedValue({ ...made, unit_id: 'u5', unit: 'Roll' });
+    open();
+    await fill('u5');
+    expect(screen.queryByText(/is a package/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
-    await new Promise((r) => setTimeout(r, 50));
-    expect(createProduct).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(screen.getByLabelText(/^Single unit/));
+    await waitFor(() => expect(createProduct).toHaveBeenCalledTimes(1));
+    expect(createProduct.mock.calls[0]?.[0]).toMatchObject({ unit_id: 'u5' });
   });
 
   it('asks No or Yes about packages, No first, and sends none on No', async () => {

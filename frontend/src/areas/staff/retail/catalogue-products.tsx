@@ -312,7 +312,8 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
           <UnitPicker
             id="item-unit"
             {...(product ? {} : { hint: 'For example piece, bulb, metre, litre. Never a box or a carton.' })}
-            units={unitChoices}
+            // Round 2 of #709: a new item's Single unit lists no package; one added in place stays so its refusal shows.
+            units={product ? unitChoices : unitChoices.filter((u) => u.is_package !== true || u.id === unitId)}
             loading={units.data === undefined} load={units}
             value={unitId}
             onChange={(next) => { setUnitId(next); forget(); setPackRows((rows) => forSmallest(rows, units.data ?? [], next)); }}

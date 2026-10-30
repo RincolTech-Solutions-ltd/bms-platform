@@ -13,7 +13,7 @@ import { ScreenLink } from './screen-link';
 import { Gate, Problem, changeFailureText, requireVersion, useToast } from './ui';
 import { useComeBack } from '../../../app/ui/EmptyChoice';
 import { UsualPackSheet, holdsText, mayHaveUsualPack, usedForText, usualSizeProblem } from './unit-usual-pack';
-import { orExistingUnit } from './units-state';
+import { isStandardPackage, orExistingUnit } from './units-state';
 
 // Categories and Units (#146): the same screen twice. A row can be renamed or switched off, never
 // deleted: items and their history keep pointing at it. A switched-off row stays on the items that
@@ -39,7 +39,9 @@ export type Section = {
 };
 
 /** Issue #709: a package is a package word (is_package, ADR-106) or a unit that usually holds another. */
-export const isPackageRow = (row: Named) => ('is_package' in row && row.is_package === true) || ('usual_pack' in row && row.usual_pack !== undefined);
+export const isPackageRow = (row: Named) => ('is_package' in row && row.is_package === true) || ('usual_pack' in row && row.usual_pack !== undefined)
+  // Round 2 of #709: a standard package that may also be a single unit (Roll) still sits under Packages.
+  || ('is_package' in row && isStandardPackage(row.name));
 
 export function usedText(count: number | undefined, noun: string): string {
   const n = count ?? 0;
@@ -128,11 +130,14 @@ function NamedList({ noun, plural, list, create, update, withPrefix = false, sec
   const asksUsual = sections?.find((s) => s.key === adding)?.usual === true;
   const ofUnitId = usual.ofUnitId || (singles[0]?.id ?? '');
   // Review of #722: with no single unit switched on there is nothing for a package to hold, so it says so and sends nothing.
-  const sizeProblem = !asksUsual ? null
+  // Round 2 of #709: the usual size is optional, a package each item says the size of has none; one given needs a single
+  // unit to count, and with none switched on the form says so and sends nothing.
+  const givesSize = asksUsual && usual.size.trim() !== '';
+  const sizeProblem = !givesSize ? null
     : ofUnitId === '' ? 'Add a single unit first, such as piece, for this package to hold.'
       : usualSizeProblem(usual.size, { name: name.trim() }, singles.find((u) => u.id === ofUnitId) as Unit | undefined);
   const add = useMutation({
-    mutationFn: () => create(name.trim(), asksUsual ? { size: usual.size.trim(), of_unit_id: ofUnitId, purpose: usual.purpose } : undefined),
+    mutationFn: () => create(name.trim(), givesSize ? { size: usual.size.trim(), of_unit_id: ofUnitId, purpose: usual.purpose } : undefined),
     onSuccess: (row) => {
       close();
       // Issue #698: a unit the shop has under another spelling or case is not added again.
@@ -173,11 +178,11 @@ function NamedList({ noun, plural, list, create, update, withPrefix = false, sec
             <Field
               id={`new-${plural}-${key}-size`}
               label="How many does it usually hold?"
-              required
+              optional
               inputMode="decimal"
               autoComplete="off"
               placeholder="10"
-              hint="Each item can be different."
+              hint="Each item can be different. Leave it empty if each item says."
               value={usual.size}
               onChange={(e) => setUsual({ ...usual, size: e.target.value })}
               error={sizeProblem}
