@@ -446,6 +446,15 @@ class RetailPackLadderIT extends IntegrationTest {
         change(socket, box, Map.of("usual_buy", true), ADMIN);
         assertThat(packOf(socket, carton).get("usual_buy").asBoolean()).isFalse();
         assertThat(packOf(socket, box).get("usual_buy").asBoolean()).isTrue();
+        // Round 4 of the review of #710: clearing it on one pack never clears another. The carton is usual again; the
+        // box, not usual, is sent false beside a real change, and the carton stays usual with no audit naming the box.
+        change(socket, carton, Map.of("usual_buy", true), ADMIN);
+        int cartonVersion = packOf(socket, carton).get("version").asInt();
+        ResponseEntity<JsonNode> cleared = change(socket, box, Map.of("usual_buy", false, "purpose", "buy"), ADMIN);
+        assertThat(cleared.getStatusCode()).as("%s", cleared.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(packOf(socket, carton).get("usual_buy").asBoolean()).isTrue();
+        assertThat(packOf(socket, carton).get("version").asInt()).isEqualTo(cartonVersion);
+        assertThat(packOf(socket, box).get("usual_buy").asBoolean()).isFalse();
         ResponseEntity<JsonNode> sellOnly = change(socket, carton, Map.of("purpose", "sell", "usual_buy", true), ADMIN);
         assertThat(sellOnly.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(sellOnly)).isEqualTo("usual_buy_not_bought");

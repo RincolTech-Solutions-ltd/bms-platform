@@ -827,7 +827,10 @@ export function createMockRetail(): RetailApi {
         const heldUnit = body.holds_unit_id ? unitRows.find((u) => u.id === body.holds_unit_id) : undefined;
         const holds = heldUnit && body.holds_qty !== undefined ? { holds_unit_id: heldUnit.id, holds_unit: heldUnit.name, holds_qty: body.holds_qty } : {};
         const pack: Pack = { id: nextId('k'), product_id: p.id, unit_id: body.unit_id, unit: unit?.name ?? '', factor: body.factor ?? '1.000', active: true, version: 1, purpose: body.purpose ?? 'both', ...(sell === undefined ? {} : { sell_minor: sell }), ...holds, usual_buy: body.usual_buy === true, suggested_sell_minor: 0 };
-        const next = reladder(p.id, [...rows.map((k) => (body.usual_buy ? { ...k, usual_buy: false } : k)), pack]).map((k) => ({ ...k, suggested_sell_minor: Math.round(p.sellMinor * Number(k.factor)) }));
+        // Only the new pack and a pack whose size followed get a new suggested price, as the server reads it.
+        const was = new Map(rows.map((k) => [k.unit_id, k.factor]));
+        const next = reladder(p.id, [...rows.map((k) => (body.usual_buy ? { ...k, usual_buy: false } : k)), pack])
+          .map((k) => (was.get(k.unit_id) === k.factor ? k : { ...k, suggested_sell_minor: Math.round(p.sellMinor * Number(k.factor)) }));
         packs.set(p.id, next);
         return next.find((k) => k.unit_id === body.unit_id) as Pack;
       }),

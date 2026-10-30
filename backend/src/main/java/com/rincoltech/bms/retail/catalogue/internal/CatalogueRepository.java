@@ -764,23 +764,29 @@ class CatalogueRepository {
     }
 
     /**
-     * Issue #699: the level Buy stock opens on; every other pack of the item is cleared first (one per item, V118). Returns
-     * the other packs cleared, so each is audited (review of #710).
+     * Issue #699: the level Buy stock opens on. Making a pack usual clears every other pack of the item first (one per item,
+     * V118) and returns them, so each is audited (review of #710); clearing a pack touches that pack only (round 4 of the
+     * review: false on a box never clears the carton) and returns none.
      */
     List<UUID> setUsualBuy(UUID productId, UUID packId, boolean usual) {
+        if (!usual) {
+            jdbc.sql("""
+                            UPDATE retail_product_units SET usual_buy = false, updated_at = now(), version = version + 1
+                             WHERE id = ? AND usual_buy
+                            """).param(packId).update();
+            return List.of();
+        }
         List<UUID> cleared =
                 jdbc.sql("""
                         UPDATE retail_product_units SET usual_buy = false, updated_at = now(), version = version + 1
-                         WHERE product_id = ? AND usual_buy AND (id <> ? OR NOT ?)
+                         WHERE product_id = ? AND usual_buy AND id <> ?
                         RETURNING id
-                        """).params(productId, packId, usual).query(UUID.class).list();
-        if (usual) {
-            jdbc.sql("""
-                            UPDATE retail_product_units SET usual_buy = true, updated_at = now(), version = version + 1
-                             WHERE id = ? AND NOT usual_buy
-                            """).param(packId).update();
-        }
-        return cleared.stream().filter(id -> !id.equals(packId)).toList();
+                        """).params(productId, packId).query(UUID.class).list();
+        jdbc.sql("""
+                        UPDATE retail_product_units SET usual_buy = true, updated_at = now(), version = version + 1
+                         WHERE id = ? AND NOT usual_buy
+                        """).param(packId).update();
+        return cleared;
     }
 
     /** Active packs only: a pack that was switched off no longer ties the product's unit or the pack's unit down. */

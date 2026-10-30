@@ -131,6 +131,22 @@ describe('the package ladder on the item page (issue #699)', () => {
     drawPackage(canvas, ladderOf(socket, huge), 3);
     expect(calls.arc).toBeLessThanOrEqual(1_500);
     expect(calls.text).toContain('+99,941');
+
+    // Round 4: the budget runs out inside a carton of a bale of 60 (each carton says its 41 boxes left), and the bale, drawn
+    // last, still says how many cartons it has left: every carton drawn and those left make 60.
+    const deep: Pack[] = [
+      { unit_id: 'u-box', unit: 'Box', factor: '100.000', active: true, version: 1, purpose: 'both', holds_unit_id: 'u-pc', holds_unit: 'Piece', holds_qty: 100 },
+      { unit_id: 'u-ctn', unit: 'Carton', factor: '10000.000', active: true, version: 1, purpose: 'both', holds_unit_id: 'u-box', holds_unit: 'Box', holds_qty: 100 },
+      { unit_id: 'u-bale', unit: 'Bale', factor: '600000.000', active: true, version: 1, purpose: 'both', holds_unit_id: 'u-ctn', holds_unit: 'Carton', holds_qty: 60 },
+    ];
+    calls.arc = 0;
+    calls.text = [];
+    drawPackage(canvas, ladderOf(socket, deep), 4);
+    expect(calls.arc).toBeLessThanOrEqual(1_500);
+    const baleLeft = Number((calls.text.at(-1) ?? '').replace(/[^\d]/g, ''));
+    const cartonsDrawn = calls.text.length - 1;
+    expect(baleLeft).toBeGreaterThan(0);
+    expect(cartonsDrawn + baleLeft).toBe(60);
   });
 
   it('says before saving that a level with its own price needs someone who may change prices (review of #710)', () => {

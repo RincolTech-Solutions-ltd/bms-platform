@@ -1262,7 +1262,9 @@ class CatalogueService {
                     repo.packs(productId),
                     before,
                     new UpdatePackRequest(factor, null, null, null, null, null, null, null),
-                    before.active());
+                    // Round 4 of the review of #710: a switched-off pack an active level still holds (a row from before
+                    // V118 or a direct write) stays a level here, so its parent is worked out again, not refused.
+                    true);
         } catch (ApiException e) {
             // Review of #710: the audit names the ladder's own refusal (not_whole, too_small, would_loop, too_big).
             ladder = null;
@@ -1463,7 +1465,6 @@ class CatalogueService {
         };
     }
 
-    /** 422 not_whole: "A carton must hold a whole number of the level below it, which is 10 piece." */
     /** 422 not_whole: "A carton must hold 2 or more whole boxes of 10 pieces." (review of #710). */
     private static ApiException notWhole(String unit, String heldUnit, BigDecimal held, Product product) {
         return ApiException.validation(List.of(new FieldProblem(

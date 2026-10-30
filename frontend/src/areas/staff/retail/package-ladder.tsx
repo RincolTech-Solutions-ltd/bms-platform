@@ -162,18 +162,24 @@ export function drawPackage(canvas: HTMLCanvasElement, rungs: Rung[], open: numb
     const gw = iw / cols;
     const gh = ih / rows;
     const tiny = gw < 14 || gh < 14 || depth >= 3 || child <= 1;
-    for (let k = 0; k < n && marks < BUDGET; k++) {
+    const more = (count: number, cx: number, cy: number, cw: number, ch: number) => {
+      ctx.fillStyle = roleColour(canvas, '--color-text');
+      ctx.font = `600 ${Math.max(10, Math.min(28, ch / 2.5))}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`+${count.toLocaleString('en-GB')}`, cx + cw / 2, cy + ch / 2, cw - 4);
+    };
+    let k = 0;
+    let labelled = false;
+    for (; k < n && marks < BUDGET; k++) {
       const cx = x + pad + (k % cols) * gw;
       const cy = y + pad + Math.floor(k / cols) * gh;
       marks += 1;
       // The last cell drawn says how many more there are: past the cap, or where the budget ran out (review of #710).
       const last = k === n - 1 || marks >= BUDGET;
       if (last && held > k + 1) {
-        ctx.fillStyle = roleColour(canvas, '--color-text');
-        ctx.font = `600 ${Math.max(10, Math.min(28, gh / 2.5))}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(`+${(held - k).toLocaleString('en-GB')}`, cx + gw / 2, cy + gh / 2, gw - 4);
+        more(held - k, cx, cy, gw, gh);
+        labelled = true;
       } else if (tiny) {
         ctx.fillStyle = roleColour(canvas, colourOf(child - 1));
         ctx.beginPath();
@@ -183,6 +189,9 @@ export function drawPackage(canvas: HTMLCanvasElement, rungs: Rung[], open: numb
         box(child, cx + 2, cy + 2, gw - 4, gh - 4, depth + 1);
       }
     }
+    // Round 4 of the review of #710: the budget ran out inside a box this one holds, so this box says what it has left too,
+    // in its own last corner.
+    if (!labelled && held > k) more(held - k, x + w - pad - Math.min(gw, w / 3), y + h - pad - Math.min(gh, h / 4), Math.min(gw, w / 3), Math.min(gh, h / 4));
   };
   box(open, 8, 8, W - 16, H - 16, 0);
 }
