@@ -38,8 +38,11 @@ want the same name.
    409 says nothing about who applied (FR-ONB-03); a repeat from a mailbox whose own confirmed application holds the name
    gets the same 409. A repeat sign-up with a new free name replaces the name of an unconfirmed application at once (it
    holds nothing); on a confirmed application the new name waits as pending and is applied, if still free under the lock,
-   only when the fresh link sent to that mailbox is opened, so a stranger who knows the email cannot make a confirmed
-   applicant give up a name, and a repeat never silently keeps the old one. For one release `short_name` is optional, so a sign-up page cached from before it
+   only when the applicant, on the page the fresh link sent to that mailbox opens, reads "Change your short name? ... from
+   N to X" and presses "Change to X". A stranger who knows the email therefore cannot make a confirmed applicant give up
+   a name, a blind click cannot either, and a repeat never silently keeps the old one. Every claim takes the name's lock
+   before an application's row (the sign-up, the confirmation, Activate and the operator's create), so none of them can
+   deadlock another. For one release `short_name` is optional, so a sign-up page cached from before it
    still works: the server then picks a free name from the business name. Activate suggests the application's short name
    as the slug while it is free, refuses a badly shaped or reserved slug (422), and claims it under the lock in the
    creating transaction, refusing one another confirmed application chose (409 `duplicate_slug`). The operator's

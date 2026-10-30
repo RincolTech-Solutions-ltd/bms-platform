@@ -300,7 +300,8 @@ unique over the open statuses whose email is confirmed (`onboarding_applications
 confirm keeps it and an unconfirmed application holds nothing; read through `onboarding_application_short_name`, replaced
 on a repeat sign-up with a new free name through `onboarding_application_set_short_name` while the email is not
 confirmed; on a confirmed application the new name goes into `pending_short_name varchar(63)` and is applied, if still
-free, only when the fresh link sent to the mailbox is opened. `V119` adds
+free, only when the applicant presses the change button on the page that fresh link opens (the page reads both names
+through `onboarding_application_names_by_link`). `V119` adds
 `onboarding_application_create` with `p_short_name` as a 16 argument overload; V23's 15 argument one becomes a wrapper
 calling it with NULL, kept for the server still running during a deploy and dropped by a later migration. It replaces
 `onboarding_application_by_link` (defined only in V23 before it), which claims the name under its lock at the

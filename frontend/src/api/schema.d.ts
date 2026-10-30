@@ -8134,9 +8134,13 @@ export interface components {
             modules?: string[];
             /** @description The operator's question, while the status is needs_info */
             operator_note?: string;
+            /** @description A new name a repeat sign-up asked for, applied by the confirm call */
+            pending_short_name?: string;
             reference?: string;
             /** @description The reason, when rejected */
             reject_reason?: string;
+            /** @description The short name asked for, or null (ADR-108) */
+            short_name?: string;
             /** @description submitted, needs_info, verified, activated, rejected or expired */
             status?: string;
             term?: string;

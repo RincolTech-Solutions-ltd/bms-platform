@@ -136,6 +136,15 @@ LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$
                p_now, NULL::text)
 $$;
 
+-- What the applicant page shows of the names, by link token: the short name and a pending one, which the applicant
+-- applies by pressing the button on that page (onboarding_application_by_link with p_verify).
+CREATE FUNCTION onboarding_application_names_by_link(p_link_hash text, p_now timestamptz)
+RETURNS TABLE (short_name text, pending_short_name text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    SELECT a.short_name::text, a.pending_short_name::text FROM onboarding_applications a
+     WHERE a.link_token_hash = p_link_hash AND a.link_token_expires_at > p_now
+$$;
+
 -- The short name an application chose, or null (applications made before V119 have none).
 CREATE FUNCTION onboarding_application_short_name(p_id uuid)
 RETURNS text
@@ -154,9 +163,11 @@ REVOKE ALL ON FUNCTION short_name_taken(text, uuid, boolean) FROM PUBLIC;
 REVOKE ALL ON FUNCTION onboarding_application_set_short_name(text, text, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION onboarding_application_create(uuid, text, text, text, text, text, text, text[], text, text, text, text, text, timestamptz, timestamptz, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION onboarding_application_short_name(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION onboarding_application_names_by_link(text, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION short_link_target(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION short_name_taken(text, uuid, boolean) TO bms_app;
 GRANT EXECUTE ON FUNCTION onboarding_application_set_short_name(text, text, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION onboarding_application_create(uuid, text, text, text, text, text, text, text[], text, text, text, text, text, timestamptz, timestamptz, text) TO bms_app;
 GRANT EXECUTE ON FUNCTION onboarding_application_short_name(uuid) TO bms_app;
+GRANT EXECUTE ON FUNCTION onboarding_application_names_by_link(text, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION short_link_target(text) TO bms_app;

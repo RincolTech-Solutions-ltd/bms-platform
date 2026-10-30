@@ -530,6 +530,10 @@ class ApplicationService {
                 new TenantProvisioning.Steps() {
                     @Override
                     public boolean before() {
+                        // ADR-108: the name's lock first, then the application's row, the order a sign-up and a
+                        // confirmation take them, so none of the three can deadlock another (review of #713, round 4).
+                        // A name another confirmed application chose is not this one's to take.
+                        Optional<String> holder = shortNames.takenBy(slug, id, true);
                         Lock lock = jdbc.sql("SELECT * FROM onboarding_application_lock(?)")
                                 .param(id)
                                 .query((rs, n) -> new Lock(rs.getString("status")))
@@ -541,12 +545,7 @@ class ApplicationService {
                         if (!"verified".equals(lock.status())) {
                             throw notVerified();
                         }
-                        // ADR-108: claimed under the name's lock, in the creating transaction; a name another
-                        // confirmed application chose is not this one's to take.
-                        if (shortNames
-                                .takenBy(slug, id, true)
-                                .filter(by -> !by.equals("tenant"))
-                                .isPresent()) {
+                        if (holder.filter(by -> !by.equals("tenant")).isPresent()) {
                             throw new ApiException(
                                     HttpStatus.CONFLICT,
                                     "duplicate_slug",
@@ -697,12 +696,41 @@ class ApplicationService {
                                 rs.getString("operator_note"),
                                 rs.getString("reject_reason"),
                                 rs.getBoolean("email_verified"),
-                                rs.getTimestamp("created_at").toInstant())))
+                                rs.getTimestamp("created_at").toInstant(),
+                                null,
+                                null)))
                 .optional()
                 // The row was found by its hash; the digests are compared again in constant time
                 // so no code path depends on a byte-by-byte comparison of secret material.
                 .filter(link -> MessageDigest.isEqual(
-                        link.hash().getBytes(StandardCharsets.US_ASCII), hash.getBytes(StandardCharsets.US_ASCII)));
+                        link.hash().getBytes(StandardCharsets.US_ASCII), hash.getBytes(StandardCharsets.US_ASCII)))
+                // ADR-108: the short name and a pending one, for the applicant page.
+                .map(link -> jdbc.sql(
+                                "SELECT short_name, pending_short_name FROM onboarding_application_names_by_link(?, ?)")
+                        .params(hash, Timestamp.from(clock.now()))
+                        .query((rs, n) -> new Link(
+                                link.id(),
+                                link.hash(),
+                                link.newlyVerified(),
+                                withNames(link.view(), rs.getString("short_name"), rs.getString("pending_short_name"))))
+                        .optional()
+                        .orElse(link));
+    }
+
+    private static ApplicantView withNames(ApplicantView v, String shortName, String pending) {
+        return new ApplicantView(
+                v.reference(),
+                v.status(),
+                v.businessName(),
+                v.modules(),
+                v.term(),
+                v.wayIn(),
+                v.operatorNote(),
+                v.rejectReason(),
+                v.emailVerified(),
+                v.createdAt(),
+                shortName,
+                pending);
     }
 
     /** Rate limit, then shape: a malformed token gets the same answer as an unknown one. */

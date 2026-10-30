@@ -445,11 +445,19 @@
             "description" : "The operator's question, while the status is needs_info",
             "type" : "string"
           },
+          "pending_short_name" : {
+            "description" : "A new name a repeat sign-up asked for, applied by the confirm call",
+            "type" : "string"
+          },
           "reference" : {
             "type" : "string"
           },
           "reject_reason" : {
             "description" : "The reason, when rejected",
+            "type" : "string"
+          },
+          "short_name" : {
+            "description" : "The short name asked for, or null (ADR-108)",
             "type" : "string"
           },
           "status" : {

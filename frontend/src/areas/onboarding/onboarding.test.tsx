@@ -140,6 +140,13 @@ describe('the applicant page (FR-ONB-02, FR-ONB-04)', () => {
     expect(readLinkToken('')).toBeNull();
   });
 
+  it('changes a confirmed short name only when the applicant presses the button (ADR-108)', async () => {
+    const html = await page({ view: { ...base, short_name: 'testduka', pending_short_name: 'testduka-gulu' } });
+    expect(html).toContain('Change your short name?');
+    expect(html).toContain('Change to testduka-gulu');
+    expect(await page({ view: { ...base, short_name: 'testduka' } })).not.toContain('Change your short name?');
+  });
+
   it('shows the status in plain words with the reference', async () => {
     const html = await page({});
     expect(html).toContain('A-TEST0001');

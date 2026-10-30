@@ -1076,6 +1076,32 @@ class OnboardingIT extends IntegrationTest {
         assertThat(done.getBody().get("tenant_slug").asString()).isEqualTo(chosen);
     }
 
+    // JUSTIFICATION-A3: review of #713 round 4 asks for an IT that runs the confirmation and Activate at once.
+    /**
+     * ADR-108, review of #713 round 4: Activate takes the name's lock before the application's row, as the confirmation
+     * does, so the applicant pressing Confirm again while the operator activates never deadlocks either.
+     */
+    @Test
+    void activateAndAConfirmationAtOnceBothAnswer() throws Exception {
+        for (int round = 0; round < 3; round++) {
+            String email = Api.email("race-confirm");
+            UUID id = verified(email, "Test Race Shop " + email);
+            String chosen = owner().sql("SELECT short_name FROM onboarding_applications WHERE id = ?")
+                    .param(id)
+                    .query(String.class)
+                    .single();
+            String token =
+                    tokenOf(outboxParams("onboarding.verify_email", email).get("link"));
+            AtomicInteger turn = new AtomicInteger();
+            var statuses = Api.race(
+                    2,
+                    () -> turn.getAndIncrement() == 0
+                            ? publicPost("/api/v1/platform/sign-up/verify", Map.of("token", token))
+                            : activate(id, activation(chosen, "trial", null)));
+            assertThat(statuses).as("round %d", round).allMatch(s -> s.value() == 200);
+        }
+    }
+
     // ---- Permissions, host rules and the database ----------------------------------------------
 
     /** NFR-SEC-04, ADR-016: no tenant token, no anonymous caller and no tenant host reaches the queue. */

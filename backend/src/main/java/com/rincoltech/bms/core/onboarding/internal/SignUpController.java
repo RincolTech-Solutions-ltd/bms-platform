@@ -122,7 +122,13 @@ class SignUpController {
             String rejectReason,
 
             boolean emailVerified,
-            Instant createdAt) {}
+            Instant createdAt,
+
+            @Schema(description = "The short name asked for, or null (ADR-108)")
+            String shortName,
+
+            @Schema(description = "A new name a repeat sign-up asked for, applied by the confirm call")
+            String pendingShortName) {}
 
     @PostMapping("/applications")
     @PublicEndpoint

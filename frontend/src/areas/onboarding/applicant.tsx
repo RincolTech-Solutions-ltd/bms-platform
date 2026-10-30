@@ -83,7 +83,27 @@ export function ApplicantPage({
         </dd>
         <dt>Wanted</dt>
         <dd>{modules.join(', ')}</dd>
+        {view.short_name && (
+          <>
+            <dt>Short name</dt>
+            <dd>{view.short_name}</dd>
+          </>
+        )}
       </dl>
+      {/* JUSTIFICATION-A3: without this step a pending short name could never be applied from the page (review of #713). */}
+      {view.email_verified === true && view.pending_short_name && (
+        // ADR-108: a repeat sign-up asked for a new short name; it changes only when the applicant says so here.
+        <section aria-labelledby="rename-heading" className="form-stack">
+          <h2 id="rename-heading">Change your short name?</h2>
+          <p>
+            Someone using your email asked to change your short name from <strong>{view.short_name ?? 'none'}</strong> to{' '}
+            <strong>{view.pending_short_name}</strong>. If it was you, press the button. If not, leave it: nothing changes.
+          </p>
+          <BusyButton className="btn-brand" type="button" busy={confirming} onClick={onConfirm}>
+            Change to {view.pending_short_name}
+          </BusyButton>
+        </section>
+      )}
       {view.email_verified === false && (view.status === 'submitted' || view.status === 'needs_info') ? (
         <section aria-labelledby="confirm-heading" className="form-stack">
           <h2 id="confirm-heading">Confirm your email</h2>
