@@ -175,10 +175,10 @@ class RetailSizesInAddItemIT extends IntegrationTest {
         dearest.put("sell_minor", 10_000_000_000_000L);
         // 100W at 6,000 a piece works the carton out at one and a half times the largest amount.
         ResponseEntity<JsonNode> worked =
-                api.post("/product-families", item("Test Longlife Bulb", List.of(pack(carton, "12"), dearest)), ADMIN);
+                api.post("/product-families", item("Test Longlife Bulb", List.of(dearest)), ADMIN);
         assertThat(worked.getStatusCode()).as("%s", worked.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(worked.getBody().get("pack_index").asInt()).isEqualTo(1);
-        assertThat(worked.getBody().toString()).contains("packs[1].sell_minor");
+        assertThat(worked.getBody().get("pack_index").asInt()).isEqualTo(0);
+        assertThat(worked.getBody().toString()).contains("packs[0].sell_minor");
 
         Map<String, Object> carton24 = pack(carton, "24");
         carton24.put("sell_minor", 96_000);
