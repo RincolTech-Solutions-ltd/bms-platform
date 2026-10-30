@@ -33,6 +33,9 @@ export default async function setup(project: TestProject) {
     root: process.cwd(),
     cacheDir: 'node_modules/.vite-layout',
     plugins: [react(), helpCorpus()],
+    // No index.html for an unknown path: the pages' calls to /api, which has no server here, get a 404 instead of the app's
+    // index.html, whose src/main.tsx Vite would transform and fail on virtual:pwa-register for every call.
+    appType: 'mpa',
     customLogger: logger,
     optimizeDeps: { entries: ['layout/*.html'] },
     server: { port: 0, host: '127.0.0.1' },
