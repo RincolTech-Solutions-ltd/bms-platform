@@ -72,7 +72,7 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
         Connection c = context.getConnection();
         try (Statement s = c.createStatement()) {
             s.execute("SET LOCAL lock_timeout = '5s'");
-            // Where a merged unit went (review of #715): the catalogue's pack lookup follows it, so a line a device queued
+            // Where a merged unit went (review of #715): the catalogue's pack lookup follows it, so a line queued
             // offline with the merged unit's id still finds its pack. Expand only: a nullable column and a key not
             // validated (nothing holds a value yet, and validating would read the table through its row security).
             s.execute("ALTER TABLE retail_units ADD COLUMN merged_into_id uuid");
@@ -80,7 +80,7 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
                     + " FOREIGN KEY (tenant_id, merged_into_id) REFERENCES retail_units (tenant_id, id) NOT VALID");
         }
         // The references to a unit and to a package, from the catalog, so a table added later is never missed: every
-        // foreign key, and every column named unit_id or *_unit_id, since some hold a unit with no key (review of #715).
+        // foreign key, and every column named unit_id or *_unit_id, as some hold a unit with no key (review, #715).
         Set<Ref> unitRefs = new LinkedHashSet<>(refs(c, "retail_units", "id"));
         unitRefs.addAll(namedRefs(c));
         unitRefs.removeIf(r -> CATALOGUE.contains(r.table() + "." + r.column()));
@@ -341,9 +341,8 @@ public class V120__retail_standard_units_and_names extends BaseJavaMigration {
                 }
             }
         }
-        try (PreparedStatement p =
-                c.prepareStatement("UPDATE " + table + " SET " + column
-                        + " = ?, updated_at = now(), version = version + 1 WHERE tenant_id = ? AND id = ?")) {
+        try (PreparedStatement p = c.prepareStatement("UPDATE " + table + " SET " + column
+                + " = ?, updated_at = now(), version = version + 1 WHERE tenant_id = ? AND id = ?")) {
             for (Change ch : changes) {
                 p.setString(1, ch.after());
                 p.setObject(2, ch.tenant());

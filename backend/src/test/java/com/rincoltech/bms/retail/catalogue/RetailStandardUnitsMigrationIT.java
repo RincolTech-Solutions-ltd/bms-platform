@@ -98,7 +98,9 @@ class RetailStandardUnitsMigrationIT extends IntegrationTest {
             UUID bag = unit(owner, t, "Bag");
             UUID bags = unit(owner, t, "Bags");
             owner.sql("CREATE TABLE test_unit_notes_698 (unit_id uuid)").update();
-            owner.sql("INSERT INTO test_unit_notes_698 (unit_id) VALUES (?)").param(bags).update();
+            owner.sql("INSERT INTO test_unit_notes_698 (unit_id) VALUES (?)")
+                    .param(bags)
+                    .update();
             // trays: Tray is a usual pack of Crate, and Crate of trays, so merging would make a loop (review of #715).
             UUID tray = unit(owner, t, "Tray");
             UUID trays = unit(owner, t, "trays");

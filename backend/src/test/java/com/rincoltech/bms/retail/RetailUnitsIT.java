@@ -197,14 +197,16 @@ class RetailUnitsIT extends IntegrationTest {
         UUID oldCarton = UUID.randomUUID();
         UUID oldPiece = UUID.randomUUID();
         TestDatabase.owner()
-                .sql("INSERT INTO retail_units (id, tenant_id, name, active, merged_into_id) VALUES (?, ?, 'Test Ctn 698', false, ?),"
-                        + " (?, ?, 'Test Pc 698', false, ?)")
+                .sql(
+                        "INSERT INTO retail_units (id, tenant_id, name, active, merged_into_id) VALUES (?, ?, 'Test Ctn 698', false, ?),"
+                                + " (?, ?, 'Test Pc 698', false, ?)")
                 .params(oldCarton, t.tenantId(), carton, oldPiece, t.tenantId(), piece)
                 .update();
 
         ResponseEntity<JsonNode> inCartons = sell(t.headOffice(), pen, oldCarton, "1", null, null);
         assertThat(inCartons.getStatusCode()).as("%s", inCartons.getBody()).isEqualTo(HttpStatus.CREATED);
-        assertThat(inCartons.getBody().get("lines").get(0).get("qty").asString()).isEqualTo("12.000");
+        assertThat(inCartons.getBody().get("lines").get(0).get("qty").asString())
+                .isEqualTo("12.000");
         ResponseEntity<JsonNode> inPieces = sell(t.headOffice(), pen, oldPiece, "3", null, null);
         assertThat(inPieces.getStatusCode()).as("%s", inPieces.getBody()).isEqualTo(HttpStatus.CREATED);
         assertThat(inPieces.getBody().get("lines").get(0).has("sale_unit_id")).isFalse();
