@@ -6,7 +6,7 @@ job as a short **Next** row of plain, full size buttons (48px targets, a full wi
 or an underlined word. The first button is the primary one only where the table says so, so a screen keeps one primary
 action (docs/ui-rules.md rule 6).
 
-This file is the single source of the list. `frontend/src/areas/staff/retail/next-steps.ts` holds the same rows in code
+This file is the single source of the list. `frontend/src/areas/staff/retail/next-steps.tsx` holds the same rows in code
 (`NEXT_STEPS`), and `next-steps.dom.test.tsx` fails when the two differ, then draws each screen and looks for its buttons.
 A new next step is added here first, then in `NEXT_STEPS`, then on its screen.
 

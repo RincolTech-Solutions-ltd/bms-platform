@@ -624,7 +624,8 @@ describe('adding an item quickly (issue #632)', () => {
     ['areas/staff/menu.tsx', 'areas/staff/tabs.tsx', 'areas/staff/retail/first-items.tsx'],
     ['areas/staff/retail/quick-add.tsx', 'app/glossary.ts'],
     ['areas/staff/retail/quick-add.tsx', 'areas/staff/retail/item-photo.tsx'],
-    ['areas/staff/retail/quick-add.tsx'],
+    // Issue #700: the buttons after the add (Add another, Sell it, Count it now) are the Next row in next-steps.tsx.
+    ['areas/staff/retail/quick-add.tsx', 'areas/staff/retail/next-steps.tsx'],
     ['areas/staff/retail/quick-add.tsx'],
   ];
   const source = (files: string[]) => files.map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')).join('\n');

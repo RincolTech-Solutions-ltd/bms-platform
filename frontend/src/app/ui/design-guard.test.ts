@@ -481,7 +481,8 @@ describe('design guard, the cross-cutting fixes of the 70-screen audit', () => {
 
   // Item 10: a related screen is a row with a chevron, an action a button; never an underlined word.
   it('draws links to other screens as chevron rows and figures that open rows without an underline', () => {
-    expect(code('areas/staff/retail/screen-link.tsx')).toMatch(/action \? 'btn btn-primary' : 'link-row'/);
+    // A step of a Next row (issue #700) is a plain button too.
+    expect(code('areas/staff/retail/screen-link.tsx')).toMatch(/action \? 'btn btn-primary' : step \? 'btn' : 'link-row'/);
     for (const sel of [/^\s*\.link-row\s*$/, /^\s*\.figure-link\s*$/]) expect(rulesFor(sel)[0]?.body).toMatch(/text-decoration: none/);
     expect(code('areas/staff/retail/analytics-ui.tsx').match(/<Link className="figure-link"/g)).toHaveLength(2);
     expect(code('areas/staff/home-cards.tsx')).not.toMatch(/<Link to="[^"]*">Open the/);
