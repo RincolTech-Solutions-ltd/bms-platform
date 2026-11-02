@@ -223,6 +223,27 @@ Prices are commercial and are not stored in this repository's seed data: the ope
 | `created_by_platform_user_id` | `uuid NOT NULL` | FK `platform_users`. |
 | `created_at` | `timestamptz NOT NULL` | |
 
+### `addon_prices` (reference, no RLS, `bms_app` SELECT only, append-only; `V125`, ADR-112)
+
+The monthly price of an add-on over time, one price on every plan. Today one add-on, `ai_assistant` (a check on `addon_code`).
+Nothing is seeded: the operator types the price on Plans and prices (`platform_add_addon_price`).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` PK | |
+| `addon_code` | `varchar(40) NOT NULL` | `ai_assistant`. |
+| `currency` | `char(3) NOT NULL` | FK `currencies`. |
+| `monthly_minor` | `bigint NOT NULL` | 0 to 50,000,000. |
+| `effective_from` | `date NOT NULL` | The price in force on a day is the newest row starting on or before it. |
+| `reason` | `varchar(300)` | |
+| `created_by_platform_user_id` | `uuid NOT NULL` | FK `platform_users`. |
+| `created_at` | `timestamptz NOT NULL` | |
+
+`subscriptions` gains `ai_addon` and `ai_addon_no_charge` (`boolean NOT NULL DEFAULT false`, `V125`): the operator switched the AI
+assistant add-on on for the business, and on without charge (a demo or a pilot). Written only through `platform_set_ai_addon`
+(switching off clears the no charge mark); read by `core.ai`'s allow-list on every call and, unbound, through
+`platform_tenant_ai_addon`. No business is switched on by the migration.
+
 Index `(plan_id, currency, effective_from DESC, created_at DESC)`. Written only through `platform_add_plan_price`; the service
 refuses a start before today, so a price never changes the past.
 

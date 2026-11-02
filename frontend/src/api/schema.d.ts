@@ -8242,7 +8242,7 @@ export interface components {
             acknowledged_by?: string;
             acknowledged_text_version?: string;
             acknowledgement?: components["schemas"]["AdvisorAcknowledgement"];
-            /** @description The tenant is named in BMS_AI_ENABLED_TENANTS; switching on is refused otherwise */
+            /** @description The operator switched the AI assistant add-on on for the business (ADR-112); switching on is refused otherwise */
             allowed?: boolean;
             cost_currency?: string;
             /** Format: int64 */
