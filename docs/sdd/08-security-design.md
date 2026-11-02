@@ -445,7 +445,7 @@ Notes:
   moves it later (`PUT /platform/tenants/{tenant_id}/go-live`), since a later date reopens the window for bringing loans in. An approved bring-in is reversed only
   through `loan_bring_in_reversal`, with the same maker and checker permissions, never decided by its maker, and only
   while the loan has no transaction in the app and no penalty charge (ADR-071 decision 9).
-- Retail AI brief (issue #422, migration `V124`, ADR-037 as amended): `retail.advisor.use` reads the shop brief on Home
+- Retail AI brief (issue #422, migration `V125`, ADR-037 as amended): `retail.advisor.use` reads the shop brief on Home
   (administrators, Supervisors, Sales and Storekeepers) and `retail.advisor.configure` reads and sets the assistant's switch
   and caps at `/staff/assistant` (administrators; switching on also needs `core.settings.manage`). The stored brief covers every
   branch, every seller, cost and profit, so it is returned only to a user who holds `retail.advisor.use`,
