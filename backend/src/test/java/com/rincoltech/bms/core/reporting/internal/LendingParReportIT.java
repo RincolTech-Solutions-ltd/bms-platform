@@ -396,6 +396,9 @@ class LendingParReportIT extends LendingBookSupport {
     @Autowired
     com.rincoltech.bms.lending.insights.InsightsFigures figures;
 
+    @Autowired
+    org.springframework.jdbc.core.simple.JdbcClient jdbc;
+
     // JUSTIFICATION-A3: new case; every other book in this suite is under the 1,000 loans of the port's checkpoint
     // block.
     /**
@@ -448,7 +451,14 @@ class LendingParReportIT extends LendingBookSupport {
                 TODAY, TODAY, TODAY, null, null, null);
         var none = com.rincoltech.bms.lending.insights.InsightsFigures.ParGroupBy.NONE;
         int[] calls = {0};
-        var figuresRead = tenantJobs.callAs(t.tenantId(), () -> figures.par(scope, none, () -> calls[0]++));
+        // A lock wait fails as "lock timeout" after 30 s, well inside the statement timeout, so a recurrence of #696
+        // says which it was: "lock timeout" is a lock held elsewhere, "statement timeout" is the read itself.
+        var figuresRead = tenantJobs.callAs(
+                t.tenantId(),
+                () -> new TransactionTemplate(transactions).execute(tx -> {
+                    jdbc.sql("SET LOCAL lock_timeout = '30s'").update();
+                    return figures.par(scope, none, () -> calls[0]++);
+                }));
         assertThat(figuresRead.total().loans()).isEqualTo(n);
         assertThat(figuresRead.total().principalOutstandingMinor()).isEqualTo(n * 1_000_000L);
         assertThat(calls[0]).as("start, 1,000th loan, 2,000th loan, end").isEqualTo(4);
