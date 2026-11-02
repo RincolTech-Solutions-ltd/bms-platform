@@ -57,15 +57,21 @@ describe('Move stock for a tenant administrator (#104)', () => {
     expect(row.getAttribute('href')).toBe('/staff/retail/transfer');
   });
 
-  it('shows neither the tile nor the menu row to a Seller, who has no transfer permission, while the rest still shows', () => {
+  // A Seller (a real role) and an administrator with only retail.stock.transfer taken away: neither has the permission.
+  const stripped: Me = { ...admin, permissions: (admin.permissions ?? []).filter((p) => p !== 'retail.stock.transfer') };
+
+  it.each([
+    ['a Seller', seller],
+    ['an administrator without retail.stock.transfer', stripped],
+  ])('shows neither the tile nor the menu row to %s, while the rest still shows', (_who, person) => {
     expect(admin.permissions).toContain('retail.stock.transfer');
-    expect(seller.permissions).not.toContain('retail.stock.transfer');
-    show(seller, <RetailHome />);
+    expect(person.permissions).not.toContain('retail.stock.transfer');
+    show(person, <RetailHome />);
     const tiles = within(screen.getByRole('list', { name: 'Retail pages' })).getAllByRole('link');
     expect(tiles.length).toBeGreaterThan(0);
     expect(tiles.map((t) => t.textContent)).not.toContainEqual(expect.stringMatching(/Move stock/));
     cleanup();
-    show(seller, sideNav(seller));
+    show(person, sideNav(person));
     const rows = within(screen.getByRole('navigation', { name: 'Staff areas' })).getAllByRole('link');
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.map((r) => r.textContent)).not.toContainEqual(expect.stringMatching(/Move stock/));
