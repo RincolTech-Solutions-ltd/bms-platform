@@ -746,7 +746,7 @@ class RetailCashbookSavingsIT extends IntegrationTest {
         assertThat(cb.sale(hq, "cash", product, "2", day).getStatusCode()).isEqualTo(HttpStatus.CREATED);
         ResponseEntity<JsonNode> on = cb.post("/savings", body(stale, null, null), CASHIER);
         assertThat(on.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-        // Ten units, then two and two more: a profit of 7,000, so a suggestion of 3,500.
+        // Ten units, then two and two more: the suggestion grows to 3,500.
         assertThat(on.getBody().get("suggested_minor").asLong()).isEqualTo(3_500);
         assertThat(on.getBody().has("available_minor")).isFalse();
         assertThat(on.getBody().has("daily_profit_minor")).isFalse();

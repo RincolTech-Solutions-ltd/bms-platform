@@ -1334,9 +1334,11 @@ Accepted (this list is the ADR index):
   about sizes, `POST /retail/product-families` takes `packs` made on every size in its transaction, and `GET
   /retail/product-families/options` offers the sizes and colours a shop used before (#697, D81, D98; no migration)
 - ADR-115 Salespeople may see and change the savings amount when the owner allows it (Proposed, #768): the setting
-  `salespeople_see_savings_amount` in the settings document, off by default; when on, a caller without `retail.profit.read`
-  sees the suggestion, the cap and the saved amount and may change it within the cap; the profit and expenses stay hidden;
-  the audit flags `salespeople_setting` (no migration)
+  `salespeople_see_savings_amount` in the settings document, off by default, set by the Owner only (403 `owner_only`); when
+  on, a caller without `retail.profit.read` sees the suggestion and may change it before the day is saved, and sees the amount
+  of records made while it is on if they hold `retail.savings.record`; the cap, the profit and the expenses stay hidden, and
+  the profit can still be worked out from the suggestion; replacing a saved amount needs `retail.savings.overwrite` for
+  everyone; the audit flags `salespeople_setting` (no migration)
 
 Pending (cite only as "pending ADR-NNN"):
 
