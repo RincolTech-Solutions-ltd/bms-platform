@@ -146,7 +146,7 @@ export function Landing() {
     return (
       <main className="landing">
         <Hero>
-          <h1>BMS by Rincoltech</h1>
+          <h1>BMS by Rincol Tech</h1>
           <p className="lead">Run your shop or lending business from your phone: sales, stock, members and loans.</p>
           <ul className="landing-actions">
             <li>

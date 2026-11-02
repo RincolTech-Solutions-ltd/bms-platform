@@ -11,7 +11,7 @@ import { router as appRouter } from '../../app/router';
 import { resetThemeMemory } from '../../app/theme-mode';
 import { StylePage } from './route';
 
-// The dark theme's leftovers (#115): the Rincoltech logo has a light-text version for dark surfaces, theme.css shows the one
+// The dark theme's leftovers (#115): the Rincol Tech logo has a light-text version for dark surfaces, theme.css shows the one
 // that suits the theme, and the style page can be looked at in both themes.
 
 beforeEach(() => {
@@ -21,11 +21,11 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe('the Rincoltech logo in both themes (#115)', () => {
+describe('the Rincol Tech logo in both themes (#115)', () => {
   it('draws the black lettering and the light lettering, and a tenant logo once', () => {
     const { container } = render(
       <>
-        <LogoImg src={RINCOLTECH_LOGO} alt="Rincoltech" />
+        <LogoImg src={RINCOLTECH_LOGO} alt="Rincol Tech" />
         <LogoImg src="/api/v1/branding/logo?v=1" alt="Test Trading Co" />
       </>,
     );

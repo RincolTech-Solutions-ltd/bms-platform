@@ -56,7 +56,7 @@ body {
   border-radius: var(--radius-sm);
 }
 
-/* The Rincoltech logo in both themes (#115, LogoImg of shell.tsx): the black lettering on the light theme, the light lettering
+/* The Rincol Tech logo in both themes (#115, LogoImg of shell.tsx): the black lettering on the light theme, the light lettering
    on the dark one, which is clear around its mark and so needs no plate. */
 :root:not([data-theme='dark']) .logo-on-dark,
 :root[data-theme='dark'] .logo-on-light {

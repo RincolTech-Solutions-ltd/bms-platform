@@ -14,7 +14,7 @@ describe('the shared shell (FR-TEN-08)', () => {
   const brands = { tenant, 'tenant without a logo': tenantNoLogo, 'platform host': PLATFORM_BRAND };
 
   for (const [name, brand] of Object.entries(brands)) {
-    it(`has the Powered-by footer with the Rincoltech logo and an accessible link: ${name}`, () => {
+    it(`has the Powered-by footer with the Rincol Tech logo and an accessible link: ${name}`, () => {
       const html = renderToStaticMarkup(
         <Shell brand={brand}>
           <main>content</main>
@@ -23,7 +23,7 @@ describe('the shared shell (FR-TEN-08)', () => {
       expect(html).toContain('Powered by');
       expect(html).toContain(`src="${RINCOLTECH_LOGO}"`);
       expect(html).toContain(`href="${RINCOLTECH_SITE}"`);
-      expect(html).toContain('aria-label="Rincoltech (opens the Rincoltech website)"');
+      expect(html).toContain('aria-label="Rincol Tech (opens the Rincol Tech website)"');
       expect(html).toContain('rel="noopener noreferrer"');
       expect(html).toContain('<main>content</main>');
     });
@@ -36,11 +36,11 @@ describe('the shared shell (FR-TEN-08)', () => {
     expect(withoutLogo).toContain('<span class="brand-name">Test Trading Co</span>');
   });
 
-  it('shows the Rincoltech brand on the platform host', () => {
+  it('shows the Rincol Tech brand on the platform host, in two words as on the logo (#409)', () => {
     const html = renderToStaticMarkup(<Shell brand={PLATFORM_BRAND}>x</Shell>);
     // The black lettering and, for the dark theme, the light lettering (#115).
-    expect(html).toContain(`<img class="logo-on-light" src="${RINCOLTECH_LOGO}" alt="Rincoltech"/>`);
-    expect(html).toContain(`<img class="logo-on-dark" src="${RINCOLTECH_LOGO_ON_DARK}" alt="Rincoltech"/>`);
+    expect(html).toContain(`<img class="logo-on-light" src="${RINCOLTECH_LOGO}" alt="Rincol Tech"/>`);
+    expect(html).toContain(`<img class="logo-on-dark" src="${RINCOLTECH_LOGO_ON_DARK}" alt="Rincol Tech"/>`);
   });
 
   it('sets the theme variables only for a tenant with a colour', () => {

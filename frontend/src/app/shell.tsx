@@ -112,7 +112,7 @@ export function ThemeMenu() {
 }
 
 /**
- * A logo image. The Rincoltech logo is drawn twice, the black lettering and the light lettering (#115), and theme.css shows the
+ * A logo image. The Rincol Tech logo is drawn twice, the black lettering and the light lettering (#115), and theme.css shows the
  * one that suits the theme; any other logo is one image on its plate.
  */
 export function LogoImg({ src, alt, className, width, height }: { src: string; alt: string; className?: string; width?: number; height?: number }) {
@@ -141,12 +141,12 @@ export function BrandBar({ brand, actions }: { brand: ShellBrand; actions?: Reac
   );
 }
 
-/** "Powered by" and the Rincoltech logo, linked to the Rincoltech site. Not removable by a tenant. */
+/** "Powered by" and the Rincol Tech logo, linked to the Rincol Tech site. Not removable by a tenant. */
 export function Footer() {
   return (
     <footer className="app-footer">
       <span>Powered by</span>
-      <a href={RINCOLTECH_SITE} target="_blank" rel="noopener noreferrer" aria-label="Rincoltech (opens the Rincoltech website)">
+      <a href={RINCOLTECH_SITE} target="_blank" rel="noopener noreferrer" aria-label="Rincol Tech (opens the Rincol Tech website)">
         <LogoImg src={RINCOLTECH_LOGO} alt="" width={84} height={24} />
       </a>
     </footer>

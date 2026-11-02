@@ -99,7 +99,7 @@ export function StylePage() {
       <Section title="Theme">
         <Segmented label="Theme" options={THEME_CHOICES.map((value) => ({ value, label: THEME_LABELS[value] }))} value={theme} onChange={setTheme} />
         <p>
-          <LogoImg src={RINCOLTECH_LOGO} alt="Rincoltech logo" width={168} height={48} />
+          <LogoImg src={RINCOLTECH_LOGO} alt="Rincol Tech logo" width={168} height={48} />
         </p>
       </Section>
 
