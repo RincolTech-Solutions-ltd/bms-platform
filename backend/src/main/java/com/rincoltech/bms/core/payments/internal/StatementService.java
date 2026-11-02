@@ -217,9 +217,7 @@ class StatementService {
             UUID approval = null;
             // Only an order whose money is booked into the clearing account has a fee to take out of it: never one that
             // is paid but not booked, held for attention or reversed. A fee posted before the provider later reverses
-            // the
-            // payment leaves clearing short by the fee; the reconciliation lists it (fee_after_reversal) for the
-            // accountant.
+            // the payment is reversed with it (reverseFeeOf), so the clearing balance never goes below nothing.
             if (r.feeMinor() > 0
                     && "matched".equals(m.status())
                     && bookedUnderLock(m.intent().id())
@@ -323,6 +321,35 @@ class StatementService {
                         .query(Long.class)
                         .single()
                 > 0;
+    }
+
+    /**
+     * An approved reversal of the provider's payment takes the whole amount out of the clearing account; the fee posted from a
+     * statement already took part of it, so the fee entry is reversed in the same transaction and clearing never goes below
+     * nothing (ADR-035 decision 67(c)). Once per order: the ledger's one-reversal rule and the idempotency key both hold it.
+     * Nothing happens for an order with no posted fee.
+     * JUSTIFICATION-A3: the lead's instruction on the review of 87df057 asks the reversal to reverse the fee in its transaction.
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    void reverseFeeOf(UUID intentId, String merchantReference) {
+        Optional<UUID> fee = jdbc.sql(
+                        "SELECT fee_entry_id FROM payment_statement_rows WHERE intent_id = ? AND fee_entry_id IS NOT NULL")
+                .param(intentId)
+                .query(UUID.class)
+                .optional();
+        if (fee.isEmpty()) {
+            return;
+        }
+        LocalDate today = clock.today(tenant.profile().timezone());
+        if (!ledger.periodOpen(today)) {
+            throw ApiException.rule("period_closed", "Today's accounting period is closed.");
+        }
+        ledger.reverse(new LedgerPosting.ReversalRequest(
+                fee.get(),
+                today,
+                "SF-" + merchantReference,
+                "Payment provider fee reversed with the payment",
+                "payments.statement.fee.reversed:" + intentId));
     }
 
     private UUID postFee(

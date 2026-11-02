@@ -2017,23 +2017,67 @@ class PaymentReconciliationIT extends LoanFixtures {
     }
 
     /**
-     * A fee posted from a statement, then the payment reported reversed: the reversal takes the whole amount out of clearing,
-     * so the run lists the fee for the accountant to reverse (review of 87df057, M1).
+     * A fee posted from a statement, then the payment reversed and the reversal approved: the fee entry is reversed in the
+     * same transaction, so the clearing account ends at nothing, not below (review of 87df057, M1).
      * JUSTIFICATION-A3: a new test case; no case reverses a payment whose fee was posted.
      */
     @Test
-    void aFeePostedBeforeTheProviderReversesThePaymentIsListedForTheAccountant() {
+    void anApprovedReversalOfAPaymentWhoseFeeWasPostedReversesTheFeeToo() {
+        long clearing = balanceOf("gateway_clearing");
+        long charges = balanceOf("gateway_charges");
         JsonNode booked = bookedRepayment(activeLoan(), 520_000, "CONF-224-1170");
-        long fees = feeEntries();
         ResponseEntity<JsonNode> r =
                 uploadAsAccountant(csv(line(booked, "CONF-224-1170", 520_000, 5_000, "2026-10-16")));
         assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(201);
-        assertThat(feeEntries()).isEqualTo(fees + 1);
-        assertThat(findings(runReconciliation(), "fee_after_reversal", booked)).isEmpty();
+        assertThat(balanceOf("gateway_clearing") - clearing).isEqualTo(515_000);
         reportReversed(booked);
-        List<JsonNode> listed = findings(runReconciliation(), "fee_after_reversal", booked);
-        assertThat(listed).hasSize(1);
-        assertThat(listed.getFirst().get("bms_amount_minor").asLong()).isEqualTo(5_000);
+        ResponseEntity<JsonNode> approved =
+                decide(reversalRequests(booked).getFirst().get("id").toString(), "approve");
+        assertThat(approved.getStatusCode().value())
+                .as("%s", approved.getBody())
+                .isEqualTo(200);
+        assertThat(row(booked).get("status")).isEqualTo("reversed");
+        assertThat(balanceOf("gateway_clearing"))
+                .as("clearing never below nothing")
+                .isEqualTo(clearing);
+        assertThat(balanceOf("gateway_charges")).as("the fee is taken back").isEqualTo(charges);
+    }
+
+    /**
+     * A reversal holding the order (its row locked for update) while a statement with the order's fee is uploaded: the upload
+     * waits for it, sees the order reversed, and posts no fee (review of 87df057, M1).
+     * JUSTIFICATION-A3: a new test case for the race the review names; nothing tested a fee and a reversal at once.
+     */
+    @Test
+    void aStatementUploadedWhileAReversalHoldsTheOrderWaitsAndPostsNoFee() throws Exception {
+        JsonNode booked = bookedRepayment(activeLoan(), 520_000, "CONF-224-1171");
+        long fees = feeEntries();
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try (java.sql.Connection reversal = TestDatabase.ownerDataSource().getConnection()) {
+            reversal.setAutoCommit(false);
+            try (java.sql.PreparedStatement lock =
+                    reversal.prepareStatement("SELECT status FROM payment_intents WHERE id = ? FOR UPDATE")) {
+                lock.setObject(1, UUID.fromString(booked.get("id").asString()));
+                lock.executeQuery();
+            }
+            java.util.concurrent.Future<ResponseEntity<JsonNode>> upload = pool.submit(
+                    () -> uploadAsAccountant(csv(line(booked, "CONF-224-1171", 520_000, 5_000, "2026-10-16"))));
+            Thread.sleep(1500);
+            assertThat(upload.isDone()).as("the upload waits for the order").isFalse();
+            try (java.sql.PreparedStatement reverse =
+                    reversal.prepareStatement("UPDATE payment_intents SET status = 'reversed' WHERE id = ?")) {
+                reverse.setObject(1, UUID.fromString(booked.get("id").asString()));
+                reverse.executeUpdate();
+            }
+            reversal.commit();
+            ResponseEntity<JsonNode> r = upload.get(60, java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(201);
+            assertThat(r.getBody().get("rows").get(0).get("fee_status").asString())
+                    .isEqualTo("held");
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(feeEntries()).as("no fee from a reversed order").isEqualTo(fees);
     }
 
     /** JUSTIFICATION-A3: a new test case for review item 6; no case keys the duplicate in another branch. */
