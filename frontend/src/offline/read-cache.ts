@@ -180,10 +180,20 @@ export function followConnectivity(client: QueryClient, connectivity: Connectivi
   return () => onlineManager.setEventListener(browserEvents);
 }
 
+/**
+ * Going offline, the reads that failed for want of the network stop saying so (the banner under the bar is the one notice):
+ * one with figures shows them again, one without waits as if loading, and both are read again once back online.
+ */
 function showKeptFigures(client: QueryClient): void {
-  for (const q of client.getQueryCache().findAll({ predicate: (query) => query.state.status === 'error' && query.state.data !== undefined })) {
-    q.setState({ status: 'success', error: null, fetchStatus: 'idle' });
+  for (const q of client.getQueryCache().findAll({ predicate: (query) => query.state.status === 'error' && !answered(query.state.error) })) {
+    q.setState(q.state.data !== undefined ? { status: 'success', error: null, fetchStatus: 'idle' } : { status: 'pending', error: null, fetchStatus: 'idle' });
   }
+}
+
+/** The server answered with a refusal (a 4xx): not a missing network, so it stays on screen. */
+function answered(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && status >= 400 && status < 500;
 }
 
 function browserEvents(setOnline: (online: boolean) => void): (() => void) | undefined {

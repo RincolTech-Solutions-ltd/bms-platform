@@ -36,12 +36,16 @@ sometimes twice: the banner under the bar and the screen's own red error. The ow
 5. **Cleared at sign-out.** The copy goes with the catalogue copy and the saved profile, after the sign-out warning of
    ADR-067 decision 9 has been answered; a write under way is waited for and nothing is written after it.
 6. **Read only, paused offline.** React Query takes the app as offline when the offline support does (the browser's events and
-   the ping of `/healthz`, ADR-067 decision 4), so reads pause instead of failing, and a read that failed while it still had
-   figures shows those figures again. Restored reads are put back only when newer than what the screen holds.
+   the ping of `/healthz`, ADR-067 decision 4), so reads pause instead of failing. Going offline, a read that failed for want
+   of the network shows its figures again, or waits as if loading when it had none, and is read again once back online; a
+   refusal the server did send (a 4xx) stays on screen. Restored reads are put back only when newer than what the screen
+   holds. Changes are never paused: mutations run with `networkMode: 'always'`, so a change made offline fails at once and
+   is never sent later (NFR-OFF-04); the offline sale keeps its own outbox (ADR-067).
 7. **One notice per page.** The banner under the bar is the only offline notice: "You are offline. You can still sell; your
    sales will send when you are back online. Figures are from today at 14:05." (the time of the oldest figures on screen, in
    the business's time zone; a person who does not sell reads "You are offline. You see what was loaded before."). Offline, a
-   screen's error for a read that could not reach the server is not drawn, and the Refresh button no longer repeats the time.
+   read that could not reach the server draws no error of its own (decision 6), and the Refresh button no longer repeats the
+   time.
 8. **Home says Sell works offline.** The Shop card on Home carries one short line for whoever may sell: "Sell works offline too.
    Sales made with no data stay on this phone and send when you are back online."
 

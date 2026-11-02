@@ -122,12 +122,17 @@ describe('offline', () => {
     client.setQueryData(['retail', 'stock', 'b1'], { items: ['Test item'] });
     await client.fetchQuery({ queryKey: ['retail', 'stock', 'b1'], queryFn: () => Promise.reject(new TypeError('Failed to fetch')), retry: false, staleTime: 0 }).catch(() => undefined);
     expect(client.getQueryState(['retail', 'stock', 'b1'])?.status).toBe('error');
+    // A read that never loaded, and a refusal the server did send (it stays on screen).
+    await client.fetchQuery({ queryKey: ['retail', 'sales', {}], queryFn: () => Promise.reject(new TypeError('Failed to fetch')), retry: false }).catch(() => undefined);
+    await client.fetchQuery({ queryKey: ['retail', 'sale', 's-9'], queryFn: () => Promise.reject(Object.assign(new Error('Not found'), { status: 404 })), retry: false }).catch(() => undefined);
     const connectivity = testConnectivity(true);
     const undo = followConnectivity(client, connectivity);
     connectivity.set(false);
     expect(onlineManager.isOnline()).toBe(false);
     expect(client.getQueryState(['retail', 'stock', 'b1'])?.status).toBe('success');
     expect(client.getQueryData(['retail', 'stock', 'b1'])).toEqual({ items: ['Test item'] });
+    expect(client.getQueryState(['retail', 'sales', {}])?.status).toBe('pending');
+    expect(client.getQueryState(['retail', 'sale', 's-9'])?.status).toBe('error');
     connectivity.set(true);
     expect(onlineManager.isOnline()).toBe(true);
     undo();
