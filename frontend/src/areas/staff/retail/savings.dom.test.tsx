@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RetailError, type Savings, type SavingsSuggestion } from '../../../api/retail';
+import type { Savings, SavingsSuggestion } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 import { showDate } from './transfers';
@@ -157,7 +157,7 @@ describe('the savings screen', () => {
 
 // JUSTIFICATION-A3: the on and off DOM tests issue #768 asks for, one test per case.
 // Issue #768, ADR-115: the owner's setting "Salespeople can see and change the savings amount". The server leaves the profit and
-// the expenses out of the suggestion for a salesperson either way; with the setting on it sends the suggestion and the cap.
+// the expenses out of the suggestion for a salesperson either way; with the setting on it sends the suggestion, never the cap.
 describe('the savings screen for a salesperson', () => {
   const seller = mockMe('cashier');
   const hidden: SavingsSuggestion = { branch_id: branch, business_date: today, total_sold_minor: 50000, suggestion_token: 'tok-1' };
@@ -193,8 +193,6 @@ describe('the savings screen for a salesperson', () => {
     savingsSuggestion.mockResolvedValue(shown);
     const row: Savings = { ...saved, amount_minor: 3000, suggested_minor: undefined, overwritten: true };
     listSavings.mockResolvedValueOnce([]).mockResolvedValue([row]);
-    const tooMuch = 'That amount is more than this shop can save today. Enter a smaller amount.';
-    createSavings.mockRejectedValueOnce(new RetailError(tooMuch, 422, 'savings_above_available', { code: 'savings_above_available' }));
     createSavings.mockResolvedValue(row);
     open(seller);
     await screen.findByText('UGX 4,000', { selector: '.key-figure-value' });
@@ -202,18 +200,18 @@ describe('the savings screen for a salesperson', () => {
     expect(screen.queryByLabelText("The day's figures")).toBeNull();
     expect(document.body.textContent).not.toMatch(/Profit|Expenses for the day|UGX 8,000/);
 
-    // Too large: only the server knows the cap, and its words do not state it.
-    fireEvent.change(amount(), { target: { value: '9000' } });
+    // Above the suggestion: refused under the field in the server's words, which name only the suggestion; nothing is sent.
+    fireEvent.change(amount(), { target: { value: '4001' } });
     fireEvent.blur(amount());
-    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('alert').textContent).toBe('You can save up to the suggested amount, UGX 4,000. Enter that amount or less.');
     fireEvent.click(saveButton());
-    await screen.findByText(tooMuch);
+    expect(createSavings).not.toHaveBeenCalled();
 
     fireEvent.change(amount(), { target: { value: '3000' } });
     expect(screen.queryByText(/Only an administrator can change the amount/)).toBeNull();
     fireEvent.click(saveButton());
-    await waitFor(() => expect(createSavings).toHaveBeenCalledTimes(2));
-    expect(createSavings.mock.calls[1]?.[0]).toMatchObject({ amount_minor: 3000, suggestion_token: 'tok-1' });
+    await waitFor(() => expect(createSavings).toHaveBeenCalledTimes(1));
+    expect(createSavings.mock.calls[0]?.[0]).toMatchObject({ amount_minor: 3000, suggestion_token: 'tok-1' });
     const panel = await screen.findByRole('region', { name: 'Savings recorded' });
     expect(panel.textContent).toContain('Amount saved: UGX 3,000');
     const records = screen.getByRole('region', { name: 'Savings records' });
