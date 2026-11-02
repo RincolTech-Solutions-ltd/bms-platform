@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../api/client';
 import { mockMe } from '../api/retail-mock';
 import { setAccessToken } from '../auth/session';
-import { othersOnPhone, summaries, useOfflineSupport, type OfflineServices } from './offline-context';
+import { forgetReads, othersOnPhone, summaries, useOfflineSupport, type OfflineServices } from './offline-context';
 import { accessOf } from './read-cache';
 import { provisionalNumber, type OutboxItem } from './outbox';
 import { memoryStore, scopeOf, type OfflineStore } from './store';
@@ -175,6 +175,54 @@ describe('a shared phone', () => {
     const { result } = renderHook(() => useOfflineSupport(watcher, false, services(store, async () => {}), client));
     expect(result.current).toBeNull();
     await waitFor(async () => expect(await store.readCache(scopeOf(HOST, 'u1'))).toBeNull());
+  });
+
+  // JUSTIFICATION-A3: new cases for the second #765 review (rights changed mid-session, opened offline, sign-out without offline support).
+  it('drops from memory what was read under the old rights when the rights change in the session (issue #763)', async () => {
+    const store = memoryStore();
+    const manager: Me = { ...mockMe('admin'), user_id: 'u1' };
+    const client = new QueryClient();
+    const make = services(store, async () => {});
+    const { rerender } = renderHook(({ who }) => useOfflineSupport(who, false, make, client), { initialProps: { who: manager } });
+    await waitFor(() => expect(client.getQueryCache().getAll().length).toBeGreaterThanOrEqual(0));
+    await client.fetchQuery({ queryKey: ['retail', 'home', 'all'], queryFn: async () => ({ title: 'Test shop wide totals' }) });
+    // The profile refresh brings the rights of a seller.
+    rerender({ who: { ...mockMe('sales'), user_id: 'u1' } });
+    await waitFor(() => expect(client.getQueryData(['retail', 'home', 'all'])).toBeUndefined());
+  });
+
+  it('opened offline, keeps a copy the saved profile does not match, and shows a copy it does (issue #763)', async () => {
+    const store = memoryStore();
+    const seller: Me = { ...mockMe('sales'), user_id: 'u1' };
+    const copy = (access: string, title: string) =>
+      ({ savedAt: 1, access, entries: [{ queryKey: ['retail', 'home', 'all'], queryHash: '["retail","home","all"]', state: { data: { title }, dataUpdatedAt: Date.now(), status: 'success' } }] }) as never;
+    const online = services(store, async () => {});
+    const offline = () => ({ ...online(), connectivity: testConnectivity(false) });
+    await store.putReadCache(scopeOf(HOST, 'u1'), copy(accessOf(mockMe('admin')), 'Test figures under other rights'));
+    const first = new QueryClient();
+    renderHook(() => useOfflineSupport(seller, false, offline, first));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(JSON.stringify(await store.readCache(scopeOf(HOST, 'u1')))).toContain('other rights');
+    expect(first.getQueryData(['retail', 'home', 'all'])).toBeUndefined();
+    cleanup();
+
+    await store.putReadCache(scopeOf(HOST, 'u1'), copy(accessOf(seller), 'Test figures of the seller'));
+    const second = new QueryClient();
+    renderHook(() => useOfflineSupport(seller, false, offline, second));
+    await waitFor(() => expect(second.getQueryData(['retail', 'home', 'all'])).toEqual({ title: 'Test figures of the seller' }));
+  });
+
+  it('signs out a person with no offline support and still clears their kept figures, also when the store fails (issue #763)', async () => {
+    const store = memoryStore();
+    const client = new QueryClient();
+    await store.putReadCache(scopeOf(HOST, 'u1'), { savedAt: 1, access: 'x', entries: [] });
+    client.setQueryData(['retail', 'customers'], [{ name: 'Test Customer 03' }]);
+    await forgetReads('u1', client, store, HOST);
+    expect(await store.readCache(scopeOf(HOST, 'u1'))).toBeNull();
+    expect(client.getQueryData(['retail', 'customers'])).toBeUndefined();
+    client.setQueryData(['retail', 'customers'], [{ name: 'Test Customer 04' }]);
+    await forgetReads('u1', client, { ...store, deleteReadCache: () => Promise.reject(new Error('blocked')) }, HOST);
+    expect(client.getQueryData(['retail', 'customers'])).toBeUndefined();
   });
 
   it('picks only the other people of this business, and only what still waits', () => {

@@ -1,5 +1,6 @@
 import { QueryClient, onlineManager, type QueryKey } from '@tanstack/react-query';
 import { afterEach, describe, expect, it } from 'vitest';
+import { markDropped } from '../api/client';
 import { RetailError, setBusinessZone } from '../api/retail';
 import { mockMe } from '../api/retail-mock';
 import { KEEP_DAYS, accessOf, figuresTime, followConnectivity, keepReads, keptForReading, merged, restore, trimmed, type ReadEntry } from './read-cache';
@@ -64,6 +65,10 @@ describe('what is kept', () => {
     expect(trimmed(['reports', 'catalogue'], [{ key: 'lending.par' }, { key: 'retail.test' }], NOW)).toEqual([{ key: 'retail.test' }]);
     expect(trimmed(['reports', 'runs'], { items: [run('r1', 'retail.test'), run('r2', 'lending.par')] }, NOW)).toEqual({ items: [run('r1', 'retail.test')] });
     expect(trimmed(['reports', 'runs'], { pages: [{ items: [run('r2', 'lending.par')] }], pageParams: [null] }, NOW)).toEqual({ pages: [{ items: [] }], pageParams: [null] });
+    // A single run or catalogue entry read on its own: a lending one is not kept at all.
+    expect(trimmed(['reports', 'runs', 'r2'], run('r2', 'lending.par'), NOW)).toBeUndefined();
+    expect(trimmed(['reports', 'catalogue', 'lending.par'], { key: 'lending.par' }, NOW)).toBeUndefined();
+    expect(trimmed(['reports', 'runs', 'r1'], run('r1', 'retail.test'), NOW)).toEqual(run('r1', 'retail.test'));
   });
 });
 
@@ -167,16 +172,27 @@ describe('keeping and restoring', () => {
     expect(theirs).not.toContain('person one');
     expect(await store.readCache(SHOP)).toBeNull();
   });
+
+  it('at sign-out clears memory first, even when the device store fails', async () => {
+    const store = { ...memoryStore(), deleteReadCache: () => Promise.reject(new DOMException('Quota', 'QuotaExceededError')) };
+    const client = new QueryClient();
+    const keeper = keepReads(client, store, SHOP, ADMIN, () => Date.now(), 0);
+    await fetched(client, ['retail', 'customers'], [{ name: 'Test Customer 02' }]);
+    await expect(keeper.forget()).rejects.toThrow();
+    expect(client.getQueryData(['retail', 'customers'])).toBeUndefined();
+  });
 });
 
 describe('offline', () => {
   it('pauses reads while the offline support says offline, and quiets only kept reads the network dropped', async () => {
     const client = new QueryClient();
     client.setQueryData(['retail', 'stock', 'b1'], { items: ['Test item'] });
-    const dropped = new TypeError('Failed to fetch');
+    // A dropped connection as the API client marks it; and a TypeError of the app's own code, which stays on screen.
+    const dropped = markDropped(new TypeError('Failed to fetch'));
     await failed(client, ['retail', 'stock', 'b1'], dropped);
     await failed(client, ['retail', 'sales', {}], dropped);
     await failed(client, ['lending', 'home-summary', 'all'], dropped);
+    await failed(client, ['retail', 'customers'], new TypeError("Cannot read properties of undefined (reading 'items')"));
     // The app's own error for an answer the server sent: a refusal and a server error.
     await failed(client, ['retail', 'sale', 's-9'], new RetailError('Not found', 404, 'not_found'));
     await failed(client, ['retail', 'home', 'all'], new RetailError('Server error', 500));
@@ -189,6 +205,7 @@ describe('offline', () => {
     expect(client.getQueryData(['retail', 'stock', 'b1'])).toEqual({ items: ['Test item'] });
     expect(status(['retail', 'sales', {}])).toBe('pending');
     expect(status(['lending', 'home-summary', 'all'])).toBe('error');
+    expect(status(['retail', 'customers'])).toBe('error');
     expect(status(['retail', 'sale', 's-9'])).toBe('error');
     expect(status(['retail', 'home', 'all'])).toBe('error');
     connectivity.set(true);

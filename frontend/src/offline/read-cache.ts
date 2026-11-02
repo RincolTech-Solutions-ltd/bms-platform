@@ -1,5 +1,5 @@
 import { hydrate, onlineManager, type DehydratedState, type Query, type QueryClient, type QueryKey } from '@tanstack/react-query';
-import type { Me } from '../api/client';
+import { droppedConnection, type Me } from '../api/client';
 import { businessToday, businessZone, daysBefore } from '../api/retail';
 import type { Connectivity } from './connectivity';
 import type { OfflineStore } from './store';
@@ -103,7 +103,8 @@ interface SaleLike {
  */
 export function trimmed(key: QueryKey, data: unknown, now: number): unknown {
   const [area, part] = key;
-  if (area === 'reports') return rowsKept(data, (r) => !lendingReport(r));
+  // A lending report is never kept: a lending run or catalogue entry read on its own is dropped whole, and lists lose them.
+  if (area === 'reports') return lendingReport(data) ? undefined : rowsKept(data, (r) => !lendingReport(r));
   if (area !== 'retail' || (part !== 'sales' && part !== 'sale')) return data;
   const from = daysBefore(businessToday(new Date(now)), KEEP_DAYS);
   // Only sales carry a sale date; the groups of the sales chain (their totals) are kept whole.
@@ -191,11 +192,17 @@ export interface ReadKeeper {
  * the app set in the cache itself, and never a read another person left in memory.
  */
 export function keepReads(client: QueryClient, store: OfflineStore, scope: string, access: string, now: () => number = () => Date.now(), delayMs = SAVE_AFTER_MS): ReadKeeper {
-  const mine = new Map<string, { entry: ReadEntry; size: number }>();
+  // Each kept read with its size, and the answer it was made from: a poll that brings the same answer (React Query keeps the
+  // same object) only moves the time, without measuring the read again.
+  const mine = new Map<string, { entry: ReadEntry; size: number; raw?: unknown }>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let writing: Promise<void> = Promise.resolve();
-  const take = (entry: ReadEntry) => mine.set(entry.queryHash, { entry, size: JSON.stringify(entry).length });
+  const take = (entry: ReadEntry, raw?: unknown) => {
+    const before = mine.get(entry.queryHash);
+    const size = before && raw !== undefined && before.raw === raw ? before.size : JSON.stringify(entry).length;
+    mine.set(entry.queryHash, { entry, size, raw });
+  };
   const save = () => {
     timer = undefined;
     writing = writing
@@ -213,7 +220,7 @@ export function keepReads(client: QueryClient, store: OfflineStore, scope: strin
   const off = client.getQueryCache().subscribe((event) => {
     if (stopped || event.type !== 'updated' || event.action.type !== 'success' || event.action.manual) return;
     const entry = entryOf(event.query, now());
-    if (entry) take(entry);
+    if (entry) take(entry, event.query.state.data);
     else if (keptForReading(event.query.queryKey)) mine.delete(event.query.queryHash);
     else return;
     timer ??= setTimeout(save, delayMs);
@@ -225,15 +232,21 @@ export function keepReads(client: QueryClient, store: OfflineStore, scope: strin
     timer = undefined;
   };
   return {
-    adopt: (entries) => entries.forEach(take),
+    adopt: (entries) => entries.forEach((e) => take(e)),
     stop,
     forget: async () => {
       stop();
+      // Memory first: the next person in this tab never gets these reads, even when the device store then fails.
+      forgetInMemory(client);
       await writing;
       await store.deleteReadCache(scope);
-      client.removeQueries({ predicate: (q) => keptForReading(q.queryKey) });
     },
   };
+}
+
+/** Removes every kept read from the query cache: at sign-out, and when the person's rights change (ADR-116 decisions 3 and 5). */
+export function forgetInMemory(client: QueryClient): void {
+  client.removeQueries({ predicate: (q) => keptForReading(q.queryKey) });
 }
 
 /**
@@ -258,12 +271,12 @@ export function followConnectivity(client: QueryClient, connectivity: Connectivi
 }
 
 /**
- * Going offline, a kept read that failed because the network dropped (the API client's TypeError, ADR-083) stops saying so,
+ * Going offline, a kept read that failed because the network dropped (the API client marks it, `droppedConnection`) stops saying so,
  * the banner under the bar being the one notice: with figures it shows them again, without it waits as if loading, and both
  * are read again once back online. Any answer the server sent (a refusal, a 5xx) and every read not kept stay as they are.
  */
 function showKeptFigures(client: QueryClient): void {
-  const dropped = (q: Query) => keptForReading(q.queryKey) && q.state.status === 'error' && q.state.error instanceof TypeError;
+  const dropped = (q: Query) => keptForReading(q.queryKey) && q.state.status === 'error' && droppedConnection(q.state.error);
   for (const q of client.getQueryCache().findAll({ predicate: dropped })) {
     q.setState(q.state.data !== undefined ? { status: 'success', error: null, fetchStatus: 'idle' } : { status: 'pending', error: null, fetchStatus: 'idle' });
   }
