@@ -1536,6 +1536,12 @@ class MigrationOrderIT {
                                 """).query(Long.class).single())
                 .as("the two lookup indexes exist")
                 .isEqualTo(2L);
+        assertThat(owner.sql("""
+                                SELECT count(*) FROM pg_indexes WHERE indexname IN
+                                ('lending_loan_transactions_manual_reference', 'lending_savings_transactions_manual_reference')
+                                """).query(Long.class).single())
+                .as("the manual receipt reference indexes exist")
+                .isEqualTo(2L);
         assertThat(owner.sql("SELECT status FROM payment_intents WHERE id = ?")
                         .param(intent)
                         .query(String.class)

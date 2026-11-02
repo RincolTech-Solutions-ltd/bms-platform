@@ -216,7 +216,10 @@ class StatementService {
             UUID entry = null;
             UUID approval = null;
             // Only an order whose money is booked into the clearing account has a fee to take out of it: never one that
-            // is paid but not booked, held for attention or reversed, so the clearing balance cannot go below nothing.
+            // is paid but not booked, held for attention or reversed. A fee posted before the provider later reverses
+            // the
+            // payment leaves clearing short by the fee; the reconciliation lists it (fee_after_reversal) for the
+            // accountant.
             if (r.feeMinor() > 0
                     && "matched".equals(m.status())
                     && bookedUnderLock(m.intent().id())

@@ -1419,9 +1419,17 @@ class PaymentReconciliationIT extends LoanFixtures {
                         .value();
             }));
         }
-        go.countDown();
-        for (var f : runs) {
-            assertThat(f.get(60, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(200);
+        // Both runs must finish, so the second waits as long as production lets it (30 seconds), not the 500 ms other
+        // tests use to see a busy run quickly.
+        Object wait = ReflectionTestUtils.getField(target(), "lockWait");
+        ReflectionTestUtils.setField(target(), "lockWait", Duration.ofSeconds(30));
+        try {
+            go.countDown();
+            for (var f : runs) {
+                assertThat(f.get(60, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(200);
+            }
+        } finally {
+            ReflectionTestUtils.setField(target(), "lockWait", wait);
         }
         pool.shutdown();
         assertThat(runCount()).isEqualTo(3L);
@@ -2008,6 +2016,26 @@ class PaymentReconciliationIT extends LoanFixtures {
         assertThat(again.getBody().get("code").asString()).isEqualTo("covered_differs");
     }
 
+    /**
+     * A fee posted from a statement, then the payment reported reversed: the reversal takes the whole amount out of clearing,
+     * so the run lists the fee for the accountant to reverse (review of 87df057, M1).
+     * JUSTIFICATION-A3: a new test case; no case reverses a payment whose fee was posted.
+     */
+    @Test
+    void aFeePostedBeforeTheProviderReversesThePaymentIsListedForTheAccountant() {
+        JsonNode booked = bookedRepayment(activeLoan(), 520_000, "CONF-224-1170");
+        long fees = feeEntries();
+        ResponseEntity<JsonNode> r =
+                uploadAsAccountant(csv(line(booked, "CONF-224-1170", 520_000, 5_000, "2026-10-16")));
+        assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(201);
+        assertThat(feeEntries()).isEqualTo(fees + 1);
+        assertThat(findings(runReconciliation(), "fee_after_reversal", booked)).isEmpty();
+        reportReversed(booked);
+        List<JsonNode> listed = findings(runReconciliation(), "fee_after_reversal", booked);
+        assertThat(listed).hasSize(1);
+        assertThat(listed.getFirst().get("bms_amount_minor").asLong()).isEqualTo(5_000);
+    }
+
     /** JUSTIFICATION-A3: a new test case for review item 6; no case keys the duplicate in another branch. */
     @Test
     void aDuplicateKeyedInAnotherBranchShowsTheOrderOnlyToTheOrdersOwnBranch() {
@@ -2027,11 +2055,14 @@ class PaymentReconciliationIT extends LoanFixtures {
                     .as(field)
                     .isTrue();
         }
-        assertThat(findings(
-                        report(accountant, accountantPerms(), t.secondBranch().toString()),
-                        "manual_receipt_duplicate",
-                        intent))
-                .hasSize(1);
+        // The head office is told which of its receipts to look at; the order's branch is not told the other's receipt.
+        assertThat(mine.getFirst().get("other_transaction_id").isNull()).isFalse();
+        List<JsonNode> theirs = findings(
+                report(accountant, accountantPerms(), t.secondBranch().toString()), "manual_receipt_duplicate", intent);
+        assertThat(theirs).hasSize(1);
+        assertThat(theirs.getFirst().get("other_transaction_id") == null
+                        || theirs.getFirst().get("other_transaction_id").isNull())
+                .isTrue();
     }
 
     @Test

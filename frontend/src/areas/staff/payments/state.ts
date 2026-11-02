@@ -132,6 +132,7 @@ export const FINDING_WORDS: Record<string, { title: string; help: string }> = {
   reversal_handed_over: { title: 'Reversed by the provider, nobody is waiting on it', help: 'It was rejected or could not be finished. Ask for it to be decided again, or leave it.' },
   reversal_blocked: { title: 'Reversal refused by the books', help: 'The reversal cannot be done (for example the deposit was already withdrawn). Record the loss by manual journal and reject the request.' },
   reversed_after_refund: { title: 'Reversed after it was already sent back', help: 'You sent this money back and the provider then reversed it too. Record the loss by manual journal.' },
+  fee_after_reversal: { title: 'Fee recorded, then the payment was reversed', help: "The provider's fee on this payment was recorded from a statement, then the payment was reversed. Reverse the fee entry so the clearing account is right." },
   manual_receipt_duplicate: { title: 'Entered by hand and also paid online', help: 'A cashier entered this payment as well as the online payment being recorded. Reverse the one entered by hand.' },
   in_provider_not_in_bms: { title: 'On the statement, not recorded here', help: 'The statement has a payment this system does not hold as paid. It may be money for something outside this system.' },
   in_bms_not_in_provider: { title: 'Recorded here, not on the statement', help: 'Booked on a day the statement covers but missing from it. Check the statement is complete.' },

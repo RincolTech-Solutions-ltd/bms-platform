@@ -89,6 +89,7 @@ class ReconciliationService {
     static final List<String> SEVERITY = List.of(
             "reversed_after_refund",
             "reversal_blocked",
+            "fee_after_reversal",
             "manual_receipt_duplicate",
             "completed_not_booked",
             "paid_differs",
@@ -139,7 +140,8 @@ class ReconciliationService {
             UUID allocatedSubjectId,
             String refusalCode,
             String receiptStatus,
-            String blocked) {}
+            String blocked,
+            Long feePostedMinor) {}
 
     private record StatementLine(
             UUID id, String trackingId, String code, long amountMinor, String currency, boolean reviewed) {}
@@ -416,7 +418,9 @@ class ReconciliationService {
                                    (SELECT a.execution_error FROM approval_requests a
                                      WHERE a.action_type = 'gateway_payment_reversal' AND a.subject_id = i.id
                                        AND a.status = 'pending'
-                                     ORDER BY a.requested_at DESC LIMIT 1) AS blocked
+                                     ORDER BY a.requested_at DESC LIMIT 1) AS blocked,
+                                   (SELECT max(s.fee_minor) FROM payment_statement_rows s
+                                     WHERE s.intent_id = i.id AND s.fee_entry_id IS NOT NULL) AS fee_posted_minor
                               FROM payment_intents i
                               LEFT JOIN unallocated_receipts r ON r.tenant_id = i.tenant_id AND r.intent_id = i.id
                              WHERE i.scope = 'tenant' AND i.created_at >= :from
@@ -446,7 +450,8 @@ class ReconciliationService {
                             rs.getObject("allocated_subject_id", UUID.class),
                             rs.getString("refusal_code"),
                             rs.getString("receipt_status"),
-                            rs.getString("blocked")))
+                            rs.getString("blocked"),
+                            (Long) rs.getObject("fee_posted_minor")))
                     .list();
             boolean more = rows.size() > want;
             if (more) {
@@ -507,6 +512,14 @@ class ReconciliationService {
                                         : "reversed_awaiting_review";
                 out.add(intentFinding(kind, i, i.paidAmountMinor(), i.paidAmountMinor()));
             }
+            // A fee posted from a statement before the provider reported the payment reversed: the reversal takes the
+            // whole
+            // amount out of clearing, the fee was already taken, so clearing is short by the fee until the accountant
+            // reverses the fee entry. Listed with the fee as this system's amount.
+            if (i.feePostedMinor() != null
+                    && ("reversed_pending_review".equals(i.status()) || "reversed".equals(i.status()))) {
+                out.add(intentFinding("fee_after_reversal", i, i.feePostedMinor(), null));
+            }
         }
     }
 
@@ -553,20 +566,23 @@ class ReconciliationService {
                         if (!samePayment(m, i, zone)) {
                             continue;
                         }
-                        // The order's tracking id and code are shown only in the order's branch. When the receipt was
-                        // keyed in another branch, that branch is told of its own receipt alone.
+                        // The order's tracking id and code are shown only in the order's branch, and the receipt only
+                        // in
+                        // its own: when the receipt was keyed in another branch, each branch is told of its own side.
+                        boolean elsewhere =
+                                m.branchId() != null && !m.branchId().equals(i.branchId());
                         out.add(new Finding(
                                 "manual_receipt_duplicate",
                                 i.id(),
                                 null,
-                                m.transactionId(),
+                                elsewhere ? null : m.transactionId(),
                                 i.providerReference(),
                                 i.confirmationCode(),
-                                m.amountMinor(),
+                                elsewhere ? null : m.amountMinor(),
                                 i.paidAmountMinor(),
-                                m.currency(),
+                                i.paidCurrency(),
                                 i.branchId()));
-                        if (m.branchId() != null && !m.branchId().equals(i.branchId())) {
+                        if (elsewhere) {
                             out.add(new Finding(
                                     "manual_receipt_duplicate",
                                     null,

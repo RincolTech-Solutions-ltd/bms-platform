@@ -172,6 +172,8 @@ CREATE TABLE payment_reconciliation_findings (
     -- reversal_handed_over        the same, handed to a person (three requests that stood, or a rejection): nothing is waiting
     -- reversal_blocked            the reversal was approved-attempted and refused (a deposit already withdrawn): a shortfall
     -- reversed_after_refund       the provider reports reversed money the lender already sent back by hand: a loss
+    -- fee_after_reversal          the order's provider fee was posted, then the provider reported the payment reversed: the
+    --                             reversal takes the whole amount out of clearing, so the fee entry is for the accountant to reverse
     -- manual_receipt_duplicate    a receipt a cashier keyed by hand has the reference of a gateway confirmation code
     -- in_provider_not_in_bms      a statement line no order of ours has, or one this system does not hold as paid
     -- in_bms_not_in_provider      a payment booked here on a day a statement covers, missing from every statement that covers it
@@ -179,7 +181,7 @@ CREATE TABLE payment_reconciliation_findings (
     -- ambiguous_statement_row     a statement line whose confirmation code names more than one order
     kind              text         NOT NULL CHECK (kind IN ('completed_not_booked', 'pending_over_24h', 'paid_differs',
                                        'reversed_awaiting_review', 'reversal_handed_over', 'reversal_blocked',
-                                       'reversed_after_refund',
+                                       'reversed_after_refund', 'fee_after_reversal',
                                        'manual_receipt_duplicate', 'in_provider_not_in_bms', 'in_bms_not_in_provider',
                                        'amount_mismatch', 'currency_mismatch', 'ambiguous_statement_row')),
     intent_id         uuid,
