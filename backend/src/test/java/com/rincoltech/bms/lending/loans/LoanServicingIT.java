@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -63,10 +64,17 @@ class LoanServicingIT extends LoanFixtures {
      * {@code daysLate} days before today. "Today minus a month minus five days" is not that: from
      * 1 to 5 November it lands on a September date whose instalment falls due on an October date
      * six days back, because October has 31 days (#744). Walking back from the due date avoids it.
-     * The only dates it cannot reach are due dates on the 29th to 31st after a shorter month.
+     * No disbursement date reaches a due date on the 29th to 31st after a shorter month (2 Nov
+     * minus 2 days is 31 Oct, and September has no 31st); on those few days the test is skipped
+     * with that reason instead of failing.
      */
     LocalDate dueDaysAgo(int months, int daysLate) {
-        return today.minusDays(daysLate).minusMonths(months);
+        LocalDate due = today.minusDays(daysLate);
+        LocalDate disbursed = due.minusMonths(months);
+        Assumptions.assumeTrue(
+                disbursed.plusMonths(months).equals(due),
+                () -> "no disbursement date has instalment " + months + " due on " + due);
+        return disbursed;
     }
 
     // ---- Fixtures -------------------------------------------------------------------------
