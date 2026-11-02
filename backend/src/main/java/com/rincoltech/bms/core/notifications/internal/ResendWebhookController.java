@@ -147,7 +147,8 @@ class ResendWebhookController {
         // Staging and production share the Resend account, and Resend sends every event to every endpoint: an email of
         // another environment (or with no environment tag) is acknowledged and not recorded here.
         if (!environment.equals(tags.get("env"))) {
-            return ResponseEntity.noContent().build();
+            log.debug("resend {} of another environment, or with no env tag, dropped", type);
+            return ResponseEntity.ok().build();
         }
         // One delivery at a time per message id, so a slow first call and Resend's retry never both write; only the
         // last week is searched, since Resend stops retrying long before that.

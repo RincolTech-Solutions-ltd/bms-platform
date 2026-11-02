@@ -82,7 +82,7 @@ types, which can be a real person's.
    sender puts on every email (`outbox_id`, `tenant_id`, `template`), the recipient's domain only (never the address), the
    bounce type and the message id. Every email also carries an `env` tag (the environment, as in the idempotency key):
    staging and production share the Resend account and Resend sends every event to every endpoint, so an event whose
-   `env` is another environment's, or missing, is acknowledged and not recorded. A repeated message id writes nothing
+   `env` is another environment's, or missing, is answered 200, logged at debug and not recorded. A repeated message id writes nothing
    more: the check takes a transaction advisory lock on the id and searches only the last seven days. Other event types
    are acknowledged and ignored. The operator's "Messages not sent" page lists the latest 100 (`GET /platform/outbox`, `bounces`).
    **No migration and no new column:** the application role already inserts and reads that log. Writing the bounce on

@@ -142,9 +142,10 @@ The `BMS_SMTP_*` values can stay on the host; they are not used while the provid
   `email.suppressed`,
   copy its Signing secret (`whsec_...`) into `/opt/bms/.env` as `BMS_RESEND_WEBHOOK_SECRET`, then
   `docker compose up -d api`. The platform host must be reachable from the internet on that path (no access gate in
-  front of it). Resend's "Send test event" must show 204 (a test event carries no `env` tag, so it is not recorded); a
-  401 means the secret differs, a 404 that it is unset. Staging and production share the Resend account, so each
-  endpoint receives the other's events too: each records only the events whose `env` tag is its own. Each bounce,
+  front of it). Resend's "Send test event" must show 200 (a test event carries no `env` tag, so it is acknowledged and
+  not recorded); a 401 means the secret differs, a 404 that it is unset. Staging and production share the Resend
+  account, so each endpoint receives the other's events too: each records only the events whose `env` tag is its own,
+  and answers the others 200 with a debug line in the log and nothing recorded. Each bounce,
   complaint and suppressed send then shows on "Messages not sent" under **Bounced and complained** (a suppressed send
   reads "Not sent, address blocked after an earlier bounce": Resend refused to send to an address that bounced or
   complained before), with the message, the

@@ -75,10 +75,11 @@ class ResendWebhookIT extends IntegrationTest {
         for (String env : new String[] {"staging", ""}) {
             String id = "msg_" + UUID.randomUUID().toString().replace("-", "");
             String body = event("email.bounced", outboxId, UUID.randomUUID(), env);
+            // Answered 200 so Resend stops retrying, logged at debug, never recorded.
             assertThat(post(id, now, sign(KEY, id, now, body), body)
                             .getStatusCode()
                             .value())
-                    .isEqualTo(204);
+                    .isEqualTo(200);
             assertThat(rows(id)).isZero();
         }
         // Resend dropped a later send to an address on its suppression list: recorded, so the operator sees it.
