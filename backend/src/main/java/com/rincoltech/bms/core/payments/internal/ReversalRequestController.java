@@ -77,19 +77,14 @@ class ReversalRequestController {
         NoStore.apply(response);
         Principal principal = CurrentPrincipal.require();
         // Under the order's row lock: only an order waiting for a reversal decision is asked about, and the provider is
-        // asked
-        // at most once in ten seconds (CheckSchedule.THROTTLE) whoever asks. The asker who finds no recent answer
-        // claims the
-        // slot by stamping last_checked_at in the same locked transaction, so two asks at the same moment cannot both
-        // call the
-        // provider; the second uses the first's slot, as any answer of a moment ago is used, so a caller in a loop
-        // cannot
-        // spend the shared account's allowance. Only a reversed payment is ever in review, so a person may still raise
+        // asked at most once in ten seconds (CheckSchedule.THROTTLE) whoever asks. The asker who finds no recent check
+        // claims the slot by stamping last_checked_at in the same locked transaction, so two asks at the same moment
+        // cannot both call the provider and a caller in a loop cannot spend the shared account's allowance. A check of
         // a
-        // request while the claimed answer is on its way; the provider's answer, when it comes, moves the order as
-        // usual.
+        // moment ago is not an answer of REVERSED (the poller stamps last_checked_at whatever the provider said), so it
+        // only returns the request already waiting and raises nothing; with none waiting, the asker tries again.
         Instant now = clock.now();
-        boolean recent = Boolean.TRUE.equals(tx.execute(status -> {
+        UUID already = tx.execute(status -> {
             Intent locked = store.lock(intentId)
                     .filter(i -> principal.may("core.payments.allocate_approve", i.branchId()))
                     .orElseThrow(ApiException::notFound);
@@ -97,27 +92,22 @@ class ReversalRequestController {
             if (locked.lastCheckedAt() != null
                     && locked.lastCheckedAt().plus(CheckSchedule.THROTTLE).isAfter(now)) {
                 if (locked.checkFailures() > 0) {
-                    throw new ApiException(
-                            HttpStatus.CONFLICT,
-                            "try_again",
-                            "Try again",
-                            "The payment provider could not be asked just now, so nothing was raised. Try again in a moment.");
+                    throw tryAgain();
                 }
-                return true;
+                return reversals.waitingRequest(intentId).orElseThrow(ReversalRequestController::tryAgain);
             }
             store.update(intentId, "reversed_pending_review", null, now, Map.of("last_checked_at", now));
-            return false;
-        }));
+            return null;
+        });
+        if (already != null) {
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(new Outcome(intentId, already));
+        }
         // The provider is asked outside any transaction: a payment it now reports completed is not reversed, and a
         // handed
         // over order is not polled, so its answer may be old. If it cannot be asked, nothing is raised.
-        StatusChecker.Asked answer = recent ? StatusChecker.Asked.REVERSED : checker.verifyInReview(intentId);
+        StatusChecker.Asked answer = checker.verifyInReview(intentId);
         if (answer == StatusChecker.Asked.UNREACHABLE) {
-            throw new ApiException(
-                    HttpStatus.CONFLICT,
-                    "try_again",
-                    "Try again",
-                    "The payment provider could not be asked just now, so nothing was raised. Try again in a moment.");
+            throw tryAgain();
         }
         UUID request = tx.execute(status -> {
             Intent intent = store.lock(intentId).orElseThrow(ApiException::notFound);
@@ -152,6 +142,14 @@ class ReversalRequestController {
                     "Nothing stands in the books for this payment, so there is nothing to reverse.");
         });
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(new Outcome(intentId, request));
+    }
+
+    private static ApiException tryAgain() {
+        return new ApiException(
+                HttpStatus.CONFLICT,
+                "try_again",
+                "Try again",
+                "The payment provider could not be asked just now, so nothing was raised. Try again in a moment.");
     }
 
     private static void requireInReview(Intent intent) {

@@ -238,6 +238,17 @@ class GatewayReversals {
                 .single();
     }
 
+    /** The request waiting for a checker for this order (pending and not expired), if any; raises nothing. */
+    Optional<UUID> waitingRequest(UUID intentId) {
+        return jdbc.sql("""
+                        SELECT id FROM approval_requests WHERE action_type = ? AND subject_id = ? AND status = 'pending'
+                           AND expires_at > ? ORDER BY requested_at DESC LIMIT 1
+                        """)
+                .params(GatewayReversalAction.TYPE, intentId, java.sql.Timestamp.from(clock.now()))
+                .query(UUID.class)
+                .optional();
+    }
+
     private boolean pendingRemains(UUID intentId) {
         return jdbc.sql("""
                         SELECT count(*) FROM approval_requests WHERE action_type = ? AND subject_id = ? AND status = 'pending'

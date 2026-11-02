@@ -1661,11 +1661,28 @@ class UnallocatedReceiptsIT extends LoanFixtures {
         loansAt = other;
         String target = activeLoan();
         loansAt = null;
+        // Above the payoff, so the request carries a notice naming the loan and its payoff.
+        cashRepayment(target, get(target, "/payoff-quote").get("total_minor").asLong() - 50_000);
         String approval = requested(askAllocate(receipt, PURPOSE, target));
         String perms = permissionsOf("accountant");
         // The request sits in the receipt's branch; the money goes to a loan of the other. A checker of the receipt's
-        // branch only may neither approve nor reject it and is not offered it, and one of the loan's branch only
-        // cannot see the request.
+        // branch only may neither approve nor reject it, is not offered it and does not read the loan's notice, and
+        // one of the loan's branch only cannot see the request.
+        JsonNode seenByHq = send(
+                        HttpMethod.GET,
+                        "/api/v1/approvals/" + approval,
+                        as(accountant, perms, hq.toString(), null),
+                        null)
+                .getBody();
+        assertThat(seenByHq.get("checker_notice") == null
+                        || seenByHq.get("checker_notice").isNull())
+                .isTrue();
+        assertThat(seenByHq.get("payload").has("checker_notice")).isFalse();
+        assertThat(send(HttpMethod.GET, "/api/v1/approvals/" + approval, as(staff, adminPerms, "*", null), null)
+                        .getBody()
+                        .get("checker_notice")
+                        .asString())
+                .contains("credit balance");
         ResponseEntity<JsonNode> hqOnly = send(
                 HttpMethod.POST,
                 "/api/v1/approvals/" + approval + "/approve",
@@ -1689,7 +1706,7 @@ class UnallocatedReceiptsIT extends LoanFixtures {
                         .get("can_decide")
                         .asBoolean())
                 .isFalse();
-        assertThat(repayments(target)).isEmpty();
+        assertThat(repayments(target)).hasSize(1);
         assertThat(receiptRow(receipt).get("status")).isEqualTo("open");
         ResponseEntity<JsonNode> otherOnly = send(
                 HttpMethod.POST,
@@ -1704,7 +1721,7 @@ class UnallocatedReceiptsIT extends LoanFixtures {
                 as(staff, adminPerms, "*", null),
                 Map.of("note", "x"));
         assertThat(both.getStatusCode().value()).as("%s", both.getBody()).isEqualTo(200);
-        assertThat(repayments(target)).hasSize(1);
+        assertThat(repayments(target)).hasSize(2);
     }
 
     @Test
@@ -2226,6 +2243,31 @@ class UnallocatedReceiptsIT extends LoanFixtures {
         assertThat(third.getBody().get("approval_request_id").asString())
                 .isEqualTo(first.getBody().get("approval_request_id").asString());
         assertThat(reversalRequests(intent)).hasSize(2);
+    }
+
+    /** JUSTIFICATION-A3: a new test case for review item 6; no existing case asks right after a poll with none waiting. */
+    @Test
+    void aCheckOfAMomentAgoWithNoRequestWaitingIsNotTakenAsReversed() {
+        String loan = activeLoan();
+        JsonNode intent = bookedRepayment(loan, 520_000, "CONF-224-0119");
+        reportReversed(intent);
+        assertThat(decide(reversalRequests(intent).getFirst().get("id").toString(), "reject")
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(200);
+        // The poller has just asked (and may have heard pending or failed): its stamp is not a reversal answer.
+        TestDatabase.owner()
+                .sql("UPDATE payment_intents SET last_checked_at = ? WHERE id = ?")
+                .params(
+                        java.sql.Timestamp.from(clock.instant()),
+                        UUID.fromString(intent.get("id").asString()))
+                .update();
+        int before = fake.queryCount();
+        ResponseEntity<JsonNode> asked = reaskAtOnce(intent, manager, managerPerms);
+        assertThat(asked.getStatusCode().value()).as("%s", asked.getBody()).isEqualTo(409);
+        assertThat(code(asked)).isEqualTo("try_again");
+        assertThat(fake.queryCount()).isEqualTo(before);
+        assertThat(reversalRequests(intent)).hasSize(1);
     }
 
     @Test
