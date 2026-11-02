@@ -29,6 +29,14 @@ public interface ApprovalAction {
                 : Optional.empty();
     }
 
+    /**
+     * Payload keys only a principal who may decide the request reads (they can name what lies in another branch); anyone
+     * else who sees the request gets the payload without them, and no notice. By default the notice alone.
+     */
+    default Set<String> deciderOnlyPayloadKeys() {
+        return Set.of(CHECKER_NOTICE);
+    }
+
     /** Lower snake case, for example {@code loan_disbursement}; stored in {@code approval_requests}. */
     String actionType();
 

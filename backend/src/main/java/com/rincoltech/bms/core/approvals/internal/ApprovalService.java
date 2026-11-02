@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -581,13 +582,16 @@ class ApprovalService implements Approvals {
                 && action.mayDecide(principal, r.branchId(), r.payload())
                 && !action.conflictedDeciders(r.subjectId(), r.payload()).contains(principal.userId());
         boolean canCancel = pending && r.requestedBy().equals(principal.userId());
-        // The notice can name what the checker decides on (a loan of another branch and its payoff), so only one who
-        // may decide reads it; it is worked out again (a quote) only on the detail of a pending request, never per row.
+        // The notice and the action's decider-only keys can name what the checker decides on (a loan of another branch
+        // and its payoff), so only one who may decide reads them; the notice is worked out again (a quote) only on the
+        // detail of a pending request, never per row.
         boolean readsNotice = action != null && action.mayDecide(principal, r.branchId(), r.payload());
         Map<String, Object> payload = r.payload();
-        if (withPayload && !readsNotice && payload != null && payload.containsKey(ApprovalAction.CHECKER_NOTICE)) {
+        if (withPayload && !readsNotice && payload != null) {
             payload = new java.util.LinkedHashMap<>(payload);
-            payload.remove(ApprovalAction.CHECKER_NOTICE);
+            payload.keySet()
+                    .removeAll(
+                            action != null ? action.deciderOnlyPayloadKeys() : Set.of(ApprovalAction.CHECKER_NOTICE));
         }
         String notice = !readsNotice
                 ? null
