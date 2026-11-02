@@ -1,8 +1,6 @@
-import react from '@vitejs/plugin-react';
 import { chromium, type Browser } from 'playwright';
-import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { helpCorpus } from '../vite.config';
+import { openLayout } from './open';
 
 // The staff top bar laid out in Chromium on a phone (issue #603): with the Ask button beside Search, at 360, 390 and 412 wide, at
 // the default and a large font size, with Ask BMS on and off, no control overlaps another, each is a target of at least 48px,
@@ -12,21 +10,14 @@ import { helpCorpus } from '../vite.config';
 // business and the branch each show their first word and the start of the second (the accepted minimum at font scale 2 is below).
 // Since issue #631 Refresh is in the bar again beside Search, its icon alone, and the same minimum holds.
 
-let server: ViteDevServer;
 let browser: Browser;
-let base = '';
 
 beforeAll(async () => {
-  // Its own dependency cache, so it never races tabs.layout.test.ts's server, which vitest starts at the same time.
-  server = await createServer({ configFile: false, root: process.cwd(), cacheDir: 'node_modules/.vite-layout-header', plugins: [react(), helpCorpus()], logLevel: 'error', server: { port: 0, host: '127.0.0.1' } });
-  await server.listen();
-  base = server.resolvedUrls?.local[0] ?? '';
   browser = await chromium.launch();
 });
 
 afterAll(async () => {
   await browser?.close();
-  await server?.close();
 });
 
 type Box = { x: number; y: number; width: number; height: number };
@@ -91,8 +82,7 @@ describe.each([360, 390, 412])('the business and the branch at %ipx wide', (widt
       async (ask, sync, waiting, name, shows) => {
         const page = await browser.newPage({ viewport: { width, height: 700 }, hasTouch: true, isMobile: true });
         const names = `branch=${encodeURIComponent('Store 1 140025')}&business=${encodeURIComponent('Tumaini Traders')}`;
-        await page.goto(`${base}layout/header.html?font=${font}&ask=${ask === 'on' ? 1 : 0}&sync=${sync}&waiting=${waiting}&${names}`);
-        await page.locator('.staff-bar-top .ask-open').waitFor();
+        await openLayout(page, `layout/header.html?font=${font}&ask=${ask === 'on' ? 1 : 0}&sync=${sync}&waiting=${waiting}&${names}`, page.locator('.staff-bar-top .ask-open'));
         const button = page.locator('.staff-bar-top .sync-button');
         await button.waitFor();
         // The business name comes from the branding of this page's host; without it the title would show the platform's name.
@@ -124,9 +114,8 @@ describe.each([360, 390, 412])('the top bar at %ipx wide', (width) => {
       ['off', '0'],
     ])('fits the Ask button with Ask BMS %s, every control 48px and on its own space', async (_state, ask) => {
       const page = await browser.newPage({ viewport: { width, height: 700 }, hasTouch: true, isMobile: true });
-      await page.goto(`${base}layout/header.html?font=${font}&ask=${ask}`);
       const button = page.locator('.staff-bar-top .ask-open');
-      await button.waitFor();
+      await openLayout(page, `layout/header.html?font=${font}&ask=${ask}`, button);
       expect(await button.getAttribute('aria-label')).toBe(ask === '1' ? 'Ask BMS, New' : 'How do I?, New');
       // Refresh is in the bar beside Search (issue #631), its icon alone, named Refresh.
       const refresh = page.locator('.staff-bar-top .refresh-button');

@@ -111,7 +111,12 @@ no tour yet: the slice that releases its pages adds the tour and marks it `ready
 ### 2.1 Roles
 
 A retail branch has a role, held in `retail_branch_roles` (a retail table, so the core `branches`
-table is untouched, as ADR-001 asks when only one vertical needs the concept):
+table is untouched, as ADR-001 asks when only one vertical needs the concept).
+
+> **Since ADR-104 (issue #371, migration V115)** a `store` is no longer stored here: it is the branch flag
+> `sells_goods = false` of ADR-048, set on the Branches screen, and reads as `store` while `branch_roles` is on. The table
+> holds only `shop` and `both`, a sale at a store is refused with 422 `branch_does_not_sell`, and the Store also takes no
+> payment, refund or cash in at its till (ADR-048). The rest of this section is the original design.
 
 | Role | Sells (sales screen, `POST /retail/sales`) | Restock (`POST /retail/purchases`, later goods received) | Transfer out | Transfer in | Usage, damage, stock-take |
 |---|---|---|---|---|---|
@@ -154,6 +159,7 @@ only narrow what the branch accepts.
 | Transfer from a store to a shop | needs `retail.stock.transfer` at the source (as today); the destination branch must be active and may be outside the caller's scope (as today) |
 | A manager scoped to Store 1 and the shop | sees both in stock views; sells only at the shop |
 | A branch-scoped caller reads the stock of Store 2 | 404 as today for a branch outside scope |
+| A caller names a branch for a retail event (`RetailBranchContext.resolve`, issue #257) | 404 `unknown_branch` outside the permission's scope, an unknown id included for a scoped caller; 403 `permission_denied` where the permission is not held at all; a closed branch inside the scope, or an unknown id for a caller over all branches (who sees every branch), stays 422 `unknown_branch` on the field |
 
 A new tenant branch defaults to `both` through the absence of a row (section 2.3), so adding a
 branch never needs the role step.
@@ -663,9 +669,9 @@ All reports are read only, respect branch scope per row, and omit cost, value an
 
 | Report | Content |
 |---|---|
-| Stock by store and shop | `GET /retail/reports/stock-by-location`: per product, the balance in each branch the caller may read, grouped by role (stores, then shops), a subtotal per role and a **combined total**; stock **in transit** (section 9.3) as its own column so the combined total neither double counts nor loses it. Extends `/retail/stock/all-branches`, which stays |
+| Stock by store and shop | `GET /retail/reports/stock-by-location`: per product, the balance in each branch the caller may read, grouped by role (stores, then shops), a subtotal per role and a **combined total**; stock **in transit** (section 9.3) as its own column so the combined total neither double counts nor loses it. An inactive product is listed while it holds stock in a listed branch or has stock on its way from or to one (issue #239). Extends `/retail/stock/all-branches`, which stays |
 | Combined total | The sum across all readable branches, quantity and, with profit read, value at cost; the revaluation difference is shown as in valuation |
-| Transfers in flight | `GET /retail/reports/transfers-in-flight` (needs `transfer_receipt`): dispatched and not received, with age, source, destination, lines. Empty by construction when transfers are atomic |
+| Transfers in flight | `GET /retail/reports/transfers-in-flight` (needs `transfer_receipt`): dispatched and not received, with age (days since it was sent, not since its transfer date, which may be set in the past; issue #239), source, destination, lines. Empty by construction when transfers are atomic |
 | Supplier payables | `GET /retail/reports/supplier-payables` (no capability since issue #557, ADR-084; invoices only with `purchasing`): per supplier, open bills by days past due (same buckets as customer ageing; a landed cost invoice is a bill, and a credit note has already come off its invoice) and unbilled receipts (goods received not invoiced). Open credit notes are zero by construction (7.5 item 6). For tenants without `purchasing` the same report shows the credit restocks by supplier, and supplier payments pay them (built, issue #557, ADR-084) |
 | Customer ageing | Section 5.2 |
 
@@ -733,7 +739,10 @@ destination still holds what came in, applied to the received quantity.
 - Receive and cancel are money-moving (`Idempotency-Key`); a replayed key returns the first response and
   two racing receipts receive once (the transfer row is locked).
 - Switching `transfer_receipt` off, directly or by choosing the `shop` profile, is refused (422
-  `transfers_in_transit`) while any transfer is in transit.
+  `transfers_in_transit`) while any transfer is in transit. The check runs inside the settings write,
+  under the tenant settings row lock, and a transfer reads the capability under a shared lock on that
+  row, so a dispatch committing at the same moment is either seen by the check or made after the
+  change as a one-step move (issue #239).
 - `GET /retail/transfers` gains a `status` filter, which is how the in-transit list is read with its
   lines; `GET /retail/reports/transfers-in-flight` adds the age, the value and the reconciliation.
 - Not done here: the shortage is posted to the ledger but is not yet a line of the daily profit report.

@@ -7,15 +7,15 @@ import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
 import { ToStock } from './analytics-ui';
 import { parseQty, showQty } from './maths';
-import { plural } from '../../../app/glossary';
 import { buildTransfer, lineMilli, linePack, transferLineHint, transferProblem, withPacks, type TransferDraft } from './transfer-state';
 import { milliOf } from './maths';
 import { TRANSFER, TRANSFER_RECEIPT, UNITS, capabilityOn, holdsAt, needsOf } from './permissions';
 import { BranchRequired, Gate, NoStockHere, PacksAndPiecesFields, ProductPicker, Problem, money, useProfitAccess, useStockingBranch } from './ui';
 import { ScanBar } from './scan';
+import { NextSteps, mayCountAt } from './next-steps';
 import { PACK_UNUSABLE, plusOne, scanInto } from './barcode-state';
 import { useItemAdded } from './toast';
-import { chosenPack, packsAndPiecesProblem, samePack, standardPack } from './units-state';
+import { chosenPack, packsAndPiecesProblem, samePack, standardPack, unitWords } from './units-state';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { ActionBar } from '../../../app/ui/ActionBar';
 import { showDate } from './maths';
@@ -176,7 +176,7 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
               </>
             )}
             {inPacks && unit && (l.packs ?? '').trim() !== '' && !samePack(inPacks, now ? { unit: now.unit, factor: now.factor } : undefined) && (
-              <p className="hint">{`Moving in ${plural(inPacks.unit)} of ${showQty(inPacks.factor ?? '')}, as when you typed them. This item's pack has changed since.`}</p>
+              <p className="hint">{`Moving in ${unitWords(inPacks.unit).toLowerCase()} of ${showQty(inPacks.factor ?? '')}, as when you typed them. This item's pack has changed since.`}</p>
             )}
             {hint && !unreadable && <p role="alert" className="rt-flag">{hint}</p>}
             {entry.notes(l.product.id ?? String(i))}
@@ -206,10 +206,11 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
   );
 }
 
-const HEADING: Record<string, string> = { voided: 'Cancelled', in_transit: 'Stock sent', received: 'Stock received', cancelled: 'Taken back' };
+const HEADING: Record<string, string> = { voided: 'Undone', in_transit: 'Stock sent', received: 'Stock received', cancelled: 'Taken back' };
 
 export function TransferSummary({ transfer, onNew }: { transfer: Transfer; onNew?: () => void }) {
   const label = useBranchLabel();
+  const { me, chooseBranch } = useStaff();
   const profit = useProfitAccess();
   return (
     <section aria-label="Saved">
@@ -230,9 +231,18 @@ export function TransferSummary({ transfer, onNew }: { transfer: Transfer; onNew
       {transfer.note && <p>Note: {transfer.note}</p>}
       {profit && transfer.cost_total_minor !== undefined && <p>Value at cost: {money(transfer.cost_total_minor)}</p>}
       {profit && transfer.shortage_cost_minor !== undefined && transfer.shortage_cost_minor > 0 && <p>Lost on the way, at cost: {money(transfer.shortage_cost_minor)}</p>}
-      {transfer.status === 'voided' && <p>Cancelled: {transfer.void_reason}</p>}
+      {transfer.status === 'voided' && <p>Undone: {transfer.void_reason}</p>}
       {transfer.status === 'cancelled' && <p>Taken back: {transfer.void_reason}</p>}
-      {onNew && <button type="button" className="rt-primary" onClick={onNew}>Move more stock</button>}
+      {/* Issue #700: once the goods are there, the next job is to count them at the branch that took them in. */}
+      {/* Move more stock stays the primary: a clear form here, or Move stock where a past move is only shown. */}
+      <NextSteps at="moveDone" lead steps={[
+        onNew ? { label: 'Move more stock', onClick: onNew } : { label: 'Move more stock', screen: 'transfer', to: '/staff/retail/transfer' },
+        {
+          label: 'Count stock at the receiving branch', words: `Count stock at ${label(transfer.to_branch_id)}`, screen: 'stocktake', to: '/staff/retail/stocktake',
+          onClick: () => chooseBranch?.(transfer.to_branch_id ?? ''),
+          show: (transfer.status === 'completed' || transfer.status === 'received') && chooseBranch !== undefined && mayCountAt(me, transfer.to_branch_id),
+        },
+      ]} />
     </section>
   );
 }

@@ -94,7 +94,8 @@ describe('glossary (issue #547)', () => {
     expect(WORDS.difference).toBe('Difference');
     expect(WORDS.lostOrDamaged).toBe('Lost or damaged stock');
     expect(WORDS.customersWhoOwe).toBe('Customers who owe');
-    expect(WORDS.countedIn).toBe('Counted in');
+    expect(WORDS.singleUnit).toBe('Single unit');
+    expect(WORDS.package).toBe('Package');
     expect(WORDS.packs).toBe('Cartons, boxes and other packs');
   });
 

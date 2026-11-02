@@ -191,7 +191,7 @@ class RetailItemCodesIT extends IntegrationTest {
                 patch("/products/" + made, Map.of("code", "BLB-0001", "description", "Test bulb 9 W"));
         assertThat(same.getStatusCode()).as("%s", same.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(same.getBody().get("code").asString()).isEqualTo("BLB-0001");
-        assertThat(same.getBody().get("description").asString()).isEqualTo("Test bulb 9 W");
+        assertThat(same.getBody().get("description").asString()).isEqualTo("Test Bulb 9 W");
         // A blank code is no code, and the item's own code in other capitals is no change either.
         for (String own : List.of("", "  ", "blb-0001")) {
             ResponseEntity<JsonNode> r = patch("/products/" + made, Map.of("code", own));
@@ -251,12 +251,13 @@ class RetailItemCodesIT extends IntegrationTest {
         applied.getBody().get("rows").forEach(r -> reported.add(r.get("code").asString()));
         // The typed BLB-0002 goes in first, so the blank rows of Bulbs step over it.
         assertThat(reported).containsExactly("BLB-0003", "BLB-0002", "BLB-0004", "EXT-0001", "OWN-7");
+        // Names are stored in the display style (issue #698, ADR-109).
         assertThat(codesByName())
-                .containsEntry("Test bulb 12W", "BLB-0003")
-                .containsEntry("Test bulb 15W", "BLB-0002")
-                .containsEntry("Test bulb 18W", "BLB-0004")
-                .containsEntry("Test extension 4 way", "EXT-0001")
-                .containsEntry("Test extension 6 way", "OWN-7");
+                .containsEntry("Test Bulb 12W", "BLB-0003")
+                .containsEntry("Test Bulb 15W", "BLB-0002")
+                .containsEntry("Test Bulb 18W", "BLB-0004")
+                .containsEntry("Test Extension 4 Way", "EXT-0001")
+                .containsEntry("Test Extension 6 Way", "OWN-7");
 
         // A file without a code column at all is read as every code blank.
         ResponseEntity<JsonNode> noColumn = api.post(
@@ -264,7 +265,7 @@ class RetailItemCodesIT extends IntegrationTest {
                 Map.of("csv", "description,category,unit,sell_price\nTest bulb 30W,Bulbs,test-piece,4000\n"),
                 ADMINISTRATOR);
         assertThat(noColumn.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(codesByName()).containsEntry("Test bulb 30W", "BLB-0005");
+        assertThat(codesByName()).containsEntry("Test Bulb 30W", "BLB-0005");
     }
 
     @Test
@@ -300,9 +301,9 @@ class RetailItemCodesIT extends IntegrationTest {
         applied.getBody().get("rows").forEach(r -> reported.add(r.get("code").asString()));
         assertThat(reported).containsExactly("BLB-0002", "BLB-0003", "BLB-0004");
         assertThat(codesByName())
-                .containsEntry("Test bulb 12W", "BLB-0002")
-                .containsEntry("Test bulb 15W", "BLB-0003")
-                .containsEntry("Test bulb 18W", "BLB-0004")
+                .containsEntry("Test Bulb 12W", "BLB-0002")
+                .containsEntry("Test Bulb 15W", "BLB-0003")
+                .containsEntry("Test Bulb 18W", "BLB-0004")
                 .doesNotContainValue("BLB-0007");
         assertThat(TestDatabase.owner()
                         .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.product.imported'"

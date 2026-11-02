@@ -112,7 +112,10 @@ jobs:
           - image: api
             context: backend
             # The help articles Ask BMS answers from (ADR-096): the Dockerfile copies them from this named context.
-            build_contexts: help=frontend/src/help/articles
+            # The one list of unit words (ADR-109), read by the server from the PWA's file.
+            build_contexts: |
+              help=frontend/src/help/articles
+              words=frontend/src/words
           - image: web
             context: frontend
           - image: proxy

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, configure, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AllBranchesStock, Purchase, PurchasesSummary, PurchasesSummaryGroup, PurchasesSummaryQuery, StockRow, StockSummary, StockSummaryGroup, StockSummaryQuery } from '../../../api/retail';
@@ -65,7 +65,12 @@ afterEach(() => {
   for (const f of [stockSummary, purchasesSummary, listStock, listStockAllBranches, listPurchases]) f.mockReset();
 });
 
-const head = (name: RegExp | string) => screen.findByRole('button', { name });
+// A group's header, not the category chip of the same name above the list (issue #690).
+const head = (name: RegExp | string) => waitFor(() => {
+  const found = screen.getAllByRole('button', { name }).find((b) => !b.closest('.find-chips'));
+  if (!found) throw new Error(`No group header ${String(name)}`);
+  return found;
+});
 
 // ---- stock -------------------------------------------------------------------------------------
 

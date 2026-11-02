@@ -56,6 +56,8 @@ const { StocktakePage } = await import('./stocktake');
 afterEach(() => {
   cleanup();
   sessionStorage.clear();
+  // Count stock keeps a count on the device (issue #681), so each test starts with none.
+  localStorage.clear();
   createProduct.mockReset();
   createCategory.mockReset();
   cats = [bulbs];
@@ -82,7 +84,7 @@ async function fill(qtyLabel: RegExp, qty: string) {
   await within(form()).findByRole('option', { name: 'piece' });
   await chooseCategory(field(/^Category/), 'Bulbs');
   fireEvent.change(field(/^Description/), { target: { value: 'Test bulb 12W' } });
-  fireEvent.change(field(/^Counted in/), { target: { value: 'u1' } });
+  fireEvent.change(field(/^Single unit/), { target: { value: 'u1' } });
   fireEvent.change(field(/^Buying price/), { target: { value: '6000' } });
   fireEvent.change(field(/^Selling price/), { target: { value: '9000' } });
   fireEvent.change(field(qtyLabel), { target: { value: qty } });
@@ -98,7 +100,7 @@ describe('Buy stock: add an item that is not in the list', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Not in the list? Add it here' }));
     await within(form()).findByRole('option', { name: 'piece' });
     fireEvent.click(field(/^Category/));
-    fireEvent.click(await screen.findByRole('button', { name: 'Add a new category' }));
+    fireEvent.click(await screen.findByRole('button', { name: '+ Add a category' }));
     fireEvent.change(screen.getByLabelText(/^Name of the new category/), { target: { value: 'Rice' } });
     expect(await screen.findByText('RCE', { selector: 'strong' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Add category' }));
@@ -116,7 +118,7 @@ describe('Buy stock: add an item that is not in the list', () => {
     await within(form()).findByRole('option', { name: 'piece' });
     const labels = [...form().querySelectorAll('label')].map((l) => l.textContent?.replace(/\s*\*$/, '').trim());
     // Issue #617: the optional photo comes last, Take a picture or Choose a photo.
-    expect(labels).toEqual(['Category', 'Description', 'Counted in', 'Buying price (UGX)', 'Selling price (UGX)', expect.stringMatching(/^Quantity bought/), 'Take a picture', 'Choose a photo']);
+    expect(labels).toEqual(['Category', 'Description', 'Single unit', 'Buying price (UGX)', 'Selling price (UGX)', expect.stringMatching(/^Quantity bought/), 'Take a picture', 'Choose a photo']);
     expect(document.activeElement).toBe(field(/^Category/));
     // Issue #562: the code comes first, as text, never a field.
     const code = within(form()).getByTestId('restock-new-code');
@@ -133,7 +135,7 @@ describe('Buy stock: add an item that is not in the list', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Not in the list? Add it here' }));
     await within(form()).findByRole('option', { name: 'piece' });
     expect(within(form()).getByText(/Fields marked/)).toBeTruthy();
-    for (const label of [/^Category/, /^Description/, /^Counted in/, /^Buying price/, /^Selling price/, /^Quantity bought/]) {
+    for (const label of [/^Category/, /^Description/, /^Single unit/, /^Buying price/, /^Selling price/, /^Quantity bought/]) {
       const control = field(label);
       expect(control.getAttribute('aria-required'), String(label)).toBe('true');
       expect(form().querySelector(`label[for="${control.id}"] .field-star`)?.getAttribute('aria-hidden')).toBe('true');
@@ -212,7 +214,7 @@ describe('Buy stock: add an item that is not in the list', () => {
   // Review of #552, must-fix 1 and 2: an item already on the purchase keeps its line and gets the quantity added, as a scan adds,
   // and a quantity is never replaced, by a number or by nothing.
   const onThePurchase = (qty: string) => ({
-    supplierId: '', newSupplier: '', purchasedOn: '2026-10-24', method: 'cash' as const,
+    supplierId: '', purchasedOn: '2026-10-24', method: 'cash' as const,
     lines: [{ product: { ...made, id: 'p1', code: 'BLB-0001', sell_minor: 8500 }, cost: '6000', sell: '8500', qtyByBranch: { [mockMe('admin').branches?.[0]?.id ?? '']: qty } }],
   });
 
@@ -251,7 +253,7 @@ describe('Buy stock: add an item that is not in the list', () => {
     expect(within(form()).queryByLabelText(/^Quantity bought/)).toBeNull();
     await chooseCategory(field(/^Category/), 'Bulbs');
     fireEvent.change(field(/^Description/), { target: { value: 'Test bulb 12W' } });
-    fireEvent.change(field(/^Counted in/), { target: { value: 'u1' } });
+    fireEvent.change(field(/^Single unit/), { target: { value: 'u1' } });
     fireEvent.change(field(/^Buying price/), { target: { value: '6000' } });
     fireEvent.change(field(/^Selling price/), { target: { value: '9000' } });
     save();

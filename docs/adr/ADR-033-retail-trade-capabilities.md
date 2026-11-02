@@ -32,6 +32,8 @@ capabilities inside retail.
    `branch_role_forbids_sales`); a store and a shop both restock and transfer. There is no "can
    receive purchases" flag: restocking is the action, permission and branch scope decide who may,
    and the role only removes what a branch cannot do. The core `branches` table is not changed. `retail.stock` owns branch roles and capability reads; sales and purchasing depend only on stock and catalogue for them.
+   *Superseded in part by ADR-104 (issue #371, migration V115): a store is the branch flag `sells_goods = false` of ADR-048, the
+   role keeps only `shop` and `both`, a Store reads as `store`, and a refused sale answers `branch_does_not_sell`.*
 4. **The retail price stays the product's `sell_minor`.** Named lists, quantity breaks, effective
    dates and customer groups add to it; a sale with no list is priced as today. The below-cost rule
    and cost visibility apply to the resolved price.
@@ -242,7 +244,7 @@ Decision 6 is built in slice 6 (migration V44; `docs/specs/trade-capabilities.md
    ordinary `retail_sale_payments` row, linked from `retail_account_payment_allocations`, so every reader of sale payments
    keeps working and no ALTER touches the large sales tables. The allocation skips imported sales and sales outside the caller's
    scope, refuses what cannot be placed (422 `payment_exceeds_allocatable`, with how much can) and holds nothing as a deposit.
-   One ledger entry posts in the receiving branch with a credit to trade debtors for each sale, so cash lands where it is held. It debits the seeded retail account of the method by system key (`cash_on_hand`, `mobile_money`, `bank`) as every retail posting does, and does not read the `payment_methods` mapping (ADR-026: retail keeps its accounts until #236); the mapping already refuses to move `cash` or `bank` elsewhere while retail is on.
+   One ledger entry posts in the receiving branch with a credit to trade debtors for each sale, so cash lands where it is held. It debits the seeded retail account of the method by system key (`cash_on_hand`, `mobile_money`, `bank`) as every retail posting does, and does not read the `payment_methods` mapping (ADR-026: retail keeps its accounts until #236); the mapping already refuses to move `cash` or `bank` elsewhere while retail is on. *Amended by ADR-105: the debit to `cash_on_hand` or `bank` now goes to the account `cash` or `bank` is mapped to at the receiving branch, and the refusal is gone.*
 4. **Reversible as a whole.** `POST .../payments/{id}/reverse` (`retail.sale.void`, a reason) reverses the entry on the business
    day and gives each sale its paid amount back; there is no partial reversal. The V14 guard on `retail_sales` allowed
    `paid_minor` only to rise; it is replaced (a function body, no table lock) so that it may fall only inside the reversal, by exactly that

@@ -45,6 +45,7 @@ class EmailLayoutTest {
                 "links",
                 "Test Shop: https://shop-bms-staging.rincoltech.test/sign-in\nTest Lender: https://lender-bms-staging.rincoltech.test/sign-in");
         p.put("sign_in_url", "https://test-bms-staging.rincoltech.test/sign-in");
+        p.put("short_link", "rincoltech.test/testshop");
         p.put("portal_url", "https://bms-staging.rincoltech.test/platform/applications/fabricated");
         p.put("note", "Test note, line one.\nLine two.");
         p.put("expires_at", "9 Oct 2026 08:00 UTC");
@@ -323,6 +324,20 @@ class EmailLayoutTest {
                 .isEqualTo(OutboxTemplates.placeholders("email", "onboarding.activation"));
         assertThat(body("onboarding.activation", params(), platform(), "").html())
                 .contains(">Set my password</a>");
+        // ADR-108: the welcome email names the short link; a row queued before it existed still renders, without it.
+        assertThat(plain).contains("Your shop's short link is rincoltech.test/testshop.");
+        Map<String, String> old = params();
+        old.remove("short_link");
+        for (String key : List.of("onboarding.activation", OutboxTemplates.ACTIVATION_TWO_STEP)) {
+            assertThat(templates.render("email", key, old).text())
+                    .as(key)
+                    .doesNotContain("short link")
+                    .contains("Rincol Tech");
+            assertThat(body(key, old, platform(), "").html())
+                    .as(key)
+                    .doesNotContain("short link")
+                    .doesNotContain("{");
+        }
     }
 
     @Test

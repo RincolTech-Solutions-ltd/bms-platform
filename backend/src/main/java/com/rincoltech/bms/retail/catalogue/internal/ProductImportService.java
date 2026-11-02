@@ -8,7 +8,9 @@ import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.CsvTable;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
+import com.rincoltech.bms.retail.catalogue.CatalogueNames;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
+import com.rincoltech.bms.retail.catalogue.StandardUnits;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.ImportResult;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.ImportRow;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceChange;
@@ -183,6 +185,11 @@ class ProductImportService {
                                 + " three decimals and no commas, for example 12 or 12.5.";
             } else if (hasPack && packUnit.equalsIgnoreCase(unit)) {
                 problem = "The pack unit must differ from the unit.";
+            } else if (hasPack
+                    && StandardUnits.fixedCount(packUnit) != null
+                    && packFactor.compareTo(java.math.BigDecimal.valueOf(StandardUnits.fixedCount(packUnit))) != 0) {
+                // Review of #722 (ADR-110): a dozen holds 12 on the import too, an error row like any other.
+                problem = StandardUnits.fixedCountRefusal(StandardUnits.fixedCount(packUnit));
             } else if (sell == null) {
                 problem = "The selling price must be " + example(exponent, 12000) + ".";
             } else if (cost == null && !costBlank) {
@@ -217,9 +224,11 @@ class ProductImportService {
                         "This code is repeated in the file; the first row is used."));
                 continue;
             }
-            String categoryKey = category.toLowerCase(Locale.ROOT);
-            String unitKey = unit.toLowerCase(Locale.ROOT);
-            String packKey = packUnit.toLowerCase(Locale.ROOT);
+            // Issue #698: as categories are stored and compared, spaces inside counted once.
+            String categoryKey = CatalogueNames.nameKey(category);
+            // Issue #698 (ADR-109): "pcs" in a file is the shop's Piece; two spellings in one file make one unit.
+            String unitKey = CatalogueNames.unitKey(unit);
+            String packKey = CatalogueNames.unitKey(packUnit);
             // JUSTIFICATION-A3: the two duplicate-name skips of issue #352 sit beside the existing duplicate-code
             // skips, in this loop.
             String nameKey = repo.nameKey(description.strip()) + CatalogueRepository.NAME_SEP + unitKey;
@@ -393,15 +402,33 @@ class ProductImportService {
         Map<String, UUID> categoryIds = new HashMap<>(categories);
         Map<String, UUID> unitIds = new HashMap<>(units);
         for (Map.Entry<String, String> e : newCategories.entrySet()) {
-            String name = e.getValue();
+            // The name as it is stored (issue #698), so the audit says what the screens show.
+            String name = CatalogueNames.display(e.getValue());
             UUID id = UUID.randomUUID();
             repo.insertCategory(id, name, null, by);
             categoryIds.put(e.getKey(), id);
             audit.record(AuditLog.Entry.created(
                     "retail.category.created", "retail.category", id, null, Map.of("name", name)));
         }
-        for (Map.Entry<String, String> e : newUnits.entrySet()) {
+        // Issue #698: each new unit under its key's lock, taken in key order so two imports queue and never
+        // deadlock; one added meanwhile in another spelling is used, never made twice.
+        for (Map.Entry<String, String> e : new java.util.TreeMap<>(newUnits).entrySet()) {
             String name = e.getValue();
+            repo.lockUnitKey(name);
+            CatalogueApi.Unit meanwhile = repo.sameUnit(name, null).orElse(null);
+            if (meanwhile != null && !meanwhile.active()) {
+                // Issue #662: a unit added and switched off meanwhile is a change made meanwhile, as for a pack unit.
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        "import_conflict",
+                        "Import conflict",
+                        "Another change added the unit " + meanwhile.name()
+                                + ", switched off, while this file was being applied. Nothing was added. Run the check again and apply the file again.");
+            }
+            if (meanwhile != null) {
+                unitIds.put(e.getKey(), meanwhile.id());
+                continue;
+            }
             UUID id = UUID.randomUUID();
             repo.insertUnit(id, name, by);
             unitIds.put(e.getKey(), id);
@@ -415,14 +442,14 @@ class ProductImportService {
         ordered.sort(Comparator.comparing((Pending p) -> p.code() == null));
         ordered.stream()
                 .filter(p -> p.code() == null)
-                .map(p -> categoryIds.get(p.category().toLowerCase(Locale.ROOT)))
+                .map(p -> categoryIds.get(CatalogueNames.nameKey(p.category())))
                 .distinct()
                 .sorted()
                 .forEach(repo::lockCategory);
         Map<Integer, String> made = new HashMap<>();
         for (Pending p : ordered) {
-            UUID categoryId = categoryIds.get(p.category().toLowerCase(Locale.ROOT));
-            UUID unitId = unitIds.get(p.unit().toLowerCase(Locale.ROOT));
+            UUID categoryId = categoryIds.get(CatalogueNames.nameKey(p.category()));
+            UUID unitId = unitIds.get(CatalogueNames.unitKey(p.unit()));
             String code = p.code() == null ? repo.nextItemCode(categoryId) : p.code();
             if (p.code() == null) {
                 made.put(p.row(), code);
@@ -463,10 +490,17 @@ class ProductImportService {
             if (p.packUnit() != null) {
                 // Issue #637: made by the one pack path of POST /products/{id}/units, its checks and its audit: for
                 // both, with no price of its own, whatever the unit's usual purpose.
-                packUnitId = unitIds.get(p.packUnit().toLowerCase(Locale.ROOT));
+                packUnitId = unitIds.get(CatalogueNames.unitKey(p.packUnit()));
                 try {
                     catalogue.createPack(
-                            product, packUnitId, p.packFactor(), RetailCatalogue.PACK_BOTH, null, by, "import");
+                            product,
+                            packUnitId,
+                            p.packFactor(),
+                            RetailCatalogue.PACK_BOTH,
+                            null,
+                            CatalogueService.Holds.NONE,
+                            by,
+                            "import");
                 } catch (ApiException e) {
                     // Issue #662: a pack unit switched off after the check read the units is a change made meanwhile.
                     if (e.errors().stream().anyMatch(f -> f.code().equals("inactive_unit"))) {

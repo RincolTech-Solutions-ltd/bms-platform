@@ -7,6 +7,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -120,7 +121,25 @@ final class CatalogueApi {
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(description = "Issue #625: present only when this unit is a pack with a usual size")
-            UsualPack usualPack) {}
+            UsualPack usualPack,
+
+            @Schema(
+                    description =
+                            "Issue #689 (ADR-106): the name is a package word, such as Box or Carton, so it can be"
+                                    + " a pack but never the single unit of a new item")
+            boolean isPackage,
+
+            @Schema(
+                    description = "Issue #709 (ADR-110): one of the standard units every shop gets, under any spelling;"
+                            + " the list shows them first, in the standard order")
+            boolean standard,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Issue #709 (ADR-110, D98): present only for a package of a fixed size, 12 for a dozen;"
+                                    + " every pack of it holds exactly this many of the level it holds")
+            Integer fixedCount) {}
 
     @Schema(name = "RetailUsualPack", description = "The usual size of a pack in a smaller unit, and what it is for")
     record UsualPack(
@@ -162,7 +181,15 @@ final class CatalogueApi {
             Long sellMinor,
 
             @Size(max = 300) @Schema(description = DUPLICATE_REASON)
-            String duplicateReason) {}
+            String duplicateReason,
+
+            @Size(max = 10)
+            @Schema(
+                    description = "Issue #689 (ADR-106): packages made with the item in its transaction, checked as"
+                            + " POST /products/{id}/units checks them; all are saved with the item or none is")
+            // Review of #692: each pack is validated by the service, so its problems carry pack_index and packs[i]
+            // names.
+            List<PackRequest> packs) {}
 
     @Schema(
             name = "UpdateRetailProductRequest",
@@ -897,7 +924,38 @@ final class CatalogueApi {
             @Size(max = VariantGrid.MAX_VARIANTS) List<@Valid VariantLine> variants,
 
             @Size(max = 300) @Schema(description = ITEM_DUPLICATE_REASON)
-            String duplicateReason) {}
+            String duplicateReason,
+
+            @Size(max = 10)
+            @Schema(
+                    description = "Issue #697 (ADR-111): packages every size and colour gets, made in its transaction,"
+                            + " checked as on POST /products; all are saved with the item or none is")
+            List<PackRequest> packs,
+
+            @Size(max = 1000)
+            @Schema(
+                    description = "Issue #697: a size's own selling price for one of its packages; a package price not"
+                            + " named here is the one sent, in proportion to the size's selling price")
+            List<@Valid SizePackPrice> packPrices) {}
+
+    @Schema(
+            name = "RetailSizePackPrice",
+            description = "Issue #697: one size's own selling price of one of its packages")
+    record SizePackPrice(
+            @Size(max = 30) String size,
+            @Size(max = 30) String colour,
+            @NotNull UUID unitId,
+
+            @NotNull @PositiveOrZero @Max(RetailCatalogue.MAX_AMOUNT_MINOR)
+            Long sellMinor) {}
+
+    @Schema(name = "RetailVariantOptions", description = "Issue #697: the sizes and colours the business has used")
+    record VariantOptions(
+            @Schema(description = "Sizes of the business's items, each once ignoring case, most used first")
+            List<String> sizes,
+
+            @Schema(description = "Colours of the business's items, each once ignoring case, most used first")
+            List<String> colours) {}
 
     @Schema(
             name = "AddRetailVariantsRequest",
@@ -1178,16 +1236,20 @@ final class CatalogueApi {
 
     // ---- Pack sizes (ADR-033, issue #194) ------------------------------------------------------
 
-    @Schema(name = "RetailPackRequest", description = "A pack size: factor base units in one pack of the unit")
+    @Schema(
+            name = "RetailPackRequest",
+            description =
+                    "A pack size: factor base units in one pack of the unit, or holds_qty of the level holds_unit_id"
+                            + " (issue #699)")
     record PackRequest(
             @NotNull UUID unitId,
 
-            @NotNull
             @DecimalMin("1")
             @Digits(integer = 11, fraction = 3)
             @Schema(
                     type = "string",
-                    description = "Base units in one pack, at least 1, up to three places, for example 12 or 12.5")
+                    description = "Base units in one pack, at least 1, up to three places, for example 12 or 12.5;"
+                            + " required unless holds_unit_id and holds_qty are sent, and then it must agree with them")
             BigDecimal factor,
 
             @Pattern(regexp = RetailCatalogue.PACK_PURPOSES)
@@ -1202,7 +1264,24 @@ final class CatalogueApi {
             @Schema(
                     description = "The selling price of one pack for a walk-in sale, in minor units; absent means the"
                             + " piece price times the size. Needs retail.price.edit (issue #624)")
-            Long sellMinor) {}
+            Long sellMinor,
+
+            @Schema(
+                    description =
+                            "Issue #699 (ADR-107): the level one pack holds, the item's own unit or another pack's"
+                                    + " unit of the item (in a new item's packs, one of its other packs); sent with holds_qty")
+            UUID holdsUnitId,
+
+            @Min(PackLadder.MIN_HOLDS)
+            @Max(PackLadder.MAX_HOLDS)
+            @Schema(description = "Issue #699: how many of holds_unit_id are in one pack, a whole number of 2 or more")
+            Integer holdsQty,
+
+            @Schema(
+                    description =
+                            "Issue #699: true for the level the shop usually buys the item in, which Buy stock opens"
+                                    + " on; never on a pack only for selling. Clears it on the item's other packs")
+            Boolean usualBuy) {}
 
     @Schema(
             name = "RetailPackUpdate",
@@ -1229,7 +1308,25 @@ final class CatalogueApi {
             @Schema(
                     description = "True to drop the pack's own price, so it sells at the piece price times the size"
                             + " again; needs retail.price.edit (issue #624)")
-            Boolean clearSellMinor) {}
+            Boolean clearSellMinor,
+
+            @Schema(
+                    description =
+                            "Issue #699 (ADR-107): the level one pack holds, the item's own unit or another active"
+                                    + " pack's unit of the item; sent with holds_qty. Every bigger level that holds this one is"
+                                    + " worked out again; stock, kept in the item's unit, never changes")
+            UUID holdsUnitId,
+
+            @Min(PackLadder.MIN_HOLDS)
+            @Max(PackLadder.MAX_HOLDS)
+            @Schema(
+                    description = "Issue #699: how many of the level held are in one pack, a whole number of 2 or more."
+                            + " With factor"
+                            + " alone, a pack that holds another level must stay a whole number of it (422 not_whole)")
+            Integer holdsQty,
+
+            @Schema(description = "Issue #699: true to make this the level Buy stock opens on, false to clear it")
+            Boolean usualBuy) {}
 
     @Schema(name = "RetailPack")
     record Pack(
@@ -1281,7 +1378,25 @@ final class CatalogueApi {
                     description =
                             "Issue #650 (ADR-103): true for the item's standard pack, the one its stock is shown and"
                                     + " counted in; at most one pack of an item")
-            boolean standard) {
+            boolean standard,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Issue #699 (ADR-107): the level one pack holds, the item's own unit or another pack's"
+                                    + " unit; absent when the pack holds factor of the item's unit and says no more")
+            UUID holdsUnitId,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(description = "Issue #699: the name of that level's unit")
+            String holdsUnit,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(description = "Issue #699: how many of that level are in one pack; factor is this times its factor")
+            Integer holdsQty,
+
+            @Schema(description = "Issue #699: true for the level the shop usually buys the item in")
+            boolean usualBuy) {
 
         /** True when the pack may be used on a sale, a scan at the till, a quotation or an order. */
         boolean sells() {
@@ -1303,7 +1418,11 @@ final class CatalogueApi {
                     prices ? suggestedSellMinor : null,
                     prices && cost && sells() ? belowCost : null,
                     hasOwnPrice,
-                    standard);
+                    standard,
+                    holdsUnitId,
+                    holdsUnit,
+                    holdsQty,
+                    usualBuy);
         }
     }
 

@@ -247,7 +247,7 @@ class SelfServePlanIT extends IntegrationTest {
         assertThat(asked.getBody().get("status").asString()).isEqualTo("approved");
         assertThat(asked.getBody().get("decided_automatically").asBoolean()).isTrue();
         assertThat(modules(b.t().tenantId())).containsExactly("lending", "retail");
-        assertThat(units(b.t().tenantId())).isEqualTo(8); // ADR-098: the default units
+        assertThat(units(b.t().tenantId())).isEqualTo(17); // ADR-098: the default units, the standard ones of ADR-110
         assertThat(platformAudits("platform.tenant.module_requested", b.t().tenantId()))
                 .isEqualTo(1);
         assertThat(platformAudits("platform.tenant.modules_changed", b.t().tenantId()))
@@ -315,7 +315,7 @@ class SelfServePlanIT extends IntegrationTest {
         assertThat(approved.getStatusCode()).as("%s", approved.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(approved.getBody().get("status").asString()).isEqualTo("approved");
         assertThat(modules(b.t().tenantId())).containsExactly("lending", "retail");
-        assertThat(units(b.t().tenantId())).isEqualTo(8); // ADR-098: the default units
+        assertThat(units(b.t().tenantId())).isEqualTo(17); // ADR-098: the default units, the standard ones of ADR-110
         assertThat(b.api()
                         .get("/api/v1/plan", b.ownerSession().accessToken())
                         .getBody()

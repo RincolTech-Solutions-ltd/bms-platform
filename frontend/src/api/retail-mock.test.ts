@@ -295,3 +295,25 @@ describe('the mock approval rules (issue #343)', () => {
     }
   });
 });
+
+describe('the mock Quick add paid by a package (issue #724)', () => {
+  // JUSTIFICATION-A3: issue #724 asks for a test of the mock's paid levels; one new case, appended.
+  it('takes the carton price for whole cartons paid by Quick add, as the server does (issue #724)', async () => {
+    const api = createMockRetail();
+    const carton = (await api.listUnits()).find((u) => u.name === 'Carton')?.id ?? (await api.createUnit('Carton')).id ?? '';
+    const half = (await api.createUnit('Test Half Carton')).id ?? '';
+    const base = { sell_minor: 6_000, cost_minor: 4_167, branch_id: branch, paid_from: 'cash', paid_level_unit_id: carton, paid_level_cost_minor: 100_000 };
+    const packs = [{ unit_id: carton, factor: '24', purpose: 'both' }, { unit_id: half, factor: '12', purpose: 'sell' }];
+    // 1 carton and 5 pieces: 100,000 and 5 at 4,167, never 29 at 4,167 (120,843).
+    const a = await api.quickAdd({ ...base, description: 'Test Marker Pen', qty: '29', packs }, 'qa-carton-724-a');
+    expect(a).toMatchObject({ paid_from: 'cash', paid_minor: 100_000 + 5 * 4_167 });
+    const b = await api.quickAdd({ ...base, description: 'Test Marker Fine', qty: '24', packs }, 'qa-carton-724-b');
+    expect(b.paid_minor).toBe(100_000);
+    // A pack only for selling is no buying level.
+    await expect(api.quickAdd({ ...base, product_id: b.product_id, qty: '12', paid_level_unit_id: half, paid_level_cost_minor: 50_000 }, 'qa-carton-724-c'))
+      .rejects.toMatchObject({ status: 422, code: 'unknown_pack_unit' });
+    // Refused on a new item, nothing is kept, as the server's one transaction.
+    await expect(api.quickAdd({ ...base, description: 'Test Marker Thick', qty: '12', packs, paid_level_unit_id: half }, 'qa-carton-724-d')).rejects.toMatchObject({ code: 'unknown_pack_unit' });
+    expect((await api.listProducts({ branchId: branch })).some((p) => p.description === 'Test Marker Thick')).toBe(false);
+  });
+});

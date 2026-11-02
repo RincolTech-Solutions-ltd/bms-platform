@@ -22,8 +22,13 @@ export const WORDS = {
   /** People who buy now and pay later; was "Credit buyers". */
   customersWhoOwe: 'Customers who owe',
   customerWhoOwes: 'customer who owes',
-  /** The smallest unit an item is kept and counted in; was "Unit". */
-  countedIn: 'Counted in',
+  /**
+   * The unit an item is kept, counted and sold in; was "Unit", then "Counted in" and "Smallest unit you sell". Issue #709
+   * (D93, ADR-110): one name everywhere, with its HelpTip.
+   */
+  singleUnit: 'Single unit',
+  /** Issue #709: what holds several single units, such as a box; a pack of an item. */
+  package: 'Package',
   /** The packs an item also comes in, each a number of the smallest unit; was "Pack sizes". */
   packs: 'Cartons, boxes and other packs',
   moveStock: 'Move stock',
@@ -67,6 +72,15 @@ export const RETIRED_WORDS: Record<string, string> = {
   stocktake: WORDS.countStock,
   'credit buyer': WORDS.customersWhoOwe,
   'pack size': WORDS.packs,
+  // Issue #680: the two prices of an item are always the buying price and the selling price.
+  'average cost': `Average ${WORDS.buyingPrice.toLowerCase()}`,
+  'cost price': WORDS.buyingPrice,
+  'unit cost': WORDS.buyingPrice,
+  // Issue #709 (D93, ADR-110): the item's own unit is the single unit, and a unit's usual pack is said in plain words.
+  'smallest unit': WORDS.singleUnit,
+  'smallest you sell': WORDS.singleUnit,
+  'counted in': WORDS.singleUnit,
+  'usual pack': 'Usually holds',
 };
 
 /** The banned and retired words a piece of copy contains, lower case; empty when it is clean. */

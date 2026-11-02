@@ -285,12 +285,12 @@ class DataExportIT extends LendingBookSupport {
 
         Sheet lines = x.sheet("Sale lines");
         assertThat(header(lines))
-                .contains("Sale no", "Product code", "Quantity", "Unit price (UGX)", "Line total (UGX)");
+                .contains("Sale no", "Product code", "Quantity", "Selling price (UGX)", "Line total (UGX)");
 
         Sheet products = x.sheet("Products");
         assertThat(header(products))
                 .startsWith("Product code", "Product")
-                .contains("Cost price (UGX)", "Selling price (UGX)", "Added on");
+                .contains("Buying price (UGX)", "Selling price (UGX)", "Added on");
         assertThat(products.text("A2")).isEqualTo("DX1");
         assertThat(products.text("B2")).isEqualTo("Test Product DX1");
 

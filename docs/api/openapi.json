@@ -445,11 +445,19 @@
             "description" : "The operator's question, while the status is needs_info",
             "type" : "string"
           },
+          "pending_short_name" : {
+            "description" : "A new name a repeat sign-up asked for, applied by the confirm call",
+            "type" : "string"
+          },
           "reference" : {
             "type" : "string"
           },
           "reject_reason" : {
             "description" : "The reason, when rejected",
+            "type" : "string"
+          },
+          "short_name" : {
+            "description" : "The short name asked for, or null (ADR-108)",
             "type" : "string"
           },
           "status" : {
@@ -2376,6 +2384,24 @@
             "minLength" : 0,
             "type" : "string"
           },
+          "pack_prices" : {
+            "description" : "Issue #697: a size's own selling price for one of its packages; a package price not named here is the one sent, in proportion to the size's selling price",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSizePackPrice"
+            },
+            "maxItems" : 1000,
+            "minItems" : 0,
+            "type" : "array"
+          },
+          "packs" : {
+            "description" : "Issue #697 (ADR-111): packages every size and colour gets, made in its transaction, checked as on POST /products; all are saved with the item or none is",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailPackRequest"
+            },
+            "maxItems" : 10,
+            "minItems" : 0,
+            "type" : "array"
+          },
           "sell_minor" : {
             "description" : "Each variant's selling price unless it has its own",
             "format" : "int64",
@@ -2435,6 +2461,15 @@
             "maxLength" : 300,
             "minLength" : 0,
             "type" : "string"
+          },
+          "packs" : {
+            "description" : "Issue #689 (ADR-106): packages made with the item in its transaction, checked as POST /products/{id}/units checks them; all are saved with the item or none is",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailPackRequest"
+            },
+            "maxItems" : 10,
+            "minItems" : 0,
+            "type" : "array"
           },
           "sell_minor" : {
             "format" : "int64",
@@ -13370,7 +13405,7 @@
         "description" : "Dispatched and not received or cancelled, the longest wait first",
         "properties" : {
           "age_days" : {
-            "description" : "Days from the transfer date to today",
+            "description" : "Days from the day it was sent (dispatched_at, in the tenant's time zone) to today",
             "format" : "int32",
             "type" : "integer"
           },
@@ -14570,6 +14605,36 @@
           }
         }
       },
+      "RetailOpenStocktake" : {
+        "description" : "Issue #728: a count started at a branch and neither saved nor thrown away (a draft)",
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "created_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "created_by" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "lines" : {
+            "description" : "How many items it counted",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "note" : {
+            "description" : "The count's note; Sell's count of a new item carries its own (review of #729)",
+            "type" : "string"
+          }
+        }
+      },
       "RetailOrder" : {
         "properties" : {
           "branch_id" : {
@@ -15267,6 +15332,20 @@
             "description" : "True when the pack has its own selling price, sent to every caller (the amount only to one who may see prices): a new usual size or making it buy only then needs retail.price.edit (issue #624)",
             "type" : "boolean"
           },
+          "holds_qty" : {
+            "description" : "Issue #699: how many of that level are in one pack; factor is this times its factor",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "holds_unit" : {
+            "description" : "Issue #699: the name of that level's unit",
+            "type" : "string"
+          },
+          "holds_unit_id" : {
+            "description" : "Issue #699 (ADR-107): the level one pack holds, the item's own unit or another pack's unit; absent when the pack holds factor of the item's unit and says no more",
+            "format" : "uuid",
+            "type" : "string"
+          },
           "id" : {
             "format" : "uuid",
             "type" : "string"
@@ -15300,10 +15379,26 @@
             "format" : "uuid",
             "type" : "string"
           },
+          "usual_buy" : {
+            "description" : "Issue #699: true for the level the shop usually buys the item in",
+            "type" : "boolean"
+          },
           "version" : {
             "description" : "Send as If-Match when updating",
             "format" : "int32",
             "type" : "integer"
+          }
+        }
+      },
+      "RetailPackLevel" : {
+        "description" : "Issue #699: one level of an item's packages and the base units in one",
+        "properties" : {
+          "factor" : {
+            "description" : "Base units in one, three places, for example 120.000",
+            "type" : "string"
+          },
+          "unit" : {
+            "type" : "string"
           }
         }
       },
@@ -15318,10 +15413,22 @@
         }
       },
       "RetailPackRequest" : {
-        "description" : "A pack size: factor base units in one pack of the unit",
+        "description" : "A pack size: factor base units in one pack of the unit, or holds_qty of the level holds_unit_id (issue #699)",
         "properties" : {
           "factor" : {
-            "description" : "Base units in one pack, at least 1, up to three places, for example 12 or 12.5",
+            "description" : "Base units in one pack, at least 1, up to three places, for example 12 or 12.5; required unless holds_unit_id and holds_qty are sent, and then it must agree with them",
+            "type" : "string"
+          },
+          "holds_qty" : {
+            "description" : "Issue #699: how many of holds_unit_id are in one pack, a whole number of 2 or more",
+            "format" : "int32",
+            "maximum" : 1000000,
+            "minimum" : 2,
+            "type" : "integer"
+          },
+          "holds_unit_id" : {
+            "description" : "Issue #699 (ADR-107): the level one pack holds, the item's own unit or another pack's unit of the item (in a new item's packs, one of its other packs); sent with holds_qty",
+            "format" : "uuid",
             "type" : "string"
           },
           "purpose" : {
@@ -15339,9 +15446,13 @@
           "unit_id" : {
             "format" : "uuid",
             "type" : "string"
+          },
+          "usual_buy" : {
+            "description" : "Issue #699: true for the level the shop usually buys the item in, which Buy stock opens on; never on a pack only for selling. Clears it on the item's other packs",
+            "type" : "boolean"
           }
         },
-        "required" : [ "factor", "unit_id" ]
+        "required" : [ "unit_id" ]
       },
       "RetailPackUpdate" : {
         "description" : "Omitted fields are unchanged; a pack is never deleted, only switched off",
@@ -15357,6 +15468,18 @@
             "description" : "Base units in one pack, at least 1; required to switch a pack on again",
             "type" : "string"
           },
+          "holds_qty" : {
+            "description" : "Issue #699: how many of the level held are in one pack, a whole number of 2 or more. With factor alone, a pack that holds another level must stay a whole number of it (422 not_whole)",
+            "format" : "int32",
+            "maximum" : 1000000,
+            "minimum" : 2,
+            "type" : "integer"
+          },
+          "holds_unit_id" : {
+            "description" : "Issue #699 (ADR-107): the level one pack holds, the item's own unit or another active pack's unit of the item; sent with holds_qty. Every bigger level that holds this one is worked out again; stock, kept in the item's unit, never changes",
+            "format" : "uuid",
+            "type" : "string"
+          },
           "purpose" : {
             "description" : "buy, sell or both; a pack made buy only loses its selling price (issue #624)",
             "pattern" : "buy|sell|both",
@@ -15368,6 +15491,10 @@
             "maximum" : 10000000000000,
             "minimum" : 0,
             "type" : "integer"
+          },
+          "usual_buy" : {
+            "description" : "Issue #699: true to make this the level Buy stock opens on, false to clear it",
+            "type" : "boolean"
           }
         }
       },
@@ -16968,6 +17095,43 @@
           }
         }
       },
+      "RetailQuickAddPack" : {
+        "description" : "As RetailPackRequest: a size, or what it holds and how many",
+        "properties" : {
+          "factor" : {
+            "example" : "24",
+            "type" : "string"
+          },
+          "holds_qty" : {
+            "format" : "int32",
+            "maximum" : 1000000,
+            "minimum" : 2,
+            "type" : "integer"
+          },
+          "holds_unit_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "purpose" : {
+            "pattern" : "buy|sell|both",
+            "type" : "string"
+          },
+          "sell_minor" : {
+            "format" : "int64",
+            "maximum" : 10000000000000,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "unit_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "usual_buy" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "unit_id" ]
+      },
       "RetailQuickAddRequest" : {
         "description" : "Issue #632: an item, its prices and how many there are at a branch, in one tap. With product_id, an item already in the list, only the quantity is added and the other item fields are ignored",
         "properties" : {
@@ -17000,9 +17164,30 @@
             "minLength" : 0,
             "type" : "string"
           },
+          "packs" : {
+            "description" : "Issue #695: the new item's packages, as packs of POST /retail/products (issue #689, ADR-106, ADR-107), made in the same transaction; a refused package names its pack_index and saves nothing. Ignored with product_id. qty stays in the item's smallest unit",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailQuickAddPack"
+            },
+            "maxItems" : 10,
+            "minItems" : 0,
+            "type" : "array"
+          },
           "paid_from" : {
             "description" : "Issue #646: the goods were just bought and paid from the branch's cash or mobile money (retail.purchase.create there). qty above 0 and cost_minor above 0 are then needed, and the stock is recorded as a purchase, as Buy stock does, never against opening balance equity. Left out: opening stock, as before",
             "pattern" : "cash|mobile_money",
+            "type" : "string"
+          },
+          "paid_level_cost_minor" : {
+            "description" : "Issue #695: what one package of paid_level_unit_id cost",
+            "format" : "int64",
+            "maximum" : 10000000000000,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "paid_level_unit_id" : {
+            "description" : "Issue #695: with paid_from, the package the goods were bought in (one of packs, or a pack of product_id); sent with paid_level_cost_minor. The whole packages are then one line at that price, as Buy stock records a pack, and only the pieces left over are at cost_minor, so the money that leaves is what was paid",
+            "format" : "uuid",
             "type" : "string"
           },
           "product_id" : {
@@ -19024,6 +19209,32 @@
           }
         }
       },
+      "RetailSizePackPrice" : {
+        "description" : "Issue #697: one size's own selling price of one of its packages",
+        "properties" : {
+          "colour" : {
+            "maxLength" : 30,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "sell_minor" : {
+            "format" : "int64",
+            "maximum" : 10000000000000,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "size" : {
+            "maxLength" : 30,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "unit_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        },
+        "required" : [ "sell_minor", "unit_id" ]
+      },
       "RetailSlowMover" : {
         "description" : "An item that sold in the branch in the last 90 days, but slowly",
         "properties" : {
@@ -19121,6 +19332,13 @@
           "factor" : {
             "description" : "Base units in one pack, three places, for example 24.000",
             "type" : "string"
+          },
+          "levels" : {
+            "description" : "Issue #699 (ADR-107): every active pack of the item holding a whole number of more than one base unit, biggest first, so stock is shown and counted at every level",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailPackLevel"
+            },
+            "type" : "array"
           },
           "unit" : {
             "type" : "string"
@@ -21293,9 +21511,18 @@
           "active" : {
             "type" : "boolean"
           },
+          "fixed_count" : {
+            "description" : "Issue #709 (ADR-110, D98): present only for a package of a fixed size, 12 for a dozen; every pack of it holds exactly this many of the level it holds",
+            "format" : "int32",
+            "type" : "integer"
+          },
           "id" : {
             "format" : "uuid",
             "type" : "string"
+          },
+          "is_package" : {
+            "description" : "Issue #689 (ADR-106): the name is a package word, such as Box or Carton, so it can be a pack but never the single unit of a new item",
+            "type" : "boolean"
           },
           "name" : {
             "type" : "string"
@@ -21304,6 +21531,10 @@
             "description" : "Products (active or not) that use this unit",
             "format" : "int32",
             "type" : "integer"
+          },
+          "standard" : {
+            "description" : "Issue #709 (ADR-110): one of the standard units every shop gets, under any spelling; the list shows them first, in the standard order",
+            "type" : "boolean"
           },
           "usual_pack" : {
             "$ref" : "#/components/schemas/RetailUsualPack"
@@ -21739,6 +21970,27 @@
             "maxLength" : 30,
             "minLength" : 0,
             "type" : "string"
+          }
+        }
+      },
+      "RetailVariantOptions" : {
+        "description" : "Issue #697: the sizes and colours the business has used",
+        "properties" : {
+          "colours" : {
+            "description" : "Colours of the business's items, each once ignoring case, most used first",
+            "items" : {
+              "description" : "Colours of the business's items, each once ignoring case, most used first",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "sizes" : {
+            "description" : "Sizes of the business's items, each once ignoring case, most used first",
+            "items" : {
+              "description" : "Sizes of the business's items, each once ignoring case, most used first",
+              "type" : "string"
+            },
+            "type" : "array"
           }
         }
       },
@@ -23013,7 +23265,7 @@
       "SetRetailBranchRoleRequest" : {
         "properties" : {
           "role" : {
-            "enum" : [ "store", "shop", "both" ],
+            "enum" : [ "shop", "both" ],
             "minLength" : 1,
             "type" : "string"
           }
@@ -23038,6 +23290,50 @@
           "photos" : {
             "description" : "A photo can be read too (a provider that reads pictures is set)",
             "type" : "boolean"
+          }
+        }
+      },
+      "ShortLink" : {
+        "properties" : {
+          "link" : {
+            "description" : "As a person types it, for example rincoltech.com/testduka",
+            "type" : "string"
+          },
+          "short_name" : {
+            "description" : "The short name, which is also the app's address (the slug)",
+            "type" : "string"
+          },
+          "url" : {
+            "description" : "The same with https://, for the Copy button",
+            "type" : "string"
+          }
+        }
+      },
+      "ShortLinkRule" : {
+        "properties" : {
+          "expression" : {
+            "description" : "The single redirect's custom filter expression",
+            "type" : "string"
+          },
+          "reserved" : {
+            "description" : "Names the rule leaves to the website and sign-up refuses",
+            "items" : {
+              "description" : "Names the rule leaves to the website and sign-up refuses",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "short_link_host" : {
+            "description" : "The host the short links are on, for example rincoltech.com",
+            "type" : "string"
+          },
+          "status_code" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "target" : {
+            "description" : "The dynamic target URL expression",
+            "type" : "string"
           }
         }
       },
@@ -23169,9 +23465,21 @@
             "minLength" : 0,
             "type" : "string"
           },
+          "short_name" : {
+            "description" : "The short name for the shop's link rincoltech.com/<short name>, which is also its address: 3 to 20 lower case letters and digits, a hyphen may join two words. A taken one is 409 short_name_taken with suggestions (ADR-108). Optional for one release, for a sign-up page from before it: the server then picks a free one from the business name",
+            "maxLength" : 63,
+            "minLength" : 0,
+            "type" : "string"
+          },
           "term" : {
             "minLength" : 1,
             "pattern" : "monthly|annual",
+            "type" : "string"
+          },
+          "town" : {
+            "description" : "Optional: the shop's town or area, for short name suggestions",
+            "maxLength" : 100,
+            "minLength" : 0,
             "type" : "string"
           },
           "way_in" : {
@@ -23188,6 +23496,32 @@
           }
         },
         "required" : [ "business_name", "contact_email", "contact_name", "contact_phone", "country", "modules", "term", "way_in" ]
+      },
+      "SignUpShortNameCheck" : {
+        "properties" : {
+          "available" : {
+            "type" : "boolean"
+          },
+          "message" : {
+            "description" : "Plain words, for example 'testduka is taken.'",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "problem" : {
+            "description" : "invalid, reserved or taken; null when available",
+            "type" : "string"
+          },
+          "suggestions" : {
+            "description" : "Free names: the town or area first, then a shorter form, then a number",
+            "items" : {
+              "description" : "Free names: the town or area first, then a shorter form, then a number",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        }
       },
       "SmsAcknowledgement" : {
         "description" : "The text to show before switching on, and its version",
@@ -26640,7 +26974,7 @@
                 }
               }
             },
-            "description" : "invalid_payment_account, unknown_branch, account_used_by_retail (cash and bank with retail on)"
+            "description" : "invalid_payment_account, unknown_branch"
           }
         },
         "summary" : "Map a payment method to an asset account (FR-GL-08)",
@@ -33932,6 +34266,65 @@
         "tags" : [ "platform" ]
       }
     },
+    "/api/v1/platform/short-link-rule" : {
+      "get" : {
+        "operationId" : "getShortLinkRule",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ShortLinkRule"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The reserved names and the one Cloudflare single redirect built from them, for the operator (ADR-108)",
+        "tags" : [ "sign-up" ]
+      }
+    },
+    "/api/v1/platform/short-links/{name}" : {
+      "get" : {
+        "operationId" : "followShortLink",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "name",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "302" : {
+            "description" : "Location is the shop's address or the not found page"
+          }
+        },
+        "summary" : "Follow a short link: 302 to the shop, to its new address while an old name forwards, or to the page 'No shop uses this link' (ADR-108)",
+        "tags" : [ "sign-up" ]
+      }
+    },
+    "/api/v1/platform/short-links/{name}/" : {
+      "get" : {
+        "operationId" : "followShortLink_1",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "name",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "302" : {
+            "description" : "Location is the shop's address or the not found page"
+          }
+        },
+        "summary" : "Follow a short link: 302 to the shop, to its new address while an old name forwards, or to the page 'No shop uses this link' (ADR-108)",
+        "tags" : [ "sign-up" ]
+      }
+    },
     "/api/v1/platform/sign-up/applications" : {
       "post" : {
         "operationId" : "signUpApply",
@@ -33987,6 +34380,53 @@
           }
         },
         "summary" : "Answer the operator's question; the application returns to the queue (FR-ONB-04)",
+        "tags" : [ "sign-up" ]
+      }
+    },
+    "/api/v1/platform/sign-up/short-name" : {
+      "get" : {
+        "operationId" : "signUpCheckShortName",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "name",
+          "required" : true,
+          "schema" : {
+            "maxLength" : 63,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "business_name",
+          "required" : false,
+          "schema" : {
+            "maxLength" : 200,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "town",
+          "required" : false,
+          "schema" : {
+            "maxLength" : 100,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SignUpShortNameCheck"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Check a short name as it is typed, with free suggestions when it is not free (ADR-108)",
         "tags" : [ "sign-up" ]
       }
     },
@@ -35709,7 +36149,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Set a branch's role (store, shop or both); audited; 422 branch_has_open_work while a transfer is unreceived",
+        "summary" : "Set a selling branch's role (shop or both; a store is sells_goods false on PATCH /branches/{id}); audited; 422 branch_is_store for a store, branch_has_open_work while a transfer is unreceived",
         "tags" : [ "retail-stock" ]
       }
     },
@@ -39069,6 +39509,25 @@
           }
         },
         "summary" : "Make items kept apart (one per size) the sizes and colours of one new item; each keeps its stock and history (issue #384)",
+        "tags" : [ "retail-catalogue" ]
+      }
+    },
+    "/api/v1/retail/product-families/options" : {
+      "get" : {
+        "operationId" : "listRetailVariantOptions",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailVariantOptions"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The sizes and colours the business's items have, offered again on Add an item (issue #697)",
         "tags" : [ "retail-catalogue" ]
       }
     },
@@ -43663,6 +44122,37 @@
         "tags" : [ "retail-stock" ]
       }
     },
+    "/api/v1/retail/stocktakes/unfinished" : {
+      "get" : {
+        "operationId" : "listRetailUnfinishedStocktakes",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "$ref" : "#/components/schemas/RetailOpenStocktake"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The counts started at a branch and neither saved nor thrown away, newest first, at most 20 (issue #728); needs retail.stocktake.commit at that branch",
+        "tags" : [ "retail-stock" ]
+      }
+    },
     "/api/v1/retail/stocktakes/{stocktake_id}" : {
       "get" : {
         "operationId" : "getRetailStocktake",
@@ -45411,6 +45901,25 @@
           }
         },
         "summary" : "Change which everyday push notices the business sends, audited with before and after (issue #412)",
+        "tags" : [ "settings" ]
+      }
+    },
+    "/api/v1/settings/short-link" : {
+      "get" : {
+        "operationId" : "getShortLink",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ShortLink"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The business's short link (ADR-108)",
         "tags" : [ "settings" ]
       }
     },

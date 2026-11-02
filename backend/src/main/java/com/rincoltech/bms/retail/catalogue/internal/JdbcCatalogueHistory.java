@@ -2,6 +2,7 @@ package com.rincoltech.bms.retail.catalogue.internal;
 
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.retail.catalogue.CatalogueHistory;
+import com.rincoltech.bms.retail.catalogue.CatalogueNames;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceChange;
 import java.sql.Timestamp;
@@ -35,7 +36,8 @@ class JdbcCatalogueHistory implements CatalogueHistory {
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public Ensured ensureCategory(String name) {
-        UUID existing = idByName("retail_categories", name);
+        // Issue #698: as categories are stored and compared, spaces inside counted once.
+        UUID existing = repo.categoryIdsByName().get(CatalogueNames.nameKey(name));
         if (existing != null) {
             return new Ensured(existing, false, false);
         }
@@ -46,22 +48,23 @@ class JdbcCatalogueHistory implements CatalogueHistory {
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
+    public void lockUnits(java.util.Collection<String> names) {
+        names.stream().map(CatalogueNames::unitKey).distinct().sorted().forEach(repo::lockUnitKey);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public Ensured ensureUnit(String name) {
-        UUID existing = idByName("retail_units", name);
+        // Issue #698 (ADR-109): "pcs" in a file is the shop's Piece, whatever spelling it has. It is read under the
+        // key's lock, so a unit added on a screen at this moment is never made twice.
+        repo.lockUnitKey(name);
+        UUID existing = repo.unitIdsByName().get(CatalogueNames.unitKey(name));
         if (existing != null) {
             return new Ensured(existing, false, false);
         }
         UUID id = UUID.randomUUID();
         repo.insertUnit(id, name, IMPORT_ACTOR);
         return new Ensured(id, true, false);
-    }
-
-    private UUID idByName(String table, String name) {
-        return jdbc.sql("SELECT id FROM " + table + " WHERE lower(name) = lower(?)")
-                .param(name)
-                .query(UUID.class)
-                .optional()
-                .orElse(null);
     }
 
     @Override
@@ -98,7 +101,7 @@ class JdbcCatalogueHistory implements CatalogueHistory {
                 .params(
                         id,
                         normal,
-                        description,
+                        CatalogueNames.display(description),
                         categoryId,
                         unitId,
                         costMinor,

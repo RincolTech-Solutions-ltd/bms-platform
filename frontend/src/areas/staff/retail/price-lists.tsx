@@ -8,7 +8,7 @@ import { formatMinor } from '../../../components/money';
 import { useStaff } from '../context';
 import { AddPanel } from './catalogue';
 import { STATUS_LABEL, belowCostHint, buildItemRequest, emptyItemForm, fromQty, itemProblem, unitChoices, withProduct, type ItemForm } from './price-list-state';
-import { Gate, Note, ProductPicker, Problem, Success, changeFailureText, requireVersion } from './ui';
+import { Gate, Note, ProductPicker, Problem, changeFailureText, requireVersion } from './ui';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { useComeBack } from '../../../app/ui/EmptyChoice';
 
@@ -118,7 +118,7 @@ export function AddPriceForm({ today, busy, error, onSubmit, onCancel }: {
           <input id="price-from" type="date" value={form.validFrom} min={today} onChange={(e) => setForm({ ...form, validFrom: e.target.value })} />
           <label htmlFor="price-to">Last day (leave empty for no end)</label>
           <input id="price-to" type="date" value={form.validTo} onChange={(e) => setForm({ ...form, validTo: e.target.value })} />
-          {warn && <p role="alert" className="rt-flag">This price is not above what the item costs. It can be saved, but a seller needs permission to sell below cost.</p>}
+          {warn && <p role="alert" className="rt-flag">This price is not above the item's buying price. It can be saved, but a seller needs permission to sell below the buying price.</p>}
           {problem && form.price !== '' && <Note>{problem}</Note>}
           <Problem error={error} />
           <p className="cluster">
@@ -137,7 +137,6 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
   const search = useLiveSearch();
   const [ended, setEnded] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const query = search.term;
   const today = businessToday();
@@ -153,17 +152,18 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ['retail'] });
   const add = useMutation({
     mutationFn: (form: ItemForm) => retail.addPriceListItem(list.id ?? '', buildItemRequest(form)),
-    onSuccess: (item) => {
+    onSuccess: () => {
       setAdding(false);
-      setMessage(`Saved the price of ${item.description} in ${item.unit}.${item.status === 'scheduled' ? ` It starts on ${item.valid_from}.` : ''}`);
       refresh();
     },
+    meta: { success: (item: PriceListItem) => (item.description ? `Price saved for ${item.description}` : 'Price saved') },
   });
   const end = useMutation({
     mutationFn: (item: PriceListItem) => retail.endPriceListItem(list.id ?? '', item.id ?? '', today),
-    onMutate: () => { setMessage(null); setFailure(null); },
-    onSuccess: (item) => { setMessage(`The price of ${item.description} in ${item.unit} ends today.`); refresh(); },
+    onMutate: () => setFailure(null),
+    onSuccess: () => refresh(),
     onError: (error) => setFailure(changeFailureText(error, queryClient)),
+    meta: { success: (item: PriceListItem) => (item.description ? `Price ended for ${item.description}` : 'Price ended') },
   });
   return (
     <section aria-label={`Prices in ${list.name}`} data-tour="price-list-items">
@@ -172,9 +172,8 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
       {adding ? (
         <AddPriceForm today={today} busy={add.isPending} error={add.error} onSubmit={(f) => add.mutate(f)} onCancel={() => { setAdding(false); add.reset(); }} />
       ) : (
-        <p><button type="button" onClick={() => { setAdding(true); setMessage(null); }}>Add a price</button></p>
+        <p><button type="button" onClick={() => setAdding(true)}>Add a price</button></p>
       )}
-      {message && <Success>{message}</Success>}
       <Problem error={failure && new Error(failure)} />
       <SearchBox id="price-search" label="Search prices by item name or code" search={search} fetching={finding} count={rows.data ? items.length : undefined} more={rows.hasNextPage} />
       <label><input type="checkbox" checked={ended} onChange={(e) => setEnded(e.target.checked)} /> Show ended prices</label>
@@ -186,7 +185,7 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
         <div className="table-wrap" tabIndex={0}>
           <table>
             <thead>
-              <tr><th>Item</th><th>Unit</th><th>Quantity</th><th className="num">Price</th><th>First day</th><th>Last day</th><th>Status</th><th><span className="visually-hidden">Actions</span></th></tr>
+              <tr><th>Item</th><th>Unit</th><th>Quantity</th><th className="num">Selling price</th><th>First day</th><th>Last day</th><th>Status</th><th><span className="visually-hidden">Actions</span></th></tr>
             </thead>
             <tbody>
               {items.map((i) => <ItemRow key={i.id} item={i} showCost={showCost} busy={end.isPending} ending={end.isPending && end.variables?.id === i.id} onEnd={(x) => end.mutate(x)} />)}
@@ -217,12 +216,19 @@ export function PriceLists() {
       // Opened from an empty list on a form (issue #619): what was added takes the person back to that form.
       back?.();
     },
+    meta: { success: 'Price list added' },
   });
   const change = useMutation({
     mutationFn: (v: { list: PriceList; body: { name?: string; strict?: boolean; active?: boolean } }) => retail.updatePriceList(v.list.id ?? '', requireVersion(v.list.version), v.body),
     onMutate: () => setFailure(null),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['retail'] }),
     onError: (error) => setFailure(changeFailureText(error, queryClient)),
+    meta: {
+      success: (_: unknown, v: { body: { active?: boolean } }) => (v.body.active === false ? 'Price list switched off' : v.body.active === true ? 'Price list switched on' : 'Changes saved'),
+      // A switch on or off can be taken back from the toast (#682): the same change the other way, on the version it made.
+      undo: (r: PriceList, v: { body: { active?: boolean } }) =>
+        v.body.active === undefined ? null : () => retail.updatePriceList(r.id ?? '', requireVersion(r.version), { active: !v.body.active }),
+    },
   });
   const selected = (lists.data ?? []).find((l) => l.id === open);
   return (

@@ -18,7 +18,7 @@ export const IDEMPOTENCY_UNSURE_CODES: readonly string[] = ['idempotency_in_prog
 
 const BY_CODE: Record<string, string> = {
   insufficient_stock: 'There is not enough stock at this branch for one of the items. Lower the quantity, or buy stock first.',
-  price_below_cost: 'One of the prices is not above what the item cost. Raise the price.',
+  price_below_cost: "One of the prices is not above the item's buying price. Raise the price.",
   idempotency_key_reused: 'This form was already used for a different entry. Reload the page and enter it again.',
   idempotency_in_progress: 'This is still being saved. Wait a moment and check Stock before trying again.',
   idempotency_key_missing: 'This could not be saved safely. Reload the page and try again.',
@@ -26,6 +26,7 @@ const BY_CODE: Record<string, string> = {
   module_not_enabled: 'Retail is not switched on for this business.',
   branch_required: 'Choose one branch in the Branch box at the top of the page first.',
   branch_role_forbids_sales: 'This branch is a store and does not sell. Choose a shop in the Branch box.',
+  branch_is_store: 'This branch is a store. Mark it as selling again on Branches before choosing shop or both.',
   branch_has_open_work: 'A stock move to or from this branch is not yet received. Finish it before changing the branch role.',
   capability_not_enabled: 'This is not switched on for this business.',
   // Price lists (ADR-033, issue #195).
@@ -111,13 +112,13 @@ const BY_CODE: Record<string, string> = {
   // Payments on a credit sale and voiding a sale (issues #326, #327).
   sale_not_payable: 'Only a credit sale that is not voided takes payments.',
   sale_has_payments: 'This credit sale has had a payment or a return. A sale with payments cannot be voided.',
-  stocktake_committed: 'This stock count has already been committed.',
-  stocktake_discarded: 'This stock count was discarded. Count the items again.',
-  transfer_voided: 'This transfer has already been cancelled.',
+  stocktake_committed: 'This stock count has already been saved.',
+  stocktake_discarded: 'This stock count was cancelled. Count the items again.',
+  transfer_voided: 'This move has already been undone.',
   received_exceeds_dispatched: 'More arrived than was sent for one of the items. Enter only what was sent.',
   transfer_not_in_transit: 'This stock is not on its way any more: it was received or taken back already. Reload the page.',
   transfer_in_transit: 'This stock is still on its way. Take it back, or wait for the other branch to receive it.',
-  transfer_cancelled: 'This stock was taken back before it was received, so there is nothing to cancel.',
+  transfer_cancelled: 'This stock was taken back before it was received, so there is nothing to undo.',
   transfers_in_transit: 'Some stock is still on its way. Receive it or take it back before switching this off.',
   payment_exceeds_balance: 'That is more than the buyer still owes on this sale. Lower the amount.',
   version_conflict: 'This was changed by someone else a moment ago. Go back, open it again and repeat your change.',
@@ -127,7 +128,6 @@ const BY_CODE: Record<string, string> = {
   item_code_made_by_app: 'The app makes the item code from the category, and an item keeps it. Reload the page and save again.',
   duplicate_category: 'A category with this name already exists.',
   duplicate_category_prefix: 'Another category already uses this code start. Choose other letters.',
-  duplicate_unit: 'A unit with this name already exists.',
   duplicate_supplier: 'A supplier with this name already exists.',
   inactive_category: 'This category is switched off. Choose another one, or switch it on first.',
   inactive_unit: 'This unit is switched off. Choose another one, or switch it on first.',
@@ -176,6 +176,12 @@ const BY_STATUS: Record<number, string> = {
 /** The message to show a person for a failed retail call. */
 export function retailMessage(problem: RetailProblem | undefined, status: number): string {
   const p = problem ?? {};
+  // Issue #257: only the 404 is a branch outside the caller's scope (trade-capabilities 2.2). A closed branch or a transfer's
+  // destination is a 422 whose field message the server words for its own case, shown below.
+  if (p.code === 'unknown_branch' && status === 404) return 'That branch is not one you work in. Choose another branch in the Branch box.';
+  // Issue #698: a category that exists by case or spaces is named, as the server names it ("You already have BULBS.").
+  const existing = (p as Record<string, unknown>)['existing_name'];
+  if (p.code === 'duplicate_category' && typeof existing === 'string') return `You already have ${existing}.`;
   const known = p.code ? BY_CODE[p.code] : undefined;
   if (known) return known;
   if (p.code === 'validation_failed') {

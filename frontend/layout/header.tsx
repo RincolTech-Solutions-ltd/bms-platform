@@ -1,9 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
+import { RouterContextProvider } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
 import type { Me } from '../src/api/client';
 import { mockMe } from '../src/api/retail-mock';
-import { router as appRouter } from '../src/app/router';
 import { StaffContext } from '../src/areas/staff/context';
 import { ASK_STATUS_KEY } from '../src/areas/staff/help/ask';
 import { StaffBar } from '../src/areas/staff/route';
@@ -11,6 +10,7 @@ import { OfflineProvider, type Offline } from '../src/offline/offline-context';
 import { TourProvider } from '../src/tour/host';
 import '../src/app/theme.css';
 import '../src/app/ui/index.css';
+import { layoutRouter } from './router';
 
 // The page header.layout.test.ts lays out in a real browser (issue #603): the staff top bar of an owner on the sale page, with
 // a long branch name, the Ask button (?ask=1: Ask BMS on, else How do I?) and its New dot, under the app's own stylesheets.
@@ -58,7 +58,7 @@ const offline = {
   connectivity: { online: () => sync !== 'offline', subscribe: () => () => undefined },
   engine: { subscribe: () => () => undefined, snapshot: () => snapshot },
 } as unknown as Offline;
-const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/retail/sale'] }) });
+const router = layoutRouter('/staff/retail/sale');
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <RouterContextProvider router={router}>

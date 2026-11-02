@@ -5,6 +5,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['layout/**/*.layout.test.ts'],
+    // One Vite server for the whole suite, its dependencies optimized once before any page opens (issue #717).
+    globalSetup: ['layout/global-setup.ts'],
     testTimeout: 60000,
     hookTimeout: 60000,
   },

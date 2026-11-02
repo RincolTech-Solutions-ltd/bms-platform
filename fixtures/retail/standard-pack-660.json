@@ -4,5 +4,13 @@
     { "unit": "box", "factor": "10.000", "purpose": "both", "standard": false },
     { "unit": "carton", "factor": "24.000", "purpose": "both", "standard": true }
   ],
-  "stock_row": { "unit": "u-unit-pen", "qty": "127.000", "standard_pack": { "unit": "carton", "factor": "24.000" } }
+  "stock_row": {
+    "unit": "u-unit-pen",
+    "qty": "127.000",
+    "standard_pack": {
+      "unit": "carton",
+      "factor": "24.000",
+      "levels": [{ "unit": "carton", "factor": "24.000" }, { "unit": "box", "factor": "10.000" }]
+    }
+  }
 }

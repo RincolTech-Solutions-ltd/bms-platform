@@ -20,7 +20,7 @@ import { RefreshButton } from '../../app/refresh-button';
 import { useHelpSheet } from '../../tour/host';
 import { BrandLoader } from '../../components/states';
 import { BillingBanner } from './billing/banner';
-import { MenuShop, initials, useActiveBranch } from './branch-picker';
+import { MenuShop, ShopHere, initials, useActiveBranch, useBranchSwitch } from './branch-picker';
 import { BranchTitle, OfflineBanner, SignOutEverywhere, TopMenu } from './top-bar';
 import { StaffContext, useOptionalStaff } from './context';
 import { FeatureSearch } from './feature-search';
@@ -46,6 +46,19 @@ function useAccessToken() {
 
 // This device's notifications (ADR-050): registered again under whoever is signed in, and dropped on sign-out.
 const push = createPush();
+
+/**
+ * The signed-in business's zone for every default date (#667). Set as the shell draws, so the screens drawn in the same pass
+ * already take it, and again in an effect whose cleanup forgets it (#670), so StrictMode's mount, unmount and mount ends on the
+ * business's zone and leaving the shell goes back to Kampala (#672).
+ */
+export function useBusinessZone(zone: string | undefined | null): void {
+  setBusinessZone(zone);
+  useEffect(() => {
+    setBusinessZone(zone);
+    return () => setBusinessZone(undefined);
+  }, [zone]);
+}
 
 // A tenant admin who has not dismissed the set-up checklist lands on it once per page load.
 let setupShown = false;
@@ -83,7 +96,10 @@ function StaffLayout() {
     enabled: token !== null || mock,
   });
   const profileNow = me.data ?? offlineMe ?? undefined;
-  const { branch, choose, ready } = useActiveBranch(profileNow);
+  useBusinessZone(profileNow?.tenant_timezone);
+  const active = useActiveBranch(profileNow);
+  const { branch, ready } = active;
+  const { choose, toast: switchToast } = useBranchSwitch(profileNow, branch, active.choose);
   const signedIn = me.data !== undefined;
   const offline = useOfflineSupport(mock ? undefined : profileNow, signedIn);
   useEffect(() => {
@@ -118,7 +134,6 @@ function StaffLayout() {
   }
 
   const profile = profileNow;
-  setBusinessZone(profile.tenant_timezone);
   if (mock) void loadRetailMock().then((m) => m.setMockProfitAccess(canSeeProfit(profile)));
   async function signOut(confirmed = false, everywhere = false) {
     // ADR-067 decision 9: sales still on this phone are never signed out of without asking (Sign out everywhere asks in its sheet).
@@ -156,6 +171,7 @@ function StaffLayout() {
       offline?.engine.stop();
       setAskEverywhere(false);
       setOfflineMe(null);
+      setBusinessZone(undefined);
       setAccessToken(null);
       queryClient.clear();
       await navigate({ to: '/sign-in' });
@@ -196,9 +212,11 @@ function StaffLayout() {
                 <StaffBreadcrumbs />
                 {!mustSetUp(profile) && <HowDoILink pathname={pathname} me={profile} />}
               </div>
+              {!mustSetUp(profile) && <ShopHere me={profile} branch={branch} onChoose={choose} />}
               {mustSetUp(profile) ? <OwnTwoStep blocking /> : <Outlet />}
               <SignOutWarning ask={askSignOut} onSignOut={() => void signOut(true)} />
               <SignOutEverywhere open={askEverywhere} waiting={waitingNow(offline)} busy={signingOut} onConfirm={() => void signOut(true, true)} onClose={() => setAskEverywhere(false)} />
+              {switchToast}
             </div>
             {!mustSetUp(profile) && <StaffTabBar me={profile} />}
           </div>

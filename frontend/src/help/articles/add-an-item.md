@@ -11,11 +11,15 @@ Add an item inside its category. The app gives it the next code of the category,
 
 1. Open **Items and categories**, then **Categories**, and tap **Open** on the item's category.
    ![Open the category](add-an-item-1.webp)
-2. Tap **Add an item**. The category is already chosen and the form shows the item code the app will give it. Type the description, what it is counted in and the selling price. You can add a photo too, with **Take a picture** or **Choose a photo**.
-   ![Type the description, unit and price](add-an-item-2.webp)
+2. Tap **Add an item**. The category is already chosen and the form shows the item code the app will give it. Type the description, choose the **Single unit**, such as piece or bulb, never box or carton, and type the selling price of one. You can add a photo too, with **Take a picture** or **Choose a photo**.
+   ![Type the description, unit and selling price](add-an-item-2.webp)
 3. Tap **Add item**. The item is in the category's list with its code. The code never changes, even if you move the item to another category.
    ![The new item in its category](add-an-item-3.webp)
 
 > You can also tap **Add an item** on the Items page. Pick the category first.
+
+> Bought or sold in boxes or cartons too? Answer **Yes** to **Do you buy or sell it in boxes, cartons or other packages?** and give each package and how many it holds. They are saved with the item.
+
+> Comes in sizes or colours, such as bulbs of 40W and 60W? Answer **Yes** to **Does it come in different sizes, colours or types?**, tap the kind of size, then tap each size and colour it comes in. Not on the list? Type it and tap **Add**. Each size gets its own price under the prices, and its own stock.
 
 > Searched on Sell and found nothing? Tap **Not in the list? Add it here** under the search. The item is made with what you typed and goes on the sale.

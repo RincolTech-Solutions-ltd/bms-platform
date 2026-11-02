@@ -123,6 +123,9 @@ bms:
     # {slug}-bms-staging.rincoltech.com; the platform console has its own host.
     tenant-host-pattern: ${BMS_TENANT_HOST_PATTERN:}
     platform-host: ${BMS_PLATFORM_HOST:}
+    # The host of the shops' short links, rincoltech.com/<short name> (ADR-108); the Cloudflare rule there sends them to
+    # the platform host, which forwards them to the shop.
+    short-link-host: ${BMS_SHORT_LINK_HOST:rincoltech.com}
     # Only the dev and test profiles may set this; startup fails otherwise (chapter 7 section 7.2).
     allow-tenant-header: ${ALLOW_TENANT_HEADER:false}
   auth:

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { StockRow } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
@@ -14,6 +14,7 @@ vi.setConfig({ testTimeout: 20000 });
 const listStock = vi.fn();
 const createStocktake = vi.fn();
 const commitStocktake = vi.fn();
+const discardStocktake = vi.fn();
 
 vi.mock('@tanstack/react-router', async (original) => {
   const real = await original<typeof import('@tanstack/react-router')>();
@@ -22,16 +23,27 @@ vi.mock('@tanstack/react-router', async (original) => {
 
 vi.mock('../../../api/retail', async (original) => {
   const real = await original<typeof import('../../../api/retail')>();
-  return { ...real, retail: { ...real.retail, listStock: (...a: unknown[]) => listStock(...a), createStocktake: (...a: unknown[]) => createStocktake(...a), commitStocktake: (...a: unknown[]) => commitStocktake(...a) } };
+  return { ...real, retail: { ...real.retail, listStock: (...a: unknown[]) => listStock(...a), createStocktake: (...a: unknown[]) => createStocktake(...a), commitStocktake: (...a: unknown[]) => commitStocktake(...a), discardStocktake: (...a: unknown[]) => discardStocktake(...a),
+    getStocktake: (...a: unknown[]) => getStocktake(...a), unfinishedStocktakes: (...a: unknown[]) => unfinishedStocktakes(...a) } };
 });
+const getStocktake = vi.fn();
+const unfinishedStocktakes = vi.fn();
+unfinishedStocktakes.mockResolvedValue([]);
 
-const { StocktakePage, StocktakeReview } = await import('./stocktake');
+const { CHANGED_ELSEWHERE, StocktakePage, StocktakeReview } = await import('./stocktake');
+const { RetailError } = await import('../../../api/retail');
 
 afterEach(() => {
   cleanup();
   listStock.mockReset();
   createStocktake.mockReset();
   commitStocktake.mockReset();
+  discardStocktake.mockReset();
+  getStocktake.mockReset();
+  unfinishedStocktakes.mockReset();
+  unfinishedStocktakes.mockResolvedValue([]);
+  // Issue #681: the count is kept on the device, so each test starts with none.
+  localStorage.clear();
 });
 
 const row = (code: string, description: string, qty: string): StockRow => ({ product_id: code, code, description, category: 'Lamps', unit: 'piece', qty, negative: false, sell_minor: 1500 });
@@ -277,15 +289,15 @@ describe('a count that wipes or halves stock', () => {
 
   it('commits only once every noted line is ticked, and a press before that goes to the first tick', async () => {
     await review();
-    const commit = screen.getByRole('button', { name: 'Commit the count' });
-    expect(screen.getByText('Tick the 2 lines marked above before you commit the count.')).toBeTruthy();
+    const commit = screen.getByRole('button', { name: 'Save the count' });
+    expect(screen.getByText('Tick the 2 lines marked above before you save the count.')).toBeTruthy();
     // Issue #636: the hint is the button's description, so a screen reader hears why a press goes to a tick.
-    expect(document.getElementById(commit.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Tick the 2 lines marked above before you commit the count.');
+    expect(document.getElementById(commit.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Tick the 2 lines marked above before you save the count.');
     fireEvent.click(commit);
     expect(commitStocktake).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Yes, Test Plug Four Way is right' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Four Way is right' }));
-    expect(screen.getByText('Tick the line marked above before you commit the count.')).toBeTruthy();
+    expect(screen.getByText('Tick the line marked above before you save the count.')).toBeTruthy();
     fireEvent.click(commit);
     expect(commitStocktake).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Yes, Test Plug Two Way is right' }));
@@ -306,8 +318,8 @@ describe('a count that wipes or halves stock', () => {
     noFinish();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Four Way is right' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Two Way is right' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
-    await screen.findByRole('heading', { name: 'Stock count committed' });
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+    await screen.findByRole('heading', { name: 'Stock updated for 4 items' });
     noFinish();
   });
 
@@ -320,17 +332,140 @@ describe('a count that wipes or halves stock', () => {
     expect(document.querySelector('.entry-warning-icon path')?.getAttribute('d')).toBe('M12 3.5 2.5 20h19z');
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Fuse One is right' }));
     expect((screen.getByRole('checkbox', { name: 'Yes, Test Fuse Two is right' }) as HTMLInputElement).checked).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     expect(onCommit).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Fuse Two is right' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     expect(onCommit).toHaveBeenCalledWith([]);
   });
 
-  it('asks again after Back to the count, since the review is a new one', async () => {
+  // Issue #664: a cancelled count (status discarded) says cancelled, and asks no tick and no commit, big drops and all.
+  it('shows a cancelled count with no tick and no Save the count, and never says discarded', () => {
+    render(<StocktakeReview stocktake={{ ...draft, status: 'discarded' }} onCommit={vi.fn()} />);
+    expect(screen.getByRole('heading', { name: 'Stock count cancelled' })).toBeTruthy();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    expect(screen.queryByTestId('count-drop-A-1')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save the count' })).toBeNull();
+    expect(screen.queryByText(/before you save the count/)).toBeNull();
+    expect(document.body.textContent).not.toMatch(/discard/i);
+  });
+
+  // Issue #728: a count left at Review the difference is named on the sheet; Finish it brings its review back to save it.
+  it('names a count left unsaved and brings its review back with Finish it, ready to save', async () => {
+    listStock.mockResolvedValue(sheet);
+    unfinishedStocktakes.mockResolvedValue([{ id: 'st-old', branch_id: 'b', created_at: '2026-10-29T09:00:00Z', lines: 4 }]);
+    getStocktake.mockResolvedValue({ ...draft, id: 'st-old' });
+    open();
+    const card = await screen.findByTestId('unfinished-st-old');
+    expect(card.textContent).toContain('started a count here');
+    fireEvent.click(within(card).getByRole('button', { name: 'Finish it' }));
+    expect(await screen.findByRole('heading', { name: 'Review the difference' })).toBeTruthy();
+    expect(getStocktake).toHaveBeenCalledWith('st-old');
+    expect(screen.getByRole('button', { name: 'Save the count' })).toBeTruthy();
+    // Back to the count leaves a count opened this way as it was: only a review made here is thrown away.
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the count' }));
+    expect(discardStocktake).not.toHaveBeenCalled();
+  });
+
+  // Review of #729: a discard sent after Save the count could reach the server first and cancel the save.
+  it('hides Back to the count while the save is on its way, and never throws away a count whose save was sent', async () => {
     await review();
+    let answer: (v: unknown) => void = () => undefined;
+    commitStocktake.mockReturnValue(new Promise((_, reject) => { answer = reject; }));
+    for (const name of ['Yes, Test Plug Four Way is right', 'Yes, Test Plug Two Way is right']) fireEvent.click(screen.getByRole('checkbox', { name }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: 'Back to the count' })).toBeNull();
+    answer(new TypeError('Failed to fetch'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to the count' }));
+    expect(discardStocktake).not.toHaveBeenCalled();
+  });
+
+  // JUSTIFICATION-A3: three new DOM tests the issue asks for, beside their siblings.
+  // Issue #730: a save the server refused for certain did not land, so Back throws its review away; the next review starts clean.
+  it('throws away a review whose save was refused for certain, and the next one too', async () => {
+    await review();
+    discardStocktake.mockResolvedValue({ ...draft, status: 'discarded' });
+    commitStocktake.mockRejectedValue(new RetailError('Stock moved since the count.', 409, 'stock_moved_since_count'));
+    for (const name of ['Yes, Test Plug Four Way is right', 'Yes, Test Plug Two Way is right']) fireEvent.click(screen.getByRole('checkbox', { name }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to the count' }));
+    expect(discardStocktake).toHaveBeenCalledWith('st1');
+    createStocktake.mockResolvedValue({ ...draft, id: 'st2' });
+    fireEvent.click(screen.getByRole('button', { name: 'Review the difference (4 counted)' }));
+    await screen.findByRole('heading', { name: 'Review the difference' });
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the count' }));
+    expect(discardStocktake).toHaveBeenCalledWith('st2');
+  });
+
+  it('keeps a review whose save may have landed: a 5xx or a key still being worked on', async () => {
+    for (const lost of [new RetailError('Server error', 503), new RetailError('Still saving', 409, 'idempotency_in_progress')]) {
+      await review();
+      commitStocktake.mockRejectedValue(lost);
+      for (const name of ['Yes, Test Plug Four Way is right', 'Yes, Test Plug Two Way is right']) fireEvent.click(screen.getByRole('checkbox', { name }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Back to the count' }));
+      expect(discardStocktake).not.toHaveBeenCalled();
+      cleanup();
+      localStorage.clear();
+    }
+  });
+
+  // Issue #730: a count opened with Finish it never held what is typed on the sheet, so saving it leaves the sheet as it is; and
+  // a count saved here before it never makes it read as saved in another tab.
+  it('saves a count opened with Finish it after one saved here, and keeps what is typed on the sheet', async () => {
+    unfinishedStocktakes.mockResolvedValue([{ id: 'st-old', branch_id: 'b', created_at: '2026-10-29T09:00:00Z', lines: 2 }]);
+    await review();
+    for (const name of ['Yes, Test Plug Four Way is right', 'Yes, Test Plug Two Way is right']) fireEvent.click(screen.getByRole('checkbox', { name }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start another count' }));
+    for (const [id, qty] of [['A-1', '0'], ['A-3', '9']] as const) {
+      fireEvent.change(document.getElementById(`count-${id}`) as HTMLInputElement, { target: { value: qty } });
+    }
+    const old = { id: 'st-old', status: 'draft', lines: draft.lines.slice(0, 2) };
+    getStocktake.mockResolvedValue(old);
+    commitStocktake.mockResolvedValue({ ...old, status: 'committed' });
+    fireEvent.click(within(await screen.findByTestId('unfinished-st-old')).getByRole('button', { name: 'Finish it' }));
+    await screen.findByRole('heading', { name: 'Review the difference' });
+    for (const name of ['Yes, Test Plug Four Way is right', 'Yes, Test Plug Two Way is right']) fireEvent.click(screen.getByRole('checkbox', { name }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('st-old', ['A-1', 'A-2']));
+    expect(screen.queryByText(CHANGED_ELSEWHERE)).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: 'Start another count' }));
+    expect((document.getElementById('count-A-1') as HTMLInputElement).value).toBe('0');
+    expect((document.getElementById('count-A-3') as HTMLInputElement).value).toBe('9');
+  });
+
+  it('lets a save on its way complete, with no discard sent', async () => {
+    await review();
+    let answer: (v: unknown) => void = () => undefined;
+    commitStocktake.mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+    for (const name of ['Yes, Test Plug Four Way is right', 'Yes, Test Plug Two Way is right']) fireEvent.click(screen.getByRole('checkbox', { name }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: 'Back to the count' })).toBeNull();
+    answer({ ...draft, status: 'committed', lines: draft.lines.map((l) => ({ ...l, committed_variance_qty: l.variance_qty })) });
+    expect(await screen.findByRole('heading', { name: /^Stock updated/ })).toBeTruthy();
+    expect(discardStocktake).not.toHaveBeenCalled();
+  });
+
+  // Issue #728: Save, the word a shop worker knows, and a tip that nothing changes before it; Review the difference stays before it.
+  it('names the last step Save the count, with a tip that stock changes only then', async () => {
+    await review();
+    expect(screen.getByRole('heading', { name: 'Review the difference' })).toBeTruthy();
+    expect(screen.queryByText(/commit/i)).toBeNull();
+    const tip = screen.getByRole('button', { name: 'More about Save the count' });
+    fireEvent.click(tip);
+    expect(await screen.findByText('Your stock changes only when you save the count.')).toBeTruthy();
+  });
+
+  it('asks again after Back to the count, since the review is a new one, and throws the old one away', async () => {
+    await review();
+    discardStocktake.mockResolvedValue({ ...draft, status: 'discarded' });
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Plug Four Way is right' }));
     fireEvent.click(screen.getByRole('button', { name: 'Back to the count' }));
+    // Issue #728: the review left this way never shows later as a count not finished.
+    expect(discardStocktake).toHaveBeenCalledWith(draft.id);
     createStocktake.mockResolvedValue({ ...draft, id: 'st2' });
     fireEvent.click(screen.getByRole('button', { name: 'Review the difference (4 counted)' }));
     await screen.findByRole('heading', { name: 'Review the difference' });
@@ -372,10 +507,10 @@ describe('counting in cartons and pieces', () => {
     await screen.findByText(EMPTY);
     const cartons = screen.getByRole('textbox', { name: 'Test Soap Cartons' }) as HTMLInputElement;
     const pieces = screen.getByRole('textbox', { name: 'Test Soap Pieces' }) as HTMLInputElement;
-    expect(document.getElementById('count-S-1-total')?.textContent).toBe('Type the Cartons and the Pieces left, or all of it in Pieces.');
+    expect(document.getElementById('count-S-1-total')?.textContent).toBe('Type the cartons and the pieces left, or all of it in pieces.');
     fireEvent.change(cartons, { target: { value: '5' } });
     fireEvent.change(pieces, { target: { value: '7' } });
-    expect(document.getElementById('count-S-1-total')?.textContent).toBe('Counted 5 Cartons and 7 Pieces (127 Pieces)');
+    expect(document.getElementById('count-S-1-total')?.textContent).toBe('Counted 5 cartons and 7 pieces (127 pieces)');
     // An item with no pack keeps its one box.
     expect(screen.getByLabelText('Test Lamp Active (piece)')).toBeTruthy();
     fireEvent.change(document.getElementById('count-A-1') as HTMLInputElement, { target: { value: '5' } });
@@ -391,9 +526,9 @@ describe('counting in cartons and pieces', () => {
     await screen.findByText(EMPTY);
     const cartons = screen.getByRole('textbox', { name: 'Test Soap Cartons' }) as HTMLInputElement;
     fireEvent.change(screen.getByRole('textbox', { name: 'Test Soap Pieces' }), { target: { value: '130' } });
-    expect(document.getElementById('count-S-1-total')?.textContent).toBe('Counted 5 Cartons and 10 Pieces (130 Pieces)');
+    expect(document.getElementById('count-S-1-total')?.textContent).toBe('Counted 5 cartons and 10 pieces (130 pieces)');
     fireEvent.change(cartons, { target: { value: '1.5' } });
-    expect(screen.getByText('Type whole Cartons, and the rest in Pieces.').getAttribute('role')).toBe('alert');
+    expect(screen.getByText('Type whole cartons, and the rest in pieces.').getAttribute('role')).toBe('alert');
     expect(cartons.getAttribute('aria-invalid')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: 'Review the difference (1 counted)' }));
     expect(createStocktake).not.toHaveBeenCalled();
@@ -403,6 +538,23 @@ describe('counting in cartons and pieces', () => {
     expect(createStocktake.mock.calls[0]?.[0]).toEqual({ branch_id: expect.any(String), lines: [{ product_id: 'S-1', counted_qty: '130.000' }] });
   });
 
+  it('takes a box for every level of a ladder and adds them up (issue #699)', async () => {
+    const levels = [{ unit: 'Carton', factor: '120.000' }, { unit: 'Box', factor: '10.000' }];
+    const socket: StockRow = { ...row('K-1', 'Test Socket', '300.000'), unit: 'Piece', standard_pack: { unit: 'Carton', factor: '120.000', levels } };
+    listStock.mockResolvedValue([socket]);
+    createStocktake.mockResolvedValue({ id: 'st1', status: 'draft', lines: [] });
+    open();
+    await screen.findByText(EMPTY);
+    expect(document.getElementById('count-K-1-total')?.textContent).toBe('Type what you counted at every level, big to small. The app adds them up.');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Test Socket Cartons' }), { target: { value: '2' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Test Socket Boxes' }), { target: { value: '3' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Test Socket Pieces' }), { target: { value: '5' } });
+    expect(document.getElementById('count-K-1-total')?.textContent).toBe('Counted 2 cartons, 3 boxes and 5 pieces (275 pieces)');
+    fireEvent.click(screen.getByRole('button', { name: 'Review the difference (1 counted)' }));
+    await waitFor(() => expect(createStocktake).toHaveBeenCalledTimes(1));
+    expect(createStocktake.mock.calls[0]?.[0]).toEqual({ branch_id: expect.any(String), lines: [{ product_id: 'K-1', counted_qty: '275.000' }] });
+  });
+
   it('counts 0 with the 0 button, emptying the cartons', async () => {
     listStock.mockResolvedValue([soap]);
     open();
@@ -410,7 +562,7 @@ describe('counting in cartons and pieces', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Test Soap Cartons' }), { target: { value: '2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Count 0 of Test Soap' }));
     expect((screen.getByRole('textbox', { name: 'Test Soap Cartons' }) as HTMLInputElement).value).toBe('');
-    expect(document.getElementById('count-S-1-total')?.textContent).toBe('Counted 0 Pieces');
+    expect(document.getElementById('count-S-1-total')?.textContent).toBe('Counted 0 pieces');
     expect(heading(/^Counted items \(1\)$/)).toBeTruthy();
   });
 
@@ -425,11 +577,11 @@ describe('counting in cartons and pieces', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review the difference (1 counted)' }));
     await screen.findByRole('heading', { name: 'Review the difference' });
     expect(createStocktake.mock.calls[0]?.[0]).toEqual({ branch_id: expect.any(String), lines: [{ product_id: 'S-1', counted_qty: '24.000' }] });
-    expect(screen.getByTestId('count-drop-S-1').textContent).toContain('This removes 4 Cartons and 10 Pieces (106 Pieces). Is that right?');
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    expect(screen.getByTestId('count-drop-S-1').textContent).toContain('This removes 4 cartons and 10 pieces (106 pieces). Is that right?');
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     expect(commitStocktake).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Yes, Test Soap is right' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('st1', ['S-1']));
   });
 });
@@ -459,9 +611,9 @@ describe('a pack that changes while counting', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Test Soap Pieces' }), { target: { value: '7' } });
     listStock.mockResolvedValue([after]);
     await client.refetchQueries({ queryKey: ['retail', 'stock'] });
-    await screen.findByText('Counted in Cartons of 24, as when you started. This item\'s pack has changed since.');
+    await screen.findByText('Your count uses cartons of 24, as when you started. This item\'s pack has changed since.');
     expect((screen.getByRole('textbox', { name: 'Test Soap Cartons' }) as HTMLInputElement).value).toBe('5');
-    expect(document.getElementById('count-S-1-total')?.textContent).toBe('Counted 5 Cartons and 7 Pieces (127 Pieces)');
+    expect(document.getElementById('count-S-1-total')?.textContent).toBe('Counted 5 cartons and 7 pieces (127 pieces)');
     fireEvent.click(screen.getByRole('button', { name: 'Review the difference (1 counted)' }));
     await waitFor(() => expect(createStocktake).toHaveBeenCalledTimes(1));
     expect(createStocktake.mock.calls[0]?.[0]).toEqual({ branch_id: expect.any(String), lines: [{ product_id: 'S-1', counted_qty: '127.000' }] });

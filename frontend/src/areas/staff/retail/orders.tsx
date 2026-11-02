@@ -17,6 +17,7 @@ import {
 import { UNITS, capabilityOn, holdsAt } from './permissions';
 import { newLine, withUnit } from './sale-state';
 import { SaleLineCard } from './sale';
+import { CustomerPicker } from './customer-picker';
 import { ScreenLink } from './screen-link';
 import { Gate, Note, Problem, ProductPicker, money, useBranchName, useBranchView, useSingleBranch } from './ui';
 import { Hint } from '../../../app/ui/Hint';
@@ -40,6 +41,7 @@ export function DeliverPanel({ order, onDone }: { order: Order; onDone: (d: Deli
   const client = useQueryClient();
   const [form, setForm] = useState<DeliverForm>(blankDeliver());
   const [key, setKey] = useState(newIdempotencyKey);
+  // toast-exempt: success screen, OrderActions puts its Delivered, Sale made words in place of the order buttons through onDone
   const deliver = useMutation({
     mutationFn: () => retailOrders.deliver(order.id ?? '', buildDeliverRequest(order, form), key),
     onSuccess: (d) => {
@@ -108,9 +110,9 @@ export function OrderActions({ order, onDelivered }: { order: Order; onDelivered
     setPanel(null);
     invalidate(client);
   };
-  const pack = useMutation({ mutationFn: () => retailOrders.pack(order.id ?? ''), onSuccess: after });
-  const send = useMutation({ mutationFn: () => retailOrders.send(order.id ?? '', rider.trim()), onSuccess: after });
-  const cancel = useMutation({ mutationFn: () => retailOrders.cancel(order.id ?? '', reason.trim()), onSuccess: after });
+  const pack = useMutation({ mutationFn: () => retailOrders.pack(order.id ?? ''), onSuccess: after, meta: { success: 'Order packed' } });
+  const send = useMutation({ mutationFn: () => retailOrders.send(order.id ?? '', rider.trim()), onSuccess: after, meta: { success: 'Order out for delivery' } });
+  const cancel = useMutation({ mutationFn: () => retailOrders.cancel(order.id ?? '', reason.trim()), onSuccess: after, meta: { success: 'Order cancelled' } });
   const steps = nextSteps(order);
   // Delivering records a sale, so it is offered to whoever may sell at the order's shop.
   const maySell = holdsAt(me, 'retail.sale.create', order.branch_id);
@@ -214,6 +216,7 @@ export function OrderForm({ branchId, onSaved }: { branchId: string; onSaved: (o
       finish();
       onSaved(o);
     },
+    meta: { success: (o: Order) => (o.order_no ? `Order ${o.order_no} saved` : 'Order saved') },
   });
   const update = (patch: Partial<OrderDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const setLine = (i: number, patch: { qty?: string; price?: string }) => setDraft((d) => ({ ...d, lines: d.lines.map((l, n) => (n === i ? { ...l, ...patch } : l)) }));
@@ -246,16 +249,8 @@ export function OrderForm({ branchId, onSaved }: { branchId: string; onSaved: (o
         )}
         <label htmlFor="order-name">Name</label>
         <input id="order-name" value={draft.name} maxLength={200} onChange={(e) => update({ name: e.target.value })} />
-        {(customers.data ?? []).length > 0 && (
-          <>
-            <label htmlFor="order-buyer">Customer from the list (optional, needed to sell to them on credit when customer accounts are on)</label>
-            {/* empty: drawn only when there are customers; otherwise the name above is all that is needed. */}
-            <select id="order-buyer" value={draft.customerId} onChange={(e) => update({ customerId: e.target.value })}>
-              <option value="">Not on the list</option>
-              {(customers.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </>
-        )}
+        <CustomerPicker id="order-buyer" label="Customer from the list (optional, needed to sell to them on credit when customer accounts are on)"
+          placeholder="Not on the list" customers={customers} value={draft.customerId} onChange={(customerId) => update({ customerId })} quietWhenEmpty />
         <p id="order-source-label">Where did the order come from?</p>
         <div className="rt-row" role="radiogroup" aria-labelledby="order-source-label" data-tour="order-source">
           {SOURCES.map((s) => (
@@ -336,7 +331,6 @@ export function OrdersPage() {
   const [source, setSource] = useState<OrderSource | ''>('');
   const [making, setMaking] = useState(false);
   const [formKey, setFormKey] = useState(0);
-  const [saved, setSaved] = useState<Order | null>(null);
   const scope = all ? undefined : (branchId ?? undefined);
   const board = useQuery({ queryKey: ['retail', 'orders', 'board', scope ?? 'all'], queryFn: ({ signal }) => retailOrders.board(scope, signal), enabled: all || branchId !== null });
   const list = useInfiniteQuery({
@@ -370,21 +364,19 @@ export function OrdersPage() {
       </div>
       {atStore && <p className="hint">{single.branchName} is a store, and a store does not sell. Choose a shop to take an order.</p>}
       {!making && !atStore && (
-        <button type="button" className="rt-primary" disabled={single.branchId === null} data-tour="order-new" onClick={() => { setMaking(true); setSaved(null); }}>
+        <button type="button" className="rt-primary" disabled={single.branchId === null} data-tour="order-new" onClick={() => setMaking(true)}>
           New order
         </button>
       )}
       {!making && !atStore && single.branchId === null && <p className="hint">Choose one shop at the top of the page to take an order.</p>}
-      {saved && <p role="status" className="alert alert-success">Order {saved.order_no} saved for {saved.customer_name}. Its items are kept aside.</p>}
       {making && !atStore && single.branchId !== null && (
         <section aria-label="New order">
           <h2>New order for {single.branchName}</h2>
           <OrderForm
             key={formKey}
             branchId={single.branchId}
-            onSaved={(o) => {
+            onSaved={() => {
               setMaking(false);
-              setSaved(o);
               setFormKey((k) => k + 1);
               invalidate(client);
             }}

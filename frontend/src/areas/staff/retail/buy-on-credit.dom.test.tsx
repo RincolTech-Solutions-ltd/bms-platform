@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState, type ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { businessToday, type Product, type SupplierOpenItem, type SupplierPayables, type SupplierStatement } from '../../../api/retail';
@@ -22,10 +22,13 @@ vi.mock('@tanstack/react-router', async (original) => {
 
 vi.mock('../../../api/retail', async (original) => {
   const real = await original<typeof import('../../../api/retail')>();
-  return { ...real, retail: { ...real.retail, listProducts: () => Promise.resolve([]), listSuppliers: () => Promise.resolve([]) } };
+  return { ...real, retail: { ...real.retail, listProducts: () => Promise.resolve([]), listSuppliers: () => Promise.resolve(suppliers), createSupplier: (...a: unknown[]) => createSupplier(...a) } };
 });
 
-const { METHODS, RestockForm, buildPurchase, creditNeedsSupplier } = await import('./restock');
+let suppliers: Record<string, unknown>[] = [];
+const createSupplier = vi.fn();
+
+const { METHODS, RestockForm, buildPurchase, creditNeedsSupplier, withoutTypedSupplier } = await import('./restock');
 const { OwedList, PayablesReport } = await import('./supplier-payables');
 const { Money } = await import('./ui');
 const { moneyLinks } = await import('../tabs');
@@ -37,6 +40,8 @@ type PaymentForm = ReturnType<typeof blankPayment>;
 afterEach(() => {
   cleanup();
   sessionStorage.clear();
+  suppliers = [];
+  createSupplier.mockReset();
 });
 
 /** An owner with the purchasing capability off: buys, pays and reads what is owed. */
@@ -53,7 +58,7 @@ function screenOf(node: ReactElement) {
 }
 
 const restockDraft = (method: 'cash' | 'mobile_money' | 'bank' | 'credit') => ({
-  supplierId: '', newSupplier: '', purchasedOn: businessToday(), method, lines: [{ product: item, cost: '1000', sell: '1500', qtyByBranch: { [branch]: '5' } }],
+  supplierId: '', purchasedOn: businessToday(), method, lines: [{ product: item, cost: '1000', sell: '1500', qtyByBranch: { [branch]: '5' } }],
 });
 
 describe('Paid how on Buy stock', () => {
@@ -70,30 +75,47 @@ describe('Paid how on Buy stock', () => {
   });
 
   it('asks for a supplier when it is on credit, and marks the supplier needed', () => {
+    suppliers = [{ id: 's1', name: 'Test Supplier 01', active: true }];
     screenOf(<RestockForm initial={restockDraft('credit')} />);
-    expect(screen.getByTestId('credit-needs-supplier').textContent).toBe('On credit needs a supplier. Choose one above, or add a new one.');
+    expect(screen.getByTestId('credit-needs-supplier').textContent).toBe('On credit needs a supplier. Choose one above, or + Add a supplier.');
     expect(document.querySelector('label[for="supplier"] .field-star')).toBeTruthy();
     expect(screen.getByLabelText(/^Supplier/).getAttribute('aria-required')).toBe('true');
     expect(screen.getByRole('button', { name: 'Save the purchase' }).getAttribute('data-not-ready')).toBe('true');
     expect(screen.getByText(/Pay them later from Money, What I owe suppliers\./)).toBeTruthy();
-    // A new supplier typed is enough.
-    fireEvent.change(screen.getByLabelText('Or add a new supplier'), { target: { value: 'Test Supplier 09' } });
-    expect(screen.queryByTestId('credit-needs-supplier')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Save the purchase' }).getAttribute('data-not-ready')).toBeNull();
   });
 
-  it('with no supplier yet, Save goes to Add a new supplier until a name is typed (review of #619)', async () => {
+  it('adds a supplier in place (issue #688): chosen at once, the lines kept, and On credit is ready', async () => {
+    createSupplier.mockResolvedValue({ id: 's9', name: 'Test Supplier 09', active: true });
     screenOf(<RestockForm initial={restockDraft('credit')} />);
-    expect(await screen.findByText('No suppliers yet. Type a new one below.')).toBeTruthy();
-    const name = screen.getByLabelText('Add a new supplier');
-    expect(name.getAttribute('aria-required')).toBe('true');
-    expect(document.querySelector('[data-needed]')).toBe(name);
+    // With no supplier yet, Save goes to + Add a supplier (review of #619).
+    const add = await screen.findByRole('button', { name: '+ Add a supplier' });
+    expect(screen.getByText('No suppliers yet.')).toBeTruthy();
+    expect(document.querySelector('[data-needed]')).toBe(add);
     fireEvent.click(screen.getByRole('button', { name: 'Save the purchase' }));
-    expect(document.activeElement).toBe(name);
-    fireEvent.change(name, { target: { value: 'Test Supplier 09' } });
+    expect(document.activeElement).toBe(add);
+    fireEvent.click(add);
+    const sheet = await screen.findByRole('dialog', { name: 'Add a supplier' });
+    fireEvent.change(within(sheet).getByLabelText(/^Name of the new supplier/), { target: { value: 'Test Supplier 09' } });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Add supplier' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(createSupplier).toHaveBeenCalledWith({ name: 'Test Supplier 09' });
+    expect((screen.getByLabelText(/^Supplier/) as HTMLSelectElement).selectedOptions[0]?.text).toBe('Test Supplier 09');
     expect(screen.queryByTestId('credit-needs-supplier')).toBeNull();
-    expect(name.getAttribute('aria-required')).toBeNull();
-    expect(document.querySelector('[data-needed]')).toBeNull();
+    expect(screen.getByTestId('restock-total').querySelector('.num')?.textContent).toBe('UGX 5,000');
+  });
+
+  it('drops a typed new supplier from a draft kept before #688, so nothing is made that the form does not show', async () => {
+    const name = `retail-draft:restock:${owner.user_id ?? ''}`;
+    sessionStorage.setItem(name, JSON.stringify({ key: 'k-old', draft: { ...restockDraft('credit'), newSupplier: 'Test Supplier 05' } }));
+    screenOf(<RestockForm />);
+    expect(screen.getByTestId('credit-needs-supplier')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save the purchase' }).getAttribute('data-not-ready')).toBe('true');
+    // The draft kept in the tab is written back without it.
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem(name) ?? '{}').draft).not.toHaveProperty('newSupplier'));
+    expect(JSON.parse(sessionStorage.getItem(name) ?? '{}').draft.method).toBe('credit');
+    expect(createSupplier).not.toHaveBeenCalled();
+    const kept = restockDraft('cash');
+    expect(withoutTypedSupplier(kept)).toBe(kept);
   });
 
   it('draws the total cost in tabular figures', () => {
@@ -103,8 +125,8 @@ describe('Paid how on Buy stock', () => {
   });
 
   it('needs no supplier for cash, mobile money or bank, and sends the method as chosen', () => {
-    for (const m of ['cash', 'mobile_money', 'bank'] as const) expect(creditNeedsSupplier(m, '', '')).toBeNull();
-    expect(creditNeedsSupplier('credit', 's1', '')).toBeNull();
+    for (const m of ['cash', 'mobile_money', 'bank'] as const) expect(creditNeedsSupplier(m, '')).toBeNull();
+    expect(creditNeedsSupplier('credit', 's1')).toBeNull();
     expect(buildPurchase({ supplierId: 's1', purchasedOn: '2026-10-08', method: 'mobile_money', lines: restockDraft('cash').lines }).payment_method).toBe('mobile_money');
   });
 });

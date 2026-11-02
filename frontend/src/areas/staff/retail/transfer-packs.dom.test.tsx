@@ -64,7 +64,7 @@ describe('Move stock in cartons and pieces', () => {
     open([{ product: soap, qty: '' }, { product: lamp, qty: '2' }]);
     fireEvent.change(screen.getByRole('textbox', { name: 'Test Soap Cartons' }), { target: { value: '2' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Test Soap Pieces' }), { target: { value: '6' } });
-    expect(document.getElementById('tq-0-total')?.textContent).toBe('Moving 2 Cartons and 6 Pieces (54 Pieces)');
+    expect(document.getElementById('tq-0-total')?.textContent).toBe('Moving 2 cartons and 6 pieces (54 pieces)');
     expect(screen.getByLabelText('Quantity (piece)')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
     await waitFor(() => expect(createTransfer).toHaveBeenCalledTimes(1));
@@ -73,9 +73,9 @@ describe('Move stock in cartons and pieces', () => {
 
   it('takes pieces alone, and says in cartons and pieces when the branch holds less', async () => {
     open([{ product: soap, qty: '24' }]);
-    expect(document.getElementById('tq-0-total')?.textContent).toBe('Moving 1 Carton (24 Pieces)');
+    expect(document.getElementById('tq-0-total')?.textContent).toBe('Moving 1 carton (24 pieces)');
     fireEvent.change(screen.getByRole('textbox', { name: 'Test Soap Cartons' }), { target: { value: '6' } });
-    expect(screen.getByRole('alert').textContent).toBe('Only 5 Cartons and 10 Pieces (130 Pieces) in stock at this branch.');
+    expect(screen.getByRole('alert').textContent).toBe('Only 5 cartons and 10 pieces (130 pieces) in stock at this branch.');
     // Both boxes say the quantity is refused, as the one box of an item with no pack does.
     expect(screen.getByRole('textbox', { name: 'Test Soap Cartons' }).getAttribute('aria-invalid')).toBe('true');
     expect(screen.getByRole('textbox', { name: 'Test Soap Pieces' }).getAttribute('aria-invalid')).toBe('true');
@@ -85,7 +85,7 @@ describe('Move stock in cartons and pieces', () => {
 
   it('refuses part of a carton in plain words, once', async () => {
     open([{ product: soap, qty: '', packs: '1.5' }]);
-    expect(screen.getAllByRole('alert').map((a) => a.textContent)).toEqual(['Type whole Cartons, and the rest in Pieces.']);
+    expect(screen.getAllByRole('alert').map((a) => a.textContent)).toEqual(['Type whole cartons, and the rest in pieces.']);
     fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
     expect(createTransfer).not.toHaveBeenCalled();
   });
@@ -103,8 +103,8 @@ describe('a pack that changes while moving', () => {
   ])('keeps 2 Cartons and 6 Pieces as 54 when %s', async (_, product) => {
     createTransfer.mockReturnValue(new Promise(() => undefined));
     open([{ product, qty: '6', packs: '2', pack: { unit: 'Carton', factor: '24.000' } }]);
-    expect(document.getElementById('tq-0-total')?.textContent).toBe('Moving 2 Cartons and 6 Pieces (54 Pieces)');
-    expect(screen.getByText("Moving in Cartons of 24, as when you typed them. This item's pack has changed since.")).toBeTruthy();
+    expect(document.getElementById('tq-0-total')?.textContent).toBe('Moving 2 cartons and 6 pieces (54 pieces)');
+    expect(screen.getByText("Moving in cartons of 24, as when you typed them. This item's pack has changed since.")).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Move stock' }));
     await waitFor(() => expect(createTransfer).toHaveBeenCalledTimes(1));
     expect(createTransfer.mock.calls[0]?.[0].lines).toEqual([{ product_id: 'p1', qty: '54.000' }]);

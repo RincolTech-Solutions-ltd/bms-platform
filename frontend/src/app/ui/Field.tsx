@@ -52,9 +52,11 @@ export type FieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'id'> & {
   control?: (props: FieldControlProps) => ReactNode;
   /** Marks the field "(optional)", on a form where most fields are needed. */
   optional?: boolean;
+  /** A HelpTip after the label (issue #709), outside the label so it never joins the field's name. */
+  tip?: ReactNode;
 };
 
-export function Field({ label, hint, error, showError = false, id, control, onBlur, className, required = false, optional = false, ...input }: FieldProps) {
+export function Field({ label, hint, error, showError = false, id, control, onBlur, className, required = false, optional = false, tip, ...input }: FieldProps) {
   const own = useId();
   const fieldId = id ?? own;
   const [left, setLeft] = useState(false);
@@ -70,17 +72,20 @@ export function Field({ label, hint, error, showError = false, id, control, onBl
       onBlur?.(e as FocusEvent<HTMLInputElement>);
     },
   };
+  const labelled = (
+    <label htmlFor={fieldId}>
+      {label}
+      {required && (
+        <span className="field-star" aria-hidden="true">
+          {' '}*
+        </span>
+      )}
+      {optional && <span className="field-optional"> (optional)</span>}
+    </label>
+  );
   return (
     <div className={className ? `field ${className}` : 'field'}>
-      <label htmlFor={fieldId}>
-        {label}
-        {required && (
-          <span className="field-star" aria-hidden="true">
-            {' '}*
-          </span>
-        )}
-        {optional && <span className="field-optional"> (optional)</span>}
-      </label>
+      {tip ? <div className="help-tip-heading">{labelled}{tip}</div> : labelled}
       {control ? control(props) : <input {...input} {...props} />}
       {shown ? (
         <span className="field-error" id={`${fieldId}-error`}>

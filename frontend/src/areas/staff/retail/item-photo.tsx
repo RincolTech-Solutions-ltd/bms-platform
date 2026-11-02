@@ -70,10 +70,12 @@ export function PhotoEditor({ inputId, photoId, shownId, label, onUpload, onClea
   const upload = useMutation({
     mutationFn: (file: File) => onUpload(file),
     onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['retail'] }); onSaved?.(`Saved the photo of ${label}.`); },
+    meta: { success: () => (onSaved ? null : 'Photo saved') },
   });
   const clear = useMutation({
     mutationFn: () => onClear(),
     onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['retail'] }); onSaved?.(`Took the photo of ${label} off.`); },
+    meta: { success: () => (onSaved ? null : 'Photo removed') },
   });
   const id = `photo-${inputId}`;
   return (
@@ -109,10 +111,10 @@ export function PhotoEditor({ inputId, photoId, shownId, label, onUpload, onClea
 export const PHOTO_LATER = 'The photo was not saved. Add it from Edit on the item.';
 
 /** Sends the photo of an item just made; the words to show when it failed, or null when it is saved. */
-export async function sendNewPhoto(productId: string, file: File | null): Promise<string | null> {
+export async function sendNewPhoto(productId: string, file: File | null, send: (id: string, file: File) => Promise<unknown> = (id, f) => retail.setProductPhoto(id, f)): Promise<string | null> {
   if (!file) return null;
   try {
-    await retail.setProductPhoto(productId, file);
+    await send(productId, file);
     return null;
   } catch {
     return PHOTO_LATER;

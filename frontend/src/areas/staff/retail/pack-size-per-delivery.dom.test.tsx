@@ -56,7 +56,7 @@ function screenOf(me: typeof admin, node: ReactElement) {
   );
 }
 
-const draft = (lines: ReturnType<typeof line>[]) => ({ supplierId: '', newSupplier: '', purchasedOn: '2026-10-08', method: 'cash' as const, lines });
+const draft = (lines: ReturnType<typeof line>[]) => ({ supplierId: '', purchasedOn: '2026-10-08', method: 'cash' as const, lines });
 
 describe('the words', () => {
   it('asks in plain glossary words, with the unit in the plural', () => {

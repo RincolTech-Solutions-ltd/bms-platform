@@ -112,6 +112,12 @@ describe('the help corpus', () => {
     }
   });
 
+  // Issue #680: Ask BMS answers only from these articles (ADR-096), so none may say the retired words for the two prices. Its
+  // `words:` search terms may hold them, since a person may still ask about the average cost; Ask BMS never sends them to a model.
+  it('never says average cost, cost price or unit cost', () => {
+    for (const a of ARTICLES) expect(articleText(a), a.id).not.toMatch(/average cost|cost price|unit cost/i);
+  });
+
   it('refuses an article without its front matter or with a job it does not know', () => {
     expect(() => parseArticle('x', 'Just text')).toThrow(/front matter/);
     expect(() => parseArticle('x', '---\ntitle: How do I fly?\njob: flying\n---\nText')).toThrow(/known job/);
@@ -331,7 +337,7 @@ describe('setting up a shop quickly (issue #625)', () => {
   const PARTS = [
     ['areas/staff/menu.tsx', 'areas/staff/retail/first-items.tsx', 'areas/staff/retail/catalogue.tsx'],
     ['areas/staff/retail/shop-setup.tsx', 'areas/staff/retail/shop-starters.ts'],
-    // The Used for words (Both, Selling, Buying) are those of a pack on an item, kept once in the pack editor (ADR-099).
+    // The Used for words (Both, Buying, Selling) are those of a pack on an item, kept once in the pack editor (ADR-099).
     ['areas/staff/retail/shop-setup.tsx', 'areas/staff/retail/shop-setup-state.ts', 'areas/staff/retail/catalogue-packs.tsx'],
     ['areas/staff/retail/shop-setup.tsx'],
     ['areas/staff/retail/permissions.ts'],
@@ -373,12 +379,14 @@ describe('setting up a shop quickly (issue #625)', () => {
 describe('adding a unit (a tester asked, issue #625)', () => {
   const UNIT = 'add-a-unit';
   // The code of the screens each part walks through (its steps in order, then its note).
+  // Issue #709 (ADR-110): Units in two parts, Single units and Packages, and Single unit on the item forms.
   const PARTS = [
-    ['areas/staff/menu.tsx', 'areas/staff/retail/permissions.ts'],
+    ['areas/staff/menu.tsx', 'areas/staff/retail/permissions.ts', 'areas/staff/retail/catalogue-lists.tsx'],
+    ['areas/staff/retail/catalogue-lists.tsx'],
     ['areas/staff/retail/catalogue-lists.tsx'],
     ['app/glossary.ts', 'areas/staff/retail/unit-picker.tsx'],
     ['app/glossary.ts'],
-    ['areas/staff/retail/catalogue-products.tsx', 'app/glossary.ts', 'areas/staff/retail/catalogue-packs.tsx'],
+    ['app/glossary.ts', 'areas/staff/retail/catalogue-packs.tsx'],
     ['areas/staff/retail/catalogue-lists.tsx', 'areas/staff/retail/unit-usual-pack.tsx'],
     ['areas/staff/retail/catalogue-lists.tsx'],
   ];
@@ -548,7 +556,7 @@ describe('selling or buying in cartons (issue #630)', () => {
   const boldIn = (runs: Inline[]) => [...new Set(runs.flat().filter((r) => r.strong).map((r) => r.text))];
   const escape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const whole = (label: string) => new RegExp(`(^|[>'"])\\s*${escape(label)}\\s*($|[<'"])`, 'm');
-  const screens = source(['areas/staff/retail/catalogue-products.tsx', 'areas/staff/retail/catalogue-packs.tsx', 'app/glossary.ts', 'app/router.tsx']);
+  const screens = source(['areas/staff/retail/catalogue-products.tsx', 'areas/staff/retail/catalogue-packs.tsx', 'areas/staff/retail/new-item-packs.tsx', 'areas/staff/retail/unit-picker.tsx', 'app/glossary.ts', 'app/router.tsx']);
 
   it('has the article the item form links to, for whoever manages the catalogue, found with the words a shop owner types', () => {
     const cartons = articleById(CARTONS)!;
@@ -566,7 +574,7 @@ describe('selling or buying in cartons (issue #630)', () => {
   });
 });
 
-// Issue #629: a help caption said Finish where the button says Commit the count. The count article, its pictures' captions and
+// Issue #629: a help caption said Finish where the button says Save the count (Commit the count until issue #728). The count article, its pictures' captions and
 // the count tour name the buttons the count screen shows, and none of them says Finish for committing the count.
 describe('the count stock words (issue #629)', () => {
   const screen = readFileSync(new URL('../areas/staff/retail/stocktake.tsx', import.meta.url), 'utf8');
@@ -579,24 +587,29 @@ describe('the count stock words (issue #629)', () => {
   const literals = (file: string) => [...java(file).matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]).join('');
   const refusals = ['retail/stock/internal/StockService.java', 'retail/stock/internal/StockCorrectionService.java', 'core/tenancy/internal/BranchService.java'];
 
-  it('put in bold, and as captions, only labels the count screen shows, Commit the count among them', () => {
+  // Issue #728: the count screen's line about a count left unsaved, with Finish it and Throw it away, is drawn from its own file.
+  const unfinished = readFileSync(new URL('../areas/staff/retail/unfinished-counts.tsx', import.meta.url), 'utf8');
+  // Issue #728: Finish it goes back to a count left unsaved; it is not the word for saving one, which the tests below forbid.
+  const notSaving = (t: string) => t.replace(/did not finish it|\bFinish it\b/g, '');
+
+  it('put in bold, and as captions, only labels the count screen shows, Save the count among them', () => {
     const count = articleById('count-stock')!;
     const labels = [...new Set([...count.intro, ...count.steps.map((s) => s.text), ...count.notes].flat().filter((r) => r.strong).map((r) => r.text))];
-    expect(labels).toContain('Commit the count');
-    expect(count.steps.map((s) => s.picture?.caption)).toContain('Commit the count');
+    expect(labels).toContain('Save the count');
+    expect(count.steps.map((s) => s.picture?.caption)).toContain('Save the count');
     // Switch branch, Count stock and the warning's Confirm and Change are drawn by the shell, the menu and the entry checks.
-    for (const label of labels.filter((l) => !['Switch branch', 'Count stock', 'Confirm', 'Change'].includes(l))) expect(screen, label).toMatch(whole(label));
-    expect(count.words).toContain('commit the count');
+    for (const label of labels.filter((l) => !['Switch branch', 'Count stock', 'Confirm', 'Change'].includes(l))) expect(screen + unfinished, label).toMatch(whole(label));
+    expect(count.words).toContain('save the count');
   });
 
-  it('never say Finish for committing a count, in an article, a word a person searches with or the tour', () => {
+  it('never say Finish for saving a count, in an article, a word a person searches with or the tour', () => {
     for (const a of counting) {
-      expect(articleText(a), a.id).not.toMatch(/\bfinish/i);
+      expect(notSaving(articleText(a)), a.id).not.toMatch(/\bfinish/i);
       expect(a.words.join(' '), a.id).not.toMatch(/\bfinish/i);
     }
     const tour = stocktakePage.steps.map((s) => `${s.title} ${s.body}`).join('\n');
     expect(tour).not.toMatch(/\bfinish/i);
-    expect(tour).toContain('Commit the count');
+    expect(tour).toContain('Save the count');
   });
 
   it('reads every article that mentions a stock count', () => {
@@ -606,8 +619,8 @@ describe('the count stock words (issue #629)', () => {
   // Issue #636: the server's refusals about a stock count say to commit it, the big drop refusal among them.
   it('never say Finish for a stock count in a server refusal', () => {
     for (const file of refusals) expect(literals(file), file).not.toMatch(/stock counts?[^.]{0,80}\bfinish|\bfinish\w* (the |a |your )?stock count/i);
-    expect(literals(refusals[0]!)).toContain('tick each line marked before you commit the count.');
-    expect(literals(refusals[2]!)).toContain(' stock counts started and not committed');
+    expect(literals(refusals[0]!)).toContain('tick each line marked before you save the count.');
+    expect(literals(refusals[2]!)).toContain(' stock counts started and not saved');
   });
 });
 
@@ -617,8 +630,10 @@ describe('adding an item quickly (issue #632)', () => {
   const PARTS = [
     ['areas/staff/menu.tsx', 'areas/staff/tabs.tsx', 'areas/staff/retail/first-items.tsx'],
     ['areas/staff/retail/quick-add.tsx', 'app/glossary.ts'],
-    ['areas/staff/retail/quick-add.tsx', 'areas/staff/retail/item-photo.tsx'],
-    ['areas/staff/retail/quick-add.tsx'],
+    // Issue #695: the packages questions are the shared rows of Add an item.
+    ['areas/staff/retail/quick-add.tsx', 'areas/staff/retail/item-photo.tsx', 'areas/staff/retail/new-item-packs.tsx'],
+    // Issue #700: the buttons after the add (Add another, Sell it, Count it now) are the Next row in next-steps.tsx.
+    ['areas/staff/retail/quick-add.tsx', 'areas/staff/retail/next-steps.tsx'],
     ['areas/staff/retail/quick-add.tsx'],
   ];
   const source = (files: string[]) => files.map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')).join('\n');

@@ -46,6 +46,8 @@ export type NewFamily = S['CreateRetailFamilyRequest'];
 export type FamilyChange = S['UpdateRetailFamilyRequest'];
 export type AddVariants = S['AddRetailVariantsRequest'];
 export type MakeFamily = S['RetailMakeFamilyRequest'];
+/** Issue #697: the sizes and colours the shop's items have, offered again on Add an item. */
+export type VariantOptions = S['RetailVariantOptions'];
 export type VariantLine = S['RetailVariantLine'];
 /** Items kept apart until now (one per size) becoming the sizes and colours of one item (issue #384). */
 export type JoinRequest = S['RetailJoinRequest'];
@@ -198,6 +200,7 @@ export type UsageRequest = S['RetailUsageRequest'];
 export type Usage = S['RetailUsageReport'];
 export type StocktakeRequest = S['RetailStocktakeRequest'];
 export type Stocktake = S['RetailStocktake'];
+export type OpenStocktake = S['RetailOpenStocktake'];
 /** Quick add (issue #632): an item, its prices and how many there are at a branch, in one request. */
 export type QuickAddRequest = S['RetailQuickAddRequest'];
 export type QuickAdd = S['RetailQuickAdd'];
@@ -403,7 +406,8 @@ export interface RetailApi {
   listProducts(q: { query?: string; branchId?: string; signal?: AbortSignal }): Promise<Product[]>;
   listCategories(): Promise<Category[]>;
   /** Catalogue management (#146): one page of products, with the filters of the Products screen. */
-  listCatalogue(q: { query?: string; categoryId?: string; active?: boolean; cursor?: string; signal?: AbortSignal }): Promise<ProductPage>;
+  /** With `branchId` each item carries its stock there (`qty`), for a session that may read that branch's stock. */
+  listCatalogue(q: { query?: string; categoryId?: string; active?: boolean; branchId?: string; cursor?: string; signal?: AbortSignal }): Promise<ProductPage>;
   getProduct(id: string): Promise<Product>;
   /** Before saving a new or renamed item: the products with this name or a close one (issue #352). */
   similarProducts(q: { description: string; unitId?: string; excludeId?: string }): Promise<SimilarProducts>;
@@ -423,6 +427,8 @@ export interface RetailApi {
   getFamily(id: string): Promise<Family>;
   /** Makes the item and every combination of the sizes and colours chosen once (or the variants named). */
   createFamily(body: NewFamily): Promise<Family>;
+  /** The sizes and colours the shop typed before, most used first (issue #697). */
+  variantOptions(): Promise<VariantOptions>;
   /** A new name renames every variant, a new category moves every variant; under If-Match. */
   updateFamily(id: string, version: number, body: FamilyChange): Promise<Family>;
   /** More sizes or colours; a combination the item has is skipped. */
@@ -621,6 +627,9 @@ export interface RetailApi {
   commitStocktake(id: string, acknowledged?: string[]): Promise<Stocktake>;
   /** Issue #656: ends a draft count without writing stock; a second call returns it unchanged, a committed one is refused with 409. */
   discardStocktake(id: string): Promise<Stocktake>;
+  getStocktake(id: string): Promise<Stocktake>;
+  /** Issue #728: the counts started at a branch and neither saved nor thrown away, newest first (retail.stocktake.commit there). */
+  unfinishedStocktakes(branchId: string): Promise<OpenStocktake[]>;
   /** Quick add (issue #632): makes the item and adds its stock at the branch as opening stock in one transaction; takes the Idempotency-Key of its form. */
   quickAdd(body: QuickAddRequest, idempotencyKey: string): Promise<QuickAdd>;
   /** Every product with its balance in each branch the caller may read (#144). */
@@ -631,7 +640,8 @@ export interface RetailApi {
   stockedBranches(): Promise<string[]>;
   /** The branches in the caller's stock scope with their roles (ADR-033); 404 capability_not_enabled while branch_roles is off. */
   branchRoles(): Promise<BranchRole[]>;
-  setBranchRole(branchId: string, role: 'store' | 'shop' | 'both'): Promise<BranchRole>;
+  /** A selling branch's role; a store is marked with sells_goods on Branches, never here (ADR-104). */
+  setBranchRole(branchId: string, role: 'shop' | 'both'): Promise<BranchRole>;
   /** The tenant's capabilities and profile (administrators only, ADR-033 section 1). */
   capabilities(): Promise<CapabilitiesRead>;
   /** Switches the profile or flags under If-Match; the server audits the old and new values. */
@@ -745,10 +755,10 @@ const realRetail: RetailApi = {
     return unwrap(await api.GET('/api/v1/retail/categories')).items ?? [];
   },
 
-  async listCatalogue({ query, categoryId, active, cursor, signal }) {
+  async listCatalogue({ query, categoryId, active, branchId, cursor, signal }) {
     return unwrap(
       await api.GET('/api/v1/retail/products', {
-        params: { query: { query: query || undefined, category_id: categoryId || undefined, active, limit: 50, cursor } },
+        params: { query: { query: query || undefined, category_id: categoryId || undefined, active, branch_id: branchId || undefined, limit: 50, cursor } },
         signal,
       }),
     );
@@ -804,6 +814,10 @@ const realRetail: RetailApi = {
 
   async createFamily(body) {
     return unwrap(await api.POST('/api/v1/retail/product-families', { body }));
+  },
+
+  async variantOptions() {
+    return unwrap(await api.GET('/api/v1/retail/product-families/options'));
   },
 
   async updateFamily(id, version, body) {
@@ -1422,6 +1436,12 @@ const realRetail: RetailApi = {
   },
   async discardStocktake(id) {
     return unwrap(await api.POST('/api/v1/retail/stocktakes/{stocktake_id}/discard', { params: { path: { stocktake_id: id } } }));
+  },
+  async getStocktake(id) {
+    return unwrap(await api.GET('/api/v1/retail/stocktakes/{stocktake_id}', { params: { path: { stocktake_id: id } } }));
+  },
+  async unfinishedStocktakes(branchId) {
+    return unwrap(await api.GET('/api/v1/retail/stocktakes/unfinished', { params: { query: { branch_id: branchId } } }));
   },
 
   async quickAdd(body, key) {

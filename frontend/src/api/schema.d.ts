@@ -3632,6 +3632,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/short-link-rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The reserved names and the one Cloudflare single redirect built from them, for the operator (ADR-108) */
+        get: operations["getShortLinkRule"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/short-links/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Follow a short link: 302 to the shop, to its new address while an old name forwards, or to the page 'No shop uses this link' (ADR-108) */
+        get: operations["followShortLink"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/short-links/{name}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Follow a short link: 302 to the shop, to its new address while an old name forwards, or to the page 'No shop uses this link' (ADR-108) */
+        get: operations["followShortLink_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/sign-up/applications": {
         parameters: {
             query?: never;
@@ -3660,6 +3711,23 @@ export interface paths {
         put?: never;
         /** Answer the operator's question; the application returns to the queue (FR-ONB-04) */
         post: operations["signUpReply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/sign-up/short-name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Check a short name as it is typed, with free suggestions when it is not free (ADR-108) */
+        get: operations["signUpCheckShortName"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4390,7 +4458,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Set a branch's role (store, shop or both); audited; 422 branch_has_open_work while a transfer is unreceived */
+        /** Set a selling branch's role (shop or both; a store is sells_goods false on PATCH /branches/{id}); audited; 422 branch_is_store for a store, branch_has_open_work while a transfer is unreceived */
         put: operations["setRetailBranchRole"];
         post?: never;
         delete?: never;
@@ -5534,6 +5602,23 @@ export interface paths {
         put?: never;
         /** Make items kept apart (one per size) the sizes and colours of one new item; each keeps its stock and history (issue #384) */
         post: operations["joinRetailProductsAsFamily"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/product-families/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The sizes and colours the business's items have, offered again on Add an item (issue #697) */
+        get: operations["listRetailVariantOptions"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6995,6 +7080,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/stocktakes/unfinished": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The counts started at a branch and neither saved nor thrown away, newest first, at most 20 (issue #728); needs retail.stocktake.commit at that branch */
+        get: operations["listRetailUnfinishedStocktakes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/stocktakes/{stocktake_id}": {
         parameters: {
             query?: never;
@@ -7593,6 +7695,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/short-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The business's short link (ADR-108) */
+        get: operations["getShortLink"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/sms": {
         parameters: {
             query?: never;
@@ -8049,9 +8168,13 @@ export interface components {
             modules?: string[];
             /** @description The operator's question, while the status is needs_info */
             operator_note?: string;
+            /** @description A new name a repeat sign-up asked for, applied by the confirm call */
+            pending_short_name?: string;
             reference?: string;
             /** @description The reason, when rejected */
             reject_reason?: string;
+            /** @description The short name asked for, or null (ADR-108) */
+            short_name?: string;
             /** @description submitted, needs_info, verified, activated, rejected or expired */
             status?: string;
             term?: string;
@@ -8907,6 +9030,10 @@ export interface components {
             duplicate_reason?: string;
             /** @description The item's name, as Baby romper */
             name: string;
+            /** @description Issue #697: a size's own selling price for one of its packages; a package price not named here is the one sent, in proportion to the size's selling price */
+            pack_prices?: components["schemas"]["RetailSizePackPrice"][];
+            /** @description Issue #697 (ADR-111): packages every size and colour gets, made in its transaction, checked as on POST /products; all are saved with the item or none is */
+            packs?: components["schemas"]["RetailPackRequest"][];
             /**
              * Format: int64
              * @description Each variant's selling price unless it has its own
@@ -8930,6 +9057,8 @@ export interface components {
             description: string;
             /** @description Issue #352: only an administrator (core.settings.manage) may add or rename a product to a name another product of the same unit has, and then with a reason of at least 5 characters, stored on the product. Without it that is refused with 422 duplicate_product_name. */
             duplicate_reason?: string;
+            /** @description Issue #689 (ADR-106): packages made with the item in its transaction, checked as POST /products/{id}/units checks them; all are saved with the item or none is */
+            packs?: components["schemas"]["RetailPackRequest"][];
             /** Format: int64 */
             sell_minor: number;
             /** Format: uuid */
@@ -14230,7 +14359,7 @@ export interface components {
         RetailInFlightTransfer: {
             /**
              * Format: int32
-             * @description Days from the transfer date to today
+             * @description Days from the day it was sent (dispatched_at, in the tenant's time zone) to today
              */
             age_days?: number;
             /**
@@ -14831,6 +14960,24 @@ export interface components {
             /** Format: int64 */
             total_minor?: number;
         };
+        /** @description Issue #728: a count started at a branch and neither saved nor thrown away (a draft) */
+        RetailOpenStocktake: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: uuid */
+            created_by?: string;
+            /** Format: uuid */
+            id?: string;
+            /**
+             * Format: int32
+             * @description How many items it counted
+             */
+            lines?: number;
+            /** @description The count's note; Sell's count of a new item carries its own (review of #729) */
+            note?: string;
+        };
         RetailOrder: {
             /** Format: uuid */
             branch_id?: string;
@@ -15162,6 +15309,18 @@ export interface components {
             factor?: string;
             /** @description True when the pack has its own selling price, sent to every caller (the amount only to one who may see prices): a new usual size or making it buy only then needs retail.price.edit (issue #624) */
             has_own_price?: boolean;
+            /**
+             * Format: int32
+             * @description Issue #699: how many of that level are in one pack; factor is this times its factor
+             */
+            holds_qty?: number;
+            /** @description Issue #699: the name of that level's unit */
+            holds_unit?: string;
+            /**
+             * Format: uuid
+             * @description Issue #699 (ADR-107): the level one pack holds, the item's own unit or another pack's unit; absent when the pack holds factor of the item's unit and says no more
+             */
+            holds_unit_id?: string;
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
@@ -15183,19 +15342,37 @@ export interface components {
             unit?: string;
             /** Format: uuid */
             unit_id?: string;
+            /** @description Issue #699: true for the level the shop usually buys the item in */
+            usual_buy?: boolean;
             /**
              * Format: int32
              * @description Send as If-Match when updating
              */
             version?: number;
         };
+        /** @description Issue #699: one level of an item's packages and the base units in one */
+        RetailPackLevel: {
+            /** @description Base units in one, three places, for example 120.000 */
+            factor?: string;
+            unit?: string;
+        };
         RetailPackList: {
             items?: components["schemas"]["RetailPack"][];
         };
-        /** @description A pack size: factor base units in one pack of the unit */
+        /** @description A pack size: factor base units in one pack of the unit, or holds_qty of the level holds_unit_id (issue #699) */
         RetailPackRequest: {
-            /** @description Base units in one pack, at least 1, up to three places, for example 12 or 12.5 */
-            factor: string;
+            /** @description Base units in one pack, at least 1, up to three places, for example 12 or 12.5; required unless holds_unit_id and holds_qty are sent, and then it must agree with them */
+            factor?: string;
+            /**
+             * Format: int32
+             * @description Issue #699: how many of holds_unit_id are in one pack, a whole number of 2 or more
+             */
+            holds_qty?: number;
+            /**
+             * Format: uuid
+             * @description Issue #699 (ADR-107): the level one pack holds, the item's own unit or another pack's unit of the item (in a new item's packs, one of its other packs); sent with holds_qty
+             */
+            holds_unit_id?: string;
             /** @description What the pack is for: buy, sell or both; a pack bought only has no selling price (issue #624). Left out, both; the screens fill in the unit's usual purpose (issue #637) */
             purpose?: string;
             /**
@@ -15205,6 +15382,8 @@ export interface components {
             sell_minor?: number;
             /** Format: uuid */
             unit_id: string;
+            /** @description Issue #699: true for the level the shop usually buys the item in, which Buy stock opens on; never on a pack only for selling. Clears it on the item's other packs */
+            usual_buy?: boolean;
         };
         /** @description Omitted fields are unchanged; a pack is never deleted, only switched off */
         RetailPackUpdate: {
@@ -15213,6 +15392,16 @@ export interface components {
             clear_sell_minor?: boolean;
             /** @description Base units in one pack, at least 1; required to switch a pack on again */
             factor?: string;
+            /**
+             * Format: int32
+             * @description Issue #699: how many of the level held are in one pack, a whole number of 2 or more. With factor alone, a pack that holds another level must stay a whole number of it (422 not_whole)
+             */
+            holds_qty?: number;
+            /**
+             * Format: uuid
+             * @description Issue #699 (ADR-107): the level one pack holds, the item's own unit or another active pack's unit of the item; sent with holds_qty. Every bigger level that holds this one is worked out again; stock, kept in the item's unit, never changes
+             */
+            holds_unit_id?: string;
             /** @description buy, sell or both; a pack made buy only loses its selling price (issue #624) */
             purpose?: string;
             /**
@@ -15220,6 +15409,8 @@ export interface components {
              * @description A new selling price of one pack; needs retail.price.edit (issue #624)
              */
             sell_minor?: number;
+            /** @description Issue #699: true to make this the level Buy stock opens on, false to clear it */
+            usual_buy?: boolean;
         };
         RetailPayment: {
             /** Format: int64 */
@@ -16060,6 +16251,21 @@ export interface components {
             /** @description True when this add made the Piece unit */
             unit_made?: boolean;
         };
+        /** @description As RetailPackRequest: a size, or what it holds and how many */
+        RetailQuickAddPack: {
+            /** @example 24 */
+            factor?: string;
+            /** Format: int32 */
+            holds_qty?: number;
+            /** Format: uuid */
+            holds_unit_id?: string;
+            purpose?: string;
+            /** Format: int64 */
+            sell_minor?: number;
+            /** Format: uuid */
+            unit_id: string;
+            usual_buy?: boolean;
+        };
         /** @description Issue #632: an item, its prices and how many there are at a branch, in one tap. With product_id, an item already in the list, only the quantity is added and the other item fields are ignored */
         RetailQuickAddRequest: {
             /**
@@ -16081,8 +16287,20 @@ export interface components {
             description?: string;
             /** @description As on a new item: to add a name that exists already, administrators only */
             duplicate_reason?: string;
+            /** @description Issue #695: the new item's packages, as packs of POST /retail/products (issue #689, ADR-106, ADR-107), made in the same transaction; a refused package names its pack_index and saves nothing. Ignored with product_id. qty stays in the item's smallest unit */
+            packs?: components["schemas"]["RetailQuickAddPack"][];
             /** @description Issue #646: the goods were just bought and paid from the branch's cash or mobile money (retail.purchase.create there). qty above 0 and cost_minor above 0 are then needed, and the stock is recorded as a purchase, as Buy stock does, never against opening balance equity. Left out: opening stock, as before */
             paid_from?: string;
+            /**
+             * Format: int64
+             * @description Issue #695: what one package of paid_level_unit_id cost
+             */
+            paid_level_cost_minor?: number;
+            /**
+             * Format: uuid
+             * @description Issue #695: with paid_from, the package the goods were bought in (one of packs, or a pack of product_id); sent with paid_level_cost_minor. The whole packages are then one line at that price, as Buy stock records a pack, and only the pieces left over are at cost_minor, so the money that leaves is what was paid
+             */
+            paid_level_unit_id?: string;
             /**
              * Format: uuid
              * @description An item already in the list, chosen instead of a new item of the same name
@@ -17171,6 +17389,15 @@ export interface components {
             exact?: components["schemas"]["RetailSimilarProduct"][];
             similar?: components["schemas"]["RetailSimilarProduct"][];
         };
+        /** @description Issue #697: one size's own selling price of one of its packages */
+        RetailSizePackPrice: {
+            colour?: string;
+            /** Format: int64 */
+            sell_minor: number;
+            size?: string;
+            /** Format: uuid */
+            unit_id: string;
+        };
         /** @description An item that sold in the branch in the last 90 days, but slowly */
         RetailSlowMover: {
             better_at?: components["schemas"]["RetailSellsBetterAt"];
@@ -17235,6 +17462,8 @@ export interface components {
         RetailStandardPack: {
             /** @description Base units in one pack, three places, for example 24.000 */
             factor?: string;
+            /** @description Issue #699 (ADR-107): every active pack of the item holding a whole number of more than one base unit, biggest first, so stock is shown and counted at every level */
+            levels?: components["schemas"]["RetailPackLevel"][];
             unit?: string;
         };
         /** @description Imported credit sales. They were never posted to the ledger (issue #96), so the statement lists them apart and the ledger-supported closing balance leaves them out */
@@ -18327,14 +18556,23 @@ export interface components {
         };
         RetailUnit: {
             active?: boolean;
+            /**
+             * Format: int32
+             * @description Issue #709 (ADR-110, D98): present only for a package of a fixed size, 12 for a dozen; every pack of it holds exactly this many of the level it holds
+             */
+            fixed_count?: number;
             /** Format: uuid */
             id?: string;
+            /** @description Issue #689 (ADR-106): the name is a package word, such as Box or Carton, so it can be a pack but never the single unit of a new item */
+            is_package?: boolean;
             name?: string;
             /**
              * Format: int32
              * @description Products (active or not) that use this unit
              */
             product_count?: number;
+            /** @description Issue #709 (ADR-110): one of the standard units every shop gets, under any spelling; the list shows them first, in the standard order */
+            standard?: boolean;
             usual_pack?: components["schemas"]["RetailUsualPack"];
             /**
              * Format: int32
@@ -18598,6 +18836,13 @@ export interface components {
              */
             sell_minor?: number;
             size?: string;
+        };
+        /** @description Issue #697: the sizes and colours the business has used */
+        RetailVariantOptions: {
+            /** @description Colours of the business's items, each once ignoring case, most used first */
+            colours?: string[];
+            /** @description Sizes of the business's items, each once ignoring case, most used first */
+            sizes?: string[];
         };
         RetailVoidRequest: {
             reason: string;
@@ -19158,7 +19403,7 @@ export interface components {
         };
         SetRetailBranchRoleRequest: {
             /** @enum {string} */
-            role: "store" | "shop" | "both";
+            role: "shop" | "both";
         };
         SetRetailStockMinimumRequest: {
             /**
@@ -19172,6 +19417,26 @@ export interface components {
             enabled?: boolean;
             /** @description A photo can be read too (a provider that reads pictures is set) */
             photos?: boolean;
+        };
+        ShortLink: {
+            /** @description As a person types it, for example rincoltech.com/testduka */
+            link?: string;
+            /** @description The short name, which is also the app's address (the slug) */
+            short_name?: string;
+            /** @description The same with https://, for the Copy button */
+            url?: string;
+        };
+        ShortLinkRule: {
+            /** @description The single redirect's custom filter expression */
+            expression?: string;
+            /** @description Names the rule leaves to the website and sign-up refuses */
+            reserved?: string[];
+            /** @description The host the short links are on, for example rincoltech.com */
+            short_link_host?: string;
+            /** Format: int32 */
+            status_code?: number;
+            /** @description The dynamic target URL expression */
+            target?: string;
         };
         SignInRequest: {
             /** @description Email, or phone for staff */
@@ -19217,11 +19482,25 @@ export interface components {
             modules: string[];
             /** @description Optional: the referral code of the business that referred the applicant (the ?ref= of its link). An unknown code is 422 referral_code_unknown (ADR-069) */
             referral_code?: string;
+            /** @description The short name for the shop's link rincoltech.com/<short name>, which is also its address: 3 to 20 lower case letters and digits, a hyphen may join two words. A taken one is 409 short_name_taken with suggestions (ADR-108). Optional for one release, for a sign-up page from before it: the server then picks a free one from the business name */
+            short_name?: string;
             term: string;
+            /** @description Optional: the shop's town or area, for short name suggestions */
+            town?: string;
             /** @description trial: one month free; paid: subscribe now */
             way_in: string;
             /** @description Leave empty. A hidden field: a value marks the request as automated */
             website?: string;
+        };
+        SignUpShortNameCheck: {
+            available?: boolean;
+            /** @description Plain words, for example 'testduka is taken.' */
+            message?: string;
+            name?: string;
+            /** @description invalid, reserved or taken; null when available */
+            problem?: string;
+            /** @description Free names: the town or area first, then a shorter form, then a number */
+            suggestions?: string[];
         };
         /** @description The text to show before switching on, and its version */
         SmsAcknowledgement: {
@@ -21328,7 +21607,7 @@ export interface operations {
                     "application/json": components["schemas"]["PaymentMethodMappingList"];
                 };
             };
-            /** @description invalid_payment_account, unknown_branch, account_used_by_retail (cash and bank with retail on) */
+            /** @description invalid_payment_account, unknown_branch */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -26286,6 +26565,66 @@ export interface operations {
             };
         };
     };
+    getShortLinkRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShortLinkRule"];
+                };
+            };
+        };
+    };
+    followShortLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Location is the shop's address or the not found page */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    followShortLink_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Location is the shop's address or the not found page */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     signUpApply: {
         parameters: {
             query?: never;
@@ -26330,6 +26669,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicantView"];
+                };
+            };
+        };
+    };
+    signUpCheckShortName: {
+        parameters: {
+            query: {
+                name: string;
+                business_name?: string;
+                town?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignUpShortNameCheck"];
                 };
             };
         };
@@ -29561,6 +29924,26 @@ export interface operations {
             };
         };
     };
+    listRetailVariantOptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailVariantOptions"];
+                };
+            };
+        };
+    };
     getRetailProductFamily: {
         parameters: {
             query?: never;
@@ -32176,6 +32559,28 @@ export interface operations {
             };
         };
     };
+    listRetailUnfinishedStocktakes: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOpenStocktake"][];
+                };
+            };
+        };
+    };
     getRetailStocktake: {
         parameters: {
             query?: never;
@@ -33312,6 +33717,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotificationSettings"];
+                };
+            };
+        };
+    };
+    getShortLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShortLink"];
                 };
             };
         };

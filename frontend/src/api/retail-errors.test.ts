@@ -4,7 +4,7 @@ import { retailMessage } from './retail-errors';
 describe('retail problem details in plain words', () => {
   it.each([
     ['insufficient_stock', 422, /not enough stock/i],
-    ['price_below_cost', 422, /not above what the item cost/i],
+    ['price_below_cost', 422, /not above the item's buying price/i],
     ['idempotency_key_reused', 422, /different entry/i],
     ['idempotency_in_progress', 409, /still being saved/i],
     ['idempotency_key_missing', 422, /reload/i],
@@ -20,8 +20,8 @@ describe('retail problem details in plain words', () => {
     ['version_conflict', 409, /changed by someone else/i],
     ['duplicate_product_code', 409, /code already exists/i],
     ['inactive_category', 422, /switched off/i],
-    ['stocktake_committed', 409, /already been committed/i],
-    ['stocktake_discarded', 409, /was discarded/i],
+    ['stocktake_committed', 409, /already been saved/i],
+    ['stocktake_discarded', 409, /was cancelled/i],
     ['token_expired', 401, /sign in/i],
   ])('maps %s', (code, status, text) => {
     const message = retailMessage({ code, detail: 'Product 00000000-0000-4000-8000-000000000001 has 2 in stock' }, status);
@@ -87,6 +87,18 @@ describe('retail problem details in plain words', () => {
     const problem = { code: 'validation_failed', detail: 'One or more fields are invalid.', errors: [{ field: 'qty', message: 'Must be above zero.' }, { field: 'x', message: 'Too long.' }] };
     expect(retailMessage(problem, 422)).toBe('Must be above zero. Too long.');
     expect(retailMessage({ code: 'validation_failed', detail: 'One or more fields are invalid.' }, 422)).toBe('One or more fields are invalid.');
+  });
+
+  // Issue #257: one code, three cases, each in its own words; only the 404 says the branch is not the person's.
+  it('words each unknown_branch case for itself', () => {
+    const outside = { code: 'unknown_branch', detail: 'That branch is not one you work in. Choose another branch.', errors: [{ field: 'branch_id', code: 'unknown_branch', message: 'That branch is not one you work in.' }] };
+    expect(retailMessage(outside, 404)).toBe('That branch is not one you work in. Choose another branch in the Branch box.');
+    const closed = { code: 'validation_failed', detail: 'One or more fields are invalid.', errors: [{ field: 'branch_id', code: 'unknown_branch', message: 'That branch is closed.' }] };
+    expect(retailMessage(closed, 422)).toBe('That branch is closed.');
+    const destination = { code: 'validation_failed', detail: 'One or more fields are invalid.', errors: [{ field: 'to_branch_id', code: 'unknown_branch', message: 'Choose an open branch of this business to move the stock to.' }] };
+    expect(retailMessage(destination, 422)).toBe('Choose an open branch of this business to move the stock to.');
+    expect(retailMessage(closed, 422)).not.toMatch(/not one you work in/);
+    expect(retailMessage(destination, 422)).not.toMatch(/not one you work in/);
   });
 
   it('falls back on the status when there is no body', () => {

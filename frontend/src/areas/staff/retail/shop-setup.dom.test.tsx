@@ -99,7 +99,9 @@ describe('Set up your shop (issue #625)', () => {
     // Box is a unit the shop has with no usual size: it gets one, never a second Box.
     expect(updateUnit).toHaveBeenCalledWith('u2', 2, { usual_pack: { size: '50', of_unit_id: 'u1', purpose: 'both' } });
     expect(createUnit.mock.calls.map((c) => c[0])).not.toContain('Box');
-    expect(screen.getByText('Added 5 categories, 3 units and 4 packs.')).toBeTruthy();
+    // Issue #699: a box of rolls holds the roll just added.
+    expect(createUnit).toHaveBeenCalledWith('Box of rolls', { size: '2', of_unit_id: 'u-Roll', purpose: 'buy' });
+    expect(screen.getByText('Added 5 categories, 3 units and 6 packs.')).toBeTruthy();
     expect(screen.getByText('Item codes start with NAI')).toBeTruthy();
   });
 
@@ -148,7 +150,7 @@ describe('Set up your shop (issue #625)', () => {
       ...hardware.packs.filter((p) => p.name !== 'Roll').map((p) => ({ id: `u-${p.name}`, name: p.name, active: true, version: 1, usual_pack: pack })),
     ];
     // Another phone added Roll after this one read the list.
-    createUnit.mockRejectedValue(new RetailError('exists', 409, 'duplicate_unit'));
+    createUnit.mockRejectedValue(new RetailError('exists', 409, 'unit_exists'));
     draw();
     fireEvent.click(screen.getByLabelText(/Hardware and building/));
     await screen.findByTestId('setup-pack-roll');

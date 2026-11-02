@@ -9,7 +9,7 @@ import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
 import { LoanRows } from './loans';
-import { money, words } from './loan-state';
+import { draftsFirst, money, words } from './loan-state';
 import { MemberSmsControl } from './member-sms';
 import { DocumentsSection } from './member-documents';
 import { NextOfKinSection } from './member-kin';
@@ -20,6 +20,7 @@ import { showSavings } from './savings-permissions';
 import { MembersGate } from './member-ui';
 import { LOANS_CREATE, mayApply } from './permissions';
 import { BusyButton } from '../../../app/ui/BusyButton';
+import { HelpTip } from '../../../app/ui/HelpTip';
 
 // A member's page (FR-MEM-05, FR-MEM-08, FR-MEM-09, FR-MEM-10): who they are, what is missing before their details can be
 // checked, the check itself for staff who may do it, next of kin, documents, the relationship panel, their loans, savings and
@@ -50,6 +51,7 @@ function KycPanel({ member, kinCount, hasIdFront }: { member: MemberRecord; kinC
       setRejecting(false);
       void queryClient.invalidateQueries({ queryKey: ['members'] });
     },
+    meta: { success: (_r: unknown, v: { decision: 'verified' | 'rejected' }) => (v.decision === 'verified' ? 'Details accepted' : 'Details not accepted') },
   });
   const missing = kycMissing(member, kinCount, hasIdFront);
   const canCheck = mayVerifyKyc(me, member.branch_id) && member.kyc_status === 'pending_verification';
@@ -114,18 +116,21 @@ function MemberLoans({ memberId, canApply }: { memberId: string; canApply: boole
       <h2 id="loans-title">Loans</h2>
       {loans.isPending && <p className="loading">Loading loans</p>}
       <Problem error={loans.error} />
-      {loans.data && ((loans.data.items ?? []).length === 0 ? <p className="empty-state">No loans yet.</p> : <LoanRows items={loans.data.items ?? []} />)}
+      {loans.data && ((loans.data.items ?? []).length === 0 ? <p className="empty-state">No loans yet.</p> : <LoanRows items={draftsFirst(loans.data.items ?? [])} />)}
       {canApply && <Link to="/staff/lending/applications/new" search={{ memberId }} className="btn btn-block" data-tour="member-apply">Start a loan application</Link>}
     </section>
   );
 }
 
-function MemberCollateral({ memberId, canAdd }: { memberId: string; canAdd: boolean }) {
+export function MemberCollateral({ memberId, currency, canAdd }: { memberId: string; currency?: string; canAdd: boolean }) {
   const api = useCollateralApi();
   const items = useQuery({ queryKey: ['collateral', 'member', memberId], queryFn: () => api.list({ memberId }) });
   return (
     <section className="rt-card stack" aria-labelledby="col-title">
-      <h2 id="col-title">Collateral</h2>
+      <div className="help-tip-heading">
+        <h2 id="col-title">Collateral</h2>
+        <HelpTip tip="collateral" />
+      </div>
       {items.isPending && <p className="loading">Loading collateral</p>}
       <Problem error={items.error} />
       {items.data && (items.data.items ?? []).length === 0 && <p className="empty-state">No collateral registered for this member.</p>}
@@ -134,7 +139,7 @@ function MemberCollateral({ memberId, canAdd }: { memberId: string; canAdd: bool
           <li key={c.id}>
             <Link className="ln-item" to="/staff/lending/collateral/$collateralId" params={{ collateralId: c.id ?? '' }}>
               <strong>{c.description}</strong>
-              <span>{words(c.collateral_type)}, worth about {money(c.collateral_value_minor ?? c.estimated_value_minor, c.currency)}</span>
+              <span>{words(c.collateral_type)}, worth about {money(c.collateral_value_minor ?? c.estimated_value_minor, c.currency ?? currency)}</span>
             </Link>
           </li>
         ))}
@@ -153,6 +158,8 @@ export function MemberView({ member }: { member: MemberRecord }) {
   const edit = mayEditMember(me, member.branch_id);
   const seesIds = holds(me, MEMBERS_VERIFY, member.branch_id);
   const branch = branchLabel((me.branches ?? []).find((b) => b.id === member.branch_id));
+  // The member's own currency, else the business's (issue #289), never UGX by default.
+  const currency = member.currency ?? me.tenant_currency;
   return (
     <>
       <section className="rt-card ln-head" aria-label="Member" data-tour="member-header">
@@ -168,7 +175,7 @@ export function MemberView({ member }: { member: MemberRecord }) {
           <Line label="ID" value={maskUnless(edit || mayVerifyKyc(me, member.branch_id), member.id_type === 'nin' ? member.national_id : member.other_id_number)} />
           <Line label="Date of birth" value={member.date_of_birth} />
           <Line label="Work" value={member.occupation} />
-          <Line label="Usual income a month" value={member.monthly_income_minor != null ? money(member.monthly_income_minor, member.currency) : undefined} />
+          <Line label="Usual income a month" value={member.monthly_income_minor != null ? money(member.monthly_income_minor, currency) : undefined} />
           <Line label="Lives in" value={[member.village, member.sub_county, member.district, member.location].filter(Boolean).join(', ')} />
           <Line label="Branch" value={branch} />
         </dl>
@@ -183,7 +190,7 @@ export function MemberView({ member }: { member: MemberRecord }) {
       <DocumentsSection memberId={id} canAdd={edit} seesIds={seesIds} />
       <Relationships memberId={id} />
       {(me.permissions ?? []).includes('lending.loans.read') && <MemberLoans memberId={id} canApply={member.status === 'active' && mayApply(me) && holds(me, LOANS_CREATE, member.branch_id)} />}
-      {showCollateral(me) && <MemberCollateral memberId={id} canAdd={holds(me, 'lending.collateral.manage', member.branch_id)} />}
+      {showCollateral(me) && <MemberCollateral memberId={id} currency={currency} canAdd={holds(me, 'lending.collateral.manage', member.branch_id)} />}
       <MemberSmsControl memberId={id} />
     </>
   );

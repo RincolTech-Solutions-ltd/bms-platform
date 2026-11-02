@@ -1,5 +1,7 @@
-import type { Pack, Product, SaleLine } from '../../../api/retail';
+import { RetailError, type Pack, type Product, type SaleLine, type Unit } from '../../../api/retail';
 import { plural } from '../../../app/glossary';
+import standardUnits from '../../../words/standard-units.json';
+import unitWordList from '../../../words/unit-words.json';
 import { milliOf, parseCount, qtyString, showQty } from './maths';
 
 // Units of measure (ADR-033, issue #194): the pure conversions the sale and restock forms show before
@@ -117,7 +119,7 @@ export function enteredPriceMinor(line: SaleLine): number {
 }
 
 /** Issue #650: an item's standard pack, the one its stock is shown in: a unit and how many base units one holds ("24.000"). */
-export type PackSize = { unit?: string; factor?: string };
+export type PackSize = { unit?: string; factor?: string; levels?: { unit?: string; factor?: string }[] };
 
 /**
  * Issue #650 (ADR-103): the pack an item's stock is shown and counted in, the one the server marks `standard` by its one rule
@@ -130,30 +132,139 @@ export function standardPack(product: Product): Pack | undefined {
 
 /** Issue #650: whether two packs are the same unit and size, so a count typed in one is never read in another. */
 export function samePack(a: PackSize | undefined, b: PackSize | undefined): boolean {
-  return a?.unit === b?.unit && sameFactor(a?.factor, b?.factor);
+  // Issue #699: the levels a count was typed in must be the same sizes too.
+  const sizes = (p: PackSize | undefined) => (ladderLevels(p) ?? []).map((l) => `${l.unit}:${l.size}`).join(',');
+  return a?.unit === b?.unit && sameFactor(a?.factor, b?.factor) && sizes(a) === sizes(b);
 }
 
-/** "1 Carton", "3 Cartons", "2.5 Kgs": a count with its unit, singular only for exactly one. */
+/**
+ * Issue #680: the full words of the short codes shops give their units, singular and plural. Issue #698 (ADR-109): built from
+ * the one list, src/words/unit-words.json, which the server reads too; add a code there.
+ */
+const UNIT_WORDS: Record<string, [string, string]> = Object.fromEntries(
+  unitWordList.units.flatMap((u) => u.codes.map((code) => [code, [u.word, u.plural]] as const)),
+);
+
+// JUSTIFICATION-A3: one helper the six add-a-unit forms share, so each needs a one-line change (issue #698).
+/** Issue #698: every spelling the one list gives a unit, its word first ("piece", "pieces", "pc", "pcs", "pce"). */
+export function spellingsOf(word: string): string[] {
+  const u = unitWordList.units.find((x) => x.word === word);
+  return u ? [u.word, u.plural, ...u.codes, ...u.also] : [word];
+}
+
+/** A unit name as the word of the one list when it is one of its spellings ("PCS" is "piece"), else lower case and trimmed. */
+export function listedWord(name: string): string {
+  const n = name.trim().toLowerCase();
+  return unitWordList.units.find((u) => spellingsOf(u.word).includes(n))?.word ?? n;
+}
+
+/**
+ * Issue #709 (ADR-110): one of the standard packages of the shared list (src/words/standard-units.json, which the server
+ * reads too), under any spelling: Roll is one, though it is no package word, so the Units page shows it under Packages.
+ */
+export function isStandardPackage(name: string | undefined): boolean {
+  const word = listedWord(name ?? '');
+  return standardUnits.packages.some((p) => listedWord(p) === word || `${listedWord(p)}s` === word);
+}
+
+/** A unit the shop added, or one it already had under another spelling or case (`reused`, from 409 unit_exists). */
+export type AddedUnit = Unit & { reused?: boolean };
+
+/**
+ * Issue #698 (ADR-109): the add of a unit, answering the unit the shop already has when the server says it exists ("pcs" when
+ * Piece exists), so the form chooses it instead of showing an error. Any other failure is passed on.
+ */
+export function orExistingUnit(added: Promise<Unit>): Promise<AddedUnit> {
+  return added.catch((error: unknown) => {
+    const p = error instanceof RetailError ? (error.problem ?? {}) : {};
+    // Only a refusal that names the unit can choose it; one added a moment ago elsewhere stays an error (review of #715).
+    if (!(error instanceof RetailError) || error.code !== 'unit_exists' || !p['existing_id']) throw error;
+    // A switched-off unit cannot be chosen for an item, so it is said, not chosen (review of #715).
+    if (p['existing_active'] === false) {
+      throw new RetailError(`You already have ${String(p['existing_name'] ?? '')}, switched off. Switch it on in Units.`, 409, 'unit_exists', p);
+    }
+    return { id: String(p['existing_id'] ?? ''), name: String(p['existing_name'] ?? ''), active: p['existing_active'] !== false, reused: true };
+  });
+}
+
+/** The plain message after adding a unit: "Added the unit Tray." or "You already have Piece. It is chosen." */
+export function unitAddedText(unit: AddedUnit): string {
+  return unit.reused ? `You already have ${unit.name ?? ''}. It is chosen.` : `Added the unit ${unit.name ?? ''}.`;
+}
+
+/**
+ * Issue #680: a quantity with its unit in full words, as a person says it: "1 piece", "8 pieces", "1 Carton", "3 Cartons". A
+ * known short code reads as its word ("8 pc" is "8 pieces"); any other name takes a plural unless the count is exactly one.
+ */
+export function quantityIn(qty: string, unit: string): string {
+  const shown = showQty(qty);
+  const one = shown.replace(/^-/, '') === '1';
+  const words = UNIT_WORDS[unit.trim().toLowerCase()];
+  if (words) return `${shown} ${words[one ? 0 : 1]}`;
+  return `${shown} ${one ? unit : plural(unit)}`;
+}
+
+/** The unit alone in full words, for a label with no number ("Quantity (pieces)", "Stock is counted in pieces"); issue #680. */
+export function unitWords(unit: string | undefined): string {
+  const words = UNIT_WORDS[(unit ?? '').trim().toLowerCase()];
+  if (words) return words[1];
+  return unit?.trim() ? plural(unit) : '';
+}
+
+/** One of the unit in full words, for a choice or "per" ("piece", "Selling price per carton"); a short code reads as its word. */
+export function unitWord(unit: string | undefined): string {
+  const words = UNIT_WORDS[(unit ?? '').trim().toLowerCase()];
+  return words ? words[0] : (unit ?? '');
+}
+
+/** A count in the words of a sentence: lower case, "2 cartons", "5 pieces" (one casing everywhere, review of #710). */
 function counted(milli: bigint, unit: string): string {
-  return `${showQty(qtyString(Number(milli)))} ${milli === 1000n ? unit : plural(unit)}`;
+  return quantityIn(qtyString(Number(milli)), unit).toLowerCase();
 }
 
 /**
  * Issue #650 (units spec section 3, "Stock is shown both ways"): a stock quantity in the item's standard pack and its base unit,
  * and the total in the base unit when that says more: "5 Cartons and 7 Pieces" with "127 Pieces". Less than one pack reads in the
  * base unit only ("7 Pieces"); below zero says how far short ("1 Carton and 3 Pieces short" with "27 Pieces short"). An item with no
- * pack reads as it always did ("127 Piece").
+ * pack reads in its unit with a correct plural ("127 Pieces", "1 Piece", "8 pieces" for "pc"; issue #680).
  */
 export function packsAndPiecesParts(qty: string, unit: string | undefined, pack: PackSize | undefined): { inPacks: string; total?: string } {
   const f = factorMilli(pack?.factor);
-  if (!unit || !pack?.unit || f === null || f <= 1000n) return { inPacks: `${showQty(qty)}${unit ? ` ${unit}` : ''}` };
+  if (!unit || !pack?.unit || f === null || f <= 1000n) return { inPacks: unit ? quantityIn(qty, unit).toLowerCase() : showQty(qty) };
+  // Issue #699 (ADR-107): every whole level of the item's ladder, biggest first ("2 Cartons, 3 Boxes and 5 Pieces"); with no
+  // levels sent, the standard pack alone as before.
+  const levels = wholeLevelsOf(pack);
+  if (levels.length === 0) levels.push({ unit: pack.unit, size: f });
   const milli = BigInt(milliOf(qty));
   const size = milli < 0n ? -milli : milli;
-  const packs = size / f;
-  const rest = size - packs * f;
-  const parts = [packs > 0n ? counted(packs * 1000n, pack.unit) : '', rest > 0n || packs === 0n ? counted(rest, unit) : ''].filter(Boolean).join(' and ');
+  let rest = size;
+  const said: string[] = [];
+  for (const l of levels) {
+    const n = rest / l.size;
+    rest -= n * l.size;
+    if (n > 0n) said.push(counted(n * 1000n, l.unit));
+  }
+  const packed = said.length > 0;
+  if (rest > 0n || !packed) said.push(counted(rest, unit));
+  const parts = said.length > 1 ? `${said.slice(0, -1).join(', ')} and ${said[said.length - 1]}` : (said[0] ?? '');
   const inPacks = milli < 0n ? `${parts} short` : parts;
-  return packs > 0n ? { inPacks, total: `${showQty(qtyString(Number(size)))} ${plural(unit)}${milli < 0n ? ' short' : ''}` } : { inPacks };
+  return packed ? { inPacks, total: `${counted(size, unit)}${milli < 0n ? ' short' : ''}` } : { inPacks };
+}
+
+/** Issue #699: the whole levels of a pack's ladder holding more than one, biggest first, one per size. */
+function wholeLevelsOf(pack: PackSize | undefined): { unit: string; size: bigint }[] {
+  const levels: { unit: string; size: bigint }[] = [];
+  for (const l of pack?.levels ?? []) {
+    const size = factorMilli(l.factor);
+    if (l.unit && size !== null && size > 1000n && size % 1000n === 0n && !levels.some((x) => x.size === size)) levels.push({ unit: l.unit, size });
+  }
+  return levels.sort((a, b) => (a.size > b.size ? -1 : 1));
+}
+
+/** Issue #699: the levels a count takes a box each for, when the item has two or more; else null (cartons and pieces). */
+export function ladderLevels(pack: PackSize | undefined): { unit: string; size: bigint }[] | null {
+  const levels = wholeLevelsOf(pack);
+  return levels.length > 1 ? levels : null;
 }
 
 /** Issue #650: the same in one line, the one every screen says: "5 Cartons and 7 Pieces (127 Pieces)". */
@@ -163,9 +274,14 @@ export function packsAndPieces(qty: string, unit: string | undefined, pack: Pack
 }
 
 /** Issue #650: why a count or a move typed in packs and pieces cannot be read, or null when it can. */
-export function packsAndPiecesProblem(packs: string, pieces: string, unit: string, pack: string): string | null {
-  if (packs.trim() !== '' && !/^\d+$/.test(packs.trim())) return `Type whole ${plural(pack)}, and the rest in ${plural(unit)}.`;
-  if (pieces.trim() !== '' && parseCount(pieces) === null) return `Type ${plural(unit)} as a number, with at most three decimals.`;
+export function packsAndPiecesProblem(packs: string, pieces: string, unit: string, pack: string | string[]): string | null {
+  // Issue #699: a count at every level is one whole number per level, joined by "|"; the words name the level that is wrong
+  // (review of #710), lower case as in every sentence.
+  const levels = Array.isArray(pack) ? pack : [pack];
+  const bad = packs.split('|').findIndex((p) => p.trim() !== '' && !/^\d+$/.test(p.trim()));
+  const words = (name: string) => unitWords(name).toLowerCase();
+  if (bad >= 0) return `Type whole ${words(levels[bad] ?? levels[0] ?? '')}, and the rest in ${words(unit)}.`;
+  if (pieces.trim() !== '' && parseCount(pieces) === null) return `Type ${words(unit)} as a number, with at most three decimals.`;
   return null;
 }
 
@@ -174,6 +290,17 @@ export function packsAndPiecesProblem(packs: string, pieces: string, unit: strin
  * pieces. Pieces alone is the plain quantity. Null when nothing is typed, a part cannot be read, or the total is too large.
  */
 export function packsAndPiecesMilli(packs: string, pieces: string, pack: PackSize | undefined): number | null {
+  const levels = ladderLevels(pack);
+  if (levels) {
+    // Issue #699: one count per level, biggest first, joined by "|"; nothing typed at any level is the pieces alone.
+    const parts = packs.split('|').map((x) => x.trim());
+    if (parts.every((x) => x === '')) return pieces.trim() === '' ? null : parseCount(pieces);
+    if (parts.some((x) => x !== '' && !/^\d+$/.test(x))) return null;
+    const rest = pieces.trim() === '' ? 0 : parseCount(pieces);
+    if (rest === null) return null;
+    const sum = levels.reduce((t, l, i) => t + BigInt(parts[i] || '0') * l.size, BigInt(rest));
+    return sum > MAX_MILLI || sum > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(sum);
+  }
   const p = packs.trim();
   const f = factorMilli(pack?.factor);
   if (p === '' || f === null) return pieces.trim() === '' ? null : parseCount(pieces);

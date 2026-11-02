@@ -2,6 +2,7 @@ package com.rincoltech.bms.retail.catalogue.internal;
 
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -95,8 +96,14 @@ class CatalogueLookup implements RetailCatalogue {
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public NewItem createItem(
-            String description, UUID categoryId, UUID unitId, long costMinor, long sellMinor, String duplicateReason) {
-        return service.createItem(description, categoryId, unitId, costMinor, sellMinor, duplicateReason);
+            String description,
+            UUID categoryId,
+            UUID unitId,
+            long costMinor,
+            long sellMinor,
+            String duplicateReason,
+            List<NewPack> packs) {
+        return service.createItem(description, categoryId, unitId, costMinor, sellMinor, duplicateReason, packs);
     }
 
     static ProductSnapshot snapshot(CatalogueApi.Product p) {

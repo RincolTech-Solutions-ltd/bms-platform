@@ -7,6 +7,7 @@ import com.rincoltech.bms.retail.stock.internal.StockApi.AllBranchesPage;
 import com.rincoltech.bms.retail.stock.internal.StockApi.Correction;
 import com.rincoltech.bms.retail.stock.internal.StockApi.CorrectionRequest;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementPage;
+import com.rincoltech.bms.retail.stock.internal.StockApi.OpenStocktake;
 import com.rincoltech.bms.retail.stock.internal.StockApi.QuickAdd;
 import com.rincoltech.bms.retail.stock.internal.StockApi.QuickAddRequest;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockPage;
@@ -226,6 +227,16 @@ class StockController {
         Stocktake s = service.createStocktake(request);
         return ResponseEntity.created(URI.create("/api/v1/retail/stocktakes/" + s.id()))
                 .body(s);
+    }
+
+    @GetMapping("/stocktakes/unfinished")
+    @RequiresPermission("retail.stocktake.commit")
+    @Operation(
+            summary = "The counts started at a branch and neither saved nor thrown away, newest first, at most 20"
+                    + " (issue #728); needs retail.stocktake.commit at that branch",
+            operationId = "listRetailUnfinishedStocktakes")
+    List<OpenStocktake> unfinished(@RequestParam(name = "branch_id", required = false) UUID branchId) {
+        return service.openStocktakes(branchId);
     }
 
     @GetMapping("/stocktakes/{stocktake_id}")

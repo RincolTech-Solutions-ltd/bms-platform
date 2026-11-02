@@ -15,7 +15,7 @@ import { usePersistedDraft } from './idempotency';
 import { bigDrop, parseQty, qtyString, showQty } from './maths';
 import { buildSaleRequest, defaultPrice, draftProblem, draftTotal, lineFigures, lineHint, newLine, resolveRequestOf, withUnit, type Accounts, type Draft, type DraftLine, type Pricing } from './sale-state';
 import { MIN_REASON, hasNoPrice, isOverride, pricedLines, receiptNote, reasonOk, sourceNote } from './price-state';
-import { chosenPack, enteredPriceMinor, enteredQty, sellingPacks } from './units-state';
+import { chosenPack, enteredPriceMinor, enteredQty, quantityIn, sellingPacks, unitWord, unitWords } from './units-state';
 import { EmptyState } from '../../../components/states';
 import { BranchRequired, Gate, NoStockHere, Note, ProductPicker, Problem, money, useBranchRoles, useProfitAccess, useStockingBranch } from './ui';
 import { branchLabel } from '../../../auth/branch';
@@ -40,8 +40,10 @@ import { useEntryChecks, useEntryNorms } from './entry-checks';
 import { FirstItemsCard, useNoItemsYet } from './first-items';
 import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
 import { ScreenLink, addOn } from './screen-link';
+import { CustomerPicker } from './customer-picker';
 import { dropWords } from './stocktake';
 import { useBranchHold } from '../branch-picker';
+import { SELL_COUNT_NOTE, savingCount, unfinishedKey } from './unfinished-counts';
 import { icons } from '../../../components/icons';
 
 // Record a sale (FR-RET-04, FR-RET-05). One idempotency key per draft, kept with the draft in this
@@ -83,7 +85,7 @@ export function Receipt({ sale, received }: { sale: Sale; /** Cash the customer 
           <tr>
             <th>Item</th>
             <th className="num">Qty</th>
-            <th className="num">Price</th>
+            <th className="num">Selling price</th>
             <th className="num">Total</th>
           </tr>
         </thead>
@@ -175,15 +177,15 @@ export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, fresh,
           <label htmlFor={`unit-${i}`}>Sell by</label>
           {/* empty: drawn only when the item has packs; its own unit is always there. */}
           <select id={`unit-${i}`} data-tour="sale-unit" value={pack?.unit_id ?? ''} onChange={(e) => onUnit(e.target.value)}>
-            <option value="">{line.product.unit}</option>
-            {packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{k.unit} ({showQty(k.factor ?? '')} {line.product.unit})</option>)}
+            <option value="">{unitWord(line.product.unit)}</option>
+            {packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{unitWord(k.unit)} ({quantityIn(k.factor ?? '', line.product.unit ?? '')})</option>)}
           </select>
         </div>
       )}
       <div className="rt-row">
-        <Stepper id={`qty-${i}`} label={`Quantity (${pack?.unit ?? line.product.unit})`} name={line.product.description} value={line.qty} onChange={onQty} min={1} inputMode="decimal" invalid={f === null || hint !== null} />
+        <Stepper id={`qty-${i}`} label={`Quantity (${unitWords(pack?.unit ?? line.product.unit ?? '')})`} name={line.product.description} value={line.qty} onChange={onQty} min={1} inputMode="decimal" invalid={f === null || hint !== null} />
         <div>
-          <label htmlFor={`price-${i}`}>{pack ? `Price per ${pack.unit}` : 'Unit price'}</label>
+          <label htmlFor={`price-${i}`}>{pack ? `${WORDS.sellingPrice} per ${unitWord(pack.unit)}` : WORDS.sellingPrice}</label>
           <input id={`price-${i}`} inputMode="numeric" value={line.price} onChange={(e) => onPrice(e.target.value)} aria-invalid={f === null} readOnly={price ? !price.canOverride : offlinePrice ? !offlinePrice.canType : false} />
         </div>
       </div>
@@ -270,6 +272,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
 
   // The client sale id is the draft's key, so a sale whose answer was lost and that is kept to send later is never twice.
   // The request is kept with the draft once sent: until the server answers, the same request is all that can go again.
+  // toast-exempt: success screen, the sale complete screen headed Sale saved through onSaved
   const save = useMutation({
     mutationFn: (body: SaleRequest) => retail.createSale(body, key),
     onError: (e) => {
@@ -294,6 +297,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       setDraft((d) => ({ ...d, customerId: c.id ?? '', newBuyerName: '', newBuyerContact: '' }));
       setAddingBuyer(false);
     },
+    meta: { success: 'Customer added' },
   });
   const update = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const setLine = (i: number, patch: { qty?: string; price?: string; typed?: boolean; reason?: string }) =>
@@ -376,7 +380,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
   useEffect(() => {
     if (!online) return;
     setStuck(false);
-    const live = [...drafts.current.values()];
+    const live = [...drafts.current.values(), ...sending];
     for (const id of keptCounts()) if (!live.includes(id)) discardCount(id);
   }, [online]);
   const holdsDraft = () => {
@@ -393,7 +397,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       // A draft whose commit was lost is sent again, never made twice.
       let draftId = drafts.current.get(id);
       if (draftId === undefined) {
-        draftId = (await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: id, counted_qty: qtyString(h.counted) }], note: 'Counted when the item was added on Sell' })).id ?? '';
+        draftId = (await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: id, counted_qty: qtyString(h.counted) }], note: SELL_COUNT_NOTE })).id ?? '';
         keepCount(draftId, true);
         drafts.current.set(id, draftId);
       }
@@ -411,8 +415,11 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     // Committed after the sale was cleared or the screen closed: the count stands, the item goes on no sale.
     if (stale()) throw new StaleCount();
   };
+  // Issue #728, review of #729: a count saved or thrown away here leaves the list of counts not saved.
+  const countsChanged = () => void queryClient.invalidateQueries({ queryKey: unfinishedKey(branchId) });
   const countCommitted = (h: HeldCount) => {
     drop(h.product.id);
+    countsChanged();
     for (const key of [['retail', 'products'], ['retail', 'stocked-branches']]) void queryClient.invalidateQueries({ queryKey: key });
     add({ ...h.product, qty: qtyString(h.counted) });
   };
@@ -423,11 +430,11 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     if (refused(e)) {
       const draftId = drafts.current.get(h.product.id ?? '');
       drafts.current.delete(h.product.id ?? '');
-      if (draftId !== undefined) discardCount(draftId);
+      if (draftId !== undefined) discardCount(draftId, countsChanged);
       drop(h.product.id);
       const words = typeof e.problem?.detail === 'string' ? e.problem.detail : e.message;
       show(`${words} ${name} is not on the sale: use ${WORDS.countStock}, then sell it.`, 'error');
-    } else show(`The count of ${name} is not committed. Try again.`, 'error');
+    } else show(`The count of ${name} is not saved. Try again.`, 'error');
   };
   const notNow = (h: HeldCount) => {
     const draftId = drafts.current.get(h.product.id ?? '');
@@ -437,7 +444,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         return;
       }
       drafts.current.delete(h.product.id ?? '');
-      discardCount(draftId);
+      discardCount(draftId, countsChanged);
     }
     drop(h.product.id);
     show(`${h.product.description ?? 'The item'} is saved. It is not on the sale: count it on ${WORDS.countStock}, then sell it.`, 'info');
@@ -464,7 +471,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
           setHeld((l) => [...l.filter((x) => x.product.id !== product.id), { product, counted, expected }]);
           asks = true;
         } else {
-          const count = await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: product.id ?? '', counted_qty: qtyString(counted) }], note: 'Counted when the item was added on Sell' });
+          const count = await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: product.id ?? '', counted_qty: qtyString(counted) }], note: SELL_COUNT_NOTE });
           const draftId = count.id ?? '';
           keepCount(draftId, true);
           // Stock that arrived between the read and the count (or a balance the search did not return): never sent to be
@@ -473,6 +480,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
             discardCount(draftId);
             throw stale() ? new StaleCount() : new Error('big drop');
           }
+          sending.add(draftId);
           try {
             // No press to try again here: a commit whose answer was lost is sent once more on the same draft.
             await commitMade(draftId).catch((e: unknown) => {
@@ -485,14 +493,18 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
             if (refused(e)) discardCount(draftId);
             else lost = true;
             throw e;
+          } finally {
+            sending.delete(draftId);
           }
           keepCount(draftId, false);
           if (stale()) throw new StaleCount();
           counts = true;
         }
       } catch (e) {
-        if (lost) show(`The count of ${name} may not be committed. Check it on ${WORDS.countStock} before you sell it.`, 'error');
-        else if (!(e instanceof StaleCount)) show(`${name} is saved, but its count is not. Count it on ${WORDS.countStock}, then sell it.`, 'error');
+        // A sale cleared or a screen left meanwhile hears nothing of it (issue #664); the kept draft is dealt with as above.
+        if (lost) {
+          if (!stale()) show(`The count of ${name} may not be saved. Check it on ${WORDS.countStock} before you sell it.`, 'error');
+        } else if (!(e instanceof StaleCount)) show(`${name} is saved, but its count is not. Count it on ${WORDS.countStock}, then sell it.`, 'error');
       }
     }
     // The card of a shop with no items, the search and the branches that hold stock all read again with the new item.
@@ -564,6 +576,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
   };
   const entry = useEntryChecks('sell', branchId, warnings, send, draft.lines);
   const lost = locked && !save.isPending && !(save.error instanceof RetailError);
+  // toast-exempt: success screen, the queued notice: the provisional receipt headed Sale saved on this phone through onQueued
   const keep = useMutation({
     mutationFn: async () => {
       if (!offline) throw new Error('Offline sales are not available');
@@ -635,7 +648,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
             notFound={(term, clear, hold) => (
               <ScreenToast.Provider value={show}>
                 <NewItemHere id="sale-new" description={term} ask={ASK_OWNER_ITEM} askCost={profit} qtyLabel={mayCount ? 'How many you have here' : undefined}
-                  qtyError="Type how many you have here, more than 0." onOpenChange={hold} onAdded={(added) => addNew(added, clear)} />
+                  qtyError="Type how many you have here, more than 0." onOpenChange={hold} onAdded={(added) => addNew(added, clear)}
+                  at={{ value: branchId, places: (me.branches ?? []).filter((b) => b.id === branchId) }} />
                 <ScreenLink screen="quickAdd" to="/staff/retail/quick-add" search={{ name: term }}>Quick add "{term}" with its prices and stock</ScreenLink>
               </ScreenToast.Provider>
             )}
@@ -648,7 +662,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       ))}
       {stuck && !online && held.length > 0 && (
         <p role="alert" className="alert alert-warning" data-testid="sale-count-offline">
-          A count on this sale is not committed. Connect to the internet, then commit the count or press Not now, before you clear the sale or switch branch.
+          A count on this sale is not saved. Connect to the internet, then save the count or press Not now, before you clear the sale or switch branch.
         </p>
       )}
 
@@ -692,20 +706,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       {pricesOn && draft.method !== 'credit' && (
         <fieldset data-tour="sale-customer">
           <legend>Customer</legend>
-          {showsEmptyChoice(customers) ? (
-            <EmptyChoice id="price-customer" label="Customer (optional): sets the price list" load={customers} text="No customers yet." ask="Ask the owner to add your customers first."
-              add={addOn(me, 'buyers', 'Add a customer', '/staff/retail/catalogue/buyers')} />
-          ) : (
-          <>
-          <label htmlFor="price-customer">Customer (optional): sets the price list</label>
-          <select id="price-customer" value={draft.customerId} onChange={(e) => update({ customerId: e.target.value })}>
-            <option value="">No customer: retail prices</option>
-            {(customers.data ?? []).map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-          </>
-          )}
+          <CustomerPicker id="price-customer" label="Customer (optional): sets the price list" placeholder="No customer: retail prices"
+            customers={customers} value={draft.customerId} onChange={(customerId) => update({ customerId })} />
         </fieldset>
       )}
       {canChooseList && (
@@ -897,6 +899,10 @@ class StaleCount extends Error {}
 // is sent again. Kept per tab: another tab's Sell may still be committing its own.
 const KEPT_COUNTS = 'sale-held-counts';
 
+// Issue #664: the drafts of new items whose commit is on its way. Shared by every Sell form, as the kept drafts are, so a form
+// opened again (the screen left and come back to, or a branch switch) leaves another form's commit alone.
+const sending = new Set<string>();
+
 function keptCounts(): string[] {
   try {
     const kept: unknown = JSON.parse(sessionStorage.getItem(KEPT_COUNTS) ?? '[]');
@@ -920,25 +926,29 @@ const refused = (e: unknown): e is RetailError => e instanceof RetailError && e.
 
 /** Issue #656: commits a count Sell made; one the server already took (409 stocktake_committed, its first answer lost) stands. */
 async function commitMade(id: string, acknowledged?: string[]) {
-  await (acknowledged ? retail.commitStocktake(id, acknowledged) : retail.commitStocktake(id)).catch((e: unknown) => {
+  // Issue #730: marked as saving, so it is never offered to be thrown away meanwhile.
+  await savingCount(id, acknowledged ? retail.commitStocktake(id, acknowledged) : retail.commitStocktake(id)).catch((e: unknown) => {
     if (!(e instanceof RetailError && e.code === 'stocktake_committed')) throw e;
   });
 }
 
-/** Issue #656: ends a draft Sell made; one already committed or discarded, or not found, is forgotten too. */
-function discardCount(id: string) {
+/**
+ * Issue #656: ends a draft Sell made; one already committed or discarded, or not found, is forgotten too. `onDone` is told once
+ * the server answers, so the list of counts not saved is read again (review of #729).
+ */
+function discardCount(id: string, onDone?: () => void) {
   keepCount(id, true);
   retail.discardStocktake(id).then(
     () => keepCount(id, false),
     (e: unknown) => {
       if (e instanceof RetailError && (e.status === 404 || e.status === 409)) keepCount(id, false);
     },
-  );
+  ).finally(onDone);
 }
 
 /**
  * Issue #656: the count Sell would make of a new item is a big drop, so the records already hold more of it here. The line asks
- * its tick first, as on Count stock; Commit the count then makes the count and sends it acknowledged. Not now leaves nothing open.
+ * its tick first, as on Count stock; Save the count then makes the count and sends it acknowledged. Not now leaves nothing open.
  */
 function HeldCountTick({ held, commit, onCommitted, onFailed, onCancel }: {
   held: HeldCount;
@@ -965,7 +975,7 @@ function HeldCountTick({ held, commit, onCommitted, onFailed, onCancel }: {
           <input type="checkbox" checked={ok} aria-describedby={wordsId} data-needed={ok ? undefined : ''} onChange={(e) => setOk(e.target.checked)} />
           {`Yes, ${name} is right`}
         </label>
-        <BusyButton type="button" className="rt-primary" busy={busy} notReady={!ok} onClick={() => sending.mutate()}>Commit the count</BusyButton>
+        <BusyButton type="button" className="rt-primary" busy={busy} notReady={!ok} onClick={() => sending.mutate()}>Save the count</BusyButton>
         {/* Not now discards a draft whose commit was lost; while the count is on its way it waits. */}
         {!busy && <button type="button" onClick={() => onCancel(held)}>Not now</button>}
       </div>

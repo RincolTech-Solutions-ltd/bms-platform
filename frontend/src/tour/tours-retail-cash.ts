@@ -35,21 +35,23 @@ export const productsPage: Tour = {
   // Version 5 says what an item is counted in, as the item form now does (issue #547); version 6 that the category comes first and
   // the item code is made from it (issue #493).
   // Version 7: the app always makes the item code, never typed (issue #562).
-  version: 7,
+  // Version 8: the search and the category chips come first, and on a phone an item is a row that opens it (issue #690).
+  // Version 9: the item's unit is its single unit (issue #709, ADR-110).
+  version: 9,
   title: 'This page: items',
   audience: (me) => held(me, CATALOGUE) && held(me, STOCK_READ),
   autoStart: false,
   page: '/staff/retail/catalogue/products',
   steps: [
-    step({ id: 'add', target: 'product-add', title: 'Add an item', body: 'Tap here to add something you sell. Pick the category first, then type the name, what it is counted in and the price. The app gives it the next code of the category, such as BLB-0001: you never type one. Adding from the category\'s own page saves picking the category.' }),
+    step({ id: 'search', target: 'product-search', title: 'Find an item', body: 'Type a name, a code, a barcode or a category. The list narrows as you type. Tap a category under the box to see only its items. Nothing found? Tap Add it.' }),
+    step({ id: 'add', target: 'product-add', title: 'Add an item', body: 'Tap here to add something you sell. Pick the category first, then type the name, choose its single unit, such as piece, and type the price. The app gives it the next code of the category, such as BLB-0001: you never type one. Adding from the category\'s own page saves picking the category.' }),
     step({ id: 'sizes', target: 'product-add-sizes', title: 'Sizes and colours', body: 'Sell one design in several sizes or prints? Tap here and type the sizes and the colours once. Each one gets its own price, stock and item code.' }),
     step({ id: 'join', target: 'product-join-sizes', title: 'One item per size?', body: 'If you typed each size as its own item, tap here to join them. Each keeps its stock and history.' }),
-    step({ id: 'search', target: 'product-search', title: 'Find an item', body: 'Type a name, a code or a category. The list narrows as you type.' }),
-    step({ id: 'filters', target: 'product-filters', title: 'Narrow the list', body: 'Pick a category, or choose Switched off to see items you no longer sell.' }),
-    step({ id: 'edit', target: 'product-list', title: 'Change an item', body: 'Tap Edit on an item to change its name, category or what it is counted in. Moving it to another category keeps its item code. Tap Stock to see how much of it you hold.' }),
+    step({ id: 'filters', target: 'product-filters', title: 'Narrow the list', body: 'Choose Inactive to see items you no longer sell.' }),
+    step({ id: 'edit', target: 'product-list', title: 'Change an item', body: 'Tap an item on a phone, or Edit on a laptop, to change its name, category or single unit. Moving it to another category keeps its item code. Tap Stock to see how much of it you hold.' }),
     // Issue #412: the low-stock level is on the item's page, under Edit.
-    step({ id: 'minimum', target: 'product-list', title: 'Warn me when stock is below', body: 'Tap Edit on an item to set when you are told it is running low. Set one level for every shop and store, or a different one for a shop. With no level, you are told when it would run out within 14 days.' }),
-    step({ id: 'price', target: 'product-list', needs: [PRICE_EDIT], optional: true, title: 'Change a price', body: 'Tap Change price on an item. The old price stays in its history, so earlier sales keep the price they were made at.' }),
+    step({ id: 'minimum', target: 'product-list', title: 'Warn me when stock is below', body: 'Open an item to set when you are told it is running low. On a phone tap the item; on a laptop tap Edit. Set one level for every shop and store, or a different one for a shop. With no level, you are told when it would run out within 14 days.' }),
+    step({ id: 'price', target: 'product-list', needs: [PRICE_EDIT], optional: true, title: 'Change a price', body: 'Open an item and tap Change price, or tap Change price on it in the list on a laptop. The old price stays in its history, so earlier sales keep the price they were made at.' }),
   ],
 };
 
@@ -58,13 +60,14 @@ export const sizesNewPage: Tour = {
   id: 'page-sizes-new',
   // Version 2 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
   // Version 3: the app always makes the item code, never typed (issue #562).
-  version: 3,
+  // Version 4: the item's unit is its single unit (issue #709, ADR-110).
+  version: 4,
   title: 'This page: an item with sizes and colours',
   audience: (me) => held(me, CATALOGUE) && held(me, STOCK_READ),
   autoStart: false,
   page: '/staff/retail/catalogue/products/sizes/new',
   steps: [
-    step({ id: 'name', target: 'sizes-name', title: 'Name it once', body: 'Type what it is called, the category, what it is counted in and the price. Every size and colour starts from these, and the app gives each its item code.' }),
+    step({ id: 'name', target: 'sizes-name', title: 'Name it once', body: 'Type what it is called, the category, its single unit and the price. Every size and colour starts from these, and the app gives each its item code.' }),
     step({ id: 'options', target: 'sizes-options', title: 'Sizes and colours', body: 'Type the sizes, then the colours or prints, each list separated by commas. Every size comes in every colour.' }),
     step({ id: 'preview', target: 'sizes-preview', title: 'Check the list', body: 'Each one shows its code and price. Change a price here if a bigger size costs more.' }),
     step({ id: 'save', target: 'sizes-save', title: 'Make them', body: 'Tap here. Each size and colour is then an item you can sell, buy, move and count on its own.' }),
@@ -76,16 +79,17 @@ export const sizesJoinPage: Tour = {
   id: 'page-sizes-join',
   // Version 2 words the Pick step for the picker that lists items only while you type (issue #534).
   // Version 3 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
-  version: 3,
-  title: 'This page: join items as sizes',
+  // Version 4 follows the three steps: pick the items, name the item, check the sizes (issue #707).
+  version: 4,
+  title: 'This page: put items together as sizes',
   audience: (me) => held(me, CATALOGUE) && held(me, STOCK_READ),
   autoStart: false,
   page: '/staff/retail/catalogue/products/sizes/join',
   steps: [
-    step({ id: 'name', target: 'join-name', title: 'Name the item', body: 'Type what the item is called, such as Twin cable. Each size gets this name with its size.' }),
-    step({ id: 'pick', target: 'join-pick', title: 'Pick the items', body: 'Type the name of each item that is one size or colour. Tap it in the list under the box.' }),
-    step({ id: 'list', target: 'join-list', title: 'Say which size', body: 'Type the size or the colour of each one. They keep their codes, prices and stock.' }),
-    step({ id: 'save', target: 'join-save', title: 'Join them', body: 'Tap here. They now show together as one item, and sell and buy as before.' }),
+    step({ id: 'pick', target: 'join-pick', title: '1. Pick the items', body: 'Type part of a name and tick each item that is one size. Tick 2 or more.' }),
+    step({ id: 'name', target: 'join-name', title: '2. Name the item', body: 'The app suggests the words the items share, such as Twin cable. Change it if customers call it something else.' }),
+    step({ id: 'list', target: 'join-list', title: '3. Check the sizes', body: 'Each item shows the size the app found in its name. Change any that are wrong.' }),
+    step({ id: 'save', target: 'join-save', title: 'Put them together', body: 'Tap here. They now show together as one item, and sell and buy as before.' }),
   ],
 };
 
@@ -141,13 +145,14 @@ export const categoryPage: Tour = {
 
 export const unitsPage: Tour = {
   id: 'page-units',
-  version: 1,
+  // Version 2: the page is in two parts, Single units and Packages (issue #709, ADR-110).
+  version: 2,
   title: 'This page: units',
   audience: (me) => held(me, CATALOGUE) && held(me, STOCK_READ),
   autoStart: false,
   page: '/staff/retail/catalogue/units',
   steps: [
-    step({ id: 'add', target: 'named-add', title: 'Add a unit', body: 'Tap here and type a unit, such as piece, kg or box. It is how you count an item.' }),
+    step({ id: 'add', target: 'named-add', title: 'Single units and packages', body: 'Your shop already has the usual ones, such as piece, kg, dozen and box. A single unit is one thing a customer can buy on its own. A package holds single units. Add your own here and under Packages.' }),
     step({ id: 'list', target: 'named-list', title: 'Rename or switch off', body: 'Tap Rename to fix a name. Tap Switch off to stop new items using it. Old items keep it. Tap Items to see them.' }),
   ],
 };
@@ -352,16 +357,17 @@ export const savingsPage: Tour = {
   ],
 };
 
+// Version 2: a store is shown, and marked on Branches, not picked here (issue #371, ADR-104).
 export const branchRolesPage: Tour = {
   id: 'page-branch-roles',
-  version: 1,
+  version: 2,
   title: 'This page: branch roles',
   audience: (me) => held(me, BRANCH_ROLE) && held(me, STOCK_READ) && capable(me, 'branch_roles'),
   autoStart: false,
   page: '/staff/retail/branch-roles',
   steps: [
     step({ id: 'help', target: 'branch-roles-help', title: 'Stores and shops', body: 'A store keeps stock and feeds the shop. Only a shop sells to customers. A branch can be both.' }),
-    step({ id: 'roles', target: 'retail-roles', title: 'Pick a role for each branch', body: 'Choose Store, Shop or Both under the branch name. It saves at once. Tap Stock to see what each branch holds.' }),
+    step({ id: 'roles', target: 'retail-roles', title: 'Pick a role for each branch', body: 'Choose Shop or Both under the branch name. It saves at once. A store is marked on Branches. Tap Stock to see what each branch holds.' }),
   ],
 };
 

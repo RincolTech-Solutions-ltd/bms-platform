@@ -158,7 +158,7 @@ describe('a Sell search that finds nothing', () => {
     await search('Test duvet cover');
     fireEvent.click(await screen.findByRole('button', { name: 'Not in the list? Add it here' }));
     await chooseCategory(within(form()).getByLabelText(/^Category/), 'Duvets');
-    fireEvent.change(within(form()).getByLabelText(/^Counted in/), { target: { value: 'u1' } });
+    fireEvent.change(within(form()).getByLabelText(/^Single unit/), { target: { value: 'u1' } });
     const cost = within(form()).queryByLabelText(/^Buying price/);
     if (cost) fireEvent.change(cost, { target: { value: '30000' } });
     fireEvent.change(within(form()).getByLabelText(/^Selling price/), { target: { value: '45000' } });
@@ -180,13 +180,13 @@ describe('a Sell search that finds nothing', () => {
 
     // A first shop has no category: the field says so (issue #619), makes one right there and chooses it.
     expect(await within(form()).findByText('No categories yet.')).toBeTruthy();
-    fireEvent.click(within(form()).getByRole('button', { name: 'Add a category' }));
-    fireEvent.change(screen.getByLabelText(/^Name of the new category/), { target: { value: 'Duvets' } });
+    fireEvent.click(within(form()).getByRole('button', { name: '+ Add a category' }));
+    fireEvent.change(await screen.findByLabelText(/^Name of the new category/), { target: { value: 'Duvets' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add category' }));
     await waitFor(() => expect(within(form()).getByLabelText(/^Category/).textContent).toBe('Duvets'));
     expect(createCategory).toHaveBeenCalledWith('Duvets');
 
-    fireEvent.change(within(form()).getByLabelText(/^Counted in/), { target: { value: 'u1' } });
+    fireEvent.change(within(form()).getByLabelText(/^Single unit/), { target: { value: 'u1' } });
     fireEvent.change(within(form()).getByLabelText(/^Buying price/), { target: { value: '30000' } });
     fireEvent.change(within(form()).getByLabelText(/^Selling price/), { target: { value: '45000' } });
     fireEvent.change(within(form()).getByLabelText(/^How many you have here/), { target: { value: '4' } });
@@ -280,11 +280,11 @@ describe('a Sell search that finds nothing', () => {
   const holdsTen = () => listProducts.mockImplementation(({ query }: { query?: string }) => Promise.resolve(query === 'DUV-0001' ? [{ ...made, qty: '10.000' }] : []));
   const tickAndCommitPillow = (ask: HTMLElement) => {
     fireEvent.click(within(ask).getByRole('checkbox', { name: 'Yes, Test pillow case is right' }));
-    fireEvent.click(within(ask).getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(within(ask).getByRole('button', { name: 'Save the count' }));
   };
   const tickAndCommit = (ask: HTMLElement) => {
     fireEvent.click(within(ask).getByRole('checkbox', { name: 'Yes, Test duvet cover is right' }));
-    fireEvent.click(within(ask).getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(within(ask).getByRole('button', { name: 'Save the count' }));
   };
 
   it('asks the tick of a big drop before any draft is made, then makes and commits it acknowledged (issues #636, #656)', async () => {
@@ -298,7 +298,7 @@ describe('a Sell search that finds nothing', () => {
     expect(ask.textContent).toContain('The records show 10 of Test duvet cover here, and you counted 4. This removes 6. Is that right?');
     expect(createStocktake).not.toHaveBeenCalled();
     // Commit the count waits for the tick.
-    fireEvent.click(within(ask).getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(within(ask).getByRole('button', { name: 'Save the count' }));
     expect(createStocktake).not.toHaveBeenCalled();
     tickAndCommit(ask);
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('s1', ['p9']));
@@ -342,9 +342,9 @@ describe('a Sell search that finds nothing', () => {
     // The first tick stays with the first item: the second asks its own.
     expect((within(first).getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
     expect((within(second).getByRole('checkbox', { name: 'Yes, Test pillow case is right' }) as HTMLInputElement).checked).toBe(false);
-    fireEvent.click(within(second).getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(within(second).getByRole('button', { name: 'Save the count' }));
     expect(createStocktake).not.toHaveBeenCalled();
-    fireEvent.click(within(first).getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(within(first).getByRole('button', { name: 'Save the count' }));
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('s-p9', ['p9']));
     tickAndCommitPillow(await screen.findByTestId('sale-count-drop-p10'));
     await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('s-p10', ['p10']));
@@ -397,8 +397,8 @@ describe('a Sell search that finds nothing', () => {
     open(<RecordSale />, owner);
     await fill('4');
     tickAndCommit(await screen.findByTestId('sale-count-drop-p9'));
-    expect(await screen.findByText('The count of Test duvet cover is not committed. Try again.')).toBeTruthy();
-    fireEvent.click(within(screen.getByTestId('sale-count-drop-p9')).getByRole('button', { name: 'Commit the count' }));
+    expect(await screen.findByText('The count of Test duvet cover is not saved. Try again.')).toBeTruthy();
+    fireEvent.click(within(screen.getByTestId('sale-count-drop-p9')).getByRole('button', { name: 'Save the count' }));
     expect(await screen.findByRole('button', { name: 'Remove Test duvet cover' })).toBeTruthy();
     expect(createStocktake).toHaveBeenCalledTimes(1);
     expect(commitStocktake.mock.calls).toEqual([['s1', ['p9']], ['s1', ['p9']]]);
@@ -418,7 +418,7 @@ describe('a Sell search that finds nothing', () => {
     expect(await screen.findByRole('button', { name: 'Remove Test bed sheet' })).toBeTruthy();
     await fill('4');
     tickAndCommit(await screen.findByTestId('sale-count-drop-p9'));
-    expect(await screen.findByText('The count of Test duvet cover is not committed. Try again.')).toBeTruthy();
+    expect(await screen.findByText('The count of Test duvet cover is not saved. Try again.')).toBeTruthy();
     expect(createStocktake).toHaveBeenCalledTimes(2);
     expect(discardStocktake).not.toHaveBeenCalled();
   };
@@ -490,7 +490,7 @@ describe('a Sell search that finds nothing', () => {
     const started = (await screen.findByTestId('branch-in-use')).textContent;
     await toLostCommit();
     act(() => network.set(false));
-    const words = 'A count on this sale is not committed. Connect to the internet, then commit the count or press Not now, before you clear the sale or switch branch.';
+    const words = 'A count on this sale is not saved. Connect to the internet, then save the count or press Not now, before you clear the sale or switch branch.';
     fireEvent.click(screen.getByRole('button', { name: 'Clear this sale' }));
     expect(await screen.findByText(words)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Remove Test bed sheet' })).toBeTruthy();
@@ -504,6 +504,36 @@ describe('a Sell search that finds nothing', () => {
     expect(screen.queryByText(words)).toBeNull();
     expect(discardStocktake).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
+    await waitFor(() => expect(screen.getByTestId('branch-in-use').textContent).not.toBe(started));
+    await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
+  });
+
+  it('moves off a branch taken away while offline once the connection comes back and the hold lifts (issue #664)', async () => {
+    lostCommit();
+    const network = testConnectivity(true);
+    const offline = { scope: 'test', connectivity: network, catalogue: null, engine: { subscribe: () => () => undefined, snapshot: () => ({ items: [], syncing: false, needsSignIn: false }) } } as unknown as Offline;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    function Shell({ me }: { me: Me }) {
+      const { branch } = useActiveBranch(me);
+      if (!branch) return null;
+      return (
+        <StaffContext.Provider value={{ me, branch, chooseBranch }}>
+          <p data-testid="branch-in-use">{branch}</p>
+          <SaleForm key={branch} branchId={branch} />
+        </StaffContext.Provider>
+      );
+    }
+    const at = (me: Me) => <QueryClientProvider client={client}><OfflineProvider value={offline}><Shell me={me} /></OfflineProvider></QueryClientProvider>;
+    const { rerender } = render(at(owner));
+    const started = (await screen.findByTestId('branch-in-use')).textContent;
+    await toLostCommit();
+    act(() => network.set(false));
+    // The profile read again no longer lists the branch in use: offline the sale holds it, with its draft.
+    rerender(at({ ...owner, branches: (owner.branches ?? []).filter((b) => b.id !== started) }));
+    await act(async () => undefined);
+    expect(screen.getByTestId('branch-in-use').textContent).toBe(started);
+    expect(discardStocktake).not.toHaveBeenCalled();
+    act(() => network.set(true));
     await waitFor(() => expect(screen.getByTestId('branch-in-use').textContent).not.toBe(started));
     await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
   });
@@ -592,8 +622,8 @@ describe('a Sell search that finds nothing', () => {
     open(<RecordSale />, owner);
     await fill('4');
     tickAndCommit(await screen.findByTestId('sale-count-drop-p9'));
-    expect(await screen.findByText('The count of Test duvet cover is not committed. Try again.')).toBeTruthy();
-    fireEvent.click(within(screen.getByTestId('sale-count-drop-p9')).getByRole('button', { name: 'Commit the count' }));
+    expect(await screen.findByText('The count of Test duvet cover is not saved. Try again.')).toBeTruthy();
+    fireEvent.click(within(screen.getByTestId('sale-count-drop-p9')).getByRole('button', { name: 'Save the count' }));
     expect(await screen.findByRole('button', { name: 'Remove Test duvet cover' })).toBeTruthy();
     expect(discardStocktake).not.toHaveBeenCalled();
   });
@@ -663,6 +693,94 @@ describe('a Sell search that finds nothing', () => {
     expect(createStocktake).toHaveBeenCalledTimes(1);
   });
 
+  // Issue #664: the count of a new item (no tick asked) whose draft is still being made when the sale or the screen changes.
+  // JUSTIFICATION-A3: the three tests issue #664 names, with the setup they share.
+  /** Holds the duvet cover's count on its way; the answer it returns gives draft s1 when called. */
+  const countOnItsWay = (first: Product = made) => {
+    createProduct.mockResolvedValueOnce(first).mockResolvedValue(made);
+    let answer: () => void = () => undefined;
+    createStocktake.mockImplementation(({ lines }: { lines: { product_id: string }[] }) =>
+      lines[0]!.product_id === 'p8' ? Promise.resolve({ id: 's8', status: 'draft', lines: [] }) : new Promise<Stocktake>((resolve) => { answer = () => resolve(draftOf('0.000')); }));
+    commitStocktake.mockImplementation((id: string) => Promise.resolve({ id, status: 'committed' }));
+    return async () => {
+      await waitFor(() => expect(createStocktake).toHaveBeenCalledWith(expect.objectContaining({ lines: [expect.objectContaining({ product_id: 'p9' })] })));
+      return () => answer();
+    };
+  };
+  /** The draft s1 that came after the sale or screen changed is discarded, never committed, and nothing is said. */
+  const discardedUnsent = async () => {
+    await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
+    expect(commitStocktake).not.toHaveBeenCalledWith('s1');
+    expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
+    expect(screen.queryByText(/its count is not|may not be saved/)).toBeNull();
+  };
+
+  it('discards the count of a new item that answers after Clear this sale, and puts nothing on the sale (issue #664)', async () => {
+    const onItsWay = countOnItsWay(sheet);
+    open(<RecordSale />, owner);
+    await fill('3');
+    expect(await screen.findByRole('button', { name: 'Remove Test bed sheet' })).toBeTruthy();
+    await fill('4');
+    const answer = await onItsWay();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear this sale' }));
+    await act(async () => answer());
+    await discardedUnsent();
+  });
+
+  it('discards the count of a new item that answers after the screen was left (issue #664)', async () => {
+    const onItsWay = countOnItsWay();
+    open(<RecordSale />, owner);
+    await fill('4');
+    const answer = await onItsWay();
+    cleanup();
+    await act(async () => answer());
+    // The screen is gone, so only the requests carry weight.
+    await waitFor(() => expect(discardStocktake).toHaveBeenCalledWith('s1'));
+    expect(commitStocktake).not.toHaveBeenCalledWith('s1');
+  });
+
+  it('discards the count of a new item that answers after a branch switch, and puts nothing on the new branch sale (issue #664)', async () => {
+    const onItsWay = countOnItsWay();
+    // The staff area's branch switch through the picker and its holds, with the sale form made again for each branch.
+    function Shell() {
+      const { branch, choose } = useActiveBranch(owner);
+      if (!branch) return null;
+      return (
+        <StaffContext.Provider value={{ me: owner, branch, chooseBranch: choose }}>
+          <p data-testid="branch-in-use">{branch}</p>
+          <button type="button" onClick={() => choose((owner.branches ?? []).find((b) => b.id !== branch)?.id ?? '')}>Switch branch</button>
+          <SaleForm key={branch} branchId={branch} />
+        </StaffContext.Provider>
+      );
+    }
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><Shell /></QueryClientProvider>);
+    const started = (await screen.findByTestId('branch-in-use')).textContent;
+    await fill('4');
+    const answer = await onItsWay();
+    fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
+    await waitFor(() => expect(screen.getByTestId('branch-in-use').textContent).not.toBe(started));
+    await act(async () => answer());
+    await discardedUnsent();
+  });
+
+  it('leaves the commit of a new item on its way alone when Sell is opened again, and the count stands (issue #664)', async () => {
+    createProduct.mockResolvedValue(made);
+    createStocktake.mockResolvedValue(draftOf('0.000'));
+    let landed: () => void = () => undefined;
+    commitStocktake.mockImplementation((id: string) => new Promise((resolve) => { landed = () => resolve({ ...draftOf('0.000'), id, status: 'committed' }); }));
+    open(<RecordSale />, owner);
+    await fill('4');
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('s1'));
+    // The screen is left and Sell opened again online while the first form's commit is on its way.
+    cleanup();
+    open(<RecordSale />, owner);
+    await act(async () => undefined);
+    await act(async () => landed());
+    await waitFor(() => expect(sessionStorage.getItem('sale-held-counts')).toBe('[]'));
+    expect(commitStocktake.mock.calls).toEqual([['s1']]);
+    expect(discardStocktake).not.toHaveBeenCalled();
+  });
+
   it('sends the commit of a new item again on the same draft when its answer is lost, and takes one the server already took (issue #656)', async () => {
     createProduct.mockResolvedValue(made);
     createStocktake.mockResolvedValue(draftOf('0.000'));
@@ -683,9 +801,61 @@ describe('a Sell search that finds nothing', () => {
     commitStocktake.mockRejectedValueOnce(new RetailError('Too many requests', 429, 'rate_limited')).mockRejectedValue(new RetailError('Offline', 503, 'unavailable'));
     open(<RecordSale />, owner);
     await fill('4');
-    expect(await screen.findByText('The count of Test duvet cover may not be committed. Check it on Count stock before you sell it.')).toBeTruthy();
+    expect(await screen.findByText('The count of Test duvet cover may not be saved. Check it on Count stock before you sell it.')).toBeTruthy();
     expect(commitStocktake).toHaveBeenCalledTimes(2);
     expect(discardStocktake).not.toHaveBeenCalled();
+    expect(JSON.parse(sessionStorage.getItem('sale-held-counts') ?? '[]')).toEqual(['s1']);
+    expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
+  });
+
+  /** Sell inside the offline context, with a network the test turns off and on. */
+  const openWithNetwork = () => {
+    const network = testConnectivity(true);
+    const offline = { scope: 'test', connectivity: network, catalogue: null, engine: { subscribe: () => () => undefined, snapshot: () => ({ items: [], syncing: false, needsSignIn: false }) } } as unknown as Offline;
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <OfflineProvider value={offline}><StaffContext.Provider value={{ me: owner, branch: owner.branches?.[0]?.id ?? '', chooseBranch }}><SaleForm branchId={owner.branches?.[0]?.id ?? ''} /></StaffContext.Provider></OfflineProvider>
+      </QueryClientProvider>,
+    );
+    return network;
+  };
+
+  it('never discards the count of a new item whose commit is on its way when the connection comes back, and puts it on the sale (issue #664)', async () => {
+    createProduct.mockResolvedValue(made);
+    createStocktake.mockResolvedValue(draftOf('0.000'));
+    let first: (e: unknown) => void = () => undefined;
+    commitStocktake.mockImplementationOnce(() => new Promise((_, reject) => { first = reject; })).mockResolvedValue({ ...draftOf('0.000'), status: 'committed' });
+    const network = openWithNetwork();
+    await fill('4');
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalledTimes(1));
+    // The connection drops and comes back before the first commit's answer, which is then lost: the commit is sent again.
+    act(() => network.set(false));
+    act(() => network.set(true));
+    await act(async () => first(new RetailError('Offline', 503, 'unavailable')));
+    expect(await screen.findByRole('button', { name: 'Remove Test duvet cover' })).toBeTruthy();
+    expect(commitStocktake.mock.calls).toEqual([['s1'], ['s1']]);
+    expect(discardStocktake).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('sale-held-counts')).toBe('[]');
+  });
+
+  it('says nothing of a lost commit of a new item once the sale is cleared, and keeps its draft for a later discard (issue #664)', async () => {
+    createProduct.mockResolvedValueOnce(sheet).mockResolvedValue(made);
+    createStocktake.mockImplementation(({ lines }: { lines: { product_id: string }[] }) =>
+      Promise.resolve(lines[0]!.product_id === 'p8' ? { id: 's8', status: 'draft', lines: [] } : draftOf('0.000')));
+    let first: (e: unknown) => void = () => undefined;
+    commitStocktake.mockResolvedValueOnce({ id: 's8', status: 'committed' })
+      .mockImplementationOnce(() => new Promise((_, reject) => { first = reject; })).mockRejectedValue(new RetailError('Offline', 503, 'unavailable'));
+    open(<RecordSale />, owner);
+    await fill('3');
+    expect(await screen.findByRole('button', { name: 'Remove Test bed sheet' })).toBeTruthy();
+    await fill('4');
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalledWith('s1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear this sale' }));
+    await act(async () => first(new RetailError('Offline', 503, 'unavailable')));
+    await waitFor(() => expect(commitStocktake).toHaveBeenCalledTimes(3));
+    await act(async () => undefined);
+    expect(screen.queryByText(/may not be saved/)).toBeNull();
+    expect(screen.queryByText(/its count is not/)).toBeNull();
     expect(JSON.parse(sessionStorage.getItem('sale-held-counts') ?? '[]')).toEqual(['s1']);
     expect(screen.queryByRole('button', { name: 'Remove Test duvet cover' })).toBeNull();
   });

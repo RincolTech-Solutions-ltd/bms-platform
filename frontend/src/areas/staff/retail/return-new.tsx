@@ -62,7 +62,7 @@ export function ReturnRow({ line, row, back, branches, onChange }: {
           <input id={`qty-${id}`} inputMode="decimal" value={row.qty} onChange={(e) => onChange({ ...row, qty: e.target.value })} aria-invalid={problem !== null} />
           {unit && (
             <>
-              <label htmlFor={`unit-${id}`}>Counted in</label>
+              <label htmlFor={`unit-${id}`}>Returned in</label>
               <select id={`unit-${id}`} value={row.entered} onChange={(e) => onChange({ ...row, entered: e.target.value as RowForm['entered'] })}>
                 <option value="line">{unit}</option>
                 <option value="base">single units</option>
@@ -197,6 +197,7 @@ export function ReturnNewPage() {
   const usualIsStore = (me.branches ?? []).some((b) => b.id === sale.data?.branch_id && b.sells_goods === false);
   const tills = sellingBranches(branches, undefined);
   const form = usualIsStore && draft.refundBranchId === '' && tills.length === 1 ? { ...draft, refundBranchId: tills[0]?.id ?? '' } : draft;
+  // toast-exempt: success screen, the return outcome
   const send = useMutation({
     mutationFn: (s: Sale) => retail.createSaleReturn(saleId, buildReturnRequest(s, form, back), key),
     onSuccess: (r) => {

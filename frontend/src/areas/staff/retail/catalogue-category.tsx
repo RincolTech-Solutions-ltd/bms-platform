@@ -7,9 +7,10 @@ import { retail, type Category, type Product } from '../../../api/retail';
 import { useCrumbLabel, useCrumbTail } from '../../../components/breadcrumbs';
 import { useStaff } from '../context';
 import { Editing, ProductCard, ProductForm } from './catalogue-products';
+import { ItemAddedNext } from './next-steps';
 import { ScreenLink } from './screen-link';
 import { ScreenToast } from './toast';
-import { Gate, Problem, Success, changeFailureText, requireVersion, useProfitAccess, useToast } from './ui';
+import { Gate, Problem, changeFailureText, requireVersion, useProfitAccess, useToast } from './ui';
 
 // One category (issue #493, owner decisions D14 and D16): its items, and Add an item, which opens the item form with this category
 // fixed (no category dropdown). Every item added gets the category's next code, such as BLB-0001, made by the app and never
@@ -78,7 +79,6 @@ export function CategoryPage({ categoryId }: { categoryId: string }) {
   const { show, toast } = useToast();
   const queryClient = useQueryClient();
   const [view, setView] = useState<View>({ mode: 'list' });
-  const [message, setMessage] = useState<string | null>(null);
   const categories = useQuery({ queryKey: ['retail', 'catalogue', 'categories'], queryFn: () => retail.listCategories() });
   const category = (categories.data ?? []).find((c) => c.id === categoryId);
   const items = useQuery({
@@ -89,13 +89,15 @@ export function CategoryPage({ categoryId }: { categoryId: string }) {
   const canManage = (me.permissions ?? []).includes(MANAGE);
   const canPrice = (me.permissions ?? []).includes('retail.price.edit');
   const back = () => setView({ mode: 'list' });
-  const saved = (text: string) => {
-    setMessage(text);
+  // Issue #700: the item Add an item just saved, whose next steps lead the list.
+  const [added, setAdded] = useState<Product | undefined>(undefined);
+  const saved = (text: string, item?: Product) => {
+    setAdded(item);
     show(text, 'success');
     void queryClient.invalidateQueries({ queryKey: ['retail'] });
     back();
   };
-  const open = (id: string) => { setMessage(null); setView({ mode: 'edit', id }); };
+  const open = (id: string) => { setAdded(undefined); setView({ mode: 'edit', id }); };
   useCrumbTail(view.mode === 'new' ? 'Add an item' : undefined, back);
   const card = (p: Product) => (
     <ProductCard
@@ -104,7 +106,7 @@ export function CategoryPage({ categoryId }: { categoryId: string }) {
       showCost={profit}
       canPrice={canPrice}
       onEdit={() => open(p.id ?? '')}
-      onPrice={() => { setMessage(null); setView({ mode: 'price', id: p.id ?? '' }); }}
+      onPrice={() => setView({ mode: 'price', id: p.id ?? '' })}
       extra={<ScreenLink screen="stock" to="/staff/retail/stock" label={`See the stock of ${p.description}`}>Stock</ScreenLink>}
     />
   );
@@ -116,14 +118,14 @@ export function CategoryPage({ categoryId }: { categoryId: string }) {
       {view.mode === 'list' && (categories.isPending || category) && (
         // The anchors of the page tour are drawn before the category arrives, so they are there when the tour starts.
         <>
-          {message && <Success>{message}</Success>}
+          {added && <ItemAddedNext item={added} onAnother={() => setView({ mode: 'new' })} />}
           {category?.active === false && <p><span className="badge badge-warning">Switched off</span></p>}
           <p className="hint" data-tour="category-codes">{category ? codeLine(category) : 'Loading'}</p>
           {canManage && (
             <p className="cluster">
               {category?.active === false
                 ? <span className="hint">Switch this category on to add items to it.</span>
-                : <button type="button" className="rt-primary" data-tour="category-add-item" disabled={!category} onClick={() => { setMessage(null); setView({ mode: 'new' }); }}>Add an item</button>}
+                : <button type="button" className="rt-primary" data-tour="category-add-item" disabled={!category} onClick={() => setView({ mode: 'new' })}>Add an item</button>}
             </p>
           )}
           {canManage && (category

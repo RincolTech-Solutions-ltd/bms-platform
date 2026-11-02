@@ -958,7 +958,9 @@ export const stocktakePage: Tour = {
   // Version 4 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
   // Version 5 says a count far from the records is asked about before the review (issue #353, ADR-093).
   // Version 6 says an empty box is not counted and a count that removes most of an item asks for a tick (issue #629).
-  version: 6,
+  // Version 7 says each count is saved as it is typed and comes back after a reload (issue #681).
+  // Version 8 names the last button Save the count (issue #728).
+  version: 8,
   title: 'This page: count stock',
   audience: (me) => STOCKTAKE.every((p) => held(me, p)),
   autoStart: false,
@@ -968,7 +970,7 @@ export const stocktakePage: Tour = {
       id: 'count',
       target: 'count-search',
       title: 'Count each item',
-      body: 'Find an item by typing part of its name, or work down the list Not counted yet. Type how many you counted, or tap 0 for an item that is gone. Leave an item empty if you did not count it.',
+      body: 'Find an item by typing part of its name, or work down the list Not counted yet. Type how many you counted, or tap 0 for an item that is gone. Leave an item empty if you did not count it. Each count is saved as you type it, so a reload never loses it.',
     },
     {
       id: 'scan',
@@ -980,7 +982,7 @@ export const stocktakePage: Tour = {
       id: 'review',
       target: 'count-review',
       title: 'Check before saving',
-      body: 'Tap Review the difference to see what differs. A count far from what the records hold is asked about first: Confirm or Change it. A line that takes an item to 0 or removes more than half needs a tick. Nothing changes until you tap Commit the count.',
+      body: 'Tap Review the difference to see what differs. A count far from what the records hold is asked about first: Confirm or Change it. A line that takes an item to 0 or removes more than half needs a tick. Nothing changes until you tap Save the count.',
     },
   ],
 };
@@ -1463,9 +1465,10 @@ export const closePage: Tour = {
   ],
 };
 
+// Version 2: a store is marked on Branches, not picked here (issue #371, ADR-104).
 export const branchRolesCapability: Tour = {
   id: 'capability-branch-roles',
-  version: 1,
+  version: 2,
   title: 'New: branch roles',
   audience: (me) => held(me, 'retail.branch_role.manage'),
   autoStart: true,
@@ -1474,7 +1477,7 @@ export const branchRolesCapability: Tour = {
     {
       id: 'intro',
       title: 'Branch roles are on',
-      body: 'Each branch can now be a store, a shop or both. Stores keep stock and feed the shop. Only shops sell to customers.',
+      body: 'Each selling branch can now be a shop or both. A store is marked on Branches: it keeps stock, feeds the shop and does not sell.',
     },
     {
       id: 'tile',
@@ -1483,7 +1486,7 @@ export const branchRolesCapability: Tour = {
       module: 'retail',
       optional: true,
       title: 'Set the roles',
-      body: 'Open Branch roles to say which branches are stores and which are shops.',
+      body: 'Open Branch roles to see which branches are stores and say which are shops.',
     },
     {
       id: 'roles',
@@ -1491,7 +1494,7 @@ export const branchRolesCapability: Tour = {
       target: 'retail-roles',
       module: 'retail',
       title: 'Pick a role for each branch',
-      body: 'Until you pick, every branch works as before. A store cannot record a sale.',
+      body: 'Until you pick, every branch works as before. A store cannot record a sale; mark one on Branches.',
     },
   ],
 };
@@ -1623,7 +1626,8 @@ export const transferReceiptCapability: Tour = {
 export const unitsCapability: Tour = {
   id: 'capability-units',
   // Version 2 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
-  version: 2,
+  // Version 3: stock is kept in the single unit (issue #709, ADR-110).
+  version: 3,
   title: 'New: cartons, boxes and other packs',
   audience: (me) => held(me, 'retail.catalogue.manage'),
   autoStart: true,
@@ -1632,7 +1636,7 @@ export const unitsCapability: Tour = {
     {
       id: 'intro',
       title: 'Packs are on',
-      body: 'An item can now have packs, like a carton of 12. Stock is still counted in single items; a sale or a purchase can be entered by the pack.',
+      body: 'An item can now have packs, like a carton of 12. Stock is still kept in the single unit, such as pieces; a sale or a purchase can be entered by the pack.',
     },
     {
       id: 'tile',

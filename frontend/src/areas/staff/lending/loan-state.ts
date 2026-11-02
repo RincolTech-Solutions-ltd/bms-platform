@@ -43,6 +43,16 @@ export function parseAmount(text: string, currency: string | undefined): number 
 
 export const isIsoDate = (s: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
+/**
+ * A money form's draft read back from the tab (#670). Its date was that day's today, so a draft started on an earlier business
+ * day, or kept from before #670 without `startedOn`, starts its date again from today; a date after today becomes today.
+ */
+export function onToday<T extends { startedOn?: string }>(draft: T, field: keyof T, today: string): T {
+  const date = draft[field];
+  if (draft.startedOn === today && !(typeof date === 'string' && date > today)) return draft;
+  return { ...draft, [field]: today, startedOn: today };
+}
+
 /** "written_off" becomes "Written off". */
 export function words(code: string | undefined): string {
   if (!code) return '';
@@ -83,6 +93,16 @@ export function statusBadge(status: string | undefined): string {
     default:
       return 'badge';
   }
+}
+
+/** A loan status in plain words; a draft says it has not gone anywhere yet (issue #704). */
+export const loanStatusWords = (status: string | undefined): string => (status === 'draft' ? 'Draft, not sent yet' : words(status));
+
+/** A member's loans with the drafts on top, newest first, and the rest in the server's order (issue #704). */
+export function draftsFirst<T extends { status?: string; created_at?: string }>(items: T[]): T[] {
+  const at = (l: T) => Date.parse(l.created_at ?? '') || 0;
+  const drafts = items.filter((l) => l.status === 'draft').sort((a, b) => at(b) - at(a));
+  return [...drafts, ...items.filter((l) => l.status !== 'draft')];
 }
 
 export type Component = 'penalty' | 'fee' | 'interest' | 'principal' | 'overpayment';

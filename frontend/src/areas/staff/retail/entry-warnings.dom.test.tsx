@@ -363,10 +363,10 @@ describe('Count stock', () => {
     press('Confirm');
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     // The review is not the save: nothing is recorded until the count is committed.
-    await screen.findByRole('button', { name: 'Commit the count' });
+    await screen.findByRole('button', { name: 'Save the count' });
     await settle();
     expect(mockEntryConfirmations).toEqual([]);
-    fireEvent.click(screen.getByRole('button', { name: 'Commit the count' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save the count' }));
     await waitFor(() => expect(mockEntryConfirmations).toHaveLength(1));
     expect(mockEntryConfirmations).toEqual([expect.objectContaining({ screen: 'count', kind: 'quantity', product_id: LAMP, entered_qty: '1000', median_qty: '10' })]);
   });

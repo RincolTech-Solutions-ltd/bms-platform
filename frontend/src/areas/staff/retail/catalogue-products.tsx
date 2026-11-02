@@ -2,7 +2,7 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { useRef, useState, type ReactNode } from 'react';
 import { BusyButton } from '../../../app/ui/BusyButton';
-import { NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
+import { SearchBox, SearchResults } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { RETAIL_CURRENCY, businessZone, retail, type Category, type PriceChange, type Product, type SimilarProduct } from '../../../api/retail';
 import { Field, FieldsNeededNote, focusFirstMissing } from '../../../app/ui/Field';
@@ -14,16 +14,24 @@ import { NameHintsPanel, useNameHints } from './name-hints';
 import { ItemCodeLine } from './new-item-here';
 import { PackEditor, PacksTurnOn } from './catalogue-packs';
 import { BarcodeEditor } from './catalogue-barcodes';
-import { MakeFamilyPanel, SIZES_JOIN, SIZES_NEW, VariantNote } from './catalogue-variants';
+import { MakeFamilyPanel, SIZES_JOIN, SIZES_NEW, VariantNote, linesOf, usePreview } from './catalogue-variants';
+import { NO_SIZES, NewItemSizes, SizePrices, chosenOptions, inSizes, packPriceFor, sizesProblem, type SizesAnswer } from './new-item-sizes';
+import { planVariants, variantKey, variantLabel } from '../../../api/retail-variants';
+import { unitWord } from './units-state';
 import { ItemPhoto, PhotoChoice, PhotoEditor, sendNewPhoto, shownPhoto } from './item-photo';
+import { ItemAddedNext, NextSteps } from './next-steps';
 import { ScreenLink } from './screen-link';
-import { canUse } from './permissions';
+import { UNITS, canUse, capabilityOn, holds, holdsAt } from './permissions';
+import { NewItemPackages, UsualLevel, answeredPieces, forSmallest, newPackageRow, packErrorOf, packageAsUnit, oneOf, packsToSend, piecePriceOf, rowPieces, rowProblem, withPackages, type PackageRow, type UsualAnswer } from './new-item-packs';
 import { StockMinimumEditor } from './stock-minimum';
+import { ItemElsewhere } from './stock-elsewhere';
 import { UnitPicker } from './unit-picker';
 import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
 import { CategoryPicker } from './category-picker';
+import { CategoryChips, FindBar, ItemRow, NoItem, onlyMatch, useChosenChip, useFindTerm } from './phone-find';
+import { RowList } from '../../../app/ui/ListRow';
 import { ScreenToast } from './toast';
-import { Gate, Problem, Success, money, useProfitAccess, useToast } from './ui';
+import { Gate, Problem, money, useBranchView, useIsPhone, useProfitAccess, useToast } from './ui';
 import { WORDS } from '../../../app/glossary';
 import { Hint } from '../../../app/ui/Hint';
 
@@ -114,7 +122,8 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
   product?: Product;
   /** Issue #493: the category the item is added in; the form then has no category dropdown. */
   category?: Category;
-  onSaved: (text: string) => void;
+  /** Issue #689: a new item comes back too, so the list can show it. */
+  onSaved: (text: string, added?: Product) => void;
   onCancel: () => void;
   onOpen?: (id: string) => void;
 }) {
@@ -142,9 +151,41 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
   // A switched-off category or unit is offered only when it is the item's own.
   const categoryChoices = (categories.data ?? []).filter((c) => c.active !== false || c.id === product?.category_id);
   const unitChoices = (units.data ?? []).filter((u) => u.active !== false || u.id === product?.unit_id);
-  const complete = description.trim() !== '' && categoryId !== '' && unitId !== '' && (product ? true : sellMinor !== null && costMinor !== null)
-    && (!variant || size.trim() !== '' || colour.trim() !== '');
+  // Issue #689 (ADR-106): a new item is added in its smallest unit, never a package, with its packages in the same save.
+  const smallest = (units.data ?? []).find((u) => u.id === unitId);
+  const unitProblem = unitId === '' ? 'Choose a unit.' : product ? null : packageAsUnit(smallest);
+  const packsOn = !product && canManage && capabilityOn(me, 'retail', UNITS);
+  const mayPrice = holds(me, PRICE);
+  const [inPackages, setInPackages] = useState<'no' | 'yes'>('no');
+  const [packRows, setPackRows] = useState<PackageRow[]>([newPackageRow(1)]);
+  const packages = packsOn && inPackages === 'yes' ? packRows : [];
+  // Issue #699: how the shop usually buys and sells it, and the price of one of that level; the piece price is worked out.
+  const [buyAt, setBuyAt] = useState<UsualAnswer>({ key: 0, priceMinor: null });
+  const [sellAt, setSellAt] = useState<UsualAnswer>({ key: 0, priceMinor: null });
+  const buyPieces = answeredPieces(packages, units.data ?? [], smallest, 'buy', buyAt);
+  const sellPieces = answeredPieces(packages, units.data ?? [], smallest, 'sell', sellAt);
+  const costOf = buyPieces === null ? costMinor : piecePriceOf(buyAt, buyPieces);
+  const sellOf = sellPieces === null ? sellMinor : piecePriceOf(sellAt, sellPieces);
   const chosen = fixed ?? (categories.data ?? []).find((c) => c.id === categoryId);
+  // Issue #697 (ADR-111): sizes, colours or types in the same form; each starts at the item's prices and is one product (ADR-051).
+  const [sizing, setSizing] = useState<SizesAnswer>(NO_SIZES);
+  const options = chosenOptions(sizing);
+  const preview = usePreview(planVariants({ baseCode: chosen ? chosen.next_code ?? `${chosen.code_prefix ?? ''}-0001` : 'ITEM', ...options, costMinor: profit ? (costOf ?? 0) : 0, sellMinor: sellOf ?? 0 }));
+  const sized = !product && canManage && sizing.answer === 'yes';
+  // Owner, clarification on #723: each size's package price, worked out from its own price, shown and changeable before saving.
+  const priced = packages.map((r) => (sellPieces !== null && r.key === sellAt.key ? { ...r, priceMinor: sellAt.priceMinor } : r));
+  const [packEdits, setPackEdits] = useState<Record<string, number | null>>({});
+  const sizePacks = !sized || !mayPrice ? [] : preview.rows.flatMap((row) => priced.filter((k) => k.unitId !== '' && k.purpose !== 'buy' && k.priceMinor !== null).map((k) => {
+    const key = `${variantKey(row.size, row.colour)}|${k.unitId}`;
+    const valueMinor = key in packEdits ? packEdits[key] ?? null : packPriceFor(k.priceMinor ?? 0, parseMinor(row.sellText, RETAIL_CURRENCY) ?? 0, sellOf ?? 0);
+    const pieces = rowPieces(packages, k);
+    const cost = profit && pieces !== null ? (parseMinor(row.costText, RETAIL_CURRENCY) ?? 0) * Number(pieces) : null;
+    const label = `${unitWord((units.data ?? []).find((u) => u.id === k.unitId)?.name)} of ${variantLabel(row.size, row.colour)}`;
+    return { key, row, unitId: k.unitId, label, valueMinor, hint: belowCostHint(valueMinor, cost) };
+  }));
+  const sizeProblem = !sized ? null : sizesProblem(preview.rows) ?? (sizePacks.some((p) => p.valueMinor === null) ? 'Type the price of every package.' : null);
+  const complete = description.trim() !== '' && categoryId !== '' && unitProblem === null && (product ? true : sellOf !== null && (!profit || costOf !== null))
+    && (!variant || size.trim() !== '' || colour.trim() !== '') && packages.every((r) => rowProblem(r, packages) === null) && sizeProblem === null;
   const movedFrom = product && !variant && categoryId !== product.category_id ? product.category : null;
   // The name is kept once per unit (issue #352): a close name is a warning, the same name is refused, an administrator may add it anyway.
   const [similar, setSimilar] = useState<SimilarProduct[] | null>(null);
@@ -156,17 +197,27 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
   // A second press before the first request has started must not send another: the ref answers at once, the mutation state a render later.
   const sending = useRef(false);
   const save = useMutation({
-    mutationFn: async (duplicateReason?: string): Promise<{ saved: Product; photoNote: string | null }> => {
+    mutationFn: async (duplicateReason?: string): Promise<{ saved: Product; made?: number; photoNote: string | null }> => {
       const reason = duplicateReason ? { duplicate_reason: duplicateReason } : {};
       if (product && variant) return { saved: await retail.updateProduct(product.id ?? '', product.version ?? 1, { active, variant_size: size.trim(), variant_colour: colour.trim() }), photoNote: null };
       if (product) return { saved: await retail.updateProduct(product.id ?? '', product.version ?? 1, { description: description.trim(), category_id: categoryId, unit_id: unitId, active, ...reason }), photoNote: null };
-      const saved = await retail.createProduct({ description: description.trim(), category_id: categoryId, unit_id: unitId, sell_minor: sellMinor ?? 0, cost_minor: profit ? (costMinor ?? 0) : 0, ...reason });
+      // Issue #699: the level it is usually sold at keeps the price typed for one of it; Buy stock opens on the usual buying level.
+      const packs = packages.length > 0 ? { packs: packsToSend(priced, mayPrice, buyPieces !== null ? buyAt.key : null) } : {};
+      if (sized) {
+        // Issue #697: one save makes the item, each size as its product and each size's packages; all of it or none.
+        const family = await retail.createFamily({ name: description.trim(), category_id: categoryId, unit_id: unitId, sell_minor: sellOf ?? 0, cost_minor: profit ? (costOf ?? 0) : 0, variants: linesOf(preview.rows, profit), ...reason, ...packs,
+          ...(sizePacks.length > 0 ? { pack_prices: sizePacks.map((p) => ({ ...(p.row.size ? { size: p.row.size } : {}), ...(p.row.colour ? { colour: p.row.colour } : {}), unit_id: p.unitId, sell_minor: p.valueMinor ?? 0 })) } : {}) });
+        const first = (family.variants ?? [])[0] ?? {};
+        return { saved: { ...first, description: family.name }, made: family.variants?.length ?? 0, photoNote: await sendNewPhoto(family.id ?? '', photo, (id, f) => retail.setFamilyPhoto(id, f)) };
+      }
+      const saved = await retail.createProduct({ description: description.trim(), category_id: categoryId, unit_id: unitId, sell_minor: sellOf ?? 0, cost_minor: profit ? (costOf ?? 0) : 0, ...reason, ...packs });
       // The item stands whatever happens to its photo: a failed upload only adds a line to the message.
       return { saved, photoNote: await sendNewPhoto(saved.id ?? '', photo) };
     },
-    onSuccess: ({ saved, photoNote }) => {
+    onSuccess: ({ saved, made, photoNote }) => {
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
-      onSaved(product ? `Saved the changes to "${saved.description}".` : `Added the item "${saved.description}" (${saved.code}).${photoNote ? ` ${photoNote}` : ''}`);
+      if (product) onSaved(`Saved the changes to "${saved.description}".`);
+      else onSaved(`${saved.description} added ${made !== undefined ? inSizes(made, options.sizes.length, options.colours.length) : `as ${saved.code}`}${withPackages(packages, units.data ?? [])}.${photoNote ? ` ${photoNote}` : ''}`, saved);
     },
     onError: (error) => {
       const found = existingOf(error);
@@ -174,6 +225,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
     },
     onSettled: () => { sending.current = false; },
   });
+  // toast-exempt: a look for items with the same name that saves nothing; the save it hands on to says it
   const check = useMutation({
     mutationFn: () => retail.similarProducts({ description: description.trim(), unitId, ...(product ? { excludeId: product.id } : {}) }),
     onSuccess: (found) => {
@@ -188,6 +240,8 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
     },
     onError: () => { sending.current = false; },
   });
+  // Issue #689: a refused package is shown on its row, not under the form.
+  const packError = packErrorOf(save.error);
   const busy = save.isPending || check.isPending;
   // Issue #353: while a new item's name is typed, the items it may already be and the category of items like it.
   const hints = useNameHints(description, !product && canManage);
@@ -258,17 +312,43 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
           )}
           <UnitPicker
             id="item-unit"
-            units={unitChoices}
+            {...(product ? {} : { hint: 'For example piece, bulb, metre, litre. Never a box or a carton.' })}
+            // Round 2 of #709: a new item's Single unit lists no package; one added in place stays so its refusal shows.
+            units={product ? unitChoices : unitChoices.filter((u) => u.is_package !== true || u.id === unitId)}
             loading={units.data === undefined} load={units}
             value={unitId}
-            onChange={(next) => { setUnitId(next); forget(); }}
-            error={unitId === '' ? 'Choose a unit.' : null}
-            showError={showErrors}
+            onChange={(next) => { setUnitId(next); forget(); setPackRows((rows) => forSmallest(rows, units.data ?? [], next)); }}
+            error={unitProblem}
+            showError={showErrors || (smallest?.is_package === true && !product)}
           />
+          {!product && canManage && <NewItemSizes value={sizing} onChange={(next) => {
+            // Issue #726: a size taken off loses its edited package prices, so tapped again it starts at the worked-out price.
+            const left = new Set(planVariants({ baseCode: '', ...chosenOptions(next), costMinor: 0, sellMinor: 0 }).map((v) => variantKey(v.size, v.colour)));
+            setPackEdits((e) => Object.fromEntries(Object.entries(e).filter(([k]) => left.has(k.slice(0, k.lastIndexOf('|'))))));
+            setSizing(next);
+            save.reset();
+          }} />}
+          {packsOn && (
+            <NewItemPackages
+              smallest={smallest}
+              units={unitChoices.filter((u) => u.active !== false)}
+              load={units}
+              answer={inPackages}
+              onAnswer={setInPackages}
+              rows={packRows}
+              onRows={(rows) => { setPackRows(rows); save.reset(); }}
+              mayPrice={mayPrice}
+              showErrors={showErrors}
+              refused={packError}
+              soldAt={sellPieces !== null ? sellAt.key : 0}
+            />
+          )}
         </>
       )}
       {product ? (
         <>
+          {/* Issue #728: none here and some at another shop says where, with a switch there. */}
+          <ItemElsewhere product={product} />
           {/* Issue #617: the photo comes first, under the name, not below the packs, barcodes and stock levels. */}
           {canManage && (
             <PhotoEditor
@@ -292,7 +372,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
             </>
           )}
           <p className="hint">To change the price, use Change price on the list.</p>
-          <PacksTurnOn adding={false} />
+          <PacksTurnOn />
           <PackEditor product={product} />
           <BarcodeEditor product={product} />
           <StockMinimumEditor productId={product.id ?? ''} unit={product.unit} />
@@ -301,26 +381,30 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
       ) : (
         <>
           {profit ? (
-            <>
-              <label htmlFor="item-cost">Buying price ({RETAIL_CURRENCY})</label>
+            <UsualLevel id="item-buy" use="buy" on={packages.length > 0} rows={packages} units={units.data ?? []} smallest={smallest} answer={buyAt} onAnswer={setBuyAt} showErrors={showErrors}>
+              <label htmlFor="item-cost">{`Buying price of one ${oneOf(smallest, 'item')} (${RETAIL_CURRENCY})`}</label>
               <input id="item-cost" inputMode="numeric" value={cost} onChange={(e) => setCost(e.target.value)} aria-invalid={costMinor === null} autoComplete="off" />
               <Hint>What you pay the supplier for one. Leave 0 if you do not know it yet; buying stock sets it.</Hint>
-            </>
+            </UsualLevel>
           ) : null}
-          <Field
-            id="item-sell"
-            label={`Selling price (${RETAIL_CURRENCY})`}
-            required
-            error={sellMinor === null ? `Type the price you sell one at, in ${RETAIL_CURRENCY}.` : null}
-            showError={showErrors}
-            inputMode="numeric"
-            value={sell}
-            onChange={(e) => setSell(e.target.value)}
-            autoComplete="off"
-          />
+          <UsualLevel id="item-sell-at" use="sell" on={packages.length > 0} rows={packages} units={units.data ?? []} smallest={smallest} answer={sellAt} onAnswer={setSellAt} showErrors={showErrors}>
+            <Field
+              id="item-sell"
+              label={`Selling price of one ${oneOf(smallest, 'item')} (${RETAIL_CURRENCY})`}
+              required
+              error={sellMinor === null ? `Type the price you sell one at, in ${RETAIL_CURRENCY}.` : null}
+              showError={showErrors}
+              inputMode="numeric"
+              value={sell}
+              onChange={(e) => setSell(e.target.value)}
+              autoComplete="off"
+            />
+          </UsualLevel>
           {!profit && <p className="hint">The buying price is set when you buy stock.</p>}
+          {sized && <SizePrices rows={preview.rows} profit={profit} onEdit={preview.edit} codesKnown={chosen !== undefined} problem={sizeProblem} showErrors={showErrors}
+            packPrices={sizePacks} onPackPrice={(key, v) => setPackEdits((e) => ({ ...e, [key]: v }))} />}
           <PhotoChoice id="item-photo" file={photo} onChange={setPhoto} />
-          <PacksTurnOn adding />
+          <PacksTurnOn />
         </>
       )}
       {exists && (
@@ -342,7 +426,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
           onChangeName={forget}
         />
       )}
-      {!exists && <Problem error={save.error ?? check.error} />}
+      {!exists && !packError && <Problem error={save.error ?? check.error} />}
       <BusyButton busy={busy} type="submit" className="rt-primary" disabled={exists !== null || similar !== null}>{product ? 'Save changes' : 'Add item'}</BusyButton>
       <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
     </form>
@@ -355,7 +439,7 @@ export function ProductForm({ product, category: fixed, onSaved, onCancel, onOpe
  */
 export function belowCostHint(sellMinor: number | null, costMinor: number | null): string | null {
   if (sellMinor === null || costMinor === null || costMinor <= 0 || sellMinor > costMinor) return null;
-  return `This price is not above the cost, ${formatMinor(costMinor, RETAIL_CURRENCY)}. A sale at this price is refused unless the seller may sell below cost.`;
+  return `This price is not above the buying price, ${formatMinor(costMinor, RETAIL_CURRENCY)}. A sale at this price is refused unless the seller may sell below the buying price.`;
 }
 
 export function PriceForm({ product, onSaved, onCancel }: { product: Product; onSaved: (text: string) => void; onCancel: () => void }) {
@@ -421,41 +505,63 @@ export function Editing({ id, mode, onSaved, onCancel, onOpen }: { id: string; m
   return mode === 'edit' ? <ProductForm key={product.data.id} product={product.data} onSaved={onSaved} onCancel={onCancel} onOpen={onOpen} /> : <PriceForm product={product.data} onSaved={onSaved} onCancel={onCancel} />;
 }
 
-export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) => void; onPrice: (id: string) => void; onAdd: () => void }) {
+export function ProductList({ onEdit, onPrice, onAdd, added }: { onEdit: (id: string) => void; onPrice: (id: string) => void; onAdd: () => void; added?: Product }) {
   const { me } = useStaff();
   const profit = useProfitAccess();
   const search = useLiveSearch();
-  const query = search.term;
-  const [categoryId, setCategoryId] = useState('');
+  // Issue #690: digits that are a known barcode search by that item's code.
+  const { query, match, looking } = useFindTerm(search.term);
+  const phone = useIsPhone();
+  // Issue #690: the stock of each item in the branch in use, so a phone row shows it in packs and pieces.
+  // The server refuses branch_id to a session that may not read stock there, so it is asked only then.
+  const { all, branchId } = useBranchView();
+  const stockAt = !all && branchId && holdsAt(me, 'retail.stock.read', branchId) ? branchId : '';
   const [activeFilter, setActiveFilter] = useState<'active' | 'off' | 'all'>('active');
   const categories = useQuery({ queryKey: ['retail', 'catalogue', 'categories'], queryFn: () => retail.listCategories() });
+  const [categoryId, setCategoryId, chipReady] = useChosenChip('items', categories.data, categories.isError);
   const active = activeFilter === 'all' ? undefined : activeFilter === 'active';
   const page = useInfiniteQuery({
-    queryKey: ['retail', 'catalogue', 'products', query, categoryId, activeFilter],
-    queryFn: ({ pageParam, signal }) => retail.listCatalogue({ query, categoryId, ...(active === undefined ? {} : { active }), ...(pageParam ? { cursor: pageParam } : {}), signal }),
+    queryKey: ['retail', 'catalogue', 'products', query, categoryId, activeFilter, stockAt],
+    queryFn: ({ pageParam, signal }) => retail.listCatalogue({ query, categoryId, branchId: stockAt, ...(active === undefined ? {} : { active }), ...(pageParam ? { cursor: pageParam } : {}), signal }),
     initialPageParam: '',
     getNextPageParam: (last) => last.next_cursor || undefined,
     placeholderData: keepPreviousData,
+    enabled: chipReady,
   });
   const finding = page.isPlaceholderData || (page.isFetching && !page.isFetchingNextPage);
-  const items = (page.data?.pages ?? []).flatMap((p) => p.items ?? []);
+  const listed = onlyMatch((page.data?.pages ?? []).flatMap((p) => p.items ?? []), match, (p) => p.id) ?? [];
+  // Issue #689: the item just added leads the unfiltered list, wherever it would fall in the pages, as the list last read it.
+  const items = added && page.data && query === '' && categoryId === '' && activeFilter !== 'off'
+    ? [listed.find((p) => p.id === added.id) ?? added, ...listed.filter((p) => p.id !== added.id)]
+    : listed;
   const canPrice = (me.permissions ?? []).includes(PRICE);
   const g = useCategoryGroups({ screen: 'items', items, categoryOf: (p) => p.category, resetKey: [query, categoryId, activeFilter].join('|'), searching: query !== '', pending: page.isPlaceholderData });
   const card = (p: Product) => <ProductCard key={p.id} product={p} showCost={profit} canPrice={canPrice} onEdit={() => onEdit(p.id ?? '')} onPrice={() => onPrice(p.id ?? '')} extra={<ScreenLink screen="stock" to="/staff/retail/stock" label={`See the stock of ${p.description}`}>Stock</ScreenLink>} />;
+  const chosenName = (categories.data ?? []).find((c) => c.id === categoryId)?.name;
+  const sizes = (
+    <>
+      <Link className="btn" to={SIZES_NEW as never} data-tour="product-add-sizes">Add an item with sizes and colours</Link>
+      <Link className="btn" to={SIZES_JOIN as never} data-tour="product-join-sizes">Join items as sizes of one item</Link>
+    </>
+  );
+  // Issue #690: search first, the category chips under it, both kept at the top on a phone, where each item is one row that opens it.
   return (
     <>
+      <FindBar>
+        <div data-tour="product-search"><SearchBox id="items-search" label="Search by name, code, barcode or category" search={search} fetching={finding} count={page.data ? items.length : undefined} more={page.hasNextPage} /></div>
+        <CategoryChips categories={categories.data ?? []} value={categoryId} onChange={setCategoryId} />
+      </FindBar>
       <p className="cluster">
         {/* Not a second primary action (rule 6): Quick add sits with the other ways to add, as a plain button. */}
         {canUse(me, 'quickAdd') && <Link className="btn" to={'/staff/retail/quick-add' as never}>Quick add</Link>}
         <button type="button" onClick={onAdd} data-tour="product-add">Add an item</button>
-        <Link className="btn" to={SIZES_NEW as never} data-tour="product-add-sizes">Add an item with sizes and colours</Link>
-        <Link className="btn" to={SIZES_JOIN as never} data-tour="product-join-sizes">Join items as sizes of one item</Link>
+        {!phone && sizes}
       </p>
-      <div data-tour="product-search"><SearchBox id="items-search" label="Search by name, code or category" search={search} fetching={finding} count={page.data ? items.length : undefined} more={page.hasNextPage} /></div>
+      <NextSteps at="items" steps={[
+        { label: 'Count stock', screen: 'stocktake', to: '/staff/retail/stocktake' },
+        { label: 'Buy stock', screen: 'restock', to: '/staff/retail/restock' },
+      ]} />
       <div className="rt-row" data-tour="product-filters">
-        <div>
-          <CategoryPicker id="items-category" categories={categories.data ?? []} value={categoryId} onChange={setCategoryId} noneLabel="All categories" allowAdd={false} />
-        </div>
         <div>
           <label htmlFor="items-active">Show</label>
           <select id="items-active" value={activeFilter} onChange={(e) => setActiveFilter(e.target.value as 'active' | 'off' | 'all')}>
@@ -467,29 +573,51 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
       </div>
       {page.isPending && <p className="loading">Loading</p>}
       <Problem error={page.error} />
-      {page.data && items.length === 0 && (query ? <NoResults term={query} onClear={search.clear} noun="items" /> : <p className="empty-state">No items found.</p>)}
+      {page.data && items.length === 0 && !looking && (search.term ? (
+        <NoItem
+          term={search.term}
+          onClear={search.clear}
+          category={chosenName}
+          onSearchAll={() => { setCategoryId(''); setActiveFilter('all'); }}
+          filtered={activeFilter === 'off'}
+        />
+      ) : <p className="empty-state">No items found.</p>)}
       <div data-tour="product-list">
         <SearchResults fetching={finding}>
-          {items.length > 0 && <GroupControls state={g} paged={page.hasNextPage} />}
-          {g.active ? <GroupedCards state={g} renderItem={card} /> : <ul style={{ listStyle: 'none', padding: 0 }}>{items.map(card)}</ul>}
+          {phone ? (
+            items.length > 0 && <RowList label="Items">{items.map((p) => <ItemRow key={p.id} product={p} onOpen={() => onEdit(p.id ?? '')} />)}</RowList>
+          ) : (
+            <>
+              {items.length > 0 && <GroupControls state={g} paged={page.hasNextPage} />}
+              {g.active ? <GroupedCards state={g} renderItem={card} /> : <ul style={{ listStyle: 'none', padding: 0 }}>{items.map(card)}</ul>}
+            </>
+          )}
         </SearchResults>
       </div>
       {page.hasNextPage && <button type="button" onClick={() => void page.fetchNextPage()} disabled={page.isFetchingNextPage || page.isPlaceholderData}>{page.isFetchingNextPage ? 'Loading' : 'Show more items'}</button>}
+      {/* On a phone the list comes right after the search; the sizes and colours ways to add follow it. */}
+      {phone && <p className="cluster">{sizes}</p>}
     </>
   );
 }
 
 export function ProductsPage() {
+  const { me } = useStaff();
   const [view, setView] = useState<View>({ mode: 'list' });
-  const [message, setMessage] = useState<string | null>(null);
+  const [added, setAdded] = useState<Product | undefined>(undefined);
   const { show, toast } = useToast();
   const back = () => setView({ mode: 'list' });
-  const open = (id: string) => { setMessage(null); setView({ mode: 'edit', id }); };
-  const saved = (text: string) => { setMessage(text); show(text, 'success'); back(); };
+  const open = (id: string) => { setAdded(undefined); setView({ mode: 'edit', id }); };
+  const saved = (text: string, item?: Product) => { setAdded(item); show(text, 'success'); back(); };
   return (
     <Gate screen="products" title="Items">
-      {message && view.mode === 'list' && <Success>{message}</Success>}
-      {view.mode === 'list' && <ProductList onAdd={() => { setMessage(null); setView({ mode: 'new' }); }} onEdit={(id) => { setMessage(null); setView({ mode: 'edit', id }); }} onPrice={(id) => { setMessage(null); setView({ mode: 'price', id }); }} />}
+      {/* Issue #700: once Add an item saves, its next steps lead the list until another item is saved or opened. */}
+      {view.mode === 'list' && added && <ItemAddedNext item={added} onAnother={() => setView({ mode: 'new' })} />}
+      {view.mode === 'list' && <ProductList added={added} onAdd={() => setView({ mode: 'new' })} onEdit={open} onPrice={(id) => setView({ mode: 'price', id })} />}
+      {/* Issue #690: a phone row opens the item, so its price is changed from here as well as from the list. */}
+      {view.mode === 'edit' && (me.permissions ?? []).includes(PRICE) && (
+        <p className="cluster"><button type="button" className="btn-sm" onClick={() => setView({ mode: 'price', id: view.id })}>Change price</button></p>
+      )}
       <ScreenToast.Provider value={show}>
         {view.mode === 'new' && <ProductForm onSaved={saved} onCancel={back} onOpen={open} />}
         {(view.mode === 'edit' || view.mode === 'price') && <Editing id={view.id} mode={view.mode} onSaved={saved} onCancel={back} onOpen={open} />}

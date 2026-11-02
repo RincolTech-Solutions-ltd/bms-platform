@@ -7,8 +7,10 @@ import { useApplicationsApi } from '../../../api/lending-context';
 import type { LoanAppraisal, LoanStatusChange } from '../../../api/loan-applications';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { FieldsNeededNote } from '../../../app/ui/Field';
+import { HelpTip } from '../../../app/ui/HelpTip';
 import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
+import { sayDone } from '../retail/toast';
 import { exposureOf, flagWords, purposeWords, rateWords, recommendationWords, scoreParts, termWords } from './application-state';
 import { typeWords } from './collateral-state';
 import { TextField, useFormErrors } from './form-fields';
@@ -120,7 +122,10 @@ export function AppraisalCard({ appraisal: a, currency, earlier = false }: { app
   const parts = scoreParts(a);
   return (
     <section className="rt-card stack" aria-labelledby="ap-appraisal" data-tour="application-appraisal">
-      <h2 id="ap-appraisal">{earlier ? 'Earlier appraisal' : 'Appraisal'}</h2>
+      <div className="help-tip-heading">
+        <h2 id="ap-appraisal">{earlier ? 'Earlier appraisal' : 'Appraisal'}</h2>
+        <HelpTip tip="appraisal" />
+      </div>
       {earlier && <p className="alert alert-info" role="note">From before the application was sent back. It no longer stands: the application is waiting to be appraised again.</p>}
       <p className="ln-item-head">
         <span className="ap-score">{a.score} of 100</span>
@@ -205,7 +210,7 @@ function ProvisionalSchedule({ loan: l }: { loan: Loan }) {
 }
 
 /** A note the step needs (why it goes back, why it is cancelled), with its error under the box once the person leaves it. */
-function NoteForm({ name, label, button, send, onDone }: { name: string; label: string; button: string; send: (note: string) => Promise<unknown>; onDone: () => void }) {
+function NoteForm({ name, label, button, done, send, onDone }: { name: string; label: string; button: string; done: string; send: (note: string) => Promise<unknown>; onDone: () => void }) {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -217,6 +222,7 @@ function NoteForm({ name, label, button, send, onDone }: { name: string; label: 
     setFailure(null);
     try {
       await send(note.trim());
+      sayDone(done);
       onDone();
     } catch (raw) {
       setFailure(asFormError(raw).message);
@@ -270,6 +276,7 @@ export function ApplicationPanel({ loan: l }: { loan: Loan }) {
     setFailure(null);
     try {
       await api.submit(id, l.version ?? 0);
+      sayDone('Sent for appraisal');
       refresh();
     } catch (raw) {
       setFailure(asFormError(raw).message);
@@ -302,10 +309,10 @@ export function ApplicationPanel({ loan: l }: { loan: Loan }) {
         </div>
       )}
       {open === 'send_back' && (
-        <NoteForm name="sb" label="What needs changing" button="Send back for changes" send={(note) => api.sendBack(id, l.version ?? 0, note)} onDone={() => { setOpen(null); refresh(); }} />
+        <NoteForm name="sb" label="What needs changing" button="Send back for changes" done="Sent back for changes" send={(note) => api.sendBack(id, l.version ?? 0, note)} onDone={() => { setOpen(null); refresh(); }} />
       )}
       {open === 'cancel' && (
-        <NoteForm name="cn" label="Why it is cancelled" button="Cancel the application" send={(note) => api.cancel(id, l.version ?? 0, note)} onDone={() => { setOpen(null); refresh(); }} />
+        <NoteForm name="cn" label="Why it is cancelled" button="Cancel the application" done="Application cancelled" send={(note) => api.cancel(id, l.version ?? 0, note)} onDone={() => { setOpen(null); refresh(); }} />
       )}
       <Problem error={failure ? new Error(failure) : null} />
       <Problem error={appraisals.error} />

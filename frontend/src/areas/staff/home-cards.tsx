@@ -15,6 +15,8 @@ import { shortDate } from './retail/range-state';
 import { money as retailMoney } from './retail/ui';
 import { RowChevron } from '../../app/ui/ListRow';
 import { KeyFigure, KeyFigureRow } from '../../app/ui/KeyFigure';
+import { HelpTip } from '../../app/ui/HelpTip';
+import type { HelpTipKey } from '../../app/help-tips';
 
 // Home's card per module the business uses (issue #471, ADR-072): Shop with today's sales, the items low on stock and the open
 // customer orders; Lending with the loans due today, those in arrears and the lending requests waiting for approval. A business with
@@ -69,10 +71,10 @@ function moneyBranches(me: Me, one: string | null): string[] {
   return branchesWhere(me, 'retail.sale.read').filter((b) => holdsAt(me, ALL_SELLERS, b.id)).map((b) => b.id ?? '');
 }
 
-function Figure({ label, query, children }: { label: string; query: { isPending: boolean; isError: boolean }; children: () => ReactNode }) {
+function Figure({ label, query, children, tip }: { label: string; query: { isPending: boolean; isError: boolean }; children: () => ReactNode; tip?: HelpTipKey }) {
   return (
     <div className="home-figure">
-      <dt>{label}</dt>
+      <dt>{label}{tip && <> <HelpTip tip={tip} /></>}</dt>
       <dd>{query.isError ? <span className="hint">Could not load</span> : query.isPending ? <span className="hint">Loading</span> : children()}</dd>
     </div>
   );
@@ -305,7 +307,7 @@ function LendingCard({ parts }: { parts: Parts }) {
           </Figure>
         )}
         {parts.loans && (
-          <Figure label="In arrears" query={summary}>
+          <Figure label="In arrears" tip="inArrears" query={summary}>
             {() => <>{lendingMoney(s?.in_arrears_minor ?? 0, s?.currency)} <span className="hint">{plural(s?.in_arrears_count ?? 0, 'loan', 'loans')}</span></>}
           </Figure>
         )}

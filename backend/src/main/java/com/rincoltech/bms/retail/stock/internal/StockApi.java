@@ -2,6 +2,7 @@ package com.rincoltech.bms.retail.stock.internal;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
+import com.rincoltech.bms.retail.catalogue.RetailCatalogue.NewPack;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Digits;
@@ -9,6 +10,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
@@ -64,6 +66,20 @@ final class StockApi {
             String unit,
 
             @Schema(description = "Base units in one pack, three places, for example 24.000")
+            String factor,
+
+            @Schema(
+                    description = "Issue #699 (ADR-107): every active pack of the item holding a whole number of more"
+                            + " than one base unit, biggest first, so stock is shown and counted at every level")
+            List<PackLevel> levels) {}
+
+    @Schema(
+            name = "RetailPackLevel",
+            description = "Issue #699: one level of an item's packages and the base units in one")
+    record PackLevel(
+            String unit,
+
+            @Schema(description = "Base units in one, three places, for example 120.000")
             String factor) {}
 
     @Schema(name = "RetailStockPage")
@@ -220,7 +236,29 @@ final class StockApi {
                                     + " (retail.purchase.create there). qty above 0 and cost_minor above 0 are then needed, and the"
                                     + " stock is recorded as a purchase, as Buy stock does, never against opening balance equity."
                                     + " Left out: opening stock, as before")
-            String paidFrom) {}
+            String paidFrom,
+
+            @Size(max = 10)
+            @Schema(
+                    description =
+                            "Issue #695: the new item's packages, as packs of POST /retail/products (issue #689, ADR-106,"
+                                    + " ADR-107), made in the same transaction; a refused package names its pack_index and"
+                                    + " saves nothing. Ignored with product_id. qty stays in the item's smallest unit")
+            @Valid
+            List<@NotNull @Valid NewPack> packs,
+
+            @Schema(
+                    description =
+                            "Issue #695: with paid_from, the package the goods were bought in (one of packs, or a pack of"
+                                    + " product_id); sent with paid_level_cost_minor. The whole packages are then one line at"
+                                    + " that price, as Buy stock records a pack, and only the pieces left over are at"
+                                    + " cost_minor, so the money that leaves is what was paid")
+            UUID paidLevelUnitId,
+
+            @Positive
+            @Max(RetailCatalogue.MAX_AMOUNT_MINOR)
+            @Schema(description = "Issue #695: what one package of paid_level_unit_id cost")
+            Long paidLevelCostMinor) {}
 
     @Schema(name = "RetailQuickAdd")
     record QuickAdd(
@@ -355,6 +393,21 @@ final class StockApi {
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = COST_ONLY)
             Long unitCostMinor) {}
+
+    @Schema(
+            name = "RetailOpenStocktake",
+            description = "Issue #728: a count started at a branch and neither saved nor thrown away (a draft)")
+    record OpenStocktake(
+            UUID id,
+            UUID branchId,
+            Instant createdAt,
+            UUID createdBy,
+
+            @Schema(description = "How many items it counted")
+            int lines,
+
+            @Schema(description = "The count's note; Sell's count of a new item carries its own (review of #729)")
+            String note) {}
 
     @Schema(name = "RetailStocktake")
     record Stocktake(

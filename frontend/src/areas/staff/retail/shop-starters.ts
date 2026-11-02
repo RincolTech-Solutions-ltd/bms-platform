@@ -53,6 +53,9 @@ export const SHOP_TYPES: ShopType[] = [
       { name: 'Box', size: 10, of: 'Piece', purpose: 'both' },
       { name: 'Dozen', size: 12, of: 'Piece', purpose: 'sell' },
       { name: 'Roll', size: 100, of: 'Metre', purpose: 'both' },
+      // Issue #699 (ADR-107): cable comes in boxes and crates of rolls, bought that way.
+      { name: 'Box of rolls', size: 2, of: 'Roll', purpose: 'buy' },
+      { name: 'Crate of rolls', size: 10, of: 'Roll', purpose: 'buy' },
     ],
   },
   {
@@ -64,6 +67,8 @@ export const SHOP_TYPES: ShopType[] = [
     packs: [
       { name: 'Box', size: 50, of: 'Piece', purpose: 'both' },
       { name: 'Roll', size: 100, of: 'Metre', purpose: 'both' },
+      { name: 'Box of rolls', size: 2, of: 'Roll', purpose: 'buy' },
+      { name: 'Crate of rolls', size: 10, of: 'Roll', purpose: 'buy' },
       { name: 'Dozen', size: 12, of: 'Piece', purpose: 'sell' },
       { name: 'Tin', size: 4, of: 'Litre', purpose: 'both' },
     ],

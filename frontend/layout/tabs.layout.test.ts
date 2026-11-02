@@ -1,7 +1,6 @@
-import react from '@vitejs/plugin-react';
 import { chromium, type Browser, type Page } from 'playwright';
-import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { openLayout } from './open';
 
 // The bottom tabs laid out in Chromium (issue #544), where tabs.dom.test.tsx can only read the stylesheet: on a phone 360 and 412
 // wide, with the iPhone's home indicator inset simulated and at the default and a large font size, no tab overlaps another, each is
@@ -9,20 +8,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // nothing scrolls sideways. The page is layout/tabs.html under the app's own stylesheets.
 
 const INSET = 34;
-let server: ViteDevServer;
 let browser: Browser;
-let base = '';
 
 beforeAll(async () => {
-  server = await createServer({ configFile: false, root: process.cwd(), plugins: [react()], logLevel: 'error', server: { port: 0, host: '127.0.0.1' } });
-  await server.listen();
-  base = server.resolvedUrls?.local[0] ?? '';
   browser = await chromium.launch();
 });
 
 afterAll(async () => {
   await browser?.close();
-  await server?.close();
 });
 
 type Box = { x: number; y: number; width: number; height: number };
@@ -33,9 +26,7 @@ async function open(width: number, font: number, low = 12) {
   const page = await browser.newPage({ viewport: { width, height: 900 }, hasTouch: true, isMobile: true });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, left: 0, right: 0, bottom: INSET } });
-  await page.goto(`${base}layout/tabs.html?font=${font}&low=${low}`);
-  await page.locator('nav.tab-bar .tab-badge').waitFor();
-  return page;
+  return openLayout(page, `layout/tabs.html?font=${font}&low=${low}`, page.locator('nav.tab-bar .tab-badge'));
 }
 
 describe.each([360, 412])('the bottom tabs at %ipx wide', (width) => {

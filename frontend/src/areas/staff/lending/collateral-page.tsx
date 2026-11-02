@@ -7,6 +7,7 @@ import { useCollateralApi } from '../../../api/lending-context';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
+import { sayDone } from '../retail/toast';
 import {
   blankValuation, canRequestRelease, custodyBadge, custodyWords, eventBody, eventProblems, EVENT_WORDS, eventsFrom, ownerWords, typeWords,
   valuationBody, valuationProblems, type EventType,
@@ -27,14 +28,14 @@ import { BusyButton } from '../../../app/ui/BusyButton';
 // done on this screen: this screen sends the request, and a second person agrees or refuses it in the approvals inbox
 // (the maker-checker action collateral_release, FR-COL-04). Nothing here is final until they do.
 
-function Facts({ c }: { c: CollateralItem }) {
+function Facts({ c, currency }: { c: CollateralItem; currency?: string }) {
   return (
     <dl className="ln-facts">
       <dt>Kind</dt><dd>{typeWords(c.collateral_type)}</dd>
       {c.reference_no && (<><dt>Reference</dt><dd>{c.reference_no}</dd></>)}
       <dt>Owner</dt><dd>{c.owner_name ?? ownerWords(c.owner_relationship)}{c.owner_name ? ` (${ownerWords(c.owner_relationship).toLowerCase()})` : ''}</dd>
-      <dt>Your estimate</dt><dd>{c.estimated_value_minor != null ? money(c.estimated_value_minor, c.currency) : 'None'}</dd>
-      <dt>Value used for loan cover</dt><dd className="ln-strong">{c.collateral_value_minor != null ? money(c.collateral_value_minor, c.currency) : 'None yet'}</dd>
+      <dt>Your estimate</dt><dd>{c.estimated_value_minor != null ? money(c.estimated_value_minor, currency) : 'None'}</dd>
+      <dt>Value used for loan cover</dt><dd className="ln-strong">{c.collateral_value_minor != null ? money(c.collateral_value_minor, currency) : 'None yet'}</dd>
       {c.storage_location && (<><dt>Kept at</dt><dd>{c.storage_location}</dd></>)}
     </dl>
   );
@@ -114,6 +115,7 @@ function Valuations({ id, currency, valuations, canAdd }: { id: string; currency
     setFailure(null);
     try {
       await api.addValuation(id, valuationBody(d, unit));
+      sayDone('Valuation saved');
       void queryClient.invalidateQueries({ queryKey: ['collateral'] });
       setOpen(false);
       setD(blankValuation(today));
@@ -179,6 +181,7 @@ function CustodyChange({ id, version, custody, onDone }: { id: string; version: 
     setFailure(null);
     try {
       await api.recordEvent(id, version, eventBody(type, location, counterparty, note));
+      sayDone('Change recorded');
       void queryClient.invalidateQueries({ queryKey: ['collateral'] });
       onDone();
     } catch (raw) {
@@ -215,6 +218,7 @@ function ReleaseRequest({ id, version, onDone }: { id: string; version: number; 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (busy || by.trim() === '') return;
+    // toast-exempt: success screen, the request sent screen replaces the form
     setBusy(true);
     setFailure(null);
     try {
@@ -255,13 +259,15 @@ export function CollateralView({ detail, collateralId }: { detail: CollateralDet
   const { me } = useStaff();
   const [panel, setPanel] = useState<'change' | 'release' | null>(null);
   const c: CollateralItem = detail.item ?? {};
+  // The item's own currency, else the business's (issue #289), never UGX by default.
+  const currency = c.currency ?? me.tenant_currency;
   const manage = mayManageCollateral(me, c.branch_id);
   const release = mayReleaseCollateral(me, c.branch_id) && canRequestRelease(c.custody_status);
   return (
     <>
       <section className="rt-card ln-head" aria-label="Item" data-tour="collateral-header">
         <p className="ln-item-head"><strong>{typeWords(c.collateral_type)}</strong><span className={custodyBadge(c.custody_status)}>{custodyWords(c.custody_status)}</span></p>
-        <Facts c={c} />
+        <Facts c={c} currency={currency} />
         <p className="cluster" data-tour="collateral-actions">
           {c.member_id && <Link to="/staff/lending/members/$memberId" params={{ memberId: c.member_id }} className="btn btn-ghost">Open the member</Link>}
           {manage && <Link to="/staff/lending/collateral/$collateralId/edit" params={{ collateralId }} className="btn rt-primary">Change details</Link>}
@@ -272,7 +278,7 @@ export function CollateralView({ detail, collateralId }: { detail: CollateralDet
         {panel === 'release' && <ReleaseRequest id={collateralId} version={c.version ?? 0} onDone={() => setPanel(null)} />}
       </section>
       <Photos id={collateralId} canAdd={manage} />
-      <Valuations id={collateralId} currency={c.currency} valuations={detail.valuations ?? []} canAdd={manage && c.custody_status !== 'disposed'} />
+      <Valuations id={collateralId} currency={currency} valuations={detail.valuations ?? []} canAdd={manage && c.custody_status !== 'disposed'} />
       <section className="rt-card stack" aria-labelledby="col-hist" data-tour="collateral-history">
         <h2 id="col-hist">History</h2>
         {(detail.events ?? []).length === 0 && <p className="empty-state">No changes recorded yet.</p>}

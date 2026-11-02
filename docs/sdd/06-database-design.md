@@ -294,7 +294,24 @@ warning. Row-level security is enabled and forced with no policy (`bms_owner` ha
 is granted to `bms_app`: the definer functions owned by `bms_owner` are its only way in (create,
 relink, created since, read by link, reply, list, counts, duplicates, decide, lock, activated,
 expire, purge, and since `V88` set referrer and referrer). Rejected and
-expired rows are deleted 90 days after `closed_at` (FR-ONB-09).
+expired rows are deleted 90 days after `closed_at` (FR-ONB-09). Since `V119` (issue #708, ADR-108): `short_name varchar(63)`,
+the short name the applicant chose (null on older rows, and cleared at the confirmation when someone else has it by then),
+unique over the open statuses whose email is confirmed (`onboarding_applications_one_open_per_short_name`), so the first to
+confirm keeps it and an unconfirmed application holds nothing; read through `onboarding_application_short_name`, replaced
+on a repeat sign-up with a new free name through `onboarding_application_set_short_name` while the email is not
+confirmed; on a confirmed application the new name goes into `pending_short_name varchar(63)` and is applied, if still
+free, only when the applicant presses the change button on the page that fresh link opens (the page reads both names
+through `onboarding_application_names_by_link`; Keep is the default answer); the trigger
+`onboarding_clear_pending_short_name` clears it whenever the application leaves the open statuses (activated, rejected,
+expired). `V119` adds
+`onboarding_application_create` with `p_short_name` as a 16 argument overload; V23's 15 argument one becomes a wrapper
+calling it with NULL, kept for the server still running during a deploy and dropped by a later migration. It replaces
+`onboarding_application_by_link` (defined only in V23 before it), which claims the name under its lock at the
+confirmation and applies a pending name when a link of a confirmed application is opened, taking the names' locks before
+the row's, the order a sign-up takes them. `short_name_taken` says who has
+a name (a business, or a confirmed open application; with `p_lock` it first takes the name's advisory lock, which every
+claim takes: the sign-up, the confirmation, Activate and the operator's tenant creation) and `short_link_target` where a
+short link goes (the active or suspended business with that slug).
 
 ### `referral_commission_rules` and `referral_settings` (platform; no privilege for `bms_app`, definer functions only; `V88`, ADR-069)
 
@@ -417,7 +434,7 @@ last minute), then by due time, and locks the best twenty candidates in that ord
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK | |
-| `slug` | `varchar(63) UNIQUE NOT NULL` | `CHECK (slug ~ '^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])$')`; reserved labels refused by the service (FR-TEN-02). |
+| `slug` | `varchar(63) UNIQUE NOT NULL` | `CHECK (slug ~ '^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])$')`; reserved labels refused by the service (FR-TEN-02). The shop's short name (FR-TEN-12, ADR-108), kept for good. |
 | `name` | `text NOT NULL` | |
 | `status` | `text NOT NULL` | [`active`, `suspended`]. FR-TEN-06. |
 | `currency` | `char(3) NOT NULL` | FK `currencies`. Default `UGX`. |
@@ -1066,10 +1083,15 @@ posts to its seeded account (`cash` to `cash_on_hand`, `bank` to `bank`, `mtn_mo
 `is_active = false` switches the method off. `core.ledger`'s `PaymentMethods` is the one lookup;
 lending's loans, savings and investments post through it, at the branch of the loan, account or
 investment (request checks included). A correction credits the account its original entry debited.
-Retail postings and the cash book do not use it yet (#236), so while the retail module is on `cash`
-and `bank` can be mapped only to `cash_on_hand` and `bank` (`account_used_by_retail`, ADR-026), and
-`platform_set_tenant_modules` (replaced in V43) refuses to switch retail on while an active cash or
-bank mapping points elsewhere. `bms_app` holds SELECT, INSERT, UPDATE and DELETE on the table (a
+Retail uses it too since #236 (ADR-105, `V117`): a retail leg on `cash_on_hand` or `bank` posts to the
+account `cash` or `bank` is mapped to at the posting's branch, or to the seeded account while the method
+is unmapped or switched off (retail has no switch-off), and the cash book reads the seeded account with every account
+the method was ever mapped to for the branch or the tenant (this table and the audit of `core.payment_method.set`), so a
+remap moves no past day.
+Retail's `mobile_money` account has no method here and stays on its system key. The V43 restrictions
+(`account_used_by_retail`, and the check in `platform_set_tenant_modules` that refused to switch retail
+on while cash or bank was mapped elsewhere) are gone; `V117` replaces the function with its V10 body.
+`bms_app` holds SELECT, INSERT, UPDATE and DELETE on the table (a
 mapping is removed to return the method to its default).
 
 ### `payment_intents` (RLS)
@@ -2147,7 +2169,10 @@ every role (section 6.2.4).
 
 Every rule posts through `post_entry` in the transaction of its event, one entry per branch, with
 `source_module = 'retail'`. "PM" is the account of the payment method: `cash_on_hand` (cash),
-`mobile_money`, `bank`, or `trade_debtors` (credit, with the sale as subledger). Amounts are line
+`mobile_money`, `bank`, or `trade_debtors` (credit, with the sale as subledger). Every retail leg on
+`cash_on_hand` or `bank`, in these rules and in the cash book's (section 6.11.5), posts to the account the
+payment method `cash` or `bank` is mapped to at the entry's branch (`payment_methods`, FR-GL-08), and to the
+seeded account while it is unmapped or switched off (#236, ADR-105). Amounts are line
 values rounded half up once per line (R-ROUND); a leg of zero is left out and an entry whose legs
 are all zero is not posted.
 
@@ -2237,7 +2262,10 @@ trigger `retail_transfers_guard_update` lets an UPDATE make exactly four transit
 `in_transit` to `received` (sets `in_entry_id`, `shortage_entry_id`, `received_at`, `received_by`),
 `in_transit` to `cancelled` and `completed` or `received` to `voided` (both set the void columns).
 Every other change, including any change to the transfer itself, is refused; DELETE is rejected for
-every role (`reject_mutation`). V22 allowed the void only; V38 replaced the trigger function.
+every role (`reject_mutation`). V22 allowed the void only; V38 replaced the trigger function. Since
+V116 (issue #239) the receipt is also checked against its lines: every line must have
+`received_qty`, and `in_entry_id` may stay null only when the received quantities at the dispatch
+cost (rounded half up per line) sum to zero.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -2246,7 +2274,7 @@ every role (`reject_mutation`). V22 allowed the void only; V38 replaced the trig
 | `transfer_date` | date | The business date both entries and all four kinds of movement carry |
 | `note` | varchar(300) | Optional |
 | `currency`, `cost_total_minor` | | The lines at the source's cost (present in responses only with `retail.profit.read`) |
-| `out_entry_id`, `in_entry_id` | uuid | The source's and the destination's journal entries. `completed`: both or neither (neither only at zero cost). `in_transit`: the source's only (none at zero cost). `cancelled`: the source's only, now reversed. `received`: the source's, unless zero cost; the destination's is null only when nothing of value arrived. CHECK `retail_transfers_entries_chk` (V38) |
+| `out_entry_id`, `in_entry_id` | uuid | The source's and the destination's journal entries. `completed`: both or neither (neither only at zero cost). `in_transit`: the source's only (none at zero cost). `cancelled`: the source's only, now reversed. `received`: the source's, unless zero cost; the destination's is null only when nothing of value arrived. CHECK `retail_transfers_entries_chk` (V38); the destination rule needs the lines, so the update guard enforces it (V116) |
 | `shortage_entry_id` | uuid | V38. The destination's shrinkage entry for what did not arrive, valued at the source cost; null when everything arrived. Composite FK to `journal_entries` |
 | `status` | text | `completed` (one step), `in_transit`, `received`, `cancelled`, `voided`. CHECK `retail_transfers_status_chk` (V38, replaces the V22 check) |
 | `received_at`, `received_by` | | V38. Set together, once, by the receipt (CHECK `retail_transfers_received_chk`); kept when a received transfer is later voided |
@@ -2463,11 +2491,17 @@ No table: `retail.reports` reads `retail_sales` (voids: `voided_at`, `voided_by`
 ### 6.11.3a Trade capabilities (ADR-033)
 
 Built: `retail_branch_roles` (issue #191, migration V37). One row per branch at most:
-`tenant_id`, `branch_id` (composite foreign key to `branches`), `role` in (`store`, `shop`, `both`),
-`changed_by`, `changed_at`; primary key `(tenant_id, branch_id)`; forced RLS; the application role may
+`tenant_id`, `branch_id` (composite foreign key to `branches`), `role` in (`shop`, `both`) since `V115` (issue #371,
+ADR-104; `store` until then), `changed_by`, `changed_at`; primary key `(tenant_id, branch_id)`; forced RLS; the application role may
 SELECT, INSERT and UPDATE. A missing row means `both`. The migration backfills `both` for the branches
 of tenants that have the retail module, so a populated database changes in no way; correctness never
-depends on the backfill. The capability flags are not a table: they live in `tenant_settings.settings`
+depends on the backfill. `V115` folds the role `store` into `branches.sells_goods` (ADR-048, ADR-104). A `store` row in
+force (the retail module on and `branch_roles` on), on a branch that keeps goods, makes the branch a Store
+(`sells_goods = false`), which takes no money at its till. No branch's state stops the migration; it retries its locks for about two minutes under live traffic before it gives up,
+changing nothing. A branch with a blocker named by
+`retail_store_fold_blockers` is skipped and keeps selling: an open branch that keeps no goods, a credit sale still owing (as
+`BranchTillCheck` counts it), or till money taken since the role was set. Every `store` row then becomes `both`; each changed branch and row gets a system audit row with the
+value before and the reason; nothing is deleted; the check then refuses `store`. A Store reads as `store` from the flag. The capability flags are not a table: they live in `tenant_settings.settings`
 under `module_groups.retail` (opaque to the core, validated by `retail.manifest`); its `profile` is the kind of business
 (`shops`, `stores_and_shops`, `wholesale`, `wholesale_and_shops`), renamed from `shop` and `trade` by `V103` without changing a
 flag (issue #424, ADR-092). Design only, no
@@ -2480,6 +2514,12 @@ Built: units of measure (issue #194, migration V39). `retail_product_units` (`id
 Built: a buying pack's size per delivery (issue #554, ADR-082, no migration). `unit_factor` on `retail_purchase_lines` and `retail_goods_receipt_lines` is the size each pack held in that delivery, which may differ from the pack's usual `retail_product_units.factor`; the existing checks (`qty_total = unit_qty_total x unit_factor`, `qty = unit_qty x unit_factor`, `unit_factor >= 1`) hold it. "Use from now on" updates `retail_product_units.factor` (version raised, audited) under the product row lock. Every reading of a stored line converts with its own `unit_factor`.
 
 Built: selling packs with their own prices (issue #624, owner decision D23, ADR-099, migration V110). `retail_product_units` gains `purpose text NOT NULL DEFAULT 'both'` (`buy`, `sell` or `both`) and `sell_minor bigint` (null, or 0 to 10^13: the selling price of one pack for a walk-in sale; null is the piece price times the size, rounded half up once), with the check `retail_product_units_buy_unpriced_chk` (a pack only for buying has no selling price), and the partial index `retail_stock_balances_product_held` on `(tenant_id, product_id) WHERE qty > 0` for the item's average cost per piece that Edit item's Below cost reads. Every existing row reads `both` and null, so it sells and buys exactly as before. A sale line still keeps what it charged (`sale_unit_price_minor`, `line_total_minor`) and the average cost per piece (`unit_cost_minor`, ADR-079), so profit stays per piece. A new size of an item copies the packs' purpose, and their own prices only when it sells at the same piece price.
+
+Built: one unit for many spellings and one display style for names (issue #698, owner decision D86 = A, ADR-109, migration V120). No table, column, constraint, grant or policy changes. `V120` is the first Java migration (`backend/src/main/java/db/migration`), so it uses the application's own display rule (`CatalogueNames.display`). Category, item and item-with-sizes names take the display style where that changes only their case, each with `version` and `updated_at` moved (so delta sync reads them again) and audited with the name before and after and `source` `V120`; a name with extra spaces keeps them until it is next saved. Units are not touched: duplicates already stored ("pc" beside "Piece") are left for the owner to join (owner decision on pull request #715), and where two share a key the name lookups use the switched-on one, then the one named as the unit's word. Row security is dropped, when the owner cannot bypass it, only on the written tables that force it, and restored on exactly those. Nothing is deleted. The unique name indexes are unchanged: they already ignore case, and a key match across spellings is the catalogue service's check under a per-key advisory lock.
+
+Built: packages inside packages, any depth (issue #699, owner decision D88, ADR-107, migration V118). `retail_product_units` gains `holds_unit_id uuid` (the level one pack holds: the item's own unit or another pack's unit of the same item; no foreign key, since that rule is narrower than a key and the catalogue service checks it on every write, and every constraint of the table stays validated) and `holds_qty integer` (how many of it, at least 2, review of #710: one would be the size of the level below), both or neither and never the pack's own unit (CHECK `retail_product_units_holds_chk`), and `usual_buy boolean NOT NULL DEFAULT false`, the level Buy stock opens on (CHECK `retail_product_units_usual_buy_chk`: never on a pack only for selling; at most one per item, the partial unique index `retail_product_units_usual_buy` on `(tenant_id, product_id) WHERE usual_buy`). `factor` stays on every row and is still what stock, sales, purchases and counts read; the catalogue service keeps `factor = holds_qty x` the factor of the level held, any depth, because the rule spans rows. Every existing row reads null and false, so it holds its factor of the item's unit as before. The stock rows' `standard_pack.levels` read every active whole pack biggest first (`RetailCatalogue.packLevelsSql`); no stock table changes.
+
+Built: the standard units every shop gets (issue #709, owner decision D98, ADR-110, migration V121). No table, column or constraint changes. `V121` is a Java migration (`db.migration.V121__retail_standard_units`) so it matches a shop's own spellings with the application's key (`StandardUnits.key`): every retail business that is not closed gets a `retail_units` row for each standard single unit (Piece, Pair, Set, Metre, Kg, Gram, Litre, Ml) and package (Dozen, Box, Carton, Packet, Bag, Roll, Bale, Crate, Bundle) it lacks under any spelling, `created_by` null, `ON CONFLICT DO NOTHING` on the unique name index, each audited as `retail.unit.created` by `system` with `source` `V121`. No existing row is updated or renamed. The dozen's 12 and a unit's `standard` flag are read from its name, as `is_package` is.
 
 Built: barcodes on products (issue #345, ADR-070, migration V87, FR-RET-68). `retail_product_barcodes` (`id`, `tenant_id`, `created_at`, `created_by`, `product_id`, the nullable `unit_id` of one of the product's pack sizes (composite foreign key to `retail_product_units (tenant_id, product_id, unit_id)`; null is the product's own unit), `code` (1 to 48 printable ASCII characters, no space, slash or backslash, not only dots), `format` (`ean13`, `ean8`, `upca`, `code128`, with a check that the digit count fits the format), `generated` (a code the system made for labels from `tenant_sequences` key `retail_barcode`: since V93, issue #524, an `ean13` of `210`, nine digits and the GS1 check digit; before it a `code128` of `IN` and eight digits, which stay; the check `retail_product_barcodes_generated_chk` allows a made code only as `code128` or as an `ean13` starting with 2), and the generated column `lookup_key` (a code stored as `upca` gets a leading 0, so a UPC-A and the EAN-13 a scanner reports for it are one key; twelve digits stored as `code128` keep their own key); unique `(tenant_id, lookup_key)`, index `(tenant_id, product_id)`; forced RLS; the application role may SELECT, INSERT and DELETE, never UPDATE. Check digits are checked by the catalogue service. Unique among active items: a code held by a switched-off item is deleted (audited `retail.barcode.released`) when an active item takes it.
 

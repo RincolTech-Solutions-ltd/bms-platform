@@ -4,6 +4,8 @@ import { useState, type ReactNode } from 'react';
 import { retail } from '../../../api/retail';
 import { retailAnalytics, type Dashboard } from '../../../api/retail-analytics';
 import { SkeletonList } from '../../../components/states';
+import { HelpTip } from '../../../app/ui/HelpTip';
+import type { HelpTipKey } from '../../../app/help-tips';
 import { useStaff } from '../context';
 import { showQty } from './maths';
 import { canUse } from './permissions';
@@ -17,10 +19,10 @@ import { showDate } from './maths';
 // figures need retail.profit.read, stock figures retail.stock.read, and what neither permission allows is simply not drawn.
 // Every sales figure follows the range picked at the top, set against the period before; the stock counts are as of now.
 
-function Stat({ label, value, hint, change }: { label: string; value: ReactNode; hint?: ReactNode; change?: ReactNode }) {
+function Stat({ label, value, hint, change, tip }: { label: string; value: ReactNode; hint?: ReactNode; change?: ReactNode; tip?: HelpTipKey }) {
   return (
     <li className="an-stat">
-      <span className="an-stat-label">{label}</span>
+      <span className="an-stat-label">{label}{tip && <> <HelpTip tip={tip} /></>}</span>
       <strong className="an-stat-value num">{value}</strong>
       {change}
       {hint && <span className="hint">{hint}</span>}
@@ -104,14 +106,14 @@ export function DashboardView({ data, nameOf, choice = DEFAULT_RANGE, onChoice, 
           <>
             <Stat label="Sales today" value={money(today?.sales_minor ?? 0)} hint={`${today?.sale_count ?? 0} ${today?.sale_count === 1 ? 'sale' : 'sales'} sold, including credit`} />
             <Stat label="Money collected" value={money(today?.received_minor ?? 0)} hint="Money received today by any method, with payments on earlier credit sales, less money paid back" />
-            <Stat label="On credit" value={money(today?.on_credit_minor ?? 0)} hint={`${today?.on_credit_count ?? 0} ${today?.on_credit_count === 1 ? 'sale' : 'sales'} not paid yet. Not counted as profit`} />
+            <Stat label="On credit" tip="onCredit" value={money(today?.on_credit_minor ?? 0)} hint={`${today?.on_credit_count ?? 0} ${today?.on_credit_count === 1 ? 'sale' : 'sales'} not paid yet. Not counted as profit`} />
             {withProfit && today?.gross_profit_minor !== undefined && <Stat label="Profit today" value={money(today.gross_profit_minor)} hint="From the money received" />}
           </>
         ) : (
           <>
             <Stat label="Sales today" value={money(today?.sales_minor ?? 0)} hint={`${today?.sale_count ?? 0} ${today?.sale_count === 1 ? 'sale' : 'sales'}`} />
             <Stat label="Cash and mobile money" value={money(today?.cash_minor ?? 0)} />
-            <Stat label="On credit" value={money(today?.credit_minor ?? 0)} />
+            <Stat label="On credit" tip="onCredit" value={money(today?.credit_minor ?? 0)} />
             {withProfit && today?.gross_profit_minor !== undefined && <Stat label="Profit today" value={money(today.gross_profit_minor)} />}
           </>
         )}
@@ -242,8 +244,8 @@ export function DashboardView({ data, nameOf, choice = DEFAULT_RANGE, onChoice, 
         <>
           <h3>Stock now</h3>
           <ul className="an-stats">
-            {stock.value_at_cost_minor !== undefined && <Stat label="Stock at cost" value={money(stock.value_at_cost_minor)} />}
-            {stock.value_at_price_minor !== undefined && <Stat label="Stock at price" value={money(stock.value_at_price_minor)} />}
+            {stock.value_at_cost_minor !== undefined && <Stat label="Stock at buying price" value={money(stock.value_at_cost_minor)} />}
+            {stock.value_at_price_minor !== undefined && <Stat label="Stock at selling price" value={money(stock.value_at_price_minor)} />}
             <Stat label="Out of stock" value={stock.out_of_stock ?? 0} hint="items at zero or less" />
             <Stat label="Low stock" value={stock.low_stock ?? 0} hint={`at their minimum, or ${showQty(stock.low_stock_threshold ?? '5')} or fewer without one`} />
           </ul>
