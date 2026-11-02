@@ -168,6 +168,40 @@ describe('the date hints after the draft is done (#674)', () => {
     expect(screen.queryByText(/may already be saved/)).toBeNull();
     expect((screen.getByLabelText(f.label) as HTMLInputElement).max).toBe('2026-10-29');
   });
+
+  // JUSTIFICATION-A3: the three cases the #740 review asks for (Clear then an unanswered send, a form level success, an unsent draft ahead).
+  it('do not come back when the next record after Clear this form is sent and gets no answer', async () => {
+    const f = FORMS[0]!;
+    const post = f.post();
+    const date = show(f, { draft: draftOn(f, '2026-10-30', '2026-10-30'), sent: '2026-10-30' });
+    expect(date.max).toBe('2026-10-30');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear this form' }));
+    fireEvent.change(screen.getByLabelText(/^Amount/), { target: { value: '20000' } });
+    fireEvent.submit(screen.getByRole('form', { name: f.formName }));
+    await vi.waitFor(() => expect(post.mock.calls).toHaveLength(1));
+    expect(kept(f).sent).toBe('2026-10-29');
+    expect((screen.getByLabelText(f.label) as HTMLInputElement).max).toBe('2026-10-29');
+  });
+
+  it('are gone after a successful post, and the next record on the same form starts with none', async () => {
+    const f = FORMS[0]!;
+    const repay = vi.spyOn(lending, 'repay').mockResolvedValue({} as Awaited<ReturnType<typeof lending.repay>>);
+    show(f, { draft: draftOn(f, '2026-10-30', '2026-10-30'), sent: '2026-10-30' });
+    fireEvent.submit(screen.getByRole('form', { name: f.formName }));
+    await vi.waitFor(() => expect(repay).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(sessionStorage.getItem(`retail-draft:${f.draftName}`)).toBeNull());
+    fireEvent.change(screen.getByLabelText(/^Amount/), { target: { value: '20000' } });
+    expect((screen.getByLabelText(f.label) as HTMLInputElement).max).toBe('2026-10-29');
+    expect(screen.queryByText(/may already be saved/)).toBeNull();
+    expect(screen.queryByText(NOTE)).toBeNull();
+  });
+
+  it('give a draft restored unsent with a date after today no later latest date once it is sent', () => {
+    sessionStorage.setItem('retail-draft:test-ahead', JSON.stringify({ key: 'test-key-676', draft: { date: '2026-10-30' } }));
+    const ahead = renderHook(() => usePersistedDraft('test-ahead', { date: '' }));
+    act(() => ahead.result.current.sending());
+    expect([ahead.result.current.sent, ahead.result.current.sentDraft]).toEqual([true, null]);
+  });
 });
 
 describe('sending a money form', () => {

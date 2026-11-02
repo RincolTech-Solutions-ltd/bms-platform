@@ -73,8 +73,9 @@ export function dropDraft(store: DraftStore | null, name: string): void {
  * draft read back from the tab before the form shows it (a date from an earlier day, #670), but only one whose key was never
  * sent: the form calls `sending` as it posts, and a retry of a sent key keeps the body it went with. `mended` says restore
  * changed the draft, until the form calls `unmend` (the person changed what was mended, #672); `sent` says the key went to the
- * server; `sentBefore` is the day a restored draft was sent, when that was an earlier business day. `finish` and `discard` clear
- * `mended` and `sentBefore`, so neither hint stays on a fresh blank form (#674).
+ * server; `sentBefore` is the day a restored draft was sent, when that was an earlier business day; `sentDraft` is a restored draft
+ * as it was when its key had already been sent. `finish` and `discard` clear `mended`, `sentBefore` and `sentDraft`, so none of
+ * them stays on a fresh blank form (#674).
  */
 export function usePersistedDraft<T>(
   name: string,
@@ -82,7 +83,7 @@ export function usePersistedDraft<T>(
   restore?: (saved: T) => T,
 ): {
   key: string; draft: T; setDraft: Dispatch<SetStateAction<T>>; finish: () => void; discard: () => void; sending: () => void;
-  mended: boolean; unmend: () => void; sent: boolean; sentBefore: string | null;
+  mended: boolean; unmend: () => void; sent: boolean; sentBefore: string | null; sentDraft: T | null;
 } {
   const store = useRef(tabStore()).current;
   const blank = useRef(initial).current;
@@ -96,6 +97,8 @@ export function usePersistedDraft<T>(
   const unmend = useCallback(() => setMended(false), []);
   // Cleared with `mended` once the record is finished or discarded, so neither hint stays on the next, blank form (#674).
   const [sentBefore, setSentBefore] = useState(start.sentBefore);
+  // Only a draft whose key had already gone when it was restored: a key sent from this form went with a date no later than today.
+  const [sentDraft, setSentDraft] = useState<T | null>(start.saved.sent ? start.saved.draft : null);
   const current = useRef(saved);
   current.current = saved;
   const done = useRef(false);
@@ -134,6 +137,7 @@ export function usePersistedDraft<T>(
     setFinished(true);
     setMended(false);
     setSentBefore(null);
+    setSentDraft(null);
     dropDraft(store, name);
   }, [store, name]);
   const discard = useCallback(() => {
@@ -141,10 +145,12 @@ export function usePersistedDraft<T>(
     setFinished(false);
     setMended(false);
     setSentBefore(null);
+    setSentDraft(null);
     dropDraft(store, name);
     setSaved({ key: newIdempotencyKey(), draft: blank });
   }, [store, name, blank]);
   return {
     key: saved.key, draft: saved.draft, setDraft, finish, discard, sending, mended, unmend, sent: saved.sent !== undefined, sentBefore,
+    sentDraft,
   };
 }
