@@ -1,6 +1,6 @@
--- V122: the unallocated receipts queue (extras slice A5/7, first part, issue #224; ADR-035 and its amendment of 2026-10-19 for
--- slice A5; docs/specs/client-extras.md sections 3.7, 3.8 and 3.16; FR-PAY-04). Flyway runs with outOfOrder off: V121 is the
--- last on main, so this file takes V122, the next. The number is checked again at merge time against what is then on main.
+-- V123: the unallocated receipts queue (extras slice A5/7, first part, issue #224; ADR-035 and its amendment of 2026-10-19 for
+-- slice A5; docs/specs/client-extras.md sections 3.7, 3.8 and 3.16; FR-PAY-04). Flyway runs with outOfOrder off: V123 (the onboarding
+-- link fix, #747) comes first, so this file takes V123, the next. The number is checked again at merge time against what is then on main.
 --
 -- Expand only, safe on a populated database. Six things and nothing else (4 to 6 belong to the governed reversal of a gateway
 -- payment, the same slice; the nightly reconciliation of the second part of #224 takes V123):
@@ -205,7 +205,7 @@ DECLARE
         ARRAY['booked', 'reversed_pending_review'], ARRAY['booked', 'reversed'],
         ARRAY['booked_unallocated', 'reversed_pending_review'], ARRAY['booked_unallocated', 'reversed'],
         ARRAY['reversed_pending_review', 'reversed'],
-        -- V122: a payment reported reversed and then completed again goes back to what it was.
+        -- V123: a payment reported reversed and then completed again goes back to what it was.
         ARRAY['reversed_pending_review', 'booked'], ARRAY['reversed_pending_review', 'booked_unallocated']];
     i integer;
     ok boolean := false;
@@ -241,7 +241,7 @@ BEGIN
             USING ERRCODE = 'integrity_constraint_violation';
     END IF;
     IF NEW.status IS DISTINCT FROM OLD.status THEN
-        -- V122: an order whose money stands in a loan or account is taken out only by the approved reversal, never by this move.
+        -- V123: an order whose money stands in a loan or account is taken out only by the approved reversal, never by this move.
         IF OLD.status = 'needs_attention' AND NEW.status = 'reversed' AND OLD.booked_subject_txn_id IS NOT NULL THEN
             RAISE EXCEPTION 'payment_intents: needs_attention to reversed is refused for an order with a booked transaction'
                 USING ERRCODE = 'integrity_constraint_violation';

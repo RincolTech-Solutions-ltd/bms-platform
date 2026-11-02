@@ -1421,12 +1421,12 @@ class MigrationOrderIT {
     }
 
     /**
-     * The unallocated receipts queue (#224, V122) on a database a server already migrated to the version before it and that holds a staff user, a
+     * The unallocated receipts queue (#224, V123) on a database a server already migrated to the version before it and that holds a staff user, a
      * payment intent and an open receipt: the receipt keeps its row and stays {@code open} and bare, the new columns take their
      * defaults, the swap of {@code users_kind_check} keeps the staff user and lets the new {@code system} kind in (and nothing
      * else), the swap of the receipts' status check lets {@code reversed} in, a second system user is refused, the guard trigger
      * refuses a status the queue does not know, and the new permission lands on the three roles that decide it.
-     * JUSTIFICATION-A3: a new test case; no existing case migrates a populated receipts or users table across V122.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates a populated receipts or users table across V123.
      */
     @Test
     void unallocatedReceiptsQueueMigrationKeepsPopulatedRowsAndSwapsTheChecks() {
@@ -1438,8 +1438,8 @@ class MigrationOrderIT {
 
     /** The body of the case above, on any empty database that has the roles of {@code 01-roles.sh}. */
     static void verifyUnallocatedReceiptsMigration(String url) {
-        // The version just before V122 (V121 today).
-        String before = VERSIONS.get(VERSIONS.indexOf("122") - 1);
+        // The version just before V123 (V122 once the onboarding link fix is on main, V121 until then).
+        String before = VERSIONS.get(VERSIONS.indexOf("123") - 1);
         assertThat(flyway(url, before).migrate().targetSchemaVersion).isEqualTo(before);
         JdbcClient owner =
                 JdbcClient.create(new DriverManagerDataSource(url, "bms_owner", TestDatabase.OWNER_PASSWORD));
@@ -1451,7 +1451,7 @@ class MigrationOrderIT {
         UUID period = UUID.randomUUID();
         UUID entry = UUID.randomUUID();
         owner.sql(
-                        "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v61', 'Test Tenant V122', '00000000-0000-4000-8000-000000000001')")
+                        "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v61', 'Test Tenant V123', '00000000-0000-4000-8000-000000000001')")
                 .param(tenant)
                 .update();
         owner.sql(
@@ -1463,7 +1463,7 @@ class MigrationOrderIT {
                 .query((rs, n) -> 1)
                 .single();
         owner.sql(
-                        "INSERT INTO users (id, tenant_id, kind, full_name, email, status) VALUES (?, ?, 'staff', 'Test Staff V122', 'staff-v61@example.test', 'active')")
+                        "INSERT INTO users (id, tenant_id, kind, full_name, email, status) VALUES (?, ?, 'staff', 'Test Staff V123', 'staff-v61@example.test', 'active')")
                 .params(staff, tenant)
                 .update();
         owner.sql("INSERT INTO gl_periods (id, tenant_id, year, month, status) VALUES (?, ?, 2026, 1, 'open')")
@@ -1476,7 +1476,7 @@ class MigrationOrderIT {
         owner.sql(
                         "WITH e AS (INSERT INTO journal_entries (id, tenant_id, branch_id, entry_no, entry_date, period_id,"
                                 + " reference, source_module, source_type) VALUES (?, ?, ?, 'JE99999999', DATE '2026-01-15', ?,"
-                                + " 'V122-FIXTURE', 'test', 'fixture') RETURNING id)"
+                                + " 'V123-FIXTURE', 'test', 'fixture') RETURNING id)"
                                 + " INSERT INTO journal_lines (id, tenant_id, entry_id, line_no, account_id, debit, credit, currency)"
                                 + " SELECT ?, ?, e.id, 1, ?, 1000, 0, 'UGX' FROM e UNION ALL SELECT ?, ?, e.id, 2, ?, 0, 1000, 'UGX' FROM e")
                 .params(
@@ -1510,7 +1510,7 @@ class MigrationOrderIT {
                         INSERT INTO unallocated_receipts (id, tenant_id, branch_id, intent_id, purpose, subject_type, subject_id,
                                                           amount_minor, currency, value_date, confirmation_code, refusal_code,
                                                           journal_entry_id)
-                        VALUES (?, ?, ?, ?, 'test.payment', 'test_subject', ?, 1500, 'UGX', DATE '2026-01-15', 'V122-CONF-1',
+                        VALUES (?, ?, ?, ?, 'test.payment', 'test_subject', ?, 1500, 'UGX', DATE '2026-01-15', 'V123-CONF-1',
                                 'loan_closed', ?)
                         """)
                 .params(receipt, tenant, branch, intent, UUID.randomUUID(), entry)
@@ -1518,7 +1518,7 @@ class MigrationOrderIT {
         long permissions =
                 owner.sql("SELECT count(*) FROM permissions").query(Long.class).single();
 
-        assertThat(flyway(url, "122").migrate().targetSchemaVersion).isEqualTo("122");
+        assertThat(flyway(url, "123").migrate().targetSchemaVersion).isEqualTo("123");
 
         Map<String, Object> row = owner.sql("SELECT * FROM unallocated_receipts WHERE id = ?")
                 .param(receipt)
@@ -1559,7 +1559,7 @@ class MigrationOrderIT {
                                 .param(receipt)
                                 .update())
                 .hasMessageContaining("unallocated_receipts_reversed_complete");
-        // The replaced guard of payment_intents: the moves V122 added are allowed, the ones it narrows or never had are
+        // The replaced guard of payment_intents: the moves V123 added are allowed, the ones it narrows or never had are
         // refused.
         UUID other = UUID.randomUUID();
         owner.sql("""
@@ -1584,7 +1584,7 @@ class MigrationOrderIT {
                     .update();
             owner.sql("""
                             UPDATE payment_intents SET status = 'paid', paid_amount_minor = 1500, paid_currency = 'UGX',
-                                   confirmation_code = 'V122-CONF', paid_at = now(), verified_at = now() WHERE id = ?
+                                   confirmation_code = 'V123-CONF', paid_at = now(), verified_at = now() WHERE id = ?
                             """).param(id).update();
         }
         owner.sql(
@@ -1594,7 +1594,7 @@ class MigrationOrderIT {
         owner.sql("UPDATE payment_intents SET status = 'reversed_pending_review' WHERE id = ?")
                 .param(intent)
                 .update();
-        // V122: a payment reported reversed and then completed again goes back to booked.
+        // V123: a payment reported reversed and then completed again goes back to booked.
         owner.sql("UPDATE payment_intents SET status = 'booked' WHERE id = ?")
                 .param(intent)
                 .update();
@@ -1613,7 +1613,7 @@ class MigrationOrderIT {
                         .param(intent)
                         .update())
                 .hasMessageContaining("is not an allowed transition");
-        // V122 narrows needs_attention to reversed: refused for an order that carries a booked transaction.
+        // V123 narrows needs_attention to reversed: refused for an order that carries a booked transaction.
         owner.sql(
                         "UPDATE payment_intents SET status = 'needs_attention', booked_subject_txn_id = ?, booked_at = now() WHERE id = ?")
                 .params(UUID.randomUUID(), other)
@@ -1705,7 +1705,7 @@ class MigrationOrderIT {
         // account one, V83 (collections, #266) the two collection list ones, V86 (offline sales, #458)
         // retail.offline.resolve, V88 (referrals, #464) core.referrals.read, V89 (existing loans, #466)
         // lending.loans.bring_in, V91 (download my data, #334) its own, V92 (billing, #480) core.billing.read, V107
-        // (fee and interest waivers, #265) lending.charges.waive_fee_interest and V122 (the unallocated receipts queue,
+        // (fee and interest waivers, #265) lending.charges.waive_fee_interest and V123 (the unallocated receipts queue,
         // #224) core.payments.allocate_approve, which are not V48's to answer for.
         assertThat(owner.sql(
                                 "SELECT count(*) FROM permissions WHERE key NOT IN ('lending.advisor.use', 'lending.advisor.configure',"
