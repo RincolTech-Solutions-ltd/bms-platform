@@ -8,7 +8,7 @@ import { formatMinor } from '../../../components/money';
 // they can be tested. A caller without retail.profit.read gets a suggestion with no `suggested_minor`:
 // that caller sends no amount and no reason at all and the server records the standard amount, unless the owner
 // turned on "Salespeople can see and change the savings amount" (ADR-115): then the suggestion comes without the profit, the
-// expenses or the cap, and that caller may save up to the suggestion, never more. The day's
+// expenses or the cap, and only the server checks the cap for that caller. The day's
 // available amount is its profit less its expenses, never below 0; nothing above it is sent, and the server
 // refuses it too. The reason for changing the amount is optional (#538).
 
@@ -83,10 +83,6 @@ export function planSavings(input: SavingsInput): SavingsPlan {
   if (input.amount.trim() === '') return { problem: null, overwrite: false, request };
   const typed = input.amount.trim() === '0' ? 0 : amountOrNull(input.amount);
   if (typed === null) return { problem: 'Enter the amount in whole shillings, for example 20000.', overwrite: false, request };
-  // ADR-115: a salesperson may save up to the suggestion, never more (the server says the same), so the cap is never asked.
-  if (suggestion.daily_profit_minor === undefined && suggestion.suggested_minor !== undefined && typed > suggestion.suggested_minor) {
-    return { problem: `You can save up to the suggested amount, ${money(suggestion.suggested_minor)}. Enter that amount or less.`, overwrite: false, request };
-  }
   if (suggestion.available_minor !== undefined && typed > suggestion.available_minor) {
     return { problem: capWords(suggestion, input.date, input.today ?? input.date), overwrite: false, request };
   }

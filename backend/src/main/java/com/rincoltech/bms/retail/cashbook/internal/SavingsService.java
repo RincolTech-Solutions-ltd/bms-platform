@@ -162,17 +162,13 @@ class SavingsService {
         branchContext.requireSells(branch, "branch_id");
         LocalDate date = support.businessDate(r.businessDate(), "business_date");
         boolean profit = mayProfit(branch);
+        // ADR-115: the owner let salespeople see and change the amount; they still never see the profit or expenses.
+        SalespeopleSavings setting = support.salespeopleSavings();
+        boolean salesperson = !profit && setting.on();
         if (r.suggestionToken() == null || r.suggestionToken().isBlank()) {
             throw ApiException.rule(
                     "suggestion_token_required", "Read the suggestion first and send its token back with the record.");
         }
-        repo.lockBranchDay(branch, date);
-        // ADR-115: the owner let salespeople see and change the amount; they still never see the profit, the expenses
-        // or the
-        // cap. Read after the branch-day lock, which a savings void takes too, so the gate below sees the day as it
-        // stands.
-        SalespeopleSavings setting = support.salespeopleSavings();
-        boolean salesperson = !profit && setting.on();
         if (!profit && !salesperson && (r.amountMinor() != null || r.overwriteReason() != null)) {
             // The same answer for every value: an accepted-or-refused amount would be an equality
             // oracle for half the day's profit.
@@ -186,6 +182,7 @@ class SavingsService {
                             "amount_requires_profit_access",
                             "Only the default can be recorded without profit access.")));
         }
+        repo.lockBranchDay(branch, date);
         Day d = day(branch, date);
         long suggested = d.suggested();
         if (!support.tokenMatches(branch, date, suggested, r.suggestionToken())) {
@@ -221,16 +218,10 @@ class SavingsService {
         if (repo.activeSavings(branch, date).isPresent()) {
             throw savingsExist();
         }
-        // The amount is judged last, after every check that does not depend on it, so no other answer tells it apart.
-        if (!profit && amount > suggested) {
-            // ADR-115: a salesperson may save up to the suggestion they were shown, never more. The suggestion is never
-            // above
-            // the cap, so the cap is never reached and no answer depends on it (no oracle for the profit less
-            // expenses).
-            throw aboveSuggestion(suggested);
-        }
+        // ADR-115: the cap is judged last, after the permission and existing-record checks, so a request refused for
+        // another reason never says whether its amount was above the cap.
         if (amount > d.available()) {
-            throw aboveAvailable(d, date);
+            throw aboveAvailable(d, date, profit);
         }
         UUID id = UUID.randomUUID();
         UUID by = principal.userId();
@@ -273,17 +264,23 @@ class SavingsService {
     }
 
     /**
-     * A typed amount above the day's available amount (ADR-080). Only a caller with profit read reaches it, so the profit and
-     * expenses in the words reveal nothing new.
+     * A typed amount above the day's available amount (ADR-080). A caller with profit read is told the cap, the profit
+     * and the expenses; a salesperson typing under the owner's setting (ADR-115) is told none of them, only that the amount
+     * is too large, so the words never state the cap.
      */
-    private ApiException aboveAvailable(Day d, LocalDate date) {
-        String when = date.equals(support.today()) ? "today" : "for " + date.format(DAY);
-        String detail = "You can save at most " + money(d.available()) + " " + when + " (profit " + money(d.profit())
-                + " minus expenses " + money(d.expenses()) + ").";
+    private ApiException aboveAvailable(Day d, LocalDate date, boolean profit) {
+        boolean today = date.equals(support.today());
+        String detail = profit
+                ? "You can save at most " + money(d.available()) + " " + (today ? "today" : "for " + date.format(DAY))
+                        + " (profit " + money(d.profit()) + " minus expenses " + money(d.expenses()) + ")."
+                : "That amount is more than this shop can save " + (today ? "today" : "on " + date.format(DAY))
+                        + ". Enter a smaller amount.";
         Map<String, Object> extra = new LinkedHashMap<>();
-        extra.put("available_minor", d.available());
-        extra.put("daily_profit_minor", d.profit());
-        extra.put("day_expenses_minor", d.expenses());
+        if (profit) {
+            extra.put("available_minor", d.available());
+            extra.put("daily_profit_minor", d.profit());
+            extra.put("day_expenses_minor", d.expenses());
+        }
         return new ApiException(
                 HttpStatus.UNPROCESSABLE_CONTENT,
                 "savings_above_available",
@@ -291,21 +288,6 @@ class SavingsService {
                 detail,
                 List.of(new FieldProblem("amount_minor", "savings_above_available", detail)),
                 extra);
-    }
-
-    /**
-     * ADR-115: a salesperson's amount above the suggestion they were shown. The answer depends only on that amount and the
-     * suggestion, both known to the caller, so it says nothing about the cap, the profit or the expenses.
-     */
-    private ApiException aboveSuggestion(long suggested) {
-        String detail = "You can save up to the suggested amount, " + money(suggested) + ". Enter that amount or less.";
-        return new ApiException(
-                HttpStatus.UNPROCESSABLE_CONTENT,
-                "savings_above_suggestion",
-                "More than the suggestion",
-                detail,
-                List.of(new FieldProblem("amount_minor", "savings_above_suggestion", detail)),
-                Map.of("suggested_minor", suggested));
     }
 
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH);
@@ -386,12 +368,6 @@ class SavingsService {
 
     private Savings doVoid(UUID id, VoidRequest r) {
         Principal principal = CurrentPrincipal.require();
-        // The branch-day lock first, as the create takes it (ADR-115): a create deciding whether a saved amount is
-        // being
-        // replaced waits for this void, and the lock order never inverts.
-        repo.savings(id, false)
-                .filter(x -> principal.may(CashbookSupport.VOID, x.branchId()))
-                .ifPresent(x -> repo.lockBranchDay(x.branchId(), x.businessDate()));
         SavingsRow row = repo.savings(id, true)
                 .filter(x -> principal.may(CashbookSupport.VOID, x.branchId()))
                 .orElseThrow(ApiException::notFound);

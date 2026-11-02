@@ -13,7 +13,6 @@ import com.rincoltech.bms.retail.RetailTestSupport;
 import com.rincoltech.bms.testsupport.Api;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -606,25 +605,17 @@ class RetailCashbookSavingsIT extends IntegrationTest {
         assertThat(s.has("daily_profit_minor")).isFalse();
         assertThat(s.has("day_expenses_minor")).isFalse();
 
-        // No oracle for the cap (4,000 here): any amount above the suggestion gets the same answer, below the cap or
-        // above it.
-        ResponseEntity<JsonNode> belowCap = cb.post("/savings", body(s, 3_999, null), CASHIER);
-        ResponseEntity<JsonNode> aboveCap = cb.post("/savings", body(s, 4_001, null), CASHIER);
-        for (ResponseEntity<JsonNode> above : List.of(belowCap, aboveCap)) {
-            assertThat(above.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-            assertThat(above.getBody().get("code").asString()).isEqualTo("savings_above_suggestion");
-            assertThat(above.getBody().get("detail").asString())
-                    .isEqualTo("You can save up to the suggested amount, UGX 2,000. Enter that amount or less.");
-            assertThat(above.getBody().toString()).doesNotContain("4,000").doesNotContain("4000");
-            assertThat(above.getBody().has("available_minor")).isFalse();
-            assertThat(above.getBody().has("daily_profit_minor")).isFalse();
-            assertThat(above.getBody().has("day_expenses_minor")).isFalse();
-        }
-        // Every field but the request id is the same.
-        assertThat(((tools.jackson.databind.node.ObjectNode) belowCap.getBody().deepCopy()).without("request_id"))
-                .isEqualTo(((tools.jackson.databind.node.ObjectNode)
-                                aboveCap.getBody().deepCopy())
-                        .without("request_id"));
+        // The cap holds, in plain words that state neither the cap, the profit nor the expenses.
+        ResponseEntity<JsonNode> above = cb.post("/savings", body(s, 4_001, null), CASHIER);
+        assertThat(above.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(above.getBody().get("code").asString()).isEqualTo("savings_above_available");
+        assertThat(above.getBody().get("detail").asString())
+                .isEqualTo(
+                        "That amount is more than this shop can save on " + words(day) + ". Enter a smaller amount.");
+        assertThat(above.getBody().toString()).doesNotContain("4,000").doesNotContain("4000");
+        assertThat(above.getBody().has("available_minor")).isFalse();
+        assertThat(above.getBody().has("daily_profit_minor")).isFalse();
+        assertThat(above.getBody().has("day_expenses_minor")).isFalse();
 
         // A changed amount needs no overwrite permission under the setting, and is echoed, listed and audited.
         ResponseEntity<JsonNode> changed = cb.post("/savings", body(s, 1_500, "Slow day"), CASHIER);
@@ -724,7 +715,8 @@ class RetailCashbookSavingsIT extends IntegrationTest {
         assertThat(suggestion(CASHIER).get("may_change_amount").asBoolean()).isFalse();
         assertThat(suggestion(PROFIT_RECORDER).get("may_change_amount").asBoolean())
                 .isFalse();
-        // The cap is 5,000: an amount below it and one above it get the same 403, so nothing probes it.
+        // The cap is 5,000: refused anyway, an amount below it and one above it get the same 403 (the cap is checked
+        // last).
         for (long amount : new long[] {1_500, 4_999, 5_001, 9_000}) {
             ResponseEntity<JsonNode> refused = cb.post("/savings", body(suggestion(CASHIER), amount, null), CASHIER);
             assertThat(refused.getStatusCode()).as("%s", amount).isEqualTo(HttpStatus.FORBIDDEN);
@@ -743,7 +735,7 @@ class RetailCashbookSavingsIT extends IntegrationTest {
         assertThat(cb.post("/savings", body(suggestion(CASHIER), null, null), CASHIER)
                         .getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
-        // With an active record, every amount gets the same 409 (or 403), never the cap's 422.
+        // With an active record, every amount gets the same 409, never the cap's 422.
         for (long amount : new long[] {1_000, 4_999, 5_001}) {
             ResponseEntity<JsonNode> refused = cb.post("/savings", body(suggestion(ALL), amount, null), ALL);
             assertThat(refused.getStatusCode()).as("%s", amount).isEqualTo(HttpStatus.CONFLICT);

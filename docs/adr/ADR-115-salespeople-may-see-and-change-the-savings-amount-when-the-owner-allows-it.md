@@ -27,9 +27,12 @@ want the person closing the till to set the savings aside by hand and to check t
    you, the owner, can change this."
 2. **Only what the request needs.** With the setting on, a caller with `retail.savings.record` and without `retail.profit.read`
    gets the suggested amount (`suggested_minor`) and may send `amount_minor` and `overwrite_reason`. That caller never gets
-   `available_minor` (the cap), `daily_profit_minor` or `day_expenses_minor`. The cap of ADR-080 still holds: an amount above it
-   is 422 `savings_above_available` with the plain words "That amount is more than this shop can save today. Enter a smaller
-   amount.", which state neither the cap, the profit nor the expenses, and the problem carries none of them. A 409
+   `available_minor` (the cap), `daily_profit_minor` or `day_expenses_minor`. The cap of ADR-080 still holds, and that caller
+   may lower or raise the amount up to it: an amount above it is 422 `savings_above_available` with the plain words "That amount
+   is more than this shop can save today. Enter a smaller amount.", which state neither the cap, the profit nor the expenses,
+   and the problem carries none of them. The cap is checked last, after the permission check (`may_change_amount`) and the
+   existing-record check (`savings_exists`), so a request that is refused anyway never says whether its amount was above the
+   cap. A 409
    `suggestion_changed` carries the new `suggested_minor`, since the caller sees the suggestion anyway.
 3. **Amounts only on records made while the setting is on, and only to recorders of savings.** Turning the setting on stores the
    moment in `salespeople_see_savings_amount_since` (the database clock, the one that stamps the records); turning it off removes
@@ -58,12 +61,12 @@ want the person closing the till to set the savings aside by hand and to check t
 the Owner can make that choice; the cap and the audit still apply; earlier days stay hidden; a business that leaves it off is
 unaffected.
 
-**Worse:** with it on, a salesperson can work out the day's profit. The suggestion is a fixed share of the day's profit less its
-expenses (half at the default rate), and a salesperson knows or records the day's expenses, so the profit follows from the
-suggestion by simple sums. Leaving the cap out of the answers does not stop that; it only avoids handing over a second figure.
-The refusal of a too large amount still tells the salesperson that the amount was above the cap, so trying amounts one after
-another narrows the cap down, though it gives no more than the suggestion already does. An amount equal to the suggestion is no
-longer a secret. The setting's help text says so in plain words, and this is the trade the Owner accepts by turning it on.
+**Worse:** with it on, a salesperson can work out the day's profit from the savings amount: the suggestion is a share of the
+day's profit less its expenses (half at the default rate), and a salesperson knows or records the day's expenses. By trying
+amounts, a salesperson can also find the most that may be saved, which is the day's profit less its expenses: an amount above
+it is refused and one at or below it is accepted. Leaving the cap out of the answers does not prevent either. The owner
+accepted this (owner decision D124). The setting is off by default, only the Owner turns it on, and its help text says plainly that a
+salesperson who sees the savings amount can work out the day's profit.
 
 **Watch for:** an owner who turns it on and later off: the amounts disappear again from the screens, but what a salesperson saw
 while it was on cannot be taken back. Turning it on again does not show records made in an earlier period. A request to show
