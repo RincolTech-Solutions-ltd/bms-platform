@@ -144,7 +144,7 @@ export function staffMenu(me: Me, { sells, counts = {}, ask = false }: { sells: 
         shopRow(me, 'Controls', 'controls', ['controls']),
         showUsers(me) && { to: '/staff/users', label: 'Staff', icon: icons.user, tour: 'nav-users' },
         showReceivePayments(me) && { to: '/staff/payments', label: 'Receive payments', icon: icons.receivePayments, exact: true },
-        showUnallocated(me) && { to: '/staff/payments/unallocated', label: 'Unallocated payments', icon: icons.receivePayments },
+        showUnallocated(me) && { to: '/staff/payments/unallocated', label: 'Unallocated payments', icon: icons.unallocatedPayments },
         showSms(me) && { to: '/staff/sms', label: 'SMS', icon: icons.phone },
         canConfigureAdvisor(me) && { to: '/staff/assistant', label: 'AI assistant', icon: icons.assistant },
         permissions.includes('core.settings.manage') && { to: '/staff/setup', label: 'Business set-up', icon: icons.settings },

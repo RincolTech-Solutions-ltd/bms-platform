@@ -2,6 +2,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { type ReceiptStatusFilter, type UnallocatedReceipt, receipts } from '../../../api/payments';
+import { businessZone } from '../../../api/retail';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { NoAccess } from '../../../app/ui/EmptyState';
+import { Hint } from '../../../app/ui/Hint';
 import { money } from '../lending/loan-state';
 import { useStaff } from '../context';
 import {
@@ -26,7 +30,7 @@ const messageOf = (e: unknown) => (e instanceof Error ? e.message : 'Something w
 function when(iso: string | undefined): string {
   if (!iso) return '';
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: businessZone() });
 }
 
 type Action = 'allocate' | 'refund';
@@ -58,6 +62,7 @@ export function ReceiptActionForm({ receipt, action, onDone, onCancel }: { recei
     onSuccess: (outcome) => {
       if (outcome) onDone();
     },
+    meta: { success: 'Asked for approval' },
   });
   const problems = [action === 'allocate' ? subjectProblem(subject) : referenceProblem(reference), reasonProblem(reason)];
   const ready = problems.every((p) => p === null);
@@ -93,7 +98,7 @@ export function ReceiptActionForm({ receipt, action, onDone, onCancel }: { recei
           <label htmlFor={`reference-${receipt.id}`}>Your reference for the refund</label>
           <input id={`reference-${receipt.id}`} value={reference} onChange={(e) => setReference(e.target.value)} autoComplete="off" spellCheck={false} aria-invalid={reference !== '' && referenceProblem(reference) !== null} />
           {reference !== '' && referenceProblem(reference) && <p role="alert" className="field-error">{referenceProblem(reference)}</p>}
-          <p className="hint">The system does not send the money. Send it first, then record it here; a second person checks the record.</p>
+          <Hint full>The system does not send the money. Send it first, then record it here; a second person checks the record.</Hint>
         </>
       )}
       <label htmlFor={`reason-${receipt.id}`}>Why</label>
@@ -101,8 +106,8 @@ export function ReceiptActionForm({ receipt, action, onDone, onCancel }: { recei
       {reason !== '' && reasonProblem(reason) && <p role="alert" className="field-error">{reasonProblem(reason)}</p>}
       {ask.error && <p role="alert" className="alert alert-danger">{messageOf(ask.error)}</p>}
       <p className="cluster">
-        <button type="submit" className="rt-primary" disabled={!ready || ask.isPending}>{ask.isPending ? 'Asking' : 'Ask for approval'}</button>
-        <button type="button" className="btn-ghost" disabled={ask.isPending} onClick={onCancel}>Cancel</button>
+        <BusyButton type="submit" className="rt-primary" busy={ask.isPending} disabled={!ready}>Ask for approval</BusyButton>
+        <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
       </p>
     </form>
   );
@@ -168,7 +173,7 @@ export function UnallocatedPage() {
     return (
       <main className="rt ln">
         <h1>Unallocated payments</h1>
-        <p className="empty-state">You do not have access to this page.</p>
+        <NoAccess />
       </main>
     );
   }
@@ -176,12 +181,12 @@ export function UnallocatedPage() {
   return (
     <main className="rt ln stack">
       <h1>Unallocated payments</h1>
-      <p>
+      <p data-tour="unallocated-intro">
         Money your members paid by mobile money or card that the loan or account would not take. It is safe in your own payment account. Put it where it belongs, or record that it
         was sent back. Either way a second person approves it before anything changes.
       </p>
       <label htmlFor="receipt-status">Show</label>
-      <select id="receipt-status" value={status} onChange={(e) => setStatus(e.target.value as ReceiptStatusFilter)}>
+      <select id="receipt-status" data-tour="unallocated-filter" value={status} onChange={(e) => setStatus(e.target.value as ReceiptStatusFilter)}>
         {STATUS_FILTERS.map((f) => (
           <option key={f.value} value={f.value}>{f.label}</option>
         ))}
@@ -190,7 +195,7 @@ export function UnallocatedPage() {
       {query.error && <p role="alert" className="alert alert-danger">{messageOf(query.error)}</p>}
       {!query.data && !query.error && <p className="loading">Loading</p>}
       {query.data && items.length === 0 && <p className="empty-state">{status === 'open' ? 'Nothing is waiting.' : 'Nothing to show.'}</p>}
-      <ul className="stack list-plain">
+      <ul className="stack list-plain" data-tour="unallocated-list">
         {items.map((r) => (
           <Row
             key={r.id}

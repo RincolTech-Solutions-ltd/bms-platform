@@ -91,7 +91,7 @@ describe('the queue', () => {
     expect(screen.queryByRole('button', { name: 'Put on a loan or account' })).toBeNull();
     cleanup();
     shell(['lending.loans.read']);
-    expect(await screen.findByText('You do not have access to this page.')).toBeTruthy();
+    expect(await screen.findByText(/You do not have access to this page\./)).toBeTruthy();
     expect(api.list).toHaveBeenCalledTimes(1);
   });
 
