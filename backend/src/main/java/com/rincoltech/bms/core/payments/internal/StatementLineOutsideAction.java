@@ -67,6 +67,12 @@ class StatementLineOutsideAction implements ApprovalAction {
         return checker.branchFilter(StatementService.READ, null) == null;
     }
 
+    /** The statement line and the marker's note are the whole business's: only one who may decide reads them. */
+    @Override
+    public java.util.Set<String> deciderOnlyPayloadKeys() {
+        return java.util.Set.of(CHECKER_NOTICE, "statement_id", "row_no", "note");
+    }
+
     @Override
     public void execute(Execution execution) {
         statements.confirmOutside(execution);

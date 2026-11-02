@@ -1752,6 +1752,20 @@ class PaymentReconciliationIT extends LoanFixtures {
                 .as("still open until confirmed")
                 .hasSize(1);
         String request = outsideRequest();
+        // A holder of the permission in the head office alone sees the request but not the line or the note.
+        JsonNode seenByHq = send(
+                        HttpMethod.GET,
+                        "/api/v1/approvals/" + request,
+                        as(manager, accountantPerms(), t.headOffice().toString(), null),
+                        null)
+                .getBody();
+        assertThat(seenByHq.get("can_decide").asBoolean()).isFalse();
+        assertThat(seenByHq.get("checker_notice") == null
+                        || seenByHq.get("checker_notice").isNull())
+                .isTrue();
+        for (String key : List.of("checker_notice", "statement_id", "row_no", "note")) {
+            assertThat(seenByHq.get("payload").has(key)).as(key).isFalse();
+        }
         ResponseEntity<JsonNode> own = send(
                 HttpMethod.POST,
                 "/api/v1/approvals/" + request + "/approve",

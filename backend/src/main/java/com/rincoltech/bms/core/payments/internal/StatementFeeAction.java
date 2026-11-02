@@ -64,6 +64,15 @@ class StatementFeeAction implements ApprovalAction {
                 .optional();
     }
 
+    /**
+     * The request sits in the order's own branch, but the statement it comes from is the whole business's: where in it, the
+     * order and the line are for deciders only. The fee is the request's own amount.
+     */
+    @Override
+    public java.util.Set<String> deciderOnlyPayloadKeys() {
+        return java.util.Set.of(CHECKER_NOTICE, STATEMENT_ID, "row_no", INTENT_ID, "line_amount_minor");
+    }
+
     @Override
     public void execute(Execution execution) {
         statements.postHeldFee(execution);
