@@ -44,8 +44,23 @@
 
 SET LOCAL lock_timeout = '5s';
 
+-- The two new keys are validated by a query over unallocated_receipts joined to approval_requests and journal_entries, which
+-- all have FORCE ROW LEVEL SECURITY, and no app.tenant_id is bound here. bms_owner has BYPASSRLS
+-- (deploy/postgres/initdb/01-roles.sh), so the validation reads every business. When the migrating owner cannot bypass row
+-- security (an owner created without BYPASSRLS), the three tables drop FORCE for this transaction only and get it back right
+-- after the keys are added, as V92 does; with BYPASSRLS nothing is altered and no further lock is taken.
+DO $$
+BEGIN
+    IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
+        ALTER TABLE unallocated_receipts NO FORCE ROW LEVEL SECURITY;
+        ALTER TABLE approval_requests NO FORCE ROW LEVEL SECURITY;
+        ALTER TABLE journal_entries NO FORCE ROW LEVEL SECURITY;
+    END IF;
+END
+$$;
+
 ALTER TABLE unallocated_receipts
-    ADD COLUMN version               integer      NOT NULL DEFAULT 0 CHECK (version >= 0),
+    ADD COLUMN version              integer      NOT NULL DEFAULT 0 CHECK (version >= 0),
     ADD COLUMN updated_at            timestamptz  NOT NULL DEFAULT now(),
     -- Who asked (the maker), who decided (the checker), which approval request, and when. The two user ids are not keys, as
     -- on approval_requests itself: the approval request they came from is.
@@ -87,6 +102,16 @@ ALTER TABLE unallocated_receipts
         AND allocated_txn_id IS NULL AND allocated_purpose IS NULL AND allocated_subject_id IS NULL)),
     -- The maker never decides their own request: the same rule the approval mechanism enforces, kept as a backstop.
     ADD CONSTRAINT unallocated_receipts_checker_is_not_maker CHECK (requested_by IS DISTINCT FROM decided_by OR decided_by IS NULL);
+
+DO $$
+BEGIN
+    IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
+        ALTER TABLE unallocated_receipts FORCE ROW LEVEL SECURITY;
+        ALTER TABLE approval_requests FORCE ROW LEVEL SECURITY;
+        ALTER TABLE journal_entries FORCE ROW LEVEL SECURITY;
+    END IF;
+END
+$$;
 
 -- `reversed` joins the endings. The status check is replaced by a superset (every existing row is `open`).
 ALTER TABLE unallocated_receipts DROP CONSTRAINT unallocated_receipts_status_check;
