@@ -3,7 +3,7 @@ import type { Me } from '../api/client';
 import type { Product } from '../api/retail';
 import type { Draft } from '../areas/staff/retail/sale-state';
 import { mayKeepOnPhone, offlineProblem, offlineSale, refreshCatalogue, searchCatalogue, sellingBranchesOf, serverIso } from './catalogue';
-import { PING_TIMEOUT_MS, createConnectivity } from './connectivity';
+import { PING_TIMEOUT_MS, browserConnectivity, createConnectivity } from './connectivity';
 import { memoryStore, scopeOf } from './store';
 
 // The catalogue copy, the offline sale request and the connection watch (issue #458, ADR-067 decisions 2, 3 and 4;
@@ -156,6 +156,27 @@ describe('the connection', () => {
     handlers.online?.();
     await vi.waitFor(() => expect(c.online()).toBe(true));
     expect(seen).toEqual([false, true, false, true]);
+  });
+
+  // JUSTIFICATION-A3: a new test the review asks for (#769), not a mechanism.
+  it("treats the browser's ping cut off by its own 3 s limit as slow, so it is pinged again (issue #769)", async () => {
+    const timedOut = (): Promise<Response> => Promise.reject(new DOMException('The operation timed out.', 'TimeoutError'));
+    const fetch = vi.fn(timedOut).mockImplementationOnce(timedOut).mockImplementationOnce(async () => ({ ok: true }) as Response);
+    vi.stubGlobal('fetch', fetch);
+    try {
+      // One cut off, the second answers: still online.
+      expect(await browserConnectivity().check()).toBe(true);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      // Both cut off: offline.
+      expect(await browserConnectivity().check()).toBe(false);
+      expect(fetch).toHaveBeenCalledTimes(4);
+      // A failure that is not slowness (no network) is offline at once, with no second ping.
+      fetch.mockImplementation(() => Promise.reject(new TypeError('Failed to fetch')));
+      expect(await browserConnectivity().check()).toBe(false);
+      expect(fetch).toHaveBeenCalledTimes(5);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   // JUSTIFICATION-A3: a new test the issue asks for (#769), not a mechanism.

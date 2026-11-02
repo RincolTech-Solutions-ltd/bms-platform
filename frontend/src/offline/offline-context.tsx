@@ -190,7 +190,8 @@ export function useOfflineSupport(me: Me | undefined, signedIn: boolean, service
   const scope = svc && userId ? scopeOf(svc.host, userId) : null;
   const engine = useMemo(() => (svc && scope ? new SyncEngine(svc.engineDeps(svc.store, scope)) : null), [svc, scope]);
   const [catalogue, setCatalogue] = useState<Catalogue | null>(null);
-  const [catalogueLoading, setCatalogueLoading] = useState(true);
+  // The scope whose copy on the phone has been read: loading until it is this one, so a new scope reads again first.
+  const [readScope, setReadScope] = useState<string | null>(null);
   const [others, setOthers] = useState(0);
   // The latest profile, read when a refresh runs, so a new copy of the same profile does not restart the watch.
   const profile = useRef(me);
@@ -235,7 +236,7 @@ export function useOfflineSupport(me: Me | undefined, signedIn: boolean, service
     void svc.store
       .catalogue(scope)
       .then((c) => live && setCatalogue((now) => now ?? c), () => undefined)
-      .finally(() => live && setCatalogueLoading(false));
+      .finally(() => live && setReadScope(scope));
     void lookAtOthers(false);
     void engine.load().then(() => {
       if (svc.connectivity.online()) void engine.sync();
@@ -285,7 +286,7 @@ export function useOfflineSupport(me: Me | undefined, signedIn: boolean, service
       engine,
       connectivity: svc.connectivity,
       catalogue,
-      catalogueLoading,
+      catalogueLoading: readScope !== scope,
       refresh,
       forget: async () => {
         await svc.store.deleteCatalogue(scope);
@@ -293,7 +294,7 @@ export function useOfflineSupport(me: Me | undefined, signedIn: boolean, service
         await svc.store.setLastPerson(svc.host, null);
       },
     };
-  }, [svc, scope, engine, catalogue, catalogueLoading, refresh, manager, admin, userId, others]);
+  }, [svc, scope, engine, catalogue, readScope, refresh, manager, admin, userId, others]);
 }
 
 /** Asks the browser to keep this site's storage (the outbox) when space runs low; a refusal or no support changes nothing. */

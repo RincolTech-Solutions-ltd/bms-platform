@@ -5,6 +5,8 @@ import { BusyButton } from '../../../app/ui/BusyButton';
 import { SEARCH_DELAY_MS, createDebouncer } from '../../../app/ui/useLiveSearch';
 import { Stepper } from '../../../app/ui/Stepper';
 import { RetailError, retail, type Product, type ResolvedLine, type Sale, type SalePayment, type SaleRequest } from '../../../api/retail';
+import { retailMessage } from '../../../api/retail-errors';
+import { getAccessToken } from '../../../auth/session';
 import { mayKeepOnPhone, offlineProblem, offlineSale } from '../../../offline/catalogue';
 import { NoAnswer, SALE_ANSWER_MS, answerWithin } from '../../../offline/connectivity';
 import { useOffline, useOnline } from '../../../offline/offline-context';
@@ -286,8 +288,12 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         return { sale: await answerWithin(asked, SALE_ANSWER_MS) };
       } catch (e) {
         // Only no answer in time or a network failure (fetch's TypeError); a 401 or any refusal is a RetailError and stays here.
+        // A write is never refreshed and sent again inside the client (only reads are), so the race is the sale request alone.
         if (!(e instanceof NoAnswer || e instanceof TypeError)) throw e;
-        const item = offlineSale({ draft: shown, clientSaleId: key, sent: { body, at }, key, scope: offline.scope, branchName, pricesAsOf: offline.catalogue?.pricesAsOf, now: new Date() });
+        // With no session left (a refused refresh, a sign-out) the sale is never kept as saved: the person is told to sign in.
+        if (!getAccessToken()) throw new RetailError(retailMessage({ code: 'unauthenticated' }, 401), 401, 'unauthenticated');
+        // Priced online from the live items at `at`, so its prices are as of then, not of the copy on the phone.
+        const item = offlineSale({ draft: shown, clientSaleId: key, sent: { body, at }, key, scope: offline.scope, branchName, pricesAsOf: at, now: new Date() });
         await offline.engine.queue(item);
         return { kept: item };
       }

@@ -62,15 +62,14 @@ left, the branch, the period, the person's roles.
    within 3 s is pinged again at once, and two in a row count as offline (issue #769): on a weak mobile connection a slow
    answer means a sale would hang, and one slow ping on a cold link does not flip the state. For the same reason a cash,
    mobile money or bank sale sent online with no answer within 8 s, or lost on the network (fetch's `TypeError`; a 401 or
-   any refusal is not), goes to the outbox at once under the same `Idempotency-Key` and client sale id, with
-   `occurred_at` (when Save was pressed), `recorded_offline` and `prices_as_of` added, and the seller gets the
-   provisional receipt. So when the first request never arrived, the outbox's send hours later is a sale recorded
+   any refusal is not, and with no session left it is never kept), goes to the outbox at once under the same
+   `Idempotency-Key` and client sale id, with `occurred_at` and `prices_as_of` (both when Save was pressed: it was priced
+   online from the live items then) and `recorded_offline` added, and the seller gets the provisional receipt. So when the first request never arrived, the outbox's send hours later is a sale recorded
    offline, dated when it was taken. The answer that comes later is ignored on the phone. The server finds the sale by
    its client sale id, or, while the first request still holds the key, answers 409 `idempotency_in_progress` (tried
    again, never a refusal, `classify` in `outbox.ts`) and then replays from the key, whose hash leaves the delivery
-   fields out (decision 5), so the sale is recorded once. For a client that sends the online body again unchanged, the
-   server also takes a cash, mobile money or bank sale with a client sale id whose `occurred_at` is more than five
-   minutes before it arrives as recorded offline, its prices as of `occurred_at`.
+   fields out (decision 5), so the sale is recorded once. A refused first request leaves no key row (the key and the sale
+   commit or roll back together), so the outbox copy is never answered with that refusal.
 5. **Sent once.** The request carries `Idempotency-Key` (replays within 7 days answer from the key row) and
    `client_sale_id`, stored on `retail_sales` with a unique index per tenant. The server looks for the client sale id
    before any other check, the key's included (issue #769), and for a request with a client sale id the key's request

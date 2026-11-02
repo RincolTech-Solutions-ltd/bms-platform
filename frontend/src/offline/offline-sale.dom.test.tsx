@@ -42,6 +42,8 @@ const { StaffContext } = await import('../areas/staff/context');
 const { RecordSale } = await import('../areas/staff/retail/sale');
 const { OfflineProvider } = await import('./offline-context');
 const { testOffline } = await import('./test-kit');
+const { setAccessToken } = await import('../auth/session');
+const { RetailError } = await import('../api/retail');
 
 const seller = mockMe('sales');
 const branch = seller.branches?.[0]?.id ?? '';
@@ -70,7 +72,10 @@ async function addBulbAndRecord() {
   fireEvent.click(save);
 }
 
-beforeEach(() => sessionStorage.clear());
+beforeEach(() => {
+  sessionStorage.clear();
+  setAccessToken('test-access-token');
+});
 
 afterEach(() => {
   cleanup();
@@ -211,7 +216,36 @@ describe('Record a sale offline', () => {
     expect(body.client_sale_id).toBe(key);
     const [item] = offline.engine.snapshot().items;
     expect(item).toMatchObject({ id: key, key, state: 'queued' });
-    expect(item?.request).toEqual({ ...body, occurred_at: item?.occurredAt, recorded_offline: true, prices_as_of: catalogue.pricesAsOf });
+    // Priced online from the live items when Save was pressed, so its prices are as of then, not of the copy on the phone.
+    expect(item?.request).toEqual({ ...body, occurred_at: item?.occurredAt, recorded_offline: true, prices_as_of: item?.occurredAt });
+    expect(item?.occurredAt).not.toBe(catalogue.pricesAsOf);
+  });
+
+  // JUSTIFICATION-A3: a new test the review asks for (#769), not a mechanism.
+  it('never keeps a sale on the phone when the session has ended, and says to sign in (issue #769)', async () => {
+    listProducts.mockResolvedValue([bulb]);
+    const offline = testOffline(seller, { online: true, catalogue });
+    if (!offline) throw new Error('a seller sells offline');
+
+    // The server answers 401: a clear answer, shown as it is.
+    createSale.mockRejectedValue(new RetailError('Your session has ended. Sign in again.', 401, 'unauthenticated'));
+    screenWith(offline);
+    await addBulbAndRecord();
+    expect(await screen.findByText(/Your session has ended. Sign in again./)).toBeTruthy();
+    expect(screen.queryByText('Sale saved on this phone')).toBeNull();
+    expect(offline.engine.snapshot().items).toHaveLength(0);
+    cleanup();
+    sessionStorage.clear();
+
+    // A refused refresh left no session, then the network fails: still never kept as saved.
+    setAccessToken(null);
+    createSale.mockReset();
+    createSale.mockRejectedValue(new TypeError('Failed to fetch'));
+    screenWith(offline);
+    await addBulbAndRecord();
+    expect(await screen.findByText(/Your session has ended. Sign in again./)).toBeTruthy();
+    expect(screen.queryByText('Sale saved on this phone')).toBeNull();
+    expect(offline.engine.snapshot().items).toHaveLength(0);
   });
 
   it('keeps a sale with no answer within 8 seconds on the phone, and the late answer makes no second sale (issue #769)', async () => {

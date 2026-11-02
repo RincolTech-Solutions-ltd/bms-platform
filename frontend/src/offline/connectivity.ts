@@ -87,8 +87,15 @@ export function browserConnectivity(): Connectivity {
   return createConnectivity({
     ping: async () => {
       const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(PING_TIMEOUT_MS) : undefined;
-      const response = await fetch('/healthz', { cache: 'no-store', signal });
-      return response.ok;
+      try {
+        const response = await fetch('/healthz', { cache: 'no-store', signal });
+        return response.ok;
+      } catch (e) {
+        // The fetch cut off by its own 3 s limit is a slow ping, not a failed one, so it is pinged again (issue #769).
+        const name = (e as { name?: string } | null)?.name;
+        if (name === 'TimeoutError' || name === 'AbortError') throw new NoAnswer('The server did not answer in time.');
+        throw e;
+      }
     },
     navigatorOnline: () => (typeof navigator === 'undefined' ? true : navigator.onLine !== false),
     addListener: (type, fn) => {

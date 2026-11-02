@@ -284,40 +284,50 @@ class RetailOfflineSalesIT extends IntegrationTest {
     }
 
     /**
-     * Issue #769: the first request never arrived and the outbox sends the same body hours later, after a price change. It
-     * takes the offline acceptance path: dated when it happened, the price the screen showed stands with a price_changed
-     * clash, never refused as an online override.
+     * Issue #769: a refused online request leaves no key row (the key and the sale commit or roll back together), so the
+     * outbox's copy under the same key is not answered with the refusal: it is recorded offline, the short stock a clash.
      */
-    // JUSTIFICATION-A3: a new test the issue asks for (#769), not a mechanism.
+    // JUSTIFICATION-A3: a new test the review asks for (#769), not a mechanism.
     @Test
-    void anOnlineSaleThatArrivesHoursLateIsDatedWhenItHappenedAndTakenAsOffline() {
-        api.stockUp(t.headOffice(), product, "5");
-        Instant at = Instant.now().truncatedTo(ChronoUnit.MILLIS).minus(Duration.ofHours(3));
-        Map<String, Object> online = onlineSale(at, 2_000);
-        assertThat(api.editPrices(product, Map.of("sell_minor", 2_500, "reason", "Test price rise"), ADMIN)
-                        .getStatusCode())
-                .isEqualTo(HttpStatus.OK);
-        ResponseEntity<JsonNode> late = send(online, UUID.randomUUID().toString());
-        assertThat(late.getStatusCode()).as("%s", late.getBody()).isEqualTo(HttpStatus.CREATED);
-        JsonNode device = late.getBody().get("device");
-        assertThat(device.get("recorded_offline").asBoolean()).isTrue();
-        assertThat(Instant.parse(device.get("occurred_at").asString())).isEqualTo(at);
-        assertThat(late.getBody().get("sale_date").asString())
-                .isEqualTo(dayIn(at).toString());
-        assertThat(late.getBody().get("total_minor").asLong()).isEqualTo(2_000);
-        assertThat(clashKinds(late.getBody())).containsExactly("price_changed");
+    void aRefusedOnlineRequestDoesNotStopItsOutboxCopyUnderTheSameKey() {
+        api.stockUp(t.headOffice(), product, "1");
+        Instant at = Instant.now().truncatedTo(ChronoUnit.MILLIS).minus(Duration.ofMinutes(1));
+        Map<String, Object> fromOutbox = offlineSale(UUID.randomUUID(), at, "2", 2_000);
+        Map<String, Object> online = new LinkedHashMap<>(fromOutbox);
+        online.remove("occurred_at");
+        online.remove("recorded_offline");
+        online.remove("prices_as_of");
+        String key = UUID.randomUUID().toString();
+        ResponseEntity<JsonNode> refused = send(online, key);
+        assertThat(refused.getStatusCode().is4xxClientError())
+                .as("%s", refused.getBody())
+                .isTrue();
+        assertThat(sales()).isZero();
+        ResponseEntity<JsonNode> kept = send(fromOutbox, key);
+        assertThat(kept.getStatusCode()).as("%s", kept.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(kept.getHeaders().getFirst("Idempotent-Replayed")).isNull();
+        assertThat(kept.getBody().get("device").get("recorded_offline").asBoolean())
+                .isTrue();
+        assertThat(clashKinds(kept.getBody())).contains("stock_short");
         assertThat(sales()).isEqualTo(1);
     }
 
     /**
-     * Issue #769, ADR-067 decision 4: the outbox's send overlaps the first request, still in flight with the same key. The
-     * send waits on the key and replays the sale, or is 409 idempotency_in_progress and its next try replays it: one sale.
+     * Issue #769, ADR-067 decision 4: the outbox's send, with its delivery fields added, overlaps the first online request,
+     * still in flight with the same key. The send misses the client sale id, waits on the key and replays the sale (the
+     * key's hash leaves the delivery fields out), or is 409 idempotency_in_progress and its next try finds it: one sale.
      */
     // JUSTIFICATION-A3: a new test the issue asks for (#769), not a mechanism.
     @Test
     void theOutboxSendOverlappingTheFirstRequestUnderItsKeyIsOneSale() throws Exception {
         api.stockUp(t.headOffice(), product, "5");
-        Map<String, Object> online = onlineSale(Instant.now(), 2_000);
+        Instant at = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        Map<String, Object> online = onlineSale(at, 2_000);
+        online.remove("occurred_at");
+        Map<String, Object> copy = new LinkedHashMap<>(online);
+        copy.put("occurred_at", at.toString());
+        copy.put("recorded_offline", true);
+        copy.put("prices_as_of", at.toString());
         String key = UUID.randomUUID().toString();
         java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
         try (java.sql.Connection conn = TestDatabase.ownerDataSource().getConnection()) {
@@ -337,7 +347,7 @@ class RetailOfflineSalesIT extends IntegrationTest {
                 assertThat(waitersOn(holder))
                         .as("the first request holds its key and waits")
                         .isEqualTo(1);
-                fromOutbox = pool.submit(() -> send(online, key));
+                fromOutbox = pool.submit(() -> send(copy, key));
                 assertThat(waitingOnAWaiterOf(holder))
                         .as("the outbox's send waits on the key")
                         .isTrue();
@@ -348,7 +358,7 @@ class RetailOfflineSalesIT extends IntegrationTest {
             ResponseEntity<JsonNode> overlap = fromOutbox.get(60, java.util.concurrent.TimeUnit.SECONDS);
             if (overlap.getStatusCode() == HttpStatus.CONFLICT) {
                 assertThat(overlap.getBody().get("code").asString()).isEqualTo("idempotency_in_progress");
-                overlap = send(online, key);
+                overlap = send(copy, key);
             }
             assertThat(overlap.getStatusCode()).as("%s", overlap.getBody()).isEqualTo(HttpStatus.CREATED);
             assertThat(overlap.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
@@ -838,8 +848,6 @@ class RetailOfflineSalesIT extends IntegrationTest {
                 List.of(Map.of("product_id", product, "qty", "1", "unit_id", carton, "unit_price_minor", 24_000)));
         Map<String, Object> online = new LinkedHashMap<>(body);
         online.remove("recorded_offline");
-        // Sent online when it happened: a request arriving late takes the offline path (issue #769).
-        online.put("occurred_at", Instant.now().toString());
         assertThat(send(online, UUID.randomUUID().toString()).getBody().toString())
                 .contains("unknown_pack_unit");
 
