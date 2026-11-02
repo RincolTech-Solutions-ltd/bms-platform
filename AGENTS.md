@@ -367,7 +367,9 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   keeps the last loaded answers of an allowlist of retail reads (Home and Retail summaries, sales of the last 30 days and older
   credit still owing, stock, customers who owe and their accounts, past usage, Download my data and non-lending report runs) in
   the `bms-offline` store (`kv`, `reads:<host>|<user id>`), capped at 2,000,000 JSON characters, restored into the query cache
-  when the staff layout mounts, cleared by `forget()` at sign-out. React Query's online state follows the offline support's
+  when the staff layout mounts, cleared by `forget()` at sign-out (with the kept reads in memory; `forgetReads` for a person
+  who no longer sells). Only server answers fetched by that person are written (never `setQueryData`), and the copy carries
+  `accessOf(me)`, so a copy made under other rights or branches is thrown away. React Query's online state follows the offline support's
   connectivity, so reads pause offline, and a read that failed for want of the network shows its figures again or waits;
   mutations run with `networkMode: 'always'` (`main.tsx`), so no change is ever held to be sent later (NFR-OFF-04).
   `OfflineBanner` is the one offline notice ("Figures are from today at 14:05"); Home's Shop card says Sell works offline. Tests:

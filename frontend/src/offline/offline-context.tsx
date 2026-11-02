@@ -6,7 +6,7 @@ import { getAccessToken, refreshFailedOffline, refreshSession, subscribe as onTo
 import { REFRESH_EVERY_MS, refreshCatalogue, type CatalogueSource } from './catalogue';
 import { browserConnectivity, type Connectivity } from './connectivity';
 import { waiting, type OutboxItem } from './outbox';
-import { followConnectivity, keepReads, restore, type ReadKeeper } from './read-cache';
+import { accessOf, followConnectivity, keepReads, keptForReading, restore, usable, type ReadKeeper } from './read-cache';
 import { deviceStore, scopeOf, type Catalogue, type OfflineStore } from './store';
 import { SyncEngine, browserTabLock, type SyncDeps, type SyncSnapshot } from './sync-engine';
 
@@ -248,22 +248,37 @@ export function useOfflineSupport(me: Me | undefined, signedIn: boolean, service
     };
   }, [svc, scope, engine, refresh, lookAtOthers]);
 
-  // Reading offline (issue #763, ADR-116): the figures last loaded come back from this person's copy on this business, new
-  // ones are written to it, and reads pause while offline instead of failing.
+  // Reading offline (issue #763, ADR-116): the figures last loaded come back from this person's copy on this business, made
+  // under the rights they hold now (a copy made under other rights is thrown away), new ones are written to it, and reads
+  // pause while offline instead of failing.
+  const access = me ? accessOf(me) : '';
   const reads = useRef<ReadKeeper | null>(null);
   useEffect(() => {
     if (!svc || !scope || !client) return;
     let live = true;
-    void svc.store.readCache(scope).then((c) => live && restore(client, c, svc.now().getTime()), () => undefined);
-    const keeper = keepReads(client, svc.store, scope, () => svc.now().getTime());
+    const now = () => svc.now().getTime();
+    const keeper = keepReads(client, svc.store, scope, access, now);
     reads.current = keeper;
-    const unfollow = followConnectivity(client, svc.connectivity);
+    void svc.store.readCache(scope).then(
+      async (c) => {
+        if (!live) return;
+        if (c && !usable(c, access)) return svc.store.deleteReadCache(scope);
+        keeper.adopt(restore(client, c, now(), access));
+      },
+      () => undefined,
+    );
     return () => {
       live = false;
       keeper.stop();
-      unfollow();
     };
-  }, [svc, scope, client]);
+  }, [svc, scope, client, access]);
+  useEffect(() => (svc && client ? followConnectivity(client, svc.connectivity) : undefined), [svc, client]);
+  // A person who does not sell has no offline support: a copy left from when they did goes (it holds customers' names).
+  useEffect(() => {
+    if (!userId || sells || me === undefined) return;
+    const s = services();
+    void s.store.deleteReadCache(scopeOf(s.host, userId)).catch(() => undefined);
+  }, [userId, sells, me, services]);
 
   // Whenever a new access token arrives (a sign-in, a refresh by any screen), a stopped engine goes on sending.
   useEffect(() => {
@@ -320,6 +335,20 @@ export function requestPersistence(): void {
 /** The number of sales waiting on this device for the signed-in person (queued and failed). */
 export function waitingNow(offline: Offline | null): number {
   return offline ? waiting(offline.engine.snapshot().items).length : 0;
+}
+
+/**
+ * At sign-out of a person with no offline support now (their selling was taken away): their kept figures go all the same,
+ * from the device and from memory (issue #763).
+ */
+export async function forgetReads(userId: string | undefined, client?: QueryClient, store: OfflineStore = deviceStore(), host: string = window.location.host): Promise<void> {
+  client?.removeQueries({ predicate: (q) => keptForReading(q.queryKey) });
+  if (!userId) return;
+  try {
+    await store.deleteReadCache(scopeOf(host, userId));
+  } catch {
+    // Nothing kept, or no store on this browser.
+  }
 }
 
 /** The profile of the last person signed in on this business, for opening the app with no network; null when none. */

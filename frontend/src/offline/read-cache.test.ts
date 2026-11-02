@@ -1,7 +1,8 @@
-import { QueryClient, onlineManager } from '@tanstack/react-query';
+import { QueryClient, onlineManager, type QueryKey } from '@tanstack/react-query';
 import { afterEach, describe, expect, it } from 'vitest';
-import { setBusinessZone } from '../api/retail';
-import { KEEP_DAYS, figuresTime, followConnectivity, keepReads, keptForReading, merged, readsOf, restore, trimmed, type ReadEntry } from './read-cache';
+import { RetailError, setBusinessZone } from '../api/retail';
+import { mockMe } from '../api/retail-mock';
+import { KEEP_DAYS, accessOf, figuresTime, followConnectivity, keepReads, keptForReading, merged, restore, trimmed, type ReadEntry } from './read-cache';
 import { memoryStore, scopeOf } from './store';
 import { testConnectivity } from './test-kit';
 
@@ -10,9 +11,15 @@ import { testConnectivity } from './test-kit';
 const NOW = Date.parse('2026-11-02T12:00:00Z');
 const DAY = 86_400_000;
 const SHOP = scopeOf('shop-one.example.test', 'u1');
+const ADMIN = accessOf(mockMe('admin'));
 
 const entry = (key: unknown[], data: unknown, at: number): ReadEntry =>
   ({ queryKey: key, queryHash: JSON.stringify(key), state: { data, dataUpdatedAt: at, status: 'success' } }) as unknown as ReadEntry;
+
+/** A read answered by the server (a fetch), as a screen makes it. */
+const fetched = (client: QueryClient, queryKey: QueryKey, data: unknown) => client.fetchQuery({ queryKey, queryFn: async () => data });
+const failed = (client: QueryClient, queryKey: QueryKey, error: unknown) => client.fetchQuery({ queryKey, queryFn: () => Promise.reject(error), retry: false }).catch(() => undefined);
+const settle = () => new Promise((r) => setTimeout(r, 20));
 
 afterEach(() => onlineManager.setOnline(true));
 
@@ -26,6 +33,7 @@ describe('what is kept', () => {
       ['retail', 'stock', 'b1', '', '', false, '', false],
       ['retail', 'catalogue', 'buyers', ''],
       ['retail', 'accounts', ''],
+      ['retail', 'orders', 'board', 'all'],
       ['retail', 'usage-history', '2026-10-01', '2026-11-02', 'all', ''],
       ['data-export'],
       ['reports', 'runs'],
@@ -44,20 +52,18 @@ describe('what is kept', () => {
     expect(kept.pages[0]?.items.map((s) => s.id)).toEqual(['new', 'owing']);
     const groups = { pages: [{ items: [{ key: 'b1', sales_count: 3 }] }], pageParams: [null] };
     expect(trimmed(['retail', 'sales', 'summary', 'branch', {}, {}], groups, NOW)).toEqual(groups);
+    // A sale opened from the list: kept while recent or owing, dropped otherwise.
+    expect(trimmed(['retail', 'sale', 's1'], { sale_date: '2026-09-01', balance_minor: 0 }, NOW)).toBeUndefined();
+    expect(trimmed(['retail', 'sale', 's2'], { sale_date: '2026-09-01', balance_minor: 100 }, NOW)).toEqual({ sale_date: '2026-09-01', balance_minor: 100 });
   });
 
-  it('leaves lending reports out of the reports lists', () => {
-    const runs = [{ id: 'r1', report_key: 'retail.test' }, { id: 'r2', report_key: 'lending.par' }];
-    expect(trimmed(['reports', 'runs'], runs, NOW)).toEqual([{ id: 'r1', report_key: 'retail.test' }]);
-    expect(trimmed(['reports', 'catalogue'], [{ key: 'lending.par' }], NOW)).toEqual([]);
-  });
-
-  it('takes only loaded reads from the cache, never a failed or a lending one', () => {
-    const client = new QueryClient();
-    client.setQueryData(['retail', 'home', 'all'], { sales: 1 });
-    client.setQueryData(['lending', 'home-summary', 'all'], { due: 1 });
-    client.setQueryData(['me', 'token'], { user_id: 'u1' });
-    expect(readsOf(client, NOW).map((e) => e.queryKey)).toEqual([['retail', 'home', 'all']]);
+  it('leaves lending reports out of the reports lists, in every shape a list comes in', () => {
+    // GET /report-runs and GET /reports answer bare lists (schema.d.ts: ReportRun[]).
+    const run = (id: string, key: string) => ({ id, report_key: key, title: `Test ${id}`, status: 'ready' });
+    expect(trimmed(['reports', 'runs'], [run('r1', 'retail.test'), run('r2', 'lending.par')], NOW)).toEqual([run('r1', 'retail.test')]);
+    expect(trimmed(['reports', 'catalogue'], [{ key: 'lending.par' }, { key: 'retail.test' }], NOW)).toEqual([{ key: 'retail.test' }]);
+    expect(trimmed(['reports', 'runs'], { items: [run('r1', 'retail.test'), run('r2', 'lending.par')] }, NOW)).toEqual({ items: [run('r1', 'retail.test')] });
+    expect(trimmed(['reports', 'runs'], { pages: [{ items: [run('r2', 'lending.par')] }], pageParams: [null] }, NOW)).toEqual({ pages: [{ items: [] }], pageParams: [null] });
   });
 });
 
@@ -78,68 +84,121 @@ describe('the size cap', () => {
 });
 
 describe('keeping and restoring', () => {
-  it('writes what loads to this person on this business, and another business on the same phone never sees it', async () => {
+  it('writes what the server answered to this person on this business, and another business on the same phone never sees it', async () => {
     const store = memoryStore();
     const client = new QueryClient();
-    const keeper = keepReads(client, store, SHOP, () => Date.now(), 0);
-    client.setQueryData(['retail', 'home', 'all'], { title: 'Test figures of shop one' });
+    const keeper = keepReads(client, store, SHOP, ADMIN, () => Date.now(), 0);
+    await fetched(client, ['retail', 'home', 'all'], { title: 'Test figures of shop one' });
+    await fetched(client, ['lending', 'home-summary', 'all'], { title: 'Test lending figures' });
     await expect.poll(async () => (await store.readCache(SHOP))?.entries.length ?? 0).toBe(1);
     keeper.stop();
+    expect(JSON.stringify(await store.readCache(SHOP))).not.toContain('lending');
 
     const other = new QueryClient();
-    restore(other, await store.readCache(scopeOf('shop-two.example.test', 'u1')), Date.now());
-    restore(other, await store.readCache(scopeOf('shop-one.example.test', 'u2')), Date.now());
+    restore(other, await store.readCache(scopeOf('shop-two.example.test', 'u1')), Date.now(), ADMIN);
+    restore(other, await store.readCache(scopeOf('shop-one.example.test', 'u2')), Date.now(), ADMIN);
     expect(other.getQueryCache().getAll()).toHaveLength(0);
 
     const again = new QueryClient();
-    restore(again, await store.readCache(SHOP), Date.now());
+    restore(again, await store.readCache(SHOP), Date.now(), ADMIN);
     expect(again.getQueryData(['retail', 'home', 'all'])).toEqual({ title: 'Test figures of shop one' });
+  });
+
+  it('never keeps what the app wrote into the cache itself, such as a sale not yet sent', async () => {
+    const store = memoryStore();
+    const client = new QueryClient();
+    const keeper = keepReads(client, store, SHOP, ADMIN, () => Date.now(), 0);
+    await fetched(client, ['retail', 'stock', 'b1'], { items: [{ code: 'TB-01', on_hand: '12.000' }] });
+    client.setQueryData(['retail', 'stock', 'b1'], { items: [{ code: 'TB-01', on_hand: '11.000' }] });
+    client.setQueryData(['retail', 'sale', 'off-1'], { id: 'off-1', sale_date: '2026-11-02' });
+    await settle();
+    keeper.stop();
+    const kept = JSON.stringify(await store.readCache(SHOP));
+    expect(kept).toContain('12.000');
+    expect(kept).not.toContain('11.000');
+    expect(kept).not.toContain('off-1');
+  });
+
+  it('throws away a copy made under other rights: a manager made a seller, or a branch taken away', async () => {
+    const store = memoryStore();
+    const client = new QueryClient();
+    const keeper = keepReads(client, store, SHOP, ADMIN, () => Date.now(), 0);
+    await fetched(client, ['retail', 'home', 'all'], { title: 'Test shop wide totals' });
+    await expect.poll(async () => (await store.readCache(SHOP)) !== null).toBe(true);
+    keeper.stop();
+    const admin = mockMe('admin');
+    const seller = accessOf(mockMe('sales'));
+    const fewerBranches = accessOf({ ...admin, branches: (admin.branches ?? []).slice(0, 1) });
+    expect(seller).not.toBe(ADMIN);
+    expect(fewerBranches).not.toBe(ADMIN);
+    for (const now of [seller, fewerBranches]) {
+      const next = new QueryClient();
+      expect(restore(next, await store.readCache(SHOP), Date.now(), now)).toEqual([]);
+      expect(next.getQueryData(['retail', 'home', 'all'])).toBeUndefined();
+    }
   });
 
   it('never puts back figures older than what the screen already holds', () => {
     const client = new QueryClient();
     client.setQueryData(['retail', 'home', 'all'], 'fresh', { updatedAt: NOW });
-    restore(client, { savedAt: NOW, entries: [entry(['retail', 'home', 'all'], 'kept', NOW - DAY)] }, NOW);
+    restore(client, { savedAt: NOW, access: ADMIN, entries: [entry(['retail', 'home', 'all'], 'kept', NOW - DAY)] }, NOW, ADMIN);
     expect(client.getQueryData(['retail', 'home', 'all'])).toBe('fresh');
   });
 
-  it('removes the copy at sign-out and writes nothing after it', async () => {
+  it('at sign-out removes the copy and the kept reads in memory, so the next person in the same tab never gets them', async () => {
     const store = memoryStore();
     const client = new QueryClient();
-    const keeper = keepReads(client, store, SHOP, () => Date.now(), 0);
-    client.setQueryData(['retail', 'home', 'all'], 1);
+    const first = keepReads(client, store, SHOP, ADMIN, () => Date.now(), 0);
+    await fetched(client, ['retail', 'customers'], [{ name: 'Test Customer of person one' }]);
     await expect.poll(async () => (await store.readCache(SHOP)) !== null).toBe(true);
-    await keeper.forget();
-    client.setQueryData(['retail', 'home', 'all'], 2);
-    await new Promise((r) => setTimeout(r, 10));
+    await first.forget();
+    expect(await store.readCache(SHOP)).toBeNull();
+    expect(client.getQueryData(['retail', 'customers'])).toBeUndefined();
+
+    // Person two signs in on the same tab and the same query cache; a read the first person left would not be theirs either.
+    client.setQueryData(['retail', 'stock', 'b1'], { items: ['Test item of person one'] });
+    const next = scopeOf('shop-one.example.test', 'u2');
+    const second = keepReads(client, store, next, ADMIN, () => Date.now(), 0);
+    await fetched(client, ['retail', 'home', 'all'], { title: 'Test figures of person two' });
+    await expect.poll(async () => (await store.readCache(next)) !== null).toBe(true);
+    second.stop();
+    const theirs = JSON.stringify(await store.readCache(next));
+    expect(theirs).toContain('person two');
+    expect(theirs).not.toContain('person one');
     expect(await store.readCache(SHOP)).toBeNull();
   });
 });
 
 describe('offline', () => {
-  it('pauses reads while the offline support says offline, and shows the figures of a read that just failed', async () => {
+  it('pauses reads while the offline support says offline, and quiets only kept reads the network dropped', async () => {
     const client = new QueryClient();
     client.setQueryData(['retail', 'stock', 'b1'], { items: ['Test item'] });
-    await client.fetchQuery({ queryKey: ['retail', 'stock', 'b1'], queryFn: () => Promise.reject(new TypeError('Failed to fetch')), retry: false, staleTime: 0 }).catch(() => undefined);
-    expect(client.getQueryState(['retail', 'stock', 'b1'])?.status).toBe('error');
-    // A read that never loaded, and a refusal the server did send (it stays on screen).
-    await client.fetchQuery({ queryKey: ['retail', 'sales', {}], queryFn: () => Promise.reject(new TypeError('Failed to fetch')), retry: false }).catch(() => undefined);
-    await client.fetchQuery({ queryKey: ['retail', 'sale', 's-9'], queryFn: () => Promise.reject(Object.assign(new Error('Not found'), { status: 404 })), retry: false }).catch(() => undefined);
+    const dropped = new TypeError('Failed to fetch');
+    await failed(client, ['retail', 'stock', 'b1'], dropped);
+    await failed(client, ['retail', 'sales', {}], dropped);
+    await failed(client, ['lending', 'home-summary', 'all'], dropped);
+    // The app's own error for an answer the server sent: a refusal and a server error.
+    await failed(client, ['retail', 'sale', 's-9'], new RetailError('Not found', 404, 'not_found'));
+    await failed(client, ['retail', 'home', 'all'], new RetailError('Server error', 500));
     const connectivity = testConnectivity(true);
     const undo = followConnectivity(client, connectivity);
     connectivity.set(false);
     expect(onlineManager.isOnline()).toBe(false);
-    expect(client.getQueryState(['retail', 'stock', 'b1'])?.status).toBe('success');
+    const status = (key: QueryKey) => client.getQueryState(key)?.status;
+    expect(status(['retail', 'stock', 'b1'])).toBe('success');
     expect(client.getQueryData(['retail', 'stock', 'b1'])).toEqual({ items: ['Test item'] });
-    expect(client.getQueryState(['retail', 'sales', {}])?.status).toBe('pending');
-    expect(client.getQueryState(['retail', 'sale', 's-9'])?.status).toBe('error');
+    expect(status(['retail', 'sales', {}])).toBe('pending');
+    expect(status(['lending', 'home-summary', 'all'])).toBe('error');
+    expect(status(['retail', 'sale', 's-9'])).toBe('error');
+    expect(status(['retail', 'home', 'all'])).toBe('error');
     connectivity.set(true);
     expect(onlineManager.isOnline()).toBe(true);
     undo();
   });
 
-  it('says the time of the figures in the business time zone', () => {
+  it('says the time of the figures in the business time zone, today only for this year', () => {
     expect(figuresTime(Date.parse('2026-11-02T11:05:00Z'), NOW, 'Africa/Kampala')).toBe('today at 14:05');
     expect(figuresTime(Date.parse('2026-10-31T06:30:00Z'), NOW, 'Africa/Kampala')).toBe('31 Oct at 09:30');
+    expect(figuresTime(Date.parse('2025-11-02T11:05:00Z'), NOW, 'Africa/Kampala')).toBe('2 Nov at 14:05');
   });
 });

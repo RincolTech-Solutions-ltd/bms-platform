@@ -6,6 +6,7 @@ import type { Me } from '../api/client';
 import { mockMe } from '../api/retail-mock';
 import { setAccessToken } from '../auth/session';
 import { othersOnPhone, summaries, useOfflineSupport, type OfflineServices } from './offline-context';
+import { accessOf } from './read-cache';
 import { provisionalNumber, type OutboxItem } from './outbox';
 import { memoryStore, scopeOf, type OfflineStore } from './store';
 import { testConnectivity } from './test-kit';
@@ -132,6 +133,7 @@ describe('a shared phone', () => {
     const me: Me = { ...mockMe('sales'), user_id: 'u1' };
     const kept = (title: string) => ({
       savedAt: 1,
+      access: accessOf(me),
       entries: [{ queryKey: ['retail', 'home', 'all'], queryHash: '["retail","home","all"]', state: { data: { title }, dataUpdatedAt: Date.now() - 60_000, status: 'success' } }],
     }) as never;
     // The same phone also holds another business (another host) and another person of this business.
@@ -144,6 +146,8 @@ describe('a shared phone', () => {
 
     await act(() => result.current!.forget());
     expect(await store.readCache(scopeOf(HOST, 'u1'))).toBeNull();
+    // The kept reads left memory with the copy.
+    expect(client.getQueryData(['retail', 'home', 'all'])).toBeUndefined();
     // Nothing loaded after sign-out is written back.
     client.setQueryData(['retail', 'home', 'all'], { title: 'Test figures after sign-out' });
     await new Promise((r) => setTimeout(r, 50));
@@ -151,6 +155,26 @@ describe('a shared phone', () => {
     // The other business and the other person keep theirs.
     expect(JSON.stringify(await store.readCache(scopeOf('other-shop.example', 'u1')))).toContain('another business');
     expect(JSON.stringify(await store.readCache(scopeOf(HOST, 'u2')))).toContain('another person');
+  });
+
+  // JUSTIFICATION-A3: a new test case for the #765 review (points 1 and 3: rights changed, selling taken away) beside the case it extends.
+  it('throws away a copy made under other rights, and the copy of a person who no longer sells (issue #763)', async () => {
+    const store = memoryStore();
+    const seller: Me = { ...mockMe('sales'), user_id: 'u1' };
+    const copy = (access: string) =>
+      ({ savedAt: 1, access, entries: [{ queryKey: ['retail', 'home', 'all'], queryHash: '["retail","home","all"]', state: { data: { title: 'Test shop wide totals' }, dataUpdatedAt: Date.now(), status: 'success' } }] }) as never;
+    await store.putReadCache(scopeOf(HOST, 'u1'), copy(accessOf(mockMe('admin'))));
+    const client = new QueryClient();
+    renderHook(() => useOfflineSupport(seller, false, services(store, async () => {}), client));
+    await waitFor(async () => expect(await store.readCache(scopeOf(HOST, 'u1'))).toBeNull());
+    expect(client.getQueryData(['retail', 'home', 'all'])).toBeUndefined();
+    cleanup();
+
+    const watcher: Me = { ...seller, permissions: (seller.permissions ?? []).filter((p) => p !== 'retail.sale.create') };
+    await store.putReadCache(scopeOf(HOST, 'u1'), copy(accessOf(watcher)));
+    const { result } = renderHook(() => useOfflineSupport(watcher, false, services(store, async () => {}), client));
+    expect(result.current).toBeNull();
+    await waitFor(async () => expect(await store.readCache(scopeOf(HOST, 'u1'))).toBeNull());
   });
 
   it('picks only the other people of this business, and only what still waits', () => {

@@ -1,4 +1,5 @@
-import { dehydrate, hydrate, onlineManager, type DehydratedState, type QueryClient, type QueryKey } from '@tanstack/react-query';
+import { hydrate, onlineManager, type DehydratedState, type Query, type QueryClient, type QueryKey } from '@tanstack/react-query';
+import type { Me } from '../api/client';
 import { businessToday, businessZone, daysBefore } from '../api/retail';
 import type { Connectivity } from './connectivity';
 import type { OfflineStore } from './store';
@@ -6,17 +7,22 @@ import type { OfflineStore } from './store';
 // Reading offline (issue #763, ADR-116, building on ADR-067): the figures last loaded on the screens a shop reads every day
 // are kept in the device store beside the catalogue copy, per business host and person, so the app opened with no network
 // still shows them, read only, with the time they are from. Kept: the Home and Retail summaries, sales of the last 30 days
-// (and older credit sales still owing), stock, customers and what they owe, past usage and damage, and the reports already
-// made (Download my data, and the report runs other than lending ones). Never kept: lending, the profile, tokens or anything of sign-in, and any read not named below. The copy is
-// capped in size, newest reads first, and goes at sign-out with the catalogue copy.
+// (and older credit sales still owing), stock, customers and what they owe, past usage and damage, the open orders count, and
+// the reports already made (Download my data, and the report runs other than lending ones). Never kept: lending, the profile,
+// tokens or anything of sign-in, any read not named below, and anything the app wrote into the cache itself (an optimistic
+// change, a sale not yet sent): only answers fetched from the server by this person. The copy carries what the person was
+// allowed to see when it was made, and is thrown away when that changes. It is capped in size, newest reads first, and goes at
+// sign-out, with the reads it put back.
 
-/** One kept read, as React Query dehydrates it (its key, hash, kind and state with the data). */
+/** One kept read, in the shape React Query hydrates: its key, hash, kind and a success state with the data. */
 export type ReadEntry = DehydratedState['queries'][number];
 
 /** The kept reads of one person on one business, newest first, within the size cap. */
 export interface ReadCache {
   /** When the copy was last written (epoch milliseconds). */
   savedAt: number;
+  /** What the person was allowed to see when the copy was made ({@link accessOf}); a copy made under other rights is not used. */
+  access?: string;
   entries: ReadEntry[];
 }
 
@@ -49,49 +55,92 @@ const RETAIL_READS = new Set([
 export function keptForReading(key: QueryKey): boolean {
   const [area, part, third] = key;
   if (area === 'retail') {
+    // The orders board is the open orders count on Home for a session that cannot read the Home summary.
     return typeof part === 'string' && (RETAIL_READS.has(part) || (part === 'orders' && third === 'board') || (part === 'catalogue' && third === 'buyers'));
   }
   // The reports already made: Download my data (every business), and the report runs of the Reports page.
   return area === 'data-export' || (area === 'reports' && (part === 'runs' || part === 'catalogue'));
 }
 
+/**
+ * What a person may see, as one string: their permissions with the branches each covers, their branches, modules and
+ * capabilities. A kept copy made under another value (a manager made a seller, a branch taken away) is thrown away.
+ */
+export function accessOf(me: Pick<Me, 'permissions' | 'permission_scopes' | 'all_branches' | 'branches' | 'modules' | 'module_capabilities'>): string {
+  const sorted = (list: readonly unknown[] | undefined | null) => [...(list ?? [])].map(String).sort();
+  const scopes = Object.entries(me.permission_scopes ?? {})
+    .map(([p, s]) => `${p}:${(s as { all_branches?: boolean })?.all_branches ? '*' : sorted((s as { branch_ids?: string[] })?.branch_ids).join(',')}`)
+    .sort();
+  const caps = Object.entries(me.module_capabilities ?? {}).map(([m, c]) => `${m}:${sorted(c as string[]).join(',')}`).sort();
+  return JSON.stringify([sorted(me.permissions), scopes, me.all_branches === true, sorted((me.branches ?? []).map((b) => b.id)), sorted(me.modules), caps]);
+}
+
 const lendingReport = (r: unknown) => {
-  const key = (r as { report_key?: unknown; key?: unknown } | null)?.report_key ?? (r as { key?: unknown } | null)?.key;
+  const row = r as { report_key?: unknown; key?: unknown } | null;
+  const key = row?.report_key ?? row?.key;
   return typeof key === 'string' && key.startsWith('lending.');
 };
 
-interface SalePageLike {
-  items?: { sale_date?: string; balance_minor?: number }[];
-}
-
-/** The data as kept: lending reports left out of the reports lists, sales cut to the last 30 days (credit still owing stays). */
-export function trimmed(key: QueryKey, data: unknown, now: number): unknown {
-  const [area, part] = key;
-  if (area === 'reports' && Array.isArray(data)) return data.filter((r) => !lendingReport(r));
-  const pages = (data as { pages?: unknown } | null)?.pages;
-  if (area === 'retail' && part === 'sales' && Array.isArray(pages)) {
-    const from = daysBefore(businessToday(new Date(now)), KEEP_DAYS);
-    // Only sales carry a sale date; the groups of the sales chain (their totals) are kept whole.
-    const recent = (s: { sale_date?: string; balance_minor?: number }) => s.sale_date === undefined || s.sale_date >= from || (s.balance_minor ?? 0) > 0;
-    return { ...(data as object), pages: (pages as SalePageLike[]).map((p) => ({ ...p, items: (p.items ?? []).filter(recent) })) };
-  }
+/** A list as the API answers it (a bare list, `{items}` or a paged `{pages: [{items}]}`), with `keep` applied to its rows. */
+// The rows are whatever the list holds (`any`); `keep` reads the few fields it needs.
+function rowsKept(data: unknown, keep: (row: any) => boolean): unknown {
+  if (Array.isArray(data)) return data.filter(keep);
+  if (data === null || typeof data !== 'object') return data;
+  const d = data as { items?: unknown; pages?: unknown };
+  if (Array.isArray(d.pages)) return { ...d, pages: d.pages.map((p) => rowsKept(p, keep)) };
+  if (Array.isArray(d.items)) return { ...d, items: d.items.filter(keep) };
   return data;
 }
 
-/** The kept reads now in the query cache, trimmed, with nothing of a failed fetch carried along. */
-export function readsOf(client: QueryClient, now: number): ReadEntry[] {
-  const state = dehydrate(client, { shouldDehydrateQuery: (q) => q.state.status === 'success' && q.state.data !== undefined && keptForReading(q.queryKey) });
-  return state.queries.map((q) => ({
-    queryKey: q.queryKey,
-    queryHash: q.queryHash,
-    ...(q.queryType && { queryType: q.queryType }),
-    dehydratedAt: q.dehydratedAt,
-    state: { ...q.state, data: trimmed(q.queryKey, q.state.data, now), error: null, fetchFailureCount: 0, fetchFailureReason: null, fetchStatus: 'idle', fetchMeta: null },
-  }));
+interface SaleLike {
+  sale_date?: string;
+  balance_minor?: number;
+}
+
+/**
+ * The data as kept, or undefined when it is not kept at all: lending reports left out of the reports lists, sales cut to the
+ * last 30 days (credit still owing stays), a single sale older than that dropped unless still owing.
+ */
+export function trimmed(key: QueryKey, data: unknown, now: number): unknown {
+  const [area, part] = key;
+  if (area === 'reports') return rowsKept(data, (r) => !lendingReport(r));
+  if (area !== 'retail' || (part !== 'sales' && part !== 'sale')) return data;
+  const from = daysBefore(businessToday(new Date(now)), KEEP_DAYS);
+  // Only sales carry a sale date; the groups of the sales chain (their totals) are kept whole.
+  const recent = (s: SaleLike) => s.sale_date === undefined || s.sale_date >= from || (s.balance_minor ?? 0) > 0;
+  if (part === 'sale') return data !== null && typeof data === 'object' && !recent(data as SaleLike) ? undefined : data;
+  return rowsKept(data, recent);
+}
+
+/** A kept read of a query just fetched from the server, or null when it is not kept. */
+export function entryOf(query: Query, now: number): ReadEntry | null {
+  if (!keptForReading(query.queryKey) || query.state.data === undefined) return null;
+  const data = trimmed(query.queryKey, query.state.data, now);
+  if (data === undefined) return null;
+  return {
+    queryKey: query.queryKey,
+    queryHash: query.queryHash,
+    ...(query.queryType === 'infinite' && { queryType: 'infinite' as const }),
+    dehydratedAt: now,
+    state: {
+      data,
+      dataUpdatedAt: query.state.dataUpdatedAt,
+      dataUpdateCount: 1,
+      error: null,
+      errorUpdateCount: 0,
+      errorUpdatedAt: 0,
+      fetchFailureCount: 0,
+      fetchFailureReason: null,
+      fetchMeta: null,
+      isInvalidated: false,
+      status: 'success',
+      fetchStatus: 'idle',
+    },
+  };
 }
 
 /** The kept reads with the fresh ones in, newest first, those older than 30 days left out, cut to the size cap. */
-export function merged(before: ReadEntry[], fresh: ReadEntry[], now: number, maxBytes = READ_CACHE_MAX_BYTES): ReadEntry[] {
+export function merged(before: ReadEntry[], fresh: ReadEntry[], now: number, maxBytes = READ_CACHE_MAX_BYTES, size: (e: ReadEntry) => number = (e) => JSON.stringify(e).length): ReadEntry[] {
   const byHash = new Map(before.map((e) => [e.queryHash, e]));
   for (const e of fresh) {
     const old = byHash.get(e.queryHash);
@@ -103,47 +152,70 @@ export function merged(before: ReadEntry[], fresh: ReadEntry[], now: number, max
   const kept: ReadEntry[] = [];
   let bytes = 0;
   for (const e of newest) {
-    const size = JSON.stringify(e).length;
-    if (bytes + size > maxBytes) continue;
-    bytes += size;
+    const n = size(e);
+    if (bytes + n > maxBytes) continue;
+    bytes += n;
     kept.push(e);
   }
   return kept;
 }
 
-/** Puts the kept reads in the query cache, kept there for the session, unless the cache already holds something newer. */
-export function restore(client: QueryClient, cache: ReadCache | null, now: number): void {
-  const entries = (cache?.entries ?? []).filter((e) => keptForReading(e.queryKey) && now - e.state.dataUpdatedAt <= KEEP_DAYS * DAY_MS);
-  if (entries.length === 0) return;
-  hydrate(client, { mutations: [], queries: entries }, { defaultOptions: { queries: { gcTime: Infinity } } });
+/** Whether a kept copy may be shown to a person with these rights now. */
+export function usable(cache: ReadCache | null, access: string): cache is ReadCache {
+  return cache !== null && cache.access === access;
+}
+
+/**
+ * Puts the kept reads in the query cache, kept there for the session, unless the cache already holds something newer.
+ * Returns the reads put back; nothing when the copy was made under other rights.
+ */
+export function restore(client: QueryClient, cache: ReadCache | null, now: number, access: string): ReadEntry[] {
+  if (!usable(cache, access)) return [];
+  const entries = cache.entries.filter((e) => keptForReading(e.queryKey) && now - e.state.dataUpdatedAt <= KEEP_DAYS * DAY_MS);
+  if (entries.length > 0) hydrate(client, { mutations: [], queries: entries }, { defaultOptions: { queries: { gcTime: Infinity } } });
+  return entries;
 }
 
 export interface ReadKeeper {
-  /** Stops writing (the scope changed or the layout left). */
+  /** Takes in the reads put back from this person's own copy, so they stay kept even when no screen reads them again. */
+  adopt(entries: ReadEntry[]): void;
+  /** Stops writing (the person, the business or their rights changed, or the layout left). */
   stop(): void;
-  /** At sign-out: stops writing, waits for a write under way, then removes the copy. */
+  /** At sign-out: stops writing, waits for a write under way, removes the copy and the kept reads in memory. */
   forget(): Promise<void>;
 }
 
-/** Writes the kept reads to the device store a moment after any of them loads, merged with what was kept before. */
-export function keepReads(client: QueryClient, store: OfflineStore, scope: string, now: () => number = () => Date.now(), delayMs = SAVE_AFTER_MS): ReadKeeper {
+/**
+ * Writes this person's kept reads to the device store a moment after any of them is fetched, merged with what was kept
+ * before. Only answers fetched from the server while this keeper runs, and the reads it put back, are written: never data
+ * the app set in the cache itself, and never a read another person left in memory.
+ */
+export function keepReads(client: QueryClient, store: OfflineStore, scope: string, access: string, now: () => number = () => Date.now(), delayMs = SAVE_AFTER_MS): ReadKeeper {
+  const mine = new Map<string, { entry: ReadEntry; size: number }>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let writing: Promise<void> = Promise.resolve();
+  const take = (entry: ReadEntry) => mine.set(entry.queryHash, { entry, size: JSON.stringify(entry).length });
   const save = () => {
     timer = undefined;
     writing = writing
       .then(async () => {
         if (stopped) return;
-        const before = (await store.readCache(scope))?.entries ?? [];
-        const entries = merged(before, readsOf(client, now()), now());
-        if (!stopped) await store.putReadCache(scope, { savedAt: now(), entries });
+        const before = await store.readCache(scope);
+        const kept = usable(before, access) ? before.entries : [];
+        const sizes = new Map([...mine.values()].map((m) => [m.entry, m.size]));
+        const entries = merged(kept, [...mine.values()].map((m) => m.entry), now(), READ_CACHE_MAX_BYTES, (e) => sizes.get(e) ?? JSON.stringify(e).length);
+        if (!stopped) await store.putReadCache(scope, { savedAt: now(), access, entries });
       })
       // A full disk keeps the last copy; the next load tries again.
       .catch(() => undefined);
   };
   const off = client.getQueryCache().subscribe((event) => {
-    if (stopped || event.type !== 'updated' || event.action.type !== 'success' || !keptForReading(event.query.queryKey)) return;
+    if (stopped || event.type !== 'updated' || event.action.type !== 'success' || event.action.manual) return;
+    const entry = entryOf(event.query, now());
+    if (entry) take(entry);
+    else if (keptForReading(event.query.queryKey)) mine.delete(event.query.queryHash);
+    else return;
     timer ??= setTimeout(save, delayMs);
   });
   const stop = () => {
@@ -153,19 +225,20 @@ export function keepReads(client: QueryClient, store: OfflineStore, scope: strin
     timer = undefined;
   };
   return {
+    adopt: (entries) => entries.forEach(take),
     stop,
     forget: async () => {
       stop();
       await writing;
       await store.deleteReadCache(scope);
+      client.removeQueries({ predicate: (q) => keptForReading(q.queryKey) });
     },
   };
 }
 
 /**
  * React Query takes the app as offline when the offline support does (the browser's events and the ping of /healthz), so
- * reads pause instead of failing; going offline, a read that failed while it still had figures shows those figures again.
- * Returns the undo, which puts back the browser's own online and offline events.
+ * reads pause instead of failing. Returns the undo, which puts back the browser's own online and offline events and state.
  */
 export function followConnectivity(client: QueryClient, connectivity: Connectivity): () => void {
   onlineManager.setEventListener((setOnline) => {
@@ -185,19 +258,15 @@ export function followConnectivity(client: QueryClient, connectivity: Connectivi
 }
 
 /**
- * Going offline, the reads that failed for want of the network stop saying so (the banner under the bar is the one notice):
- * one with figures shows them again, one without waits as if loading, and both are read again once back online.
+ * Going offline, a kept read that failed because the network dropped (the API client's TypeError, ADR-083) stops saying so,
+ * the banner under the bar being the one notice: with figures it shows them again, without it waits as if loading, and both
+ * are read again once back online. Any answer the server sent (a refusal, a 5xx) and every read not kept stay as they are.
  */
 function showKeptFigures(client: QueryClient): void {
-  for (const q of client.getQueryCache().findAll({ predicate: (query) => query.state.status === 'error' && !answered(query.state.error) })) {
+  const dropped = (q: Query) => keptForReading(q.queryKey) && q.state.status === 'error' && q.state.error instanceof TypeError;
+  for (const q of client.getQueryCache().findAll({ predicate: dropped })) {
     q.setState(q.state.data !== undefined ? { status: 'success', error: null, fetchStatus: 'idle' } : { status: 'pending', error: null, fetchStatus: 'idle' });
   }
-}
-
-/** The server answered with a refusal (a 4xx): not a missing network, so it stays on screen. */
-function answered(error: unknown): boolean {
-  const status = (error as { status?: unknown } | null)?.status;
-  return typeof status === 'number' && status >= 400 && status < 500;
 }
 
 function browserEvents(setOnline: (online: boolean) => void): (() => void) | undefined {
@@ -214,7 +283,8 @@ function browserEvents(setOnline: (online: boolean) => void): (() => void) | und
 
 /** "today at 14:05", or "2 Nov at 14:05" for an earlier day, in the business's time zone. */
 export function figuresTime(at: number, now: number, zone: string = businessZone()): string {
-  const day = (t: number) => new Intl.DateTimeFormat('en-GB', { timeZone: zone, day: 'numeric', month: 'short' }).format(new Date(t));
+  const day = (t: number, year = false) =>
+    new Intl.DateTimeFormat('en-GB', { timeZone: zone, day: 'numeric', month: 'short', ...(year && { year: 'numeric' }) }).format(new Date(t));
   const time = new Intl.DateTimeFormat('en-GB', { timeZone: zone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(at));
-  return `${day(at) === day(now) ? 'today' : day(at)} at ${time}`;
+  return `${day(at, true) === day(now, true) ? 'today' : day(at)} at ${time}`;
 }

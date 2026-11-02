@@ -1674,8 +1674,9 @@ profile, refreshed when the app comes online, at sign-in and every 15 minutes (`
   Download my data show what was last loaded on this phone for this person, read only. The one notice is the banner under the
   bar: "You are offline. You can still sell; your sales will send when you are back online. Figures are from today at 14:05."
   (neutral grey, the info icon; "You are offline. You see what was loaded before." for a person who does not sell). No red
-  error under it, and the Refresh button says only **Offline**. The copy is per business and person, capped, never lending, and
-  goes at sign-out.
+  error under it for a read the network dropped, and the Refresh button says only **Offline**. The copy is per business and
+  person, only as the server answered, capped, never lending, thrown away when the person's rights or branches change, and goes
+  at sign-out.
 - **Home** says on the Shop card, to whoever may sell: "Sell works offline too: your sales send when you are back online."
 - The tour `retail-sales` (version 13) and `page-sale` (version 2) gain the step **Online or offline** on the dot.
 

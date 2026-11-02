@@ -7,7 +7,7 @@ import { api } from '../api/client';
 import { mockMe } from '../api/retail-mock';
 import { StaffContext } from '../areas/staff/context';
 import { OfflineProvider, type Offline } from './offline-context';
-import { keepReads, restore } from './read-cache';
+import { accessOf, keepReads, restore } from './read-cache';
 import { memoryStore, scopeOf, type OfflineStore } from './store';
 
 // Reading offline (issue #763, NFR-OFF-09, ADR-116): each screen a shop reads every day is opened once online, its figures
@@ -27,7 +27,8 @@ vi.mock('@tanstack/react-router', async (original) => {
   };
 });
 
-const me = mockMe('admin');
+// The owner by default; the seller case below signs in as a seller who sees only their own sales, in two branches.
+let me = mockMe('admin');
 const branch = me.branches?.[0]?.id ?? '';
 const SCOPE = scopeOf('shop-one.example.test', me.user_id ?? '');
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -66,7 +67,7 @@ async function readOffline(ui: ReactElement, seen: string, store: OfflineStore =
   online = true;
   onlineManager.setOnline(true);
   const first = newClient();
-  const keeper = keepReads(first, store, SCOPE, () => Date.now(), 0);
+  const keeper = keepReads(first, store, SCOPE, accessOf(me), () => Date.now(), 0);
   show(first, ui, true);
   await screen.findAllByText(seen, { exact: false });
   await waitFor(async () => expect((await store.readCache(SCOPE))?.entries.length ?? 0).toBeGreaterThan(0));
@@ -76,7 +77,7 @@ async function readOffline(ui: ReactElement, seen: string, store: OfflineStore =
   online = false;
   onlineManager.setOnline(false);
   const second = newClient();
-  restore(second, await store.readCache(SCOPE), Date.now());
+  restore(second, await store.readCache(SCOPE), Date.now(), accessOf(me));
   show(second, ui, false);
   expect((await screen.findAllByText(seen, { exact: false })).length).toBeGreaterThan(0);
   expect(screen.queryByRole('alert')).toBeNull();
@@ -84,6 +85,7 @@ async function readOffline(ui: ReactElement, seen: string, store: OfflineStore =
 }
 
 beforeEach(() => {
+  me = mockMe('admin');
   online = true;
   routes = {};
   serve();
@@ -127,6 +129,16 @@ describe('reading offline from the kept figures', () => {
     const { BuyersPage } = await import('../areas/staff/retail/catalogue-people');
     routes['/api/v1/retail/customers'] = { items: [{ id: 'c-1', name: 'Test Customer 01', contact: '+256700000001', balance_minor: 80_000, active: true }] };
     await readOffline(<BuyersPage />, 'Test Customer 01');
+  });
+
+  it('shows a seller the stock of their own branches with no network', async () => {
+    me = mockMe('sales');
+    const { StockPage } = await import('../areas/staff/retail/stock');
+    const row = { product_id: 'p-2', code: 'TS-02', description: 'Test soap for the seller', unit: 'piece', on_hand: '4.000', branch_id: branch };
+    routes['/api/v1/retail/stock'] = { items: [row] };
+    routes['/api/v1/retail/stock/all-branches'] = { items: [{ ...row, branches: [{ branch_id: branch, on_hand: '4.000' }] }], branches: [] };
+    routes['/api/v1/retail/categories'] = { items: [] };
+    await readOffline(<StockPage />, 'Test soap for the seller');
   });
 
   it('shows past usage and damage with no network', async () => {

@@ -171,7 +171,10 @@ describe.each([360, 412])('the offline banner at %ipx wide', (width) => {
     expect(box.x).toBeGreaterThanOrEqual(-0.5);
     expect(box.x + box.width).toBeLessThanOrEqual(width + 0.5);
     expect(await banner.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-    expect(await page.locator('.refresh-more').count()).toBe(0);
+    // The time of the figures is said once on the page: not again beside Refresh or anywhere else.
+    expect(await page.getByText(/Figures are from|Showing the figures/).count()).toBe(1);
+    // One notice: the dot's own word Offline (ADR-067) is a status, not a second notice.
+    expect(await page.getByText(/You are offline/).count()).toBe(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     await page.close();
   });
