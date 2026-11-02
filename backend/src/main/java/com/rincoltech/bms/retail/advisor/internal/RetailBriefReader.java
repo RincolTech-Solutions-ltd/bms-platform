@@ -110,7 +110,9 @@ class RetailBriefReader {
                 at,
                 brief.factsAsOf(),
                 brief.summary(),
-                brief.points().stream().map(p -> new PointView(p.text(), p.facts())).toList(),
+                brief.points().stream()
+                        .map(p -> new PointView(p.text(), p.facts()))
+                        .toList(),
                 brief.chips().stream()
                         .map(c -> new ChipView(c.key(), c.label(), c.display(), c.metric()))
                         .toList(),

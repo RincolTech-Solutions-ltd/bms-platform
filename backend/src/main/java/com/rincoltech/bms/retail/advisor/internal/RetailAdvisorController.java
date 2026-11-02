@@ -50,25 +50,32 @@ class RetailAdvisorController {
             String acknowledgedTextVersion,
 
             @DecimalMin("0")
-            @Schema(type = "integer", description = "Tokens a day for this business, at most the platform ceiling; 0 stops every call")
+            @Schema(
+                    type = "integer",
+                    description = "Tokens a day for this business, at most the platform ceiling; 0 stops every call")
             BigDecimal dailyTokenCap,
 
             @DecimalMin("0")
             @Schema(
                     type = "integer",
-                    description = "Estimated cost a day in millionths of the cost currency, at most the platform ceiling")
+                    description =
+                            "Estimated cost a day in millionths of the cost currency, at most the platform ceiling")
             BigDecimal dailyCostCapMicro) {}
 
     @GetMapping("/brief")
     @RequiresPermission("retail.advisor.use")
     @Operation(
-            summary = "Today's retail brief: the stored AI brief for the owner, else the automatic summary of what the caller may see",
+            summary =
+                    "Today's retail brief: the stored AI brief for the owner, else the automatic summary of what the caller may see",
             operationId = "getRetailAdvisorBrief")
     ResponseEntity<BriefView> brief() {
         // 204 when the assistant is not active for the tenant: nothing is read and the card is not drawn.
         return briefs.today()
-                .map(b -> ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(b))
-                .orElseGet(() -> ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build());
+                .map(b ->
+                        ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(b))
+                .orElseGet(() -> ResponseEntity.noContent()
+                        .cacheControl(CacheControl.noStore())
+                        .build());
     }
 
     @GetMapping("/settings")

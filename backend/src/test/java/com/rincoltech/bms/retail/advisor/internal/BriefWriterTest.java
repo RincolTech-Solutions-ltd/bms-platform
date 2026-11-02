@@ -120,11 +120,13 @@ class BriefWriterTest {
         assertThat(brief.points()).hasSize(3);
         assertThat(brief.points().get(0).text())
                 .startsWith("Medium priority. " + ITEM_NAME + ": sales in the last seven days (UGX 300,000)")
-                .contains("Suggested action: Keep enough stock for " + ITEM_NAME + " so the best sellers do not run out.");
+                .contains("Suggested action: Keep enough stock for " + ITEM_NAME
+                        + " so the best sellers do not run out.");
         assertThat(brief.points().get(1).text())
                 .contains("Sales yesterday fell by UGX 30,000 compared with the usual Tuesday (worse)");
         assertThat(brief.points().get(2).text()).isEqualTo("To watch: Owed past the due date (UGX 50,000).");
-        assertThat(brief.chips()).extracting(BriefWriter.Chip::metric)
+        assertThat(brief.chips())
+                .extracting(BriefWriter.Chip::metric)
                 .containsExactly("item.sales_week", "stock.low", "credit.overdue");
         assertThat(brief.summary()).contains("20 October 2026");
     }
@@ -171,8 +173,9 @@ class BriefWriterTest {
     void aViewWithNoFiguresSaysNothingWasFlagged() {
         PromptFacts none = PromptFacts.of(new FactSet(LocalDate.of(2026, 10, 20), "UGX", false, List.of(), List.of()));
         Brief brief = BriefWriter.fallback(none, "scope");
-        assertThat(brief.points()).singleElement().satisfies(p -> assertThat(p.text())
-                .isEqualTo("Nothing was flagged in the figures you can see."));
+        assertThat(brief.points())
+                .singleElement()
+                .satisfies(p -> assertThat(p.text()).isEqualTo("Nothing was flagged in the figures you can see."));
     }
 
     @Test
@@ -181,8 +184,25 @@ class BriefWriterTest {
                 LocalDate.of(2026, 10, 20),
                 "UGX",
                 true,
-                List.of(new Fact("item.sales_week", "sales", Kind.MONEY, Polarity.HIGHER_IS_BETTER, 1, "UGX 1", null, "a"),
-                        new Fact("item.sales_week", "sales", Kind.MONEY, Polarity.HIGHER_IS_BETTER, 2, "UGX 2", null, "b")),
+                List.of(
+                        new Fact(
+                                "item.sales_week",
+                                "sales",
+                                Kind.MONEY,
+                                Polarity.HIGHER_IS_BETTER,
+                                1,
+                                "UGX 1",
+                                null,
+                                "a"),
+                        new Fact(
+                                "item.sales_week",
+                                "sales",
+                                Kind.MONEY,
+                                Polarity.HIGHER_IS_BETTER,
+                                2,
+                                "UGX 2",
+                                null,
+                                "b")),
                 List.of(new ItemName("a", "Item B box"), new ItemName("b", "Plain tea")));
         assertThat(PromptFacts.of(set).toNames("Item A and Item B")).isEqualTo("Item B box and Plain tea");
     }

@@ -11,12 +11,15 @@ final class RetailAdvisorApi {
 
     private RetailAdvisorApi() {}
 
-    @Schema(name = "RetailAdvisorPoint", description = "One point of the brief, written by our code from the reviewed catalogue")
+    @Schema(
+            name = "RetailAdvisorPoint",
+            description = "One point of the brief, written by our code from the reviewed catalogue")
     record PointView(String text, List<String> facts) {}
 
     @Schema(
             name = "RetailAdvisorFact",
-            description = "A figure the brief rests on; metric is the figure's family, which the screen opens the page of")
+            description =
+                    "A figure the brief rests on; metric is the figure's family, which the screen opens the page of")
     record ChipView(String key, String label, String display, String metric) {}
 
     @Schema(name = "RetailAdvisorBrief")
@@ -24,7 +27,9 @@ final class RetailAdvisorApi {
             @Schema(description = "Always true: every text here is advisory")
             boolean advisory,
 
-            @Schema(description = "model: written from an accepted structured model answer. fallback: the automatic summary")
+            @Schema(
+                    description =
+                            "model: written from an accepted structured model answer. fallback: the automatic summary")
             String source,
 
             @Schema(
@@ -48,17 +53,23 @@ final class RetailAdvisorApi {
             @Schema(description = "The line shown under the text")
             String note) {}
 
-    @Schema(name = "RetailAdvisorAcknowledgement", description = "The text to show before switching on, and its version")
+    @Schema(
+            name = "RetailAdvisorAcknowledgement",
+            description = "The text to show before switching on, and its version")
     record Acknowledgement(String textVersion, String text) {}
 
     @Schema(name = "RetailAdvisorSettings")
     record SettingsView(
             boolean enabled,
 
-            @Schema(description = "The platform has opened the assistant for the business; switching on is refused otherwise")
+            @Schema(
+                    description =
+                            "The platform has opened the assistant for the business; switching on is refused otherwise")
             boolean allowed,
 
-            @Schema(description = "A provider is configured on the platform; false means every brief is the automatic summary")
+            @Schema(
+                    description =
+                            "A provider is configured on the platform; false means every brief is the automatic summary")
             boolean providerConfigured,
 
             long dailyTokenCap,

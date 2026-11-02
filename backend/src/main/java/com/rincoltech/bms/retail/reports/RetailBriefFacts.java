@@ -56,7 +56,14 @@ public interface RetailBriefFacts {
      * @param item the product the figure is about, by id; null for a figure of the whole business
      */
     record Fact(
-            String key, String label, Kind kind, Polarity polarity, long value, String display, Change change, String item) {}
+            String key,
+            String label,
+            Kind kind,
+            Polarity polarity,
+            long value,
+            String display,
+            Change change,
+            String item) {}
 
     /** The real name of an item, for mapping an alias back. Never for a prompt or a log. */
     record ItemName(String item, String name) {

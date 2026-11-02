@@ -80,9 +80,8 @@ final class BriefWriter {
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{([a-z]+)\\}\\}");
     private static final Pattern DIGIT = Pattern.compile("\\d");
 
-    static final String SYSTEM = load().replace("@CANARY@", CANARY)
-            .replace("@TOPICS@", topics())
-            .replace("@ACTIONS@", actions());
+    static final String SYSTEM =
+            load().replace("@CANARY@", CANARY).replace("@TOPICS@", topics()).replace("@ACTIONS@", actions());
 
     /** One point of the brief: our sentence and the fact keys it rests on. */
     record Point(String text, List<String> facts) {}
@@ -91,7 +90,8 @@ final class BriefWriter {
     record Chip(String key, String label, String display, String metric) {}
 
     /** What is stored and shown. {@code source} is {@code model} or {@code fallback}; {@code reason} is null for a model brief. */
-    record Brief(String source, String reason, String summary, List<Point> points, List<Chip> chips, LocalDate factsAsOf) {
+    record Brief(
+            String source, String reason, String summary, List<Point> points, List<Chip> chips, LocalDate factsAsOf) {
 
         boolean model() {
             return "model".equals(source);
@@ -113,15 +113,20 @@ final class BriefWriter {
 
     static String content(PromptFacts facts) {
         StringBuilder out = new StringBuilder();
-        out.append("Figures stand at the end of ").append(facts.asOf()).append(". Currency: ").append(facts.currency());
+        out.append("Figures stand at the end of ")
+                .append(facts.asOf())
+                .append(". Currency: ")
+                .append(facts.currency());
         out.append(".\nFACTS (key | name | value | note)\n");
         for (PromptFact f : facts.facts()) {
             out.append(f.key()).append(" | ").append(f.label()).append(" | ").append(f.display());
-            out.append(" | ").append(switch (f.polarity()) {
-                case HIGHER_IS_BETTER -> "higher is better";
-                case HIGHER_IS_WORSE -> "lower is better";
-                case NEUTRAL -> "neither higher nor lower is better";
-            });
+            out.append(" | ")
+                    .append(
+                            switch (f.polarity()) {
+                                case HIGHER_IS_BETTER -> "higher is better";
+                                case HIGHER_IS_WORSE -> "lower is better";
+                                case NEUTRAL -> "neither higher nor lower is better";
+                            });
             out.append('\n');
         }
         return out.append("END FACTS\n").toString();
@@ -129,23 +134,29 @@ final class BriefWriter {
 
     private static String topics() {
         StringBuilder out = new StringBuilder();
-        BriefCatalogue.INSTANCE.topics.values().forEach(t -> out.append("- ")
-                .append(t.code())
-                .append(": ")
-                .append(t.label())
-                .append('\n'));
+        BriefCatalogue.INSTANCE
+                .topics
+                .values()
+                .forEach(t -> out.append("- ")
+                        .append(t.code())
+                        .append(": ")
+                        .append(t.label())
+                        .append('\n'));
         return out.toString().stripTrailing();
     }
 
     private static String actions() {
         StringBuilder out = new StringBuilder();
-        BriefCatalogue.INSTANCE.actions.values().forEach(a -> out.append("- ")
-                .append(a.code())
-                .append(", ")
-                .append(a.topic())
-                .append(": ")
-                .append(a.text().replace("{{where}}", ""))
-                .append('\n'));
+        BriefCatalogue.INSTANCE
+                .actions
+                .values()
+                .forEach(a -> out.append("- ")
+                        .append(a.code())
+                        .append(", ")
+                        .append(a.topic())
+                        .append(": ")
+                        .append(a.text().replace("{{where}}", ""))
+                        .append('\n'));
         return out.toString().stripTrailing();
     }
 
@@ -238,7 +249,11 @@ final class BriefWriter {
             case HIGHER_IS_WORSE -> f.value() > 0 ? " (worse)" : " (better)";
             case NEUTRAL -> "";
         };
-        return name + (f.value() > 0 ? " rose by " : " fell by ") + f.display().replaceFirst("^[+-]", "") + compared + how;
+        return name
+                + (f.value() > 0 ? " rose by " : " fell by ")
+                + f.display().replaceFirst("^[+-]", "")
+                + compared
+                + how;
     }
 
     // ---- The check ---------------------------------------------------------------------------------------------
@@ -307,8 +322,7 @@ final class BriefWriter {
                 return null;
             }
             if (action.calm()
-                    && (!"low".equals(priority)
-                            || keys.stream().map(byKey::get).anyMatch(PromptFact::isWorse))) {
+                    && (!"low".equals(priority) || keys.stream().map(byKey::get).anyMatch(PromptFact::isWorse))) {
                 return null;
             }
             findings.add(new Finding(keys, topic, action, priority));
@@ -369,7 +383,10 @@ final class BriefWriter {
                             "finding",
                             Map.of(
                                     "priority", Objects.requireNonNullElse(catalogue.priorities.get(f.priority()), ""),
-                                    "facts", used.stream().map(BriefWriter::phrase).collect(Collectors.joining("; ")),
+                                    "facts",
+                                            used.stream()
+                                                    .map(BriefWriter::phrase)
+                                                    .collect(Collectors.joining("; ")),
                                     "action", action)),
                     f.keys()));
             cited.add(used);
@@ -379,7 +396,9 @@ final class BriefWriter {
             points.add(new Point(
                     template(
                             "watch",
-                            Map.of("facts", used.stream().map(BriefWriter::phrase).collect(Collectors.joining("; ")))),
+                            Map.of(
+                                    "facts",
+                                    used.stream().map(BriefWriter::phrase).collect(Collectors.joining("; ")))),
                     watch));
             cited.add(used);
         }
@@ -391,7 +410,8 @@ final class BriefWriter {
             String rest = points.get(i).text();
             // Longest first, so a display that is part of another (1 in UGX 1,200) cannot break it up.
             List<String> displays = cited.get(i).stream()
-                    .flatMap(f -> java.util.stream.Stream.of(f.display(), f.display().replaceFirst("^[+-]", "")))
+                    .flatMap(f ->
+                            java.util.stream.Stream.of(f.display(), f.display().replaceFirst("^[+-]", "")))
                     .sorted((a, b) -> b.length() - a.length())
                     .toList();
             for (String display : displays) {
@@ -406,8 +426,11 @@ final class BriefWriter {
 
     /** The items the cited facts are about, for the action's {@code {{where}}}: {@code " for Item A and Item B"}. */
     static String where(List<PromptFact> used) {
-        List<String> aliases =
-                used.stream().map(PromptFact::alias).filter(Objects::nonNull).distinct().toList();
+        List<String> aliases = used.stream()
+                .map(PromptFact::alias)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
         if (aliases.isEmpty()) {
             return "";
         }

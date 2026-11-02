@@ -194,7 +194,8 @@ class BriefFactsService implements RetailBriefFacts {
         LocalDate first = dashboard.firstSaleDay(f);
         long[] yesterday = byDay.getOrDefault(y, new long[3]);
 
-        // The usual day: the same weekday in each of the four weeks before, counting only weeks the business was selling.
+        // The usual day: the same weekday in each of the four weeks before, counting only weeks the business was
+        // selling.
         long usualSum = 0;
         int usualDays = 0;
         for (int week = 1; week <= 4; week++) {
@@ -250,11 +251,17 @@ class BriefFactsService implements RetailBriefFacts {
 
         BuyerRow owed = credit.totals(f, date);
         long overdue = owed.buckets().owed() - owed.buckets().notDue();
-        facts.add(d.money("credit.owed", "Owed by credit buyers", Polarity.HIGHER_IS_WORSE, owed.buckets().owed(), null));
+        facts.add(d.money(
+                "credit.owed",
+                "Owed by credit buyers",
+                Polarity.HIGHER_IS_WORSE,
+                owed.buckets().owed(),
+                null));
         facts.add(d.money("credit.overdue", "Owed past the due date", Polarity.HIGHER_IS_WORSE, overdue, null));
         facts.add(d.count("credit.buyers", "Buyers who owe", Polarity.NEUTRAL, owed.buyers(), null));
 
-        // The wholesale figures, when the business uses them (ADR-033): sales at a price list's price, buyers over their limit.
+        // The wholesale figures, when the business uses them (ADR-033): sales at a price list's price, buyers over
+        // their limit.
         if (capabilities.enabled(RetailCapabilities.PRICE_LISTS)) {
             long listed = analysis.listPricedSales(f, y.minusDays(6), y);
             long listedBefore = analysis.listPricedSales(f, y.minusDays(13), y.minusDays(7));
@@ -338,11 +345,13 @@ class BriefFactsService implements RetailBriefFacts {
         }
 
         Change moneyChange(long change, String against) {
-            return new Change(change, change == 0 ? "no change" : (change > 0 ? "+" : "-") + money(Math.abs(change)), against);
+            return new Change(
+                    change, change == 0 ? "no change" : (change > 0 ? "+" : "-") + money(Math.abs(change)), against);
         }
 
         Change countChange(long change, String against) {
-            return new Change(change, change == 0 ? "no change" : (change > 0 ? "+" : "-") + count(Math.abs(change)), against);
+            return new Change(
+                    change, change == 0 ? "no change" : (change > 0 ? "+" : "-") + count(Math.abs(change)), against);
         }
 
         static String grouped(long n) {

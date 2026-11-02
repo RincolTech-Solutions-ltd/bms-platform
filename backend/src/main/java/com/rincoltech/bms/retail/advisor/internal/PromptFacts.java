@@ -81,7 +81,8 @@ record PromptFacts(LocalDate asOf, String currency, List<PromptFact> facts, Map<
             }
             String key = alias == null
                     ? f.key()
-                    : alias.toLowerCase().replace(' ', '_') + f.key().substring(f.key().indexOf('.'));
+                    : alias.toLowerCase().replace(' ', '_')
+                            + f.key().substring(f.key().indexOf('.'));
             String label = alias == null ? f.label() : alias + ": " + f.label();
             out.add(new PromptFact(
                     key, f.key(), label, alias, f.kind(), f.polarity(), f.value(), f.display(), null, null));

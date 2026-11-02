@@ -78,9 +78,13 @@ final class BriefCatalogue {
                     .build()
                     .readTree(json);
             Map<String, String> templates = new LinkedHashMap<>();
-            root.get("templates").properties().forEach(e -> templates.put(e.getKey(), e.getValue().asString()));
+            root.get("templates")
+                    .properties()
+                    .forEach(e -> templates.put(e.getKey(), e.getValue().asString()));
             Map<String, String> priorities = new LinkedHashMap<>();
-            root.get("priorities").properties().forEach(e -> priorities.put(e.getKey(), e.getValue().asString()));
+            root.get("priorities")
+                    .properties()
+                    .forEach(e -> priorities.put(e.getKey(), e.getValue().asString()));
             Map<String, Topic> topics = new LinkedHashMap<>();
             for (JsonNode t : root.get("topics")) {
                 Set<String> facts = new LinkedHashSet<>();

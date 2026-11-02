@@ -85,7 +85,10 @@ class RetailDailyBriefService {
         try {
             facts = PromptFacts.of(briefFacts.forOwner(date));
         } catch (RuntimeException e) {
-            log.warn("retail brief facts unavailable date={} error={}", date, e.getClass().getSimpleName());
+            log.warn(
+                    "retail brief facts unavailable date={} error={}",
+                    date,
+                    e.getClass().getSimpleName());
             return Outcome.NO_FACTS;
         }
         AiResult result = gateway.complete("retail_brief", null, BriefWriter.request(facts));
@@ -100,7 +103,10 @@ class RetailDailyBriefService {
             store.insertOnce(date, brief, now, called ? llm.model() : null, called ? result.callId() : null);
         } catch (RuntimeException e) {
             // The call is paid for: store a minimal facts only row so the next tick does not pay again.
-            log.error("retail brief store failed date={} error={}", date, e.getClass().getSimpleName());
+            log.error(
+                    "retail brief store failed date={} error={}",
+                    date,
+                    e.getClass().getSimpleName());
             brief = BriefWriter.fallback(facts, "internal_error");
             store.insertOnce(date, brief, now, null, null);
         }

@@ -40,7 +40,8 @@ class RetailAdvisorJobs {
     }
 
     @Bean
-    RecurringTask<Void> retailAdvisorDailyBrief(TenantJobs tenantJobs, RetailDailyBriefService briefs, JdbcClient jdbc) {
+    RecurringTask<Void> retailAdvisorDailyBrief(
+            TenantJobs tenantJobs, RetailDailyBriefService briefs, JdbcClient jdbc) {
         return Tasks.recurring(DAILY_BRIEF, Schedules.fixedDelay(Duration.ofMinutes(15)))
                 .execute((instance, context) ->
                         runFor(context.getExecution().executionTime, () -> retailTenants(jdbc), tenantJobs, briefs));
@@ -53,7 +54,8 @@ class RetailAdvisorJobs {
                 .list();
     }
 
-    static void runFor(Instant dueAt, Supplier<List<UUID>> tenants, TenantJobs tenantJobs, RetailDailyBriefService briefs) {
+    static void runFor(
+            Instant dueAt, Supplier<List<UUID>> tenants, TenantJobs tenantJobs, RetailDailyBriefService briefs) {
         LocalDate date = businessDateFor(dueAt);
         if (date == null) {
             return;
@@ -64,7 +66,10 @@ class RetailAdvisorJobs {
                 tenantJobs.callAs(tenantId, () -> briefs.generate(date));
             } catch (RuntimeException e) {
                 failures++;
-                log.error("retail brief failed for tenant {} error={}", tenantId, e.getClass().getSimpleName());
+                log.error(
+                        "retail brief failed for tenant {} error={}",
+                        tenantId,
+                        e.getClass().getSimpleName());
             }
         }
         if (failures > 0) {
