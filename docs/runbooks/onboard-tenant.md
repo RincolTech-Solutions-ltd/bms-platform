@@ -78,6 +78,48 @@ internet for the images to show: a host behind an access gate shows the alt text
 email still reads correctly. To check a change, send yourself a password reset and open it in a
 web mail and a phone mail app, in light and dark mode.
 
+### Email through Resend (issue #333, ADR-115)
+
+The sender is `no-reply@rincoltech.com` on the Rincol Resend account. `rincoltech.com` is verified in Resend and its
+records are in Cloudflare (DNS of the `rincoltech.com` zone); do not change them without the owner:
+
+| Record | Where | What it is for |
+|---|---|---|
+| SPF | `TXT` on the return path subdomain Resend shows under Domains | lets Resend's servers send for the domain |
+| DKIM | `TXT` at the `_domainkey` name Resend shows under Domains | signs every message |
+| DMARC | `TXT` at `_dmarc`, `v=DMARC1` with the policy the owner set | tells receivers what to do with a message that fails |
+| MX | on the return path subdomain, as Resend shows it | receives bounces for Resend |
+
+Copy the exact values from Resend (Domains, `rincoltech.com`); they are not repeated here so they cannot go stale. The
+domain shows **Verified** there when all of them are live.
+
+To send by the HTTP API instead of SMTP, set in `/opt/bms/.env` (never in git), then `docker compose up -d api`:
+
+| Variable | Value |
+|---|---|
+| `BMS_MAIL_PROVIDER` | `resend` (unset or `smtp` keeps SMTP; any other value stops the start) |
+| `BMS_RESEND_API_KEY` | A **send-only** key restricted to `rincoltech.com`, made in Resend under API Keys, one per environment. Never logged |
+| `BMS_MAIL_FROM` | `BMS by Rincol Tech <no-reply@rincoltech.com>` (quote the whole value) |
+| `BMS_MAIL_ALLOWLIST` | **Staging only.** The addresses that may get mail, comma separated; `@<domain>` allows a whole domain, for example `@rincoltech.com`. Empty on staging sends nothing |
+
+The `BMS_SMTP_*` values can stay on the host; they are not used while the provider is `resend`, and setting it back to
+`smtp` returns to them. On production the API refuses to start with `resend` and no key or no `BMS_MAIL_FROM`.
+
+- **From-name.** A business's emails show that business's name as the sender, from `no-reply@rincoltech.com`; the
+  platform's own emails show the name in `BMS_MAIL_FROM`.
+- **Staging allow-list.** With `BMS_ENVIRONMENT=staging` a message to anyone not on `BMS_MAIL_ALLOWLIST` is not sent and
+  shows on "Messages not sent" as `not_on_staging_allowlist`. Set the list **before** this release reaches staging, or
+  every email there stops. To let a tester in, add the address, `docker compose up -d api`, then "Send again".
+- **What a failure means.** `resend_rejected`: Resend refused the message as invalid (often the From); it is not retried.
+  `resend_unauthorized`: the key is wrong, revoked or not allowed for the domain; make a new one. `resend_rate_limited`,
+  `resend_unavailable`, `resend_timeout`, `resend_unreachable`: retried twice on their own; a retry never sends a second
+  copy, because the outbox key is sent as Resend's idempotency key.
+- **Bounces and complaints.** Not in the portal yet (ADR-115 decision 8). Look in Resend under Emails: each message
+  carries the tag `outbox_id`, the row id the API log line `outbox email accepted by resend` names. An address that
+  bounces hard or complains is suppressed by Resend; fix it in BMS (the user's email) before sending again.
+- **Rotating the key.** Make the new key, put it in `.env`, `docker compose up -d api`, send yourself a password reset,
+  then delete the old key in Resend.
+
 SMS is a channel of the same outbox but is off for every tenant until the platform operator switches it on
 (`PUT /api/v1/platform/tenants/{tenant_id}/sms`) and off for the environment until a provider and a mode are set;
 see `docs/runbooks/sms-setup.md`. A new tenant therefore sends no SMS until you decide it should.

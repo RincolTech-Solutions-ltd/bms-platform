@@ -165,6 +165,11 @@ services:
       BMS_SMTP_USER: ${BMS_SMTP_USER:-}
       BMS_SMTP_PASSWORD: ${BMS_SMTP_PASSWORD:-}
       BMS_MAIL_FROM: ${BMS_MAIL_FROM:-}
+      # Email by the Resend HTTP API instead of SMTP (issue #333, ADR-115). On staging only the recipients on
+      # BMS_MAIL_ALLOWLIST get mail (addresses or @domain, comma separated); an empty list sends nothing.
+      BMS_MAIL_PROVIDER: ${BMS_MAIL_PROVIDER:-smtp}
+      BMS_RESEND_API_KEY: ${BMS_RESEND_API_KEY:-}
+      BMS_MAIL_ALLOWLIST: ${BMS_MAIL_ALLOWLIST:-}
       # The support line in the footer of every email (issue #396, ADR-054); empty leaves it out.
       BMS_SUPPORT_CONTACT: ${BMS_SUPPORT_CONTACT:-}
       BMS_TELEGRAM_BOT_TOKEN: ${BMS_TELEGRAM_BOT_TOKEN:-}
