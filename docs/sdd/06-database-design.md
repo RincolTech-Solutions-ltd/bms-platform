@@ -493,7 +493,7 @@ so it goes once. FR-SUB-08.
 One row (`id = 1`): `grace_days integer NOT NULL DEFAULT 7` (0 to 60), `how_to_pay varchar(1000)` (the operator's words, empty at
 first), `updated_at`, `updated_by_platform_user_id`. Changed only through `platform_set_billing_settings`. FR-SUB-09.
 
-### `platform_import_settings` (platform, no RLS, `bms_app` SELECT only; `V114`, ADR-027)
+### `platform_import_settings` (platform, no RLS, `bms_app` SELECT only; `V126`, ADR-027)
 
 One row (`id = 1`): `commit_enabled boolean NOT NULL DEFAULT true`, the kill switch `imports.commit_enabled` of customer data
 onboarding (spec section 5.4), `updated_at`, `updated_by_platform_user_id`. Changed only through
@@ -1186,7 +1186,7 @@ one repayment (spec 3.4.1).
 Specified in full in chapter 13 section 13.4; listed here for completeness:
 `import_batches`, `import_rows`, `import_issues`, `import_issue_resolutions`.
 
-As built so far (migration `V114__import_runs.sql`, issue #127, ADR-027; chapter 13 section 13.14):
+As built so far (migration `V126__import_runs.sql`, issue #127, ADR-027; chapter 13 section 13.14):
 
 - **`import_runs`** (RLS, `SELECT, INSERT, UPDATE`): one onboarding attempt. (std with `version`), `created_by uuid NOT NULL`,
   `status` [`draft`, `uploaded`, `in_review`, `ready`, `committing`, `committed`, `signed_off`, `purged`, `cancelled`] (the
@@ -2073,8 +2073,8 @@ reversal that reopens a closed loan can restore that loan's own pledges (section
 changes. `V88__referrals_and_commissions.sql` (#464, ADR-069) is expand only: `referral_codes` (with the trigger on `tenants` and
 the backfill), `tenant_referrals`, `referral_commission_lines`, `referral_commission_rules`, `referral_settings`, two columns on
 `onboarding_applications`, their definer functions and the permission `core.referrals.read`; `V85` is shop logos and `V86` and `V87`
-are the ordered claims before it (offline sales, barcodes); it is renamed at merge if that order changes. `V114__import_runs.sql`
-(#127, ADR-027) is expand only: `platform_import_settings` with `platform_set_import_commit_enabled`, `import_runs` and the first
+are the ordered claims before it (offline sales, barcodes); it is renamed at merge if that order changes. `V126__import_runs.sql`
+(#127, ADR-027; claimed as `V114` and renumbered above main's `V121` and the claims `V122` to `V125`) is expand only: `platform_import_settings` with `platform_set_import_commit_enabled`, `import_runs` and the first
 form of `import_batches` (section 6.5, Import tables). The next migration takes the number above the highest on `main`
 (`MigrationOrderIT`, chapter 15 section 15.4.3).
 

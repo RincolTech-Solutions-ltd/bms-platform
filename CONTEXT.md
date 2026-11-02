@@ -32,7 +32,7 @@ switches on. Lending is the first vertical; retail was brought forward (ADR-020)
 - Customer data onboarding (#125, ADR-027) is being built in the spec's section 9 order, as the
   path to the pilot import (#110, which lands with #136): 1/16 #127 (import runs, run states,
   one committing run per business, advisory lock per batch, kill switch and halt, trading tenant
-  guard; module `core.imports`, migration V114) is on branch `feat/127-import-runs`. Next: #128
+  guard; module `core.imports`, migration V126) is in review on branch `feat/127-import-runs-v126`. Next: #128
   (quarantined upload), then #129 to #134.
 - Retail R1 to R5, transfers, catalogue management, the parity pass, the optional trade
   capabilities and landed cost (V48) are on `main`, as are report runs (V49), the SMS channel

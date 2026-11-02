@@ -26,7 +26,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * {@link ImportRuns} over {@code import_runs}, {@code import_batches} and {@code platform_import_settings} (migration V114).
+ * {@link ImportRuns} over {@code import_runs}, {@code import_batches} and {@code platform_import_settings} (migration V126).
  *
  * <p>The commit is a sequence of transactions, never one: the start (guards, then {@code ready} to {@code committing}),
  * one per batch, and the finish. A batch takes {@code pg_advisory_xact_lock} on the business's import key before it reads

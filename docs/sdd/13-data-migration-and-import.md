@@ -648,7 +648,7 @@ requirements are written with the tasks that build them.
 
 ### 13.14.1 As built
 
-**1/16, runs and guards (#127, migration `V114`).** The module `core.imports` (public API `ImportRuns`) holds:
+**1/16, runs and guards (#127, migration `V126`).** The module `core.imports` (public API `ImportRuns`) holds:
 
 - `import_runs` with the states above, enforced by the service: an illegal move is `invalid_status_transition` (409), and
   `committing` and `committed` are reached only through the commit.
