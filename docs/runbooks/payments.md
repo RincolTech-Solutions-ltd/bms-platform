@@ -124,16 +124,16 @@ confirms it with an authenticated status query, and the booker records it as a r
    was made it goes stale and the next notification or the weekly look raises a fresh one. A booked payment is looked at again daily for 7 days when the provider names a mobile money wallet and for 120 days (daily for 14
    days, then weekly) for a card or an unknown method. A reversal of money the lender already refunded by hand raises no request (nothing in the books can be reversed): the loss is recorded by the accountant by manual journal.
 
-**Rolling back V122 (the unallocated receipts queue).** Flyway has no down step; the migration is expand only, so the previous application
+**Rolling back V123 (the unallocated receipts queue).** Flyway has no down step; the migration is expand only, so the previous application
 version runs on the new schema untouched. To go back to the previous release: deploy it (it ignores the new columns, the `system` user and
 the new permission), and leave the data. If the schema itself must be put back, in this order and only by the owner role, after the
 queue has been emptied (no `unallocated_allocation`, `unallocated_refund` or `gateway_payment_reversal` request pending; reject them):
-(1) drop the trigger `unallocated_receipts_guard` and its function, and restore `payment_intents_guard()` from V54 (V122 added the moves from review back to booked and narrowed needs_attention to reversed);
-(2) revoke `UPDATE` on `unallocated_receipts` from `bms_app` (the V59 grant was `SELECT, INSERT`) and drop the V122 columns and checks; a receipt
+(1) drop the trigger `unallocated_receipts_guard` and its function, and restore `payment_intents_guard()` from V54 (V123 added the moves from review back to booked and narrowed needs_attention to reversed);
+(2) revoke `UPDATE` on `unallocated_receipts` from `bms_app` (the V59 grant was `SELECT, INSERT`) and drop the V123 columns and checks; a receipt
 already `allocated`, `refunded` or `reversed` has lost its `status` explanation then, so keep a copy of
 `SELECT id, status, allocated_txn_id, cleared_entry_id, refund_method_key, refund_reference FROM unallocated_receipts WHERE status <> 'open'`
 first, and set those receipts back to `open` only if their journal entries are also reversed by the accountant (the books, not the status, are the record);
-(3) keep the `users` rows of kind `system` and leave `users_kind_check` as V122 made it: requests, allocations and audit rows name that user as their maker with no foreign key, and deleting it would leave them pointing at nothing (it has no credentials, role or session, and every staff query filters on kind `staff`); if the check must be put back, export the rows that reference those ids first;
+(3) keep the `users` rows of kind `system` and leave `users_kind_check` as V123 made it: requests, allocations and audit rows name that user as their maker with no foreign key, and deleting it would leave them pointing at nothing (it has no credentials, role or session, and every staff query filters on kind `staff`); if the check must be put back, export the rows that reference those ids first;
 (4) delete the permission `core.payments.allocate_approve` and its three role rows. Nothing of this is needed to roll the application back.
 
 ## 4e. Savings deposits by mobile money: operating them
@@ -182,7 +182,7 @@ outside this system need `core.payments.manage` (tenant admin, accountant) **in 
    `amount_mismatch` / `currency_mismatch` / `ambiguous_statement_row`: the statement and this system disagree; check both against the member.
    If the report says the run **could not read everything** ("truncated": more orders or statement lines than one run holds in memory: 200,000 and 100,000), what it lists is partial and it lists nothing that needs the whole (no `in_bms_not_in_provider`); tell the developer.
 4. **Closing a difference.** Put its cause right; the next run no longer lists it (statement lines are matched again every run). Runs are kept 90 days.
-5. **Rolling back V123.** The previous release ignores the new tables and the job does not exist there; nothing needs undoing for a rollback of the application. To remove the schema (owner role only): drop the five tables in this order, findings, runs, reviews, statement rows, statements; drop the two indexes on `payment_intents`
+5. **Rolling back V124.** The previous release ignores the new tables and the job does not exist there; nothing needs undoing for a rollback of the application. To remove the schema (owner role only): drop the five tables in this order, findings, runs, reviews, statement rows, statements; drop the two indexes on `payment_intents`
    (`payment_intents_lower_provider_reference`, `payment_intents_upper_confirmation_code`); and delete the permission `core.payments.manage` and its two role rows. The fees already posted are ordinary ledger entries (source type `statement_fee`) and stay; they are reversed only by the accountant, one entry at a time, if a statement was wrong.
 
 ## 4a. Rotating the data key

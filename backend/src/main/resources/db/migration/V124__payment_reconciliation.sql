@@ -1,7 +1,7 @@
--- V123: the daily reconciliation of gateway payments and the merchant statement upload (extras slice A5/7, second part, issue #224,
+-- V124: the daily reconciliation of gateway payments and the merchant statement upload (extras slice A5/7, second part, issue #224,
 -- task #317; ADR-035 and its amendment of 2026-10-19 for slice A5; docs/specs/client-extras.md sections 3.8, 3.9 and 3.17;
--- FR-PAY-05, FR-PAY-06, FR-PAY-11). Flyway runs with outOfOrder off: V121 is the last on main, V122 is the unallocated
--- receipts queue (#316, part 1) and this file takes V123. The number is checked again at merge time.
+-- FR-PAY-05, FR-PAY-06, FR-PAY-11). Flyway runs with outOfOrder off: V122 is the onboarding link fix (#747), V123 the
+-- unallocated receipts queue (#316, part 1) and this file takes V124. The number is checked again at merge time.
 --
 -- Expand only, safe on a populated database. Five tenant tables, all created empty, one permission, and two indexes on
 -- `payment_intents` (item 5); no existing column, constraint or row is touched:

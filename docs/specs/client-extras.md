@@ -498,7 +498,7 @@ The twin of 3.14; only what differs is listed.
 ### 3.16 As built in slice #224, part 1 (the unallocated receipts queue, governed reversal, review windows)
 
 Slice #224 is delivered as a stack: this part (the queue, the reversal of a gateway payment, the review windows) and a second part (the nightly reconciliation job and report, the statement upload and the
-fee posting, migration `V123`). Everything here is off with the collections switch: a business that never collected has no receipts and no payments to reverse.
+fee posting, migration `V124`). Everything here is off with the collections switch: a business that never collected has no receipts and no payments to reverse.
 
 - **The queue.** `GET /payments/unallocated` (open by default) lists the money a loan or account would not take, with the order's facts staff match against the provider's statement (order reference, tracking id,
   confirmation code, method, paid time), the refusal code, and the requests waiting on it; never the payer's phone. A receipt is read with `core.payments.read` in its branch (else 404).
@@ -536,7 +536,7 @@ fee posting, migration `V123`). Everything here is off with the collections swit
 
 ### 3.17 As built in slice #224, part 2 (daily reconciliation and the statement upload)
 
-Migration `V123`; permission `core.payments.manage` (tenant admin, accountant). Off with the collections switch: a business with no orders and no statement gets no nightly run.
+Migration `V124`; permission `core.payments.manage` (tenant admin, accountant). Off with the collections switch: a business with no orders and no statement gets no nightly run.
 
 - **Statement upload** (`POST /payments/statements`, multipart CSV). The provider offers no settlement interface (3.1) and its export columns are undocumented to us (3.12.2), so the reader asks for few: a column for the order tracking id and/or the confirmation code, `amount` and `date`; it reads
   `fee`, `settled`, `currency` and `payment_method` when present and ignores every other column (a payer's number or masked account is never stored). Usual names are accepted (`Tracking ID`, `Gross Amount`, `Net`, `Fees`, `Payment Code`...). Amounts are the decimal the provider shows; a fraction a

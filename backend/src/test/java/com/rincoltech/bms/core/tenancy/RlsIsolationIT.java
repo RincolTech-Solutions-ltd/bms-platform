@@ -1033,7 +1033,7 @@ public class RlsIsolationIT {
                         "INSERT INTO retail_notice_runs (tenant_id, kind, run_on) VALUES (?, 'daily_summary', DATE '2026-01-15')")
                 .param(t.tenantId())
                 .update();
-        // The merchant statement, its line, a reconciliation run and one of its findings (migration V123, #317).
+        // The merchant statement, its line, a reconciliation run and one of its findings (migration V124, #317).
         // JUSTIFICATION-A3: one factory row per tenant table; they point at the fixture user, intent and journal entry
         // above.
         UUID statement = UUID.randomUUID();
