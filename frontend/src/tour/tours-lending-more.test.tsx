@@ -62,7 +62,7 @@ const SAVER_READER = person('Test Reader 01', ['lending.savings.read', 'lending.
 const INVESTMENT_READER = person('Test Reader 02', ['lending.investments.read']);
 const PAYMENTS_READER = person('Test Reader 03', ['core.payments.read', 'core.payments.allocate']);
 const PAYMENTS_MANAGER = person('Test Accountant 01', ['core.payments.read', 'core.payments.manage']);
-const ASKER = person('Test Asker 01',['core.approvals.read', 'core.settings.read', 'core.notifications.read']);
+const ASKER = person('Test Asker 01', ['core.approvals.read', 'core.settings.read', 'core.notifications.read']);
 // The owner of a shop (issue #485): Home shows the shop's summary cards.
 const SHOP_OWNER = { ...mockMe('admin'), full_name: 'Test Shop Owner 01', modules: ['retail'], permission_scopes: undefined, branches } as Me;
 
