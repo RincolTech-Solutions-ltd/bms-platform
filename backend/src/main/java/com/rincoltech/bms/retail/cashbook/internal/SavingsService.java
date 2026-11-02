@@ -17,6 +17,7 @@ import com.rincoltech.bms.retail.cashbook.internal.CashbookApi.SavingsRequest;
 import com.rincoltech.bms.retail.cashbook.internal.CashbookApi.SavingsSuggestion;
 import com.rincoltech.bms.retail.cashbook.internal.CashbookApi.VoidRequest;
 import com.rincoltech.bms.retail.cashbook.internal.CashbookRepository.SavingsRow;
+import com.rincoltech.bms.retail.cashbook.internal.CashbookSupport.SalespeopleSavings;
 import com.rincoltech.bms.retail.reports.DailyProfits;
 import com.rincoltech.bms.retail.stock.RetailBooks;
 import com.rincoltech.bms.retail.stock.RetailBranchContext;
@@ -117,9 +118,16 @@ class SavingsService {
         boolean gate = mayProfit(branch);
         // ADR-115: with the owner's setting on, the suggestion shows without profit read; the profit, the expenses and
         // the
-        // day's cap never do.
-        boolean sees = gate || support.salespeopleSeeSavingsAmount();
+        // day's cap never do, and the day's saved amount only when it was saved while the setting was on.
+        SalespeopleSavings setting = support.salespeopleSavings();
+        boolean sees = gate || setting.on();
         UUID existing = repo.activeSavings(branch, on).orElse(null);
+        Long existingAmount = existing == null
+                ? null
+                : repo.savings(existing, false)
+                        .filter(x -> gate || setting.shows(x.createdAt()))
+                        .map(SavingsRow::amountMinor)
+                        .orElse(null);
         return new SavingsSuggestion(
                 branch,
                 on,
@@ -130,11 +138,7 @@ class SavingsService {
                 gate ? d.expenses() : null,
                 gate ? d.available() : null,
                 existing,
-                sees && existing != null
-                        ? repo.savings(existing, false)
-                                .map(SavingsRow::amountMinor)
-                                .orElse(null)
-                        : null);
+                existingAmount);
     }
 
     @Transactional
@@ -148,7 +152,8 @@ class SavingsService {
         LocalDate date = support.businessDate(r.businessDate(), "business_date");
         boolean profit = mayProfit(branch);
         // ADR-115: the owner let salespeople see and change the amount; they still never see the profit or expenses.
-        boolean salesperson = !profit && support.salespeopleSeeSavingsAmount();
+        SalespeopleSavings setting = support.salespeopleSavings();
+        boolean salesperson = !profit && setting.on();
         if (r.suggestionToken() == null || r.suggestionToken().isBlank()) {
             throw ApiException.rule(
                     "suggestion_token_required", "Read the suggestion first and send its token back with the record.");
@@ -242,7 +247,7 @@ class SavingsService {
             after.put("salespeople_setting", true);
         }
         audit.record(AuditLog.Entry.created("retail.savings.created", "retail.savings", id, branch, after));
-        return view(repo.savings(id, false).orElseThrow(), support.salespeopleSeeSavingsAmount());
+        return view(repo.savings(id, false).orElseThrow(), setting);
     }
 
     /**
@@ -311,17 +316,20 @@ class SavingsService {
                 ? Cursor.encode(
                         items.getLast().createdAt() + "|" + items.getLast().id())
                 : null;
-        boolean salespeopleSee = support.salespeopleSeeSavingsAmount();
-        return new SavingsPage(items.stream().map(x -> view(x, salespeopleSee)).toList(), next);
+        SalespeopleSavings setting = support.salespeopleSavings();
+        return new SavingsPage(items.stream().map(x -> view(x, setting)).toList(), next);
     }
 
     /**
-     * A savings row as the caller may see it: the suggestion needs profit read; the amount and the overwrite flag need
-     * profit read or the owner's setting that salespeople see the amount (ADR-115).
+     * A savings row as the caller may see it: the suggestion needs profit read; the amount and the overwrite flag need profit
+     * read, or, under the owner's setting (ADR-115), {@code retail.savings.record} for the row's branch and a record made while
+     * the setting was on. Older records and a reader of the cash book only keep the amount hidden.
      */
-    static Savings view(SavingsRow r, boolean salespeopleSee) {
+    static Savings view(SavingsRow r, SalespeopleSavings setting) {
         boolean profit = mayProfit(r.branchId());
-        boolean amount = profit || salespeopleSee;
+        boolean amount = profit
+                || (setting.shows(r.createdAt())
+                        && CurrentPrincipal.require().may(CashbookSupport.SAVINGS_RECORD, r.branchId()));
         return new Savings(
                 r.id(),
                 r.branchId(),
@@ -374,6 +382,6 @@ class SavingsService {
                 row.branchId(),
                 Map.of("business_date", row.businessDate().toString()),
                 Map.of("reason", reason)));
-        return view(repo.savings(id, false).orElseThrow(), support.salespeopleSeeSavingsAmount());
+        return view(repo.savings(id, false).orElseThrow(), support.salespeopleSavings());
     }
 }

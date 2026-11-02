@@ -637,6 +637,56 @@ class RetailCashbookSavingsIT extends IntegrationTest {
         assertThat(payload).doesNotContain("1500").doesNotContain("2000").doesNotContain("4000");
     }
 
+    // JUSTIFICATION-A3: the review's third must-fix asks for tests that older records and cash book readers keep
+    // amounts hidden.
+    /** The row of the savings list with that id, read with the given permissions, voided rows included. */
+    JsonNode listed(UUID id, String perms) {
+        for (JsonNode row :
+                cb.get("/savings?include_voided=true", perms).getBody().get("items")) {
+            if (row.get("id").asString().equals(id.toString())) {
+                return row;
+            }
+        }
+        throw new AssertionError("not listed: " + id);
+    }
+
+    @Test
+    void withTheSettingOnOnlyRecordsMadeWhileItIsOnShowAmountsAndOnlyToARecorderOfSavings() {
+        // Made before the Owner turned the setting on: its amount stays hidden from a salesperson afterwards.
+        UUID older = RetailTestSupport.id(
+                cb.post("/savings", body(suggestion(PROFIT_RECORDER), null, null), PROFIT_RECORDER));
+        salespeopleSeeSavingsAmount(true);
+        JsonNode s = suggestion(CASHIER);
+        assertThat(s.get("existing_id").asString()).isEqualTo(older.toString());
+        assertThat(s.has("existing_amount_minor")).isFalse();
+        assertThat(listed(older, CASHIER).has("amount_minor")).isFalse();
+        assertThat(listed(older, CASHIER).has("overwritten")).isFalse();
+
+        // Made while it is on: shown to a caller holding retail.savings.record.
+        assertThat(cb.voidIt("/savings/" + older, "Wrong day", ALL).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> made = cb.post("/savings", body(suggestion(CASHIER), null, null), CASHIER);
+        assertThat(made.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        UUID fresh = RetailTestSupport.id(made);
+        assertThat(made.getBody().get("amount_minor").asLong()).isEqualTo(2_500);
+        assertThat(listed(fresh, CASHIER).get("amount_minor").asLong()).isEqualTo(2_500);
+        assertThat(suggestion(CASHIER).get("existing_amount_minor").asLong()).isEqualTo(2_500);
+        assertThat(listed(older, CASHIER).has("amount_minor")).isFalse();
+
+        // A reader of the cash book who does not record savings sees no amount, not even on the new record.
+        assertThat(listed(fresh, AUDIT_ONLY).has("amount_minor")).isFalse();
+        assertThat(listed(fresh, AUDIT_ONLY).has("overwritten")).isFalse();
+
+        // Off again: every amount is hidden again; on once more, only records made from then on show.
+        salespeopleSeeSavingsAmount(false);
+        assertThat(listed(fresh, CASHIER).has("amount_minor")).isFalse();
+        salespeopleSeeSavingsAmount(true);
+        assertThat(listed(fresh, CASHIER).has("amount_minor")).isFalse();
+        assertThat(suggestion(CASHIER).has("existing_amount_minor")).isFalse();
+        // A caller with profit read sees every amount, as before.
+        assertThat(listed(older, PROFIT_RECORDER).get("amount_minor").asLong()).isEqualTo(2_500);
+    }
+
     @Test
     void withTheSettingOnASalespersonMaySaveTheSuggestionAndItIsNotAnOverwrite() {
         salespeopleSeeSavingsAmount(true);
