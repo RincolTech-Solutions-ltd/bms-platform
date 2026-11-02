@@ -17455,11 +17455,13 @@ export interface components {
             day_expenses_minor?: number;
             /**
              * Format: int64
-             * @description Present only with retail.profit.read in the record's branch; the amount of the active record for the day, if any
+             * @description Present only with retail.profit.read in the record's branch, or for a record made while salespeople_see_savings_amount is on (ADR-115); the amount of the active record for the day, if any
              */
             existing_amount_minor?: number;
             /** Format: uuid */
             existing_id?: string;
+            /** @description True when this caller may save an amount different from the suggestion: with retail.savings.overwrite, or with salespeople_see_savings_amount on when no saved record of the day was voided (replacing a saved amount needs retail.savings.overwrite; ADR-115) */
+            may_change_amount?: boolean;
             /**
              * Format: int64
              * @description Present only with retail.profit.read in the record's branch

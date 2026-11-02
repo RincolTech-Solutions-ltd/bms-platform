@@ -6,7 +6,7 @@ import { useStaff } from '../context';
 import { DateField, RecordsByShop, Saved, WindowFields, useReadScope, useSavedFor, useWindow } from './cash-ui';
 import { usePersistedDraft } from './idempotency';
 import { CASHBOOK_READ, SAVINGS_OVERWRITE, SAVINGS_RECORD, holds } from './permissions';
-import { SAVINGS_REASONS, afterSavingsConflict, nowAboveWords, planSavings, reasonText, salespersonMayChange, seesAmounts } from './savings-state';
+import { SAVINGS_REASONS, afterSavingsConflict, nowAboveWords, planSavings, reasonText, seesAmounts } from './savings-state';
 import { ScreenLink } from './screen-link';
 import { useToast } from './toast';
 import { BranchRequired, Gate, Note, Problem, money, useSingleBranch } from './ui';
@@ -60,8 +60,9 @@ export function SavingsForm({ branchId, onSaved }: { branchId: string; onSaved?:
   const suggestion = useQuery({ queryKey: suggestionKey, queryFn: () => retail.savingsSuggestion({ branchId, date: draft.date }) });
   const s = suggestion.data;
   const profitView = seesAmounts(s);
-  // ADR-115: under the owner's setting a salesperson may change the amount without the overwrite permission.
-  const canOverwrite = holds(me, SAVINGS_OVERWRITE) || salespersonMayChange(s);
+  // ADR-115: the server says whether this caller may change the amount (the owner's setting before the day is saved, or the
+  // overwrite permission); an older server without the flag leaves it to the permission.
+  const canOverwrite = s?.may_change_amount ?? holds(me, SAVINGS_OVERWRITE);
   const reason = reasonText(draft.reason, draft.other ?? '');
   const plan = s ? planSavings({ branchId, date: draft.date, suggestion: s, amount: draft.amount, reason, canOverwrite, today: businessToday() }) : null;
 

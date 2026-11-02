@@ -161,7 +161,18 @@ describe('the savings screen', () => {
 describe('the savings screen for a salesperson', () => {
   const seller = mockMe('cashier');
   const hidden: SavingsSuggestion = { branch_id: branch, business_date: today, total_sold_minor: 50000, suggestion_token: 'tok-1' };
-  const shown: SavingsSuggestion = { ...hidden, suggested_minor: 4000 };
+  const shown: SavingsSuggestion = { ...hidden, suggested_minor: 4000, may_change_amount: true };
+
+  it('with the setting on but a saved amount voided earlier that day, may not change it (overwrite needed)', async () => {
+    savingsSuggestion.mockResolvedValue({ ...shown, may_change_amount: false });
+    listSavings.mockResolvedValue([]);
+    open(seller);
+    await screen.findByText('UGX 4,000', { selector: '.key-figure-value' });
+    fireEvent.change(amount(), { target: { value: '3000' } });
+    expect(screen.getByText(/Only an administrator can change the amount/)).toBeTruthy();
+    fireEvent.click(saveButton());
+    expect(createSavings).not.toHaveBeenCalled();
+  });
 
   it('with the setting off shows no amount and sends none, as before', async () => {
     savingsSuggestion.mockResolvedValue(hidden);

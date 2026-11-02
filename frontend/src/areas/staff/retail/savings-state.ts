@@ -34,13 +34,6 @@ export function capWords(s: SavingsSuggestion, date: string, today: string): str
 }
 
 /**
- * Issue #768, ADR-115: the suggestion carries the amount but not the profit only when the owner let salespeople see and change
- * the savings amount and the caller has no profit read; such a caller may change the amount within the cap.
- */
-export const salespersonMayChange = (s: SavingsSuggestion | undefined): boolean =>
-  s?.suggested_minor !== undefined && s.daily_profit_minor === undefined;
-
-/**
  * "Saved UGX X; profit less expenses is now UGX Y." for a day whose savings are above what it has now, after an expense
  * or a void entered later (ADR-080 decision 3); null otherwise, and always without profit read.
  */
@@ -65,7 +58,7 @@ export interface SavingsInput {
   amount: string;
   /** Optional: the pick, or the text typed under Other. */
   reason: string;
-  /** True when the session holds retail.savings.overwrite. */
+  /** True when the caller may change the amount: the suggestion's `may_change_amount` (ADR-115), else retail.savings.overwrite. */
   canOverwrite: boolean;
   /** The business date today, so the cap can say "today". */
   today?: string;

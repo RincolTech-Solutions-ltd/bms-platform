@@ -687,6 +687,71 @@ class RetailCashbookSavingsIT extends IntegrationTest {
         assertThat(listed(older, PROFIT_RECORDER).get("amount_minor").asLong()).isEqualTo(2_500);
     }
 
+    // JUSTIFICATION-A3: the review's fourth must-fix asks for tests that no caller gets more by holding less.
+    @Test
+    void withTheSettingOnChangingTheSuggestionNeedsOnlyRecordButReplacingASavedAmountNeedsOverwriteForEveryone() {
+        // Off: a caller with profit read but no overwrite may not change it, as before.
+        assertThat(suggestion(PROFIT_RECORDER).get("may_change_amount").asBoolean())
+                .isFalse();
+        assertThat(suggestion(CASHIER).get("may_change_amount").asBoolean()).isFalse();
+        assertThat(suggestion(ALL).get("may_change_amount").asBoolean()).isTrue();
+
+        // On: before the day is saved, a supervisor with profit read changes it just as a cashier may.
+        salespeopleSeeSavingsAmount(true);
+        assertThat(suggestion(PROFIT_RECORDER).get("may_change_amount").asBoolean())
+                .isTrue();
+        assertThat(suggestion(CASHIER).get("may_change_amount").asBoolean()).isTrue();
+        ResponseEntity<JsonNode> bySupervisor =
+                cb.post("/savings", body(suggestion(PROFIT_RECORDER), 1_000, null), PROFIT_RECORDER);
+        assertThat(bySupervisor.getStatusCode())
+                .as("%s", bySupervisor.getBody())
+                .isEqualTo(HttpStatus.CREATED);
+        assertThat(bySupervisor.getBody().get("overwritten").asBoolean()).isTrue();
+
+        // Replacing the saved amount (void, then a different amount) needs retail.savings.overwrite, for everyone.
+        assertThat(cb.voidIt("/savings/" + RetailTestSupport.id(bySupervisor), "Wrong amount", ALL)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(suggestion(CASHIER).get("may_change_amount").asBoolean()).isFalse();
+        assertThat(suggestion(PROFIT_RECORDER).get("may_change_amount").asBoolean())
+                .isFalse();
+        assertThat(cb.post("/savings", body(suggestion(CASHIER), 1_500, null), CASHIER)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(cb.post("/savings", body(suggestion(PROFIT_RECORDER), 1_500, null), PROFIT_RECORDER)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        // The suggestion itself is not a change, and a holder of the overwrite permission may replace it.
+        assertThat(suggestion(ALL).get("may_change_amount").asBoolean()).isTrue();
+        ResponseEntity<JsonNode> byAdmin = cb.post("/savings", body(suggestion(ALL), 1_500, "Owner asked"), ALL);
+        assertThat(byAdmin.getStatusCode()).as("%s", byAdmin.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(cb.voidIt("/savings/" + RetailTestSupport.id(byAdmin), "Redo", ALL)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(cb.post("/savings", body(suggestion(CASHIER), null, null), CASHIER)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void theSuggestionChangedAnswerCarriesTheNewSuggestionForASalespersonOnlyWithTheSettingOn() {
+        JsonNode stale = suggestion(CASHIER);
+        assertThat(cb.sale(hq, "cash", product, "2", day).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> off = cb.post("/savings", body(stale, null, null), CASHIER);
+        assertThat(off.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(off.getBody().get("code").asString()).isEqualTo("suggestion_changed");
+        assertThat(off.getBody().has("suggested_minor")).isFalse();
+
+        salespeopleSeeSavingsAmount(true);
+        assertThat(cb.sale(hq, "cash", product, "2", day).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> on = cb.post("/savings", body(stale, null, null), CASHIER);
+        assertThat(on.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        // Ten units, then two and two more: a profit of 7,000, so a suggestion of 3,500.
+        assertThat(on.getBody().get("suggested_minor").asLong()).isEqualTo(3_500);
+        assertThat(on.getBody().has("available_minor")).isFalse();
+        assertThat(on.getBody().has("daily_profit_minor")).isFalse();
+    }
+
     @Test
     void withTheSettingOnASalespersonMaySaveTheSuggestionAndItIsNotAnOverwrite() {
         salespeopleSeeSavingsAmount(true);

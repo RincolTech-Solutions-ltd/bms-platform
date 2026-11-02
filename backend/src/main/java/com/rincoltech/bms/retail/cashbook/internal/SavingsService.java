@@ -118,7 +118,7 @@ class SavingsService {
         boolean gate = mayProfit(branch);
         // ADR-115: with the owner's setting on, the suggestion shows without profit read; the profit, the expenses and
         // the
-        // day's cap never do, and the day's saved amount only when it was saved while the setting was on.
+        // cap never do, and the day's saved amount only when it was saved while the setting was on.
         SalespeopleSavings setting = support.salespeopleSavings();
         boolean sees = gate || setting.on();
         UUID existing = repo.activeSavings(branch, on).orElse(null);
@@ -138,7 +138,18 @@ class SavingsService {
                 gate ? d.expenses() : null,
                 gate ? d.available() : null,
                 existing,
-                existingAmount);
+                existingAmount,
+                sees && mayChangeAmount(branch, on, setting));
+    }
+
+    /**
+     * ADR-115: the same rule for every caller, so no one gets more by holding less. Changing the suggestion before the day is
+     * saved needs only {@code retail.savings.record} while the owner's setting is on; replacing a saved amount (the day has a
+     * voided record) and any change while the setting is off need {@code retail.savings.overwrite}.
+     */
+    private boolean mayChangeAmount(UUID branch, LocalDate date, SalespeopleSavings setting) {
+        return CurrentPrincipal.require().may(CashbookSupport.SAVINGS_OVERWRITE, branch)
+                || (setting.on() && !repo.voidedSavingsExist(branch, date));
     }
 
     @Transactional
@@ -197,7 +208,7 @@ class SavingsService {
         String reason = null;
         Principal principal = CurrentPrincipal.require();
         if (overwritten) {
-            if (!salesperson && !principal.may(CashbookSupport.SAVINGS_OVERWRITE, branch)) {
+            if (!mayChangeAmount(branch, date, setting)) {
                 throw new ApiException(
                         HttpStatus.FORBIDDEN,
                         "permission_denied",
@@ -242,7 +253,7 @@ class SavingsService {
         if (reason != null) {
             after.put("reason", reason);
         }
-        if (salesperson) {
+        if (setting.on()) {
             // ADR-115: the record was made under the owner's setting; the actor is on the audit row itself.
             after.put("salespeople_setting", true);
         }
