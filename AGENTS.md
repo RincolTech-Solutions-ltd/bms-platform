@@ -1303,16 +1303,14 @@ Accepted (this list is the ADR index):
 - ADR-111 Sizes, colours and types in Add an item, picked from ready lists shipped with the app: the same one form asks
   about sizes, `POST /retail/product-families` takes `packs` made on every size in its transaction, and `GET
   /retail/product-families/options` offers the sizes and colours a shop used before (#697, D81, D98; no migration)
-- ADR-113 Shop words (Proposed, plan only, #683): one list of keys in `frontend/src/words/labels.json`, one label function for
-  menus, tabs, titles, crumbs and headers, a `tenant_words` table of the changes only, a Words page in Business set-up under
-  `core.settings.manage`, limits checked by the server, help and Ask BMS in the shop's words, report footers and a Words sheet in
-  Download my data, and the same keys for Luganda and Swahili later; plan and build order in `docs/specs/shop-words-plan.md`
 
 Pending (cite only as "pending ADR-NNN"):
 
 - ADR-012 Credit scoring model beyond the rules-based default
 - ADR-013 USSD aggregator (the SMS half is settled by ADR-036)
 - ADR-022 The cash book: expenses, banking and advances, likely partly core (ADR-020)
+- ADR-113 Shop words (written as Proposed, plan only, #683; not settled until the owner accepts it): one list of keys, one
+  label function, a `tenant_words` table of the changes only and a Words page; plan in `docs/specs/shop-words-plan.md`
 
 ## Team
 

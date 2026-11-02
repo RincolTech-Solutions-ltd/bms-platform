@@ -34,21 +34,38 @@ word and nothing that tells help, Ask BMS, reports or exports which words a busi
 4. **The owner changes words on a Words page in Business set-up** (`/staff/setup/words`), under the existing
    `core.settings.manage` permission; no new permission. The page lists the keys by area, each with its default shown beside the
    box, a search, Save per row and Reset to the default (which deletes the row). Every change is audited with the key, the old and
-   the new label. API: `GET /api/v1/words` (any signed-in staff user: the changed rows and the revision), `PUT
-   /api/v1/words/{key}` (`If-Match` on the row version, `Idempotency-Key`) and `DELETE /api/v1/words/{key}` (reset).
-5. **Limits, checked by the server.** A label is plain text: trimmed, not empty, at most the key's maximum length (24 for menu
-   entries and tabs, 40 for titles and headers, 60 for other words), no line breaks, no markup characters (`<`, `>`, `{`, `}`), no
-   control characters, and not the same as another key's label in the same area (two menu entries named "Store" would be a dead
-   end). An unknown or retired key is 404. A refusal names the rule in plain words.
-6. **Help articles and Ask BMS use the shop's words.** The articles stay written in the default words (ADR-095). When an article
-   is drawn, the PWA replaces each default label of a changed key, as a whole phrase and keeping its capital, with the shop's word.
-   Ask BMS does the same to the article text it retrieves before the model sees it, tells the model the business's changed words,
-   and adds the words revision to its answer cache key (ADR-096), so a cached answer in the old words is never served. Search
-   matches both the default and the shop's word.
-7. **Reports and exports say which words were used.** A PDF report or document drawn with changed words carries one footer line,
-   "Words used: Store for My stock, Price to customer for Selling price", and nothing when none changed. Download my data
-   (ADR-074) keeps its column headers in the default words, so a file stays readable by the import and by anyone the business
-   sends it to, and gains a Words sheet listing every changed key, its default and the business's label.
+   the new label. API: `GET /api/v1/words` (any signed-in staff user: the changed rows, each with its version, and the
+   revision); `PUT /api/v1/words/{key}` with an `Idempotency-Key` and either `If-None-Match: *` to create the first row of a key
+   (refused with 412 if a row already exists, so two first renames never race) or `If-Match` on the row's version to change it;
+   `DELETE /api/v1/words/{key}` (Reset) with `If-Match` on the row's version, refused with 412 if someone changed it since, so a
+   reset never silently undoes another owner's save. A `PUT` or `DELETE` without the matching header is refused with 428.
+5. **Limits, checked by the server, after normalising.** The server first applies Unicode NFC and trims, then checks. A label is
+   plain text: not empty; at most the key's maximum length in characters (12 for the bottom tabs, 24 for menu entries, 40 for
+   titles and headers, 60 for other words); no line breaks; no markup characters (`<`, `>`, `{`, `}`); no control characters of
+   Unicode category Cc and no format characters of category Cf (zero width and bidirectional marks such as U+200B and U+202E,
+   which could make two labels look the same or show text reversed); and no leading `=`, `+`, `-`, `@`, tab or carriage return,
+   so a label can never start a spreadsheet formula. The tab limit is set by measurement, not taste: the layout suite draws five
+   tabs, each holding a label of the maximum length in its widest letters, at 360 pixels and the largest font scale, and fails
+   if one wraps past two lines or overflows; the limit is lowered if it does. A label may not equal another key's label in the
+   same area, compared case-insensitively after the same normalising and trimming, nor that key's default when it has no row
+   (two menu entries named "Store" would be a dead end). Saves of one business are serialised (a transaction-scoped advisory
+   lock on the tenant) so two concurrent saves in one area cannot both pass the duplicate check. An unknown or retired key is
+   404. A refusal names the rule in plain words.
+6. **Help articles and Ask BMS use the shop's words, only where an article marks them.** Free prose is never rewritten: "for
+   more detail" must not become "for extras detail" when the More tab is renamed. An article names a screen word with a marked
+   reference, `{{word:tabs.more}}`, which the build checks against `labels.json` (an unknown key fails the help corpus build,
+   ADR-095). When an article is drawn, the PWA replaces each marked reference with the business's word, or the default when it
+   has none; everything else stays as written. Ask BMS does the same to the article text it retrieves before the model sees it,
+   tells the model the business's changed words, and adds the words revision to its answer cache key (ADR-096), so a cached
+   answer in the old words is never served. Search matches both the default and the shop's word. The existing articles are
+   given marked references in the build step that brings this in.
+7. **Reports and exports say which words were used.** A PDF report or document drawn with changed words carries one footer line
+   listing every word the business changed (not only those on the page), "Words used: Store for My stock, Price to customer for
+   Selling price", and nothing when none changed. Download my data (ADR-074) keeps its column headers in the default words, so a
+   file stays readable by the import and by anyone the business sends it to, and gains a Words sheet listing every changed key,
+   its default and the business's label. Every label written to a sheet is written as a text cell and, as a second guard behind
+   decision 5, a label starting with `=`, `+`, `-`, `@`, tab or carriage return is prefixed with an apostrophe, so no export can
+   carry a formula.
 8. **Translations later use the same keys.** A language is a second file of the same keys (`labels.lg.json` for Luganda,
    `labels.sw.json` for Swahili) chosen per person. The label function then reads, in order: the business's own word, the
    language file, the default. Building a language is not part of this decision; the keys are made so it needs no second pass over
@@ -61,7 +78,8 @@ word and nothing that tells help, Ask BMS, reports or exports which words a busi
 Better: a business sees its own words in every menu, title and header without a code change; a new screen starts with keys
 because the guard asks for them; help, Ask BMS and documents agree with the screens; the same keys carry a later translation.
 
-Worse: every typed label has to move to a key once (about 400 places, `docs/specs/shop-words-plan.md`); a label longer than the
+Worse: every typed label has to move to a key once (about 860 places to edit, but about 420 keys, since most crumbs and titles
+share a key and most headers repeat; `docs/specs/shop-words-plan.md` section 2); a label longer than the
 default can wrap where the default did not, so the maximum lengths are tight and the layout suite checks the longest allowed
 label on the phone screens; a tour or help picture still shows the default words; a support call has to ask which words the
 business uses (the Words sheet and the footer answer it).
