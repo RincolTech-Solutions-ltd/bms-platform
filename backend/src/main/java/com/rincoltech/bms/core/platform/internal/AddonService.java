@@ -64,8 +64,7 @@ class AddonService {
     @Transactional(readOnly = true)
     AddonDetail detail() {
         LocalDate today = clock.today(BusinessClock.DEFAULT_ZONE);
-        long on = jdbc.sql("SELECT count(*) FROM platform_tenant_overview() o, platform_tenant_ai_addon(o.id) a"
-                        + " WHERE a.ai_addon")
+        long on = jdbc.sql("SELECT platform_ai_addon_on_count()")
                 .query(Long.class)
                 .single();
         return new AddonDetail(
@@ -185,10 +184,16 @@ class AddonService {
             return view(tenant);
         }
         UUID operator = CurrentPrincipal.require().userId();
-        jdbc.sql("SELECT * FROM platform_set_ai_addon(?, ?, ?, ?)")
+        // The marks before, as the function read them under the row lock: another operator's change in between is
+        // audited as the before, and when it already made this state nothing is audited (review of #743).
+        State locked = jdbc.sql("SELECT * FROM platform_set_ai_addon(?, ?, ?, ?)")
                 .params(tenantId, on, after.noCharge(), operator)
-                .query()
-                .singleRow();
+                .query((rs, n) -> new State(rs.getBoolean("was_on"), rs.getBoolean("was_no_charge")))
+                .single();
+        if (locked.equals(after)) {
+            return view(tenant);
+        }
+        before = locked;
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("addon_code", AI_ASSISTANT);
         data.put("before", before.on() ? (before.noCharge() ? "on_no_charge" : "on") : "off");

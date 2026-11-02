@@ -8,6 +8,9 @@ import com.rincoltech.bms.core.ai.AiSettings;
 import com.rincoltech.bms.kernel.TenantContext;
 import com.rincoltech.bms.testsupport.Api;
 import com.rincoltech.bms.testsupport.Api.Session;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.LinkedHashMap;
@@ -32,8 +35,8 @@ import tools.jackson.databind.JsonNode;
 class AiAddonIT extends IntegrationTest {
 
     static final ZoneId KAMPALA = ZoneId.of("Africa/Kampala");
-    /** The add-on's invented price, in whole shillings. */
-    static final long ADDON = 10_000;
+    /** The add-on's invented price, in whole shillings: never the real one (review of #743). */
+    static final long ADDON = 7_300;
     /** The plan's invented price. */
     static final long PLAN = 40_000;
 
@@ -45,12 +48,13 @@ class AiAddonIT extends IntegrationTest {
 
     Api platform;
     Session operator;
+    UUID operatorId;
 
     @BeforeEach
     void setUp() {
         platform = Api.platform(http);
         String email = Api.email("operator");
-        UUID operatorId = Api.platformUser(email);
+        operatorId = Api.platformUser(email);
         operator = platform.signIn(operatorId, email, Api.PASSWORD, null);
         ResponseEntity<JsonNode> priced = platform.post(
                 "/api/v1/platform/addons/ai_assistant/prices",
@@ -156,7 +160,7 @@ class AiAddonIT extends IntegrationTest {
         ResponseEntity<JsonNode> refused =
                 platform.post("/api/v1/platform/addons/ai_assistant/prices", far, operator.accessToken());
         assertThat(refused.getStatusCode().value()).isEqualTo(422);
-        assertThat(refused.getBody().get("detail").asString()).contains("UGX 10,000", "UGX 50,000");
+        assertThat(refused.getBody().get("detail").asString()).contains("UGX 7,300", "UGX 36,500");
     }
 
     @Test
@@ -186,11 +190,17 @@ class AiAddonIT extends IntegrationTest {
     void aChargedAddonIsAddedToWhatTheBusinessOwesAndANoChargeOneIsNot() {
         UUID charged = business(pricedPlan());
         setAddon(charged, true, false);
-        // The plan and the add-on together: a payment of the plan alone is a quarter away and needs a confirmation.
+        // The plan and the add-on together. The plan alone is within a quarter of it, so it is named and needs a
+        // confirmation:
+        // the add-on is never left out of a payment silently.
         assertThat(pay(charged, PLAN + ADDON).getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        ResponseEntity<JsonNode> planOnly = pay(charged, PLAN - ADDON);
+        ResponseEntity<JsonNode> planOnly = pay(charged, PLAN);
         assertThat(planOnly.getStatusCode().value()).isEqualTo(422);
-        assertThat(planOnly.getBody().get("detail").asString()).contains("UGX 50,000");
+        assertThat(planOnly.getBody().get("detail").asString())
+                .contains("UGX 40,000", "without the AI assistant add-on", "UGX 47,300");
+        ResponseEntity<JsonNode> farOff = pay(charged, PLAN - ADDON * 2);
+        assertThat(farOff.getStatusCode().value()).isEqualTo(422);
+        assertThat(farOff.getBody().get("detail").asString()).contains("UGX 47,300", "more than a quarter away");
 
         UUID free = business(pricedPlan());
         ResponseEntity<JsonNode> demo = setAddon(free, true, true);
@@ -198,6 +208,70 @@ class AiAddonIT extends IntegrationTest {
         assertThat(demo.getBody().get("no_charge").asBoolean()).isTrue();
         assertThat(allowed(free)).isTrue();
         assertThat(pay(free, PLAN).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    /**
+     * The SQL state of {@code sql} run as the application bound to {@code bound} (null: unbound), rolled back; null on success.
+     * JUSTIFICATION-A3: BillingAutomationIT's helper is package-private in another package; this is the review's new test.
+     */
+    static String asApp(UUID bound, String sql, Object... params) {
+        try (Connection c = TestDatabase.appDataSource().getConnection()) {
+            c.setAutoCommit(false);
+            try {
+                if (bound != null) {
+                    try (PreparedStatement bind = c.prepareStatement("SELECT set_config('app.tenant_id', ?, true)")) {
+                        bind.setString(1, bound.toString());
+                        bind.execute();
+                    }
+                }
+                try (PreparedStatement s = c.prepareStatement(sql)) {
+                    for (int i = 0; i < params.length; i++) {
+                        s.setObject(i + 1, params[i]);
+                    }
+                    s.execute();
+                }
+                return null;
+            } finally {
+                c.rollback();
+            }
+        } catch (SQLException e) {
+            return e.getSQLState();
+        }
+    }
+
+    /**
+     * Review of #743 (ADR-016, as V88 and V105): code bound to a business never switches the add-on, prices it or reads another
+     * business's marks, and a platform user who is not active never switches it. The Owner's page reads its own business.
+     */
+    @Test
+    void theDefinerFunctionsRefuseACallerBoundToABusiness() {
+        UUID mine = business("growth");
+        UUID other = business("growth");
+        String set = "SELECT * FROM platform_set_ai_addon(?, true, true, ?)";
+        assertThat(asApp(mine, set, mine, operatorId)).as("bound: refused").isEqualTo("42501");
+        assertThat(asApp(mine, set, other, operatorId))
+                .as("bound, another business: refused")
+                .isEqualTo("42501");
+        assertThat(asApp(null, set, mine, UUID.randomUUID()))
+                .as("not a platform user: refused")
+                .isEqualTo("42501");
+        assertThat(asApp(null, set, mine, operatorId))
+                .as("the operator, unbound")
+                .isNull();
+        assertThat(asApp(
+                        mine,
+                        "SELECT platform_add_addon_price(?, 'ai_assistant', 'UGX', 1, current_date, null, ?)",
+                        UUID.randomUUID(),
+                        operatorId))
+                .isEqualTo("42501");
+        assertThat(asApp(mine, "SELECT platform_ai_addon_on_count()")).isEqualTo("42501");
+        assertThat(asApp(mine, "SELECT * FROM platform_tenant_ai_addon(?)", other))
+                .isEqualTo("42501");
+        assertThat(asApp(mine, "SELECT * FROM platform_tenant_ai_addon(?)", mine))
+                .as("its own business")
+                .isNull();
+        assertThat(allowed(mine)).isFalse();
+        assertThat(allowed(other)).isFalse();
     }
 
     @Test

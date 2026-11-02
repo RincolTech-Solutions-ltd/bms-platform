@@ -241,8 +241,10 @@ Nothing is seeded: the operator types the price on Plans and prices (`platform_a
 
 `subscriptions` gains `ai_addon` and `ai_addon_no_charge` (`boolean NOT NULL DEFAULT false`, `V126`): the operator switched the AI
 assistant add-on on for the business, and on without charge (a demo or a pilot). Written only through `platform_set_ai_addon`
-(switching off clears the no charge mark); read by `core.ai`'s allow-list on every call and, unbound, through
-`platform_tenant_ai_addon`. No business is switched on by the migration.
+(switching off clears the no charge mark); read by `core.ai`'s allow-list on every call and through `platform_tenant_ai_addon`
+(unbound, or bound to the same business for the Owner's billing page). `platform_set_ai_addon`, `platform_add_addon_price` and
+`platform_ai_addon_on_count` (live businesses with it on) refuse a caller bound to a business, and the first two a platform user
+who is not active (ADR-016). No business is switched on by the migration.
 
 Index `(plan_id, currency, effective_from DESC, created_at DESC)`. Written only through `platform_add_plan_price`; the service
 refuses a start before today, so a price never changes the past.

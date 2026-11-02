@@ -157,6 +157,7 @@ export function AddonPriceSection() {
         <p><BusyButton type="submit" className="btn-primary" busy={busy}>Save the price</BusyButton></p>
       </form>
       {detail && (detail.prices ?? []).length > 0 && (
+        <div className="table-wrap table-cards">
         <table className="table">
           <caption>Prices of the add-on, newest first</caption>
           <thead>
@@ -165,13 +166,14 @@ export function AddonPriceSection() {
           <tbody>
             {(detail.prices ?? []).map((p) => (
               <tr key={p.id}>
-                <td>{p.effective_from ? formatDay(p.effective_from) : ''}</td>
-                <td className="num">{formatMinor(p.monthly_minor ?? 0, p.currency ?? 'UGX')}</td>
-                <td>{p.reason}</td>
+                <td data-label="From">{p.effective_from ? formatDay(p.effective_from) : ''}</td>
+                <td data-label="A month" className="num">{formatMinor(p.monthly_minor ?? 0, p.currency ?? 'UGX')}</td>
+                <td data-label="Why" className="cell-stack">{p.reason}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </section>
   );

@@ -194,6 +194,22 @@ class AiConfigurationTest {
         assertThat(none.allowAll()).isFalse();
     }
 
+    /** Review of #743: * is refused at start outside the dev, test and demo profiles, so a production host never lets all in. */
+    @Test
+    void allowAllIsRefusedOnAServerHost() {
+        AiProperties all = new AiProperties(
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, "*");
+        MockEnvironment server = new MockEnvironment();
+        server.setActiveProfiles("server");
+        assertThatThrownBy(() -> new AiAllowList(all, null, server))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("dev, test and demo");
+        MockEnvironment demo = new MockEnvironment();
+        demo.setActiveProfiles("server", "demo");
+        new AiAllowList(all, null, demo);
+        new AiAllowList(props(null, null, null, null), null, server);
+    }
+
     @Test
     void aCapOfZeroMeansStopAndANegativeOneFailsStartup() {
         AiProperties stop =

@@ -11,14 +11,14 @@ const plan = { monthly_minor: 40_000, annual_months: 10, annual_minor: 400_000, 
 
 describe('what a business owes with the add-on', () => {
   it('adds a charged add-on to the month and twelve of it to the year', () => {
-    const owed = withAddon(plan, { charged: true, monthly_minor: 10_000 });
-    expect(owed?.monthly_minor).toBe(50_000);
-    expect(owed?.annual_minor).toBe(520_000);
-    expect(expectedAmount(owed, 1)).toBe('50000');
+    const owed = withAddon(plan, { charged: true, monthly_minor: 7_300 });
+    expect(owed?.monthly_minor).toBe(47_300);
+    expect(owed?.annual_minor).toBe(487_600);
+    expect(expectedAmount(owed, 1)).toBe('47300');
   });
 
   it('adds nothing when the add-on is off, not charged or has no price', () => {
-    expect(withAddon(plan, { charged: false, monthly_minor: 10_000 })).toBe(plan);
+    expect(withAddon(plan, { charged: false, monthly_minor: 7_300 })).toBe(plan);
     expect(withAddon(plan, { charged: true, monthly_minor: null })).toBe(plan);
     expect(withAddon(plan, undefined)).toBe(plan);
   });
@@ -26,13 +26,13 @@ describe('what a business owes with the add-on', () => {
   it('says in one plain line whether the business may use it and what it costs', () => {
     expect(addonLine(undefined, 'UGX')).toContain('Off');
     expect(addonLine({ on: true, no_charge: true }, 'UGX')).toBe('On, with no charge.');
-    expect(addonLine({ on: true, charged: true, monthly_minor: 10_000 }, 'UGX')).toContain('UGX 10,000 a month');
+    expect(addonLine({ on: true, charged: true, monthly_minor: 7_300 }, 'UGX')).toContain('UGX 7,300 a month');
   });
 });
 
 describe('the add-on on the Business page', () => {
   const detail = (on: boolean) =>
-    ({ tenant: { name: 'Test Shop 01', currency: 'UGX' }, ai_addon: { on, no_charge: false, charged: on, monthly_minor: 10_000 } }) as unknown as BusinessDetail;
+    ({ tenant: { name: 'Test Shop 01', currency: 'UGX' }, ai_addon: { on, no_charge: false, charged: on, monthly_minor: 7_300 } }) as unknown as BusinessDetail;
   const render = (d: BusinessDetail) =>
     renderToString(
       <QueryClientProvider client={new QueryClient()}>
@@ -50,6 +50,6 @@ describe('the add-on on the Business page', () => {
   it('offers to switch it off while it is on', () => {
     const html = render(detail(true));
     expect(html).toContain('Switch off');
-    expect(html).toContain('UGX 10,000 a month');
+    expect(html).toContain('UGX 7,300 a month');
   });
 });

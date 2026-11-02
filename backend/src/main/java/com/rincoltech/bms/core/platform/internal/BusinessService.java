@@ -417,6 +417,19 @@ class BusinessService {
                             + money(currency, expected) + ", and this payment is " + money(currency, amount)
                             + ". That is more than a quarter away. Check it, then confirm it.");
         }
+        // The plan's price alone while the add-on is charged is within a quarter, so it is named, never taken silently
+        // (review of #743): the add-on may have been left out of the payment.
+        long planAlone = priceBook
+                .priceOn(tenant.planCode(), currency, today)
+                .map(p -> expectedMinor(p, request.months()))
+                .orElse(expected);
+        if (planAlone != expected && amount == planAlone) {
+            throw ApiException.rule(
+                    "payment_amount_unusual",
+                    "This payment is " + money(currency, amount)
+                            + ", the plan's price without the AI assistant add-on. With the add-on it is "
+                            + money(currency, expected) + ". Check it, then confirm it.");
+        }
     }
 
     private static final String PAYMENT_SELECT = """
