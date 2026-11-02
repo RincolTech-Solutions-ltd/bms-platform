@@ -255,28 +255,37 @@ export function useOfflineSupport(me: Me | undefined, signedIn: boolean, service
   const reads = useRef<ReadKeeper | null>(null);
   // The rights the kept reads in memory were loaded under, to drop them when the rights change in the session.
   const accessBefore = useRef<string | null>(null);
+  // A manager made a seller, a branch taken away, selling taken away, signed out: what was read under the old rights leaves
+  // memory, never shown offline. Whether or not the person still has offline support, so before anything else.
+  useEffect(() => {
+    if (!client) return;
+    if (accessBefore.current !== null && accessBefore.current !== access) forgetInMemory(client);
+    accessBefore.current = access;
+  }, [client, access]);
   useEffect(() => {
     if (!svc || !scope || !client) return;
     let live = true;
     const now = () => svc.now().getTime();
-    // A manager made a seller, a branch taken away: what was read under the old rights leaves memory, never shown offline.
-    if (accessBefore.current !== null && accessBefore.current !== access) forgetInMemory(client);
-    accessBefore.current = access;
+    // The keeper of the old rights may still be writing: its copy is read (and thrown away) only once it has finished.
+    const before = reads.current;
     const keeper = keepReads(client, svc.store, scope, access, now);
     reads.current = keeper;
-    void svc.store.readCache(scope).then(
-      async (c) => {
-        if (!live) return;
-        if (c && !usable(c, access)) {
-          // Online the rights are the server's own, so a copy made under others goes. Opened offline they come from the
-          // profile saved on the phone, which may lag the copy: it is not shown, and not destroyed either.
-          if (svc.connectivity.online()) await svc.store.deleteReadCache(scope);
-          return;
-        }
-        keeper.adopt(restore(client, c, now(), access));
-      },
-      () => undefined,
-    );
+    void (before?.settled() ?? Promise.resolve())
+      .then(() => svc.store.readCache(scope))
+      .then(
+        async (c) => {
+          if (!live) return;
+          if (c && !usable(c, access)) {
+            // Online the rights are the server's own, so a copy made under others goes, once a ping confirms the server
+            // answers (Wi-Fi with no internet says online). Opened offline they come from the profile saved on the phone,
+            // which may lag the copy: it is not shown, and not destroyed either.
+            if (await svc.connectivity.check().catch(() => false)) await svc.store.deleteReadCache(scope);
+            return;
+          }
+          keeper.adopt(restore(client, c, now(), access));
+        },
+        () => undefined,
+      );
     return () => {
       live = false;
       keeper.stop();

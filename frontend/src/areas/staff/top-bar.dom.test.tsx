@@ -197,7 +197,7 @@ describe('the offline banner', () => {
     client.setQueryData(['retail', 'home', 'all'], { sales: 1 }, { updatedAt: loaded });
     function Page() {
       useQuery({ queryKey: ['retail', 'home', 'all'], queryFn: () => new Promise(() => undefined), staleTime: Infinity });
-      return <OfflineBanner />;
+      return <OfflineBanner me={mockMe('sales')} />;
     }
     render(
       <QueryClientProvider client={client}>

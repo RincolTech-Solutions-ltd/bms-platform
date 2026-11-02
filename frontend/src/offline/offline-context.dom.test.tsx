@@ -191,6 +191,33 @@ describe('a shared phone', () => {
     await waitFor(() => expect(client.getQueryData(['retail', 'home', 'all'])).toBeUndefined());
   });
 
+  // JUSTIFICATION-A3: new cases for the third #765 review (selling taken away mid-session, Wi-Fi with no internet on open).
+  it('drops from memory what was read before selling was taken away, when the person no longer has offline support (issue #763)', async () => {
+    const store = memoryStore();
+    const seller: Me = { ...mockMe('sales'), user_id: 'u1' };
+    const client = new QueryClient();
+    const make = services(store, async () => {});
+    const { rerender, result } = renderHook(({ who }) => useOfflineSupport(who, false, make, client), { initialProps: { who: seller } });
+    await waitFor(() => expect(result.current).not.toBeNull());
+    await client.fetchQuery({ queryKey: ['retail', 'stock', 'b1'], queryFn: async () => ({ items: ['Test item of a branch taken away'] }) });
+    rerender({ who: { ...seller, permissions: (seller.permissions ?? []).filter((p) => p !== 'retail.sale.create') } });
+    expect(result.current).toBeNull();
+    await waitFor(() => expect(client.getQueryData(['retail', 'stock', 'b1'])).toBeUndefined());
+  });
+
+  it('keeps a copy the profile does not match while a ping has not confirmed the server answers (issue #763)', async () => {
+    const store = memoryStore();
+    const seller: Me = { ...mockMe('sales'), user_id: 'u1' };
+    const base = services(store, async () => {});
+    // Wi-Fi with no internet: the browser says online, the ping does not answer.
+    const wifiOnly = () => ({ ...base(), connectivity: { ...testConnectivity(true), check: async () => false } });
+    const stale = { savedAt: 1, access: accessOf(mockMe('admin')), entries: [] };
+    await store.putReadCache(scopeOf(HOST, 'u1'), stale);
+    renderHook(() => useOfflineSupport(seller, false, wifiOnly, new QueryClient()));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(await store.readCache(scopeOf(HOST, 'u1'))).toEqual(stale);
+  });
+
   it('opened offline, keeps a copy the saved profile does not match, and shows a copy it does (issue #763)', async () => {
     const store = memoryStore();
     const seller: Me = { ...mockMe('sales'), user_id: 'u1' };

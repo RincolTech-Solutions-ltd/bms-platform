@@ -34,9 +34,11 @@ sometimes twice: the banner under the bar and the screen's own red error. The ow
    Only a person who may sell in retail has offline support (ADR-067), so only they get the copy. The copy carries what the
    person was allowed to see when it was made (their permissions with the branches each covers, their branches, modules and
    capabilities); when that changes (a manager made a seller, a branch taken away) the copy is thrown away, never shown, and
-   the kept reads already in memory leave the query cache too. Opened with no network, the rights come from the profile saved
-   on the phone, which may lag the copy: a copy that does not match is then not shown, and not deleted either; online, it is
-   deleted.
+   the kept reads already in memory leave the query cache too, whether or not the person still has offline support (selling
+   taken away, signed out). Opened with no network, the rights come from the profile saved on the phone, which may lag the
+   copy: a copy that does not match is then not shown, and not deleted either; it is deleted only once a ping of `/healthz`
+   confirms the server answers (the browser alone says online on Wi-Fi with no internet). A write of the old rights still
+   under way finishes before the copy is read again.
 4. **Cap.** Sales older than 30 days by their sale date are cut from the kept sales lists, and a single sale that old is not
    kept, apart from credit sales still owing; any kept read older than 30 days is dropped; the whole copy is held under
    2,000,000 JSON characters, newest reads first. A read is written about two seconds after it loads, merged with what was

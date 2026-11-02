@@ -5,7 +5,7 @@ import { useShellBrand } from '../../app/branding';
 import { useDeviceOnline, useLoadedAt } from '../../app/refresh-button';
 import { useOffline, useOnline } from '../../offline/offline-context';
 import { figuresTime } from '../../offline/read-cache';
-import { canUse } from './retail/permissions';
+import { recordsSalesOffline } from './retail/permissions';
 import { THEME_LABELS } from '../../app/shell';
 import { THEME_CHOICES, type ThemeChoice, useThemeChoice } from '../../app/theme-mode';
 import { BusyButton } from '../../app/ui/BusyButton';
@@ -196,7 +196,7 @@ export function OfflineBanner({ me }: { me?: Me }) {
   }, [shown]);
   if (!shown) return null;
   // Only a person who may sell has the sale screen offline (ADR-067); the same check as the Home hint (home-cards.tsx).
-  const sells = offline !== null && (me === undefined || canUse(me, 'sale'));
+  const sells = offline !== null && me !== undefined && recordsSalesOffline(me);
   const sell = sells ? ' You can still sell; your sales will send when you are back online.' : ' You see what was loaded before.';
   const figures = loadedAt > 0 ? ` Figures are from ${figuresTime(loadedAt, Math.max(now, loadedAt))}.` : '';
   return (

@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
 import { mockMe } from '../api/retail-mock';
 import { StaffContext } from '../areas/staff/context';
-import { OfflineProvider, type Offline } from './offline-context';
+import { OfflineProvider, useOfflineSupport, type Offline, type OfflineServices } from './offline-context';
+import { testConnectivity } from './test-kit';
 import { accessOf, keepReads, restore } from './read-cache';
 import { memoryStore, scopeOf, type OfflineStore } from './store';
 
@@ -154,5 +155,59 @@ describe('reading offline from the kept figures', () => {
     const run = { id: 'r-1', report_key: 'core.data_export', title: 'Test workbook', format: 'xlsx', status: 'ready', params: {}, as_of: TODAY, snapshot_at: null, requested_at: `${TODAY}T07:00:00Z`, started_at: null, finished_at: `${TODAY}T07:01:00Z`, row_count: 12, size_bytes: 2048, document_id: 'd-1', expires_at: null, expired: false, cancel_requested: false, error: null };
     routes['/api/v1/data-export'] = { weekly_email: true, owner: true, last_export_at: `${TODAY}T07:01:00Z`, last_emailed_at: null, latest: run };
     await readOffline(<DataExportCard modules={['retail']} zone="Africa/Kampala" />, 'Your workbook is ready');
+  });
+});
+
+// JUSTIFICATION-A3: the end to end case the third #765 review asked for, through the hook the staff layout uses.
+describe('reading offline through the offline support of the staff layout', () => {
+  it('opens the stock page with no network and shows the kept figures once the hook has put them back', async () => {
+    me = mockMe('sales');
+    const { StockPage } = await import('../areas/staff/retail/stock');
+    const row = { product_id: 'p-3', code: 'TC-03', description: 'Test cable through the hook', unit: 'metre', on_hand: '30.000', branch_id: branch };
+    routes['/api/v1/retail/stock'] = { items: [row] };
+    routes['/api/v1/retail/stock/all-branches'] = { items: [{ ...row, branches: [{ branch_id: branch, on_hand: '30.000' }] }], branches: [] };
+    routes['/api/v1/retail/categories'] = { items: [] };
+    // Loaded once online, kept for this person on this business.
+    const store = memoryStore();
+    const first = newClient();
+    const keeper = keepReads(first, store, SCOPE, accessOf(me), () => Date.now(), 0);
+    show(first, <StockPage />, true);
+    await screen.findAllByText('Test cable through the hook', { exact: false });
+    await waitFor(async () => expect((await store.readCache(SCOPE))?.entries.length ?? 0).toBeGreaterThan(0));
+    keeper.stop();
+    cleanup();
+
+    // Opened again with no network: the screen mounts paused, then the hook restores the copy.
+    online = false;
+    const connectivity = testConnectivity(false);
+    const svc: OfflineServices = {
+      store,
+      connectivity,
+      host: 'shop-one.example.test',
+      now: () => new Date(),
+      source: { products: async () => ({ items: [] }), customers: async () => [] },
+      reportWaiting: async () => undefined,
+      engineDeps: (s, scope) => ({ store: s, scope, send: async () => ({ status: 503, body: {} }), refreshSession: async () => false, report: async (i) => ({ id: i.id, client_sale_id: i.id, status: 'open' }), decisions: async () => [], now: () => 0, later: () => () => {} }),
+    };
+    const services = () => svc;
+    const client = newClient();
+    function Layout() {
+      const offline = useOfflineSupport(me, false, services, client);
+      return (
+        <OfflineProvider value={offline}>
+          <StaffContext.Provider value={{ me, branch, chooseBranch: () => undefined, signOut: () => undefined, signingOut: false } as never}>
+            <StockPage />
+          </StaffContext.Provider>
+        </OfflineProvider>
+      );
+    }
+    render(
+      <QueryClientProvider client={client}>
+        <Layout />
+      </QueryClientProvider>,
+    );
+    expect((await screen.findAllByText('Test cable through the hook', { exact: false })).length).toBeGreaterThan(0);
+    expect(onlineManager.isOnline()).toBe(false);
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });

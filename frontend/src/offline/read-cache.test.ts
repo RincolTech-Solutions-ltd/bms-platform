@@ -213,6 +213,16 @@ describe('offline', () => {
     undo();
   });
 
+  it('quiets a kept read that fails for a dropped connection while already offline, as it fails', async () => {
+    const client = new QueryClient();
+    const connectivity = testConnectivity(false);
+    const undo = followConnectivity(client, connectivity);
+    // A read that does not pause offline (networkMode always) and fails between two pings.
+    await client.fetchQuery({ queryKey: ['retail', 'usage-history'], queryFn: () => Promise.reject(markDropped(new TypeError('Failed to fetch'))), retry: false, networkMode: 'always' }).catch(() => undefined);
+    expect(client.getQueryState(['retail', 'usage-history'])?.status).toBe('pending');
+    undo();
+  });
+
   it('says the time of the figures in the business time zone, today only for this year', () => {
     expect(figuresTime(Date.parse('2026-11-02T11:05:00Z'), NOW, 'Africa/Kampala')).toBe('today at 14:05');
     expect(figuresTime(Date.parse('2026-10-31T06:30:00Z'), NOW, 'Africa/Kampala')).toBe('31 Oct at 09:30');

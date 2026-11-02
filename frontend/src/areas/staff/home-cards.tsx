@@ -7,11 +7,10 @@ import { retailAnalytics, type HomeSummary, type HomeTopItem } from '../../api/r
 import { retailOrders } from '../../api/retail-orders';
 import { ALL_BRANCHES, branchFilter } from '../../auth/branch';
 import { icons } from '../../components/icons';
-import { sellsOffline } from '../../offline/offline-context';
 import { useStaff } from './context';
 import { money as lendingMoney } from './lending/loan-state';
 import { showLending } from './lending/permissions';
-import { ALL_SELLERS, branchesWhere, canUse, holds, holdsAt, showRetail } from './retail/permissions';
+import { ALL_SELLERS, branchesWhere, canUse, holds, holdsAt, recordsSalesOffline, showRetail } from './retail/permissions';
 import { shortDate } from './retail/range-state';
 import { money as retailMoney } from './retail/ui';
 import { RowChevron } from '../../app/ui/ListRow';
@@ -115,7 +114,7 @@ function useHomeSummary(parts: Parts) {
 function ShopCard({ parts, home }: { parts: Parts; home: Summary }) {
   const { me, branch } = useStaff();
   // The shop owner did not know Sell works with no data (issue #763): one short line says so to whoever may sell.
-  const sells = sellsOffline(me) && canUse(me, 'sale');
+  const sells = recordsSalesOffline(me);
   const branchId = branch && branch !== ALL_BRANCHES ? branch : undefined;
   // Only a session that cannot read the summary (no sales read) asks the orders board for the open orders.
   const board = useQuery({

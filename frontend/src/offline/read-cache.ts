@@ -182,6 +182,8 @@ export interface ReadKeeper {
   adopt(entries: ReadEntry[]): void;
   /** Stops writing (the person, the business or their rights changed, or the layout left). */
   stop(): void;
+  /** Settles once a write under way has finished (after `stop`, nothing further is written). */
+  settled(): Promise<void>;
   /** At sign-out: stops writing, waits for a write under way, removes the copy and the kept reads in memory. */
   forget(): Promise<void>;
 }
@@ -234,6 +236,7 @@ export function keepReads(client: QueryClient, store: OfflineStore, scope: strin
   return {
     adopt: (entries) => entries.forEach((e) => take(e)),
     stop,
+    settled: () => writing,
     forget: async () => {
       stop();
       // Memory first: the next person in this tab never gets these reads, even when the device store then fails.
@@ -254,6 +257,11 @@ export function forgetInMemory(client: QueryClient): void {
  * reads pause instead of failing. Returns the undo, which puts back the browser's own online and offline events and state.
  */
 export function followConnectivity(client: QueryClient, connectivity: Connectivity): () => void {
+  // A kept read that fails for a dropped connection while already offline (one that does not pause, or fails between two
+  // pings) is quieted as it fails, so the banner stays the page's one notice.
+  const off = client.getQueryCache().subscribe((event) => {
+    if (event.type === 'updated' && event.action.type === 'error' && !connectivity.online() && quietable(event.query)) quiet(event.query);
+  });
   onlineManager.setEventListener((setOnline) => {
     const tell = () => {
       const online = connectivity.online();
@@ -264,6 +272,7 @@ export function followConnectivity(client: QueryClient, connectivity: Connectivi
     return connectivity.subscribe(tell);
   });
   return () => {
+    off();
     onlineManager.setEventListener(browserEvents);
     // The browser's own state again, so a later sign-in never starts paused by the last person's ping.
     onlineManager.setOnline(typeof navigator === 'undefined' || navigator.onLine !== false);
@@ -276,10 +285,13 @@ export function followConnectivity(client: QueryClient, connectivity: Connectivi
  * are read again once back online. Any answer the server sent (a refusal, a 5xx) and every read not kept stay as they are.
  */
 function showKeptFigures(client: QueryClient): void {
-  const dropped = (q: Query) => keptForReading(q.queryKey) && q.state.status === 'error' && droppedConnection(q.state.error);
-  for (const q of client.getQueryCache().findAll({ predicate: dropped })) {
-    q.setState(q.state.data !== undefined ? { status: 'success', error: null, fetchStatus: 'idle' } : { status: 'pending', error: null, fetchStatus: 'idle' });
-  }
+  client.getQueryCache().findAll({ predicate: quietable }).forEach(quiet);
+}
+
+const quietable = (q: Query) => keptForReading(q.queryKey) && q.state.status === 'error' && droppedConnection(q.state.error);
+
+function quiet(q: Query): void {
+  q.setState(q.state.data !== undefined ? { status: 'success', error: null, fetchStatus: 'idle' } : { status: 'pending', error: null, fetchStatus: 'idle' });
 }
 
 function browserEvents(setOnline: (online: boolean) => void): (() => void) | undefined {
