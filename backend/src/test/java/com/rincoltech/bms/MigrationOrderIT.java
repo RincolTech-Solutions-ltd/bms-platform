@@ -1490,6 +1490,8 @@ class MigrationOrderIT {
         // (fee and interest waivers, #265) lending.charges.waive_fee_interest, which are not V48's to answer for.
         assertThat(owner.sql(
                                 "SELECT count(*) FROM permissions WHERE key NOT IN ('lending.advisor.use', 'lending.advisor.configure',"
+                                        // V124 (the shop brief, #422): the two retail advisor permissions.
+                                        + " 'retail.advisor.use', 'retail.advisor.configure',"
                                         + " 'core.payment_account.manage', 'retail.controls.read', 'retail.credit.write_off',"
                                         + " 'retail.order.manage', 'retail.sale.all_sellers', 'retail.till.close',"
                                         + " 'retail.offline.resolve', 'lending.members.contact',"
@@ -1786,7 +1788,9 @@ class MigrationOrderIT {
                                     SELECT string_agg(role_key || ':' || permission_key, ',' ORDER BY role_key, permission_key)
                                       FROM role_permissions WHERE role_key IN ('retail_storekeeper', 'retail_purchasing')
                                     """).query(String.class).single())
+                    // V124 (#422) gives the Storekeeper the shop brief, stock counts only.
                     .isEqualTo("retail_purchasing:retail.purchase.create,retail_purchasing:retail.stock.read,"
+                            + "retail_storekeeper:retail.advisor.use,"
                             + "retail_storekeeper:retail.stock.read,retail_storekeeper:retail.stock.transfer,"
                             + "retail_storekeeper:retail.stocktake.commit,retail_storekeeper:retail.usage.report");
             // V74 (slice 2): seeing every seller's sales is the administrator's alone; the Sales role sees its own.
