@@ -64,7 +64,7 @@ type Outcome = { kind: 'added'; name: string } | { kind: 'refused'; message: str
  * cannot take the scan (a pack it cannot use, an item not on the sheet), shown in place of Added. A form that raises its own
  * toast for the add (`toasts`, issue #498) says Added there, so it is seen and heard once, with the quantity the line now has.
  */
-export function ScanBar({ id, branchId, onFound, autoFocus = false, toasts = false }: { id: string; branchId?: string; onFound: (product: Product, unitId?: string) => string | void; autoFocus?: boolean; toasts?: boolean }) {
+export function ScanBar({ id, branchId, onFound, autoFocus = false, toasts = false }: { id: string; branchId?: string; onFound: (product: Product, unitId?: string, readAt?: number) => string | void; autoFocus?: boolean; toasts?: boolean }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const offline = useOffline();
@@ -90,8 +90,8 @@ export function ScanBar({ id, branchId, onFound, autoFocus = false, toasts = fal
     if (at === box.current || ((at === null || at === document.body) && (holdFocus || finePointer()))) box.current?.focus();
   };
 
-  const found = (product: Product, unitId?: string) => {
-    const refused = onFound(product, unitId);
+  const found = (product: Product, unitId?: string, readAt?: number) => {
+    const refused = onFound(product, unitId, readAt);
     feedback(!refused);
     setOutcome(refused ? { kind: 'refused', message: refused } : { kind: 'added', name: product.description ?? product.code ?? '' });
   };
@@ -113,7 +113,8 @@ export function ScanBar({ id, branchId, onFound, autoFocus = false, toasts = fal
     }
     try {
       const match = await retail.findByBarcode(code, branchId);
-      if (match?.product) found(match.product, match.unit_id);
+      // Read from the server now; a hit in a copy below has no known read time (issue #769).
+      if (match?.product) found(match.product, match.unit_id, Date.now());
       else {
         feedback(false);
         setOutcome({ kind: 'unknown', code });

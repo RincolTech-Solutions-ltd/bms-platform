@@ -294,8 +294,9 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         // With no session left (a refused refresh, a sign-out) the sale is never kept as saved: the person is told to sign in.
         // The request may still have been recorded, so the form stays locked (`sent` kept) and Try again sends the same sale.
         if (!getAccessToken()) throw new Error(`${retailMessage({ code: 'unauthenticated' }, 401)} Then tap Try again: the same sale is sent, never twice.`);
-        // Priced online from the items as they were read (`pricesAt`), not from the copy on the phone; Save's time if unknown.
-        const item = offlineSale({ draft: shown, clientSaleId: key, sent: { body, at }, key, scope: offline.scope, branchName, pricesAsOf: pricesAt ?? at, now: new Date() });
+        // Priced online from the items as they were read (`pricesAt`), never from Save's time or the copy on the phone; absent
+        // when not known, and the server then holds each price to today's.
+        const item = offlineSale({ draft: shown, clientSaleId: key, sent: { body, at }, key, scope: offline.scope, branchName, pricesAsOf: pricesAt, now: new Date() });
         await offline.engine.queue(item);
         return { kept: item };
       }
@@ -356,14 +357,15 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     setPops((n) => n + 1);
     setFresh((f) => ({ index, n: (f?.n ?? 0) + 1, created }));
   };
-  // `readAt`: when the picker's answer was read; the other ways in (scan, Sell it, an item made here) have just read it.
-  const add = (p: Product, readAt?: number) => {
+  // `readAt` (#769): when the item and its price were read, as each way in knows it (the picker's answer, the copy on the phone,
+  // a fresh read); absent when it is not known, and then a sale kept on the phone says no prices_as_of rather than a later time.
+  const add = (p: Product, readAt: string | undefined) => {
     const now = lines.current;
     if (now.some((l) => l.product.id === p.id) && !(unitsOn && sellingPacks(p).length > 0)) {
       show(`${p.description} is already on the sale. Change its quantity below.`, 'info');
       return;
     }
-    const next = [...now, newLine(p, new Date(readAt ?? Date.now()).toISOString())];
+    const next = [...now, newLine(p, readAt)];
     lines.current = next;
     setDraft((d) => ({ ...d, lines: next }));
     mark(next.length - 1, true);
@@ -379,7 +381,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         const found = await retail.listProducts({ query: item.code ?? item.description ?? '', branchId });
         const p = found.find((x) => x.id === startItem);
         // Not in what this branch's list returns (issue #641): said, never dropped in silence.
-        if (p) add(p);
+        if (p) add(p, new Date().toISOString());
         else show(`${item.description ?? 'The item'} did not come up here. Search for it to add it.`, 'info');
       })
       .catch(() => show('The item could not be read. Search for it to add it.', 'error'))
@@ -457,7 +459,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     drop(h.product.id);
     countsChanged();
     for (const key of [['retail', 'products'], ['retail', 'stocked-branches']]) void queryClient.invalidateQueries({ queryKey: key });
-    add({ ...h.product, qty: qtyString(h.counted) });
+    // Its price was read with an earlier search whose time is not kept here: not known (#769).
+    add({ ...h.product, qty: qtyString(h.counted) }, undefined);
   };
   const countFailed = (h: HeldCount, e: unknown) => {
     if (e instanceof StaleCount) return;
@@ -561,22 +564,23 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         show(`${name} is already in your items, but it has no stock here yet, so it is not on the sale. Use ${WORDS.buyStock} or ${WORDS.countStock} first.`, 'info');
         return;
       }
-      add(here);
+      add(here, new Date().toISOString());
       if (qty.trim() !== '') show(`${name} is already in your items, so its stock is not changed here. If it is wrong, use ${WORDS.countStock}.`, 'info');
       return;
     }
     if (stale()) return;
-    if (counts) add({ ...product, qty: qtyString(counted ?? 0) });
+    if (counts) add({ ...product, qty: qtyString(counted ?? 0) }, new Date().toISOString());
     else if (asks) return;
     else if (counted === null) show(`${name} is saved. It has no stock here yet: use ${WORDS.buyStock} or ${WORDS.countStock}, then sell it.`, 'info');
   };
   // A scan (issue #345) adds the item at 1, or one more to its line in the pack the barcode is on; a pack it cannot
   // use is refused, never sold as one piece: ScanBar shows the refusal as a warning and no toast is raised.
-  const scanAdd = (p: Product, unitId?: string) => {
+  // `readAt`: a fresh read from the server, or absent when the scan found the item in a copy whose time is not known (#769).
+  const scanAdd = (p: Product, unitId?: string, readAt?: number) => {
     const unit = unitsOn && sellingPacks(p).some((k) => k.unit_id === unitId) ? unitId : undefined;
     if (unitId && !unit) return PACK_UNUSABLE;
     const now = lines.current;
-    const read = new Date().toISOString();
+    const read = readAt ? new Date(readAt).toISOString() : undefined;
     const next = scanInto(now, p, unit, (l) => ({ ...l, qty: plusOne(l.qty) }), () => (unit ? withUnit(newLine(p, read), unit) : newLine(p, read)));
     const { index, created } = touchedLine(now, next);
     lines.current = next;
@@ -610,8 +614,12 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     const body = draft.sent?.body ?? { ...buildSaleRequest(shown, pricing, accounts), ...(offline ? { client_sale_id: key } : {}) };
     const at = draft.sent?.at ?? new Date().toISOString();
     // The oldest read of the items and, with price lists, of the resolved prices: what the form priced the sale from (#769).
-    const reads = [...draft.lines.map((l) => l.readAt), resolved && resolution.dataUpdatedAt ? new Date(resolution.dataUpdatedAt).toISOString() : undefined];
-    const pricesAt = draft.sent ? draft.sent.pricesAt : reads.filter((r): r is string => !!r).sort()[0];
+    // A line whose read time is not known (a draft from before #769, a scan found in a copy) leaves it unknown: no
+    // prices_as_of is sent then, and the server holds each price to today's (ADR-067 decision 4), never a later read time.
+    const reads = draft.lines.map((l) => l.readAt);
+    if (resolved) reads.push(resolution.dataUpdatedAt ? new Date(resolution.dataUpdatedAt).toISOString() : undefined);
+    const known = reads.length > 0 && reads.every((r) => !!r);
+    const pricesAt = draft.sent ? draft.sent.pricesAt : known ? (reads as string[]).sort()[0] : undefined;
     if (offline) setDraft((d) => ({ ...d, sent: d.sent ?? { body, at, ...(pricesAt ? { pricesAt } : {}) } }));
     save.mutate({ body, at, pricesAt });
   };
@@ -629,8 +637,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         key: draft.sent ? newIdempotencyKey() : key,
         scope: offline.scope,
         branchName,
-        // A request sent online was priced from the items as read then (#769); offline, from the copy on the phone.
-        pricesAsOf: draft.sent?.pricesAt ?? offline.catalogue?.pricesAsOf,
+        // A request sent online was priced from the items as read then (#769), absent when not known; offline, from the copy.
+        pricesAsOf: draft.sent ? draft.sent.pricesAt : offline.catalogue?.pricesAsOf,
         buyerName: draft.newBuyerName,
         now: new Date(),
       });
@@ -681,12 +689,12 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
       {offlineMode && <OfflineNote branchId={branchId} />}
       <fieldset disabled={locked} className="sale-lock" style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <div data-tour="sale-search">
-        {offlineMode ? <OfflineProductPicker branchId={branchId} onAdd={add} /> : (
+        {offlineMode ? <OfflineProductPicker branchId={branchId} onAdd={(p) => add(p, offline?.catalogue?.pricesAsOf)} /> : (
           <ProductPicker
             id="sale-search"
             branchId={branchId}
             showPrice
-            onAdd={add}
+            onAdd={(p, readAt) => add(p, readAt ? new Date(readAt).toISOString() : undefined)}
             notFound={(term, clear, hold) => (
               <ScreenToast.Provider value={show}>
                 <NewItemHere id="sale-new" description={term} ask={ASK_OWNER_ITEM} askCost={profit} qtyLabel={mayCount ? 'How many you have here' : undefined}
@@ -885,9 +893,12 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
             <>
               <p>The server did not answer. The sale may or may not be saved. Keep it on this phone and it is sent once.</p>
               <Hint full>The items and the payment cannot be changed now, so the same sale is sent. To sell something else, clear this sale.</Hint>
-              <BusyButton type="button" busy={keep.isPending} onClick={() => keep.mutate()}>
-                Keep it on this phone
-              </BusyButton>
+              {/* Never kept on the phone with no session left (#769): sign in, then Try again sends the same sale. */}
+              {getAccessToken() !== null && (
+                <BusyButton type="button" busy={keep.isPending} onClick={() => keep.mutate()}>
+                  Keep it on this phone
+                </BusyButton>
+              )}
             </>
           ) : (
             <>

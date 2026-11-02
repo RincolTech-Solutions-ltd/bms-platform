@@ -65,7 +65,8 @@ left, the branch, the period, the person's roles.
    any refusal is not, and with no session left it is never kept), goes to the outbox at once under the same
    `Idempotency-Key` and client sale id, with `occurred_at` (when Save was pressed), `prices_as_of` (the oldest time the
    form read its items, or with price lists its resolved prices, from the server: what it priced the sale from, never the
-   copy on the phone) and `recorded_offline` added, and the seller gets the provisional receipt. With no session left the
+   copy on the phone, unless the item was picked from that copy, which dates it; when any line's read time is not known no
+   `prices_as_of` is sent at all, so the server holds each price to today's, never a later time) and `recorded_offline` added, and the seller gets the provisional receipt. With no session left the
    form stays locked, since the request may have been recorded, and Try again sends the same sale after sign-in. So when the first request never arrived, the outbox's send hours later is a sale recorded
    offline, dated when it was taken. The answer that comes later is ignored on the phone. The server finds the sale by
    its client sale id, or, while the first request still holds the key, answers 409 `idempotency_in_progress` (tried

@@ -231,6 +231,41 @@ describe('Record a sale offline', () => {
   });
 
   // JUSTIFICATION-A3: a new test the review asks for (#769), not a mechanism.
+  it("dates an item picked from the phone's copy as of the copy, and leaves the time out when it is not known (issue #769)", async () => {
+    createSale.mockRejectedValue(new TypeError('Failed to fetch'));
+    listProducts.mockResolvedValue([bulb]);
+    // Picked offline from the copy saved at 09:14 on 22 Oct, then saved online once the weak link came back, and lost.
+    const offline = testOffline(seller, { online: false, catalogue });
+    if (!offline) throw new Error('a seller sells offline');
+    screenWith(offline);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Find an item by name, code or category' }), { target: { value: 'bulb' } });
+    fireEvent.click(await screen.findByRole('option', { name: /^Test Bulb 9W/ }));
+    act(() => offline.connectivity.set(true));
+    const save = (await screen.findByRole('button', { name: /^Record sale/ })) as HTMLButtonElement;
+    await waitFor(() => expect(ready(save)).toBe(true));
+    fireEvent.click(save);
+    expect(await screen.findByText('Sale saved on this phone')).toBeTruthy();
+    expect(offline.engine.snapshot().items[0]?.request.prices_as_of).toBe(catalogue.pricesAsOf);
+    cleanup();
+
+    // A draft from before the read times were kept (no readAt on its line): the time is not known, so none is sent, never
+    // Save's time; the server then holds each price to today's.
+    const key = 'c0ffee00-0000-4000-8000-000000000770';
+    const draft = { branchId: branch, method: 'cash', customerId: '', newBuyerName: '', newBuyerContact: '', dueDate: '', lines: [{ product: bulb, qty: '1', price: '5000' }] };
+    sessionStorage.setItem(`retail-draft:sale:${seller.user_id ?? ''}:${branch}`, JSON.stringify({ key, draft }));
+    const again = testOffline(seller, { online: true, catalogue });
+    if (!again) throw new Error('a seller sells offline');
+    screenWith(again);
+    const record = (await screen.findByRole('button', { name: /^Record sale/ })) as HTMLButtonElement;
+    await waitFor(() => expect(ready(record)).toBe(true));
+    fireEvent.click(record);
+    expect(await screen.findByText('Sale saved on this phone')).toBeTruthy();
+    const [kept] = again.engine.snapshot().items;
+    expect(kept?.request.recorded_offline).toBe(true);
+    expect(kept?.request).not.toHaveProperty('prices_as_of');
+  });
+
+  // JUSTIFICATION-A3: a new test the review asks for (#769), not a mechanism.
   it("dates the kept copy's prices when the items were read, not when Save was pressed (issue #769)", async () => {
     createSale.mockRejectedValue(new TypeError('Failed to fetch'));
     listProducts.mockResolvedValue([bulb]);
@@ -317,8 +352,10 @@ describe('Record a sale offline', () => {
     expect(await screen.findByText(/Your session has ended. Sign in again. Then tap Try again/)).toBeTruthy();
     expect(screen.queryByText('Sale saved on this phone')).toBeNull();
     expect(offline.engine.snapshot().items).toHaveLength(0);
-    // The request may have been recorded: the form stays locked, so only the same sale can go again.
+    // The request may have been recorded: the form stays locked, so only the same sale can go again, and with no session
+    // it is never offered to keep on the phone.
     expect(screen.getByTestId('lost-answer')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Keep it on this phone' })).toBeNull();
     const qty = screen.getAllByRole('textbox').find((i) => (i as HTMLInputElement).value === '1') as HTMLInputElement;
     expect(qty.matches(':disabled')).toBe(true);
   });
