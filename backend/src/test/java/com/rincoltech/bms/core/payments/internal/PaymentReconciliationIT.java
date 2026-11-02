@@ -32,6 +32,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.util.ReflectionTestUtils;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -96,6 +97,11 @@ class PaymentReconciliationIT extends LoanFixtures {
 
     @Autowired
     ReconciliationService reconciliation;
+
+    /** The service behind its transaction proxy, whose page and ceilings a test makes small. */
+    Object target() {
+        return org.springframework.test.util.AopTestUtils.getUltimateTargetObject(reconciliation);
+    }
 
     @Autowired
     MerchantAccountService merchantAccounts;
@@ -1195,6 +1201,13 @@ class PaymentReconciliationIT extends LoanFixtures {
         assertThat(differs).hasSize(1);
         assertThat(differs.getFirst().get("bms_amount_minor").asLong()).isEqualTo(520_000);
         assertThat(differs.getFirst().get("provider_amount_minor").asLong()).isEqualTo(400_000);
+        // Most severe first: the payment that differs is listed before the unpaid link, which comes last.
+        List<String> kinds = new java.util.ArrayList<>();
+        runReconciliation().get("findings").forEach(f -> kinds.add(f.get("kind").asString()));
+        assertThat(kinds.indexOf("paid_differs")).isNotNegative().isLessThan(kinds.indexOf("pending_over_24h"));
+        // A week on, the unpaid link is abandoned: it is no longer listed every night.
+        clock.set(clock.instant().plus(ReconciliationService.ABANDONED_AFTER));
+        assertThat(findings(runReconciliation(), "pending_over_24h", unpaid)).isEmpty();
     }
 
     @Test
@@ -1444,14 +1457,34 @@ class PaymentReconciliationIT extends LoanFixtures {
                 assertThat(busy.getBody().get("code").asString()).isEqualTo("try_again");
                 assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(10));
                 assertThat(runCount()).isEqualTo(runs);
+                // The nightly job meets the same lock: the miss is counted and logged, nothing is written, nothing
+                // throws (the other businesses go on), and the next slot of the night tries again.
+                long missed = counterToday("reconciliation_lock_missed");
+                tenantJobs.callForTenant(t.tenantId(), () -> {
+                    reconciliation.runNightly();
+                    return null;
+                });
+                assertThat(runCount()).isEqualTo(runs);
+                assertThat(counterToday("reconciliation_lock_missed")).isEqualTo(missed + 1);
             } finally {
                 held.rollback();
             }
         }
+        // The next slot, with the lock free, writes the night's run; a slot after it finds the run and writes nothing.
+        tenantJobs.callForTenant(t.tenantId(), () -> {
+            reconciliation.runNightly();
+            return null;
+        });
+        assertThat(runCount()).isEqualTo(runs + 1);
+        tenantJobs.callForTenant(t.tenantId(), () -> {
+            reconciliation.runNightly();
+            return null;
+        });
+        assertThat(runCount()).isEqualTo(runs + 1);
         ResponseEntity<JsonNode> free =
                 send(HttpMethod.POST, RECON + "/run", as(accountant, accountantPerms(), "*", null), null);
         assertThat(free.getStatusCode().value()).as("%s", free.getBody()).isEqualTo(200);
-        assertThat(runCount()).isEqualTo(runs + 1);
+        assertThat(runCount()).isEqualTo(runs + 2);
     }
 
     long runCount() {
@@ -1890,19 +1923,19 @@ class PaymentReconciliationIT extends LoanFixtures {
         // An export that is complete for the day and lists only the newest: the others would be reported missing from
         // it.
         uploadCovered(csv(line(newest, "CONF-224-1122", 200_000, 0, "2026-10-16")), "2026-10-16", "2026-10-16");
-        int page = ReconciliationService.page;
-        int ceiling = ReconciliationService.intentCeiling;
+        Object page = ReflectionTestUtils.getField(target(), "page");
+        Object ceiling = ReflectionTestUtils.getField(target(), "intentCeiling");
         try {
-            ReconciliationService.page = 2;
-            ReconciliationService.intentCeiling = 2;
+            ReflectionTestUtils.setField(target(), "page", 2);
+            ReflectionTestUtils.setField(target(), "intentCeiling", 2);
             JsonNode small = runReconciliation();
             assertThat(small.get("run").get("truncated").asBoolean()).isTrue();
             assertThat(small.get("run").get("intents_examined").asInt()).isEqualTo(2);
             // Partial: nothing that needs the whole is listed, so no payment is falsely reported missing.
             assertThat(findings(small, "in_bms_not_in_provider", null)).isEmpty();
         } finally {
-            ReconciliationService.page = page;
-            ReconciliationService.intentCeiling = ceiling;
+            ReflectionTestUtils.setField(target(), "page", page);
+            ReflectionTestUtils.setField(target(), "intentCeiling", ceiling);
         }
         JsonNode whole = runReconciliation();
         assertThat(whole.get("run").get("truncated").asBoolean()).isFalse();
@@ -1924,24 +1957,54 @@ class PaymentReconciliationIT extends LoanFixtures {
                         line(c, "CONF-224-1132", 200_000, 0, "2026-10-16")),
                 "2026-10-16",
                 "2026-10-16");
-        int page = ReconciliationService.page;
-        int lines = ReconciliationService.lineCeiling;
+        Object page = ReflectionTestUtils.getField(target(), "page");
+        Object lines = ReflectionTestUtils.getField(target(), "lineCeiling");
         try {
             // Pages of two read three lines whole: nothing is missing, nothing is reported.
-            ReconciliationService.page = 2;
+            ReflectionTestUtils.setField(target(), "page", 2);
             JsonNode paged = runReconciliation();
             assertThat(paged.get("run").get("truncated").asBoolean()).isFalse();
             assertThat(findings(paged, "in_bms_not_in_provider", null)).isEmpty();
+            // A ceiling equal to the statement: the last page ends exactly at it, and the read is whole.
+            ReflectionTestUtils.setField(target(), "lineCeiling", 3);
+            assertThat(runReconciliation().get("run").get("truncated").asBoolean())
+                    .isFalse();
             // A ceiling below the statement: partial, and it says so rather than reporting the unread lines' orders
             // missing.
-            ReconciliationService.lineCeiling = 2;
+            ReflectionTestUtils.setField(target(), "lineCeiling", 2);
             JsonNode cut = runReconciliation();
             assertThat(cut.get("run").get("truncated").asBoolean()).isTrue();
             assertThat(findings(cut, "in_bms_not_in_provider", null)).isEmpty();
         } finally {
-            ReconciliationService.page = page;
-            ReconciliationService.lineCeiling = lines;
+            ReflectionTestUtils.setField(target(), "page", page);
+            ReflectionTestUtils.setField(target(), "lineCeiling", lines);
         }
+    }
+
+    /** JUSTIFICATION-A3: a new test case for review item 6; no case keys the duplicate in another branch. */
+    @Test
+    void aDuplicateKeyedInAnotherBranchShowsTheOrderOnlyToTheOrdersOwnBranch() {
+        loansAt = t.secondBranch();
+        String farLoan = activeLoan();
+        loansAt = null;
+        JsonNode intent = bookedRepayment(farLoan, 520_000, "CONF-224-1150");
+        // The same money keyed by hand at the head office, on a loan of its own: same amount, same day, same code.
+        manualRepayment(activeLoan(), 520_000, "mtn_momo", "CONF-224-1150");
+        runReconciliation();
+        List<JsonNode> mine = findings(
+                report(accountant, accountantPerms(), t.headOffice().toString()), "manual_receipt_duplicate", null);
+        assertThat(mine).hasSize(1);
+        for (String field : List.of("order_tracking_id", "confirmation_code", "intent_id")) {
+            assertThat(mine.getFirst().get(field) == null
+                            || mine.getFirst().get(field).isNull())
+                    .as(field)
+                    .isTrue();
+        }
+        assertThat(findings(
+                        report(accountant, accountantPerms(), t.secondBranch().toString()),
+                        "manual_receipt_duplicate",
+                        intent))
+                .hasSize(1);
     }
 
     @Test

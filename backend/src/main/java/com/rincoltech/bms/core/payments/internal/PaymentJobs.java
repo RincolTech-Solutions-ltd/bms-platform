@@ -32,13 +32,25 @@ class PaymentJobs {
                 .execute((instance, context) -> poller.tick());
     }
 
-    /** The nightly reconciliation of each business's gateway payments (FR-PAY-05), after the end of day. */
+    /**
+     * The nightly reconciliation of each business's gateway payments (FR-PAY-05), after the end of day. It runs at 03:10 and again
+     * every half hour to 05:10: a business whose run of the day is written is skipped, and one whose run met a person's run
+     * still going is tried again at the next slot (ReconciliationService.runNightly).
+     */
     @Bean
     @ConditionalOnProperty(name = "bms.payments.poller-enabled", havingValue = "true", matchIfMissing = true)
     RecurringTask<Void> paymentReconcileTask(TenantJobs tenantJobs, ReconciliationService reconciliation) {
-        return Tasks.recurring(RECONCILE, Schedules.daily(BusinessClock.DEFAULT_ZONE, LocalTime.of(3, 10)))
+        return Tasks.recurring(
+                        RECONCILE,
+                        Schedules.daily(
+                                BusinessClock.DEFAULT_ZONE,
+                                LocalTime.of(3, 10),
+                                LocalTime.of(3, 40),
+                                LocalTime.of(4, 10),
+                                LocalTime.of(4, 40),
+                                LocalTime.of(5, 10)))
                 .execute((instance, context) ->
-                        tenantJobs.forEachActiveTenant(RECONCILE, tenantId -> reconciliation.run("job", null, false)));
+                        tenantJobs.forEachActiveTenant(RECONCILE, tenantId -> reconciliation.runNightly()));
     }
 
     /** Re-seals lenders' stored credentials with the current data key after a rotation; a no-op when none is left. */

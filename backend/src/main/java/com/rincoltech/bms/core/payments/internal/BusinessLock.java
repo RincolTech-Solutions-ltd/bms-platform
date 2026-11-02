@@ -7,11 +7,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * One business's statement uploads, fee approvals and reconciliation runs go one after the other: a transaction-scoped
- * advisory lock, so a crashed holder leaves nothing held. The wait for it is bounded, and only that wait: the lock timeout is
+ * A transaction-scoped advisory lock per business and key, so a crashed holder leaves nothing held. Two keys are used:
+ * {@code payments:statement:<tenant>} puts one business's statement uploads, fee approvals and line marks one after the other,
+ * and {@code payments:reconcile:<tenant>} its reconciliation runs; an upload and a run do not wait for each other. The wait for it is bounded, and only that wait: the lock timeout is
  * set for the one statement that takes the lock and put back to what it was at once, so a later write of the same transaction
  * (a scheduled look, the retention delete, a posting) waits as it always does and is never reported as "another run is going".
- * Failing to take the lock in time is 409 {@code try_again}; a nightly job that meets it tries again the next night.
+ * Failing to take the lock in time is 409 {@code try_again}; the nightly job that meets it logs the miss and tries that business
+ * again later the same night ({@link ReconciliationService#runNightly}).
  */
 final class BusinessLock {
 

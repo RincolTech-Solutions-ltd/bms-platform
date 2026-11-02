@@ -41,7 +41,7 @@ final class ReconciliationApi {
             @Schema(
                     description =
                             "What differs. completed_not_booked, pending_over_24h, paid_differs, reversed_awaiting_review,"
-                                    + " reversal_blocked, reversed_after_refund, manual_receipt_duplicate, in_provider_not_in_bms,"
+                                    + " reversal_handed_over, reversal_blocked, reversed_after_refund, manual_receipt_duplicate, in_provider_not_in_bms,"
                                     + " in_bms_not_in_provider, amount_mismatch, currency_mismatch, ambiguous_statement_row")
             String kind,
 

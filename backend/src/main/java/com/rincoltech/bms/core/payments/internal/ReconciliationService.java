@@ -29,10 +29,14 @@ import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * The daily reconciliation of a business's gateway payments (spec 3.9, FR-PAY-05). Once a night per tenant, and on request, it
@@ -67,15 +71,35 @@ class ReconciliationService {
     static final Duration KEEP = Duration.ofDays(90);
     private static final Duration UNBOOKED_AFTER = Duration.ofHours(1);
     private static final Duration PENDING_AFTER = Duration.ofHours(24);
-    /** How much is read at a time, and how much at most; package-private so a test can make them small. */
-    static int page = 5_000;
+    /** An unpaid link older than this is abandoned: it is neither listed nor asked about again. */
+    static final Duration ABANDONED_AFTER = Duration.ofDays(7);
+    /** At most this many unpaid links are listed in one run (the newest), so they never crowd out the rest. */
+    static final int PENDING_LISTED = 100;
 
-    static int intentCeiling = 200_000;
-    static int lineCeiling = 100_000;
     private static final long SAME_PAYMENT_DAYS = 3;
     private static final int REPORT_LIMIT = 500;
     private static final int CODE_BATCH = 1000;
+    private static final int INSERT_BATCH = 500;
     private static final Set<String> BOOKED = Set.of("booked", "booked_unallocated", "reversed_pending_review");
+
+    /**
+     * The report's order: losses and money that may be counted twice first, then what is unbooked or differs, then what waits
+     * for a person, then lines that cannot be told apart, and the unpaid links last.
+     */
+    static final List<String> SEVERITY = List.of(
+            "reversed_after_refund",
+            "reversal_blocked",
+            "manual_receipt_duplicate",
+            "completed_not_booked",
+            "paid_differs",
+            "amount_mismatch",
+            "currency_mismatch",
+            "in_provider_not_in_bms",
+            "in_bms_not_in_provider",
+            "reversed_awaiting_review",
+            "reversal_handed_over",
+            "ambiguous_statement_row",
+            "pending_over_24h");
 
     /** One difference before it is written. */
     private record Finding(
@@ -134,18 +158,32 @@ class ReconciliationService {
     private final CurrentTenant tenant;
     private final BusinessClock clock;
     private final Duration lockWait;
+    private final TransactionTemplate savepoint;
+    /** How much is read at a time, and how much at most (the runbook's ceilings, section 4f). */
+    private final int page;
+
+    private final int intentCeiling;
+    private final int lineCeiling;
 
     ReconciliationService(
             JdbcClient jdbc,
+            PlatformTransactionManager transactions,
             StatementMatcher matcher,
             PurposeRegistry registry,
             AuditLog audit,
             PaymentCounters counters,
             CurrentTenant tenant,
             BusinessClock clock,
-            @org.springframework.beans.factory.annotation.Value("${bms.payments.reconcile-lock-wait:30s}")
-                    Duration lockWait) {
+            @Value("${bms.payments.reconcile-lock-wait:30s}") Duration lockWait,
+            @Value("${bms.payments.reconcile-page:5000}") int page,
+            @Value("${bms.payments.reconcile-order-ceiling:50000}") int intentCeiling,
+            @Value("${bms.payments.reconcile-line-ceiling:20000}") int lineCeiling) {
         this.lockWait = lockWait;
+        this.savepoint = new TransactionTemplate(transactions);
+        this.savepoint.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
+        this.page = page;
+        this.intentCeiling = intentCeiling;
+        this.lineCeiling = lineCeiling;
         this.jdbc = jdbc;
         this.matcher = matcher;
         this.registry = registry;
@@ -164,6 +202,31 @@ class ReconciliationService {
     }
 
     // ---- running -------------------------------------------------------------------------------
+
+    /**
+     * The nightly job's run for the bound tenant. The job is scheduled at several times in the night (PaymentJobs); a business
+     * whose run of the day is written is skipped at once. A run that meets the business's reconciliation lock (a person's run
+     * still going) is rolled back to a savepoint, logged and counted ({@code reconciliation_lock_missed}), and the next slot of
+     * the same night tries again; the other businesses go on.
+     * JUSTIFICATION-A3: review item 3 asks for exactly this retry; the job had no per-tenant handling of the lock.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    void runNightly() {
+        if (jobRanOn(clock.today(tenant.profile().timezone()))) {
+            return;
+        }
+        try {
+            savepoint.executeWithoutResult(status -> run("job", null, false));
+        } catch (com.rincoltech.bms.kernel.ApiException busy) {
+            if (!"try_again".equals(busy.code())) {
+                throw busy;
+            }
+            counters.count("reconciliation_lock_missed");
+            log.warn(
+                    "nightly payment reconciliation of tenant {} met a run already going; the next slot tonight tries again",
+                    tenant.profile().id());
+        }
+    }
 
     /**
      * One run for the bound tenant, in the caller's transaction. A tenant with no orders and no statement gets no run from the
@@ -210,12 +273,14 @@ class ReconciliationService {
 
         UUID runId = UUID.randomUUID();
         jdbc.sql("""
-                        INSERT INTO payment_reconciliation_runs (id, tenant_id, ran_on, trigger, started_by, window_from,
-                            intents_examined, statements_used, finding_count, truncated)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO payment_reconciliation_runs (id, tenant_id, created_at, ran_on, trigger, started_by,
+                            window_from, intents_examined, statements_used, finding_count, truncated)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """)
                 .params(
                         runId,
+                        // The application's clock, the one the 90 day purge and the report read.
+                        Timestamp.from(now),
                         Date.valueOf(today),
                         trigger,
                         startedBy,
@@ -225,26 +290,35 @@ class ReconciliationService {
                         findings.size(),
                         truncated)
                 .update();
-        for (Finding f : findings) {
-            jdbc.sql("""
-                            INSERT INTO payment_reconciliation_findings (id, tenant_id, run_id, kind, intent_id, statement_row_id,
-                                other_txn_id, order_tracking_id, confirmation_code, bms_amount_minor, provider_amount_minor,
-                                currency, branch_id)
-                            VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """)
-                    .params(
-                            UUID.randomUUID(),
-                            runId,
-                            f.kind(),
-                            f.intentId(),
-                            f.statementRowId(),
-                            f.otherTxnId(),
-                            f.trackingId(),
-                            f.code(),
-                            f.bmsAmount(),
-                            f.providerAmount(),
-                            f.currency(),
-                            f.branchId())
+        // Many rows per statement, not one round trip per difference.
+        for (int start = 0; start < findings.size(); start += INSERT_BATCH) {
+            List<Finding> chunk = findings.subList(start, Math.min(findings.size(), start + INSERT_BATCH));
+            List<Object> params = new ArrayList<>(chunk.size() * 12);
+            for (Finding f : chunk) {
+                params.addAll(java.util.Arrays.asList(
+                        UUID.randomUUID(),
+                        runId,
+                        f.kind(),
+                        f.intentId(),
+                        f.statementRowId(),
+                        f.otherTxnId(),
+                        f.trackingId(),
+                        f.code(),
+                        f.bmsAmount(),
+                        f.providerAmount(),
+                        f.currency(),
+                        f.branchId()));
+            }
+            String values = String.join(
+                    ", ",
+                    java.util.Collections.nCopies(
+                            chunk.size(),
+                            "(?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+            jdbc.sql(
+                            "INSERT INTO payment_reconciliation_findings (id, tenant_id, run_id, kind, intent_id, statement_row_id,"
+                                    + " other_txn_id, order_tracking_id, confirmation_code, bms_amount_minor, provider_amount_minor,"
+                                    + " currency, branch_id) VALUES " + values)
+                    .params(params)
                     .update();
         }
         if (!requeue.isEmpty()) {
@@ -328,6 +402,9 @@ class ReconciliationService {
         Timestamp afterAt = null;
         UUID afterId = null;
         while (true) {
+            // One more row than wanted says whether anything is left, so a read that ends exactly at the ceiling is
+            // whole.
+            int want = Math.min(page, intentCeiling - all.size());
             List<IntentRow> rows = jdbc.sql("""
                             SELECT i.id, i.branch_id, i.status, i.merchant_reference, i.provider_reference, i.confirmation_code,
                                    i.amount_minor, i.currency, i.paid_amount_minor, i.paid_currency, i.paid_at, i.created_at,
@@ -346,7 +423,7 @@ class ReconciliationService {
                     .param("from", Timestamp.from(from))
                     .param("afterAt", afterAt)
                     .param("afterId", afterId)
-                    .param("limit", page)
+                    .param("limit", want + 1)
                     .query((rs, n) -> new IntentRow(
                             rs.getObject("id", UUID.class),
                             rs.getObject("branch_id", UUID.class),
@@ -368,8 +445,12 @@ class ReconciliationService {
                             rs.getString("receipt_status"),
                             rs.getString("blocked")))
                     .list();
+            boolean more = rows.size() > want;
+            if (more) {
+                rows = rows.subList(0, want);
+            }
             all.addAll(rows);
-            if (rows.size() < page) {
+            if (!more) {
                 return new Load<>(all, false);
             }
             if (all.size() >= intentCeiling) {
@@ -386,6 +467,8 @@ class ReconciliationService {
     }
 
     private void intentFindings(List<IntentRow> intents, Instant now, List<Finding> out, Set<UUID> requeue) {
+        // The orders come newest first, so the unpaid links listed are the newest ones.
+        int pendingListed = 0;
         for (IntentRow i : intents) {
             boolean paid = i.paidAt() != null && i.paidAmountMinor() != null;
             if (("paid".equals(i.status()) || "needs_attention".equals(i.status()))
@@ -394,10 +477,16 @@ class ReconciliationService {
                 out.add(intentFinding("completed_not_booked", i, i.amountMinor(), i.paidAmountMinor()));
                 requeue.add(i.id());
             }
+            // An unpaid link between a day and a week old is listed (up to PENDING_LISTED) and asked about again; an
+            // older one
+            // is abandoned, neither listed nor asked about every night.
             if (Set.of("created", "pending", "expired").contains(i.status())
-                    && i.createdAt().isBefore(now.minus(PENDING_AFTER))) {
-                out.add(intentFinding("pending_over_24h", i, i.amountMinor(), null));
+                    && i.createdAt().isBefore(now.minus(PENDING_AFTER))
+                    && !i.createdAt().isBefore(now.minus(ABANDONED_AFTER))) {
                 requeue.add(i.id());
+                if (pendingListed++ < PENDING_LISTED) {
+                    out.add(intentFinding("pending_over_24h", i, i.amountMinor(), null));
+                }
             }
             if (paid
                     && i.paidAmountMinor() != i.amountMinor()
@@ -461,6 +550,8 @@ class ReconciliationService {
                         if (!samePayment(m, i, zone)) {
                             continue;
                         }
+                        // The order's tracking id and code are shown only in the order's branch. When the receipt was
+                        // keyed in another branch, that branch is told of its own receipt alone.
                         out.add(new Finding(
                                 "manual_receipt_duplicate",
                                 i.id(),
@@ -471,7 +562,20 @@ class ReconciliationService {
                                 m.amountMinor(),
                                 i.paidAmountMinor(),
                                 m.currency(),
-                                m.branchId()));
+                                i.branchId()));
+                        if (m.branchId() != null && !m.branchId().equals(i.branchId())) {
+                            out.add(new Finding(
+                                    "manual_receipt_duplicate",
+                                    null,
+                                    null,
+                                    m.transactionId(),
+                                    null,
+                                    null,
+                                    m.amountMinor(),
+                                    null,
+                                    m.currency(),
+                                    m.branchId()));
+                        }
                     }
                 }
             }
@@ -498,6 +602,7 @@ class ReconciliationService {
         List<StatementLine> all = new ArrayList<>();
         UUID after = null;
         while (true) {
+            int want = Math.min(page, lineCeiling - all.size());
             List<StatementLine> rows = jdbc.sql("""
                             SELECT r.id, r.order_tracking_id, r.confirmation_code, r.amount_minor, r.currency,
                                    EXISTS (SELECT 1 FROM payment_statement_reviews v WHERE v.row_id = r.id) AS reviewed
@@ -508,7 +613,7 @@ class ReconciliationService {
                             """)
                     .param("from", Timestamp.from(from))
                     .param("after", after)
-                    .param("limit", page)
+                    .param("limit", want + 1)
                     .query((rs, n) -> new StatementLine(
                             rs.getObject("id", UUID.class),
                             rs.getString("order_tracking_id"),
@@ -517,8 +622,12 @@ class ReconciliationService {
                             rs.getString("currency"),
                             rs.getBoolean("reviewed")))
                     .list();
+            boolean more = rows.size() > want;
+            if (more) {
+                rows = rows.subList(0, want);
+            }
             all.addAll(rows);
-            if (rows.size() < page) {
+            if (!more) {
                 return new Load<>(all, false);
             }
             if (all.size() >= lineCeiling) {
@@ -567,8 +676,11 @@ class ReconciliationService {
                 // Clean, or a person has marked it as money for something outside this system.
                 continue;
             }
+            // Folded as the matching folds them: a tracking id in lower case, a code trimmed and in upper case.
             String key = m.status() + ":"
-                    + (l.trackingId() != null ? l.trackingId().toLowerCase(Locale.ROOT) : "c:" + l.code());
+                    + (l.trackingId() != null
+                            ? l.trackingId().toLowerCase(Locale.ROOT)
+                            : "c:" + (l.code() == null ? "" : l.code().trim().toUpperCase(Locale.ROOT)));
             if (!seen.add(key)) {
                 continue;
             }
@@ -646,9 +758,12 @@ class ReconciliationService {
             return new Report(restricted(run.get(), 0), Map.of(), List.of(), false);
         }
         String where = everywhere ? "" : " AND branch_id IN (:branches)";
+        // Most severe first, in the counts and in the list (SEVERITY), so losses are never pushed out of the shown
+        // rows.
+        String severity = "array_position(ARRAY['" + String.join("', '", SEVERITY) + "']::text[], kind)";
         var counts = new LinkedHashMap<String, Integer>();
         var countQuery = jdbc.sql("SELECT kind, count(*) FROM payment_reconciliation_findings WHERE run_id = :run"
-                        + where + " GROUP BY kind ORDER BY kind")
+                        + where + " GROUP BY kind ORDER BY " + severity + ", kind")
                 .param("run", run.get().id());
         if (!everywhere) {
             countQuery = countQuery.param("branches", branches);
@@ -657,7 +772,7 @@ class ReconciliationService {
         var query = jdbc.sql("""
                         SELECT id, kind, intent_id, branch_id, order_tracking_id, confirmation_code, bms_amount_minor,
                                provider_amount_minor, currency, other_txn_id, statement_row_id
-                          FROM payment_reconciliation_findings WHERE run_id = :run""" + where + " ORDER BY kind, id LIMIT :limit")
+                          FROM payment_reconciliation_findings WHERE run_id = :run""" + where + " ORDER BY " + severity + ", kind, id LIMIT :limit")
                 .param("run", run.get().id())
                 .param("limit", REPORT_LIMIT + 1);
         if (!everywhere) {

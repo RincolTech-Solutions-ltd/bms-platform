@@ -1,7 +1,7 @@
 -- V124: the daily reconciliation of gateway payments and the merchant statement upload (extras slice A5/7, second part, issue #224,
 -- task #317; ADR-035 and its amendment of 2026-10-19 for slice A5; docs/specs/client-extras.md sections 3.8, 3.9 and 3.17;
 -- FR-PAY-05, FR-PAY-06, FR-PAY-11). Flyway runs with outOfOrder off: V122 is the onboarding link fix (#747), V123 the
--- unallocated receipts queue (#316, part 1) and this file takes V124. The number is checked again at merge time.
+-- unallocated receipts queue (#315, part 1) and this file takes V124. The number is checked again at merge time.
 --
 -- Expand only, safe on a populated database. Five tenant tables, all created empty, one permission, and two indexes on
 -- `payment_intents` (item 5); no existing column, constraint or row is touched:
@@ -35,8 +35,10 @@
 -- takes SHARE ROW EXCLUSIVE on its target until the commit, which blocks writes (not reads) to those tables for the few
 -- milliseconds this file takes. The two indexes are built on `payment_intents` itself: CREATE INDEX takes SHARE on it, which blocks
 -- its writes (not reads) while the index is built, and Flyway holds that to the commit; the table holds the first lenders' orders
--- (thousands of rows at most, a few milliseconds each). `lock_timeout` makes the migration fail and be retried rather than queue
--- every writer behind it.
+-- (thousands of rows at most, a few milliseconds each). The two partial indexes on `lending_loan_transactions` and
+-- `lending_savings_transactions` take SHARE on those tables the same way: repayments and deposits wait while they are built
+-- (the first lenders' transactions, well under a second). `lock_timeout` makes the migration fail and be retried rather than
+-- queue every writer behind it.
 --
 -- PRIVACY: a statement row holds the provider's order tracking id and confirmation code, amounts and a date; never the payer's
 -- phone number or masked account, which the upload ignores if a statement carries them. The file name is stored without any path.
@@ -220,6 +222,15 @@ CREATE INDEX payment_intents_lower_provider_reference ON payment_intents (tenant
     WHERE provider_reference IS NOT NULL;
 CREATE INDEX payment_intents_upper_confirmation_code ON payment_intents (tenant_id, upper(confirmation_code))
     WHERE confirmation_code IS NOT NULL;
+
+-- The manual receipt check looks up receipts keyed by hand by their reference, upper-cased and trimmed, in batches of codes
+-- (PurposeHandler.manualReceiptsWithReference): without these each batch would scan the whole table.
+CREATE INDEX lending_loan_transactions_manual_reference
+    ON lending_loan_transactions (tenant_id, upper(btrim(external_reference)))
+    WHERE txn_type = 'repayment' AND payment_method_key <> 'gateway' AND external_reference IS NOT NULL;
+CREATE INDEX lending_savings_transactions_manual_reference
+    ON lending_savings_transactions (tenant_id, upper(btrim(external_reference)))
+    WHERE txn_type = 'deposit' AND payment_method_key <> 'gateway' AND external_reference IS NOT NULL;
 
 INSERT INTO permissions (key, module, description, is_money_moving) VALUES
     ('core.payments.manage', 'core', 'Payments: upload the merchant statement and run the reconciliation', true);

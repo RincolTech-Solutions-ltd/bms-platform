@@ -1450,7 +1450,7 @@ class MigrationOrderIT {
      * JUSTIFICATION-A3: a new test case; no existing case migrates across V124.
      */
     @Test
-    void paymentReconciliationMigrationAddsFourClosedTablesAndOnePermission() {
+    void paymentReconciliationMigrationAddsFiveClosedTablesAndOnePermission() {
         try (PostgreSQLContainer postgres = database()) {
             postgres.start();
             verifyReconciliationMigration(postgres.getJdbcUrl());
@@ -1467,7 +1467,7 @@ class MigrationOrderIT {
         UUID staff = UUID.randomUUID();
         UUID intent = UUID.randomUUID();
         owner.sql(
-                        "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v62', 'Test Tenant V124', '00000000-0000-4000-8000-000000000001')")
+                        "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v124', 'Test Tenant V124', '00000000-0000-4000-8000-000000000001')")
                 .param(tenant)
                 .update();
         owner.sql(
@@ -1475,7 +1475,7 @@ class MigrationOrderIT {
                 .params(branch, tenant)
                 .update();
         owner.sql(
-                        "INSERT INTO users (id, tenant_id, kind, full_name, email, status) VALUES (?, ?, 'staff', 'Test Staff V124', 'staff-v62@example.test', 'active')")
+                        "INSERT INTO users (id, tenant_id, kind, full_name, email, status) VALUES (?, ?, 'staff', 'Test Staff V124', 'staff-v124@example.test', 'active')")
                 .params(staff, tenant)
                 .update();
         owner.sql("""
@@ -1483,7 +1483,7 @@ class MigrationOrderIT {
                                                      amount_minor, currency, merchant_reference, status, initiated_by,
                                                      idempotency_key, expires_at)
                         VALUES (?, ?, ?, 'test.payment', 'test_subject', ?, '+256700000001', 1500, 'UGX', ?, 'created', ?,
-                                'v62-key-0001', now() + interval '30 minutes')
+                                'v124-key-0001', now() + interval '30 minutes')
                         """)
                 .params(
                         intent,
