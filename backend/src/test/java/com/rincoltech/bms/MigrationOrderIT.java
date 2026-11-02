@@ -1603,7 +1603,7 @@ class MigrationOrderIT {
         UUID period = UUID.randomUUID();
         UUID entry = UUID.randomUUID();
         owner.sql(
-                        "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v61', 'Test Tenant V123', '00000000-0000-4000-8000-000000000001')")
+                        "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v123', 'Test Tenant V123', '00000000-0000-4000-8000-000000000001')")
                 .param(tenant)
                 .update();
         owner.sql(
@@ -1615,7 +1615,7 @@ class MigrationOrderIT {
                 .query((rs, n) -> 1)
                 .single();
         owner.sql(
-                        "INSERT INTO users (id, tenant_id, kind, full_name, email, status) VALUES (?, ?, 'staff', 'Test Staff V123', 'staff-v61@example.test', 'active')")
+                        "INSERT INTO users (id, tenant_id, kind, full_name, email, status) VALUES (?, ?, 'staff', 'Test Staff V123', 'staff-v123@example.test', 'active')")
                 .params(staff, tenant)
                 .update();
         owner.sql("INSERT INTO gl_periods (id, tenant_id, year, month, status) VALUES (?, ?, 2026, 1, 'open')")
@@ -1648,7 +1648,7 @@ class MigrationOrderIT {
                                                      amount_minor, currency, merchant_reference, status, initiated_by,
                                                      idempotency_key, expires_at)
                         VALUES (?, ?, ?, 'test.payment', 'test_subject', ?, '+256700000001', 1500, 'UGX', ?, 'created', ?,
-                                'v61-key-0001', now() + interval '30 minutes')
+                                'v123-key-0001', now() + interval '30 minutes')
                         """)
                 .params(
                         intent,
@@ -1719,7 +1719,7 @@ class MigrationOrderIT {
                                                      amount_minor, currency, merchant_reference, status, initiated_by,
                                                      idempotency_key, expires_at)
                         VALUES (?, ?, ?, 'test.payment', 'test_subject', ?, '+256700000001', 1500, 'UGX', ?, 'created', ?,
-                                'v61-key-0002', now() + interval '30 minutes')
+                                'v123-key-0002', now() + interval '30 minutes')
                         """)
                 .params(
                         other,

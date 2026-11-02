@@ -433,6 +433,9 @@ class ReceiptSettler {
     }
 
     private Receipt lockOpen(UUID receiptId) {
+        // The order before the receipt, as the reversal of a held receipt takes them, so two approvals cannot deadlock.
+        // A receipt's intent never changes (V123 guard), so reading it unlocked first is safe.
+        receipts.find(receiptId).ifPresent(r -> intents.lock(r.intentId()));
         Receipt receipt = receipts.lock(receiptId).orElseThrow(ApiException::notFound);
         if (!receipt.open()) {
             throw new RequestSupersededException(

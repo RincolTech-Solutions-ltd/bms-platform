@@ -581,6 +581,21 @@ class ApprovalService implements Approvals {
                 && action.mayDecide(principal, r.branchId(), r.payload())
                 && !action.conflictedDeciders(r.subjectId(), r.payload()).contains(principal.userId());
         boolean canCancel = pending && r.requestedBy().equals(principal.userId());
+        // The notice can name what the checker decides on (a loan of another branch and its payoff), so only one who
+        // may decide reads it; it is worked out again (a quote) only on the detail of a pending request, never per row.
+        boolean readsNotice = action != null && action.mayDecide(principal, r.branchId(), r.payload());
+        Map<String, Object> payload = r.payload();
+        if (withPayload && !readsNotice && payload != null && payload.containsKey(ApprovalAction.CHECKER_NOTICE)) {
+            payload = new java.util.LinkedHashMap<>(payload);
+            payload.remove(ApprovalAction.CHECKER_NOTICE);
+        }
+        String notice = !readsNotice
+                ? null
+                : pending && withPayload
+                        ? action.checkerNotice(r.subjectId(), r.payload()).orElse(null)
+                        : r.payload() != null && r.payload().get(ApprovalAction.CHECKER_NOTICE) instanceof String s
+                                ? s
+                                : null;
         return new ApprovalResponse(
                 r.id(),
                 r.actionType(),
@@ -598,12 +613,8 @@ class ApprovalService implements Approvals {
                 r.decidedAt(),
                 r.decisionNote(),
                 r.executionError(),
-                withPayload ? r.payload() : null,
-                pending && action != null
-                        ? action.checkerNotice(r.subjectId(), r.payload()).orElse(null)
-                        : r.payload() != null && r.payload().get(ApprovalAction.CHECKER_NOTICE) instanceof String notice
-                                ? notice
-                                : null,
+                withPayload ? payload : null,
+                notice,
                 canDecide,
                 canCancel);
     }
