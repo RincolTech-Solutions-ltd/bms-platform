@@ -235,3 +235,22 @@ more than a few hundred rows holds its whole layout in memory while it is made.
 **Watch for:** a report that lists a column the PDF cannot print in its width (a long heading is wrapped, a long figure is not: widen the
 column weights in `PdfReport`); a new column kind (add it to the spool, the PDF text, the workbook cell and the CSV together); the PDF cap raised
 on a small host without running `ReportMemoryIT` first.
+
+## Amendment (issue #225, slice D4: the collateral register and the regulator data summary)
+
+Building `lending.collateral_register` and `lending.regulatory_summary` settled four things. None reverses a decision; no migration and no
+permission were needed.
+
+1. **A second public port, `RegisterFigures`, beside `InsightsFigures`.** The page computes neither figure, so they have their own
+   queries (as decision 3 allows), kept in `lending.insights` with every other read of the lending tables (ADR-030 decision 1) so
+   `lending.reports` still depends on one lending module. The summary's book, PAR 30 and PAR 90 are `InsightsFigures.par`'s own, and its
+   breakdowns are aggregates over the very position statement PAR reads, so they cannot describe a different book. The savings and
+   investment figures are those of the panels' `SavingsMetrics` and `InvestmentMetrics`, looked up when a summary is made.
+2. **The register is the items as they stand, not as at a date.** Custody, location and value are not kept by date, so a past `as_at`
+   would be a guess; the register takes no date parameter, prints the business date it was made on, and says so.
+3. **Flags are counted in a first pass and printed first.** The register reads its items twice in the one snapshot: once to count the
+   flags, once to write the items. The short table of counts comes first, so the PDF prints it whole even when the items are cut at the
+   row cap, and the Excel file holds every item.
+4. **"Imported, not verified" reads the import's note.** Chapter 13 section 13.6.8 has the import register an item with the note
+   "imported; verify custody and value"; the flag is an item registered with that note and not valued, moved or noted since. No column
+   was added (the migration queue is busy, and none is needed), and nothing writes the note until the import commit (issue #133).

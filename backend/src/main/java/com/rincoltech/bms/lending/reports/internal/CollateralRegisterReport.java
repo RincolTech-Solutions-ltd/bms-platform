@@ -121,7 +121,9 @@ class CollateralRegisterReport implements ReportDefinition {
             normalised.put("custody_status", custody);
         }
         Map<String, Object> frozen = new LinkedHashMap<>();
-        frozen.put("branch_ids", scope == null ? null : scope.stream().map(UUID::toString).toList());
+        frozen.put(
+                "branch_ids",
+                scope == null ? null : scope.stream().map(UUID::toString).toList());
         frozen.put("names", principal.hasPermission(MEMBERS_READ));
         // The register is the items as they stand now; the business date of the request is printed as its date.
         return new Prepared(normalised, frozen, figures.today());
@@ -163,7 +165,8 @@ class CollateralRegisterReport implements ReportDefinition {
     @Override
     public void query(Prepared prepared, ReportOutput out) {
         boolean names = names(prepared);
-        out.note("The items as they stand when the report is made; custody and values are not read back to a past date.");
+        out.note(
+                "The items as they stand when the report is made; custody and values are not read back to a past date.");
         out.note(RELEASE_OVERDUE + ": still pledged or in our custody, and every loan it secures is closed.");
         out.note(UNVERIFIED + ": brought in by an import and not valued, moved or noted since.");
         out.note(NO_VALUATION + ": no valuation recorded; the estimated value is the one given at registration.");

@@ -102,8 +102,9 @@ class RegulatorySummaryReport extends PortfolioReport {
                 + " at the end of the period; its PAR 30 and PAR 90 are those of the portfolio at risk report.");
         out.note("Only active loans are in the book; written-off loans are not.");
         if (s.savingsMinor() == null) {
-            out.note("Savings and investments are not shown: they belong to no loan officer, and this report covers your"
-                    + " own loans only.");
+            out.note(
+                    "Savings and investments are not shown: they belong to no loan officer, and this report covers your"
+                            + " own loans only.");
         }
         out.note("Open investments, branches and staff are counted as they are now.");
 

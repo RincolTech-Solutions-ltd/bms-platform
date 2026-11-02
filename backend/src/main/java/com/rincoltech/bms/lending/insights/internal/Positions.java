@@ -248,8 +248,8 @@ class Positions {
     /** Distinct borrowers in total and by group id (a null id is the loans with no such value). */
     record Borrowers(long total, Map<UUID, Long> byGroup) {}
 
-    // JUSTIFICATION-A3: borrowers() can only count; the regulator summary (issue #225) needs sums by gender, purpose and
-    // product rate over the same position statement, so they are the loans PAR reads.
+    // JUSTIFICATION-A3: borrowers() can only count; the regulator summary (issue #225) needs sums by gender,
+    // purpose and product rate over the same position statement, so they are the loans PAR reads.
 
     /**
      * An aggregate over the very positions {@link #forEachLive} or {@link #forEachSnapshot} reads (issue #225, the regulator

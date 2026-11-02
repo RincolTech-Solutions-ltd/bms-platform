@@ -248,7 +248,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
         bms.api.ai -> bms.db "Call log (counts, a request hash, a closed reason; no prompt, no response, no provider error text) and the daily cap sums"
         bms.api.ai -> bms.api.tenancy "Keeps the tenant's switch, caps and acknowledgement as the settings group ai; refuses the switch for a tenant outside BMS_AI_ENABLED_TENANTS"
         bms.api.ai -> bms.db "Nightly housekeeping function for every tenant, suspended included: deletes call rows past 90 days and closes calls left pending"
-        bms.api.lendingReports -> bms.api.insights "Reads the PAR and portfolio figures through the public InsightsFigures port with a public PortfolioScope (every group cross checked against the insights endpoints by test)"
+        bms.api.lendingReports -> bms.api.insights "Reads the PAR and portfolio figures through the public InsightsFigures port with a public PortfolioScope (every group cross checked against the insights endpoints by test), and the collateral register and regulator data summary through the public RegisterFigures port (issue #225)"
         bms.api.lendingReports -> bms.api.reporting "Registers its reports (lending.par and lending.portfolio_outstanding; the rest and the pack follow)"
         bms.api.lendingReports -> bms.db "Reads loans, schedules, transactions, collateral and snapshots under RLS"
         bms.api.reporting -> bms.api.documents "Lays a report out as a PDF with the shared report template, and stores run files (PDF, Excel, CSV, JSON); expiry deletes the object"

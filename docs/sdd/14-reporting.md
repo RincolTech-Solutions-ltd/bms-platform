@@ -294,6 +294,25 @@ latest value, custody status and location, linked loans and their status. Flags:
 custody while every linked loan is closed ("release overdue"); imported items not yet
 verified (13.6.8); items without a valuation.
 
+**Built (extras slice D4, issue #225).** Offered as `pdf`, `xlsx`, `csv` and `json` under `lending.reports.members`; no migration and no
+permission. Parameters `branch_id`, `collateral_type` and `custody_status`; the branches are those the requester holds the permission in,
+resolved at request time and frozen with the run, and a download by someone whose access has narrowed since is refused. Not `as_at`: the
+register is the items as they stand when it is made, under the business date of the request, because custody and values are not kept by
+date (the report says so). Two tables, the short one first so the PDF always prints it whole:
+
+- `flags`: the items with each flag and the items in the register (a total row).
+- `items`, by branch, member number and registration order: branch, member number, the name (only for a holder of
+  `lending.members.read`), type, description, reference, the estimated value given at registration, the latest valuation's market value
+  and date, custody status, where it is kept, the linked loans with their status in words ("LN0001 (active)"), and its flags.
+
+The flags: **Release overdue**, an item still pledged or in custody that secures at least one loan and whose loans are all closed,
+cancelled or rejected (a written-off loan keeps its collateral for recovery, so it does not count as finished); **Imported, not
+verified**, an item whose registration event carries the import's note "imported; verify custody and value" (chapter 13 section 13.6.8)
+and that has no valuation and no later event; **No valuation**, an item with no valuation recorded. Nothing writes the import's note
+yet (the import commit is issue #133), so the second flag is proven on fabricated rows only. A register longer than the PDF row cap is
+cut with the printed pointer to the Excel file, which holds every item. The figures come through the new public port `RegisterFigures` of
+`lending.insights`, read with plain SQL like the other insights reads (ADR-030 decision 1). Test: `LendingRegistersReportsIT`.
+
 ## 14.6 Operational and audit reports
 
 ### `lending.operational_trend` (`lending.reports.portfolio`)
@@ -328,6 +347,27 @@ the period by count and amount; portfolio outstanding by product and purpose; PA
 PAR90; interest rate range and weighted average per product (in bp, weighted by `PO`);
 loans written off in the period; savings held from members (total, number of accounts);
 investments held from members (total principal, number); number of branches and staff.
+
+**Built (extras slice D4, issue #225).** Offered as `pdf`, `xlsx`, `csv` and `json` under `lending.reports.compliance`, and, like the
+portfolio reports, it also needs `lending.insights.read` because its scope is the insights page's (a caller without
+`lending.insights.all_officers` gets their own loans and no savings or investments, which belong to no officer). No migration and no
+permission. Parameters `from` (the first of the month of `to` by default), `to` (the period end, today by default) and `branch_id`. Its
+first note is the cover note "Data summary. Not a filed return.", printed on every format. Four tables:
+
+- `summary`, a figure per row with its number, amount or rate: active borrowers and active loans with their principal outstanding at the
+  period end; PAR 30 and PAR 90; loans disbursed and loans written off in the period (count and amount, the insights page's
+  `portfolio.disbursed` and `portfolio.written_off` rules); savings held (the savings panel's balance at the period end, and the accounts
+  open then); investments held (the investment panel's balance at the period end, and the open investments now); branches in the scope;
+  active staff with a role that is not revoked in those branches or in every branch, now.
+- `borrowers`: the distinct borrowers with an active loan by gender (women, men, other, not recorded) and the total.
+- `products`: by product and rate unit, the active loans, principal outstanding, lowest and highest rate and the rate weighted by
+  principal outstanding (half up), in basis points per the unit; rates of different units are never averaged together.
+- `purposes`: the active loans and principal outstanding by loan purpose (the purpose is the loan's own and never changes, so a past
+  date can be grouped by it).
+
+The loan book at the period end is the positions of `lending.par` (the loan tables for today, the nightly snapshot for an earlier
+date, with the same refusals), so PAR 30 and PAR 90 are those of section 14.3: a test asserts they equal `lending.par` and the insights
+page. The figures come through the public port `RegisterFigures` of `lending.insights`. Test: `LendingRegistersReportsIT`.
 
 ## 14.9 Live insights (`lending.insights.*`, #153, ADR-030)
 

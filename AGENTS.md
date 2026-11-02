@@ -464,6 +464,12 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   by branch, product or officer) are offered in all four formats, from `InsightsFigures.par` and `.portfolio`, with tests that every group
   equals the insights endpoints for the same filter and caller. `ReportMemoryIT` runs both reports as PDF and Excel on the 224 MB
   heap. The Reports screen offers the PDF first. Visual check: `make document-samples` and `docs/ui/report-samples/`.
+- **Built (extras slice D4, issue #225, ADR-038 amendment):** no migration and no permission. `lending.collateral_register` (flag counts,
+  then every item with its valuation, custody, linked loans and flags: release overdue, imported and not verified, no valuation; cut at
+  the PDF row cap with the pointer to the workbook) and `lending.regulatory_summary` (cover note "Data summary. Not a filed return.";
+  borrowers by gender, the book by product with rates and by purpose, PAR 30 and 90 from `InsightsFigures.par`, disbursed, written off,
+  savings, investments, branches, staff), in all four formats, through the new public port `RegisterFigures` of `lending.insights`;
+  `LendingRegistersReportsIT` proves the flags, the row cap and that PAR equals `lending.par` and the insights page.
 - **Built (Download my data, issue #334 step 1, ADR-074, FR-RPT-09 to FR-RPT-11):** migration `V91` (`data_export_settings`,
   `data_export_weekly`, the permission `core.data_export.run` for `tenant_admin`, and `app_data_export_weekly_tenants`; the runner's definer functions stay as V90
   left them, so a business the operator suspended gets no run). The report `core.data_export` (`ReportDefinition.everyBusiness`: offered whatever `reports_enabled` says) writes

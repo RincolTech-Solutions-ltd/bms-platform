@@ -15,7 +15,8 @@ import java.util.function.Consumer;
 public interface RegisterFigures {
 
     /** The collateral types, in the order the register's filter offers them. */
-    List<String> COLLATERAL_TYPES = List.of("land_title", "vehicle_logbook", "vehicle", "national_id", "household_item", "other");
+    List<String> COLLATERAL_TYPES =
+            List.of("land_title", "vehicle_logbook", "vehicle", "national_id", "household_item", "other");
 
     /** The custody statuses, in the order the register's filter offers them. */
     List<String> CUSTODY_STATUSES = List.of("pledged", "in_custody", "released", "seized", "disposed");

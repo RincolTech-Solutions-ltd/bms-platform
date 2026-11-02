@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -92,8 +93,10 @@ class RegisterFiguresService implements RegisterFigures {
     private final InsightsFigures figures;
     private final Positions positions;
     private final InsightsQueries queries;
-    private final SavingsMetrics savings;
-    private final InvestmentMetrics investments;
+    // Looked up when a summary is made, not at start: the investments module reaches the report registry through the
+    // approvals and the documents, so a constructor dependency would be a cycle.
+    private final ObjectProvider<SavingsMetrics> savings;
+    private final ObjectProvider<InvestmentMetrics> investments;
     private final CurrentTenant tenant;
     private final InsightsService service;
 
@@ -104,8 +107,8 @@ class RegisterFiguresService implements RegisterFigures {
             InsightsFigures figures,
             Positions positions,
             InsightsQueries queries,
-            SavingsMetrics savings,
-            InvestmentMetrics investments,
+            ObjectProvider<SavingsMetrics> savings,
+            ObjectProvider<InvestmentMetrics> investments,
             CurrentTenant tenant) {
         this.jdbc = jdbc;
         JdbcTemplate template = new JdbcTemplate(dataSource);
@@ -282,7 +285,9 @@ class RegisterFiguresService implements RegisterFigures {
         for (Rates r : rates) {
             Long weighted = r.po() == 0
                     ? null
-                    : r.weighted().divide(BigDecimal.valueOf(r.po()), 0, RoundingMode.HALF_UP).longValueExact();
+                    : r.weighted()
+                            .divide(BigDecimal.valueOf(r.po()), 0, RoundingMode.HALF_UP)
+                            .longValueExact();
             byProduct.add(new ProductRates(
                     productNames.getOrDefault(r.product(), "Product"),
                     RATE_UNITS.getOrDefault(r.unit(), r.unit()),
@@ -305,9 +310,9 @@ class RegisterFiguresService implements RegisterFigures {
         Long investmentsMinor = null;
         Long investmentCount = null;
         if (p.officerId() == null) {
-            savingsMinor = metric(savings.metrics(p.from(), p.to(), p.branchIds()), "savings.balances");
+            savingsMinor = metric(savings.getObject().metrics(p.from(), p.to(), p.branchIds()), "savings.balances");
             savingsAccounts = savingsAccounts(p.to(), p.branchIds());
-            List<InvestmentMetrics.Metric> inv = investments.metrics(p.from(), p.to(), p.branchIds());
+            List<InvestmentMetrics.Metric> inv = investments.getObject().metrics(p.from(), p.to(), p.branchIds());
             investmentsMinor = inv.stream()
                     .filter(m -> m.key().equals(InvestmentMetrics.KEY + ".balance"))
                     .map(InvestmentMetrics.Metric::value)
@@ -398,9 +403,7 @@ class RegisterFiguresService implements RegisterFigures {
         return jdbc.sql("""
                         SELECT count(DISTINCT u.id) FROM users u
                           JOIN user_role_assignments ra ON ra.user_id = u.id AND ra.revoked_at IS NULL
-                         WHERE u.kind = 'staff' AND u.status = 'active'""" + (branchIds == null
-                                ? ""
-                                : " AND (ra.branch_id IS NULL OR ra.branch_id IN (:branches))"))
+                         WHERE u.kind = 'staff' AND u.status = 'active'""" + (branchIds == null ? "" : " AND (ra.branch_id IS NULL OR ra.branch_id IN (:branches))"))
                 .params(branchIds == null ? Map.of() : Map.of("branches", branchIds))
                 .query(Long.class)
                 .single();
