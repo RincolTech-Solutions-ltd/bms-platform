@@ -165,8 +165,10 @@ class ResendEmailChannelTest {
         assertThat(body.path("text").asString()).startsWith("Hello,");
         assertThat(body.path("html").asString()).contains("<html");
         assertThat(body.path("tags").get(0).path("value").asString()).isEqualTo("00000000-0000-4000-8000-0000000000e1");
-        assertThat(body.path("tags").get(1).path("name").asString()).isEqualTo("tenant_id");
-        assertThat(body.path("tags").get(2).path("value").asString()).isEqualTo("identity_password_changed");
+        assertThat(body.path("tags").get(1).path("name").asString()).isEqualTo("env");
+        assertThat(body.path("tags").get(1).path("value").asString()).isEqualTo("live");
+        assertThat(body.path("tags").get(2).path("name").asString()).isEqualTo("tenant_id");
+        assertThat(body.path("tags").get(3).path("value").asString()).isEqualTo("identity_password_changed");
     }
 
     @Test
@@ -315,6 +317,60 @@ class ResendEmailChannelTest {
         assertThatThrownBy(() -> refused.send(delivery("staff01@example.test", null)))
                 .isInstanceOf(OutboxChannel.SendFailure.class)
                 .hasMessage("resend_unreachable");
+    }
+
+    @Test
+    void anUnreachableResendFallsBackToSmtpWhenSetAndNoOtherFailureDoes() throws Exception {
+        // JUSTIFICATION-A3: item 3 of the third #759 review. The SMTP side is a refused port: its failure proves the
+        // email went that way.
+        int closed;
+        try (java.net.ServerSocket probe = new java.net.ServerSocket(0)) {
+            closed = probe.getLocalPort();
+        }
+        NotificationProperties withSmtp = new NotificationProperties(
+                new NotificationProperties.Smtp("127.0.0.1", closed, "u", "fabricated-01", FROM),
+                null,
+                "",
+                new NotificationProperties.Mail("resend", KEY, "http://127.0.0.1:" + closed, null));
+        ResendEmailChannel fallback = new ResendEmailChannel(
+                smtpChannel(withSmtp, "live"),
+                withSmtp,
+                mapper,
+                CLOCK,
+                "live",
+                java.time.Duration.ofSeconds(2),
+                java.time.Duration.ofMillis(300));
+        assertThatThrownBy(() -> fallback.send(delivery("staff01@example.test", null)))
+                .as("the SMTP sender was tried")
+                .isInstanceOf(jakarta.mail.MessagingException.class);
+        // Without SMTP set, the same failure stays Resend's and is retried.
+        NotificationProperties noSmtp = new NotificationProperties(
+                new NotificationProperties.Smtp(null, null, null, null, FROM),
+                null,
+                "",
+                new NotificationProperties.Mail("resend", KEY, "http://127.0.0.1:" + closed, null));
+        ResendEmailChannel alone = new ResendEmailChannel(
+                smtpChannel(noSmtp, "live"),
+                noSmtp,
+                mapper,
+                CLOCK,
+                "live",
+                java.time.Duration.ofSeconds(2),
+                java.time.Duration.ofMillis(300));
+        assertThatThrownBy(() -> alone.send(delivery("staff01@example.test", null)))
+                .isInstanceOf(OutboxChannel.SendFailure.class)
+                .hasMessage("resend_unreachable");
+        // A 5xx (Resend may hold the email) never falls back, even with SMTP set.
+        NotificationProperties answered = new NotificationProperties(
+                new NotificationProperties.Smtp("127.0.0.1", closed, "u", "fabricated-01", FROM),
+                null,
+                "",
+                new NotificationProperties.Mail("resend", KEY, base, null));
+        replies.add(new Reply(503, "{}", null));
+        assertThatThrownBy(() -> new ResendEmailChannel(smtpChannel(answered, "live"), answered, mapper, CLOCK, "live")
+                        .send(delivery("staff01@example.test", null)))
+                .isInstanceOf(OutboxChannel.SendFailure.class)
+                .hasMessage("resend_unavailable");
     }
 
     @Test

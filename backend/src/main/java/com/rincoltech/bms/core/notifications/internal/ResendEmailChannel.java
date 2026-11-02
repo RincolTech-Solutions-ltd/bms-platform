@@ -10,6 +10,7 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -54,6 +55,8 @@ class ResendEmailChannel implements OutboxChannel {
     static final Duration TOTAL_TIMEOUT = Duration.ofSeconds(20);
     /** Below the dispatcher's two minute lease, so a slow upload never overlaps a second claim of the same row. */
     static final Duration MAX_TIMEOUT = Duration.ofSeconds(90);
+    /** The least time left in the budget for the from-name's second request to be tried at all. */
+    static final Duration MIN_SECOND_TRY = Duration.ofSeconds(5);
     /** Resend's limit on a whole email with its attachments once encoded; a larger one is refused before it is sent. */
     static final long MAX_ENCODED_BYTES = 40L * 1024 * 1024;
     /** The {@code from} field named in an error message, in backticks or quotes. */
@@ -67,6 +70,7 @@ class ResendEmailChannel implements OutboxChannel {
     private final ObjectMapper mapper;
     private final BusinessClock clock;
     private final String keyPrefix;
+    private final String envTag;
     private final Duration baseTimeout;
     private final HttpClient http;
 
@@ -95,12 +99,21 @@ class ResendEmailChannel implements OutboxChannel {
         this.mapper = mapper;
         this.clock = clock;
         // At most 20 characters of the environment, so a long value can never push the row id out of the key.
+        this.envTag = environmentTag(environment);
+        this.keyPrefix = "bms:" + envTag + ":";
+        this.baseTimeout = baseTimeout;
+        this.http = HttpClient.newBuilder().connectTimeout(connectTimeout).build();
+    }
+
+    /**
+     * {@code BMS_ENVIRONMENT} as the idempotency key and the {@code env} tag carry it: lower case, letters, digits and
+     * dashes, at most 20 characters, {@code local} when unset. The webhook drops events whose tag differs.
+     */
+    static String environmentTag(String environment) {
         String env = environment == null || environment.isBlank()
                 ? "local"
                 : environment.strip().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9-]", "-");
-        this.keyPrefix = "bms:" + (env.length() > 20 ? env.substring(0, 20) : env) + ":";
-        this.baseTimeout = baseTimeout;
-        this.http = HttpClient.newBuilder().connectTimeout(connectTimeout).build();
+        return env.length() > 20 ? env.substring(0, 20) : env;
     }
 
     @Override
@@ -128,14 +141,32 @@ class ResendEmailChannel implements OutboxChannel {
         }
         String from = email.sender(context);
         String key = idempotencyKey(delivery, context);
-        Answer answer = post(from, delivery, body, attachment, context, key);
-        if (answer.status() == 422 && !from.equals(smtp.from()) && answer.namesFrom()) {
+        // Both requests of one send share one budget, so the two together stay inside the dispatcher's lease.
+        Instant started = clock.now();
+        Answer answer;
+        try {
+            answer = post(from, delivery, body, attachment, context, key, MAX_TIMEOUT);
+        } catch (SendFailure e) {
+            // Resend could not even be reached (no connection, so it cannot have sent anything): with SMTP still set on
+            // the host, the same email goes that way now. Any other failure is retried as before, since Resend may
+            // already hold it and SMTP has no idempotency key.
+            if ("resend_unreachable".equals(e.getMessage()) && smtp.configured()) {
+                log.warn("outbox row {}: resend unreachable; sent by smtp instead", context.outboxId());
+                return email.send(delivery);
+            }
+            throw e;
+        }
+        Duration left = MAX_TIMEOUT.minus(Duration.between(started, clock.now()));
+        if (answer.status() == 422
+                && !from.equals(smtp.from())
+                && answer.namesFrom()
+                && left.compareTo(MIN_SECOND_TRY) >= 0) {
             // The business's name as the from-name was refused: send once more with the platform's From, under a key of
             // its own (the body differs, so the first key would answer 409).
             log.warn(
                     "outbox row {}: resend refused the business from-name; sent with the platform's",
                     context.outboxId());
-            answer = post(smtp.from(), delivery, body, attachment, context, key + ":platform-from");
+            answer = post(smtp.from(), delivery, body, attachment, context, key + ":platform-from", left);
         }
         Result result = read(answer, clock);
         if (result instanceof Result.Sent) {
@@ -173,10 +204,12 @@ class ResendEmailChannel implements OutboxChannel {
             SmtpEmailChannel.Body body,
             EmailAttachments.Attachment attachment,
             RowContext context,
-            String idempotencyKey)
+            String idempotencyKey,
+            Duration budget)
             throws SendFailure {
-        String json = mapper.writeValueAsString(request(from, delivery, body, attachment, context));
-        Duration timeout = timeoutFor(json.length());
+        String json = mapper.writeValueAsString(request(from, delivery, body, attachment, context, envTag));
+        Duration scaled = timeoutFor(json.length());
+        Duration timeout = scaled.compareTo(budget) > 0 ? budget : scaled;
         HttpRequest request = HttpRequest.newBuilder(URI.create(stripSlash(mail.resendUrl()) + "/emails"))
                 .timeout(timeout)
                 .header("Authorization", "Bearer " + mail.resendApiKey())
@@ -267,7 +300,8 @@ class ResendEmailChannel implements OutboxChannel {
             Delivery delivery,
             SmtpEmailChannel.Body body,
             EmailAttachments.Attachment attachment,
-            RowContext context) {
+            RowContext context,
+            String envTag) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("from", from);
         out.put("to", List.of(delivery.recipient()));
@@ -286,6 +320,8 @@ class ResendEmailChannel implements OutboxChannel {
         if (context.outboxId() != null) {
             tags.add(Map.of("name", "outbox_id", "value", context.outboxId().toString()));
         }
+        // The environment that sent it: another environment's webhook on the same Resend account ignores the event.
+        tags.add(Map.of("name", "env", "value", envTag));
         if (context.tenantId() != null) {
             // So a bounce or complaint that comes back names the business (ResendWebhookController).
             tags.add(Map.of("name", "tenant_id", "value", context.tenantId().toString()));

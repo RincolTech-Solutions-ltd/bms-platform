@@ -109,8 +109,14 @@ The `BMS_SMTP_*` values can stay on the host; they are not used while the provid
   platform's own emails show the name in `BMS_MAIL_FROM`.
 - **Staging allow-list.** With `BMS_ENVIRONMENT=staging`, or on any host where `BMS_MAIL_ALLOWLIST` is set, a message to
   anyone not on the list is not sent and shows on "Messages not sent" as `not_on_staging_allowlist`. Set the list
-  **before** this release reaches staging, or every email there stops. To let a tester in, add the address,
-  `docker compose up -d api`, then "Send again". Never set the list on production.
+  **before** this release reaches staging, or every email there stops; the API log then says `BMS_MAIL_ALLOWLIST is empty
+  on staging` at every start. To let a tester in, add the address, `docker compose up -d api`, then "Send again". Never
+  set the list on production.
+- **Resend down.** Keep the `BMS_SMTP_*` values on the host when switching to Resend: an email that cannot reach Resend
+  at all (`resend_unreachable`) then goes by SMTP at once, and the log says `resend unreachable; sent by smtp instead`.
+  A Resend that answers with errors or times out is not bypassed (it may already hold the email): those rows are tried
+  three times over about six minutes, then show as failed on "Messages not sent". When Resend is back, press "Send
+  again" on them; an activation or reset whose link has expired needs a new one.
 - **What a failure means.** `resend_rejected`: Resend refused the message as invalid; it is not retried (a refused
   business from-name is already retried once with `BMS_MAIL_FROM`). `resend_too_large`: the message, usually the weekly
   workbook, is over Resend's attachment limit (about 40 MB once encoded); it is not retried, so ask the business to use
@@ -132,15 +138,22 @@ The `BMS_SMTP_*` values can stay on the host; they are not used while the provid
 - **`BMS_RESEND_API_URL`** stays unset on every host. It must be an `https` address; the only exception is a test's
   `http://127.0.0.1` or `http://localhost` stand-in, and production refuses even that at start.
 - **Bounces and complaints (ADR-115 decision 8).** Set it up once per host: in Resend, Webhooks, add the endpoint
-  `https://<BMS_PLATFORM_HOST>/api/v1/platform/webhooks/resend` with the events `email.bounced` and `email.complained`,
+  `https://<BMS_PLATFORM_HOST>/api/v1/platform/webhooks/resend` with the events `email.bounced`, `email.complained` and
+  `email.suppressed`,
   copy its Signing secret (`whsec_...`) into `/opt/bms/.env` as `BMS_RESEND_WEBHOOK_SECRET`, then
   `docker compose up -d api`. The platform host must be reachable from the internet on that path (no access gate in
-  front of it). Resend's "Send test event" must show 204; a 401 means the secret differs, a 404 that it is unset.
-  Each bounce and complaint then shows on "Messages not sent" under **Bounced and complained**, with the message, the
+  front of it). Resend's "Send test event" must show 204 (a test event carries no `env` tag, so it is not recorded); a
+  401 means the secret differs, a 404 that it is unset. Staging and production share the Resend account, so each
+  endpoint receives the other's events too: each records only the events whose `env` tag is its own. Each bounce,
+  complaint and suppressed send then shows on "Messages not sent" under **Bounced and complained** (a suppressed send
+  reads "Not sent, address blocked after an earlier bounce": Resend refused to send to an address that bounced or
+  complained before), with the message, the
   recipient's domain only and the time; the full address is never stored. Match it to its outbox row by the row id
-  (in the platform audit log, action `platform.email.bounced` or `platform.email.complained`), or in Resend under
-  Emails by the tag `outbox_id`. An address that bounces hard or complains is suppressed by Resend; fix it in BMS (the
-  user's email) before sending again.
+  (in the platform audit log, action `platform.email.bounced`, `platform.email.complained` or
+  `platform.email.suppressed`), or in Resend under Emails by the tag `outbox_id`. An address that bounces hard or
+  complains is suppressed by Resend: later emails to it are not sent and show here as suppressed, while the outbox row
+  reads `sent`. Fix the address in BMS (the user's email), or remove it from Resend's suppression list once the mailbox
+  works again. BMS refusing such sends itself, and marking the outbox row, is issue #767.
 - **Rotating the key.** Make the new key, put it in `.env`, `docker compose up -d api`, send yourself a password reset,
   then delete the old key in Resend.
 

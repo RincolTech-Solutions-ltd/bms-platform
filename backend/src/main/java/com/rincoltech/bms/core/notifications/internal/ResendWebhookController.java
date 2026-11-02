@@ -54,7 +54,10 @@ class ResendWebhookController {
 
     static final String BOUNCED = "platform.email.bounced";
     static final String COMPLAINED = "platform.email.complained";
-    static final Set<String> ACTIONS = Set.of(BOUNCED, COMPLAINED);
+    /** Resend did not send the email because the address is on its suppression list (an earlier bounce or complaint). */
+    static final String SUPPRESSED = "platform.email.suppressed";
+
+    static final Set<String> ACTIONS = Set.of(BOUNCED, COMPLAINED, SUPPRESSED);
     /** How far a signed timestamp may be from now, either way, before the message is treated as a replay. */
     static final Duration TOLERANCE = Duration.ofMinutes(5);
     /** Resend's events are small; anything larger is not one. */
@@ -64,16 +67,22 @@ class ResendWebhookController {
     private final ObjectMapper mapper;
     private final BusinessClock clock;
     private final byte[] secret;
+    private final String environment;
+    private final org.springframework.jdbc.core.simple.JdbcClient jdbc;
 
     ResendWebhookController(
             PlatformAuditLog audit,
             ObjectMapper mapper,
             BusinessClock clock,
-            @Value("${bms.notifications.mail.resend-webhook-secret:}") String secret) {
+            org.springframework.jdbc.core.simple.JdbcClient jdbc,
+            @Value("${bms.notifications.mail.resend-webhook-secret:}") String secret,
+            @Value("${bms.environment:}") String environment) {
         this.audit = audit;
         this.mapper = mapper;
         this.clock = clock;
+        this.jdbc = jdbc;
         this.secret = decodeSecret(secret);
+        this.environment = ResendEmailChannel.environmentTag(environment);
     }
 
     /** The key of a {@code whsec_<base64>} secret; empty when unset or not in that shape (the route is then off). */
@@ -127,13 +136,28 @@ class ResendWebhookController {
         String action = switch (type) {
             case "email.bounced" -> BOUNCED;
             case "email.complained" -> COMPLAINED;
+            case "email.suppressed" -> SUPPRESSED;
             default -> null;
         };
-        if (action == null || audit.recorded(ACTIONS, "svix_id", id)) {
+        if (action == null) {
             return ResponseEntity.noContent().build();
         }
         JsonNode data = event.path("data");
         Map<String, String> tags = tags(data.path("tags"));
+        // Staging and production share the Resend account, and Resend sends every event to every endpoint: an email of
+        // another environment (or with no environment tag) is acknowledged and not recorded here.
+        if (!environment.equals(tags.get("env"))) {
+            return ResponseEntity.noContent().build();
+        }
+        // One delivery at a time per message id, so a slow first call and Resend's retry never both write; only the
+        // last week is searched, since Resend stops retrying long before that.
+        jdbc.sql("SELECT pg_advisory_xact_lock(hashtext(?))")
+                .param("resend:" + id)
+                .query()
+                .singleRow();
+        if (audit.recorded(ACTIONS, "svix_id", id, clock.now().minus(Duration.ofDays(7)))) {
+            return ResponseEntity.noContent().build();
+        }
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("svix_id", id);
         details.put("outbox_id", uuidOrNull(tags.get("outbox_id")));
@@ -156,13 +180,15 @@ class ResendWebhookController {
         if (key.length == 0 || id == null || timestamp == null || signatures == null || id.length() > 200) {
             return false;
         }
-        long seconds;
         try {
-            seconds = Long.parseLong(timestamp.strip());
-        } catch (NumberFormatException e) {
-            return false;
-        }
-        if (Duration.between(Instant.ofEpochSecond(seconds), now).abs().compareTo(TOLERANCE) > 0) {
+            // A number out of Instant's range (a forged timestamp) is a refusal, never a 500.
+            if (Duration.between(Instant.ofEpochSecond(Long.parseLong(timestamp.strip())), now)
+                            .abs()
+                            .compareTo(TOLERANCE)
+                    > 0) {
+                return false;
+            }
+        } catch (NumberFormatException | java.time.DateTimeException | ArithmeticException e) {
             return false;
         }
         byte[] expected;

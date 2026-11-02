@@ -53,12 +53,53 @@ class ResendWebhookIT extends IntegrationTest {
     }
 
     static String event(String type, UUID outboxId, UUID tenantId) {
+        // The test profile sets no BMS_ENVIRONMENT, so this environment's tag is "local".
+        return event(type, outboxId, tenantId, "local");
+    }
+
+    static String event(String type, UUID outboxId, UUID tenantId, String env) {
         return """
                 {"type":"%s","created_at":"2026-11-02T10:00:00.000Z","data":{"email_id":"4ef9a417-02e9-4d39-ad75-9611e0fcc33c",
                 "from":"Test Shop <no-reply@example.test>","to":["Staff01@Bounce.Example.Test"],"subject":"Your BMS password was changed",
                 "bounce":{"type":"Permanent","subType":"General","message":"The address does not exist"},
-                "tags":{"outbox_id":"%s","tenant_id":"%s","template":"identity_password_changed"}}}
-                """.formatted(type, outboxId, tenantId);
+                "tags":{"outbox_id":"%s","tenant_id":"%s","template":"identity_password_changed","env":"%s"}}}
+                """.formatted(type, outboxId, tenantId, env);
+    }
+
+    @Test
+    void anotherEnvironmentsEventIsIgnoredASuppressionIsRecordedAndAForgedTimestampIsRefused() throws Exception {
+        // JUSTIFICATION-A3: items 1, 2 and 6 of the third #759 review, through HTTP.
+        UUID outboxId = UUID.randomUUID();
+        long now = Instant.now().getEpochSecond();
+        // Staging's bounce, signed for this endpoint (one Resend account sends every event to every endpoint).
+        for (String env : new String[] {"staging", ""}) {
+            String id = "msg_" + UUID.randomUUID().toString().replace("-", "");
+            String body = event("email.bounced", outboxId, UUID.randomUUID(), env);
+            assertThat(post(id, now, sign(KEY, id, now, body), body)
+                            .getStatusCode()
+                            .value())
+                    .isEqualTo(204);
+            assertThat(rows(id)).isZero();
+        }
+        // Resend dropped a later send to an address on its suppression list: recorded, so the operator sees it.
+        String suppressedId = "msg_" + UUID.randomUUID().toString().replace("-", "");
+        String suppressed = event("email.suppressed", outboxId, UUID.randomUUID());
+        assertThat(post(suppressedId, now, sign(KEY, suppressedId, now, suppressed), suppressed)
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(204);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT action FROM platform_audit_log WHERE data ->> 'svix_id' = ?")
+                        .param(suppressedId)
+                        .query(String.class)
+                        .single())
+                .isEqualTo("platform.email.suppressed");
+        // A timestamp out of Instant's range is a refusal (401), never a 500.
+        String forged = "msg_" + UUID.randomUUID().toString().replace("-", "");
+        assertThat(post(forged, Long.MAX_VALUE, sign(KEY, forged, Long.MAX_VALUE, suppressed), suppressed)
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(401);
     }
 
     long rows(String svixId) {

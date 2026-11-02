@@ -26,7 +26,12 @@ types, which can be a real person's.
    `resend`. Any other value stops the start, so a typo never leaves email quietly off. Both implement the outbox channel
    `email`; only the chosen one is ever on. The dispatcher keeps the senders that are on before it picks one by channel
    name, so the order of the two beans never decides where a row goes (`OutboxIT` sends a row through the dispatcher
-   with SMTP listed first and off). SMTP is unchanged and stays a full choice.
+   with SMTP listed first and off). SMTP is unchanged and stays a full choice. **Fallback:** with `resend` chosen and the
+   `BMS_SMTP_*` values still on the host, an email whose request could not reach Resend at all (`resend_unreachable`: no
+   connection, so Resend cannot have sent it) goes by SMTP at once. A timeout, a `5xx` or a `429` never falls back,
+   because Resend may already hold the email and SMTP has no idempotency key; those are retried at 1 and 5 minutes and
+   then show as failed on "Messages not sent" for "Send again". So a Resend outage that answers errors for longer than
+   about six minutes leaves its rows failed there; an outage that refuses connections goes by SMTP.
 2. **Resend over HTTP.** `ResendEmailChannel` sends one `POST /emails` to `BMS_RESEND_API_URL` (default
    `https://api.resend.com`; anything but `https`, apart from the loopback a test uses, stops the start, so the key never
    travels in clear) with `Authorization: Bearer <BMS_RESEND_API_KEY>`. The message is the one the SMTP sender builds:
@@ -57,7 +62,8 @@ types, which can be a real person's.
    set whatever `BMS_ENVIRONMENT` says (so an unset or misspelled environment never lifts it), both senders send only to
    recipients on the list: comma separated, each an address or `@domain` for every address at that domain, letter case
    ignored. Any other row is refused with `not_on_staging_allowlist` and never sent anywhere. An empty list on staging
-   sends nothing. A host that is not staging and has no list sends to anyone; production leaves the list unset.
+   sends nothing, and the API logs a warning saying so at every start; it does not refuse to start, which would take all
+   of staging down for an email setting. A host that is not staging and has no list sends to anyone; production leaves the list unset.
 6. **Production needs the chosen sender.** The ADR-059 startup guard follows the provider: with `resend` it needs
    `BMS_RESEND_API_KEY` and `BMS_MAIL_FROM` (an address), naming only the unset variables.
 7. **The wording of the invitation, activation and reset emails was reviewed and kept.** Staff invitations are not
@@ -70,17 +76,23 @@ types, which can be a real person's.
    `POST /api/v1/platform/webhooks/resend` (public, hidden from the OpenAPI document) for each event. The body must carry
    a Svix signature made with `BMS_RESEND_WEBHOOK_SECRET` over the message id, its timestamp and the exact body, and the
    timestamp must be within five minutes of now; anything else gets 401 and writes nothing, and with the secret unset the
-   route answers 404. `email.bounced` and `email.complained` become one `platform_audit_log` row each
-   (`platform.email.bounced`, `platform.email.complained`), holding the outbox row id and the business from the tags the
+   route answers 404. `email.bounced`, `email.complained` and `email.suppressed` (Resend did not send a later email
+   because the address is on its suppression list) become one `platform_audit_log` row each (`platform.email.bounced`,
+   `platform.email.complained`, `platform.email.suppressed`), holding the outbox row id and the business from the tags the
    sender puts on every email (`outbox_id`, `tenant_id`, `template`), the recipient's domain only (never the address), the
-   bounce type and the message id. A repeated message id writes nothing more. Other event types are acknowledged and
-   ignored. The operator's "Messages not sent" page lists the latest 100 (`GET /platform/outbox`, `bounces`).
+   bounce type and the message id. Every email also carries an `env` tag (the environment, as in the idempotency key):
+   staging and production share the Resend account and Resend sends every event to every endpoint, so an event whose
+   `env` is another environment's, or missing, is acknowledged and not recorded. A repeated message id writes nothing
+   more: the check takes a transaction advisory lock on the id and searches only the last seven days. Other event types
+   are acknowledged and ignored. The operator's "Messages not sent" page lists the latest 100 (`GET /platform/outbox`, `bounces`).
    **No migration and no new column:** the application role already inserts and reads that log. Writing the bounce on
    the outbox row itself would need one new `SECURITY DEFINER` function (the application role cannot update
    `notification_outbox`, and `notification_outbox_record_result` only touches rows still `pending`), which is a Flyway
    migration. The rule against a migration in this change came from the lead's brief for issue #333, not from this ADR.
    That function, marking the row `failed` with `last_error` `bounced` or `complained` and stopping further sends to an
-   address that complained, is issue #767; it reuses this route and its signature check.
+   address that complained, is issue #767; it reuses this route and its signature check. Until then BMS does not refuse a
+   send to such an address itself: Resend's own suppression list drops it, and the `email.suppressed` row above makes
+   that visible to the operator next to the email, so a reset that never arrived is never silent.
 
 ## Consequences
 

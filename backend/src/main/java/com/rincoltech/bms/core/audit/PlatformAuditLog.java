@@ -23,6 +23,9 @@ public interface PlatformAuditLog {
     /** The latest rows of these actions, newest first, at most {@code limit} (issue #333: the email bounces). */
     java.util.List<Entry> recent(java.util.Set<String> actions, int limit);
 
-    /** True when a row of one of these actions carries {@code value} under {@code key} in its data (a repeat delivery). */
-    boolean recorded(java.util.Set<String> actions, String key, String value);
+    /**
+     * True when a row of one of these actions since {@code since} carries {@code value} under {@code key} in its data (a
+     * repeat delivery); the time bound keeps the search to the recent part of a log that only grows.
+     */
+    boolean recorded(java.util.Set<String> actions, String key, String value, java.time.Instant since);
 }

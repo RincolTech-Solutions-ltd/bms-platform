@@ -77,7 +77,8 @@ class OutboxController {
     record Bounce(
             Instant occurredAt,
 
-            @Schema(description = "bounced or complained") String kind,
+            @Schema(description = "bounced, complained or suppressed (Resend did not send it: the address is blocked)")
+            String kind,
 
             @Schema(description = "The outbox row the email was, when Resend gave it back")
             UUID outboxId,
@@ -131,7 +132,11 @@ class OutboxController {
         List<Bounce> bounces = audit.recent(ResendWebhookController.ACTIONS, 100).stream()
                 .map(e -> new Bounce(
                         e.occurredAt(),
-                        e.action().equals(ResendWebhookController.BOUNCED) ? "bounced" : "complained",
+                        switch (e.action()) {
+                            case ResendWebhookController.BOUNCED -> "bounced";
+                            case ResendWebhookController.SUPPRESSED -> "suppressed";
+                            default -> "complained";
+                        },
                         e.data().get("outbox_id") == null
                                 ? null
                                 : UUID.fromString(e.data().get("outbox_id")),

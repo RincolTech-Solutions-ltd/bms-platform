@@ -7240,7 +7240,7 @@
             "type" : "string"
           },
           "kind" : {
-            "description" : "bounced or complained",
+            "description" : "bounced, complained or suppressed (Resend did not send it: the address is blocked)",
             "type" : "string"
           },
           "occurred_at" : {

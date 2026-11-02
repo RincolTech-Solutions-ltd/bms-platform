@@ -11231,7 +11231,7 @@ export interface components {
         OutboxBounce: {
             /** @description Resend's bounce type, for example Permanent or Transient; null for a complaint */
             bounce_type?: string;
-            /** @description bounced or complained */
+            /** @description bounced, complained or suppressed (Resend did not send it: the address is blocked) */
             kind?: string;
             /** Format: date-time */
             occurred_at?: string;

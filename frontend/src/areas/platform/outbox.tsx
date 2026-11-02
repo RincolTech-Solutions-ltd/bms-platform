@@ -15,6 +15,12 @@ const TEMPLATE_LABEL: Record<string, string> = {
   'feedback.new': 'New feedback',
 };
 
+// A suppressed email was never sent: the address bounced or complained before, so Resend blocks it.
+const BOUNCE_WORDS: Record<string, string> = {
+  complained: 'Marked as unwanted',
+  suppressed: 'Not sent, address blocked after an earlier bounce',
+};
+
 export function OutboxView({ status, busyId, onRetry }: { status: OutboxStatus; busyId: string | null; onRetry: (id: string) => void }) {
   const channels = status.enabled_channels ?? [];
   const counts = (status.counts ?? {}) as Record<string, number>;
@@ -82,7 +88,7 @@ export function OutboxView({ status, busyId, onRetry }: { status: OutboxStatus; 
           <tbody>
             {(status.bounces ?? []).map((b, i) => (
               <tr key={`${b.outbox_id ?? 'none'}-${b.occurred_at ?? i}-${b.kind}`}>
-                <td>{b.kind === 'complained' ? 'Marked as unwanted' : b.bounce_type === 'Permanent' ? 'Bounced, address does not work' : 'Bounced'}</td>
+                <td>{BOUNCE_WORDS[b.kind ?? ''] ?? (b.bounce_type === 'Permanent' ? 'Bounced, address does not work' : 'Bounced')}</td>
                 <td>{TEMPLATE_LABEL[(b.template_key ?? '').replace(/_/g, '.')] ?? b.template_key ?? 'Email'}</td>
                 <td>{b.recipient_domain}</td>
                 <td>{b.occurred_at?.slice(0, 16).replace('T', ' ')}</td>

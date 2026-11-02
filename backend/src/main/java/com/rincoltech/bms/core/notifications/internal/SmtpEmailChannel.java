@@ -84,6 +84,11 @@ class SmtpEmailChannel implements OutboxChannel {
         this.smtp = properties.smtp();
         this.mail = properties.mail();
         this.staging = NotificationProperties.isStaging(environment);
+        if (staging && !mail.hasAllowlist()) {
+            // Not a refusal to start: that would take all of staging down for an email setting. Every email is refused
+            // (not_on_staging_allowlist) until the list is set, and this line says so at every start.
+            log.warn("BMS_MAIL_ALLOWLIST is empty on staging: no email will be sent until it lists the testers");
+        }
         this.supportContact = properties.supportContact();
         this.templates = templates;
         this.hosts = hosts;

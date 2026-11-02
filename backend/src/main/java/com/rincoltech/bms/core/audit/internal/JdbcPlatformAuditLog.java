@@ -65,9 +65,13 @@ class JdbcPlatformAuditLog implements PlatformAuditLog {
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY, readOnly = true)
-    public boolean recorded(java.util.Set<String> actions, String key, String value) {
-        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM platform_audit_log WHERE action = ANY (?) AND data ->> ? = ?)")
-                .params(actions.toArray(String[]::new), key, value)
+    public boolean recorded(java.util.Set<String> actions, String key, String value, java.time.Instant since) {
+        // occurred_at first, so the time index (platform_audit_log_by_time) bounds the rows read.
+        return jdbc.sql("""
+                        SELECT EXISTS (SELECT 1 FROM platform_audit_log
+                                        WHERE occurred_at >= ? AND action = ANY (?) AND data ->> ? = ?)
+                        """)
+                .params(java.sql.Timestamp.from(since), actions.toArray(String[]::new), key, value)
                 .query(Boolean.class)
                 .single();
     }
