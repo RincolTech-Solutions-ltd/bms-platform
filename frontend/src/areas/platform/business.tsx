@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute, Link, useParams } from '@tanstack/react-router';
 import { type FormEvent, useMemo, useRef, useState } from 'react';
+import { BusyButton } from '../../app/ui/BusyButton';
 import {
   type Business,
   type BusinessDetail,
@@ -38,6 +39,7 @@ import {
   METHODS,
   methodLabel,
   MODULES,
+  businessTypeLabel,
   moduleLabel,
   type PaymentForm,
   paymentFormFor,
@@ -95,6 +97,12 @@ export function BusinessFacts({ detail }: { detail: BusinessDetail }) {
       <dd>
         {b.currency}, {b.timezone}
       </dd>
+      {businessTypeLabel(b) && (
+        <>
+          <dt>Kind of business</dt>
+          <dd data-testid="business-type">{businessTypeLabel(b)}</dd>
+        </>
+      )}
     </dl>
   );
 }
@@ -626,6 +634,7 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
               >
                 <div>
                   <label htmlFor="plan-pick">New plan</label>
+                  {/* empty: the operator console; the plans are seeded with the platform and a plan in use is never removed. */}
                   <select id="plan-pick" value={planPick} onChange={(e) => setPlanPick(e.target.value)}>
                     <option value="">Choose</option>
                     {activePlans.map((p) => (
@@ -846,10 +855,10 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                         </p>
                       )}
                       <div className="cluster">
-                        <button type="submit" className="btn-primary" disabled={busy}>
-                          {busy ? 'Working' : open.what === 'invite' ? 'Yes, make the link' : open.what === 'owner' ? 'Yes, make them the owner' : open.what === 'sign-in' ? 'Yes, make the link' : 'Yes, reset it'}
-                        </button>
-                        <button type="button" className="btn-ghost" onClick={close} disabled={busy}>
+                        <BusyButton type="submit" className="btn-primary" busy={busy}>
+                          {open.what === 'invite' ? 'Yes, make the link' : open.what === 'owner' ? 'Yes, make them the owner' : open.what === 'sign-in' ? 'Yes, make the link' : 'Yes, reset it'}
+                        </BusyButton>
+                        <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" onClick={close} disabled={busy}>
                           Cancel
                         </button>
                       </div>

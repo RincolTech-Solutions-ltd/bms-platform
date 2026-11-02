@@ -15,6 +15,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.io.IOException;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -71,7 +72,9 @@ class SettingsController {
             @Schema(description = "Brand colour #RRGGBB, or null for the platform look (FR-TEN-08)")
             String themePrimary,
 
-            @Schema(description = "True once the admin has saved a business name of their own")
+            @Schema(
+                    description =
+                            "True when the business has a name: the one given at onboarding or one the admin saved")
             boolean displayNameSet,
 
             @Schema(description = "True once the business set-up checklist has been dismissed")
@@ -98,6 +101,16 @@ class SettingsController {
             @Schema(description = "The business's time zone, in which a two-step deadline is a day's end (ADR-046)")
             String timezone,
 
+            @Schema(
+                    description =
+                            "The day the app became the business's register: as the Owner or the operator set it, else the business date of the first administrator sign-in, stored then; null before either. An existing loan is brought in only with a disbursement date before it (ADR-071)")
+            LocalDate goLiveDate,
+
+            @Schema(
+                    description =
+                            "The month the business's financial year ends in (1 to 12), or null for June, the end of the Uganda tax year; the retention of a closed business's money records counts from it (ADR-090)")
+            Integer financialYearEndMonth,
+
             int version) {}
 
     /** Omitted (or null) fields are unchanged (chapter 7 section 7.5). */
@@ -106,7 +119,9 @@ class SettingsController {
             @Size(min = 1, max = 100) String displayName,
             @Size(max = 500) String receiptFooter,
 
-            @Schema(description = "Action type to amount in minor units; below it no checker is needed (FR-APR-04)")
+            @Schema(
+                    description =
+                            "Action type to amount in minor units; below it no checker is needed (FR-APR-04). A change needs totp_code or password (ADR-091); the approval rules screen uses PUT /settings/approvals")
             Map<String, Long> approvalThresholdsMinor,
 
             @Min(1) @Max(90) Integer approvalValidityDays,
@@ -142,16 +157,28 @@ class SettingsController {
             Boolean setupDismissed,
             Boolean reportsEnabled,
 
+            @Schema(
+                    description =
+                            "The go-live date, today or earlier; only the Owner of the business sets it, 403 owner_only otherwise (ADR-071)")
+            LocalDate goLiveDate,
+
+            @Min(1)
+            @Max(12)
+            @Schema(
+                    description =
+                            "The month the financial year ends in, 1 to 12; only the Owner sets it, 403 owner_only otherwise (ADR-090)")
+            Integer financialYearEndMonth,
+
             @Size(max = 20)
             @Schema(
                     description =
-                            "Needed to turn two-step sign-in off or narrow it, from an administrator who has an authenticator: its current code (ADR-046). Never stored or logged")
+                            "Needed to turn two-step sign-in off, narrow it or put its date back (a later date, or a date for people required at once), or to change an approval amount, from an administrator who has an authenticator: its current code (ADR-046, ADR-091). Never stored or logged")
             String totpCode,
 
             @Size(max = 200)
             @Schema(
                     description =
-                            "Needed to turn two-step sign-in off or narrow it, from an administrator with no authenticator: their own current password (ADR-046). Never stored or logged")
+                            "Needed to turn two-step sign-in off, narrow it or put its date back (a later date, or a date for people required at once), or to change an approval amount, from an administrator with no authenticator: their own current password (ADR-046, ADR-091). Never stored or logged")
             String password) {}
 
     @GetMapping
@@ -170,12 +197,15 @@ class SettingsController {
     ResponseEntity<SettingsResponse> update(
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @Valid @RequestBody UpdateSettingsRequest request) {
-        // Relaxing the two-step rule needs the proof of the admin reset of a sign-in, before the transaction (ADR-046).
-        boolean relaxes = service.relaxesTwoStep(request);
-        if (relaxes) {
+        // Relaxing the two-step rule needs the proof of the admin reset of a sign-in, before the transaction (ADR-046),
+        // and so does changing an approval amount (ADR-091 decision 7). This read is unlocked: update() decides again
+        // on
+        // the locked row and refuses, 422 proof_required, a change that relaxes it when no proof was checked here.
+        boolean proves = service.relaxesTwoStep(request) || service.changesThresholds(request);
+        if (proves) {
             guard.requireProof(request.totpCode(), request.password());
         }
-        SettingsResponse settings = service.update(ifMatch, request, relaxes);
+        SettingsResponse settings = service.update(ifMatch, request, proves);
         return ResponseEntity.ok().eTag(String.valueOf(settings.version())).body(settings);
     }
 

@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
-import { businessToday, retail, type Expense, type ExpenseGroup } from '../../../api/retail';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { Segmented } from '../../../app/ui/Segmented';
+import { businessToday, isWaiting, retail, type Expense, type ExpenseGroup } from '../../../api/retail';
 import { useStaff } from '../context';
 import { DateField, RecordsByShop, Saved, WindowFields, useReadScope, useSavedFor, useWindow } from './cash-ui';
 import { MIN_EXPLANATION, activeCategories, itemsOf, needsExplanation, planExpense } from './expenses-state';
@@ -10,8 +12,11 @@ import { PartyPicker, useCashParties } from './party-picker';
 import { CASHBOOK_READ, holds, needsOf } from './permissions';
 import { ScreenLink } from './screen-link';
 import { useToast } from './toast';
-import { BranchRequired, Gate, Problem, money, useBranchName, useSingleBranch } from './ui';
+import { BranchRequired, Gate, Problem, WaitingForApproval, money, useBranchName, useSingleBranch } from './ui';
 import { showDate } from './transfers';
+import { ActionBar } from '../../../app/ui/ActionBar';
+import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
+import { addOn } from './screen-link';
 
 // Company expenses (FR-RET-24): shop, date, category, then an item of that category, an optional
 // beneficiary, the amount, and an explanation when the item needs one. A receipt photo is not offered yet:
@@ -19,7 +24,7 @@ import { showDate } from './transfers';
 
 interface ExpenseDraft { date: string; categoryId: string; itemId: string; partyId: string; amount: string; explanation: string }
 
-export function ExpenseForm({ branchId, onSaved }: { branchId: string; onSaved?: (saved: Expense) => void }) {
+export function ExpenseForm({ branchId, onSaved, onWaiting }: { branchId: string; onSaved?: (saved: Expense) => void; onWaiting?: (amountMinor: number) => void }) {
   const queryClient = useQueryClient();
   const { me } = useStaff();
   const { key, draft, setDraft, finish } = usePersistedDraft<ExpenseDraft>(`expense:${me.user_id ?? ''}:${branchId}`, {
@@ -31,12 +36,15 @@ export function ExpenseForm({ branchId, onSaved }: { branchId: string; onSaved?:
   const items = itemsOf(list, draft.categoryId);
   const explain = needsExplanation(list, draft.categoryId, draft.itemId);
   const plan = planExpense({ branchId, ...draft }, list);
+  // toast-exempt: success screen, the Saved panel replaces the form
   const save = useMutation({
     mutationFn: () => retail.createExpense(plan.request, key),
     onSuccess: (saved) => {
       finish();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
-      onSaved?.(saved);
+      // ADR-091: an expense worth the business's amount waits for an administrator and is not in the cash book until then.
+      if (isWaiting(saved)) onWaiting?.(saved.amount_minor ?? 0);
+      else onSaved?.(saved);
     },
   });
   const update = (patch: Partial<ExpenseDraft>) => setDraft((d) => ({ ...d, ...patch }));
@@ -45,7 +53,11 @@ export function ExpenseForm({ branchId, onSaved }: { branchId: string; onSaved?:
     <form onSubmit={(e) => { e.preventDefault(); if (!blocked) save.mutate(); }}>
       <DateField id="expense-date" label="Date" value={draft.date} onChange={(date) => update({ date })} />
 
-      {categories.isError && <Problem error={categories.error} />}
+      {showsEmptyChoice(categories, categories.data && activeCategories(list)) ? (
+        <EmptyChoice id="expense-category" label="Category" load={categories} text="No expense categories yet." ask="Ask the owner to add expense categories first."
+          add={addOn(me, 'expenseSetup', 'Add an expense category', '/staff/retail/expense-lists')} />
+      ) : (
+      <>
       <label htmlFor="expense-category">Category</label>
       <select id="expense-category" value={draft.categoryId} onChange={(e) => update({ categoryId: e.target.value, itemId: '', explanation: '' })}>
         <option value="">Choose a category</option>
@@ -54,6 +66,14 @@ export function ExpenseForm({ branchId, onSaved }: { branchId: string; onSaved?:
         ))}
       </select>
 
+      </>
+      )}
+
+      {draft.categoryId !== '' && items.length === 0 ? (
+        <EmptyChoice id="expense-item" label="Item" text="This category has no items yet." ask="Ask the owner to add its items first."
+          add={addOn(me, 'expenseSetup', 'Add an item to it', '/staff/retail/expense-lists')} />
+      ) : (
+      <>
       <label htmlFor="expense-item">Item</label>
       <select id="expense-item" value={draft.itemId} disabled={draft.categoryId === ''} onChange={(e) => update({ itemId: e.target.value, explanation: '' })}>
         <option value="">{draft.categoryId === '' ? 'Choose a category first' : 'Choose an item'}</option>
@@ -61,6 +81,8 @@ export function ExpenseForm({ branchId, onSaved }: { branchId: string; onSaved?:
           <option key={i.id} value={i.id}>{i.name}</option>
         ))}
       </select>
+      </>
+      )}
 
       {explain && (
         <>
@@ -70,7 +92,7 @@ export function ExpenseForm({ branchId, onSaved }: { branchId: string; onSaved?:
       )}
 
       <PartyPicker
-        id="expense-party" label="Beneficiary (optional)" parties={parties.data ?? []} kinds={['other']} value={draft.partyId}
+        id="expense-party" label="Beneficiary (optional)" parties={parties.data ?? []} loading={parties.data === undefined} load={parties} kinds={['other']} value={draft.partyId}
         onChange={(partyId) => update({ partyId })} noneLabel="No beneficiary" addLabel="Add a new beneficiary" optional
       />
 
@@ -79,9 +101,11 @@ export function ExpenseForm({ branchId, onSaved }: { branchId: string; onSaved?:
 
       {plan.problem && draft.categoryId !== '' && draft.amount.trim() !== '' && <p role="alert" className="rt-flag">{plan.problem}</p>}
       <Problem error={save.error} />
-      <button type="submit" className="rt-primary" disabled={blocked}>
-        {save.isPending ? 'Saving' : 'Save expense'}
-      </button>
+      <ActionBar>
+        <BusyButton busy={save.isPending} type="submit" className="rt-primary" notReady={blocked}>
+          Save expense
+        </BusyButton>
+      </ActionBar>
     </form>
   );
 }
@@ -126,6 +150,7 @@ export function ExpensesScreen() {
   const { branchId, branchName } = useSingleBranch();
   const [saved, setSaved] = useSavedFor<Expense>(branchId);
   const [round, setRound] = useState(0);
+  const [waiting, setWaiting] = useState<number | null>(null);
   const { show, toast } = useToast();
   return (
     <Gate screen="expenses" title="Expenses">
@@ -136,6 +161,11 @@ export function ExpensesScreen() {
       <div data-tour="expense-form">
       {branchId === null ? (
         <BranchRequired permissions={needsOf('expenses')} />
+      ) : waiting !== null ? (
+        <section aria-label="Expense sent for approval" className="stack">
+          <WaitingForApproval what={`The expense of ${money(waiting)} is not in the cash book yet.`} />
+          <button type="button" className="rt-primary" onClick={() => { setWaiting(null); setRound((n) => n + 1); }}>Record another expense</button>
+        </section>
       ) : saved ? (
         <Saved title="Expense recorded" again="Record another expense" onAgain={() => { setSaved(null); setRound((n) => n + 1); }}>
           <p>
@@ -145,13 +175,12 @@ export function ExpensesScreen() {
         </Saved>
       ) : (
         <>
-          <p className="branch-line">Branch: <strong>{branchName}</strong></p>
-          <ExpenseForm key={`${branchId}-${round}`} branchId={branchId} onSaved={(x) => { setSaved(x); show('Expense recorded.'); }} />
+          <ExpenseForm key={`${branchId}-${round}`} branchId={branchId} onSaved={setSaved} onWaiting={(amount) => { setWaiting(amount); show('Sent for approval.', 'info'); }} />
         </>
       )}
       </div>
       {toast}
-      {holds(me, CASHBOOK_READ) && <ExpenseRecords onVoided={show} />}
+      {holds(me, CASHBOOK_READ) && <ExpenseRecords onVoided={(text) => show(text, 'success')} />}
     </Gate>
   );
 }
@@ -199,15 +228,9 @@ export function ExpensesReportScreen() {
   });
   return (
     <Gate screen="expensesReport" title="Expenses report">
-      <p><ScreenLink screen="expenses" to="/staff/retail/expenses" tour="expenses-back-link">Record an expense</ScreenLink></p>
+      <p><ScreenLink screen="expenses" to="/staff/retail/expenses" tour="expenses-back-link" action>Record an expense</ScreenLink></p>
       <div data-tour="expenses-report-window"><WindowFields id="expenses-report" window={window} /></div>
-      <div className="cluster filters" role="group" aria-label="Group the expenses" data-tour="expenses-report-group">
-        {GROUPS.map((g) => (
-          <button key={g.value} type="button" className="btn-sm" aria-pressed={by === g.value} onClick={() => setBy(g.value)}>
-            {g.label}
-          </button>
-        ))}
-      </div>
+      <Segmented label="Group the expenses" tour="expenses-report-group" options={GROUPS} value={by} onChange={setBy} />
       {report.isError && <Problem error={report.error} />}
       {report.isPending && <p className="loading">Loading</p>}
       <div data-tour="expenses-report-rows">

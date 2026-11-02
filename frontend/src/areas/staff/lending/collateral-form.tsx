@@ -7,13 +7,18 @@ import { useCollateralApi, useMembersApi } from '../../../api/lending-context';
 import { useStaff } from '../context';
 import { newIdempotencyKey } from '../retail/idempotency';
 import { Problem } from '../retail/ui';
+import { sayDone } from '../retail/toast';
 import { blankCollateral, collateralProblems, createBody, CUSTODY, draftOf, OWNERS, referenceLabel, TYPES, updateBody, type CollateralDraft } from './collateral-state';
 import { CollateralGate } from './member-ui';
 import { Group, SaveBar, SelectField, TextField, useFormErrors } from './form-fields';
+import { FieldsNeededNote } from '../../../app/ui/Field';
 import { mayManageCollateral } from './member-permissions';
 import { MemberPicker } from './member-picker';
 import { PhotoQueueControl, usePhotoQueue, type Sender } from './photo-queue';
 import { SaveGuardNotice, useSaveGuard } from './save-guard';
+import { NoAccess } from '../../../app/ui/EmptyState';
+import { currencyOf, tenantCurrency } from './loan-state';
+import { exponentOf } from '../../../components/money';
 
 // Register or change a collateral item (issue #280, FR-COL-01, FR-COL-05): the member it belongs to (found by searching), the
 // kind, a description, the title, logbook or plate number, who owns it, what it is worth, whether the owner keeps it or we
@@ -24,6 +29,7 @@ import { SaveGuardNotice, useSaveGuard } from './save-guard';
 const ORDER = ['member_id', 'description', 'reference_no', 'owner_name', 'estimated_value_minor', 'storage_location'] as const;
 
 export function CollateralForm({ item: loaded, memberId }: { item?: CollateralItem; memberId?: string }) {
+  const { me } = useStaff();
   const api = useCollateralApi();
   const members = useMembersApi();
   const navigate = useNavigate();
@@ -37,10 +43,14 @@ export function CollateralForm({ item: loaded, memberId }: { item?: CollateralIt
   const [failure, setFailure] = useState<string | null>(null);
   const guard = useSaveGuard<CollateralItem>();
   const [stale, setStale] = useState(false);
-  const [saved, setSaved] = useState<CollateralItem | null>(null);
+  // The new item whose photos still need sending: its retry screen shows only when a photo failed, and then `done` (the toast)
+  // has not run, so success is said once.
+  const [photosFor, setPhotosFor] = useState<CollateralItem | null>(null);
   const photos = usePhotoQueue();
   const original = useMemo(() => (item ? draftOf(item) : undefined), [item]);
-  const problems = collateralProblems(draft, editing, original);
+  // The value is typed in the item's currency, or the business's for a new item (issue #289).
+  const currency = item ? currencyOf(item.currency) : tenantCurrency(me);
+  const problems = collateralProblems(draft, editing, original, currency);
   const form = useFormErrors(problems, 'cf');
   // A member given in the address (from the member's page) is read once to show the name.
   const given = useQuery({ queryKey: ['members', 'one', memberId], queryFn: () => members.get(memberId ?? ''), enabled: !!memberId && !editing });
@@ -49,6 +59,7 @@ export function CollateralForm({ item: loaded, memberId }: { item?: CollateralIt
 
   const sender = (id: string): Sender<unknown> => (p, o) => api.uploadDocument(id, p.blob, p.fileName, o);
   const done = (c: CollateralItem) => {
+    sayDone(item ? 'Collateral saved' : 'Collateral registered');
     void queryClient.invalidateQueries({ queryKey: ['collateral'] });
     void navigate({ to: '/staff/lending/collateral/$collateralId', params: { collateralId: c.id ?? '' } });
   };
@@ -71,8 +82,8 @@ export function CollateralForm({ item: loaded, memberId }: { item?: CollateralIt
         done(Object.keys(body).length === 0 ? item : await api.update(item.id ?? '', item.version ?? 0, body));
         return;
       }
-      const created = await api.create(createBody(draft), idempotencyKey);
-      setSaved(created);
+      const created = await api.create(createBody(draft, currency), idempotencyKey);
+      setPhotosFor(created);
       if (photos.waiting === 0) done(created);
       else if ((await photos.sendAll(sender(created.id ?? ''))).failed === 0) done(created);
     } catch (raw) {
@@ -88,19 +99,20 @@ export function CollateralForm({ item: loaded, memberId }: { item?: CollateralIt
     }
   }
 
-  if (saved) {
+  if (photosFor) {
     return (
       <section className="rt-card stack" aria-live="polite">
         <h2>The collateral is registered</h2>
         <p>A photo did not go through. Send it again, or open the item and add it later.</p>
-        <PhotoQueueControl id="cf-photos-retry" label="Photos of the item" queue={photos} sender={sender(saved.id ?? '')} max={5} />
-        <Link to="/staff/lending/collateral/$collateralId" params={{ collateralId: saved.id ?? '' }} className="btn btn-block rt-primary">Open the item</Link>
+        <PhotoQueueControl id="cf-photos-retry" label="Photos of the item" queue={photos} sender={sender(photosFor.id ?? '')} max={5} />
+        <Link to="/staff/lending/collateral/$collateralId" params={{ collateralId: photosFor.id ?? '' }} className="btn btn-block rt-primary">Open the item</Link>
       </section>
     );
   }
   const owned = draft.ownerRelationship !== 'self';
   return (
     <form className="mf" onSubmit={(e) => void submit(e)} noValidate aria-label={editing ? 'Change collateral' : 'Register collateral'} data-tour="collateral-form">
+      <FieldsNeededNote />
       {form.count(ORDER) > 0 && <p role="alert" className="alert alert-danger">Some entries need a look. They are marked below.</p>}
       {stale && (
         <div role="alert" className="alert alert-warning">
@@ -122,7 +134,7 @@ export function CollateralForm({ item: loaded, memberId }: { item?: CollateralIt
       <Group title="Who owns it and what it is worth" tourId="collateral-owner">
         <SelectField name="owner_relationship" label="Who owns it" form={form} value={draft.ownerRelationship} onChange={(v) => setDraft((d) => ({ ...d, ownerRelationship: v, ownerName: v === 'self' ? '' : d.ownerName }))} options={OWNERS} />
         {owned && <TextField name="owner_name" label="Owner's name" form={form} required={draft.ownerRelationship === 'other'} value={draft.ownerName} onChange={(v) => set('ownerName', v)} maxLength={200} />}
-        <TextField name="estimated_value_minor" label="What it is worth (UGX, your estimate)" form={form} inputMode="numeric" value={draft.value} onChange={(v) => set('value', v)}
+        <TextField name="estimated_value_minor" label={`What it is worth (${currency}, your estimate)`} form={form} inputMode={exponentOf(currency) ? 'decimal' : 'numeric'} value={draft.value} onChange={(v) => set('value', v)}
           hint="A valuation can be added later. Until then the loan cover uses this estimate." />
       </Group>
       {!editing && (
@@ -137,7 +149,7 @@ export function CollateralForm({ item: loaded, memberId }: { item?: CollateralIt
         </Group>
       )}
       <Problem error={failure ? new Error(failure) : null} />
-      <SaveBar label={editing ? 'Save changes' : 'Register collateral'} busyLabel="Saving" busy={busy} blocked={guard.blocked ? 'Wait for the check above before saving again.' : photos.busy ? 'Wait for the photo to be ready.' : undefined}
+      <SaveBar label={editing ? 'Save changes' : 'Register collateral'} busy={busy} blocked={guard.blocked ? 'Wait for the check above before saving again.' : photos.busy ? 'Wait for the photo to be ready.' : undefined}
         cancel={editing ? <Link to="/staff/lending/collateral/$collateralId" params={{ collateralId: item?.id ?? '' }} className="btn btn-ghost">Cancel</Link> : <Link to="/staff/lending/collateral" className="btn btn-ghost">Cancel</Link>} tourId="collateral-save" />
     </form>
   );
@@ -150,7 +162,7 @@ function NewCollateral() {
   const { memberId } = newRoute.useSearch();
   return (
     <CollateralGate title="Register collateral" tourId="collateral-new">
-      {mayManageCollateral(me) ? <CollateralForm memberId={memberId} /> : <p className="empty-state">You do not have access to register collateral.</p>}
+      {mayManageCollateral(me) ? <CollateralForm memberId={memberId} /> : <NoAccess what="register collateral" />}
     </CollateralGate>
   );
 }
@@ -167,7 +179,7 @@ function EditCollateral() {
     <CollateralGate title="Change collateral" tourId="collateral-edit">
       {detail.isPending && <p className="loading">Loading the item</p>}
       <Problem error={detail.error} />
-      {item && (mayManageCollateral(me, item.branch_id) ? <CollateralForm item={item} /> : <p className="empty-state">You do not have access to change this item.</p>)}
+      {item && (mayManageCollateral(me, item.branch_id) ? <CollateralForm item={item} /> : <NoAccess what="change this item" />)}
     </CollateralGate>
   );
 }

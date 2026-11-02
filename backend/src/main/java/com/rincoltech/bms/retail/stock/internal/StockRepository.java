@@ -1,10 +1,14 @@
 package com.rincoltech.bms.retail.stock.internal;
 
 import com.rincoltech.bms.kernel.Search;
+import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
+import com.rincoltech.bms.retail.stock.LowStockRule;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.internal.StockApi.Correction;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementCorrection;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementRow;
+import com.rincoltech.bms.retail.stock.internal.StockApi.OpenStocktake;
+import com.rincoltech.bms.retail.stock.internal.StockApi.StandardPack;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockRow;
 import com.rincoltech.bms.retail.stock.internal.StockApi.Stocktake;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StocktakeLine;
@@ -49,7 +53,7 @@ class StockRepository {
             UUID categoryId,
             boolean negativeOnly,
             boolean includeInactive,
-            Long atMostMilli,
+            String level,
             int afterRank,
             String afterCode,
             UUID afterId,
@@ -57,11 +61,15 @@ class StockRepository {
         Search.Match match = query == null ? null : query.match(SEARCH);
         StringBuilder sql = new StringBuilder("""
                 SELECT p.id, p.code, p.description, p.category_id, c.name AS category, u.name AS unit, p.sell_minor,
-                       p.cost_minor, coalesce(b.qty, 0) AS qty, coalesce(b.reserved_qty, 0) AS reserved_qty
+                       coalesce(b.avg_cost_minor, p.cost_minor) AS cost_minor, coalesce(b.qty, 0) AS qty,
+                       coalesce(b.reserved_qty, 0) AS reserved_qty, sp.pack_unit, sp.pack_factor, pl.level_units,
+                       pl.level_factors
                   FROM retail_products p
                   JOIN retail_units u ON u.id = p.unit_id
                   JOIN retail_categories c ON c.id = p.category_id
-                  LEFT JOIN retail_stock_balances b ON b.product_id = p.id AND b.branch_id = :branch
+                  LEFT JOIN retail_stock_balances b ON b.tenant_id = p.tenant_id AND b.product_id = p.id
+                       AND b.branch_id = :branch
+                """ + STANDARD_PACK + """
                  WHERE (p.active OR :includeInactive)
                 """);
         Map<String, Object> params = new LinkedHashMap<>();
@@ -79,9 +87,16 @@ class StockRepository {
         if (negativeOnly) {
             sql.append(" AND coalesce(b.qty, 0) < 0");
         }
-        if (atMostMilli != null) {
-            sql.append(" AND coalesce(b.qty, 0) <= :atMost");
-            params.put("atMost", java.math.BigDecimal.valueOf(atMostMilli, 3));
+        if (level != null) {
+            sql.append(" AND ")
+                    .append(LowStockRule.atBranchSql(
+                            level.equals(StockService.LEVEL_LOW),
+                            "p.tenant_id",
+                            "p.id",
+                            ":branch",
+                            "coalesce(b.qty, 0)",
+                            ":low"));
+            params.put("low", StockService.lowStock());
         }
         String statement;
         if (match == null) {
@@ -120,7 +135,8 @@ class StockRepository {
                                     rs.getLong("cost_minor"),
                                     rs.getBigDecimal("reserved_qty").signum() == 0
                                             ? null
-                                            : Quantities.format(rs.getBigDecimal("reserved_qty")));
+                                            : Quantities.format(rs.getBigDecimal("reserved_qty")),
+                                    standardPack(rs));
                         },
                         match != null))
                 .list();
@@ -136,12 +152,38 @@ class StockRepository {
             long sellMinor,
             long costMinor,
             BigDecimal total,
-            boolean negative) {}
+            boolean negative,
+            StandardPack standardPack) {}
+
+    /**
+     * Issue #650: the pack a product's stock is shown in, its standard pack, by the catalogue's one rule (ADR-103); the
+     * service leaves it out while the units capability is off.
+     */
+    static final String STANDARD_PACK = "  LEFT JOIN LATERAL (" + RetailCatalogue.standardPackSql("p")
+            + ") sp ON true\n" + "  LEFT JOIN LATERAL (" + RetailCatalogue.packLevelsSql("p") + ") pl ON true\n";
+
+    /** Issue #699 (ADR-107): with every level of the item's ladder, biggest first, for stock read at every level. */
+    private static StandardPack standardPack(ResultSet rs) throws SQLException {
+        String unit = rs.getString("pack_unit");
+        if (unit == null) {
+            return null;
+        }
+        java.sql.Array unitArray = rs.getArray("level_units");
+        String[] units = unitArray == null ? new String[0] : (String[]) unitArray.getArray();
+        java.sql.Array factorArray = rs.getArray("level_factors");
+        BigDecimal[] factors = factorArray == null ? new BigDecimal[0] : (BigDecimal[]) factorArray.getArray();
+        List<StockApi.PackLevel> levels = new java.util.ArrayList<>();
+        for (int i = 0; i < units.length; i++) {
+            levels.add(new StockApi.PackLevel(units[i], Quantities.format(factors[i])));
+        }
+        return new StandardPack(unit, Quantities.format(rs.getBigDecimal("pack_factor")), levels);
+    }
 
     /**
      * Products with their quantity summed over {@code branchIds} (the caller's scope; never empty),
      * ordered by code. An inactive product is left out unless {@code includeInactive} (issue #342); the stock-by-location
-     * report passes {@code keepHeldInactive} so it still shows an inactive product while it holds a quantity there.
+     * report passes {@code keepHeldInactive} so it still shows an inactive product while it holds a quantity there, or
+     * while some of it is on its way from or to one of those branches (issue #239).
      */
     List<Search.Ranked<ProductTotal>> allBranches(
             List<UUID> branchIds,
@@ -150,7 +192,7 @@ class StockRepository {
             boolean negativeOnly,
             boolean includeInactive,
             boolean keepHeldInactive,
-            Long atMostMilli,
+            String level,
             int afterRank,
             String afterCode,
             UUID afterId,
@@ -158,15 +200,23 @@ class StockRepository {
         Search.Match match = query == null ? null : query.match(SEARCH);
         StringBuilder sql = new StringBuilder("""
                 SELECT p.id, p.code, p.description, p.category_id, c.name AS category, u.name AS unit, p.sell_minor,
-                       p.cost_minor, coalesce(t.total, 0) AS total, coalesce(t.negs, 0) > 0 AS negative
+                       coalesce(round(t.held_value / nullif(t.held_qty, 0)), p.cost_minor)::bigint AS cost_minor,
+                       coalesce(t.total, 0) AS total, coalesce(t.negs, 0) > 0 AS negative, sp.pack_unit, sp.pack_factor,
+                       pl.level_units, pl.level_factors
                   FROM retail_products p
                   JOIN retail_units u ON u.id = p.unit_id
                   JOIN retail_categories c ON c.id = p.category_id
                   LEFT JOIN (SELECT product_id, sum(qty) AS total, count(*) FILTER (WHERE qty < 0) AS negs,
-                                    count(*) FILTER (WHERE qty <> 0) AS held
+                                    count(*) FILTER (WHERE qty <> 0) AS held,
+                                    sum(qty * avg_cost_minor) FILTER (WHERE qty > 0) AS held_value,
+                                    sum(qty) FILTER (WHERE qty > 0) AS held_qty
                                FROM retail_stock_balances WHERE branch_id IN (:branchIds)
                               GROUP BY product_id) t ON t.product_id = p.id
-                 WHERE (p.active OR :includeInactive OR (:keepHeld AND coalesce(t.held, 0) > 0))
+                """ + STANDARD_PACK + """
+                 WHERE (p.active OR :includeInactive OR (:keepHeld AND (coalesce(t.held, 0) > 0
+                        OR EXISTS (SELECT 1 FROM retail_transfer_lines tl JOIN retail_transfers tt ON tt.id = tl.transfer_id
+                                    WHERE tl.product_id = p.id AND tt.status = 'in_transit'
+                                      AND (tt.from_branch_id IN (:branchIds) OR tt.to_branch_id IN (:branchIds))))))
                 """);
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("branchIds", branchIds);
@@ -184,9 +234,17 @@ class StockRepository {
         if (negativeOnly) {
             sql.append(" AND coalesce(t.negs, 0) > 0");
         }
-        if (atMostMilli != null) {
-            sql.append(" AND coalesce(t.total, 0) <= :atMost");
-            params.put("atMost", java.math.BigDecimal.valueOf(atMostMilli, 3));
+        if (level != null) {
+            // Over the listed branches together: out on the summed balance, low at any one of them (issue #490).
+            sql.append(" AND ")
+                    .append(LowStockRule.overBranchesSql(
+                            level.equals(StockService.LEVEL_LOW),
+                            "p.tenant_id",
+                            "p.id",
+                            "lb.id IN (:branchIds)",
+                            "coalesce(t.total, 0)",
+                            ":low"));
+            params.put("low", StockService.lowStock());
         }
         String statement;
         if (match == null) {
@@ -220,7 +278,8 @@ class StockRepository {
                                 rs.getLong("sell_minor"),
                                 rs.getLong("cost_minor"),
                                 rs.getBigDecimal("total"),
-                                rs.getBoolean("negative")),
+                                rs.getBoolean("negative"),
+                                standardPack(rs)),
                         match != null))
                 .list();
     }
@@ -252,6 +311,27 @@ class StockRepository {
                 .query((rs, n) -> {
                     out.computeIfAbsent(rs.getObject("product_id", UUID.class), k -> new LinkedHashMap<>())
                             .put(rs.getObject("branch_id", UUID.class), rs.getBigDecimal("qty"));
+                    return null;
+                })
+                .list();
+        return out;
+    }
+
+    /** ADR-079: each branch's average cost per base unit of the products, by product and branch. */
+    Map<UUID, Map<UUID, Long>> averages(List<UUID> productIds, List<UUID> branchIds) {
+        Map<UUID, Map<UUID, Long>> out = new LinkedHashMap<>();
+        if (productIds.isEmpty()) {
+            return out;
+        }
+        jdbc.sql("""
+                        SELECT product_id, branch_id, avg_cost_minor FROM retail_stock_balances
+                         WHERE product_id IN (:products) AND branch_id IN (:branchIds)
+                        """)
+                .param("products", productIds)
+                .param("branchIds", branchIds)
+                .query((rs, n) -> {
+                    out.computeIfAbsent(rs.getObject("product_id", UUID.class), k -> new LinkedHashMap<>())
+                            .put(rs.getObject("branch_id", UUID.class), rs.getLong("avg_cost_minor"));
                     return null;
                 })
                 .list();
@@ -448,6 +528,38 @@ class StockRepository {
                                adjustment_entry_id = ?, updated_at = now(), version = version + 1
                          WHERE id = ?
                         """).params(by, entryId, id).update();
+    }
+
+    /** Issue #656: ends a draft count without writing stock. */
+    void markDiscarded(UUID id, UUID by) {
+        jdbc.sql("""
+                        UPDATE retail_stocktakes SET status = 'discarded', discarded_by = ?, discarded_at = now(),
+                               updated_at = now(), version = version + 1
+                         WHERE id = ? AND status = 'draft'
+                        """).params(by, id).update();
+    }
+
+    // JUSTIFICATION-A3: no query lists a branch's draft counts; the one read the issue needs.
+    /** Issue #728: the draft counts of a branch, newest first, at most 20. */
+    List<OpenStocktake> openStocktakes(UUID branchId) {
+        return jdbc.sql("""
+                        SELECT s.id, s.branch_id, s.created_at, s.created_by, s.note,
+                               (SELECT count(*) FROM retail_stocktake_lines l
+                                 WHERE l.tenant_id = s.tenant_id AND l.stocktake_id = s.id) AS lines
+                          FROM retail_stocktakes s
+                         WHERE s.branch_id = ? AND s.status = 'draft'
+                         ORDER BY s.created_at DESC, s.id
+                         LIMIT 20
+                        """)
+                .param(branchId)
+                .query((rs, n) -> new OpenStocktake(
+                        rs.getObject("id", UUID.class),
+                        rs.getObject("branch_id", UUID.class),
+                        instant(rs, "created_at"),
+                        rs.getObject("created_by", UUID.class),
+                        rs.getInt("lines"),
+                        rs.getString("note")))
+                .list();
     }
 
     Optional<Stocktake> stocktake(UUID id, boolean lock) {

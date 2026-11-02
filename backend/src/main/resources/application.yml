@@ -112,12 +112,20 @@ springdoc:
 
 bms:
   git-sha: ${BMS_GIT_SHA:}
+  # This release's commit time, UTC YYYYMMDDHHMMSS (the image's BMS_GIT_TIME): a BMS_MIN_CLIENT_BUILD later than it is ignored.
+  git-time: ${BMS_GIT_TIME:}
+  # The commit time (UTC YYYYMMDDHHMMSS) of the oldest web app build the API still serves; an older app gets 426 app_too_old and
+  # loads the new one (#576, ADR-088). Empty: every app is served. When to set it: docs/runbooks/deploy.md.
+  min-client-build: ${BMS_MIN_CLIENT_BUILD:}
   tenancy:
     # Chapter 7 section 7.2. Required outside the dev and test profiles; startup fails on a missing
     # or invalid value. Tenant hosts are one label under the zone, for example
     # {slug}-bms-staging.rincoltech.com; the platform console has its own host.
     tenant-host-pattern: ${BMS_TENANT_HOST_PATTERN:}
     platform-host: ${BMS_PLATFORM_HOST:}
+    # The host of the shops' short links, rincoltech.com/<short name> (ADR-108); the Cloudflare rule there sends them to
+    # the platform host, which forwards them to the shop.
+    short-link-host: ${BMS_SHORT_LINK_HOST:rincoltech.com}
     # Only the dev and test profiles may set this; startup fails otherwise (chapter 7 section 7.2).
     allow-tenant-header: ${ALLOW_TENANT_HEADER:false}
   auth:
@@ -161,6 +169,13 @@ bms:
     max-file-bytes: ${BMS_REPORTS_MAX_FILE_BYTES:67108864}
     # Where a run's spool files live while it runs; empty means a folder in the system temp directory.
     spool-dir: ${BMS_REPORTS_SPOOL_DIR:}
+  # Download my data (issue #334, ADR-074). Not secrets. A table longer than split-rows is cut into a sheet per year (and
+  # never past the row cap above); the weekly email attaches a workbook up to attach-max-bytes and links to a larger one.
+  # A run of the whole business may take up to timeout, longer than the runner's own limit above.
+  data-export:
+    timeout: PT30M
+    split-rows: ${BMS_DATA_EXPORT_SPLIT_ROWS:10000}
+    attach-max-bytes: ${BMS_DATA_EXPORT_ATTACH_MAX_BYTES:5242880}
   # Outbox senders (spec section 11, chapter 9 section 9.8). A sender whose values are unset is off:
   # its rows stay pending and nothing fails. SMTP is implicit TLS (465); 587 is blocked on the
   # staging host. Never logged.
@@ -219,6 +234,51 @@ bms:
     price-output-micro-per-million: ${BMS_AI_PRICE_OUTPUT_MICRO_PER_MILLION:0}
     price-currency: ${BMS_AI_PRICE_CURRENCY:USD}
     enabled-tenants: ${BMS_AI_ENABLED_TENANTS:}
+  # Ask BMS (issue #20, ADR-096, docs/runbooks/ask-bms.md): answers phrased from the help articles by a small model, providers
+  # tried cheapest first. Off for every business until BMS_HELP_ASK_TENANTS names it; with no key at all the matching
+  # articles are shown. Keys come from the host environment only. The provider allow-list (one host each for gemini, groq
+  # and deepseek) is a constant in AskProviders, not configuration; Claude is never used (startup refuses anything naming
+  # Anthropic or Claude). DeepSeek is skipped until both of its prices are set.
+  help:
+    ask:
+      enabled-tenants: ${BMS_HELP_ASK_TENANTS:}
+      daily-questions: ${BMS_HELP_ASK_DAILY_QUESTIONS:100}
+      user-hourly-questions: ${BMS_HELP_ASK_USER_HOURLY_QUESTIONS:30}
+      budget-seconds: ${BMS_HELP_ASK_BUDGET_SECONDS:10}
+      max-tokens: ${BMS_HELP_ASK_MAX_TOKENS:400}
+      cache-days: ${BMS_HELP_ASK_CACHE_DAYS:30}
+      cost-currency: ${BMS_HELP_ASK_COST_CURRENCY:USD}
+      deepseek-monthly-cost-micro: ${BMS_HELP_ASK_DEEPSEEK_MONTHLY_COST_MICRO:5000000}
+      gemini:
+        base-url: ${BMS_HELP_ASK_GEMINI_BASE_URL:https://generativelanguage.googleapis.com/v1beta/openai}
+        api-key: ${BMS_HELP_ASK_GEMINI_API_KEY:}
+        model: ${BMS_HELP_ASK_GEMINI_MODEL:gemini-3.5-flash-lite}
+        reasoning: ${BMS_HELP_ASK_GEMINI_REASONING:minimal}
+        price-input-micro-per-million: ${BMS_HELP_ASK_GEMINI_PRICE_INPUT_MICRO_PER_MILLION:0}
+        price-output-micro-per-million: ${BMS_HELP_ASK_GEMINI_PRICE_OUTPUT_MICRO_PER_MILLION:0}
+      groq:
+        base-url: ${BMS_HELP_ASK_GROQ_BASE_URL:https://api.groq.com/openai/v1}
+        api-key: ${BMS_HELP_ASK_GROQ_API_KEY:}
+        model: ${BMS_HELP_ASK_GROQ_MODEL:llama-3.1-8b-instant}
+        price-input-micro-per-million: ${BMS_HELP_ASK_GROQ_PRICE_INPUT_MICRO_PER_MILLION:0}
+        price-output-micro-per-million: ${BMS_HELP_ASK_GROQ_PRICE_OUTPUT_MICRO_PER_MILLION:0}
+      deepseek:
+        base-url: ${BMS_HELP_ASK_DEEPSEEK_BASE_URL:https://api.deepseek.com}
+        api-key: ${BMS_HELP_ASK_DEEPSEEK_API_KEY:}
+        model: ${BMS_HELP_ASK_DEEPSEEK_MODEL:deepseek-chat}
+        price-input-micro-per-million: ${BMS_HELP_ASK_DEEPSEEK_PRICE_INPUT_MICRO_PER_MILLION:0}
+        price-output-micro-per-million: ${BMS_HELP_ASK_DEEPSEEK_PRICE_OUTPUT_MICRO_PER_MILLION:0}
+    # The setup helper (ADR-102, issue #626): Ask BMS's providers, keys and prices above, its own switch and limits. A
+    # business's list goes to a provider only for the tenant ids named here; empty is off everywhere.
+    setup:
+      enabled-tenants: ${BMS_SETUP_AI_TENANTS:}
+      daily-drafts: ${BMS_SETUP_AI_DAILY_DRAFTS:30}
+      user-hourly-drafts: ${BMS_SETUP_AI_USER_HOURLY_DRAFTS:10}
+      budget-seconds: ${BMS_SETUP_AI_BUDGET_SECONDS:25}
+      max-tokens: ${BMS_SETUP_AI_MAX_TOKENS:8000}
+      max-text-chars: ${BMS_SETUP_AI_MAX_TEXT_CHARS:30000}
+      gemini-photo-model: ${BMS_SETUP_AI_GEMINI_PHOTO_MODEL:}
+      groq-photo-model: ${BMS_SETUP_AI_GROQ_PHOTO_MODEL:}
   # JUSTIFICATION-A3: the two new configuration groups (bms.pesapal, bms.payments) for slice #213 are new settings, not wrapped code.
   # Payment collections through Pesapal (ADR-035, spec 3.11). Nothing here collects by default: with no credentials the
   # gateway is off, and startup refuses any base URL that could reach the live provider from outside production (only the
@@ -249,6 +309,28 @@ bms:
     max-applications-per-hour: ${BMS_SIGNUP_MAX_APPLICATIONS_PER_HOUR:30}
     max-verification-emails-per-hour: ${BMS_SIGNUP_MAX_VERIFICATION_EMAILS_PER_HOUR:60}
     max-verification-emails-per-mailbox: 3
+  # The nightly arrears run (FR-ARR-01, lending.loan-arrears, every quarter hour). On by default; the integration
+  # tests switch it off so that a tick never charges penalties on a test's loans, and drive the run themselves.
+  lending:
+    arrears-job-enabled: ${BMS_LENDING_ARREARS_JOB_ENABLED:true}
+  # Subscription billing (issue #480, ADR-075): the reminders and the overdue move, every quarter hour. Nothing is ever
+  # suspended by it. On by default; the integration tests switch it off and call the run themselves. The SMS reminder to
+  # the Owner goes only when sms-enabled is true (and then through the SMS channel's own checks). The receipt's issuer
+  # details are environment values, never repository content.
+  platform:
+    billing-job-enabled: ${BMS_PLATFORM_BILLING_JOB_ENABLED:true}
+    billing:
+      sms-enabled: ${BMS_PLATFORM_BILLING_SMS_ENABLED:false}
+      issuer-name: ${BMS_PLATFORM_BILLING_ISSUER_NAME:Rincol Tech}
+      issuer-address: ${BMS_PLATFORM_BILLING_ISSUER_ADDRESS:}
+      issuer-contact: ${BMS_PLATFORM_BILLING_ISSUER_CONTACT:}
+      issuer-tax-id: ${BMS_PLATFORM_BILLING_ISSUER_TAX_ID:}
+    # Closing a business (issue #571, ADR-090, owner decision D46): the Owner's request waits this many days before the
+    # operator may remove it, and the money records a removed business kept are deleted this many years after the end of the
+    # financial year of its removal, by the daily job (off in the integration tests, which call it themselves).
+    closure-cooling-off-days: ${BMS_PLATFORM_CLOSURE_COOLING_OFF_DAYS:30}
+    closed-retention-years: ${BMS_CLOSED_RETENTION_YEARS:5}
+    closed-retention-job-enabled: ${BMS_PLATFORM_CLOSED_RETENTION_JOB_ENABLED:true}
 
 # Background jobs on PostgreSQL (ADR-008). BMS_SCHEDULER_ENABLED=false turns polling off in an
 # instance that should only serve HTTP, if a separate worker instance is ever split out.

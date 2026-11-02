@@ -509,6 +509,7 @@ class OutboxIT extends IntegrationTest {
                 Map.entry("note", "Test note."),
                 Map.entry("expires_at", "9 Oct 2026 08:00 UTC"),
                 Map.entry("sign_in_url", "https://test-bms-staging.rincoltech.test/sign-in"),
+                Map.entry("short_link", "rincoltech.test/testshop"),
                 Map.entry("reference", "A-TEST0001"),
                 Map.entry("modules", "retail"),
                 Map.entry("portal_url", "https://localhost/platform/applications/x"),
@@ -527,6 +528,9 @@ class OutboxIT extends IntegrationTest {
                 Map.entry("next_due_date", "6 Nov 2026"),
                 Map.entry("maturity_date", "6 Oct 2027"),
                 Map.entry("voucher_no", "VC-HQ-000001"),
+                Map.entry("due_date", "6 Nov 2026"),
+                Map.entry("arrears", "120,000"),
+                Map.entry("dpd", "7"),
                 Map.entry("text", "Test digest line."),
                 Map.entry("day", "2026-10-06"),
                 Map.entry("scope", "platform"),
@@ -536,6 +540,20 @@ class OutboxIT extends IntegrationTest {
                 Map.entry("change", "saved"),
                 Map.entry("who", "Test Administrator"),
                 Map.entry("when", "18 Oct 2026 10:00 UTC"),
+                Map.entry("sender_name", "Test Staff 01"),
+                Map.entry("kind", "idea"),
+                Map.entry("page", "/staff/retail/sale"),
+                Map.entry("message", "Test feedback message."),
+                // Subscription billing (issue #480).
+                Map.entry("owner_name", "Test Owner 01"),
+                Map.entry("amount_line", "The price is UGX 10,000 a month, or UGX 110,000 for a year."),
+                Map.entry("how_to_pay", "Test: pay to the test account."),
+                Map.entry("period", "1 Nov 2026 to 30 Nov 2026"),
+                Map.entry("remove_after", "24 November 2026"),
+                Map.entry("as_of", "12 Oct 2026"),
+                Map.entry("expires_on", "11 Nov 2026"),
+                Map.entry("module", "Shop"),
+                Map.entry("decision", "approved: Shop is switched on now"),
                 Map.entry("links", "Test Shop\nhttps://test-bms-staging.rincoltech.test/sign-in"));
         for (String channel : List.of("email", "telegram", "sms")) {
             for (String key : OutboxTemplates.keys(channel)) {

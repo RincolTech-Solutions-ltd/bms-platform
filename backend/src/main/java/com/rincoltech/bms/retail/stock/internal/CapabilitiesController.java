@@ -1,7 +1,7 @@
 package com.rincoltech.bms.retail.stock.internal;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.rincoltech.bms.core.tenancy.TenantSettings;
+import com.rincoltech.bms.core.approvals.Approvals;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import com.rincoltech.bms.kernel.Versions;
 import com.rincoltech.bms.retail.stock.RetailCapabilities;
@@ -32,18 +32,22 @@ import org.springframework.web.bind.annotation.RestController;
 class CapabilitiesController {
 
     private final RetailCapabilities capabilities;
-    private final TransferService transfers;
-    private final TenantSettings settings;
+    private final Approvals approvals;
 
-    CapabilitiesController(RetailCapabilities capabilities, TransferService transfers, TenantSettings settings) {
+    CapabilitiesController(RetailCapabilities capabilities, Approvals approvals) {
         this.capabilities = capabilities;
-        this.transfers = transfers;
-        this.settings = settings;
+        this.approvals = approvals;
     }
 
     @Schema(name = "RetailCapabilities")
     record CapabilitiesResponse(
-            @Schema(allowableValues = {"shop", "trade"}) String profile,
+            @Schema(
+                    allowableValues = {"shops", "stores_and_shops", "wholesale", "wholesale_and_shops"},
+                    description =
+                            "What kind of business this is (issue #424, ADR-092): a preset of the switches, never a mode;"
+                                    + " shops (the default), stores_and_shops, wholesale or wholesale_and_shops")
+            String profile,
+
             boolean branchRoles,
             boolean units,
             boolean priceLists,
@@ -74,8 +78,9 @@ class CapabilitiesController {
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(
                     description =
-                            "Read only: the tenant's approval threshold for customer returns (action retail_sale_return),"
-                                    + " present only when one is set; while it is absent a return needs no second administrator")
+                            "Read only: the amount from which a customer return needs a second administrator (action"
+                                    + " retail_sale_return, ADR-091), present only while returns ask for approval (0: every return);"
+                                    + " while it is absent a return needs no second administrator")
             Long returnsApprovalThresholdMinor,
 
             @Schema(
@@ -93,7 +98,14 @@ class CapabilitiesController {
     /** Omitted fields are unchanged; choosing a profile first writes its preset of the flags. */
     @Schema(name = "UpdateRetailCapabilitiesRequest")
     record UpdateRequest(
-            @Schema(allowableValues = {"shop", "trade"}) String profile,
+            @Schema(
+                    allowableValues = {"shops", "stores_and_shops", "wholesale", "wholesale_and_shops"},
+                    description =
+                            "The kind of business: sets units, price_lists, customer_accounts, documents, purchasing and"
+                                    + " transfer_receipt to its preset (branch_roles and returns are left as they are);"
+                                    + " a flag sent in the same change wins")
+            String profile,
+
             Boolean branchRoles,
             Boolean units,
             Boolean priceLists,
@@ -121,7 +133,7 @@ class CapabilitiesController {
     @PutMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
     @RequiresPermission("core.settings.manage")
     @Operation(
-            summary = "Switch retail capabilities or choose the shop or trade profile; audited with old and new values",
+            summary = "Switch retail capabilities or choose the kind of business; audited with old and new values",
             operationId = "updateRetailCapabilities")
     ResponseEntity<CapabilitiesResponse> update(
             @RequestHeader(name = "If-Match", required = false) String ifMatch, @Valid @RequestBody UpdateRequest r) {
@@ -139,7 +151,8 @@ class CapabilitiesController {
         put(proposed, RetailCapabilities.CREDIT_RECOGNITION, r.creditSaleRecognition());
         put(proposed, "slow_mover_months", r.slowMoverMonths());
         put(proposed, "slow_mover_min_sold", r.slowMoverMinSold());
-        transfers.guardSwitchOff(proposed);
+        // Switching transfer_receipt off while stock is on its way is refused inside the change
+        // (TransferService.check).
         CapabilitiesResponse saved = response(capabilities.change(proposed, expected));
         return ResponseEntity.ok().eTag(String.valueOf(capabilities.version())).body(saved);
     }
@@ -151,7 +164,7 @@ class CapabilitiesController {
     }
 
     private CapabilitiesResponse response(Map<String, Object> g) {
-        long threshold = settings.approvalThresholdMinor("retail_sale_return");
+        Approvals.Rule returns = approvals.rule("retail_sale_return");
         return new CapabilitiesResponse(
                 (String) g.get("profile"),
                 flag(g, "branch_roles"),
@@ -164,7 +177,7 @@ class CapabilitiesController {
                 flag(g, "returns"),
                 g.get(RetailCapabilities.CREDIT_RECOGNITION) instanceof String c ? c : RetailCapabilities.ON_SALE,
                 g.get("credit_recognition_effective_from") instanceof String d ? LocalDate.parse(d) : null,
-                threshold > 0 ? threshold : null,
+                returns.on() ? returns.thresholdMinor() : null,
                 g.get("slow_mover_months") instanceof Number m ? m.intValue() : 4,
                 g.get("slow_mover_min_sold") instanceof Number n ? n.intValue() : 0);
     }

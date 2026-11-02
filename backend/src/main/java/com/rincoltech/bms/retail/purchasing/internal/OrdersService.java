@@ -6,7 +6,6 @@ import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.operations.Idempotency;
 import com.rincoltech.bms.core.operations.Idempotency.Outcome;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
-import com.rincoltech.bms.core.tenancy.TenantSettings;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.BusinessClock;
@@ -32,6 +31,7 @@ import com.rincoltech.bms.retail.purchasing.internal.PurchaseLines.Planned;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.RetailBranchContext;
 import com.rincoltech.bms.retail.stock.RetailCapabilities;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -69,7 +69,6 @@ class OrdersService {
     private final RetailBranchContext branches;
     private final Idempotency idempotency;
     private final Approvals approvals;
-    private final TenantSettings settings;
     private final RetailCapabilities capabilities;
     private final CurrentTenant tenant;
     private final BusinessClock clock;
@@ -83,7 +82,6 @@ class OrdersService {
             RetailBranchContext branches,
             Idempotency idempotency,
             Approvals approvals,
-            TenantSettings settings,
             RetailCapabilities capabilities,
             CurrentTenant tenant,
             BusinessClock clock,
@@ -95,7 +93,6 @@ class OrdersService {
         this.branches = branches;
         this.idempotency = idempotency;
         this.approvals = approvals;
-        this.settings = settings;
         this.capabilities = capabilities;
         this.tenant = tenant;
         this.clock = clock;
@@ -205,10 +202,23 @@ class OrdersService {
                     "Order not a draft",
                     "This order has been sent or cancelled already.");
         }
-        long threshold = settings.approvalThresholdMinor(PurchaseOrderAction.TYPE);
-        if (threshold > 0 && o.totalMinor() >= threshold) {
-            Approvals.Outcome a = approvals.request(new ActionRequest(
-                    PurchaseOrderAction.TYPE, o.branchId(), id, o.version(), o.totalMinor(), o.currency(), Map.of()));
+        Approvals.Rule rule = approvals.rule(PurchaseOrderAction.TYPE);
+        if (rule.asks(o.totalMinor())) {
+            // ADR-094: refused before a checker is asked; a direct send is checked once, in markSent.
+            sending.requireActiveItems(o);
+            Approvals.Outcome a = approvals.request(
+                    new ActionRequest(
+                            PurchaseOrderAction.TYPE,
+                            o.branchId(),
+                            id,
+                            o.version(),
+                            o.totalMinor(),
+                            o.currency(),
+                            Map.of()),
+                    rule);
+            if (a.executed()) {
+                return new OrderOutcome(true, null, view(repo.find(id, false).orElseThrow(), true));
+            }
             return new OrderOutcome(false, a.approvalId(), null);
         }
         sending.markSent(o, CurrentPrincipal.require().userId(), null, null);
@@ -260,8 +270,13 @@ class OrdersService {
         List<LineRow> all = repo.lines(orderId);
         boolean any = all.stream().anyMatch(l -> l.receivedQty().signum() > 0);
         boolean full =
-                !all.isEmpty() && all.stream().allMatch(l -> l.receivedQty().compareTo(l.qty()) >= 0);
+                !all.isEmpty() && all.stream().allMatch(l -> l.receivedUnitQty().compareTo(orderedInUnit(l)) >= 0);
         repo.setStatus(orderId, full ? "received" : any ? "partly_received" : "sent");
+    }
+
+    /** D23, issue #554: what a line ordered, in its own unit (packs for a pack line), as receipts are counted. */
+    static BigDecimal orderedInUnit(LineRow l) {
+        return l.unitQty() != null ? l.unitQty() : l.qty();
     }
 
     // ---- Reads -----------------------------------------------------------------------------
@@ -440,6 +455,8 @@ class OrdersService {
                 Quantities.format(l.receivedQty()),
                 l.receivedMinor(),
                 billed ? Quantities.format(l.billedQty()) : null,
-                billed ? l.billedMinor() : null);
+                billed ? l.billedMinor() : null,
+                l.unitId() == null ? null : Quantities.format(l.receivedUnitQty()),
+                l.baseUnit());
     }
 }

@@ -1,18 +1,26 @@
 package com.rincoltech.bms.retail.stock.internal;
 
+import com.rincoltech.bms.core.approvals.ApprovalWaiting;
 import com.rincoltech.bms.core.operations.Idempotency.Outcome;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import com.rincoltech.bms.retail.stock.internal.StockApi.AllBranchesPage;
 import com.rincoltech.bms.retail.stock.internal.StockApi.Correction;
 import com.rincoltech.bms.retail.stock.internal.StockApi.CorrectionRequest;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementPage;
+import com.rincoltech.bms.retail.stock.internal.StockApi.OpenStocktake;
+import com.rincoltech.bms.retail.stock.internal.StockApi.QuickAdd;
+import com.rincoltech.bms.retail.stock.internal.StockApi.QuickAddRequest;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockPage;
 import com.rincoltech.bms.retail.stock.internal.StockApi.Stocktake;
+import com.rincoltech.bms.retail.stock.internal.StockApi.StocktakeCommitRequest;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StocktakeRequest;
 import com.rincoltech.bms.retail.stock.internal.StockSummaryApi.Summary;
 import com.rincoltech.bms.retail.stock.internal.UsageApi.UsageReport;
 import com.rincoltech.bms.retail.stock.internal.UsageApi.UsageRequest;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.net.URI;
@@ -41,16 +49,19 @@ class StockController {
     private final UsageService usage;
     private final StockCorrectionService corrections;
     private final StockSummaryService summaries;
+    private final QuickAddService quickAdd;
 
     StockController(
             StockService service,
             UsageService usage,
             StockCorrectionService corrections,
-            StockSummaryService summaries) {
+            StockSummaryService summaries,
+            QuickAddService quickAdd) {
         this.service = service;
         this.usage = usage;
         this.corrections = corrections;
         this.summaries = summaries;
+        this.quickAdd = quickAdd;
     }
 
     @GetMapping("/stock")
@@ -137,15 +148,33 @@ class StockController {
             summary =
                     "Correct the quantity of an item at a branch with a reason; an adjustment that is not shrinkage (issue #351); M",
             operationId = "correctRetailStockQuantity")
-    ResponseEntity<Correction> correct(
+    @ApiResponse(
+            responseCode = "201",
+            description = "The correction, made",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = Correction.class)))
+    @ApiResponse(
+            responseCode = "202",
+            description =
+                    "Stock corrections ask for approval and the value of the difference reaches the amount (ADR-091): the"
+                            + " correction waits for an administrator and the quantity is unchanged",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApprovalWaiting.class)))
+    ResponseEntity<?> correct(
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CorrectionRequest request) {
-        Outcome<Correction> outcome = corrections.correct(idempotencyKey, request);
-        ResponseEntity.BodyBuilder response = ResponseEntity.status(HttpStatus.CREATED);
+        Outcome<StockCorrectionService.CorrectionOutcome> outcome = corrections.correct(idempotencyKey, request);
+        StockCorrectionService.CorrectionOutcome body = outcome.body();
+        ResponseEntity.BodyBuilder response =
+                ResponseEntity.status(body.waiting() != null ? HttpStatus.ACCEPTED : HttpStatus.CREATED);
         if (outcome.replayed()) {
             response.header("Idempotent-Replayed", "true");
         }
-        return response.body(outcome.body());
+        return body.waiting() != null ? response.body(body.waiting()) : response.body(body.correction());
     }
 
     @PostMapping("/usage")
@@ -164,6 +193,31 @@ class StockController {
         return response.body(outcome.body());
     }
 
+    @PostMapping("/quick-add")
+    @RequiresPermission("retail.catalogue.manage")
+    @Operation(
+            summary =
+                    "Quick add: a new item (or one already in the list) and stock added at a branch as opening stock, in one"
+                            + " transaction; the stock also needs retail.stocktake.commit there (issue #632, ADR-101); M",
+            operationId = "quickAddRetailItem")
+    @ApiResponse(
+            responseCode = "201",
+            description = "The item, and the stock added when some was",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = QuickAdd.class)))
+    ResponseEntity<QuickAdd> quickAdd(
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody QuickAddRequest request) {
+        Outcome<QuickAdd> outcome = quickAdd.add(idempotencyKey, request);
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(HttpStatus.CREATED);
+        if (outcome.replayed()) {
+            response.header("Idempotent-Replayed", "true");
+        }
+        return response.body(outcome.body());
+    }
+
     @PostMapping("/stocktakes")
     @RequiresPermission("retail.stocktake.commit")
     @Operation(
@@ -173,6 +227,16 @@ class StockController {
         Stocktake s = service.createStocktake(request);
         return ResponseEntity.created(URI.create("/api/v1/retail/stocktakes/" + s.id()))
                 .body(s);
+    }
+
+    @GetMapping("/stocktakes/unfinished")
+    @RequiresPermission("retail.stocktake.commit")
+    @Operation(
+            summary = "The counts started at a branch and neither saved nor thrown away, newest first, at most 20"
+                    + " (issue #728); needs retail.stocktake.commit at that branch",
+            operationId = "listRetailUnfinishedStocktakes")
+    List<OpenStocktake> unfinished(@RequestParam(name = "branch_id", required = false) UUID branchId) {
+        return service.openStocktakes(branchId);
     }
 
     @GetMapping("/stocktakes/{stocktake_id}")
@@ -185,9 +249,22 @@ class StockController {
     @PostMapping("/stocktakes/{stocktake_id}/commit")
     @RequiresPermission("retail.stocktake.commit")
     @Operation(
-            summary = "Write the adjustment movements and post the variance (FR-RET-08)",
+            summary = "Write the adjustment movements and post the variance (FR-RET-08); every big drop must be"
+                    + " acknowledged (issue #636)",
             operationId = "commitRetailStocktake")
-    Stocktake commit(@PathVariable("stocktake_id") UUID id) {
-        return service.commit(id);
+    Stocktake commit(
+            @PathVariable("stocktake_id") UUID id,
+            @Valid @RequestBody(required = false) StocktakeCommitRequest request) {
+        return service.commit(
+                id, request == null || request.acknowledged() == null ? List.of() : request.acknowledged());
+    }
+
+    @PostMapping("/stocktakes/{stocktake_id}/discard")
+    @RequiresPermission("retail.stocktake.commit")
+    @Operation(
+            summary = "End a draft count without writing stock; idempotent, a committed count is refused (issue #656)",
+            operationId = "discardRetailStocktake")
+    Stocktake discard(@PathVariable("stocktake_id") UUID id) {
+        return service.discard(id);
     }
 }

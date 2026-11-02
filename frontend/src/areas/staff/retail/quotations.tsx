@@ -13,7 +13,10 @@ import { showDate } from './maths';
 import { UNITS, capabilityOn, holdsAt } from './permissions';
 import { draftTotal, newLine, withUnit } from './sale-state';
 import { SaleLineCard } from './sale';
+import { CustomerPicker } from './customer-picker';
 import { Gate, Note, Problem, ProductPicker, money, useBranchName, useBranchView, useSingleBranch } from './ui';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { Hint } from '../../../app/ui/Hint';
 
 // Quotations (documents capability, ADR-033, issue #197): prices offered to a buyer until a date. A quotation reserves no stock and
 // posts nothing; it is numbered and its PDF stored like every document, and it can be made into a sale (and its invoice) once,
@@ -56,9 +59,9 @@ export function ConvertPanel({ form, hasTerms, busy, onChange, onConvert }: { fo
         <input type="checkbox" checked={form.invoice} onChange={(e) => onChange({ ...form, invoice: e.target.checked })} /> Also make the invoice
       </label>
       {problem && <p role="alert" className="rt-flag">{problem}</p>}
-      <button type="button" className="rt-primary" disabled={problem !== null || busy} onClick={onConvert}>
-        {busy ? 'Making the sale' : 'Make the sale'}
-      </button>
+      <BusyButton type="button" className="rt-primary" busy={busy === true} notReady={problem !== null} onClick={onConvert}>
+        Make the sale
+      </BusyButton>
     </fieldset>
   );
 }
@@ -72,7 +75,7 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
   const [form, setForm] = useState<ConvertForm>(blankConvert());
   const [key, setKey] = useState(newIdempotencyKey);
   const [reason, setReason] = useState('');
-  const [done, setDone] = useState<Converted | null>(null);
+  const [converted, setConverted] = useState<Converted | null>(null);
   const customers = useQuery({ queryKey: ['retail', 'customers'], queryFn: () => retail.listCustomers(), enabled: panel === 'convert' && q.customer_id !== undefined });
   const hasTerms = (customers.data ?? []).find((c) => c.id === q.customer_id)?.terms_days !== undefined;
   const refresh = () => {
@@ -82,13 +85,14 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
   const convert = useMutation({
     mutationFn: () => retail.convertQuotation(q.id ?? '', buildConvertRequest(form), key),
     onSuccess: (r) => {
-      setDone(r);
+      setConverted(r);
       setPanel(null);
       setKey(newIdempotencyKey());
       void queryClient.invalidateQueries({ queryKey: ['retail', 'products'] });
       void queryClient.invalidateQueries({ queryKey: ['retail', 'stock'] });
       refresh();
     },
+    meta: { success: (r: Converted) => (r.sale_no ? `Sale ${r.sale_no} made` : 'Sale made') },
   });
   const cancel = useMutation({
     mutationFn: () => retail.cancelQuotation(q.id ?? '', reason),
@@ -96,6 +100,7 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
       setPanel(null);
       refresh();
     },
+    meta: { success: 'Quotation cancelled' },
   });
   const open = q.status === 'open' && !q.expired;
   // A store never sells (ADR-048), so a quotation made there cannot be turned into a sale.
@@ -123,24 +128,23 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
         {open && canSell && <button type="button" className="btn-sm" onClick={() => setPanel(panel === 'convert' ? null : 'convert')}>Make it a sale</button>}
         {open && <button type="button" className="btn-sm" onClick={() => setPanel(panel === 'cancel' ? null : 'cancel')}>Cancel</button>}
       </div>
-      {q.expired && <p className="hint">The last day has passed, so it cannot be made into a sale. Make a new quotation.</p>}
+      {q.expired && <Hint full>The last day has passed, so it cannot be made into a sale. Make a new quotation.</Hint>}
       {panel === 'convert' && <ConvertPanel form={form} hasTerms={hasTerms} busy={convert.isPending} onChange={setForm} onConvert={() => convert.mutate()} />}
       {panel === 'cancel' && (
         <fieldset>
           <legend>Cancel this quotation</legend>
           <label htmlFor={`cancel-${q.id}`}>Why? (it stays on record)</label>
           <input id={`cancel-${q.id}`} value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} />
-          <button type="button" disabled={reason.trim() === '' || cancel.isPending} onClick={() => cancel.mutate()}>
-            {cancel.isPending ? 'Cancelling' : 'Cancel the quotation'}
-          </button>
+          <BusyButton type="button" busy={cancel.isPending} disabled={reason.trim() === ''} onClick={() => cancel.mutate()}>
+            Cancel the quotation
+          </BusyButton>
         </fieldset>
       )}
       <Problem error={convert.error ?? cancel.error} />
-      {done && (
-        <div role="status" className="alert alert-success" data-testid="converted">
-          <p>Sale {done.sale_no} made.</p>
-          {done.note && <p className="hint" data-testid="convert-note">{done.note}</p>}
-          {done.invoice && <button type="button" className="btn-sm" onClick={() => void openDocumentPdf(done.invoice ?? {})}>Open invoice {done.invoice.number}</button>}
+      {converted && (converted.note || converted.invoice) && (
+        <div data-testid="converted">
+          {converted.note && <p className="hint" data-testid="convert-note">{converted.note}</p>}
+          {converted.invoice && <button type="button" className="btn-sm" onClick={() => void openDocumentPdf(converted.invoice ?? {})}>Open invoice {converted.invoice.number}</button>}
         </div>
       )}
     </li>
@@ -160,6 +164,7 @@ export function QuotationForm({ branchId, onSaved }: { branchId: string; onSaved
       finish();
       onSaved(q);
     },
+    meta: { success: 'Quotation saved' },
   });
   const update = (patch: Partial<QuotationDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const setLine = (i: number, patch: { qty?: string; price?: string }) => setDraft((d) => ({ ...d, lines: d.lines.map((l, n) => (n === i ? { ...l, ...patch } : l)) }));
@@ -174,11 +179,8 @@ export function QuotationForm({ branchId, onSaved }: { branchId: string; onSaved
     >
       <fieldset data-tour="quotation-buyer">
         <legend>Who is it for?</legend>
-        <label htmlFor="quote-customer">Credit buyer</label>
-        <select id="quote-customer" value={draft.customerId} onChange={(e) => update({ customerId: e.target.value, buyerName: '', buyerContact: '' })}>
-          <option value="">Not on the list: type their name</option>
-          {(customers.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        <CustomerPicker id="quote-customer" label="Customer from the list" placeholder="Not on the list: type their name" customers={customers}
+          value={draft.customerId} onChange={(customerId) => update({ customerId, buyerName: '', buyerContact: '' })} quietWhenEmpty />
         {draft.customerId === '' && (
           <>
             <label htmlFor="quote-name">Buyer name</label>
@@ -197,7 +199,7 @@ export function QuotationForm({ branchId, onSaved }: { branchId: string; onSaved
         <ProductPicker id="quote-search" showPrice showStock={false} onAdd={add} />
       </div>
       <h2>Items</h2>
-      {draft.lines.length === 0 && <EmptyState art="noSales" title="No items yet.">Search above and tap Add.</EmptyState>}
+      {draft.lines.length === 0 && <EmptyState title="No items yet.">Type an item above and tap it in the list.</EmptyState>}
       {draft.lines.map((l, i) => (
         <SaleLineCard
           key={`${l.product.id}-${i}`}
@@ -211,12 +213,13 @@ export function QuotationForm({ branchId, onSaved }: { branchId: string; onSaved
         />
       ))}
       <p className="rt-total" aria-live="polite">Total {money(draftTotal(draft.lines))}</p>
-      <p className="hint">Stock is not reserved. A price list, if the buyer has one, prices the items as it would on a sale.</p>
+      <Hint full>Stock is not reserved. A price list, if the buyer has one, prices the items as it would on a sale.</Hint>
       {problem && draft.lines.length > 0 && <Note>{problem}</Note>}
       <Problem error={save.error} />
-      <button type="submit" className="rt-primary" disabled={problem !== null || save.isPending} data-tour="quotation-save">
-        {save.isPending ? 'Saving' : 'Save quotation'}
-      </button>
+      <BusyButton type="submit" className="rt-primary" busy={save.isPending} notReady={problem !== null} data-tour="quotation-save">
+        Save quotation
+      </BusyButton>
+
       {draft.lines.length > 0 && !save.isPending && <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this quotation</button>}
     </form>
   );
@@ -225,7 +228,7 @@ export function QuotationForm({ branchId, onSaved }: { branchId: string; onSaved
 type Status = 'all' | 'open' | 'converted' | 'cancelled';
 
 export function QuotationsPage() {
-  const { all, branchId, branchName } = useBranchView();
+  const { all, branchId } = useBranchView();
   const nameOf = useBranchName();
   const single = useSingleBranch();
   const { me } = useStaff();
@@ -247,8 +250,7 @@ export function QuotationsPage() {
   const fetching = list.isPlaceholderData || (list.isFetching && !list.isFetchingNextPage && list.fetchStatus !== 'idle');
   return (
     <Gate screen="quotations" title="Quotations" wide>
-      <p className="branch-line">Branch: <strong>{all ? 'All branches' : branchName}</strong></p>
-      <p className="hint" data-tour="quotations-help">A quotation offers prices until a date. It reserves no stock and posts nothing. When the buyer says yes, make it a sale here.</p>
+      <Hint tour="quotations-help">A quotation offers prices until a date. It reserves no stock and posts nothing. When the buyer says yes, make it a sale here.</Hint>
       {atStore && <p className="hint">{single.branchName} is a store, and a store does not sell or quote. Choose a shop to make a quotation.</p>}
       {!making && !atStore && (
         <button type="button" className="rt-primary" disabled={single.branchId === null} data-tour="quotation-new" onClick={() => setMaking(true)}>

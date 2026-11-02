@@ -1,11 +1,16 @@
-import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { QueryClientContext, keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { useRef, useState, type ReactNode } from 'react';
-import { retail } from '../../../api/retail';
+import { useContext, useRef, useState, type ReactNode } from 'react';
+import { retail, type Supplier } from '../../../api/retail';
+import { AddByName, EmptyChoice } from '../../../app/ui/EmptyChoice';
+import { PickerWithAdd } from '../../../app/ui/PickerWithAdd';
+import { useOptionalStaff } from '../context';
+import { canUse } from './permissions';
 import { branchLabel } from '../../../auth/branch';
 import { MIN_REASON, reasonOf, reversalKeys } from './account-state';
 import { newIdempotencyKey } from './idempotency';
 import { Problem } from './ui';
+import { BusyButton } from '../../../app/ui/BusyButton';
 
 // Small pieces the purchasing screens share (ADR-033, issue #198): a cursor-paged list, the "why" panel every void, cancel and
 // reversal asks for, and the supplier and branch fields. They hold no purchasing rules; those are in purchasing-state.ts and
@@ -78,7 +83,8 @@ export function ReasonPanel({ openLabel, question, hint, confirmLabel, busy, err
       {hint && <p className="hint">{hint}</p>}
       <Problem error={error} />
       <p className="cluster">
-        <button type="submit" disabled={reasonOf(reason) === null || busy}>{confirmLabel}</button>
+        <BusyButton type="submit" busy={busy === true} disabled={reasonOf(reason) === null}>{confirmLabel}</BusyButton>
+
         <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>Back</button>
       </p>
     </form>
@@ -93,22 +99,53 @@ export function useSuppliers(chosenId = ''): SupplierOption[] {
   return (suppliers.data ?? []).filter((s) => s.active !== false || s.id === chosenId);
 }
 
-export function SupplierField({ id, label = 'Supplier', value, suppliers, disabled, onChange }: {
+/** The red asterisk after the label of a required field, hidden from a screen reader (which hears aria-required). */
+export const Star = () => <span className="field-star" aria-hidden="true"> *</span>;
+
+export function SupplierField({ id, label = 'Supplier', value, suppliers, disabled, required = false, onChange }: {
   id: string;
   label?: string;
   value: string;
   suppliers: SupplierOption[];
   disabled?: boolean;
+  required?: boolean;
   onChange: (supplierId: string) => void;
 }) {
+  const me = useOptionalStaff()?.me;
+  // The form's own read of the suppliers, looked up in the cache without a second request: the empty line waits until it has
+  // answered. A form drawn without a query client (a test) never shows it.
+  const queryClient = useContext(QueryClientContext);
+  const read = queryClient?.getQueryState(['retail', 'suppliers']);
+  const failed = read?.status === 'error';
+  // Issue #688: the list ends with "+ Add a supplier", added in a sheet over the order or invoice and chosen.
   return (
-    <>
-      <label htmlFor={id}>{label}</label>
-      <select id={id} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
-        <option value="">Choose a supplier</option>
-        {suppliers.map((s) => <option key={s.id} value={s.id}>{s.active === false ? `${s.name} (switched off)` : s.name}</option>)}
-      </select>
-    </>
+    <PickerWithAdd
+      id={id}
+      label={label}
+      thing="supplier"
+      placeholder="Choose a supplier"
+      options={suppliers.map((s) => ({ value: s.id ?? '', label: s.active === false ? `${s.name ?? ''} (switched off)` : s.name ?? '' }))}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      canAdd={!disabled && !!me && canUse(me, 'suppliers')}
+      required={required}
+      loading={!failed && read?.data === undefined}
+      load={{ isError: failed, refetch: () => queryClient?.refetchQueries({ queryKey: ['retail', 'suppliers'] }) }}
+      empty="No suppliers yet."
+      ask="Ask the owner to add your suppliers first."
+      form={(done, cancel) => (
+        <AddByName id={`${id}-add`} onCancel={cancel} add={{
+          label: 'Add a supplier', name: 'Name of the new supplier', send: 'Add supplier', maxLength: 120,
+          create: (name) => retail.createSupplier({ name }),
+          onAdded: (supplier: Supplier) => {
+            queryClient?.setQueryData<Supplier[]>(['retail', 'suppliers'], (was) => [...(was ?? []).filter((s) => s.id !== supplier.id), supplier]);
+            void queryClient?.invalidateQueries({ queryKey: ['retail', 'suppliers'] });
+            done({ value: supplier.id ?? '', label: supplier.name ?? '' });
+          },
+        }} />
+      )}
+    />
   );
 }
 
@@ -122,18 +159,20 @@ export function SupplierOwed({ id, name, payable }: { id?: string; name?: string
 }
 
 /** Which branch or store a form is for. With only one to choose from it is shown, not asked. */
-export function BranchField({ id, label, value, branches, onChange }: {
+export function BranchField({ id, label, value, branches, required = false, onChange }: {
   id: string;
   label: string;
   value: string;
   branches: { id?: string; name?: string; code?: string }[];
+  required?: boolean;
   onChange: (branchId: string) => void;
 }) {
   if (branches.length === 1) return <p><strong>{label}:</strong> {branchLabel(branches[0])}</p>;
+  if (branches.length === 0) return <EmptyChoice id={id} label={label} required={required} text="No branch or store you may use here." ask="Ask the owner to give you one first." />;
   return (
     <>
-      <label htmlFor={id}>{label}</label>
-      <select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
+      <label htmlFor={id}>{label}{required && <Star />}</label>
+      <select id={id} value={value} aria-required={required || undefined} onChange={(e) => onChange(e.target.value)}>
         <option value="">Choose a branch or store</option>
         {branches.map((b) => <option key={b.id} value={b.id}>{branchLabel(b)}</option>)}
       </select>

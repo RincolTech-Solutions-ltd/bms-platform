@@ -13,7 +13,9 @@ import { PAYABLE_MANAGE, canUse, holdsAt } from './permissions';
 import { varianceWords } from './payables-state';
 import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys, useCursorList } from './purchasing-ui';
 import { showDate } from './transfers';
-import { Gate, Problem, Success, money, useBranchName, useToast } from './ui';
+import { Gate, Problem, money, useBranchName, useToast } from './ui';
+import { NoAccess } from '../../../app/ui/EmptyState';
+import { Hint } from '../../../app/ui/Hint';
 
 // Supplier invoices (the purchasing capability, ADR-033, issue #198), which the supplier's paper calls a bill: the list, found by
 // our number, the supplier's invoice number or the supplier's name, and one invoice with the goods it bills, what was paid and what
@@ -45,9 +47,9 @@ export function SupplierBillsPage() {
   const list = useCursorList(['retail', 'supplier-bills', query, openOnly], (cursor, signal) => retail.listSupplierBills({ query, openOnly, cursor, signal }));
   return (
     <Gate screen="supplierBills" title="Supplier invoices">
-      <p className="hint" data-tour="bills-help">
+      <Hint tour="bills-help">
         A supplier invoice says what a supplier wants to be paid for goods you received. Record it against the goods, and the page checks it against what you ordered and received.
-      </p>
+      </Hint>
       <p className="cluster">
         <Link className="btn rt-primary" to="/staff/retail/supplier-bills/new" data-tour="bills-new">New supplier invoice</Link>
         <Link className="btn-sm" to="/staff/retail/supplier-payments">Supplier payments</Link>
@@ -150,7 +152,6 @@ export function SupplierBillPage() {
   const { show, toast } = useToast();
   const nameOf = useBranchName();
   const keys = useActionKeys();
-  const [message, setMessage] = useState<string | null>(null);
   const allowed = canUse(me, 'supplierBills');
   const bill = useQuery({ queryKey: ['retail', 'supplier-bill', billId], queryFn: () => retail.getSupplierBill(billId), enabled: allowed });
   useCrumbLabel(bill.data?.bill_no);
@@ -165,9 +166,7 @@ export function SupplierBillPage() {
     mutationFn: (reason: string) => retail.voidSupplierBill(billId, reason, keys.keyFor(billId, reason)),
     onSuccess: (b) => {
       keys.done(billId);
-      const text = `Voided ${b.bill_no ?? 'the invoice'}. The goods can be put on another invoice.`;
-      setMessage(text);
-      show(text);
+      show(`Voided ${b.bill_no ?? 'the invoice'}. The goods can be put on another invoice.`, 'success');
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
   });
@@ -175,7 +174,7 @@ export function SupplierBillPage() {
     return (
       <main className="rt">
         <h1>Supplier invoice</h1>
-        <p className="empty-state">You do not have access to this page.</p>
+        <NoAccess />
       </main>
     );
   }
@@ -183,10 +182,8 @@ export function SupplierBillPage() {
   return (
     <main className="rt rt-wide">
       <h1>{b?.bill_no ?? 'Supplier invoice'}</h1>
-      <p><Link to="/staff/retail/supplier-bills">Back to supplier invoices</Link></p>
       {bill.isPending && <SkeletonList label="Loading the invoice" />}
       <Problem error={bill.error} />
-      {message && <Success>{message}</Success>}
       {b && <SupplierBillView bill={b} nameOf={nameOf} landedCostId={landed.data?.id} payable={canUse(me, 'supplierPayments')} />}
       {b && b.status === 'posted' && holdsAt(me, PAYABLE_MANAGE, b.branch_id) && (
         <div className="stack">

@@ -1,7 +1,10 @@
 import { Fragment, useId, useRef, useState, type ReactNode } from 'react';
-import { milliOf, qtyString, showQty } from './maths';
+import { milliOf, qtyString } from './maths';
+import { quantityIn } from './units-state';
+import { Hint } from '../../../app/ui/Hint';
 
-// Item lists grouped by category as expandable sections (stock, catalogue items, the product pickers).
+// Item lists grouped by category as expandable sections (the stock list and the catalogue items; the item pickers
+// list matches only while something is typed and are never grouped, issue #534).
 // The grouping works on the items the screen already holds, after the server filtered them: it never
 // asks for more, so on a paged list it groups the loaded page and the hint says so. The pure part
 // (groupByCategory, defaultOpen, sameUnitQty, the stored choice) is tested on its own; the hook keeps
@@ -43,7 +46,7 @@ export function sameUnitQty(rows: { qty?: string; unit?: string }[]): string | n
   const unit = rows[0]?.unit;
   if (!unit || rows.some((r) => r.unit !== unit)) return null;
   const total = rows.reduce((sum, r) => sum + milliOf(r.qty ?? '0'), 0);
-  return `${showQty(qtyString(total))} ${unit}`;
+  return quantityIn(qtyString(total), unit);
 }
 
 const storeKey = (screen: string) => `bms.groupByCategory.${screen}`;
@@ -139,7 +142,7 @@ export function GroupControls<T>({ state, paged = false }: { state: CategoryGrou
           </>
         )}
       </div>
-      {state.grouped && paged && <p className="hint">Grouped within the items loaded so far. Show more items loads the rest.</p>}
+      {state.grouped && paged && <Hint>Grouped within the items loaded so far. Show more items loads the rest.</Hint>}
     </>
   );
 }
@@ -178,10 +181,10 @@ export function GroupedBodies<T>({ state, colSpan, renderRow }: { state: Categor
 }
 
 /** The groups of a card list: a heading with its button and the group's list. */
-export function GroupedCards<T>({ state, renderItem, scroll }: { state: CategoryGroups<T>; renderItem: (item: T) => ReactNode; scroll?: boolean }) {
+export function GroupedCards<T>({ state, renderItem }: { state: CategoryGroups<T>; renderItem: (item: T) => ReactNode }) {
   const base = useId();
   return (
-    <div className={scroll ? 'cat-scroll' : undefined}>
+    <div>
       {state.groups.map((g, i) => {
         const open = state.isOpen(g.key);
         const id = `${base}-${i}`;

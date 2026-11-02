@@ -27,6 +27,7 @@ import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.UpdateSupplie
 import com.rincoltech.bms.retail.purchasing.internal.PurchasingApi.VoidPurchaseRequest;
 import com.rincoltech.bms.retail.purchasing.internal.PurchasingRepository.NewLine;
 import com.rincoltech.bms.retail.stock.Quantities;
+import com.rincoltech.bms.retail.stock.QuickAddPurchase;
 import com.rincoltech.bms.retail.stock.RetailBooks;
 import com.rincoltech.bms.retail.stock.RetailBooks.Leg;
 import com.rincoltech.bms.retail.stock.RetailBooks.Posting;
@@ -35,10 +36,12 @@ import com.rincoltech.bms.retail.stock.RetailCapabilities;
 import com.rincoltech.bms.retail.stock.StockLedger;
 import com.rincoltech.bms.retail.stock.StockLedger.Movement;
 import com.rincoltech.bms.retail.stock.StockLedger.Recorded;
+import jakarta.validation.Validator;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -57,7 +60,7 @@ import org.springframework.transaction.annotation.Transactional;
  * and their history rows, its movements and its journal entries commit together or not at all.
  */
 @Service
-class PurchasingService {
+class PurchasingService implements QuickAddPurchase {
 
     static final String PURCHASE = "retail.purchase";
     static final String PERMISSION = "retail.purchase.create";
@@ -76,6 +79,7 @@ class PurchasingService {
     private final BusinessClock clock;
     private final AuditLog audit;
     private final RetailCapabilities capabilities;
+    private final Validator validator;
 
     PurchasingService(
             PurchasingRepository repo,
@@ -88,7 +92,8 @@ class PurchasingService {
             CurrentTenant tenant,
             BusinessClock clock,
             AuditLog audit,
-            RetailCapabilities capabilities) {
+            RetailCapabilities capabilities,
+            Validator validator) {
         this.repo = repo;
         this.catalogue = catalogue;
         this.stock = stock;
@@ -100,11 +105,13 @@ class PurchasingService {
         this.clock = clock;
         this.audit = audit;
         this.capabilities = capabilities;
+        this.validator = validator;
     }
 
     static String accountFor(String method) {
         return switch (method) {
             case "cash" -> "cash_on_hand";
+            case "mobile_money" -> "mobile_money";
             case "bank" -> "bank";
             case "credit" -> "trade_creditors";
             default -> throw new IllegalArgumentException(method);
@@ -181,6 +188,88 @@ class PurchasingService {
     }
 
     /**
+     * Issue #646: goods just bought, added through Quick add and paid from cash or mobile money, are one restock of one line,
+     * dated today, recorded by the same steps as Buy stock, in Quick add's transaction (its key covers a retry).
+     */
+    @Override
+    @Transactional
+    public Bought buy(UUID branchId, UUID productId, BigDecimal qty, long costMinor, String method, Level level) {
+        // Issue #695: bought by the carton, the whole cartons are one pack line at the carton price, as Buy stock
+        // records it, and only the pieces left over are at the piece cost, so the cash that leaves is what the
+        // cartons cost. A level that is no active pack of the item is refused, never booked at the piece cost; so is a
+        // pack only for selling (issue #724), as Buy stock refuses it.
+        BigDecimal factor = level == null
+                ? null
+                : catalogue
+                        .packUnit(productId, level.unitId())
+                        .filter(RetailCatalogue.PackUnit::active)
+                        .filter(RetailCatalogue.PackUnit::buys)
+                        .map(RetailCatalogue.PackUnit::factor)
+                        .orElseThrow(() -> ApiException.validation(List.of(new FieldProblem(
+                                "paid_level_unit_id",
+                                "unknown_pack_unit",
+                                "The item has no such package. Choose how you bought it again."))));
+        BigDecimal whole = factor == null ? BigDecimal.ZERO : qty.divideToIntegralValue(factor);
+        BigDecimal loose = qty.subtract(whole.multiply(factor == null ? BigDecimal.ZERO : factor));
+        List<PurchaseLineRequest> lines = new ArrayList<>();
+        if (loose.signum() > 0 || whole.signum() == 0) {
+            lines.add(new PurchaseLineRequest(
+                    productId, costMinor, null, List.of(new BranchQty(branchId, loose)), null, null, null));
+        }
+        if (whole.signum() > 0) {
+            lines.add(new PurchaseLineRequest(
+                    productId,
+                    level.costMinor(),
+                    null,
+                    List.of(new BranchQty(branchId, whole)),
+                    level.unitId(),
+                    null,
+                    null));
+        }
+        PurchaseRequest r =
+                new PurchaseRequest(null, clock.today(tenant.profile().timezone()), method, "Quick add", lines);
+        // The bounds Buy stock's route checks before record(), so nothing Buy stock refuses is taken here; named by the
+        // Quick add field the value came from.
+        // Review of #716: a problem on the package line is named by the package fields it came from.
+        String packLine = "lines[" + (lines.size() - 1) + "]";
+        List<FieldProblem> problems = validator.validate(r).stream()
+                .map(v -> {
+                    String path = v.getPropertyPath().toString();
+                    String field = whole.signum() > 0 && path.startsWith(packLine + ".")
+                            ? packLineField(path)
+                            : quickAddField(path);
+                    return new FieldProblem(field, "invalid", v.getMessage());
+                })
+                .toList();
+        if (!problems.isEmpty()) {
+            throw ApiException.validation(problems);
+        }
+        Purchase made = record(r);
+        return new Bought(made.id(), made.purchaseNo(), made.totalMinor());
+    }
+
+    private static String quickAddField(String path) {
+        if (path.endsWith(".qty")) {
+            return "qty";
+        }
+        if (path.endsWith(".costMinor")) {
+            return "cost_minor";
+        }
+        return path.equals("paymentMethod") ? "paid_from" : path;
+    }
+
+    /**
+     * Issue #724: the package line's own fields. Its count is the whole packages in qty, its price is
+     * paid_level_cost_minor, and anything else on it is the package bought in.
+     */
+    private static String packLineField(String path) {
+        if (path.endsWith(".qty")) {
+            return "qty";
+        }
+        return path.endsWith(".costMinor") ? "paid_level_cost_minor" : "paid_level_unit_id";
+    }
+
+    /**
      * FR-RET-06: lines are applied in request order, so when two lines name one product the later
      * line's prices are the product's prices afterwards (latest restock wins), each change with its
      * own history row. Products are locked in id order first.
@@ -218,7 +307,7 @@ class PurchasingService {
                         new FieldProblem(
                                 field + ".product_id",
                                 "product_inactive",
-                                "This item is inactive, so it cannot be restocked. Switch it on again on the Items screen first."));
+                                "This item is inactive, so it cannot be bought. Switch it on again on the Items screen first."));
                 continue;
             }
             if (l.unitId() != null && !l.unitId().equals(p.unitId())) {
@@ -230,12 +319,21 @@ class PurchasingService {
                     continue;
                 }
                 PackUnit pack = catalogue.packUnit(p.id(), l.unitId()).orElse(null);
-                if (pack == null || !pack.active()) {
+                // Issue #624: a pack only for selling (a half carton) is never bought.
+                if (pack == null || !pack.active() || !pack.buys()) {
                     problems.add(new FieldProblem(
                             field + ".unit_id", "unknown_pack_unit", "This item is not bought in that unit."));
                     continue;
                 }
                 packs.put(i, pack);
+            }
+            if (l.packSize() != null) {
+                // D23, issue #554: how many each pack held in this delivery, kept on the line only.
+                PackUnit sized = PurchaseLines.delivered(field, packs.get(i), l.packSize(), problems);
+                if (sized == null) {
+                    continue;
+                }
+                packs.put(i, sized);
             }
             if (!p.currency().equals(currency)) {
                 problems.add(new FieldProblem(field + ".product_id", "currency_mismatch", "Priced in " + p.currency()));
@@ -275,6 +373,7 @@ class PurchasingService {
                     "Permission denied",
                     "Setting the selling price needs the permission to change prices. Leave the selling price empty.");
         }
+        PurchaseLines.requireUseFromNowOn(r.lines().stream().anyMatch(PurchasingService::usesFromNowOn));
         for (PurchaseLineRequest l : r.lines()) {
             for (BranchQty b : l.qtyByBranch()) {
                 branches.resolveStocking(PERMISSION, b.branchId());
@@ -292,6 +391,8 @@ class PurchasingService {
         Map<UUID, Long> stockByBranch = new TreeMap<>();
         // Per line, the quantity of each branch in base units (a base unit line: as entered).
         List<List<BigDecimal>> baseQtys = new ArrayList<>();
+        // D23, issue #554: the lines whose size becomes the pack's usual size, by the line's own id.
+        Set<UUID> fromNowOn = new HashSet<>();
         for (int i = 0; i < r.lines().size(); i++) {
             PurchaseLineRequest l = r.lines().get(i);
             PackUnit pack = packs.get(i);
@@ -308,10 +409,7 @@ class PurchasingService {
                 BigDecimal base = b.qty();
                 if (pack != null) {
                     base = Quantities.toBase(b.qty(), pack.factor())
-                            .orElseThrow(() -> ApiException.rule(
-                                    "quantity_not_representable",
-                                    b.qty() + " " + pack.unit() + " does not convert exactly to thousandths of the"
-                                            + " item's unit. Change the quantity."));
+                            .orElseThrow(() -> PurchaseLines.notInBase(b.qty(), pack));
                     unitQtyTotal = unitQtyTotal.add(b.qty());
                 }
                 long entered = Quantities.value(b.qty(), l.costMinor());
@@ -322,9 +420,19 @@ class PurchasingService {
                 valueByBranch.merge(b.branchId(), entered, Math::addExact);
                 stockByBranch.merge(b.branchId(), stocked, Math::addExact);
             }
+            if (qtyTotal.compareTo(Quantities.MAX_QTY) > 0) {
+                throw ApiException.rule(
+                        "quantity_out_of_range",
+                        "Line " + (i + 1) + " comes to more than can be recorded. Check the quantities"
+                                + (pack == null ? "." : " and how many are in each " + pack.unit() + "."));
+            }
             baseQtys.add(bases);
+            UUID lineId = UUID.randomUUID();
+            if (usesFromNowOn(l)) {
+                fromNowOn.add(lineId);
+            }
             lines.add(new NewLine(
-                    UUID.randomUUID(),
+                    lineId,
                     i + 1,
                     l.productId(),
                     costBase,
@@ -350,10 +458,16 @@ class PurchasingService {
                 null,
                 by));
         List<Movement> movements = new ArrayList<>();
+        Map<UUID, String> sizesKept = new HashMap<>();
         for (int i = 0; i < lines.size(); i++) {
             NewLine line = lines.get(i);
             repo.insertLine(id, line);
             catalogue.applyPurchasePrices(line.productId(), line.costMinor(), line.sellMinor(), id);
+            // Under the product lock taken above and before any balance row (ADR-079 lock order).
+            if (fromNowOn.contains(line.id())
+                    && !catalogue.useBuyingSize(line.productId(), line.unitId(), line.unitFactor(), PURCHASE, id)) {
+                sizesKept.put(line.id(), PurchaseLines.sizeKeptNote(line.unitFactor()));
+            }
             List<BranchQty> entered = r.lines().get(i).qtyByBranch();
             for (int j = 0; j < entered.size(); j++) {
                 BranchQty b = entered.get(j);
@@ -401,7 +515,22 @@ class PurchasingService {
         after.put("payment_method", r.paymentMethod());
         after.put("lines", lines.size());
         audit.record(AuditLog.Entry.created("retail.purchase.created", PURCHASE, id, null, after));
-        return repo.find(id).orElseThrow();
+        Purchase made = repo.find(id).orElseThrow();
+        if (sizesKept.isEmpty()) {
+            return made;
+        }
+        // Issue #624: the line whose "use from now on" was left out says so, so nobody is told the opposite.
+        return made.withLinesAndTotal(
+                made.lines().stream()
+                        .map(l -> sizesKept.containsKey(l.id()) ? l.withSizeKept(sizesKept.get(l.id())) : l)
+                        .toList(),
+                made.totalMinor(),
+                Boolean.TRUE.equals(made.partial()));
+    }
+
+    /** D23, issue #554: the line asks for its size to become the pack's usual size. */
+    private static boolean usesFromNowOn(PurchaseLineRequest l) {
+        return Boolean.TRUE.equals(l.useFromNowOn()) && l.packSize() != null;
     }
 
     @Transactional(readOnly = true)
@@ -514,7 +643,7 @@ class PurchasingService {
                     HttpStatus.FORBIDDEN,
                     "permission_denied",
                     "Permission denied",
-                    "This restock added stock at a branch you do not manage, so only someone who manages every branch it"
+                    "This purchase added stock at a branch you do not manage, so only someone who manages every branch it"
                             + " touched can void it.");
         }
         repo.lockPurchase(id);
@@ -525,19 +654,22 @@ class PurchasingService {
         }
         if (repo.voidOf(id).isPresent()) {
             throw new ApiException(
-                    HttpStatus.CONFLICT, "purchase_voided", "Restock voided", "This restock has been voided already.");
+                    HttpStatus.CONFLICT,
+                    "purchase_voided",
+                    "Purchase voided",
+                    "This purchase has been voided already.");
         }
         if (repo.historical(id)) {
             throw ApiException.rule(
                     "purchase_historical",
-                    "This restock was imported from the old records, so it cannot be voided here. Use Correct the quantity"
+                    "This purchase was imported from the old records, so it cannot be voided here. Use Correct the quantity"
                             + " on the stock list instead.");
         }
         if (repo.paidAgainst(id)) {
             throw ApiException.rule(
                     "purchase_paid",
-                    "A payment to the supplier has been recorded against this restock. Reverse that payment first, then"
-                            + " void the restock.");
+                    "A payment to the supplier has been recorded against this purchase. Reverse that payment first, then"
+                            + " void the purchase.");
         }
         moved.stream().map(Recorded::productId).distinct().sorted().forEach(catalogue::lock);
         Map<UUID, Map<UUID, BigDecimal>> added = new TreeMap<>();
@@ -551,7 +683,7 @@ class PurchasingService {
                     ProductSnapshot p = catalogue.find(product.getKey()).orElseThrow();
                     throw ApiException.rule(
                             "purchase_stock_moved",
-                            p.description() + ": this restock added " + plain(product.getValue()) + " " + p.unit()
+                            p.description() + ": this purchase added " + plain(product.getValue()) + " " + p.unit()
                                     + " but only " + plain(onHand) + " are in stock there now, because some were sold,"
                                     + " used or moved. It cannot be voided. Use Correct the quantity on the stock list,"
                                     + " or count the stock.");

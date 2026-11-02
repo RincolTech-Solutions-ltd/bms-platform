@@ -11,6 +11,8 @@ import { ScreenLink } from './screen-link';
 import { useToast } from './toast';
 import { BranchRequired, Gate, Problem, money, useSingleBranch } from './ui';
 import { showDate } from './transfers';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { ActionBar } from '../../../app/ui/ActionBar';
 
 // Cash withdrawn from the bank into a shop's till (FR-RET-25). A withdrawal above the bank balance on
 // record is saved and comes back with a warning, never a refusal.
@@ -22,6 +24,7 @@ export function WithdrawalForm({ branchId, onSaved }: { branchId: string; onSave
   const { me } = useStaff();
   const { key, draft, setDraft, finish } = usePersistedDraft<WithdrawalDraft>(`withdrawal:${me.user_id ?? ''}:${branchId}`, { date: businessToday(), amount: '', purpose: '' });
   const minor = amountOrNull(draft.amount);
+  // toast-exempt: success screen, the Saved panel replaces the form
   const save = useMutation({
     mutationFn: () => retail.createWithdrawal({ branch_id: branchId, business_date: draft.date, amount_minor: minor ?? 0, ...(draft.purpose.trim() ? { purpose: draft.purpose.trim() } : {}) }, key),
     onSuccess: (saved) => {
@@ -41,9 +44,12 @@ export function WithdrawalForm({ branchId, onSaved }: { branchId: string; onSave
       <input id="withdrawal-purpose" maxLength={200} value={draft.purpose} onChange={(e) => setDraft((d) => ({ ...d, purpose: e.target.value }))} />
       <p className="hint">The cash goes into this shop's till.</p>
       <Problem error={save.error} />
-      <button type="submit" className="rt-primary" disabled={blocked}>
-        {save.isPending ? 'Saving' : 'Save withdrawal'}
-      </button>
+      <ActionBar>
+        <BusyButton type="submit" className="rt-primary" busy={save.isPending} notReady={blocked}>
+          Save withdrawal
+        </BusyButton>
+      </ActionBar>
+
     </form>
   );
 }
@@ -98,13 +104,12 @@ export function WithdrawalsScreen() {
         </Saved>
       ) : (
         <>
-          <p className="branch-line">Branch: <strong>{branchName}</strong></p>
-          <WithdrawalForm key={`${branchId}-${round}`} branchId={branchId} onSaved={(w) => { setSaved(w); show('Withdrawal recorded.'); }} />
+          <WithdrawalForm key={`${branchId}-${round}`} branchId={branchId} onSaved={setSaved} />
         </>
       )}
       </div>
       {toast}
-      {holds(me, CASHBOOK_READ) && <WithdrawalRecords onVoided={show} />}
+      {holds(me, CASHBOOK_READ) && <WithdrawalRecords onVoided={(text) => show(text, 'success')} />}
     </Gate>
   );
 }

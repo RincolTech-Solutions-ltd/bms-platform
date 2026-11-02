@@ -69,17 +69,23 @@ The group also holds two settings that are not capabilities and are never listed
 health (issue #414), `slow_mover_months` (whole, 1 to 24, default 4) and `slow_mover_min_sold` (whole, 0 to 1,000,000, default
 0 meaning off). A profile never changes them.
 
-### 1.2 The tenant profile switch
+### 1.2 The tenant profile switch: the kind of business
 
-`retail.profile` in the same settings group is `shop` (default) or `trade`. A profile is a
-**preset, not a mode**: choosing it writes a bundle of the capability flags, after which an
-administrator can still toggle each flag. The module reads the flags, never the profile, so there
-is no code path "if trade".
+`retail.profile` in the same settings group is the kind of business (issue #424, ADR-092): `shops` (default), `stores_and_shops`,
+`wholesale` or `wholesale_and_shops`. Before issue #424 it was `shop` or `trade`; migration `V103` renamed the stored values
+without changing a flag, judged from the flags (`wholesale_and_shops` with one of the five wholesale tools on; otherwise `trade`
+is `stores_and_shops`, and `shop` is `stores_and_shops` with `transfer_receipt` on, else `shops`). A kind is a **preset, not a mode**: choosing it sets the six flags it governs, after which an administrator
+can still toggle each flag. The module reads the flags, never the profile, so there is no code path "if wholesale".
 
-| Profile | Capabilities switched on by the preset |
-|---|---|
-| `shop` | none (all off) |
-| `trade` | `branch_roles`, `units`, `price_lists`, `customer_accounts`, `returns`, `transfer_receipt`; `documents` and `purchasing` stay off until chosen, because the product owner's rule is that documents are never assumed |
+| Kind | Screen name | Governed flags switched on (the others of the six off) |
+|---|---|---|
+| `shops` | Shops only | none |
+| `stores_and_shops` | Stores and shops | `transfer_receipt` |
+| `wholesale` | Wholesale | `units`, `price_lists`, `customer_accounts`, `documents`, `purchasing` |
+| `wholesale_and_shops` | Wholesale and shops | the five of `wholesale` and `transfer_receipt` |
+
+`branch_roles` and `returns` belong to no kind: a choice leaves them as they are. Whether a branch is a store or a shop is set per
+branch under Branches (ADR-048), whatever the kind; the screen says so. A flag sent in the same change wins over the preset.
 
 Changing the profile or a flag needs `core.settings.manage` (administrators only), is audited
 (`retail.capabilities.changed`, old and new values) and takes effect on the next request.
@@ -105,7 +111,12 @@ no tour yet: the slice that releases its pages adds the tour and marks it `ready
 ### 2.1 Roles
 
 A retail branch has a role, held in `retail_branch_roles` (a retail table, so the core `branches`
-table is untouched, as ADR-001 asks when only one vertical needs the concept):
+table is untouched, as ADR-001 asks when only one vertical needs the concept).
+
+> **Since ADR-104 (issue #371, migration V115)** a `store` is no longer stored here: it is the branch flag
+> `sells_goods = false` of ADR-048, set on the Branches screen, and reads as `store` while `branch_roles` is on. The table
+> holds only `shop` and `both`, a sale at a store is refused with 422 `branch_does_not_sell`, and the Store also takes no
+> payment, refund or cash in at its till (ADR-048). The rest of this section is the original design.
 
 | Role | Sells (sales screen, `POST /retail/sales`) | Restock (`POST /retail/purchases`, later goods received) | Transfer out | Transfer in | Usage, damage, stock-take |
 |---|---|---|---|---|---|
@@ -148,6 +159,7 @@ only narrow what the branch accepts.
 | Transfer from a store to a shop | needs `retail.stock.transfer` at the source (as today); the destination branch must be active and may be outside the caller's scope (as today) |
 | A manager scoped to Store 1 and the shop | sees both in stock views; sells only at the shop |
 | A branch-scoped caller reads the stock of Store 2 | 404 as today for a branch outside scope |
+| A caller names a branch for a retail event (`RetailBranchContext.resolve`, issue #257) | 404 `unknown_branch` outside the permission's scope, an unknown id included for a scoped caller; 403 `permission_denied` where the permission is not held at all; a closed branch inside the scope, or an unknown id for a caller over all branches (who sees every branch), stays 422 `unknown_branch` on the field |
 
 A new tenant branch defaults to `both` through the absence of a row (section 2.3), so adding a
 branch never needs the role step.
@@ -351,7 +363,7 @@ of the sale (sales are append-only apart from the void):
 - **Refund.** `cash`, `mobile_money` or `bank` pay out of the till of `refund_branch_id`, the branch the caller names inside their `retail.sale.return` scope (the receiving branch of spec 5.3; absent means the caller's own branch when their scope is exactly one, else the sale's), on the day of the return (the cash book reads that day and that till, never the sale's). When it is not the sale's branch the sale's branch owes the money through inter-branch clearing and the paying branch pays it out in an entry of its own, so both tills reconcile with the ledger; a void gives it back to the same till. `account` is for a credit sale with an open balance and not an imported one: it takes `min(total, open balance)` off what the customer owes and pays the rest in the stated `money_method` (422 `refund_remainder_method_required` without one). Money goes back to a credit buyer only up to the money that came in and was not refunded already (422 `refund_exceeds_paid`).
 - **The balance goes down through `paid_minor`.** The account credit raises the sale's `paid_minor`, the column a payment raises, so the customer balance, the credit limit, credit control, ageing and the allocation of a payment on account all read it unchanged and a return needs no change in any of them. `paid_minor` is now the amount of the sale that has been settled, by money or by a credit note. The V44 guard is not loosened: a lowering is still refused unless it happens inside the reversal of a named, reversed receipt or the void of a named, voided return (a second transaction-local setting, `bms.void_sale_return`), by exactly the amount that record gave, and never below `retail_sale_settled_minor` (unreversed payments plus the account credit of returns that stand). A payment on account whose sale has money refunded on a return cannot be reversed until that return is voided, and a sale with returns cannot be voided.
 - **Numbering.** `CN` + the branch code + a dash + six digits, from the tenant sequence `retail_credit_note_no:<branch>`: gap free, because a rolled back return gives its number back, and a void keeps its number.
-- **Approval.** The permission is administrators only. The tenant's approval threshold for the action `retail_sale_return` (the existing `approval_thresholds_minor` setting) is applied to the returns of a sale together: when the returns on it that were not voided, with this one, come to the threshold or more, the return waits for a second holder of `retail.sale.return` (202; the checker is never the maker; the request goes stale when anything else happens to the sale; the amount shown is that total), so splitting a return into parts does not get round it. Voiding a return that was approved, or is worth the threshold by itself, is the action `retail_sale_return_void`, which needs a second administrator in the same way. **With no threshold set there is no checker for either, and one administrator can refund up to the whole of a sale in cash.** That is the default on purpose: the system may not invent a currency amount for a business it does not know, and a business with one administrator must be able to take goods back; so the retail settings screen shows a warning for as long as returns are on and no threshold is set, and the capabilities answer says whether one is (`returns_approval_threshold_minor`, absent when none). Nothing is edited, so there is no `If-Match`; the void is a separate write under its own key.
+- **Approval.** (Since issue #343, ADR-091, the approval rules switch this on or off and set the amount; with no switch saved it reads as below.) The permission is administrators only. The tenant's approval threshold for the action `retail_sale_return` (the existing `approval_thresholds_minor` setting) is applied to the returns of a sale together: when the returns on it that were not voided, with this one, come to the threshold or more, the return waits for a second holder of `retail.sale.return` (202; the checker is never the maker; the request goes stale when anything else happens to the sale; the amount shown is that total), so splitting a return into parts does not get round it. Voiding a return that was approved, or is worth the threshold by itself, is the action `retail_sale_return_void`, which needs a second administrator in the same way. **With no threshold set there is no checker for either, and one administrator can refund up to the whole of a sale in cash.** That is the default on purpose: the system may not invent a currency amount for a business it does not know, and a business with one administrator must be able to take goods back; so the retail settings screen says so in one neutral Hint line (no link until a screen sets the limit) for as long as returns are on and no threshold is set (issue #575), and the capabilities answer says whether one is (`returns_approval_threshold_minor`, absent when none). Nothing is edited, so there is no `If-Match`; the void is a separate write under its own key.
 - **Write-offs are not usage reports.** Spec 5.3 said damaged goods are "a usage report instead". They are not: goods that never entered stock cannot be used up from it, and making them enter and leave in one transaction would add two movements and two entries to say nothing. A written-off line is recorded on the return itself (disposition `write_off`, its reason, its cost) and posts its cost to `stock_shrinkage`; the daily profit counts it as usage. There is no usage list in the module to add it to (usage is write-only: `POST /retail/usage`), and the shrinkage section of stock health reads usage reports, so it does not include written-off returns; they are read in Customer returns.
 - **What "sold" means in the lists.** The sales analysis, the margins, the dashboard and the evaluation net returns. The lists of items that did or did not sell in a window (slow movers, items with no sales) and the stock health report (cover, reorder, dead stock) count sales only: an item whose only activity in the window is a return did not sell, in all three.
 - **Void by reversal.** Reverses every entry on today's business date, takes the restocked goods out again (refused, 422 `return_stock_moved`, when they were sold since) and puts the account credit back on the sale.
@@ -451,7 +463,7 @@ line with the remainder on the line with the largest value, so the parts add exa
 
 - The allocation raises the receipt lines' landed unit cost. The product's cost is set to the
   landed unit cost with a price history row (`source` = `receipt`), by the existing rule that the
-  latest receipt wins (ADR-020 decision 5), under the guard below. Weighted average cost stays pending (pending ADR-021).
+  latest receipt wins (ADR-020 decision 5), under the guard below. Weighted average cost stays pending (pending ADR-021; since settled by ADR-079, issue #523).
 - Posting: debit inventory, credit trade creditors (the carrier or agent as supplier) for the
   allocated amount.
 - **Cost update guard.** The product's cost is changed by the allocation only when this receipt is
@@ -570,7 +582,10 @@ documents slice is on main). The choices the design left open:
 13. **The payables report without the capability.** Section 8 says that, for a tenant without `purchasing`, credit restocks
     are shown from trade creditors by supplier. That view is deferred: the report, like every route of this slice, is 404
     `capability_not_enabled` while the capability is off, and a tenant that has not switched it on has no payment route for a
-    credit restock either.
+    credit restock either. **Built since (issue #557, owner decision D15, ADR-084):** the supplier payments, the open items and the
+    report need no capability; they read and pay the credit restocks, a payment takes `paid_on` (not in the future, paying only what
+    was owed on that day), and `GET /retail/suppliers/{id}/statement` gives the running balance. Buy stock also takes mobile money
+    (migration V97).
 
 ### 7.5 As built (issue #199, slice 10, migration V48)
 
@@ -654,10 +669,10 @@ All reports are read only, respect branch scope per row, and omit cost, value an
 
 | Report | Content |
 |---|---|
-| Stock by store and shop | `GET /retail/reports/stock-by-location`: per product, the balance in each branch the caller may read, grouped by role (stores, then shops), a subtotal per role and a **combined total**; stock **in transit** (section 9.3) as its own column so the combined total neither double counts nor loses it. Extends `/retail/stock/all-branches`, which stays |
+| Stock by store and shop | `GET /retail/reports/stock-by-location`: per product, the balance in each branch the caller may read, grouped by role (stores, then shops), a subtotal per role and a **combined total**; stock **in transit** (section 9.3) as its own column so the combined total neither double counts nor loses it. An inactive product is listed while it holds stock in a listed branch or has stock on its way from or to one (issue #239). Extends `/retail/stock/all-branches`, which stays |
 | Combined total | The sum across all readable branches, quantity and, with profit read, value at cost; the revaluation difference is shown as in valuation |
-| Transfers in flight | `GET /retail/reports/transfers-in-flight` (needs `transfer_receipt`): dispatched and not received, with age, source, destination, lines. Empty by construction when transfers are atomic |
-| Supplier payables | `GET /retail/reports/supplier-payables` (needs `purchasing`): per supplier, open bills by days past due (same buckets as customer ageing; a landed cost invoice is a bill, and a credit note has already come off its invoice) and unbilled receipts (goods received not invoiced). Open credit notes are zero by construction (7.5 item 6). For tenants without `purchasing`, credit restocks are shown from trade creditors by supplier (deferred, section 7.4 item 13) |
+| Transfers in flight | `GET /retail/reports/transfers-in-flight` (needs `transfer_receipt`): dispatched and not received, with age (days since it was sent, not since its transfer date, which may be set in the past; issue #239), source, destination, lines. Empty by construction when transfers are atomic |
+| Supplier payables | `GET /retail/reports/supplier-payables` (no capability since issue #557, ADR-084; invoices only with `purchasing`): per supplier, open bills by days past due (same buckets as customer ageing; a landed cost invoice is a bill, and a credit note has already come off its invoice) and unbilled receipts (goods received not invoiced). Open credit notes are zero by construction (7.5 item 6). For tenants without `purchasing` the same report shows the credit restocks by supplier, and supplier payments pay them (built, issue #557, ADR-084) |
 | Customer ageing | Section 5.2 |
 
 ## 9. Workflow for the wholesaler
@@ -724,7 +739,10 @@ destination still holds what came in, applied to the received quantity.
 - Receive and cancel are money-moving (`Idempotency-Key`); a replayed key returns the first response and
   two racing receipts receive once (the transfer row is locked).
 - Switching `transfer_receipt` off, directly or by choosing the `shop` profile, is refused (422
-  `transfers_in_transit`) while any transfer is in transit.
+  `transfers_in_transit`) while any transfer is in transit. The check runs inside the settings write,
+  under the tenant settings row lock, and a transfer reads the capability under a shared lock on that
+  row, so a dispatch committing at the same moment is either seen by the check or made after the
+  change as a one-step move (issue #239).
 - `GET /retail/transfers` gains a `status` filter, which is how the in-transit list is read with its
   lines; `GET /retail/reports/transfers-in-flight` adds the age, the value and the reconciliation.
 - Not done here: the shortage is posted to the ledger but is not yet a line of the daily profit report.
@@ -794,12 +812,12 @@ Branch-bound routes check scope per ADR-017. Full catalogue goes in SDD 7.11.23.
 | GET | `/retail/reports/customer-ageing` | `retail.sale.read` | `customer_accounts` |
 | POST (M), GET | `/retail/sales/{id}/documents`, `/retail/documents/{id}` | `retail.document.issue` | `documents` |
 | POST, GET, PATCH | `/retail/quotations`, `/retail/quotations/{id}/convert` | `retail.document.issue`; convert needs `retail.sale.create` | `documents` |
-| POST (M), GET | `/retail/purchase-orders`, `/retail/goods-receipts`, `/retail/supplier-bills`, `/retail/supplier-credits`, `/retail/supplier-payments` | `retail.purchase.create` (orders and receipts), `retail.payable.manage` (bills, credits, payments) | `purchasing` (built, issue #198; the supplier credits are built in issue #199 on their own route; also the order's `PUT`, `send` and `cancel`, the receipt's and the bill's `void`, the payment's `reverse`, `POST /retail/supplier-bills/match`, `GET /retail/suppliers/{id}/unbilled-receipts` and `.../open-items`, and `GET`, `PUT /retail/purchasing/settings`; section 7.4) |
+| POST (M), GET | `/retail/purchase-orders`, `/retail/goods-receipts`, `/retail/supplier-bills`, `/retail/supplier-credits`, `/retail/supplier-payments` | `retail.purchase.create` (orders and receipts), `retail.payable.manage` (bills, credits, payments) | `purchasing` (built, issue #198; since issue #557 (ADR-084) the supplier payments, `.../open-items`, the payables report and the new `GET /retail/suppliers/{id}/statement` need no capability; the supplier credits are built in issue #199 on their own route; also the order's `PUT`, `send` and `cancel`, the receipt's and the bill's `void`, the payment's `reverse`, `POST /retail/supplier-bills/match`, `GET /retail/suppliers/{id}/unbilled-receipts` and `.../open-items`, and `GET`, `PUT /retail/purchasing/settings`; section 7.4) |
 | POST (M), GET | `/retail/landed-costs`, `/retail/landed-costs/{id}`, `/retail/landed-costs/{id}/void`, `POST /retail/landed-costs/preview` | `retail.payable.manage` | `purchasing` (built, issue #199, as its own route and not under a bill: the payee's invoice is created with it; section 7.5) |
 | POST (M), GET | `/retail/supplier-credits`, `/retail/supplier-credits/{id}`, `/retail/supplier-credits/{id}/void` | `retail.payable.manage` | `purchasing` (built, issue #199) |
 | POST (M) | `/retail/goods-receipts/{id}/release-hold` | `retail.purchase.create` | `purchasing` (built, issue #199) |
 | POST (M) | `/retail/transfers/{id}/receive`, `/retail/transfers/{id}/cancel` | `retail.stock.transfer` | `transfer_receipt` |
-| GET | `/retail/reports/stock-by-location`, `/retail/reports/transfers-in-flight`, `/retail/reports/supplier-payables` | `retail.stock.read` (payables: `retail.payable.manage`) | as stated in section 8 |
+| GET | `/retail/reports/stock-by-location`, `/retail/reports/transfers-in-flight`, `/retail/reports/supplier-payables` | `retail.stock.read` (payables: `retail.payable.manage`) | as stated in section 8 (the payables report needs no capability since issue #557) |
 
 New permissions (design only; each is added to the SDD 8 matrix by the migration of the slice that needs it, so the matrix never lists a permission no migration seeds):
 `retail.branch_role.manage`, `retail.pricelist.manage`, `retail.pricelist.use`,
@@ -903,7 +921,7 @@ Answers written after one pass looking for what breaks.
 | A new column or table slows or changes the sales path | The sale path reads capability flags once per request; with all off it takes the pre-existing code path (no list lookup, no unit conversion, no role lookup). New columns on `retail_sale_lines` are nullable and add no index; the covering index V26 is untouched, so the daily profit query plan is unchanged. The performance benchmark queries k01 to k15 run in the slice that adds columns |
 | A menu or tour shows something new | Nothing renders unless its capability is on; the component test "all off equals today" fails otherwise |
 | A new permission appears and the sales role loses something | A permission that guards existing behaviour (`price.override`) is seeded to every holder of `retail.sale.create`; `pricelist.use` is not, because it names a list other than the customer's own, which no seller could do before. They are only consulted when the capability is on |
-| The profile preset surprises an administrator | `shop` is the default and switches nothing on; `trade` is an explicit choice that lists the flags it will set and asks for confirmation; flags remain individually editable |
+| The profile preset surprises an administrator | `shops` is the default and switches nothing on; every other kind is an explicit choice whose review lists the flags it will set and asks for confirmation; flags remain individually editable |
 | Settings read fails or a flag is absent | Absent reads as off. A failure to read settings fails the request closed, as every settings read does |
 | A plain shop is accidentally given `branch_roles` and a branch is a store | Role changes are an explicit administrator action; the default is `both`; a store can never be created by default |
 
@@ -979,13 +997,14 @@ Answers written after one pass looking for what breaks.
 
 ## 16. Deliberately deferred
 
-Weighted average cost (pending ADR-021); spending an unapplied supplier credit on a later invoice and a cash refund from a supplier; tiered or mix-and-match quantity breaks across lines;
+Weighted average cost (pending ADR-021, since built: ADR-079, issue #523); spending an unapplied supplier credit on a later invoice and a cash refund from a supplier; tiered or mix-and-match quantity breaks across lines;
 promotions and coupons; tax and VAT handling on documents (the module has no tax model today);
 unallocated customer deposits; server-side PDFs (documents
 follow-up, issue #120); sending documents by message or email; serial or batch tracking and expiry;
-multi-currency lists; barcode scanning for pack units; reorder points and automatic purchase orders;
+multi-currency lists; reorder points and automatic purchase orders;
 bank reconciliation of supplier payments; role-specific mobile layouts for store clerks beyond
-hiding the sales screen.
+hiding the sales screen. Barcode scanning, including a barcode on a pack size, is built by issue #345
+(ADR-070, FR-RET-68).
 
 ## 17. Build plan
 

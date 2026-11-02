@@ -1,9 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { retail, type Customer } from '../../../api/retail';
 import { useStaff } from '../context';
 import { PRICELIST_MANAGE, PRICE_LISTS, capabilityOn, holds } from './permissions';
 import { Problem, changeFailureText, requireVersion } from './ui';
+import { EmptyChoice, showsEmptyChoice } from '../../../app/ui/EmptyChoice';
+import { addOn } from './screen-link';
 
 // A credit buyer's customer group and own price list (ADR-033, issue #195). Shown on the Credit buyers page only while
 // the price_lists feature is on and only to retail.pricelist.manage: the list a buyer is on is what that buyer pays. The buyer's own list wins
@@ -22,10 +25,13 @@ export function BuyerPricing({ row }: { row: Customer }) {
   const save = useMutation({
     mutationFn: () => retail.setCustomerPricing(row.id ?? '', requireVersion(row.version), { ...(groupId ? { customer_group_id: groupId } : {}), ...(listId ? { price_list_id: listId } : {}) }),
     onSuccess: () => { setEditing(false); void queryClient.invalidateQueries({ queryKey: ['retail'] }); },
+    meta: { success: 'Prices saved' },
   });
   if (!on) return null;
   const group = (groups.data ?? []).find((g) => g.id === row.customer_group_id);
   const list = (lists.data ?? []).find((l) => l.id === row.price_list_id);
+  const groupChoices = (groups.data ?? []).filter((g) => g.active || g.id === row.customer_group_id);
+  const listChoices = (lists.data ?? []).filter((l) => l.active || l.id === row.price_list_id);
   return (
     <div data-tour="buyer-pricing" data-testid="buyer-pricing">
       <p className="hint">
@@ -35,19 +41,36 @@ export function BuyerPricing({ row }: { row: Customer }) {
       {!editing && <p><button type="button" className="btn-sm" onClick={() => setEditing(true)} aria-label={`Change the prices of ${row.name}`}>Change prices</button></p>}
       {editing && (
         <div className="stack">
-          <label htmlFor={`buyer-group-${row.id}`}>Customer group</label>
-          <select id={`buyer-group-${row.id}`} value={groupId} onChange={(e) => setGroupId(e.target.value)}>
-            <option value="">No group</option>
-            {(groups.data ?? []).filter((g) => g.active || g.id === row.customer_group_id).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </select>
-          <label htmlFor={`buyer-list-${row.id}`}>Own price list (wins over the group's)</label>
-          <select id={`buyer-list-${row.id}`} value={listId} onChange={(e) => setListId(e.target.value)}>
-            <option value="">No own list</option>
-            {(lists.data ?? []).filter((l) => l.active || l.id === row.price_list_id).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
+          {showsEmptyChoice(groups, groups.data && groupChoices) ? (
+            <EmptyChoice id={`buyer-group-${row.id}`} label="Customer group" load={groups} text="No customer groups yet." add={{
+              label: 'Add a customer group', name: 'Name of the new group', send: 'Add group',
+              create: (name) => retail.createCustomerGroup({ name }),
+              onAdded: (group) => { void queryClient.invalidateQueries({ queryKey: ['retail', 'customer-groups'] }); setGroupId(group.id ?? ''); },
+            }} />
+          ) : (
+            <>
+              <label htmlFor={`buyer-group-${row.id}`}>Customer group</label>
+              <select id={`buyer-group-${row.id}`} value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+                <option value="">No group</option>
+                {groupChoices.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
+            </>
+          )}
+          {showsEmptyChoice(lists, lists.data && listChoices) ? (
+            <EmptyChoice id={`buyer-list-${row.id}`} label="Own price list (wins over the group's)" load={lists} text="No price lists yet." ask="Ask the owner to add a price list first."
+              add={addOn(me, 'priceLists', 'Add a price list', '/staff/retail/price-lists')} />
+          ) : (
+            <>
+              <label htmlFor={`buyer-list-${row.id}`}>Own price list (wins over the group's)</label>
+              <select id={`buyer-list-${row.id}`} value={listId} onChange={(e) => setListId(e.target.value)}>
+                <option value="">No own list</option>
+                {listChoices.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            </>
+          )}
           <Problem error={save.error && new Error(changeFailureText(save.error, queryClient))} />
           <p className="cluster">
-            <button type="button" disabled={save.isPending} onClick={() => save.mutate()}>Save</button>
+            <BusyButton busy={save.isPending} type="button" onClick={() => save.mutate()}>Save</BusyButton>
             <button type="button" className="btn-ghost" onClick={() => { setGroupId(row.customer_group_id ?? ''); setListId(row.price_list_id ?? ''); setEditing(false); save.reset(); }}>Cancel</button>
           </p>
         </div>

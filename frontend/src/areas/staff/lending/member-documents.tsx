@@ -5,6 +5,7 @@ import { useMembersApi } from '../../../api/lending-context';
 import type { DocKind } from '../../../api/members';
 import { Problem } from '../retail/ui';
 import { PhotoQueueControl, usePhotoQueue, type Sender } from './photo-queue';
+import { BusyButton } from '../../../app/ui/BusyButton';
 
 // A member's documents (FR-MEM-09): the ID photos, a portrait and anything else. Each upload is checked and shrunk on the phone,
 // sent with a progress bar and can be sent again. The server lists ID images only to those who may check the details; others
@@ -23,6 +24,7 @@ function OpenButton({ documentId, label }: { documentId: string; label: string }
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const open = async () => {
+    // toast-exempt: it only opens the file in a new tab and saves nothing
     setBusy(true);
     setError(null);
     try {
@@ -35,7 +37,7 @@ function OpenButton({ documentId, label }: { documentId: string; label: string }
   };
   return (
     <>
-      <button type="button" className="btn-sm" disabled={busy} onClick={() => void open()} aria-label={`Open ${label}`}>{busy ? 'Opening' : 'Open'}</button>
+      <BusyButton busy={busy} type="button" className="btn-sm" onClick={() => void open()} aria-label={`Open ${label}`}>Open</BusyButton>
       {error && <span role="alert" className="field-error">{error}</span>}
     </>
   );

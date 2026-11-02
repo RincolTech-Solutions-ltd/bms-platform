@@ -22,7 +22,9 @@ export type RepaymentRequest = S['RepaymentRequest'];
 export type RepaymentResult = S['RepaymentResult'];
 export type DisbursementRequest = S['DisbursementRequest'];
 export type LoanActionOutcome = S['LoanActionOutcome'];
+export type ScheduleItemWaiverRequest = S['ScheduleItemWaiverRequest'];
 export type PayoffQuote = S['PayoffQuote'];
+export type LoanHomeSummary = S['LoanHomeSummary'];
 
 /** The payment methods the server maps to an account (payment_method_key). */
 export const PAYMENT_METHODS = [
@@ -48,6 +50,9 @@ const BY_CODE: Record<string, string> = {
   not_reversible: 'Only a repayment or a recovery can be reversed.',
   nothing_to_write_off: 'There is nothing outstanding to write off.',
   self_approval_forbidden: 'Someone else must approve this.',
+  principal_not_waivable: 'Principal is never waived. A loan that will not be repaid is written off.',
+  waiver_exceeds_due: 'That is more than is still due. Reload the loan to see what is left.',
+  nothing_to_waive: 'Nothing of this is still due on the item. Reload the loan to see what is left.',
   lending_chart_missing: 'The lending accounts are not set up in the ledger yet. Ask an admin.',
   idempotency_in_progress: 'This is still being saved. Wait a moment and reload the loan before trying again.',
   module_not_enabled: 'Lending is not switched on for this business.',
@@ -97,6 +102,11 @@ export const lending = {
     );
   },
 
+  /** Home's Lending card (issue #471): loans due today and in arrears in the caller's scope, read live from the schedule. */
+  async homeSummary(branchIds?: string[]): Promise<LoanHomeSummary> {
+    return unwrap(await api.GET('/api/v1/lending/loans/summary', { params: { query: { branch_id: branchIds } } }));
+  },
+
   async getLoan(id: string): Promise<Loan> {
     return unwrap(await api.GET('/api/v1/lending/loans/{loan_id}', { params: { path: { loan_id: id } } }));
   },
@@ -140,6 +150,16 @@ export const lending = {
     const result = await api.POST('/api/v1/lending/loans/{loan_id}/transactions/{txn_id}/reverse', {
       params: { path: { loan_id: id, txn_id: txnId }, header: key(idempotencyKey) },
       body: { reason },
+    });
+    const outcome = unwrap(result);
+    return { executed: executed(outcome, result.response.status), outcome };
+  },
+
+  /** FR-ARR-04 (#265): waive part or all of a schedule item's fees or interest; 202 while it waits for the accountant. */
+  async waiveItem(id: string, itemNo: number, body: ScheduleItemWaiverRequest, idempotencyKey: string): Promise<{ executed: boolean; outcome: LoanActionOutcome }> {
+    const result = await api.POST('/api/v1/lending/loans/{loan_id}/schedule/{item_no}/waive', {
+      params: { path: { loan_id: id, item_no: itemNo }, header: key(idempotencyKey) },
+      body,
     });
     const outcome = unwrap(result);
     return { executed: executed(outcome, result.response.status), outcome };

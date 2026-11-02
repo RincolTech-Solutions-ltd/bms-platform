@@ -5,8 +5,12 @@
 ## Automatic rollback
 
 `deploy.sh` rolls back by itself when a new release does not pass the readiness gate: it
-switches `api`, `web` and `proxy` back to the tag in `state/current_tag`, waits for it to be
-ready, records `failed-health` and `rolled-back-to` in `state/history.log`, and exits 1. Nothing
+switches `api`, `web` and `proxy` back to the tag in `state/current_tag` with the same gap-free
+switch as a deploy (ADR-083; a new container that never got healthy was already removed, and the
+old one never stopped serving), waits for it to be
+ready, records `failed-health` and `rolled-back-to` in `state/history.log`, and exits 1. Before
+switching back it keeps the failed build's hashed web files in `bms_web_assets`, so a phone that
+loaded that build in the meantime still works (ADR-078). Nothing
 more is needed except fixing the release. On staging the puller also writes the failed tag to
 `state/last_failed_tag`, so it is not tried again every two minutes; the next merge to `main`
 moves the pointer to a new tag, which is tried at once.
@@ -41,6 +45,11 @@ contract (chapter 6 section 6.9), so the previous release runs on the newer sche
    The migrate step is a no-op (the schema is already ahead) and the switch happens as usual. On
    staging, start `bms-pull.timer` again once `main` carries the fix or the revert.
 4. Confirm `https://<platform host>/version` shows the old tag, then open an issue for the fix.
+5. If `BMS_MIN_CLIENT_BUILD` is set in `/opt/bms/.env` to a time later than the release you rolled
+   back to (ADR-088), clear it (empty) and recreate the api the usual way. The API already ignores a
+   minimum later than its own build, with a warning in its log at start (`BMS_MIN_CLIENT_BUILD ... is
+   later than this release`), so phones keep working meanwhile; clearing it removes the warning and
+   the doubt.
 
 ## When the rollback itself is unhealthy (`rollback-unhealthy`)
 

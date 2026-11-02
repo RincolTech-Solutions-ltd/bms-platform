@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useState, type ReactNode } from 'react';
 import type { FieldMessages } from '../../../api/lending-forms';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { EmptyChoice, type ChoiceAdd } from '../../../app/ui/EmptyChoice';
+import { HelpTip } from '../../../app/ui/HelpTip';
+import type { HelpTipKey } from '../../../app/help-tips';
 
 // Accessible form pieces shared by the member and collateral forms (issue #280): a label above every
 // input, a hint and an error tied to the input with aria-describedby, aria-invalid on a refused input,
@@ -113,7 +117,7 @@ export function TextField({ name, label, form, hint, required, disabled, value, 
   };
   return (
     <div className="mf-field">
-      <label htmlFor={id}>{label}{required ? <span className="mf-req"> (needed)</span> : null}</label>
+      <label htmlFor={id}>{label}{required ? <span className="field-star" aria-hidden="true"> *</span> : null}</label>
       {type === 'textarea' ? (
         <textarea {...shared} rows={rows ?? 3} maxLength={maxLength} onChange={(e) => change(e.target.value)} />
       ) : (
@@ -124,18 +128,21 @@ export function TextField({ name, label, form, hint, required, disabled, value, 
   );
 }
 
-export function SelectField({ name, label, form, hint, required, disabled, value, onChange, options, blankLabel }: CommonProps & {
+export function SelectField({ name, label, form, hint, required, disabled, value, onChange, options, blankLabel, empty }: CommonProps & {
   value: string;
   onChange: (value: string) => void;
   options: readonly { value: string; label: string }[];
   /** An empty first choice ("Choose a branch"). */
   blankLabel?: string;
+  /** What the field says when a list read from the server is empty (issue #619): the line, who to ask, and the way to add one. */
+  empty?: { text: string; ask: string; add?: ChoiceAdd<unknown> | null; load?: { isError: boolean; refetch: () => unknown } };
 }) {
   const id = form.idOf(name);
   const error = form.error(name);
+  if (empty && (options.length === 0 || empty.load?.isError)) return <EmptyChoice id={id} label={label} required={required} load={empty.load} text={empty.text} ask={empty.ask} add={empty.add} />;
   return (
     <div className="mf-field">
-      <label htmlFor={id}>{label}{required ? <span className="mf-req"> (needed)</span> : null}</label>
+      <label htmlFor={id}>{label}{required ? <span className="field-star" aria-hidden="true"> *</span> : null}</label>
       <select
         id={id}
         value={value}
@@ -155,10 +162,12 @@ export function SelectField({ name, label, form, hint, required, disabled, value
 }
 
 /** A group of related inputs under a heading (a fieldset and legend, so a screen reader announces the group). */
-export function Group({ title, children, tourId }: { title: string; children: ReactNode; tourId?: string }) {
+export function Group({ title, children, tourId, tip }: { title: string; children: ReactNode; tourId?: string; tip?: HelpTipKey }) {
+  // With a help tip the group is named by its title alone, not with the tip's button (issue #707).
+  const titleId = useId();
   return (
-    <fieldset className="mf-group" data-tour={tourId}>
-      <legend>{title}</legend>
+    <fieldset className="mf-group" data-tour={tourId} aria-labelledby={tip ? titleId : undefined}>
+      <legend><span id={titleId}>{title}</span>{tip && <> <HelpTip tip={tip} /></>}</legend>
       {children}
     </fieldset>
   );
@@ -168,15 +177,15 @@ export function Group({ title, children, tourId }: { title: string; children: Re
  * The save bar: sticks to the bottom of the screen on a phone so the main action is always under the thumb, says in words
  * what is stopping it, and keeps Cancel next to it.
  */
-export function SaveBar({ label, busyLabel, busy, blocked, cancel, tourId }: { label: string; busyLabel: string; busy: boolean; blocked?: string; cancel: ReactNode; tourId?: string }) {
+export function SaveBar({ label, busy, blocked, cancel, tourId }: { label: string; busy: boolean; blocked?: string; cancel: ReactNode; tourId?: string }) {
   return (
     <div className="mf-savebar" data-tour={tourId}>
       {blocked && <p className="mf-savebar-note" role="status">{blocked}</p>}
       <div className="mf-savebar-row">
         {cancel}
-        <button type="submit" className="rt-primary" disabled={busy || !!blocked} aria-disabled={busy || !!blocked}>
-          {busy ? busyLabel : label}
-        </button>
+        <BusyButton busy={busy} type="submit" className="rt-primary" disabled={!!blocked} aria-disabled={busy || !!blocked}>
+          {label}
+        </BusyButton>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute, getRouteApi } from '@tanstack/react-router';
 import { useRef, useState, type ReactNode } from 'react';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { retail, type SaleReturn } from '../../../api/retail';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { SkeletonList } from '../../../components/states';
@@ -11,7 +12,9 @@ import { newIdempotencyKey } from './idempotency';
 import { SALE_RETURN, canOpenAccount, canUse, holdsAt } from './permissions';
 import { DISPOSITION_WORDS, reasonWords, returnedWords, settledWords, type Disposition } from './returns-state';
 import { showDate } from './transfers';
-import { Problem, Success, money, useBranchName, useToast } from './ui';
+import { Note, Problem, money, useBranchName, useToast } from './ui';
+import { NoAccess } from '../../../app/ui/EmptyState';
+import { Hint } from '../../../app/ui/Hint';
 
 // One credit note (returns capability, ADR-033, issue #201), on screen: the goods that came back, what each was credited,
 // where they went, and how the credit was settled. The printable credit note (a PDF under this number) shows while the documents capability is on. A
@@ -87,10 +90,10 @@ export function VoidPanel({ busy, error, onVoid }: { busy?: boolean; error?: unk
     >
       <label htmlFor="void-reason">Why is it voided? (at least {MIN_REASON} characters)</label>
       <input id="void-reason" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} />
-      <p className="hint">The goods it put back come off the shelf again, and the money or the balance goes back as it was. This only works while those goods are still in stock.</p>
+      <Hint full>The goods it put back come off the shelf again, and the money or the balance goes back as it was. This only works while those goods are still in stock.</Hint>
       <Problem error={error} />
       <p className="cluster">
-        <button type="submit" disabled={reasonOf(reason) === null || busy}>Void it</button>
+        <BusyButton busy={busy ?? false} type="submit" disabled={reasonOf(reason) === null}>Void it</BusyButton>
         <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
       </p>
     </form>
@@ -99,13 +102,15 @@ export function VoidPanel({ busy, error, onVoid }: { busy?: boolean; error?: unk
 
 const route = getRouteApi('/staff/retail/returns/$returnId');
 
+// A void large enough to need a second administrator waits; the page keeps saying so. A done void is said by the toast alone.
+const VOID_WAITS = 'This return is large enough to need a second administrator. It will be voided when they approve it in Approvals.';
+
 export function CreditNotePage() {
   const { returnId } = route.useParams();
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const { show, toast } = useToast();
   const nameOf = useBranchName();
-  const [message, setMessage] = useState<string | null>(null);
   const keys = useRef(reversalKeys(newIdempotencyKey));
   const allowed = canUse(me, 'returns');
   const note = useQuery({ queryKey: ['retail', 'return', returnId], queryFn: () => retail.getReturn(returnId), enabled: allowed });
@@ -114,9 +119,7 @@ export function CreditNotePage() {
     mutationFn: (reason: string) => retail.voidReturn(returnId, reason, keys.current.keyFor(returnId, reason)),
     onSuccess: (r) => {
       keys.current.done(returnId);
-      const text = r.executed ? `Voided ${r.sale_return?.credit_note_no ?? 'the credit note'}.` : 'This return is large enough to need a second administrator. It will be voided when they approve it in Approvals.';
-      setMessage(text);
-      show(text);
+      show(r.executed ? `Voided ${r.sale_return?.credit_note_no ?? 'the credit note'}.` : VOID_WAITS, r.executed ? 'success' : 'info');
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
   });
@@ -124,17 +127,16 @@ export function CreditNotePage() {
     return (
       <main className="rt">
         <h1>Credit note</h1>
-        <p className="empty-state">You do not have access to this page.</p>
+        <NoAccess />
       </main>
     );
   }
   return (
     <main className="rt rt-wide">
       <h1>{note.data?.credit_note_no ?? 'Credit note'}</h1>
-      <p><Link to="/staff/retail/returns">Back to customer returns</Link></p>
       {note.isPending && <SkeletonList label="Loading the credit note" />}
       <Problem error={note.error} />
-      {message && <Success>{message}</Success>}
+      {voided.data && !voided.data.executed && <Note>{VOID_WAITS}</Note>}
       {note.data && <CreditNoteView note={note.data} nameOf={nameOf} buyerOpens={canOpenAccount(me)} />}
       {note.data && <CreditNotePdf returnId={returnId} branchId={note.data.branch_id} />}
       {note.data && note.data.status === 'completed' && holdsAt(me, SALE_RETURN, note.data.branch_id) && (

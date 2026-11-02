@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { retail } from '../../../api/retail';
+import { Hint } from '../../../app/ui/Hint';
 
 // Item photos (issue #384, ADR-053): a small picture of an item in the item lists, the sale screen and the item's page, read
 // from the app's own origin (GET /retail/photos/{id}) as a blob, since the content security policy allows no other image host.
@@ -68,16 +70,18 @@ export function PhotoEditor({ inputId, photoId, shownId, label, onUpload, onClea
   const upload = useMutation({
     mutationFn: (file: File) => onUpload(file),
     onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['retail'] }); onSaved?.(`Saved the photo of ${label}.`); },
+    meta: { success: () => (onSaved ? null : 'Photo saved') },
   });
   const clear = useMutation({
     mutationFn: () => onClear(),
     onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['retail'] }); onSaved?.(`Took the photo of ${label} off.`); },
+    meta: { success: () => (onSaved ? null : 'Photo removed') },
   });
   const id = `photo-${inputId}`;
   return (
     <div className="rt-photo-editor" data-tour={tour}>
       <ItemPhoto photoId={shownId ?? photoId} label={label} size={160} />
-      {!photoId && shownId && <p className="hint">This shows the item's photo. Add one here for this size alone.</p>}
+      {!photoId && shownId && <Hint>This shows the item's photo. Add one here for this size alone.</Hint>}
       <label htmlFor={id}>{photoId ? 'Change the photo' : 'Add a photo'}</label>
       <input
         id={id}
@@ -94,11 +98,70 @@ export function PhotoEditor({ inputId, photoId, shownId, label, onUpload, onClea
           if (input.current) input.current.value = '';
         }}
       />
-      <p className="hint">A PNG, JPEG or WebP picture up to 5 MB. It shows in the item list and when you pick the item in a sale.</p>
+      <Hint>A PNG, JPEG or WebP picture up to 5 MB. It shows in the item list and when you pick the item in a sale.</Hint>
       {upload.isPending && <p className="loading">Sending the photo</p>}
       {problem && <p role="alert" className="rt-flag">{problem}</p>}
       {(upload.error || clear.error) && <p role="alert" className="rt-flag">{((upload.error ?? clear.error) as Error).message}</p>}
-      {photoId && <button type="button" className="btn-ghost" disabled={clear.isPending} onClick={() => clear.mutate()}>Take the photo off</button>}
+      {photoId && <BusyButton busy={clear.isPending} type="button" className="btn-ghost" onClick={() => clear.mutate()}>Take the photo off</BusyButton>}
+    </div>
+  );
+}
+
+/** What a new item's message adds when its photo could not be sent: the item is saved, the photo waits for Edit (issue #617). */
+export const PHOTO_LATER = 'The photo was not saved. Add it from Edit on the item.';
+
+/** Sends the photo of an item just made; the words to show when it failed, or null when it is saved. */
+export async function sendNewPhoto(productId: string, file: File | null, send: (id: string, file: File) => Promise<unknown> = (id, f) => retail.setProductPhoto(id, f)): Promise<string | null> {
+  if (!file) return null;
+  try {
+    await send(productId, file);
+    return null;
+  } catch {
+    return PHOTO_LATER;
+  }
+}
+
+/**
+ * The optional photo of an item being added (issue #617): Take a picture opens the camera on a phone, Choose a photo picks a
+ * saved one, both with the rules of the photo editor (PNG, JPEG or WebP up to 5 MB, refused in words at once). Nothing is sent
+ * here: the form sends the file right after the item is made, with sendNewPhoto. Each button is the visible label of its input.
+ */
+export function PhotoChoice({ id, file, onChange }: { id: string; file: File | null; onChange: (file: File | null) => void }) {
+  const [problem, setProblem] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  useEffect(() => {
+    if (!file || typeof URL.createObjectURL !== 'function') return setPreview(null);
+    const made = URL.createObjectURL(file);
+    setPreview(made);
+    return () => URL.revokeObjectURL(made);
+  }, [file]);
+  const pick = (e: ChangeEvent<HTMLInputElement>) => {
+    const chosen = e.target.files?.[0];
+    e.target.value = '';
+    if (!chosen) return;
+    const why = photoProblem(chosen);
+    setProblem(why);
+    onChange(why === null ? chosen : null);
+  };
+  return (
+    <div className="photo-choice" role="group" aria-labelledby={`${id}-title`} data-testid={id}>
+      <p id={`${id}-title`} className="photo-choice-title">Photo</p>
+      {preview && <img className="rt-photo" src={preview} alt={`The photo chosen, ${file?.name ?? ''}`} width={96} height={96} />}
+      {file && <p className="hint">{file.name}</p>}
+      <p className="cluster">
+        <label className="btn" htmlFor={`${id}-camera`}>
+          <input id={`${id}-camera`} type="file" accept={PHOTO_TYPES} capture="environment" className="visually-hidden" onChange={pick} />
+          Take a picture
+        </label>
+        <label className="btn" htmlFor={`${id}-file`}>
+          <input id={`${id}-file`} type="file" accept={PHOTO_TYPES} className="visually-hidden" onChange={pick} />
+          Choose a photo
+        </label>
+        {file && <button type="button" className="btn-ghost" onClick={() => { setProblem(null); onChange(null); }}>Take the photo off</button>}
+      </p>
+      {/* Whole, wrapping on a phone (issue #642): the one cut line ran past the form at a large font size. */}
+      <Hint full>A PNG, JPEG or WebP picture up to 5 MB. You can also add it later.</Hint>
+      {problem && <p role="alert" className="rt-flag">{problem}</p>}
     </div>
   );
 }

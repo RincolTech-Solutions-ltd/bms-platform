@@ -12,7 +12,9 @@ import { PAYABLE_MANAGE, PURCHASE_CREATE, canUse, holdsAt } from './permissions'
 import { RECEIPT_STATUS_WORDS, canVoidReceipt, inLineUnit } from './purchasing-state';
 import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys, useCursorList } from './purchasing-ui';
 import { showDate } from './transfers';
-import { Gate, Problem, Success, money, useBranchName, useToast } from './ui';
+import { Gate, Problem, money, useBranchName, useToast } from './ui';
+import { NoAccess } from '../../../app/ui/EmptyState';
+import { Hint } from '../../../app/ui/Hint';
 
 // Goods received (the purchasing capability, ADR-033, issue #198): the list of deliveries and one delivery. A delivery can be voided
 // with a reason, which takes the goods out of stock again. It is refused once the delivery is on a supplier invoice (void the
@@ -45,11 +47,11 @@ export function GoodsReceivedPage() {
   const list = useCursorList(['retail', 'goods-receipts', query, status], (cursor, signal) => retail.listGoodsReceipts({ query, status, cursor, signal }));
   return (
     <Gate screen="goodsReceived" title="Goods received">
-      <p className="hint" data-tour="goods-received-help">
+      <Hint tour="goods-received-help">
         Each delivery from a supplier is recorded here. Receive against an order from the order itself, or record a delivery that came with no order.
         A wrong delivery is undone by voiding it and receiving it again correctly. Goods sent back to a supplier are recorded on a supplier credit note.
         A delivery marked held is waiting for its freight and duty to be added as a landed cost.
-      </p>
+      </Hint>
       <p className="cluster">
         <Link className="btn rt-primary" to="/staff/retail/goods-received/new" data-tour="receipts-new">Receive goods without an order</Link>
         <Link className="btn-sm" to="/staff/retail/purchase-orders">Purchase orders</Link>
@@ -147,7 +149,6 @@ export function GoodsReceiptPage() {
   const { show, toast } = useToast();
   const nameOf = useBranchName();
   const keys = useActionKeys();
-  const [message, setMessage] = useState<string | null>(null);
   const allowed = canUse(me, 'goodsReceived');
   const receipt = useQuery({ queryKey: ['retail', 'goods-receipt', receiptId], queryFn: () => retail.getGoodsReceipt(receiptId), enabled: allowed });
   useCrumbLabel(receipt.data?.receipt_no);
@@ -155,9 +156,7 @@ export function GoodsReceiptPage() {
     mutationFn: (reason: string) => retail.voidGoodsReceipt(receiptId, reason, keys.keyFor(receiptId, reason)),
     onSuccess: (r) => {
       keys.done(receiptId);
-      const text = `Voided ${r.receipt_no ?? 'the delivery'}. The goods are out of stock again.`;
-      setMessage(text);
-      show(text);
+      show(`Voided ${r.receipt_no ?? 'the delivery'}. The goods are out of stock again.`, 'success');
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
   });
@@ -167,9 +166,7 @@ export function GoodsReceiptPage() {
     mutationFn: (reason: string) => retail.releaseReceiptHold(receiptId, reason, releaseKeys.keyFor(receiptId, reason)),
     onSuccess: (r) => {
       releaseKeys.done(receiptId);
-      const text = `Released ${r.receipt_no ?? 'the delivery'}. It no longer waits for a landed cost.`;
-      setMessage(text);
-      show(text);
+      show(`Released ${r.receipt_no ?? 'the delivery'}. It no longer waits for a landed cost.`, 'success');
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
   });
@@ -177,7 +174,7 @@ export function GoodsReceiptPage() {
     return (
       <main className="rt">
         <h1>Goods received</h1>
-        <p className="empty-state">You do not have access to this page.</p>
+        <NoAccess />
       </main>
     );
   }
@@ -185,10 +182,8 @@ export function GoodsReceiptPage() {
   return (
     <main className="rt rt-wide">
       <h1>{r?.receipt_no ?? 'Goods received'}</h1>
-      <p><Link to="/staff/retail/goods-received">Back to goods received</Link></p>
       {receipt.isPending && <SkeletonList label="Loading the delivery" />}
       <Problem error={receipt.error} />
-      {message && <Success>{message}</Success>}
       {r && <GoodsReceiptView receipt={r} nameOf={nameOf} payable={canUse(me, 'supplierPayments')} />}
       {r && r.status === 'posted' && canUse(me, 'landedCosts') && holdsAt(me, PAYABLE_MANAGE, r.branch_id) && (
         <p><Link className="btn-sm" to="/staff/retail/landed-costs/new" search={{ receipt: r.id } as never} data-tour="receipt-landed">Add landed cost</Link></p>

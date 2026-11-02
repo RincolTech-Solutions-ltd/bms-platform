@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, createLazyRoute, useNavigate, useSearch } from '@tanstack/react-router';
+import { createLazyRoute, useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { SearchBox, SearchResults } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { businessToday, retail, type GoodsReceipt, type LandedCostPreview } from '../../../api/retail';
@@ -16,6 +17,7 @@ import { showQty } from './maths';
 import { SupplierField, useSuppliers, type SupplierOption } from './purchasing-ui';
 import { showDate } from './transfers';
 import { Gate, Problem, money } from './ui';
+import { Hint } from '../../../app/ui/Hint';
 
 // The landed cost form (the purchasing capability, issue #199). Choose who is owed (the forwarder or agent, one of your supplier
 // rows) and their invoice, type the charges and the total printed on the invoice, choose how to share them over the goods, find the
@@ -27,6 +29,7 @@ export function GoodsPicker({ onAdd, chosen }: { onAdd: (receipt: GoodsReceipt) 
   const search = useLiveSearch();
   const term = search.term;
   const found = useQuery({ queryKey: ['retail', 'goods-receipts', 'pick', term], queryFn: ({ signal }) => retail.listGoodsReceipts({ query: term, status: 'posted', signal }) });
+  // toast-exempt: it reads a delivery to put on the form and saves nothing; the delivery shows on the form at once
   const add = useMutation({ mutationFn: (id: string) => retail.getGoodsReceipt(id), onSuccess: onAdd });
   const rows = (found.data?.items ?? []).filter((r) => !chosen.includes(r.id ?? ''));
   return (
@@ -41,7 +44,7 @@ export function GoodsPicker({ onAdd, chosen }: { onAdd: (receipt: GoodsReceipt) 
                 <strong>{r.receipt_no}</strong> from {r.supplier_name}, {showDate(r.received_on)}, {money(r.total_minor ?? 0)}
                 {r.held_for_costing ? <span className="hint"> Held until the landed cost is in.</span> : null}
               </p>
-              <button type="button" className="btn-sm" disabled={add.isPending} onClick={() => add.mutate(r.id ?? '')} aria-label={`Add ${r.receipt_no}`}>Add this delivery</button>
+              <BusyButton busy={add.isPending && add.variables === (r.id ?? '')} type="button" className="btn-sm" disabled={add.isPending} onClick={() => add.mutate(r.id ?? '')} aria-label={`Add ${r.receipt_no}`}>Add this delivery</BusyButton>
             </li>
           ))}
         </ul>
@@ -122,7 +125,7 @@ export function LandedFormView({ form, suppliers, picker, onChange, onReview }: 
       <div className="stack" data-tour="landed-who">
         <h2>Who is owed</h2>
         <SupplierField id="landed-supplier" label="Who is owed (the forwarder, carrier or agent)" value={form.supplierId} suppliers={suppliers} onChange={(supplierId) => onChange({ ...form, supplierId })} />
-        <p className="hint">They must be in your list of suppliers. Add them in the Catalogue first if they are not.</p>
+        <Hint full>They must be in your list of suppliers. Add them in the Catalogue first if they are not.</Hint>
         <label htmlFor="landed-ref">Their invoice number</label>
         <input id="landed-ref" value={form.supplierRef} maxLength={60} onChange={(e) => onChange({ ...form, supplierRef: e.target.value })} />
         <label htmlFor="landed-date">Date of the charges</label>
@@ -206,8 +209,8 @@ export function ReviewPanel({ form, payee, preview, busy, error, onBack, onSave 
       {preview && <AllocationTable lines={lines} total={preview.total_minor} />}
       <Problem error={error} />
       <p className="cluster">
-        <button type="button" className="rt-primary" disabled={!preview || preview.total_mismatch === true || busy} onClick={onSave}>{busy ? 'Saving' : 'Save landed cost'}</button>
-        <button type="button" className="btn-ghost" onClick={onBack} disabled={busy}>Change something</button>
+        <BusyButton busy={busy ?? false} type="button" className="rt-primary" disabled={!preview || preview.total_mismatch === true} onClick={onSave}>Save landed cost</BusyButton>
+        <button type="button" /* busy-exempt: going back waits for the save */ className="btn-ghost" onClick={onBack} disabled={busy}>Change something</button>
       </p>
     </section>
   );
@@ -243,12 +246,12 @@ export function LandedCostNewPage() {
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       void navigate({ to: '/staff/retail/landed-costs/$landedCostId', params: { landedCostId: made.id ?? '' } });
     },
+    meta: { success: 'Landed cost saved' },
   });
   const picker = <GoodsPicker chosen={draft.receipts.map((r) => r.id)} onAdd={(receipt) => setDraft((d) => addReceipt(d, receipt))} />;
   return (
     <Gate screen="landedCosts" title="New landed cost">
-      <p><Link to="/staff/retail/landed-costs">Back to landed costs</Link></p>
-      <p className="hint">Record freight, duty, clearing or insurance for goods you have received. You see the share of every line before anything is saved.</p>
+      <Hint>Record freight, duty, clearing or insurance for goods you have received. You see the share of every line before anything is saved.</Hint>
       {!reviewing ? (
         <LandedFormView form={draft} suppliers={suppliers} picker={picker} onChange={(f) => setDraft(() => f)} onReview={() => { save.reset(); setReviewing(true); }} />
       ) : (

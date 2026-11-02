@@ -140,6 +140,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/logout-everywhere": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign out everywhere: revokes every session of the signed-in user, this one included (issue #647) */
+        post: operations["logoutEverywhere"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/refresh": {
         parameters: {
             query?: never;
@@ -293,6 +310,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/billing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The plan, its price, the subscription's state and dates, how to pay and the payments with their receipts (FR-SUB-12) */
+        get: operations["billingView"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/contact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Owner only: name the person who gets the reminders and receipts; sign-in contacts are never changed (ADR-090) */
+        put: operations["setBillingContact"];
+        post?: never;
+        /** Owner only: remove the billing contact, so reminders and receipts go to the Owner again (ADR-090) */
+        delete: operations["clearBillingContact"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/notice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether the business is overdue, since when and the last day of its grace period (FR-SUB-09) */
+        get: operations["billingNotice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/payments/{payment_id}/receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The receipt of a payment as a PDF (FR-SUB-11) */
+        get: operations["billingReceipt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/branches": {
         parameters: {
             query?: never;
@@ -346,6 +432,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/branches/{branch_id}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A shop's own logo image (public, cacheable) */
+        get: operations["getBranchLogo"];
+        /** Upload or replace a shop's own logo: the rules of the business logo, PNG, JPEG or WebP, 1 MB, 128 px or more (issue #461, ADR-068) */
+        put: operations["uploadBranchLogo"];
+        post?: never;
+        /** Remove a shop's own logo; it shows the business logo again and the file is kept (issue #461) */
+        delete: operations["removeBranchLogo"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/branches/{branch_id}/reopen": {
         parameters: {
             query?: never;
@@ -380,6 +485,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/branding/app/manifest.webmanifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The installed app's manifest for this business (public) */
+        get: operations["getAppManifest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/branding/app/{file}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An installed app icon drawn from the business's logo (public, cacheable) */
+        get: operations["getAppIcon"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/branding/logo": {
         parameters: {
             query?: never;
@@ -390,6 +529,92 @@ export interface paths {
         /** The tenant's logo image (public, cacheable) */
         get: operations["getBrandingLogo"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/closure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The open request to close the business, if any, and whether the caller may change it (ADR-090) */
+        get: operations["getClosure"];
+        put?: never;
+        /** Owner only, with the step-up: ask to close the business; read only at once, a full data export for the Owner, removal by the platform operator after the cooling-off (ADR-090) */
+        post: operations["requestClosure"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/closure/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Owner only: cancel the request to close the business before it is removed (ADR-090) */
+        post: operations["cancelClosure"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The data export card: the weekly email switch, the last export and email, the caller's newest workbook */
+        get: operations["getDataExport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-export/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask for a workbook of the whole business, made in the background; an identical one still queued or running is returned (202 new, 200 existing) */
+        post: operations["createDataExport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-export/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Switch the weekly email of the workbook to the Owner on or off, audited; the Owner only (403 owner_only) */
+        put: operations["updateDataExportSettings"];
         post?: never;
         delete?: never;
         options?: never;
@@ -425,6 +650,76 @@ export interface paths {
         put?: never;
         /** A 5 minute signed download URL (FR-DOC-03) */
         post: operations["createDocumentDownloadUrl"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's own feedback, newest first, with its status and the reply */
+        get: operations["listMyFeedback"];
+        put?: never;
+        /** Send an idea, a problem or a question to the platform operator, with an optional PNG or JPEG screenshot of at most 2 MB; at most 10 an hour per person (429 feedback_rate_limited) */
+        post: operations["sendFeedback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/feedback/{feedback_id}/screenshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The screenshot of one of the caller's own feedback items */
+        get: operations["getMyFeedbackScreenshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/help/ask": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether Ask BMS is on for this business, and the corpus revision */
+        get: operations["getAskStatus"];
+        put?: never;
+        /** Ask how to do something: an answer phrased from the help articles the caller may read, citing one, or the matching articles; 403 ask_bms_off while it is off for the business; 429 ask_rate_limited past the person's questions an hour */
+        post: operations["askBms"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/help/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether the setup helper can read a list, a photo or a file for this business */
+        get: operations["getSetupHelperStatus"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -600,6 +895,211 @@ export interface paths {
         put?: never;
         /** Record a valuation (FR-COL-02) */
         post: operations["addCollateralValuation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/collections/arrears": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Loans in arrears by PAR bucket (FR-CLN-03) */
+        get: operations["getArrearsList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/collections/due-list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every item of an active loan due in a range, today by default (FR-CLN-02) */
+        get: operations["getDueList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/collections/promises": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Promises to pay by status, pending by default (FR-CLN-05) */
+        get: operations["listPromises"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/collections/reassign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reassign many loans to one officer, all or none (FR-CLN-01) */
+        post: operations["reassignLoans"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/existing-loans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Loans brought in from the register, newest first (at most 200); status filters, for example brought_in */
+        get: operations["listExistingLoans"];
+        put?: never;
+        /** Record an existing loan with its real disbursement date and past repayments; 201 brought_in and waiting for a checker, or with dry_run=true 200 and the position it would have, saving nothing (FR-EXL-01 to FR-EXL-03) */
+        post: operations["recordExistingLoan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/existing-loans/go-live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The business's go-live date: set by the Owner or the operator, else the first administrator sign-in (ADR-071) */
+        get: operations["getLendingGoLiveDate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/existing-loans/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import existing loans and their repayments from CSV: check first (dry_run=true, the default), then commit; a commit with any error records nothing (FR-EXL-06) */
+        post: operations["importExistingLoans"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/existing-loans/import/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Draft the import from a loan register: typed, a photo, or a CSV, Excel or PDF file (the setup helper, issue #626); saves nothing; 403 setup_ai_off while it is off for the business */
+        post: operations["draftExistingLoansImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/existing-loans/{loan_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An existing loan as recorded: its repayments, schedule and position (FR-EXL-02) */
+        get: operations["getExistingLoan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/existing-loans/{loan_id}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask for approval again after a rejected, expired or stale request; checked against today's go-live date (FR-EXL-04) */
+        post: operations["requestExistingLoanApproval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/existing-loans/{loan_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Withdraw an existing loan still waiting for its checker, with a reason; it ends cancelled */
+        post: operations["cancelExistingLoan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/existing-loans/{loan_id}/reversal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask a second person to reverse an approved bring-in, with a reason: the opening entry is mirrored, the historic transactions are marked reversed and the loan is cancelled; refused once the loan has a transaction in the app or a penalty charge (FR-EXL-08) */
+        post: operations["requestExistingLoanReversal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1190,6 +1690,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/lending/loans/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Home's Lending card: loans due today and in arrears, with what is owed (issue #471) */
+        get: operations["getLoanHomeSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/lending/loans/{loan_id}": {
         parameters: {
             query?: never;
@@ -1243,6 +1760,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/lending/loans/{loan_id}/charges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The loan's penalty charges with what each still allows a waiver to take (R-PEN) */
+        get: operations["listLoanCharges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/loans/{loan_id}/charges/{charge_id}/waive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request a waiver of all or part of a penalty, with a reason (FR-ARR-04) */
+        post: operations["requestLoanChargeWaiver"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/lending/loans/{loan_id}/collateral": {
         parameters: {
             query?: never;
@@ -1254,6 +1805,24 @@ export interface paths {
         /** Set a draft's pledged collateral (FR-ORG-02) */
         put: operations["setLoanCollateral"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/loans/{loan_id}/collection-actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A loan's collection actions, newest first (FR-CLN-04) */
+        get: operations["listCollectionActions"];
+        put?: never;
+        /** Log a call, visit, SMS, letter, promise to pay or other action (FR-CLN-04) */
+        post: operations["logCollectionAction"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1345,6 +1914,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/lending/loans/{loan_id}/officer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Reassign a loan's responsible officer (FR-CLN-01) */
+        put: operations["setLoanOfficer"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/lending/loans/{loan_id}/payoff-quote": {
         parameters: {
             query?: never;
@@ -1407,6 +1993,23 @@ export interface paths {
         get: operations["getLoanSchedule"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/loans/{loan_id}/schedule/{item_no}/waive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request a waiver of all or part of a schedule item's fees or interest, with a reason (FR-ARR-04); the checker needs the accountant's permission; 201 when executed, 202 when it waits */
+        post: operations["requestLoanItemWaiver"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2398,6 +3001,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The plan card: the plan, the modules on, the paid-until date, module requests and changes still to come (ADR-073) */
+        get: operations["getPlan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plan/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Owner only, with the step-up: cancel the subscription at the end of the paid period; the business is read only after it, data kept (ADR-073) */
+        post: operations["cancelPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plan/changes/{change_id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Owner only: undo a module stop or the cancellation before its day (ADR-073) */
+        post: operations["undoPlanChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plan/module-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Owner only, after the step-up: ask for a module; switched on at once when the plan includes it, otherwise the platform operator decides (ADR-073) */
+        post: operations["requestPlanModule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plan/modules/{module}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Owner only, with the step-up: stop using a module at the end of the paid period (at once when nothing is paid ahead); records are kept (ADR-073) */
+        post: operations["stopPlanModule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plan/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** When the subscription ends or ended, for the banner and the read-only notice (ADR-073) */
+        get: operations["getPlanStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/applications": {
         parameters: {
             query?: never;
@@ -2619,6 +3324,143 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/billing/due-for-suspension": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Overdue businesses past the grace period, with days overdue and the amount; nothing is suspended automatically (FR-SUB-10) */
+        get: operations["platformDueForSuspension"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/billing/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The grace period and how to pay (FR-SUB-09) */
+        get: operations["platformBillingSettings"];
+        /** Change the grace period or how to pay, with a reason; unchanged values change nothing (FR-SUB-09) */
+        put: operations["platformSaveBillingSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/closures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The open requests to close a business, soonest removable first, and those of the last 180 days (ADR-090) */
+        get: operations["platformClosures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/closures/{closure_id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove a business whose Owner asked to close it, once the cooling-off is over, with a reason; deletes or anonymises its personal data and keeps its money records anonymised until a date; needs a current code from the operator's own authenticator (ADR-090) */
+        post: operations["platformRemoveClosedBusiness"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Feedback from every business, newest first, optionally one status (new, seen, done) and only what was sent after since */
+        get: operations["platformListFeedback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/feedback/{feedback_id}/linked-issue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set or clear the number of the issue opened for one feedback item */
+        put: operations["platformSetFeedbackLinkedIssue"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/feedback/{feedback_id}/screenshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The screenshot sent with one feedback item */
+        get: operations["platformGetFeedbackScreenshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/feedback/{feedback_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Move one feedback item forward (new, seen, done) with an optional reply the sender sees; 422 feedback_status_backwards for a move back */
+        put: operations["platformSetFeedbackStatus"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/find-sign-in": {
         parameters: {
             query?: never;
@@ -2647,6 +3489,57 @@ export interface paths {
         get: operations["platformMe"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/module-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Module requests of every business, newest first; pending by default (ADR-073) */
+        get: operations["platformListModuleRequests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/module-requests/{request_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve a module request with a reason, optionally moving the plan first; switches the module on, data kept; needs a current code from the operator's own authenticator (ADR-073) */
+        post: operations["platformApproveModuleRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/module-requests/{request_id}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decline a module request with a reason the Owner sees; needs a current code from the operator's own authenticator (ADR-073) */
+        post: operations["platformDeclineModuleRequest"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2739,6 +3632,228 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/referrals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Referrals across the platform and open applications with a code, newest first; filters: referrer_tenant_id, status (applied, active, paying, suspended, cancelled, ended), commission (due, paid) */
+        get: operations["platformListReferrals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/commissions/{line_id}/paid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record that one commission line was paid (date, method, reference, note), with a reason; the app never pays; 409 commission_already_paid, 409 commission_line_reversed, 409 commission_reversal_of_unpaid, 409 referrer_inactive unless confirm_referrer_inactive */
+        post: operations["platformMarkReferralCommissionPaid"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/commissions/{line_id}/reverse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reverse one commission line with a reason (lines are never deleted); refunded true records that its payment was refunded; 409 commission_line_already_reversed, 422 commission_line_is_reversal and commission_line_not_payment */
+        post: operations["platformReverseReferralCommission"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/default-rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The platform default commission rule, or null */
+        get: operations["platformGetReferralDefaultRule"];
+        /** Set or clear the platform default commission rule, with a reason; it applies to payments recorded from now on; needs a current code from the operator's own authenticator */
+        put: operations["platformSetReferralDefaultRule"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The same referrals as CSV, one row per referral and currency, at most 10,000; audited */
+        get: operations["platformExportReferrals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/payments/{payment_id}/refunded": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record that a referred business's subscription payment was refunded, with a reason, when it has no commission line left standing: it no longer uses up the rule's months; 404 when the payment has no referral, 409 payment_already_refunded, 409 payment_line_not_reversed (reverse the line with refunded instead) */
+        post: operations["platformMarkReferralPaymentRefunded"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/{referral_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One referral, the rule a payment recorded now would use, and its commission lines */
+        get: operations["platformGetReferral"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/{referral_id}/commissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a commission line with an amount the operator typed, with a reason. Needs an Idempotency-Key; a repeat adds nothing and answers 200 */
+        post: operations["platformAddReferralCommission"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/{referral_id}/rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set this referral's own commission rule, or clear it so the default applies, with a reason; 422 referral_ended; needs a current code from the operator's own authenticator */
+        put: operations["platformSetReferralRule"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/scheduled-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Module stops and cancellations still to come, soonest first (ADR-073) */
+        get: operations["platformListScheduledChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/short-link-rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The reserved names and the one Cloudflare single redirect built from them, for the operator (ADR-108) */
+        get: operations["getShortLinkRule"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/short-links/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Follow a short link: 302 to the shop, to its new address while an old name forwards, or to the page 'No shop uses this link' (ADR-108) */
+        get: operations["followShortLink"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/short-links/{name}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Follow a short link: 302 to the shop, to its new address while an old name forwards, or to the page 'No shop uses this link' (ADR-108) */
+        get: operations["followShortLink_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/sign-up/applications": {
         parameters: {
             query?: never;
@@ -2767,6 +3882,23 @@ export interface paths {
         put?: never;
         /** Answer the operator's question; the application returns to the queue (FR-ONB-04) */
         post: operations["signUpReply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/sign-up/short-name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Check a short name as it is typed, with free suggestions when it is not free (ADR-108) */
+        get: operations["signUpCheckShortName"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2825,6 +3957,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/tenants/without-owner": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every active or suspended business with no Owner, with its active administrators, so the operator sets the Owner (ADR-062, ADR-090) */
+        get: operations["platformTenantsWithoutOwner"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/tenants/{tenant_id}": {
         parameters: {
             query?: never;
@@ -2835,6 +3984,23 @@ export interface paths {
         /** One tenant */
         get: operations["platformGetTenant"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenant_id}/go-live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set the business's go-live date, with a reason: an existing loan is brought in only with a disbursement date before it (ADR-071) */
+        put: operations["platformSetGoLiveDate"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2954,6 +4120,23 @@ export interface paths {
         get?: never;
         /** Move the business to another active plan, with a reason; the same plan again changes nothing (FR-TEN-04) */
         put: operations["platformSetTenantPlan"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenant_id}/referrer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set, correct or clear the business that referred this one, with a reason; 422 referral_self and referral_code_unknown; lines already earned stay with their referrer; the same referrer again changes nothing; needs a current code from the operator's own authenticator */
+        put: operations["platformSetTenantReferrer"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3161,6 +4344,23 @@ export interface paths {
         put?: never;
         /** Lift the sign-in lock of a tenant's staff user after too many wrong passwords, with a reason; audited, changes no password (ADR-059) */
         post: operations["platformUnlockUserSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/referrals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The business's referral code and link, the businesses it referred, and the commission earned, paid and due (ADR-069) */
+        get: operations["myReferrals"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3429,7 +4629,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Set a branch's role (store, shop or both); audited; 422 branch_has_open_work while a transfer is unreceived */
+        /** Set a selling branch's role (shop or both; a store is sells_goods false on PATCH /branches/{id}); audited; 422 branch_is_store for a store, branch_has_open_work while a transfer is unreceived */
         put: operations["setRetailBranchRole"];
         post?: never;
         delete?: never;
@@ -3480,6 +4680,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/categories/prefix-suggestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The code start a new category of this name would get, free in the business (issue #493) */
+        get: operations["suggestRetailCategoryPrefix"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/categories/{category_id}": {
         parameters: {
             query?: never;
@@ -3493,7 +4710,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Rename or deactivate a category (#146); never deleted */
+        /** Rename, change the code start of, or deactivate a category (#146, #493); never deleted */
         patch: operations["updateRetailCategory"];
         trace?: never;
     };
@@ -3841,6 +5058,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/entry-warnings/confirmations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record that the person confirmed an entry warning and saved anyway (issue #353) */
+        post: operations["confirmRetailEntryWarning"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/expense-categories": {
         parameters: {
             query?: never;
@@ -4101,6 +5335,93 @@ export interface paths {
         put?: never;
         /** Void a landed cost as a whole by reversal, once; refused while a payment stands against the payee's invoice, while a credit note touches its lines, or when the goods have moved on (issue #199); M */
         post: operations["voidRetailLandedCost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/offline-failures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reported offline sales in the caller's branch scope, open and retry by default (ADR-067) */
+        get: operations["listRetailOfflineFailures"];
+        put?: never;
+        /** Report a sale made offline that the server refused, for a manager to decide (ADR-067); idempotent on the client sale id */
+        post: operations["reportRetailOfflineFailure"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/offline-failures/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's own reported offline sales: these client sale ids, or every one open or waiting to be sent again (ADR-067) */
+        get: operations["listMyRetailOfflineFailures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/offline-failures/{failure_id}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Discard a refused offline sale with a reason; it is never recorded; audited (ADR-067). The caller's own sale only by an administrator, with self_discard_reason */
+        post: operations["discardRetailOfflineFailure"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/offline-failures/{failure_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask the device that reported it to send the sale again (ADR-067); audited */
+        post: operations["retryRetailOfflineFailure"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/offline-waiting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sales waiting on a phone in the caller's branch scope, oldest first (ADR-067) */
+        get: operations["listRetailOfflineWaiting"];
+        put?: never;
+        /** A phone tells which sales other people left queued on it, in short, so managers see them waiting (ADR-067); upserted on the client sale id */
+        post: operations["reportRetailOfflineWaiting"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4458,6 +5779,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/product-families/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The sizes and colours the business's items have, offered again on Add an item (issue #697) */
+        get: operations["listRetailVariantOptions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/product-families/{family_id}": {
         parameters: {
             query?: never;
@@ -4546,6 +5884,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/products/barcodes/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make a shop EAN-13 label code (210, nine digits, check digit) for each item that has no made code yet; idempotent (#345, #524) */
+        post: operations["generateRetailBarcodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/products/by-barcode/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The active item a scanned barcode belongs to; with branch_id, with that branch's balance (#345) */
+        get: operations["findRetailProductByBarcode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/products/import": {
         parameters: {
             query?: never;
@@ -4557,6 +5929,40 @@ export interface paths {
         put?: never;
         /** Import items from CSV for a new client: dry run first, then apply; administrators only (#146) */
         post: operations["importRetailProducts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/products/import/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Draft the item import from a typed list, a photo, or a CSV, Excel or PDF file (the setup helper); saves nothing; administrators only; 403 setup_ai_off while it is off for the business */
+        post: operations["draftRetailProductImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/products/name-hints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Did you mean, and the category of similar items, while a new item's name is typed (issue #353) */
+        get: operations["getRetailNameHints"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4596,6 +6002,58 @@ export interface paths {
         head?: never;
         /** Edit a product's non-price fields */
         patch: operations["updateRetailProduct"];
+        trace?: never;
+    };
+    "/api/v1/retail/products/{product_id}/barcodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The barcodes of an item (#345) */
+        get: operations["listRetailProductBarcodes"];
+        put?: never;
+        /** Add a barcode to an item or one of its pack sizes; check digits are checked (#345) */
+        post: operations["addRetailProductBarcode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/products/{product_id}/barcodes/{barcode_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a barcode from an item (#345) */
+        delete: operations["removeRetailProductBarcode"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/products/{product_id}/entry-norms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An item's recent quantities, usual units and last selling price, for the entry warnings (issue #353) */
+        get: operations["getRetailEntryNorms"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/retail/products/{product_id}/family": {
@@ -4894,6 +6352,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/quick-add": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Quick add: a new item (or one already in the list) and stock added at a branch as opening stock, in one transaction; the stock also needs retail.stocktake.commit there (issue #632, ADR-101); M */
+        post: operations["quickAddRetailItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/quotations": {
         parameters: {
             query?: never;
@@ -5134,6 +6609,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/reports/home": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Shop Home summary: today's sales and takings by way of paying, credit owed, top items, each shop, low stock and open orders (issue #485)
+         * @description One read for the Shop cards on Home (ADR-076). The money parts (sales_today, takings, credit_owed, top_items, branches) follow the dashboard's scope and need retail.sale.all_sellers in every branch they cover (ADR-055); without it they are left out, not refused. low_stock needs retail.stock.read and open_orders retail.order.manage, each in its own branch scope. branches is present only over two or more shops
+         */
+        get: operations["getRetailHomeSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/reports/margins": {
         parameters: {
             query?: never;
@@ -5341,6 +6836,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/sale-clashes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Clashes of sales recorded offline in the caller's branch scope, newest first (ADR-067) */
+        get: operations["listRetailSaleClashes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/sale-clashes/{clash_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve a clash with a note, once; audited (ADR-067). Nothing else changes */
+        post: operations["resolveRetailSaleClash"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/sales": {
         parameters: {
             query?: never;
@@ -5469,6 +6998,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/sales/{sale_id}/receipt/printed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What a sale's receipt PDF prints, laid out for the screen's preview and asked for only when View receipt is tapped; the same check as the PDF, and without printed when it cannot be laid out (issue #500) */
+        get: operations["getRetailSaleReceiptPrinted"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/sales/{sale_id}/returns": {
         parameters: {
             query?: never;
@@ -5496,7 +7042,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Void a sale by reversal (FR-RET-04) */
+        /** Void a sale by reversal (FR-RET-04), or ask an administrator first (ADR-091) */
         post: operations["voidRetailSale"];
         delete?: never;
         options?: never;
@@ -5594,7 +7140,7 @@ export interface paths {
         };
         /** The tenant's retail capabilities, absent keys off */
         get: operations["getRetailCapabilities"];
-        /** Switch retail capabilities or choose the shop or trade profile; audited with old and new values */
+        /** Switch retail capabilities or choose the kind of business; audited with old and new values */
         put: operations["updateRetailCapabilities"];
         post?: never;
         delete?: never;
@@ -5705,6 +7251,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/stocktakes/unfinished": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The counts started at a branch and neither saved nor thrown away, newest first, at most 20 (issue #728); needs retail.stocktake.commit at that branch */
+        get: operations["listRetailUnfinishedStocktakes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/stocktakes/{stocktake_id}": {
         parameters: {
             query?: never;
@@ -5731,8 +7294,25 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Write the adjustment movements and post the variance (FR-RET-08) */
+        /** Write the adjustment movements and post the variance (FR-RET-08); every big drop must be acknowledged (issue #636) */
         post: operations["commitRetailStocktake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/stocktakes/{stocktake_id}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** End a draft count without writing stock; idempotent, a committed count is refused (issue #656) */
+        post: operations["discardRetailStocktake"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5956,6 +7536,23 @@ export interface paths {
         };
         /** What a supplier is owed on invoices and credit restocks in the caller's scope, oldest due first (issue #198) */
         get: operations["listRetailSupplierOpenItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/suppliers/{supplier_id}/statement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A supplier's statement: opening balance, purchases on credit, invoices, credit notes, payments, voids and reversals with a running balance, closing balance (issue #557) */
+        get: operations["getRetailSupplierStatement"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6215,6 +7812,24 @@ export interface paths {
         patch: operations["updateSettings"];
         trace?: never;
     };
+    "/api/v1/settings/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Which actions ask for a second person, and from what amount (ADR-091) */
+        get: operations["getApprovalRules"];
+        /** Change the approval rules, with the administrator's proof, audited (ADR-091) */
+        put: operations["updateApprovalRules"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/logo": {
         parameters: {
             query?: never;
@@ -6244,6 +7859,23 @@ export interface paths {
         get: operations["getNotificationSettings"];
         /** Change which everyday push notices the business sends, audited with before and after (issue #412) */
         put: operations["updateNotificationSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/short-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The business's short link (ADR-108) */
+        get: operations["getShortLink"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -6459,6 +8091,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{user_id}/sign-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign another user out on every device, for a lost or stolen phone; they stay active and sign in again with their password (issue #647) */
+        post: operations["signOutUserDevices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/{user_id}/transfer-ownership": {
         parameters: {
             query?: never;
@@ -6664,6 +8313,30 @@ export interface components {
              */
             subject_id: string;
         };
+        /** @description A W3C web app manifest */
+        AppManifest: {
+            background_color?: string;
+            description?: string;
+            display?: string;
+            icons?: components["schemas"]["AppManifestIcon"][];
+            id?: string;
+            lang?: string;
+            name?: string;
+            scope?: string;
+            short_name?: string;
+            start_url?: string;
+            /**
+             * @description The business's colour, or this one when it has none
+             * @default #0077B6
+             */
+            theme_color: string;
+        };
+        AppManifestIcon: {
+            purpose?: string;
+            sizes?: string;
+            src?: string;
+            type?: string;
+        };
         ApplicantLinkRequest: {
             token: string;
         };
@@ -6680,9 +8353,13 @@ export interface components {
             modules?: string[];
             /** @description The operator's question, while the status is needs_info */
             operator_note?: string;
+            /** @description A new name a repeat sign-up asked for, applied by the confirm call */
+            pending_short_name?: string;
             reference?: string;
             /** @description The reason, when rejected */
             reject_reason?: string;
+            /** @description The short name asked for, or null (ADR-108) */
+            short_name?: string;
             /** @description submitted, needs_info, verified, activated, rejected or expired */
             status?: string;
             term?: string;
@@ -6731,6 +8408,7 @@ export interface components {
         ApplicationDetail: {
             application?: components["schemas"]["Application"];
             possible_duplicates?: components["schemas"]["PossibleDuplicate"][];
+            referred_by?: components["schemas"]["ApplicationReferrer"];
             /** @description A free slug from the business name (FR-TEN-02); editable at Activate */
             suggested_slug?: string;
         };
@@ -6743,6 +8421,14 @@ export interface components {
         };
         ApplicationNoteRequest: {
             note: string;
+        };
+        /** @description The business whose referral code the applicant brought */
+        ApplicationReferrer: {
+            code?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+            tenant_name?: string;
+            tenant_slug?: string;
         };
         Approval: {
             action_type?: string;
@@ -6788,6 +8474,133 @@ export interface components {
             items?: components["schemas"]["Approval"][];
             next_cursor?: string;
         };
+        ApprovalRule: {
+            /** @description The action type, as on an approval request */
+            action_type?: string;
+            /** @description Whether the action has an amount a threshold applies to */
+            has_amount?: boolean;
+            /** @description The action in words */
+            label?: string;
+            /** @description The module the action belongs to: lending or retail */
+            module?: string;
+            /** @description Whether the action asks for a second person now */
+            on?: boolean;
+            /** @description Whether the business may switch it off; lending actions always ask */
+            switchable?: boolean;
+            /**
+             * Format: int64
+             * @description The amount from which it asks, in minor units; 0 means every one; null without an amount
+             */
+            threshold_minor?: number;
+        };
+        ApprovalRuleChange: {
+            action_type: string;
+            on: boolean;
+            /**
+             * Format: int64
+             * @description Only for an action with an amount; omitted keeps the amount
+             */
+            threshold_minor?: number;
+        };
+        ApprovalRules: {
+            /** @description The business's currency, for the amounts */
+            currency?: string;
+            rules?: components["schemas"]["ApprovalRule"][];
+            /** Format: int32 */
+            version?: number;
+        };
+        ApprovalWaiting: {
+            /** @description The action type, as on the request */
+            action_type: string;
+            /**
+             * Format: int64
+             * @description The amount the checker sees, in minor units
+             */
+            amount_minor?: number;
+            /**
+             * Format: uuid
+             * @description The pending approval request
+             */
+            approval_id: string;
+            currency?: string;
+        };
+        ArrearsBucket: {
+            /** Format: int64 */
+            arrears_minor?: number;
+            items?: components["schemas"]["ArrearsListLine"][];
+            /** Format: int32 */
+            loans?: number;
+            par_bucket?: string;
+        };
+        /** @description FR-CLN-03, chapter 14 lending.arrears_list: loans with DPD above 0 by PAR bucket */
+        ArrearsList: {
+            buckets?: components["schemas"]["ArrearsBucket"][];
+            /** @description More loans matched than the limit; the bucket totals still count every loan */
+            truncated?: boolean;
+        };
+        ArrearsListLine: {
+            /** Format: int64 */
+            arrears_minor?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: int32 */
+            days_past_due?: number;
+            /** Format: date-time */
+            last_action_at?: string;
+            last_action_type?: string;
+            /** Format: date */
+            last_repayment_on?: string;
+            /** Format: uuid */
+            loan_id?: string;
+            loan_no?: string;
+            member_name?: string;
+            member_no?: string;
+            officer_name?: string;
+            /** Format: uuid */
+            officer_user_id?: string;
+            par_bucket?: string;
+            /** Format: int64 */
+            penalties_outstanding_minor?: number;
+            /** @description Masked (+256*****0001) unless the caller holds lending.members.contact in the loan's branch */
+            phone?: string;
+            /** Format: int64 */
+            principal_outstanding_minor?: number;
+            /** Format: int64 */
+            promised_amount_minor?: number;
+            /**
+             * Format: date
+             * @description The earliest pending promise to pay, if any
+             */
+            promised_date?: string;
+        };
+        AskAnswer: {
+            /** @description The answer to show; null for articles and no_match */
+            answer?: string;
+            /** @description The matching articles the asker may read, best first */
+            articles?: components["schemas"]["AskArticle"][];
+            cited?: components["schemas"]["AskArticle"];
+            /** @description Why no answer was written, for source articles only: not_in_articles (the model found none in the articles), all_failed (every provider failed), no_provider (none is set) or daily_cap (the business's questions for the day are used up); null otherwise */
+            reason?: string;
+            revision?: string;
+            /** @description model: phrased from the cited article; cache: the same answer as before; articles: no answer was phrased, the matching articles are listed; other_role: the best match is a job for another role; no_match: no article matches */
+            source?: string;
+        };
+        /** @description The matching articles the asker may read, best first */
+        AskArticle: {
+            id?: string;
+            title?: string;
+        };
+        AskRequest: {
+            /** @description The asker's language, for example en; the articles' language is used when there is none */
+            locale?: string;
+            question: string;
+        };
+        AskStatus: {
+            /** @description Ask BMS is on for this business; while false the box is not shown */
+            enabled?: boolean;
+            /** @description The help corpus revision the server answers from (ADR-095) */
+            revision?: string;
+        };
         /** @description Identifiers in data are masked (FR-AUD-05) */
         AuditEvent: {
             action?: string;
@@ -6825,6 +8638,123 @@ export interface components {
             /** Format: date-time */
             to?: string;
         };
+        /** @description Who gets the reminders and receipts; never a sign-in contact */
+        BillingContact: {
+            email?: string;
+            full_name?: string;
+            phone?: string;
+            /** Format: date-time */
+            updated_at?: string;
+        };
+        BillingContactRequest: {
+            /** Format: email */
+            email: string;
+            full_name: string;
+            /** @description A Ugandan mobile number for SMS reminders, optional */
+            phone?: string;
+        };
+        BillingNotice: {
+            /** Format: date */
+            overdue_since?: string;
+            /** Format: date */
+            pay_by?: string;
+            /** @description none, in_grace or overdue */
+            state?: string;
+        };
+        /** @description Newest first */
+        BillingPayment: {
+            /** Format: int64 */
+            amount_minor?: number;
+            currency?: string;
+            /** Format: uuid */
+            id?: string;
+            /** @description mtn_momo, airtel_money, bank_transfer or other */
+            method?: string;
+            /** Format: int32 */
+            months?: number;
+            /** Format: date */
+            paid_on?: string;
+            /** Format: date */
+            period_end?: string;
+            /** Format: date */
+            period_start?: string;
+            /** @description RT-<year>-<number>; null only if the receipt could not be issued */
+            receipt_no?: string;
+            reference?: string;
+        };
+        BillingSettings: {
+            /**
+             * Format: int32
+             * @description Days an overdue business keeps working before it is listed for suspension
+             */
+            grace_days?: number;
+            /** @description How to pay, in the operator's words, shown in reminders and on the Owner's page */
+            how_to_pay?: string;
+            /** Format: date-time */
+            updated_at?: string;
+            updated_by_name?: string;
+        };
+        BillingSettingsRequest: {
+            /** Format: int32 */
+            grace_days: number;
+            /** @description Left out: kept as it is; empty: cleared */
+            how_to_pay?: string;
+            /** @description Why; kept in the platform audit log */
+            reason: string;
+        };
+        BillingView: {
+            /**
+             * Format: int64
+             * @description The yearly price, or null
+             */
+            annual_minor?: number;
+            /**
+             * Format: int32
+             * @description Months charged for a year, or null
+             */
+            annual_months?: number;
+            billing_contact?: components["schemas"]["BillingContact"];
+            /** @description The name reminders and receipts are written to now, or null when nobody gets them */
+            bills_go_to?: string;
+            /** @description Whether the caller is the Owner, who alone changes the billing contact */
+            can_change_contact?: boolean;
+            currency?: string;
+            /** Format: int32 */
+            grace_days?: number;
+            /** @description The operator's words on how to pay, or null */
+            how_to_pay?: string;
+            /**
+             * Format: int64
+             * @description The plan's monthly price on the first day the next payment would cover (the later of today and the day after the last day paid for), in minor units, or null when none was entered
+             */
+            monthly_minor?: number;
+            /**
+             * Format: date
+             * @description While overdue: the first day not paid for
+             */
+            overdue_since?: string;
+            /**
+             * Format: date
+             * @description The last day paid for, or null
+             */
+            paid_until?: string;
+            /**
+             * Format: date
+             * @description While overdue: the last day of the grace period
+             */
+            pay_by?: string;
+            /** @description Newest first */
+            payments?: components["schemas"]["BillingPayment"][];
+            plan_code?: string;
+            plan_name?: string;
+            /** @description trial, active, in_grace, overdue, suspended, cancelled or pilot */
+            state?: string;
+            /**
+             * Format: date
+             * @description The last day of the free month, or null
+             */
+            trial_ends_on?: string;
+        };
         BlacklistRequest: {
             is_blacklisted: boolean;
             /** @description Required when blacklisting (FR-MEM-13) */
@@ -6845,6 +8775,8 @@ export interface components {
             id?: string;
             is_head_office?: boolean;
             location?: string;
+            /** @description Same-origin URL of the shop's own logo, versioned by its document id, or null: the shop shows the business logo (issue #461, ADR-068) */
+            logo_url?: string;
             name?: string;
             /** @description false for a Store: it holds stock and takes transfers but does not sell (ADR-048) */
             sells_goods?: boolean;
@@ -6881,6 +8813,33 @@ export interface components {
             /** @description #FFFFFF or #111111, the readable text colour on themePrimary; null with it */
             theme_text?: string;
         };
+        /** @description The request to close the business, if one is open */
+        BusinessClosure: {
+            /** @description Whether the caller is the Owner, who alone asks to close and cancels */
+            can_change?: boolean;
+            /**
+             * Format: int32
+             * @description The days between the request and the first day of removal
+             */
+            cooling_off_days?: number;
+            /**
+             * Format: uuid
+             * @description The full data export made for the Owner with the request, or null
+             */
+            export_run_id?: string;
+            /** Format: uuid */
+            id?: string;
+            /**
+             * Format: date
+             * @description The first day the platform operator may remove the business
+             */
+            remove_after?: string;
+            /** Format: date-time */
+            requested_at?: string;
+            requested_by_name?: string;
+            /** @description none or requested */
+            status?: string;
+        };
         BusinessDetail: {
             admins?: components["schemas"]["TenantAdmin"][];
             /** @description Newest first, at most 50 */
@@ -6892,9 +8851,88 @@ export interface components {
             plan_price?: components["schemas"]["PlanPrice"];
             tenant?: components["schemas"]["PlatformTenant"];
         };
+        BusinessPlan: {
+            /** @description Whether a change asked for now takes effect at once, as nothing is paid ahead */
+            applies_at_once?: boolean;
+            /** @description Whether the signed-in user is the Owner, who alone may change the plan */
+            can_change?: boolean;
+            /** @description Changes still to come, soonest first, then the latest done or undone */
+            changes?: components["schemas"]["PlanScheduledChange"][];
+            /**
+             * Format: date
+             * @description The day a change asked for now would take effect
+             */
+            changes_take_effect_on?: string;
+            /**
+             * Format: date
+             * @description When the subscription has ended: the day it ended
+             */
+            ended_on?: string;
+            /**
+             * Format: date
+             * @description While a cancellation is scheduled: the first day the business is read only
+             */
+            ends_on?: string;
+            modules?: string[];
+            /** @description Modules the business does not use and may ask for */
+            modules_available?: string[];
+            /** @description Modules the plan includes: asking for one of these switches it on at once */
+            modules_in_plan?: string[];
+            /**
+             * Format: date
+             * @description The last day paid for, or null
+             */
+            paid_until?: string;
+            pilot?: boolean;
+            plan_code?: string;
+            plan_name?: string;
+            /** @description The latest module requests, newest first */
+            requests?: components["schemas"]["PlanModuleRequest"][];
+            /** @description trial, active, past_due, suspended or cancelled; null when the business has none yet */
+            subscription_status?: string;
+            /**
+             * Format: date
+             * @description Today in the business's own time zone
+             */
+            today?: string;
+            /** Format: date */
+            trial_ends_on?: string;
+        };
+        /** @description For the banner and the read-only notice every member of staff sees */
+        BusinessPlanStatus: {
+            /**
+             * Format: date
+             * @description While the Owner's request to close the business is open: the first day it may be removed; the business is read only (ADR-090)
+             */
+            closing_remove_after?: string;
+            /**
+             * Format: date
+             * @description When the subscription has ended: the day it ended; the business is read only
+             */
+            ended_on?: string;
+            /**
+             * Format: date
+             * @description While a cancellation is scheduled: the first day the business is read only
+             */
+            ends_on?: string;
+        };
+        CancelExistingLoanRequest: {
+            reason: string;
+        };
+        /** @description FR-ARR-04: amount_minor left out waives all that is waivable */
+        ChargeWaiverRequest: {
+            /** Format: int64 */
+            amount_minor?: number;
+            reason: string;
+        };
         /** @description The reason is required only when the branch still holds stock or has transfers on their way (422 branch_close_needs_reason says which). */
         CloseBranchRequest: {
             reason?: string;
+        };
+        /** @description The authenticator code when the Owner has two-step sign-in, else the password */
+        ClosureStepUp: {
+            password?: string;
+            totp_code?: string;
         };
         Collateral: {
             /** Format: uuid */
@@ -7018,12 +9056,48 @@ export interface components {
             valued_on: string;
             valuer_name?: string;
         };
+        CollectionAction: {
+            action_type?: string;
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            loan_id?: string;
+            note?: string;
+            /** Format: date-time */
+            performed_at?: string;
+            /** Format: uuid */
+            performed_by?: string;
+            performed_by_name?: string;
+            /** @description pending, kept or broken; null unless a promise to pay */
+            promise_status?: string;
+            /** Format: int64 */
+            promised_amount_minor?: number;
+            /** Format: date */
+            promised_date?: string;
+        };
+        /** @description FR-CLN-04: the loan's timeline, newest first */
+        CollectionActionList: {
+            items?: components["schemas"]["CollectionAction"][];
+        };
+        /** @description FR-CLN-04: a promise to pay carries a date and an amount */
+        CollectionActionRequest: {
+            /** @description call, visit, sms, letter, promise_to_pay or other */
+            action_type: string;
+            note?: string;
+            /** Format: int64 */
+            promised_amount_minor?: number;
+            /** Format: date */
+            promised_date?: string;
+        };
         CreateBranchRequest: {
-            code: string;
+            /** @description 2 to 10 capital letters or digits. Omitted, the server makes one from the name, unique in the business (issue #581, ADR-089). */
+            code?: string;
             location?: string;
             name: string;
             /** @description false creates a Store: it holds stock but does not sell (ADR-048). Omitted means a shop. */
             sells_goods?: boolean;
+            /** @description false creates a branch that keeps no goods, such as a head office (ADR-041, ADR-089). Omitted means it keeps goods. A Store must keep goods (422 store_must_stock). */
+            stocks_goods?: boolean;
         };
         CreateCollateralRequest: {
             collateral_type: string;
@@ -7126,8 +9200,11 @@ export interface components {
         };
         /** @description Issue #384: an item with sizes and colours. Without variants every combination of sizes and colours is made, sizes in the order given; with variants exactly those are made */
         CreateRetailFamilyRequest: {
-            /** @description What every variant's code starts with, as ROMP; unique codes ignore case */
-            base_code: string;
+            /**
+             * @deprecated
+             * @description Leave it out: every variant's code starts with the category's next code, as BLB-0007 (issue #562). One that is not blank is refused with 400 item_code_made_by_app
+             */
+            base_code?: string;
             /** Format: uuid */
             category_id: string;
             colours?: string[];
@@ -7140,6 +9217,10 @@ export interface components {
             duplicate_reason?: string;
             /** @description The item's name, as Baby romper */
             name: string;
+            /** @description Issue #697: a size's own selling price for one of its packages; a package price not named here is the one sent, in proportion to the size's selling price */
+            pack_prices?: components["schemas"]["RetailSizePackPrice"][];
+            /** @description Issue #697 (ADR-111): packages every size and colour gets, made in its transaction, checked as on POST /products; all are saved with the item or none is */
+            packs?: components["schemas"]["RetailPackRequest"][];
             /**
              * Format: int64
              * @description Each variant's selling price unless it has its own
@@ -7153,13 +9234,18 @@ export interface components {
         CreateRetailProductRequest: {
             /** Format: uuid */
             category_id: string;
-            /** @description Unique ignoring case and surrounding spaces */
-            code: string;
+            /**
+             * @deprecated
+             * @description Leave it out: the app always gives the category's next code, such as BLB-0001 (issue #562, ADR-081 as amended). A code that is not blank is refused with 400 item_code_made_by_app
+             */
+            code?: string;
             /** Format: int64 */
             cost_minor: number;
             description: string;
             /** @description Issue #352: only an administrator (core.settings.manage) may add or rename a product to a name another product of the same unit has, and then with a reason of at least 5 characters, stored on the product. Without it that is refused with 422 duplicate_product_name. */
             duplicate_reason?: string;
+            /** @description Issue #689 (ADR-106): packages made with the item in its transaction, checked as POST /products/{id}/units checks them; all are saved with the item or none is */
+            packs?: components["schemas"]["RetailPackRequest"][];
             /** Format: int64 */
             sell_minor: number;
             /** Format: uuid */
@@ -7190,6 +9276,27 @@ export interface components {
             head_office_branch_id?: string;
             tenant?: components["schemas"]["PlatformTenant"];
         };
+        DataExportSettingsRequest: {
+            /** @description Email the Owner a copy every week */
+            weekly_email: boolean;
+        };
+        DataExportStatus: {
+            /**
+             * Format: date-time
+             * @description When the weekly email last went to the Owner; null when never
+             */
+            last_emailed_at?: string;
+            /**
+             * Format: date-time
+             * @description When a workbook of the business's data was last made, by anyone; null when never
+             */
+            last_export_at?: string;
+            latest?: components["schemas"]["ReportRun"];
+            /** @description Whether the caller is the Owner, who alone may switch the weekly email; others see it only */
+            owner?: boolean;
+            /** @description Whether the Owner is emailed a copy every week (on until switched off) */
+            weekly_email?: boolean;
+        };
         DisbursementRequest: {
             /**
              * Format: date
@@ -7205,6 +9312,83 @@ export interface components {
             /** Format: date-time */
             expires_at?: string;
             url?: string;
+        };
+        DueForSuspension: {
+            /** Format: int32 */
+            grace_days?: number;
+            /** @description Most overdue first */
+            items?: components["schemas"]["DueForSuspensionItem"][];
+        };
+        /** @description Most overdue first */
+        DueForSuspensionItem: {
+            /**
+             * Format: int64
+             * @description The plan's monthly price on the first day the next payment would cover (today, for an overdue business), or null when none was entered
+             */
+            amount_due_minor?: number;
+            currency?: string;
+            /** Format: int64 */
+            days_overdue?: number;
+            /**
+             * Format: date
+             * @description The last day paid for, or of the free month
+             */
+            due_on?: string;
+            /**
+             * Format: date
+             * @description The last day of the grace period, passed
+             */
+            grace_ended_on?: string;
+            /** Format: date-time */
+            last_sign_in_at?: string;
+            name?: string;
+            /** Format: date */
+            overdue_since?: string;
+            owner_email?: string;
+            owner_name?: string;
+            plan_name?: string;
+            slug?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+        };
+        /** @description FR-CLN-02, chapter 14 lending.due_list: sorted by officer then due date */
+        DueList: {
+            /** Format: date */
+            date_from?: string;
+            /** Format: date */
+            date_to?: string;
+            items?: components["schemas"]["DueListLine"][];
+            /** @description More lines matched than the limit; narrow by officer, branch or dates */
+            truncated?: boolean;
+        };
+        DueListLine: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            due_date?: string;
+            /**
+             * Format: int64
+             * @description principal, interest, fees and penalties due
+             */
+            due_minor?: number;
+            /** Format: int32 */
+            item_no?: number;
+            /** Format: uuid */
+            loan_id?: string;
+            loan_no?: string;
+            member_name?: string;
+            member_no?: string;
+            officer_name?: string;
+            /** Format: uuid */
+            officer_user_id?: string;
+            /** Format: int64 */
+            outstanding_minor?: number;
+            /** Format: int64 */
+            paid_minor?: number;
+            /** @description Masked (+256*****0001) unless the caller holds lending.members.contact in the loan's branch */
+            phone?: string;
+            /** Format: int64 */
+            waived_minor?: number;
         };
         DuplicateCandidate: {
             /** Format: uuid */
@@ -7228,6 +9412,189 @@ export interface components {
         DuplicateCheckResponse: {
             candidates?: components["schemas"]["DuplicateCandidate"][];
         };
+        ExistingLoan: {
+            /** Format: int64 */
+            agreed_total_minor?: number;
+            /**
+             * Format: uuid
+             * @description The pending request a second person decides: the bring-in while the loan is brought_in, the reversal of the bring-in (loan_bring_in_reversal) once it is active or closed
+             */
+            approval_request_id?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /**
+             * Format: date
+             * @description Set on approval: the first business date the app charges penalties for
+             */
+            brought_in_on?: string;
+            currency?: string;
+            /** Format: date */
+            disbursement_date?: string;
+            /** Format: date */
+            go_live_date?: string;
+            /**
+             * Format: uuid
+             * @description Null on a check (dry run), which saves nothing
+             */
+            loan_id?: string;
+            loan_no?: string;
+            /** Format: uuid */
+            member_id?: string;
+            member_no?: string;
+            position?: components["schemas"]["ExistingLoanPosition"];
+            /** Format: int64 */
+            principal_minor?: number;
+            product_code?: string;
+            /** Format: uuid */
+            product_id?: string;
+            register_ref?: string;
+            repayments?: components["schemas"]["ExistingLoanRepayment"][];
+            schedule?: components["schemas"]["ExistingLoanScheduleItem"][];
+            /** @description brought_in (waiting for a checker), then active or closed; cancelled if withdrawn */
+            status?: string;
+            /** Format: int32 */
+            term_count?: number;
+            /** @description Things to check before recording or approving, none of which stops it: a loan of the same member for the same amount and date already in the app when no register number tells them apart */
+            warnings?: string[];
+        };
+        ExistingLoanImportRequest: {
+            /**
+             * Format: uuid
+             * @description The branch members new to the app join (issue #626); empty for the only branch the caller may add members in
+             */
+            branch_id?: string;
+            /** @description The CSV text: a header row, then rows of kind loan (one per loan) and kind repayment (any number per loan), tied by ref. Comma, semicolon or tab separated; amounts in the currency's major units. A loan row names its member by member_no, or by member_name and member_phone (issue #626): the member with that phone, else a new member added with the loan */
+            csv: string;
+        };
+        ExistingLoanImportResult: {
+            /**
+             * Format: int32
+             * @description Loans recorded, or on a check the loans that would be; 0 while any row is an error
+             */
+            added?: number;
+            dry_run?: boolean;
+            /** Format: int32 */
+            errors?: number;
+            /** Format: int32 */
+            loans?: number;
+            /**
+             * Format: int32
+             * @description Members new to the app that come in with the loans (issue #626); 0 while any row is an error
+             */
+            members_added?: number;
+            /** Format: int32 */
+            repayments?: number;
+            rows?: components["schemas"]["ExistingLoanImportRow"][];
+            /** Format: int32 */
+            rows_read?: number;
+            /** Format: int32 */
+            skipped?: number;
+        };
+        ExistingLoanImportRow: {
+            /** Format: int32 */
+            line?: number;
+            /** Format: uuid */
+            loan_id?: string;
+            message?: string;
+            /** @description ready (a check found nothing wrong), added, skipped (the register number is in use) or error */
+            outcome?: string;
+            ref?: string;
+        };
+        ExistingLoanPage: {
+            items?: components["schemas"]["ExistingLoanSummary"][];
+        };
+        /** @description As the register leaves the loan, on today's business date */
+        ExistingLoanPosition: {
+            /** Format: int64 */
+            arrears_minor?: number;
+            /**
+             * Format: int32
+             * @description Counted from the real due date of the oldest unpaid instalment (R-DPD)
+             */
+            days_past_due?: number;
+            /** Format: int64 */
+            fees_outstanding_minor?: number;
+            /** Format: int64 */
+            interest_outstanding_minor?: number;
+            /** Format: date */
+            last_repayment_on?: string;
+            /** Format: date */
+            next_due_date?: string;
+            /** Format: int64 */
+            principal_outstanding_minor?: number;
+            /** @description True when the register shows the loan repaid in full; it is closed on approval */
+            settled?: boolean;
+            /** Format: int64 */
+            total_outstanding_minor?: number;
+            /** Format: int64 */
+            total_paid_minor?: number;
+        };
+        /** @description One repayment the register shows, before the go-live date */
+        ExistingLoanRepayment: {
+            /** Format: int64 */
+            amount_minor: number;
+            /** @description The paper receipt number or a note; optional */
+            note?: string;
+            payment_method_key: string;
+            /** Format: date */
+            value_date: string;
+        };
+        ExistingLoanScheduleItem: {
+            /** Format: date */
+            due_date?: string;
+            /** Format: int64 */
+            fees_due_minor?: number;
+            /** Format: int64 */
+            interest_due_minor?: number;
+            /** Format: int32 */
+            no?: number;
+            /** Format: int64 */
+            paid_minor?: number;
+            /** Format: int64 */
+            principal_due_minor?: number;
+            status?: string;
+            /** Format: int64 */
+            unpaid_minor?: number;
+        };
+        ExistingLoanSummary: {
+            /** Format: uuid */
+            approval_request_id?: string;
+            /** Format: date */
+            disbursement_date?: string;
+            /** Format: uuid */
+            loan_id?: string;
+            loan_no?: string;
+            /** Format: uuid */
+            member_id?: string;
+            member_no?: string;
+            /** Format: int64 */
+            principal_minor?: number;
+            register_ref?: string;
+            status?: string;
+        };
+        FeedbackItem: {
+            /** @description The version of BMS that was running (version and git SHA) */
+            app_version?: string;
+            /** Format: date-time */
+            created_at?: string;
+            has_screenshot?: boolean;
+            /** Format: uuid */
+            id?: string;
+            /** @description idea, problem or question */
+            kind?: string;
+            message?: string;
+            /** @description The path of the page it was sent from, or null */
+            page_path?: string;
+            /** @description The platform operator's reply, or null */
+            reply_note?: string;
+            /** @description new, seen or done */
+            status?: string;
+            /** Format: date-time */
+            status_changed_at?: string;
+        };
+        FeedbackList: {
+            items?: components["schemas"]["FeedbackItem"][];
+        };
         /** @description The same words whether or not the address matched */
         FindSignInAccepted: {
             message?: string;
@@ -7250,6 +9617,15 @@ export interface components {
             email?: string;
             full_name: string;
             phone?: string;
+        };
+        GoLiveDate: {
+            /**
+             * Format: date
+             * @description The business's go-live date, or null while none is known
+             */
+            go_live_date?: string;
+            /** @description set (by the Owner or the operator), first_admin_sign_in (the default) or none (nobody has signed in yet) */
+            source?: string;
         };
         HeadOfficeRequest: {
             code: string;
@@ -8151,6 +10527,13 @@ export interface components {
             maturity_date?: string;
             /** Format: date */
             next_due_date?: string;
+            /** @description FR-ARR-03, chapter 14: current, 1_30, 31_60, 61_90 or over_90 */
+            par_bucket?: string;
+            /**
+             * Format: int64
+             * @description FR-ARR-03: penalties charged so far (R-PEN), paid or not
+             */
+            penalties_assessed_minor?: number;
             /** Format: int64 */
             penalties_outstanding_minor?: number;
             /** Format: int64 */
@@ -8163,6 +10546,34 @@ export interface components {
             total_paid_minor?: number;
             /** Format: date */
             written_off_on?: string;
+        };
+        /** @description R-PEN: one charge on a schedule item, and what can still be waived */
+        LoanCharge: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: date */
+            business_date?: string;
+            /** @description penalty or fee */
+            charge_type?: string;
+            /** Format: uuid */
+            id?: string;
+            /** Format: int32 */
+            item_no?: number;
+            /**
+             * Format: int32
+             * @description The penalty period; null for a fee
+             */
+            period_no?: number;
+            /**
+             * Format: int64
+             * @description What a waiver may still take: unwaived and not yet paid
+             */
+            waivable_minor?: number;
+            /** Format: int64 */
+            waived_minor?: number;
+        };
+        LoanChargeList: {
+            items?: components["schemas"]["LoanCharge"][];
         };
         LoanDecisionRequest: {
             /**
@@ -8216,6 +10627,35 @@ export interface components {
             member_id: string;
             relationship?: string;
         };
+        /** @description The Lending card on Home (issue #471, ADR-072): active loans in the caller's lending.loans.read scope and in the business's currency, read live from the schedule, not from the nightly arrears run */
+        LoanHomeSummary: {
+            currency?: string;
+            /**
+             * Format: date
+             * @description The business date the figures are for
+             */
+            date?: string;
+            /**
+             * Format: int32
+             * @description Loans with an instalment due today that is not fully paid
+             */
+            due_today_count?: number;
+            /**
+             * Format: int64
+             * @description What is still owed on the instalments due today
+             */
+            due_today_minor?: number;
+            /**
+             * Format: int32
+             * @description Loans with an instalment due before today that is not fully paid
+             */
+            in_arrears_count?: number;
+            /**
+             * Format: int64
+             * @description What is still owed on the instalments due before today
+             */
+            in_arrears_minor?: number;
+        };
         LoanListItem: {
             /** Format: int64 */
             approved_principal_minor?: number;
@@ -8250,6 +10690,12 @@ export interface components {
         };
         LoanNoteRequest: {
             note: string;
+        };
+        LoanOfficerRequest: {
+            /** Format: uuid */
+            officer_user_id: string;
+            /** @description Why; kept in the loan's audit row */
+            reason: string;
         };
         LoanPage: {
             items?: components["schemas"]["LoanListItem"][];
@@ -8396,6 +10842,66 @@ export interface components {
         LoanReasonRequest: {
             reason: string;
         };
+        /** @description FR-CLN-01: all or none of the loans move */
+        LoanReassignRequest: {
+            loan_ids: string[];
+            /** Format: uuid */
+            officer_user_id: string;
+            /** @description Why; kept in each loan's audit row */
+            reason: string;
+        };
+        LoanReassignResult: {
+            /** Format: uuid */
+            officer_user_id?: string;
+            /** Format: int32 */
+            reassigned?: number;
+        };
+        LoanRegisterDraft: {
+            /**
+             * Format: int32
+             * @description Decimal places of the currency, to write the amounts in the import file
+             */
+            currency_exponent?: number;
+            /** @description The drafted loans, for the import's check; nothing is saved */
+            loans?: components["schemas"]["LoanRegisterDraftLoan"][];
+            /** @description Null when loans were drafted; else why there are none: no_provider, all_failed, daily_cap or unreadable. The screen then offers to type it or import a file */
+            reason?: string;
+        };
+        /** @description The drafted loans, for the import's check; nothing is saved */
+        LoanRegisterDraftLoan: {
+            /**
+             * Format: int64
+             * @description The total to repay, as written or worked out
+             */
+            agreed_total_minor?: number;
+            /** Format: date */
+            disbursement_date?: string;
+            /** @description That member's name in the app, or null */
+            member_full_name?: string;
+            /** @description The borrower's name as the register writes it */
+            member_name?: string;
+            /** @description The member who has this phone already, or null for a member new to the app */
+            member_no?: string;
+            /** @description The phone, in E.164 when it is a Uganda number, else as written */
+            member_phone?: string;
+            payments?: components["schemas"]["LoanRegisterDraftPayment"][];
+            /** Format: int64 */
+            principal_minor?: number;
+            /** @description The monthly rate in percent as written, or null */
+            rate_percent?: string;
+            /** @description The register's number for the loan, or one the app made when it has none */
+            ref?: string;
+            /** Format: int32 */
+            term_months?: number;
+            /** @description The total was worked out as flat interest from the rate and the term, for the owner to check */
+            total_worked_out?: boolean;
+        };
+        LoanRegisterDraftPayment: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: date */
+            date?: string;
+        };
         /** @description FR-DIS-04: the items and a totals row that equals the loan totals */
         LoanSchedule: {
             currency?: string;
@@ -8424,10 +10930,20 @@ export interface components {
             due_date?: string;
             /** Format: int64 */
             fees_due_minor?: number;
+            /**
+             * Format: int64
+             * @description Fees still due on the item: the most a fee waiver may take (FR-ARR-04)
+             */
+            fees_outstanding_minor?: number;
             /** Format: int64 */
             fees_paid_minor?: number;
             /** Format: int64 */
             interest_due_minor?: number;
+            /**
+             * Format: int64
+             * @description Interest still due on the item: the most an interest waiver may take (FR-ARR-04)
+             */
+            interest_outstanding_minor?: number;
             /** Format: int64 */
             interest_paid_minor?: number;
             /** Format: int32 */
@@ -8477,6 +10993,8 @@ export interface components {
             created_at?: string;
             currency?: string;
             external_reference?: string;
+            /** @description From the paper register before go-live (ADR-071): no journal entry, no receipt number, not counted as cash in the app's books */
+            historic?: boolean;
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
@@ -8530,6 +11048,8 @@ export interface components {
             /** @description True when the tenant has switched report runs on (setting reports_enabled, ADR-038); the PWA shows the Reports tab only then */
             reports_enabled?: boolean;
             roles?: components["schemas"]["RoleAssignment"][];
+            /** @description The business's currency (ISO 4217): forms type and show money in it before the record they make carries one (issue #289) */
+            tenant_currency?: string;
             /** @description The business's time zone, in which mfa_due_by is a day's end (ADR-046) */
             tenant_timezone?: string;
             /** @description Guided tours the user finished or dismissed, by tour id (issue #19) */
@@ -8548,6 +11068,8 @@ export interface components {
             /** Format: uuid */
             id?: string;
             is_head_office?: boolean;
+            /** @description Same-origin URL of the shop's own logo, or null: show the business logo (#461, ADR-068) */
+            logo_url?: string;
             name?: string;
             /** @description false for a Store, a branch that holds stock but does not sell: the sale form, the default selling branch and the till skip it; restock, goods receipt, transfer and stock-take forms include it (#366) */
             sells_goods?: boolean;
@@ -8689,6 +11211,28 @@ export interface components {
             code: string;
             mfa_token: string;
         };
+        /** @description A business this business referred: its name, when it joined, never more */
+        MyReferral: {
+            /**
+             * Format: date-time
+             * @description When the business was created, or the application sent
+             */
+            joined_at?: string;
+            referred_name?: string;
+            /** @description applied, active, paying, suspended, cancelled or ended */
+            status?: string;
+            totals?: components["schemas"]["ReferralTotal"][];
+        };
+        MyReferrals: {
+            /** @description The business's referral code */
+            code?: string;
+            /** @description Newest first */
+            items?: components["schemas"]["MyReferral"][];
+            /** @description The public sign-up with the code filled in */
+            link?: string;
+            /** @description Every referral together, one row per currency */
+            totals?: components["schemas"]["ReferralTotal"][];
+        };
         NextOfKin: {
             /** Format: date-time */
             created_at?: string;
@@ -8800,6 +11344,15 @@ export interface components {
             /** @description Channels whose sender is configured; rows of the others stay pending */
             enabled_channels?: string[];
             failures?: components["schemas"]["OutboxFailure"][];
+        };
+        /** @description An active administrator of a business with no Owner */
+        OwnerCandidate: {
+            email?: string;
+            full_name?: string;
+            /** Format: uuid */
+            id?: string;
+            /** Format: date-time */
+            last_login_at?: string;
         };
         PasswordResetCompleteRequest: {
             password: string;
@@ -8980,7 +11533,7 @@ export interface components {
             /** Format: int64 */
             fee_minor?: number;
             /**
-             * @description posted: this upload posted the fee; already_posted: an earlier statement did; none: no fee on the line; held: the line did not match cleanly, so no fee was posted
+             * @description posted: the fee was posted from this line; already_posted: an earlier statement did; none: no fee on the line; held: the line did not match cleanly, so no fee was posted; awaiting_approval: the fee is above the automatic rate and waits for a second person; not_approved: that request was rejected, cancelled or expired, so nothing was posted
              * @enum {string}
              */
             fee_status?: "posted" | "already_posted" | "none" | "held" | "awaiting_approval" | "not_approved";
@@ -8989,12 +11542,12 @@ export interface components {
             /** @enum {string} */
             match_status?: "matched" | "amount_mismatch" | "currency_mismatch" | "not_paid_here" | "ambiguous" | "unmatched";
             order_tracking_id?: string;
+            /** @description Marked as outside this system and waiting for a second person to confirm; still a finding */
+            outside_awaiting_confirmation?: boolean;
             /** Format: date */
             paid_on?: string;
             payment_method?: string;
-            /** @description A person marked the line as money for something outside this system */
-            /** @description Marked as outside this system and waiting for a second person to confirm; still a finding */
-            outside_awaiting_confirmation?: boolean;
+            /** @description Two people agreed the line is money for something outside this system (marked, then confirmed) */
             reviewed_outside?: boolean;
             /** Format: int32 */
             row_no?: number;
@@ -9075,6 +11628,29 @@ export interface components {
         PlanList: {
             items?: components["schemas"]["Plan"][];
         };
+        /** @description The module, with the Owner's step-up: the authenticator code when the Owner has two-step sign-in, else the password */
+        PlanModuleAsk: {
+            module?: string;
+            password?: string;
+            totp_code?: string;
+        };
+        /** @description A module the Owner asked for, and the operator's decision */
+        PlanModuleRequest: {
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            decided_at?: string;
+            /** @description True when the plan already included the module, so it was switched on at once */
+            decided_automatically?: boolean;
+            /** @description The operator's reason, shown to the Owner when declined */
+            decision_reason?: string;
+            /** Format: uuid */
+            id?: string;
+            module_key?: string;
+            requested_by_name?: string;
+            /** @description pending, approved or declined */
+            status?: string;
+        };
         /** @description A price of a plan from a date; a later row replaces it from its own date */
         PlanPrice: {
             /**
@@ -9102,6 +11678,114 @@ export interface components {
             monthly_minor?: number;
             reason?: string;
         };
+        /** @description A module stopped or the subscription cancelled, from a date */
+        PlanScheduledChange: {
+            /** Format: date-time */
+            applied_at?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /**
+             * Format: date
+             * @description The first day the change is in force
+             */
+            effective_on?: string;
+            /** Format: uuid */
+            id?: string;
+            /** @description stop_module or cancel */
+            kind?: string;
+            module_key?: string;
+            requested_by_name?: string;
+            /** @description scheduled, applied or undone */
+            status?: string;
+        };
+        /** @description The authenticator code when the Owner has two-step sign-in, else the password */
+        PlanStepUp: {
+            password?: string;
+            totp_code?: string;
+        };
+        PlatformClosure: {
+            /** Format: date-time */
+            cancelled_at?: string;
+            /** Format: uuid */
+            id?: string;
+            /**
+             * Format: date
+             * @description When removed: the day after which the kept money records may be deleted
+             */
+            keep_until?: string;
+            /** @description Whether the cooling-off period is over in the business's own time zone */
+            removable?: boolean;
+            /**
+             * Format: date
+             * @description The first day the business may be removed
+             */
+            remove_after?: string;
+            /** Format: date-time */
+            removed_at?: string;
+            removed_by_name?: string;
+            /** Format: date-time */
+            requested_at?: string;
+            requested_by_name?: string;
+            /** @description requested, cancelled, removing or removed */
+            status?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+            tenant_name?: string;
+            tenant_slug?: string;
+        };
+        PlatformClosureRemoved: {
+            /** Format: uuid */
+            closure_id?: string;
+            /** @description Rows deleted or anonymised, by area */
+            erased?: {
+                [key: string]: number;
+            };
+            /**
+             * Format: date
+             * @description The day after which the kept money records may be deleted
+             */
+            keep_until?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+        };
+        PlatformFeedbackItem: {
+            app_version?: string;
+            /** Format: date-time */
+            created_at?: string;
+            has_screenshot?: boolean;
+            /** Format: uuid */
+            id?: string;
+            kind?: string;
+            /** Format: int32 */
+            linked_issue_number?: number;
+            message?: string;
+            page_path?: string;
+            reply_note?: string;
+            sender_name?: string;
+            status?: string;
+            /** Format: date-time */
+            status_changed_at?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+            tenant_name?: string;
+            tenant_slug?: string;
+            user_agent?: string;
+        };
+        PlatformFeedbackLinkedIssueRequest: {
+            /**
+             * Format: int32
+             * @description The number of the issue opened for this feedback; null clears it
+             */
+            linked_issue_number?: number;
+        };
+        PlatformFeedbackList: {
+            items?: components["schemas"]["PlatformFeedbackItem"][];
+        };
+        PlatformFeedbackStatusRequest: {
+            /** @description A reply the sender sees; null keeps the one there, an empty string clears it */
+            reply_note?: string;
+            status: string;
+        };
         PlatformMe: {
             email?: string;
             full_name?: string;
@@ -9110,9 +11794,118 @@ export interface components {
             /** Format: uuid */
             user_id?: string;
         };
+        PlatformModuleApproval: {
+            /** @description Move the business to this plan first, when its plan does not include the module */
+            plan_code?: string;
+            /** @description Why; kept in the platform audit log */
+            reason: string;
+            /** @description A current 6 digit code from the operator's own authenticator app */
+            totp_code: string;
+        };
+        PlatformModuleDecline: {
+            /** @description Why; shown to the Owner and kept in the audit log */
+            reason: string;
+            /** @description A current 6 digit code from the operator's own authenticator app */
+            totp_code: string;
+        };
+        PlatformModuleRequest: {
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            decided_at?: string;
+            decided_automatically?: boolean;
+            decision_reason?: string;
+            /** Format: uuid */
+            id?: string;
+            module_key?: string;
+            plan_code?: string;
+            /** @description Whether the business's plan already includes the module */
+            plan_includes?: boolean;
+            requested_by_name?: string;
+            status?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+            tenant_name?: string;
+            tenant_slug?: string;
+        };
+        PlatformModuleRequestList: {
+            items?: components["schemas"]["PlatformModuleRequest"][];
+        };
         PlatformReasonRequest: {
             /** @description Why; kept in the platform audit log */
             reason: string;
+        };
+        /** @description The current referral of the business, or null when it has no referrer */
+        PlatformReferral: {
+            /**
+             * Format: uuid
+             * @description The sign-up application, while it is open or when the referral came from one
+             */
+            application_id?: string;
+            code?: string;
+            /** Format: date-time */
+            ended_at?: string;
+            /**
+             * Format: date-time
+             * @description When the business was created, or the application sent
+             */
+            joined_at?: string;
+            /**
+             * Format: uuid
+             * @description Null for an application not activated yet
+             */
+            referral_id?: string;
+            referred_name?: string;
+            referred_slug?: string;
+            /**
+             * Format: uuid
+             * @description Null while the referred business is an application
+             */
+            referred_tenant_id?: string;
+            referrer_name?: string;
+            referrer_slug?: string;
+            /** @description The referrer business now: active, suspended, cancelled, past_due or trial_lapsed */
+            referrer_status?: string;
+            /** Format: uuid */
+            referrer_tenant_id?: string;
+            /** @description True when the operator set a rule for this referral */
+            rule_override?: boolean;
+            /** @description sign_up or operator */
+            source?: string;
+            /** Format: date-time */
+            started_at?: string;
+            /** @description applied, active, paying, suspended or cancelled (the referred business's subscription), or ended */
+            status?: string;
+            totals?: components["schemas"]["ReferralTotal"][];
+        };
+        PlatformReferralDetail: {
+            /** @description Oldest first */
+            lines?: components["schemas"]["ReferralCommissionLine"][];
+            referral?: components["schemas"]["PlatformReferral"];
+            rule_in_force?: components["schemas"]["ReferralCommissionRule"];
+            /** @description override, default or none */
+            rule_source?: string;
+        };
+        PlatformReferralList: {
+            items?: components["schemas"]["PlatformReferral"][];
+        };
+        PlatformScheduledChange: {
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date */
+            effective_on?: string;
+            /** Format: uuid */
+            id?: string;
+            kind?: string;
+            module_key?: string;
+            requested_by_name?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+            tenant_name?: string;
+            tenant_slug?: string;
+        };
+        PlatformScheduledChangeList: {
+            items?: components["schemas"]["PlatformScheduledChange"][];
         };
         /** @description Shown once to the operator, who hands it to the tenant admin */
         PlatformSignInResetLink: {
@@ -9129,6 +11922,8 @@ export interface components {
         PlatformTenant: {
             /** @description The business's own address, where its staff sign in */
             address?: string;
+            /** @description The kind of business its administrator chose (issue #424, ADR-092): the profile a module's settings group stores, read through that module's group, for retail shops, stores_and_shops, wholesale or wholesale_and_shops; null when none was saved (a retail business is then shops) */
+            business_type?: string;
             /** Format: date-time */
             created_at?: string;
             currency?: string;
@@ -9194,6 +11989,32 @@ export interface components {
             /** @description Wording to preview without saving; omitted: the saved wording, else the default */
             text?: string;
         };
+        PromiseList: {
+            items?: components["schemas"]["PromiseListLine"][];
+            /** @description More promises matched than the limit */
+            truncated?: boolean;
+        };
+        PromiseListLine: {
+            /** Format: uuid */
+            action_id?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: uuid */
+            loan_id?: string;
+            loan_no?: string;
+            member_name?: string;
+            /** Format: uuid */
+            officer_user_id?: string;
+            /** Format: date-time */
+            performed_at?: string;
+            /** Format: uuid */
+            performed_by?: string;
+            promise_status?: string;
+            /** Format: int64 */
+            promised_amount_minor?: number;
+            /** Format: date */
+            promised_date?: string;
+        };
         PushConfig: {
             enabled?: boolean;
             public_key?: string;
@@ -9253,6 +12074,34 @@ export interface components {
             method_key?: string;
             reference?: string;
         };
+        RecordExistingLoanRequest: {
+            /**
+             * Format: int64
+             * @description The total the borrower agreed to repay (principal and interest), when the register records that instead of the product's rate; the difference is spread as flat interest and no fee is added
+             */
+            agreed_total_minor?: number;
+            /**
+             * Format: date
+             * @description The real disbursement date, before the business's go-live date
+             */
+            disbursement_date: string;
+            /** Format: uuid */
+            member_id: string;
+            /** Format: int64 */
+            principal_minor: number;
+            /** Format: uuid */
+            product_id: string;
+            /** @description Defaults to other */
+            purpose_category?: string;
+            /** @description The loan's number in the paper register; one live loan per number */
+            register_ref?: string;
+            repayments: components["schemas"]["ExistingLoanRepayment"][];
+            /**
+             * Format: int32
+             * @description Defaults to the product's default term; within the product's limits
+             */
+            term_count?: number;
+        };
         RecoveryCodes: {
             /** @description Shown once; each works once */
             recovery_codes?: string[];
@@ -9260,6 +12109,148 @@ export interface components {
         RecoveryCodesRequest: {
             /** @description A current TOTP code */
             code: string;
+        };
+        /** @description Oldest first */
+        ReferralCommissionLine: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: date-time */
+            created_at?: string;
+            created_by_name?: string;
+            currency?: string;
+            /** Format: uuid */
+            id?: string;
+            /** @description The referrer business was not active when the line was worked out */
+            inactive_when_worked_out?: boolean;
+            /** @description payment (worked out from a rule), manual (typed) or reversal */
+            kind?: string;
+            /** Format: int32 */
+            months_counted?: number;
+            note?: string;
+            /** Format: date-time */
+            paid_at?: string;
+            paid_by_name?: string;
+            paid_method?: string;
+            paid_note?: string;
+            /** Format: date */
+            paid_on?: string;
+            paid_reference?: string;
+            /** Format: uuid */
+            payment_id?: string;
+            /** @description The referrer business is not active now: marking the line paid needs confirm_referrer_inactive */
+            referrer_inactive?: boolean;
+            /** @description The referrer business now: active, suspended, cancelled, past_due or trial_lapsed */
+            referrer_status?: string;
+            /** Format: uuid */
+            reversed_by_line_id?: string;
+            /** Format: uuid */
+            reverses_line_id?: string;
+            /** @description The rule as it was when the line was worked out, and the payment it was applied to */
+            rule_snapshot?: {
+                [key: string]: Record<string, never>;
+            };
+        };
+        /** @description The rule a payment recorded now would use, or null */
+        ReferralCommissionRule: {
+            /**
+             * Format: int64
+             * @description Minor units: once (fixed_first_payment) or per paid month (fixed_per_month)
+             */
+            amount_minor?: number;
+            /**
+             * Format: int64
+             * @description The most a referral earns under a percent rule, in currency; null: no cap
+             */
+            cap_minor?: number;
+            /** Format: date-time */
+            created_at?: string;
+            created_by_name?: string;
+            currency?: string;
+            /** Format: uuid */
+            id?: string;
+            /** @description percent_of_payment, fixed_first_payment or fixed_per_month */
+            kind?: string;
+            /**
+             * Format: int32
+             * @description The first paid months of the referred business it applies to; null: no end
+             */
+            months?: number;
+            /**
+             * Format: int32
+             * @description Basis points of each payment: 1000 is 10%
+             */
+            percent_bp?: number;
+        };
+        ReferralDefaultRule: {
+            rule?: components["schemas"]["ReferralCommissionRule"];
+        };
+        /** @description The commission was paid outside the app; this records it */
+        ReferralLinePaidRequest: {
+            /** @description True to pay a line although the referrer business is inactive now (suspended, cancelled, past_due or trial_lapsed); without it that is 409 referrer_inactive */
+            confirm_referrer_inactive?: boolean;
+            method: string;
+            note?: string;
+            /** Format: date */
+            paid_on: string;
+            reason: string;
+            reference?: string;
+        };
+        /** @description A commission the operator works out and types */
+        ReferralLineRequest: {
+            /** Format: int64 */
+            amount_minor: number;
+            currency: string;
+            /** @description Why; kept on the line and in the audit log */
+            reason: string;
+        };
+        ReferralLineReverseRequest: {
+            reason: string;
+            /** @description True when the line's subscription payment was refunded: the payment then no longer uses up the rule's months. Only for a line worked out from a payment */
+            refunded?: boolean;
+        };
+        ReferralPaymentRefundedRequest: {
+            reason: string;
+        };
+        /** @description The rule; null clears it (the default: nothing is worked out; a referral: the default) */
+        ReferralRuleBody: {
+            /**
+             * Format: int64
+             * @description The fixed amount in minor units
+             */
+            amount_minor?: number;
+            /**
+             * Format: int64
+             * @description percent_of_payment: the most one referral earns; null: no cap
+             */
+            cap_minor?: number;
+            currency?: string;
+            kind: string;
+            /**
+             * Format: int32
+             * @description The first paid months it applies to; null: no end
+             */
+            months?: number;
+            /**
+             * Format: int32
+             * @description percent_of_payment: basis points, 1000 is 10%
+             */
+            percent_bp?: number;
+        };
+        ReferralRuleRequest: {
+            reason: string;
+            rule?: components["schemas"]["ReferralRuleBody"];
+            /** @description A current 6 digit code from the operator's own authenticator app (step-up), used once */
+            totp_code: string;
+        };
+        /** @description One currency: everything earned, what was marked paid, and the rest */
+        ReferralTotal: {
+            currency?: string;
+            /** Format: int64 */
+            due_minor?: number;
+            /** Format: int64 */
+            earned_minor?: number;
+            /** Format: int64 */
+            paid_minor?: number;
         };
         RefundReceiptRequest: {
             /**
@@ -9325,6 +12316,7 @@ export interface components {
             /** @description The allowed values of an enum */
             values?: string[];
         };
+        /** @description The caller's newest workbook, in any state; null when they never asked for one */
         ReportRun: {
             /** Format: date */
             as_of?: string;
@@ -9568,6 +12560,7 @@ export interface components {
              * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
              */
             sell_minor?: number;
+            standard_pack?: components["schemas"]["RetailStandardPack"];
             /** @description The sum over the branches of the page */
             total_qty?: string;
             unit?: string;
@@ -9580,7 +12573,7 @@ export interface components {
              */
             closed_branches?: number;
             items?: components["schemas"]["RetailAllBranchesRow"][];
-            /** @description A total at or below this is low stock; the same for every branch */
+            /** @description A balance at or below this is low stock for an item with no minimum set; the same for every branch */
             low_stock_threshold?: string;
             next_cursor?: string;
         };
@@ -9741,6 +12734,54 @@ export interface components {
             business_date?: string;
             reference?: string;
         };
+        /** @description Issue #345: one barcode of a product, for its base unit or one pack size */
+        RetailBarcode: {
+            code?: string;
+            /** @description ean13, ean8, upca or code128 */
+            format?: string;
+            /** @description True for a code the system made for the product's labels: a shop EAN-13 from 210 (#524), or a Code 128 IN code made before */
+            generated?: boolean;
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            product_id?: string;
+            /** @description The name of that pack's unit */
+            unit?: string;
+            /**
+             * Format: uuid
+             * @description The pack size this barcode is on; absent for the product's own unit
+             */
+            unit_id?: string;
+        };
+        /** @description Issue #345: the items to make a label code for */
+        RetailBarcodeGenerateRequest: {
+            product_ids: string[];
+        };
+        RetailBarcodeList: {
+            items?: components["schemas"]["RetailBarcode"][];
+        };
+        /** @description Issue #345: the active product a scanned barcode belongs to */
+        RetailBarcodeMatch: {
+            barcode?: components["schemas"]["RetailBarcode"];
+            product?: components["schemas"]["RetailProduct"];
+            /**
+             * Format: uuid
+             * @description The pack size the barcode is on, to add the line in that unit; absent for the base unit
+             */
+            unit_id?: string;
+        };
+        /** @description Issue #345: add a barcode to a product */
+        RetailBarcodeRequest: {
+            /** @description As printed or scanned; EAN-13, EAN-8 and UPC-A check digits are checked */
+            code: string;
+            /** @description ean13, ean8, upca or code128; by default read from the code (13, 12 or 8 digits, else Code 128) */
+            format?: string;
+            /**
+             * Format: uuid
+             * @description A pack size of the product (the units capability); absent for the product's own unit
+             */
+            unit_id?: string;
+        };
         /** @description One entry per branch of the page, in the page's branch order */
         RetailBranchBalance: {
             /** Format: uuid */
@@ -9819,13 +12860,16 @@ export interface components {
             customer_accounts?: boolean;
             documents?: boolean;
             price_lists?: boolean;
-            /** @enum {string} */
-            profile?: "shop" | "trade";
+            /**
+             * @description What kind of business this is (issue #424, ADR-092): a preset of the switches, never a mode; shops (the default), stores_and_shops, wholesale or wholesale_and_shops
+             * @enum {string}
+             */
+            profile?: "shops" | "stores_and_shops" | "wholesale" | "wholesale_and_shops";
             purchasing?: boolean;
             returns?: boolean;
             /**
              * Format: int64
-             * @description Read only: the tenant's approval threshold for customer returns (action retail_sale_return), present only when one is set; while it is absent a return needs no second administrator
+             * @description Read only: the amount from which a customer return needs a second administrator (action retail_sale_return, ADR-091), present only while returns ask for approval (0: every return); while it is absent a return needs no second administrator
              */
             returns_approval_threshold_minor?: number;
             /**
@@ -10001,9 +13045,13 @@ export interface components {
         };
         RetailCategory: {
             active?: boolean;
+            /** @description Issue #493, ADR-081: 2 to 4 letters, unique in the business, that start the item codes the app makes in this category, such as BLB for BLB-0001. */
+            code_prefix?: string;
             /** Format: uuid */
             id?: string;
             name?: string;
+            /** @description The code the next item added here without a typed code would get now, such as BLB-0004; a hint only (issue #493) */
+            next_code?: string;
             /**
              * Format: int32
              * @description Products (active or not) that use this category
@@ -10015,15 +13063,38 @@ export interface components {
              */
             version?: number;
         };
+        /** @description Absent when no item shares a word of 3 letters or more with the name */
+        RetailCategoryHint: {
+            /**
+             * @description One of those items, to say why
+             * @example Single cable 1.5 mm
+             */
+            example?: string;
+            /** Format: uuid */
+            id?: string;
+            /**
+             * Format: int32
+             * @description How many items sharing the most words with the typed name are in it
+             */
+            items_like?: number;
+            name?: string;
+        };
         RetailCategoryList: {
             items?: components["schemas"]["RetailCategory"][];
         };
+        RetailCategoryPrefixSuggestion: {
+            code_prefix?: string;
+        };
         RetailCategoryRequest: {
+            /** @description Issue #493, ADR-081: 2 to 4 letters, unique in the business, that start the item codes the app makes in this category, such as BLB for BLB-0001. Left out or blank, the app suggests one from the name. */
+            code_prefix?: string;
             name: string;
         };
         /** @description Omitted fields are unchanged; a category is never deleted */
         RetailCategoryUpdate: {
             active?: boolean;
+            /** @description Issue #493, ADR-081: 2 to 4 letters, unique in the business, that start the item codes the app makes in this category, such as BLB for BLB-0001. Items made before keep their codes. */
+            code_prefix?: string;
             name?: string;
         };
         RetailControls: {
@@ -10042,7 +13113,7 @@ export interface components {
         RetailControlsCard: {
             /** Format: int64 */
             count?: number;
-            /** @description voided_sales, quick_cancels, returns, price_overrides, discounts, below_cost, restock_voids or quantity_corrections; the key to ask groups and records for */
+            /** @description voided_sales, quick_cancels, returns, credit_writeoffs, price_overrides, discounts, below_cost, restock_voids or quantity_corrections; the key to ask groups and records for */
             metric?: string;
             /** Format: int64 */
             previous_count?: number;
@@ -10066,7 +13137,7 @@ export interface components {
             tracked?: boolean;
             /**
              * Format: int64
-             * @description At sale prices; for discounts, the money given up against the price the system chose
+             * @description At sale prices; for discounts, the money given up against the price the system chose; for credit_writeoffs, what the buyer still owed, never the loss
              */
             value_minor?: number;
         };
@@ -10172,7 +13243,7 @@ export interface components {
         RetailControlsRecord: {
             /** Format: uuid */
             approver_id?: string;
-            /** @description Who cancelled the sale, took the goods back or voided the restock; absent for a price, a cost and a correction */
+            /** @description Who cancelled the sale, took the goods back, wrote it off or voided the restock; absent for a price, a cost and a correction */
             approver_name?: string;
             approver_status?: string;
             /** Format: date-time */
@@ -10581,7 +13652,7 @@ export interface components {
             profit_minor?: number;
             /**
              * Format: int64
-             * @description Present only with on_payment: the money recorded as collected on the day it was entered, by any method (cash, mobile money, bank) (Received): sales paid at the sale and every payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales included; less payments reversed (on the day of the reversal) and money paid back on returns (on the day of the return, at the refund branch; given back on the day a return is voided). A payment dated earlier than it was entered counts on the day it was entered. Sales paid at the sale count on the day they were entered; cancelling a cash sale removes it from its own day. Not a profit basis
+             * @description Present only with on_payment: the money recorded as collected on the day it was entered, by any method (cash, mobile money, bank) (Received): sales paid at the sale and every payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales included; less payments reversed (on the day of the reversal) and money paid back on returns (on the day of the return, at the refund branch; given back on the day a return is voided). A payment dated earlier than it was entered counts on the day it was entered. Sales paid at the sale count on the day they were entered; cancelling a cash sale removes it from the day it was entered. Not a profit basis
              */
             received_minor?: number;
             rows?: components["schemas"]["RetailDailyProfitRow"][];
@@ -10625,7 +13696,7 @@ export interface components {
             profit_minor?: number;
             /**
              * Format: int64
-             * @description Present only with on_payment: the money recorded as collected on the day it was entered, by any method (cash, mobile money, bank) (Received): sales paid at the sale and every payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales included; less payments reversed (on the day of the reversal) and money paid back on returns (on the day of the return, at the refund branch; given back on the day a return is voided). A payment dated earlier than it was entered counts on the day it was entered. Sales paid at the sale count on the day they were entered; cancelling a cash sale removes it from its own day. Not a profit basis
+             * @description Present only with on_payment: the money recorded as collected on the day it was entered, by any method (cash, mobile money, bank) (Received): sales paid at the sale and every payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales included; less payments reversed (on the day of the reversal) and money paid back on returns (on the day of the return, at the refund branch; given back on the day a return is voided). A payment dated earlier than it was entered counts on the day it was entered. Sales paid at the sale count on the day they were entered; cancelling a cash sale removes it from the day it was entered. Not a profit basis
              */
             received_minor?: number;
             /** Format: int64 */
@@ -10877,13 +13948,13 @@ export interface components {
         RetailDashboardStock: {
             /**
              * Format: int32
-             * @description Active items at or below low_stock_threshold (ADR-029), out of stock ones included, as the stock list's low tab counts them
+             * @description Active items at or below their minimum at a branch, else low_stock_threshold (ADR-029), at a branch that has held them (issue #490), out of stock ones included, as the stock list's low tab counts them
              */
             low_stock?: number;
             low_stock_threshold?: string;
             /**
              * Format: int32
-             * @description Active items whose balance is zero or less, as the stock list judges it: a branch alone, or the sum over the branches reported
+             * @description Active items whose balance is zero or less, as the stock list judges it: a branch alone, or the sum over the branches reported; only items one of them has held (a balance row or a movement, issue #490)
              */
             out_of_stock?: number;
             /**
@@ -11083,6 +14154,92 @@ export interface components {
         RetailDocumentSeriesRequest: {
             /** @description One to eight capital letters or digits, starting with a letter */
             prefix: string;
+        };
+        /** @description Issue #353: the person confirmed an entry warning and the save it went with succeeded. Recorded in the audit log as the warning's kind and its numbers (no free text), never needed to save */
+        RetailEntryConfirmation: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: int64 */
+            entered_price_minor?: number;
+            /**
+             * @description The quantity entered, in the unit entered
+             * @example 200
+             */
+            entered_qty?: string;
+            /**
+             * Format: uuid
+             * @description The pack unit entered; absent for the item's own unit
+             */
+            entered_unit_id?: string;
+            kind: string;
+            /** Format: int64 */
+            last_price_minor?: number;
+            /** @description What it was compared with, in base units: the median, or on Count stock what the records hold */
+            median_qty?: string;
+            /** Format: uuid */
+            product_id: string;
+            screen: string;
+        };
+        /** @description Issue #353, ADR-093: the item's recent history the entry screens warn against: Buy stock, Sell, Move stock and Count stock call this once per item. The thresholds are sent so the screens use the server's */
+        RetailEntryNorms: {
+            buy?: components["schemas"]["RetailEntryUsage"];
+            /**
+             * Format: int64
+             * @description The price per base unit of the last sale, what was charged (line total over quantity, rounded half up). Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             */
+            last_sell_minor?: number;
+            /**
+             * Format: date
+             * @description The day of that sale. Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             */
+            last_sold_on?: string;
+            /**
+             * Format: int32
+             * @description The fewest lines a median or a usual unit is given from
+             */
+            min_lines?: number;
+            move?: components["schemas"]["RetailEntryUsage"];
+            /**
+             * Format: int32
+             * @description A selling price this many times the last price or more, or this many times less, is warned about
+             */
+            price_factor?: number;
+            /** Format: uuid */
+            product_id?: string;
+            /**
+             * Format: int32
+             * @description A quantity this many times the median or more, or this many times less, is warned about
+             */
+            quantity_factor?: number;
+            sell?: components["schemas"]["RetailEntryUsage"];
+            /**
+             * @description The item's own (base) unit
+             * @example metre
+             */
+            unit?: string;
+        };
+        /** @description Issue #353: what the item's last lines of one kind say, read newest first and at most 20 */
+        RetailEntryUsage: {
+            /**
+             * Format: int32
+             * @description How many lines were read, at most 20
+             */
+            lines_read?: number;
+            /**
+             * @description The median quantity of those lines in the item's own unit (base units), as plain text; absent under 3 lines, when no quantity warning is given
+             * @example 50
+             */
+            median_qty?: string;
+            /**
+             * @description The name of that usual unit (the item's own unit when usual_unit_id is absent); absent when there is no usual unit
+             * @example roll
+             */
+            usual_unit?: string;
+            /**
+             * Format: uuid
+             * @description The unit used on more than half of those lines: a pack's unit id; absent when that unit is the item's own or when no unit holds more than half or under 3 lines were read
+             */
+            usual_unit_id?: string;
         };
         RetailEvaluationBranch: {
             /** Format: uuid */
@@ -11367,6 +14524,10 @@ export interface components {
             qty?: string;
             /** Format: int64 */
             sell_minor?: number;
+            /** @description On the response that made the line only: true when use_from_now_on was left out because the pack has its own price and the caller may not change prices (issue #624) */
+            size_kept?: boolean;
+            /** @description Why the usual size was kept, in one plain sentence, with size_kept */
+            size_kept_note?: string;
             unit?: string;
             /** @description Base units in one pack of the line's unit */
             unit_factor?: string;
@@ -11387,6 +14548,11 @@ export interface components {
              */
             order_line_id?: string;
             /**
+             * @description For a line in a pack (D23, issue #554): how many base units each pack held in this delivery, at least 1. Kept on the line only; stock and the cost per base unit use it. Absent means the pack's usual size
+             * @example 30
+             */
+            pack_size?: string;
+            /**
              * Format: uuid
              * @description Required on a blind receipt; on an order line it is the line's own product
              */
@@ -11403,6 +14569,8 @@ export interface components {
              * @description The unit qty and cost are in. On an order line, absent means the unit the line was ordered in; on a blind receipt absent means the base unit. Naming the base unit is the base unit
              */
             unit_id?: string;
+            /** @description With pack_size: also make it the pack's usual size from now on (needs retail.catalogue.manage). Selling always uses the usual size */
+            use_from_now_on?: boolean;
         };
         RetailGoodsReceiptList: {
             items?: components["schemas"]["RetailGoodsReceipt"][];
@@ -11439,11 +14607,131 @@ export interface components {
         RetailGoodsReceiptVoidRequest: {
             reason: string;
         };
+        /** @description Present only with retail.sale.all_sellers in every branch the summary covers (ADR-055): everybody's money; and only when the summary covers two or more shops: one line per shop, most sales first */
+        RetailHomeBranch: {
+            /** Format: uuid */
+            branch_id?: string;
+            name?: string;
+            /** Format: int64 */
+            sale_count?: number;
+            /** Format: int64 */
+            sales_minor?: number;
+        };
+        /** @description What buyers owe on credit sales, as Credit control counts it */
+        RetailHomeCreditOwed: {
+            /**
+             * Format: int32
+             * @description Buyers that owe: a customer record, or a name typed with the sale
+             */
+            customers?: number;
+            /**
+             * Format: date
+             * @description The earliest due date of a sale still owing; absent when none has a due date
+             */
+            oldest_due_date?: string;
+            /** Format: int64 */
+            owed_minor?: number;
+            /** Format: int32 */
+            sales?: number;
+        };
+        /** @description Present only with retail.sale.all_sellers in every branch the summary covers (ADR-055): everybody's money; the same figure as today on the dashboard */
+        RetailHomeSales: {
+            /** Format: int64 */
+            sale_count?: number;
+            /** Format: int64 */
+            sales_minor?: number;
+        };
+        RetailHomeSummary: {
+            /** @description Present only with retail.sale.all_sellers in every branch the summary covers (ADR-055): everybody's money; and only when the summary covers two or more shops: one line per shop, most sales first */
+            branches?: components["schemas"]["RetailHomeBranch"][];
+            credit_owed?: components["schemas"]["RetailHomeCreditOwed"];
+            currency?: string;
+            /**
+             * Format: date
+             * @description The business day in the tenant's zone (Africa/Kampala by default)
+             */
+            date?: string;
+            /**
+             * Format: int32
+             * @description Present only with retail.stock.read: active items low as the dashboard counts them, at or below their minimum or else the low stock threshold, at a branch that has held them (issue #490)
+             */
+            low_stock?: number;
+            /**
+             * Format: int32
+             * @description Present only with retail.order.manage: customer orders ordered, packed or out for delivery
+             */
+            open_orders?: number;
+            sales_today?: components["schemas"]["RetailHomeSales"];
+            takings?: components["schemas"]["RetailHomeTakings"];
+            top_items?: components["schemas"]["RetailHomeTopItems"];
+            /**
+             * Format: date
+             * @description The Monday of this week: the first day of the top items of the week
+             */
+            week_from?: string;
+        };
+        /** @description Money taken today by way of paying, read the way the cash book reads a day for every way: sales paid at the sale dated today, payments on credit sales dated today and delivery fees taken today, less sales cancelled today, payments on account reversed today and money refunded today on goods taken back. Besides retail.sale.all_sellers it needs, as the cash summary, retail.cashbook.read in every branch it covers and retail.till.close (ADR-076) */
+        RetailHomeTakings: {
+            methods?: components["schemas"]["RetailHomeTakingsMethod"][];
+            /** Format: int64 */
+            total_minor?: number;
+        };
+        RetailHomeTakingsMethod: {
+            /**
+             * Format: int64
+             * @description sales_minor + payments_minor + fees_minor - out_minor
+             */
+            amount_minor?: number;
+            /**
+             * Format: int64
+             * @description Delivery fees taken at the door today, or paid today on an account
+             */
+            fees_minor?: number;
+            /**
+             * @description cash and mobile_money always, then any other way that took or gave back money today (bank)
+             * @enum {string}
+             */
+            method?: "cash" | "mobile_money" | "bank";
+            /**
+             * Format: int64
+             * @description Money given back today: sales cancelled, payments on account reversed, refunds on goods taken back (a return cancelled today counts back in), door fees of cancelled orders
+             */
+            out_minor?: number;
+            /**
+             * Format: int64
+             * @description Payments on credit sales dated today, at the branch that took them
+             */
+            payments_minor?: number;
+            /**
+             * Format: int64
+             * @description Sales paid at the sale dated today, cancelled later or not
+             */
+            sales_minor?: number;
+        };
+        RetailHomeTopItem: {
+            code?: string;
+            /**
+             * Format: uuid
+             * @description The product, or the whole item for one with sizes and colours
+             */
+            item_id?: string;
+            label?: string;
+            /** @description Base units, as a decimal string */
+            qty?: string;
+            /** Format: int64 */
+            sales_minor?: number;
+            unit?: string;
+        };
+        /** @description The five items that sold the most by value, today and this week */
+        RetailHomeTopItems: {
+            today?: components["schemas"]["RetailHomeTopItem"][];
+            week?: components["schemas"]["RetailHomeTopItem"][];
+        };
         /** @description Dispatched and not received or cancelled, the longest wait first */
         RetailInFlightTransfer: {
             /**
              * Format: int32
-             * @description Days from the transfer date to today
+             * @description Days from the day it was sent (dispatched_at, in the tenant's time zone) to today
              */
             age_days?: number;
             /**
@@ -11464,6 +14752,37 @@ export interface components {
             /** Format: date */
             transfer_date?: string;
         };
+        RetailItemDraft: {
+            /**
+             * Format: int32
+             * @description Decimal places of the shop's currency, to write the prices in the import file
+             */
+            currency_exponent?: number;
+            /** @description Null when rows were drafted; else why there are none: no_provider, all_failed, daily_cap or unreadable. The screen then offers to type the list or import a file */
+            reason?: string;
+            /** @description The drafted rows, for the import's check; nothing is saved */
+            rows?: components["schemas"]["RetailItemDraftRow"][];
+        };
+        /** @description The drafted rows, for the import's check; nothing is saved */
+        RetailItemDraftRow: {
+            category?: string;
+            /**
+             * Format: int64
+             * @description Buying price of one unit in minor units; null when none, and always for a caller without retail.profit.read
+             */
+            cost_price_minor?: number;
+            description?: string;
+            /** @description How many units are in that pack, up to three decimals, or null */
+            pack_factor?: string;
+            /** @description A bigger pack it comes in, or null */
+            pack_unit?: string;
+            /**
+             * Format: int64
+             * @description Selling price of one unit in minor units; null when the list gives none
+             */
+            sell_price_minor?: number;
+            unit?: string;
+        };
         /** @description An item without sizes that becomes one size or colour of the item */
         RetailJoinItem: {
             /** @description A colour or a print */
@@ -11474,7 +14793,10 @@ export interface components {
         };
         /** @description Issue #384: items kept apart until now (one per size) become the sizes and colours of one item. Each keeps its id, code, prices, stock and history; its name becomes the item's name with its size and colour, its category the item's. They must share one unit and have no sizes yet. Joining an item that exists (POST /product-families/{id}/join) takes only items: name, base_code, category_id and duplicate_reason are refused with 422 there, and the item may not pass 100 sizes and colours. A product's reason for a name in use is cleared by a join and kept in the audit trail */
         RetailJoinRequest: {
-            /** @description What later variant codes start with; by default the first item's code */
+            /**
+             * @deprecated
+             * @description Leave it out: later variant codes start with the first item's code (issue #562). One that is not blank is refused with 400 item_code_made_by_app
+             */
             base_code?: string;
             /**
              * Format: uuid
@@ -11866,6 +15188,129 @@ export interface components {
             top?: number;
             totals?: components["schemas"]["RetailMarginTotals"];
         };
+        /** @description At most 5 items, those holding the typed name first, then those a few letters apart */
+        RetailNameHint: {
+            category?: string;
+            /** Format: uuid */
+            category_id?: string;
+            code?: string;
+            description?: string;
+            /** Format: uuid */
+            id?: string;
+            unit?: string;
+        };
+        /** @description Issue #353: while a new item's name is typed, the existing items it may be (case, accents, spaces and punctuation ignored) and the category most of the items like it are in. Suggestions only */
+        RetailNameHints: {
+            category?: components["schemas"]["RetailCategoryHint"];
+            /** @description At most 5 items, those holding the typed name first, then those a few letters apart */
+            did_you_mean?: components["schemas"]["RetailNameHint"][];
+        };
+        RetailOfflineFailure: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: uuid */
+            client_sale_id?: string;
+            code?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            decided_at?: string;
+            /** Format: uuid */
+            decided_by?: string;
+            discard_reason?: string;
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            made_by?: string;
+            made_by_name?: string;
+            message?: string;
+            /** Format: date-time */
+            occurred_at?: string;
+            payment_method?: string;
+            request?: {
+                [key: string]: Record<string, never>;
+            };
+            /** Format: uuid */
+            sale_id?: string;
+            /** @description open, retry, discarded or recorded */
+            status?: string;
+            /** Format: int64 */
+            total_minor?: number;
+        };
+        RetailOfflineFailureDiscard: {
+            reason: string;
+            /** @description A second written reason, needed when an administrator (or the Owner) discards a sale they made themselves (ADR-067 decision 11 d); audited as self_discard */
+            self_discard_reason?: string;
+        };
+        RetailOfflineFailurePage: {
+            items?: components["schemas"]["RetailOfflineFailure"][];
+        };
+        /** @description A sale made offline that the server refused (ADR-067) */
+        RetailOfflineFailureRequest: {
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: uuid */
+            client_sale_id: string;
+            code: string;
+            message: string;
+            /** Format: date-time */
+            occurred_at: string;
+            payment_method: string;
+            /** @description The sale request exactly as the device holds it; at most 64 KB as JSON (413) */
+            request: {
+                [key: string]: Record<string, never>;
+            };
+            /** Format: int64 */
+            total_minor: number;
+        };
+        /** @description A sale waiting on a phone (ADR-067) */
+        RetailOfflineWaiting: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: uuid */
+            client_sale_id?: string;
+            /** Format: uuid */
+            made_by?: string;
+            made_by_name?: string;
+            /** Format: date-time */
+            occurred_at?: string;
+            /** Format: date-time */
+            reported_at?: string;
+            /** Format: uuid */
+            reported_by?: string;
+            reported_by_name?: string;
+            /** Format: int64 */
+            total_minor?: number;
+        };
+        RetailOfflineWaitingAccepted: {
+            /**
+             * Format: int32
+             * @description How many were kept; a sale already recorded or reported as refused is skipped
+             */
+            accepted?: number;
+        };
+        RetailOfflineWaitingPage: {
+            items?: components["schemas"]["RetailOfflineWaiting"][];
+        };
+        RetailOfflineWaitingRequest: {
+            items: components["schemas"]["RetailOfflineWaitingSale"][];
+        };
+        /** @description ADR-067: a sale queued on a phone by a person who is not signed in there now, in short */
+        RetailOfflineWaitingSale: {
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: uuid */
+            client_sale_id: string;
+            /**
+             * Format: uuid
+             * @description The person who made the sale (the seller)
+             */
+            made_by: string;
+            /** Format: date-time */
+            occurred_at: string;
+            /** Format: int64 */
+            total_minor: number;
+        };
         RetailOpenSale: {
             /** Format: int64 */
             balance_minor?: number;
@@ -11886,6 +15331,24 @@ export interface components {
             sale_no?: string;
             /** Format: int64 */
             total_minor?: number;
+        };
+        /** @description Issue #728: a count started at a branch and neither saved nor thrown away (a draft) */
+        RetailOpenStocktake: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: uuid */
+            created_by?: string;
+            /** Format: uuid */
+            id?: string;
+            /**
+             * Format: int32
+             * @description How many items it counted
+             */
+            lines?: number;
+            /** @description The count's note; Sell's count of a new item carries its own (review of #729) */
+            note?: string;
         };
         RetailOrder: {
             /** Format: uuid */
@@ -12212,36 +15675,114 @@ export interface components {
         /** @description The pack sizes of the product; present only while the units capability is on */
         RetailPack: {
             active?: boolean;
+            /** @description For a selling pack and a caller holding retail.profit.read: true when its price is not above the size times the item's average cost per piece (ADR-079); absent otherwise */
+            below_cost?: boolean;
             /** @description Base units in one pack, three places, for example 12.000 */
             factor?: string;
+            /** @description True when the pack has its own selling price, sent to every caller (the amount only to one who may see prices): a new usual size or making it buy only then needs retail.price.edit (issue #624) */
+            has_own_price?: boolean;
+            /**
+             * Format: int32
+             * @description Issue #699: how many of that level are in one pack; factor is this times its factor
+             */
+            holds_qty?: number;
+            /** @description Issue #699: the name of that level's unit */
+            holds_unit?: string;
+            /**
+             * Format: uuid
+             * @description Issue #699 (ADR-107): the level one pack holds, the item's own unit or another pack's unit; absent when the pack holds factor of the item's unit and says no more
+             */
+            holds_unit_id?: string;
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
             product_id?: string;
+            /** @description buy, sell or both (issue #624) */
+            purpose?: string;
+            /**
+             * Format: int64
+             * @description The pack's own selling price for a walk-in sale; absent when it has none (it then sells at suggested_sell_minor) or the caller may not see prices (issue #624)
+             */
+            sell_minor?: number;
+            /** @description Issue #650 (ADR-103): true for the item's standard pack, the one its stock is shown and counted in; at most one pack of an item */
+            standard?: boolean;
+            /**
+             * Format: int64
+             * @description The piece price times the size, rounded half up once: what the pack sells at without its own price, and the price the app suggests (issue #624)
+             */
+            suggested_sell_minor?: number;
             unit?: string;
             /** Format: uuid */
             unit_id?: string;
+            /** @description Issue #699: true for the level the shop usually buys the item in */
+            usual_buy?: boolean;
             /**
              * Format: int32
              * @description Send as If-Match when updating
              */
             version?: number;
         };
+        /** @description Issue #699: one level of an item's packages and the base units in one */
+        RetailPackLevel: {
+            /** @description Base units in one, three places, for example 120.000 */
+            factor?: string;
+            unit?: string;
+        };
         RetailPackList: {
             items?: components["schemas"]["RetailPack"][];
         };
-        /** @description A pack size: factor base units in one pack of the unit */
+        /** @description A pack size: factor base units in one pack of the unit, or holds_qty of the level holds_unit_id (issue #699) */
         RetailPackRequest: {
-            /** @description Base units in one pack, at least 1, up to three places, for example 12 or 12.5 */
-            factor: string;
+            /** @description Base units in one pack, at least 1, up to three places, for example 12 or 12.5; required unless holds_unit_id and holds_qty are sent, and then it must agree with them */
+            factor?: string;
+            /**
+             * Format: int32
+             * @description Issue #699: how many of holds_unit_id are in one pack, a whole number of 2 or more
+             */
+            holds_qty?: number;
+            /**
+             * Format: uuid
+             * @description Issue #699 (ADR-107): the level one pack holds, the item's own unit or another pack's unit of the item (in a new item's packs, one of its other packs); sent with holds_qty
+             */
+            holds_unit_id?: string;
+            /** @description What the pack is for: buy, sell or both; a pack bought only has no selling price (issue #624). Left out, both; the screens fill in the unit's usual purpose (issue #637) */
+            purpose?: string;
+            /**
+             * Format: int64
+             * @description The selling price of one pack for a walk-in sale, in minor units; absent means the piece price times the size. Needs retail.price.edit (issue #624)
+             */
+            sell_minor?: number;
             /** Format: uuid */
             unit_id: string;
+            /** @description Issue #699: true for the level the shop usually buys the item in, which Buy stock opens on; never on a pack only for selling. Clears it on the item's other packs */
+            usual_buy?: boolean;
         };
         /** @description Omitted fields are unchanged; a pack is never deleted, only switched off */
         RetailPackUpdate: {
             active?: boolean;
+            /** @description True to drop the pack's own price, so it sells at the piece price times the size again; needs retail.price.edit (issue #624) */
+            clear_sell_minor?: boolean;
             /** @description Base units in one pack, at least 1; required to switch a pack on again */
             factor?: string;
+            /**
+             * Format: int32
+             * @description Issue #699: how many of the level held are in one pack, a whole number of 2 or more. With factor alone, a pack that holds another level must stay a whole number of it (422 not_whole)
+             */
+            holds_qty?: number;
+            /**
+             * Format: uuid
+             * @description Issue #699 (ADR-107): the level one pack holds, the item's own unit or another active pack's unit of the item; sent with holds_qty. Every bigger level that holds this one is worked out again; stock, kept in the item's unit, never changes
+             */
+            holds_unit_id?: string;
+            /** @description buy, sell or both; a pack made buy only loses its selling price (issue #624) */
+            purpose?: string;
+            /**
+             * Format: int64
+             * @description A new selling price of one pack; needs retail.price.edit (issue #624)
+             */
+            sell_minor?: number;
+            /** @description Issue #699: true to make this the level Buy stock opens on, false to clear it */
+            usual_buy?: boolean;
         };
         RetailPayment: {
             /** Format: int64 */
@@ -12560,6 +16101,8 @@ export interface components {
         };
         RetailProduct: {
             active?: boolean;
+            /** @description Issue #345: the barcodes of this product and of its pack sizes, sent by the list, the get and the barcode lookup; scan any of them to find the product */
+            barcodes?: components["schemas"]["RetailBarcode"][];
             category?: string;
             /** Format: uuid */
             category_id?: string;
@@ -12634,6 +16177,7 @@ export interface components {
             units_created?: string[];
         };
         RetailProductImportRow: {
+            /** @description Empty on a dry run for a row whose code the category makes; the made code once applied (issue #493) */
             code?: string;
             description?: string;
             /** Format: int32 */
@@ -12718,6 +16262,10 @@ export interface components {
             qty_total?: string;
             /** Format: int64 */
             sell_minor?: number;
+            /** @description On the response that made the line only: true when use_from_now_on was left out because the pack has its own price and the caller may not change prices (issue #624) */
+            size_kept?: boolean;
+            /** @description Why the usual size was kept, in one plain sentence, with size_kept */
+            size_kept_note?: string;
             unit?: string;
             /**
              * Format: int64
@@ -12748,6 +16296,11 @@ export interface components {
              * @description Cost per unit_id when one is given, otherwise per base unit; becomes the product's cost per base unit (a pack cost divided by the factor, rounded half up)
              */
             cost_minor: number;
+            /**
+             * @description With unit_id (D23, issue #554): how many base units each pack held in this delivery, at least 1. Kept on the line only; stock and the cost per base unit use it. Absent means the pack's usual size
+             * @example 30
+             */
+            pack_size?: string;
             /** Format: uuid */
             product_id: string;
             qty_by_branch: components["schemas"]["RetailBranchQty"][];
@@ -12761,6 +16314,8 @@ export interface components {
              * @description A pack unit of the product (units capability): the quantities and cost_minor are then in that unit and stock moves in base units. Absent or the base unit: as before
              */
             unit_id?: string;
+            /** @description With pack_size: also make it the pack's usual size from now on (needs retail.catalogue.manage). Selling always uses the usual size */
+            use_from_now_on?: boolean;
         };
         /** @description A purchase order. A list carries no lines */
         RetailPurchaseOrder: {
@@ -12818,6 +16373,8 @@ export interface components {
             reason: string;
         };
         RetailPurchaseOrderLine: {
+            /** @description The unit the item is counted in (piece), whatever unit the line was ordered in */
+            base_unit?: string;
             /**
              * Format: int64
              * @description What the supplier billed for it; present with retail.payable.manage
@@ -12849,6 +16406,8 @@ export interface components {
             received_minor?: number;
             /** @description Received so far on receipts that stand, in base units; present on one order only */
             received_qty?: string;
+            /** @description D23, issue #554: received so far in the line's own unit, for a line ordered in a pack: packs received in it count whatever each held, other units count in packs of the size ordered. The order is received in full when this reaches unit_qty */
+            received_unit_qty?: string;
             unit?: string;
             /**
              * Format: int64
@@ -12924,6 +16483,7 @@ export interface components {
         RetailPurchaseRequest: {
             lines: components["schemas"]["RetailPurchaseLineRequest"][];
             note?: string;
+            /** @description cash, mobile_money, bank, or credit: owed to the supplier, who is then required (issue #557) */
             payment_method: string;
             /**
              * Format: date
@@ -13009,7 +16569,7 @@ export interface components {
             bill_tolerance_bp?: number;
             /**
              * Format: int64
-             * @description Read only: the approval threshold for sending a purchase order (action retail_purchase_order), present only when one is set; while it is absent an order needs no second administrator
+             * @description Read only: the amount from which sending a purchase order needs a second administrator (action retail_purchase_order, ADR-091), present only while purchase orders ask for approval (0: every order); while it is absent an order needs no second administrator
              */
             order_approval_threshold_minor?: number;
             /**
@@ -13029,6 +16589,110 @@ export interface components {
             /** Format: int32 */
             over_receipt_bp?: number;
             require_costing_before_sale?: boolean;
+        };
+        RetailQuickAdd: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description True when this add made the General category */
+            category_made?: boolean;
+            code?: string;
+            description?: string;
+            /** @description False when the item was already in the list */
+            item_made?: boolean;
+            /**
+             * Format: uuid
+             * @description The opening movement of source retail.quick_add; absent when nothing was added or when it was paid for (the purchase's movement)
+             */
+            movement_id?: string;
+            /** @description cash or mobile_money when the goods were paid for (issue #646); absent otherwise */
+            paid_from?: string;
+            /**
+             * Format: int64
+             * @description What left the cash or mobile money account; absent when not paid for
+             */
+            paid_minor?: number;
+            /** Format: uuid */
+            product_id?: string;
+            /** @description The purchase recorded when the goods were paid for, as on Buy stock */
+            purchase_no?: string;
+            /** @description The quantity added; absent when no stock was recorded */
+            qty?: string;
+            /** @description What the branch holds now; absent when no stock was recorded */
+            total_qty?: string;
+            unit?: string;
+            /** @description True when this add made the Piece unit */
+            unit_made?: boolean;
+        };
+        /** @description As RetailPackRequest: a size, or what it holds and how many */
+        RetailQuickAddPack: {
+            /** @example 24 */
+            factor?: string;
+            /** Format: int32 */
+            holds_qty?: number;
+            /** Format: uuid */
+            holds_unit_id?: string;
+            purpose?: string;
+            /** Format: int64 */
+            sell_minor?: number;
+            /** Format: uuid */
+            unit_id: string;
+            usual_buy?: boolean;
+        };
+        /** @description Issue #632: an item, its prices and how many there are at a branch, in one tap. With product_id, an item already in the list, only the quantity is added and the other item fields are ignored */
+        RetailQuickAddRequest: {
+            /**
+             * Format: uuid
+             * @description Where the stock is; defaults to the caller's one branch
+             */
+            branch_id?: string;
+            /**
+             * Format: uuid
+             * @description Left out: the item goes under General, made when the business has none
+             */
+            category_id?: string;
+            /**
+             * Format: int64
+             * @description Left out: 0, set by the first restock
+             */
+            cost_minor?: number;
+            /** @description The new item's name; required without product_id */
+            description?: string;
+            /** @description As on a new item: to add a name that exists already, administrators only */
+            duplicate_reason?: string;
+            /** @description Issue #695: the new item's packages, as packs of POST /retail/products (issue #689, ADR-106, ADR-107), made in the same transaction; a refused package names its pack_index and saves nothing. Ignored with product_id. qty stays in the item's smallest unit */
+            packs?: components["schemas"]["RetailQuickAddPack"][];
+            /** @description Issue #646: the goods were just bought and paid from the branch's cash or mobile money (retail.purchase.create there). qty above 0 and cost_minor above 0 are then needed, and the stock is recorded as a purchase, as Buy stock does, never against opening balance equity. Left out: opening stock, as before */
+            paid_from?: string;
+            /**
+             * Format: int64
+             * @description Issue #695: what one package of paid_level_unit_id cost
+             */
+            paid_level_cost_minor?: number;
+            /**
+             * Format: uuid
+             * @description Issue #695: with paid_from, the package the goods were bought in (one of packs, or a pack of product_id); sent with paid_level_cost_minor. The whole packages are then one line at that price, as Buy stock records a pack, and only the pieces left over are at cost_minor, so the money that leaves is what was paid
+             */
+            paid_level_unit_id?: string;
+            /**
+             * Format: uuid
+             * @description An item already in the list, chosen instead of a new item of the same name
+             */
+            product_id?: string;
+            /**
+             * @description How many to add to the item's stock at the branch (retail.stocktake.commit there), as opening stock against opening balance equity; more than 0 with product_id; left out, no stock is recorded
+             * @example 600
+             */
+            qty?: string;
+            /**
+             * Format: int64
+             * @description Required without product_id
+             */
+            sell_minor?: number;
+            /**
+             * Format: uuid
+             * @description Left out: the shop's piece unit (Piece or pc), made when the business has none
+             */
+            unit_id?: string;
         };
         RetailQuotation: {
             /** Format: uuid */
@@ -13156,6 +16820,69 @@ export interface components {
              * @description Not before the quotation date
              */
             valid_until: string;
+        };
+        RetailReceiptPreview: {
+            printed?: components["schemas"]["RetailReceiptPrint"];
+            /** Format: uuid */
+            sale_id?: string;
+            /**
+             * Format: int32
+             * @description The sale's version the receipt was laid out at
+             */
+            sale_version?: number;
+        };
+        /** @description What the receipt PDF prints, in its order and already formatted; absent when it could not be laid out, and the screen then offers the PDF */
+        RetailReceiptPrint: {
+            branch_location?: string;
+            branch_name?: string;
+            business_name?: string;
+            buyer_contact?: string;
+            buyer_name?: string;
+            currency?: string;
+            /** @description The day the receipt was made, as printed */
+            date?: string;
+            due?: string;
+            due_date?: string;
+            /** @description The receipt footer */
+            footer?: string;
+            issued_by?: string;
+            issued_on?: string;
+            lines?: components["schemas"]["RetailReceiptPrintLine"][];
+            /** @description The same-origin URL of the logo the receipt PDF prints: the shop's own when its stored file can be read, else the business logo; absent when the PDF prints none. Versioned so the browser caches it, and public, so an image tag loads it */
+            logo_url?: string;
+            /** @description The net after returns */
+            net?: string;
+            notes?: string;
+            number?: string;
+            payment?: string;
+            price_list?: string;
+            quotation?: string;
+            /** @description The received signature line as printed, such as Received by Test Buyer */
+            received?: string;
+            /** @description One line for each credit note, oldest first */
+            returns?: string[];
+            sale_date?: string;
+            sale_no?: string;
+            status?: string;
+            /** @description RECEIPT, or RECEIPT AFTER RETURNS */
+            title?: string;
+            total?: string;
+            total_words?: string;
+        };
+        RetailReceiptPrintLine: {
+            amount?: string;
+            code?: string;
+            description?: string;
+            /** @description The line under the description as printed: the code, and the price list after a bar */
+            detail?: string;
+            /** Format: int32 */
+            no?: number;
+            /** @description A pack in base units, such as = 60 piece */
+            pack?: string;
+            price_list?: string;
+            /** @description The quantity and unit as sold, such as 5 carton, or 5 alone without a unit */
+            quantity?: string;
+            unit_price?: string;
         };
         RetailRepayment: {
             /** Format: uuid */
@@ -13319,6 +17046,7 @@ export interface components {
              * @description Issue #385: the delivery fee of the customer order this credit sale came from, left on the buyer's account and not yet paid: owed besides balance_minor, and written off with the sale
              */
             delivery_fee_owed_minor?: number;
+            device?: components["schemas"]["RetailSaleDevice"];
             /** Format: date */
             due_date?: string;
             historical?: boolean;
@@ -13353,6 +17081,52 @@ export interface components {
             /** Format: uuid */
             voided_by?: string;
             write_off?: components["schemas"]["RetailSaleWriteOffInfo"];
+        };
+        /** @description Something that changed while a sale was offline (ADR-067) */
+        RetailSaleClash: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: uuid */
+            id?: string;
+            /** @description stock_short, item_inactive, pack_inactive, price_changed, price_typed, below_cost, clock_ahead or clock_behind */
+            kind?: string;
+            /**
+             * Format: int32
+             * @description The sale line; absent for clock_ahead and clock_behind
+             */
+            line_no?: number;
+            /** Format: uuid */
+            product_id?: string;
+            resolution_note?: string;
+            /** Format: date-time */
+            resolved_at?: string;
+            /** Format: uuid */
+            resolved_by?: string;
+            /** Format: uuid */
+            sale_id?: string;
+            sale_no?: string;
+            /** @description What happened, in plain words; never a cost */
+            words?: string;
+        };
+        RetailSaleClashPage: {
+            items?: components["schemas"]["RetailSaleClash"][];
+        };
+        RetailSaleClashResolve: {
+            note: string;
+        };
+        /** @description How a sale came from a device (ADR-067) */
+        RetailSaleDevice: {
+            clashes?: components["schemas"]["RetailSaleClash"][];
+            /** Format: uuid */
+            client_sale_id?: string;
+            /**
+             * Format: date-time
+             * @description When the sale happened on the device, as recorded
+             */
+            occurred_at?: string;
+            recorded_offline?: boolean;
         };
         RetailSaleLine: {
             code?: string;
@@ -13496,6 +17270,11 @@ export interface components {
             branch_id?: string;
             buyer_contact?: string;
             buyer_name?: string;
+            /**
+             * Format: uuid
+             * @description ADR-067: the id the device made for this sale, unique per business. A second request with it, by the same person, answers the sale already recorded (Idempotent-Replayed), after the Idempotency-Key has expired too; by another person it is 422 client_sale_id_reused; with a different request (apart from occurred_at, recorded_offline and prices_as_of) 422 client_sale_conflict; the id of a refused offline sale a manager discarded 422 offline_sale_discarded
+             */
+            client_sale_id?: string;
             /** @description Why a credit sale above the buyer's credit limit goes ahead; needed (at least five characters) from a user who holds retail.credit.override, ignored when the sale is within the limit or the customer_accounts capability is off */
             credit_override_reason?: string;
             /** Format: uuid */
@@ -13506,12 +17285,24 @@ export interface components {
              */
             due_date?: string;
             lines: components["schemas"]["RetailSaleLineRequest"][];
+            /**
+             * Format: date-time
+             * @description ADR-067: when the sale happened on the device; the sale is dated that day in the business's time zone. Up to five minutes ahead is recorded as now; further ahead is 422 occurred_at_in_future, or for a sale recorded offline now with a clock_ahead clash
+             */
+            occurred_at?: string;
             payment_method: string;
             /**
              * Format: uuid
              * @description Price the sale from this list instead of the customer's own or the customer group's; needs retail.pricelist.use unless it is one of those (price_lists capability)
              */
             price_list_id?: string;
+            /**
+             * Format: date-time
+             * @description ADR-067: the server's time when the device last refreshed its prices. A device price equal to the catalogue or pack price in force then stands; an occurred_at before it means the phone clock was behind (clock_behind)
+             */
+            prices_as_of?: string;
+            /** @description ADR-067: the sale was taken with no network and its money is already in hand. Needs client_sale_id and occurred_at; never a credit sale. A short stock, an item or a pack switched off, a saved price that changed, a typed price the online rules would not take (price_typed), a price not above cost or a phone clock ahead or behind then records the sale with a clash instead of refusing it */
+            recorded_offline?: boolean;
             /**
              * Format: date
              * @description Defaults to today; not in the future
@@ -13857,10 +17648,16 @@ export interface components {
             branch_id?: string;
             /** Format: date */
             business_date?: string;
+            /** @description Optional, even when the amount differs from the suggestion */
             overwrite_reason?: string;
             suggestion_token: string;
         };
         RetailSavingsSuggestion: {
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch; profit less expenses, never below 0, the most the day may save
+             */
+            available_minor?: number;
             /** Format: uuid */
             branch_id?: string;
             /** Format: date */
@@ -13870,6 +17667,16 @@ export interface components {
              * @description Present only with retail.profit.read in the record's branch
              */
             daily_profit_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch; the branch's expenses recorded for the day, voided ones left out
+             */
+            day_expenses_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch; the amount of the active record for the day, if any
+             */
+            existing_amount_minor?: number;
             /** Format: uuid */
             existing_id?: string;
             /**
@@ -13954,6 +17761,15 @@ export interface components {
             exact?: components["schemas"]["RetailSimilarProduct"][];
             similar?: components["schemas"]["RetailSimilarProduct"][];
         };
+        /** @description Issue #697: one size's own selling price of one of its packages */
+        RetailSizePackPrice: {
+            colour?: string;
+            /** Format: int64 */
+            sell_minor: number;
+            size?: string;
+            /** Format: uuid */
+            unit_id: string;
+        };
         /** @description An item that sold in the branch in the last 90 days, but slowly */
         RetailSlowMover: {
             better_at?: components["schemas"]["RetailSellsBetterAt"];
@@ -14013,6 +17829,14 @@ export interface components {
              * @description Money tied up in all slow stock reported, at cost; present only for a caller with retail.profit.read in every branch of the business (an administrator)
              */
             value_at_cost_minor?: number;
+        };
+        /** @description An item's standard pack: its unit and the base units one holds */
+        RetailStandardPack: {
+            /** @description Base units in one pack, three places, for example 24.000 */
+            factor?: string;
+            /** @description Issue #699 (ADR-107): every active pack of the item holding a whole number of more than one base unit, biggest first, so stock is shown and counted at every level */
+            levels?: components["schemas"]["RetailPackLevel"][];
+            unit?: string;
         };
         /** @description Imported credit sales. They were never posted to the ledger (issue #96), so the statement lists them apart and the ledger-supported closing balance leaves them out */
         RetailStatementBeforeSystemStart: {
@@ -14090,7 +17914,7 @@ export interface components {
             /** Format: uuid */
             branch_id: string;
             /**
-             * @description The quantity the form showed when it was opened; 409 stock_moved when it has changed since
+             * @description The quantity the form showed when it was opened; 409 stock_moved when it has changed since, with current_qty, the quantity now
              * @example 12.5
              */
             expected_qty: string;
@@ -14196,7 +18020,7 @@ export interface components {
             /** Format: uuid */
             branch_id?: string;
             items?: components["schemas"]["RetailStockRow"][];
-            /** @description A quantity at or below this is low stock (FR-RET-03); the same for every branch */
+            /** @description A quantity at or below this is low stock (FR-RET-03) for an item with no minimum set; the same for every branch */
             low_stock_threshold?: string;
             next_cursor?: string;
         };
@@ -14223,6 +18047,7 @@ export interface components {
              * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
              */
             sell_minor?: number;
+            standard_pack?: components["schemas"]["RetailStandardPack"];
             unit?: string;
         };
         RetailStockSummary: {
@@ -14302,6 +18127,11 @@ export interface components {
             status?: string;
             /** Format: int32 */
             version?: number;
+        };
+        /** @description Issue #636: the lines of a big drop the person ticked as right on Review the difference */
+        RetailStocktakeCommitRequest: {
+            /** @description The product ids of the lines that take an item holding stock to 0, or to less than half of it, that were ticked as right. Every such line must be here, or the commit is refused with 409 big_drop_not_acknowledged */
+            acknowledged?: string[];
         };
         RetailStocktakeLine: {
             code?: string;
@@ -14836,6 +18666,11 @@ export interface components {
             /** @description cash|mobile_money|bank */
             method: string;
             note?: string;
+            /**
+             * Format: date
+             * @description The day it was paid, in the business time zone; absent means today. Never in the future, and it pays only what was owed on that day (issue #557)
+             */
+            paid_on?: string;
             /** @description A bank or mobile money reference */
             reference?: string;
             /** Format: uuid */
@@ -14847,6 +18682,57 @@ export interface components {
         RetailSupplierRequest: {
             contact?: string;
             name: string;
+        };
+        /** @description What happened with one supplier between from and to, with the running balance (issue #557) */
+        RetailSupplierStatement: {
+            /**
+             * Format: int64
+             * @description Opening plus the lines: owed at the end of to, in the caller's branch scope
+             */
+            closing_minor?: number;
+            currency?: string;
+            /** Format: date */
+            from?: string;
+            lines?: components["schemas"]["RetailSupplierStatementLine"][];
+            /**
+             * Format: int64
+             * @description Owed at the start of from
+             */
+            opening_minor?: number;
+            /** Format: uuid */
+            supplier_id?: string;
+            supplier_name?: string;
+            /** Format: date */
+            to?: string;
+        };
+        /** @description kind is purchase (bought on credit in Buy stock), purchase_void, bill (a supplier invoice), bill_void, credit_note, credit_note_void, payment or payment_reversed (issue #557) */
+        RetailSupplierStatementLine: {
+            /**
+             * Format: int64
+             * @description Owed after this line
+             */
+            balance_minor?: number;
+            /** Format: date */
+            date?: string;
+            /**
+             * Format: int64
+             * @description What the line takes off what is owed
+             */
+            decrease_minor?: number;
+            /**
+             * Format: int64
+             * @description What the line adds to what is owed
+             */
+            increase_minor?: number;
+            kind?: string;
+            /** @description cash, mobile_money or bank, on a payment and its reversal */
+            method?: string;
+            /** @description Our number: the purchase, invoice, credit note or payment number */
+            number?: string;
+            /** @description The supplier's invoice or credit note number, or a payment's reference */
+            reference?: string;
+            /** Format: uuid */
+            source_id?: string;
         };
         /** @description Omitted fields are unchanged; an empty contact clears it */
         RetailSupplierUpdate: {
@@ -15042,14 +18928,24 @@ export interface components {
         };
         RetailUnit: {
             active?: boolean;
+            /**
+             * Format: int32
+             * @description Issue #709 (ADR-110, D98): present only for a package of a fixed size, 12 for a dozen; every pack of it holds exactly this many of the level it holds
+             */
+            fixed_count?: number;
             /** Format: uuid */
             id?: string;
+            /** @description Issue #689 (ADR-106): the name is a package word, such as Box or Carton, so it can be a pack but never the single unit of a new item */
+            is_package?: boolean;
             name?: string;
             /**
              * Format: int32
              * @description Products (active or not) that use this unit
              */
             product_count?: number;
+            /** @description Issue #709 (ADR-110): one of the standard units every shop gets, under any spelling; the list shows them first, in the standard order */
+            standard?: boolean;
+            usual_pack?: components["schemas"]["RetailUsualPack"];
             /**
              * Format: int32
              * @description Send as If-Match when updating
@@ -15061,11 +18957,15 @@ export interface components {
         };
         RetailUnitRequest: {
             name: string;
+            usual_pack?: components["schemas"]["RetailUsualPackRequest"];
         };
         /** @description Omitted fields are unchanged; a unit is never deleted */
         RetailUnitUpdate: {
             active?: boolean;
+            /** @description Issue #637: true to clear the usual pack; not sent with usual_pack. Items' packs are unchanged */
+            clear_usual_pack?: boolean;
             name?: string;
+            usual_pack?: components["schemas"]["RetailUsualPackRequest"];
         };
         RetailUsageLine: {
             code?: string;
@@ -15127,6 +19027,32 @@ export interface components {
              */
             occurred_on?: string;
             reason: string;
+        };
+        /** @description The usual size of a pack in a smaller unit, and what it is for */
+        RetailUsualPack: {
+            /** @description The smaller unit's name */
+            of_unit?: string;
+            /** Format: uuid */
+            of_unit_id?: string;
+            /** @enum {string} */
+            purpose?: "buy" | "sell" | "both";
+            /** @description How many of the smaller unit, three places, for example 100.000 */
+            size?: string;
+        };
+        /** @description The usual size of this pack in a smaller unit, such as a roll of 100 metres, and what it is for */
+        RetailUsualPackRequest: {
+            /**
+             * Format: uuid
+             * @description The smaller unit, such as Metre or Piece
+             */
+            of_unit_id: string;
+            /**
+             * @description What the pack is for, the values of a pack's purpose on an item (#624); an item's pack of this unit added with no purpose takes it
+             * @enum {string}
+             */
+            purpose: "buy" | "sell" | "both";
+            /** @description How many of the smaller unit, at least 1, up to three places */
+            size: string;
         };
         RetailValuation: {
             /** Format: date */
@@ -15264,7 +19190,10 @@ export interface components {
         };
         /** @description One size and colour to make: a size, a colour or both; the code and prices default from the item */
         RetailVariantLine: {
-            /** @description The variant's own code; by default the base code, the size and the colour in capitals, as ROMP-03M-BLUE */
+            /**
+             * @deprecated
+             * @description Leave it out: the app makes the code from the item's base code, the size and the colour in capitals, as BLB-0007-03M-BLUE (issue #562). One that is not blank is refused with 400 item_code_made_by_app
+             */
             code?: string;
             /** @description A colour or a print */
             colour?: string;
@@ -15279,6 +19208,13 @@ export interface components {
              */
             sell_minor?: number;
             size?: string;
+        };
+        /** @description Issue #697: the sizes and colours the business has used */
+        RetailVariantOptions: {
+            /** @description Colours of the business's items, each once ignoring case, most used first */
+            colours?: string[];
+            /** @description Sizes of the business's items, each once ignoring case, most used first */
+            sizes?: string[];
         };
         RetailVoidRequest: {
             reason: string;
@@ -15752,6 +19688,14 @@ export interface components {
             notify_member?: boolean;
             payment_method_key: string;
         };
+        /** @description FR-ARR-04 (#265): waive all or part of an item's fees or interest; principal is never waived */
+        ScheduleItemWaiverRequest: {
+            /** Format: int64 */
+            amount_minor: number;
+            /** @description fee or interest */
+            component: string;
+            reason: string;
+        };
         SchedulePreview: {
             /**
              * Format: int64
@@ -15837,7 +19781,7 @@ export interface components {
         };
         SetRetailBranchRoleRequest: {
             /** @enum {string} */
-            role: "store" | "shop" | "both";
+            role: "shop" | "both";
         };
         SetRetailStockMinimumRequest: {
             /**
@@ -15845,6 +19789,32 @@ export interface components {
              * @example 10
              */
             min_qty?: string;
+        };
+        SetupHelperStatus: {
+            /** @description The helper may read a typed list or a file for this business; while false the box is not shown */
+            enabled?: boolean;
+            /** @description A photo can be read too (a provider that reads pictures is set) */
+            photos?: boolean;
+        };
+        ShortLink: {
+            /** @description As a person types it, for example rincoltech.com/testduka */
+            link?: string;
+            /** @description The short name, which is also the app's address (the slug) */
+            short_name?: string;
+            /** @description The same with https://, for the Copy button */
+            url?: string;
+        };
+        ShortLinkRule: {
+            /** @description The single redirect's custom filter expression */
+            expression?: string;
+            /** @description Names the rule leaves to the website and sign-up refuses */
+            reserved?: string[];
+            /** @description The host the short links are on, for example rincoltech.com */
+            short_link_host?: string;
+            /** Format: int32 */
+            status_code?: number;
+            /** @description The dynamic target URL expression */
+            target?: string;
         };
         SignInRequest: {
             /** @description Email, or phone for staff */
@@ -15888,11 +19858,27 @@ export interface components {
             country: string;
             message?: string;
             modules: string[];
+            /** @description Optional: the referral code of the business that referred the applicant (the ?ref= of its link). An unknown code is 422 referral_code_unknown (ADR-069) */
+            referral_code?: string;
+            /** @description The short name for the shop's link rincoltech.com/<short name>, which is also its address: 3 to 20 lower case letters and digits, a hyphen may join two words. A taken one is 409 short_name_taken with suggestions (ADR-108). Optional for one release, for a sign-up page from before it: the server then picks a free one from the business name */
+            short_name?: string;
             term: string;
+            /** @description Optional: the shop's town or area, for short name suggestions */
+            town?: string;
             /** @description trial: one month free; paid: subscribe now */
             way_in: string;
             /** @description Leave empty. A hidden field: a value marks the request as automated */
             website?: string;
+        };
+        SignUpShortNameCheck: {
+            available?: boolean;
+            /** @description Plain words, for example 'testduka is taken.' */
+            message?: string;
+            name?: string;
+            /** @description invalid, reserved or taken; null when available */
+            problem?: string;
+            /** @description Free names: the town or area first, then a shorter form, then a number */
+            suggestions?: string[];
         };
         /** @description The text to show before switching on, and its version */
         SmsAcknowledgement: {
@@ -16176,6 +20162,15 @@ export interface components {
             /** @description invited, active or deactivated */
             status?: string;
         };
+        TenantGoLiveRequest: {
+            /**
+             * Format: date
+             * @description The day the app became the business's register, today or earlier (ADR-071)
+             */
+            go_live_date: string;
+            /** @description Why; kept in the tenant's audit log and the platform's */
+            reason: string;
+        };
         /** @description An operator action on the business, from the platform audit log */
         TenantHistoryEntry: {
             action?: string;
@@ -16228,6 +20223,19 @@ export interface components {
             plan_code: string;
             reason: string;
         };
+        TenantReferrer: {
+            referral?: components["schemas"]["PlatformReferral"];
+            /** Format: uuid */
+            tenant_id?: string;
+        };
+        TenantReferrerRequest: {
+            /** @description Why; kept in the platform audit log */
+            reason: string;
+            /** @description The referral code of the business that referred this one; null or empty clears it */
+            referrer_code?: string;
+            /** @description A current 6 digit code from the operator's own authenticator app (step-up), used once */
+            totp_code: string;
+        };
         TenantSettings: {
             allow_loans_before_kyc_verified?: boolean;
             appraisal_weights?: {
@@ -16240,8 +20248,18 @@ export interface components {
             approval_validity_days?: number;
             disabled_collateral_types?: string[];
             display_name?: string;
-            /** @description True once the admin has saved a business name of their own */
+            /** @description True when the business has a name: the one given at onboarding or one the admin saved */
             display_name_set?: boolean;
+            /**
+             * Format: int32
+             * @description The month the business's financial year ends in (1 to 12), or null for June, the end of the Uganda tax year; the retention of a closed business's money records counts from it (ADR-090)
+             */
+            financial_year_end_month?: number;
+            /**
+             * Format: date
+             * @description The day the app became the business's register: as the Owner or the operator set it, else the business date of the first administrator sign-in, stored then; null before either. An existing loan is brought in only with a disbursement date before it (ADR-071)
+             */
+            go_live_date?: string;
             /**
              * Format: uuid
              * @description The current logo (a core document of this tenant), or null; set through PUT /settings/logo
@@ -16304,6 +20322,18 @@ export interface components {
         TenantSmsSenderIds: {
             items?: components["schemas"]["TenantSmsSenderId"][];
         };
+        TenantWithoutOwner: {
+            /** @description Its active administrators, oldest first; any one of them can be made the Owner */
+            admins?: components["schemas"]["OwnerCandidate"][];
+            /** Format: date-time */
+            created_at?: string;
+            name?: string;
+            slug?: string;
+            /** @description active or suspended */
+            status?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+        };
         /** @description How the user left a guided tour, and its version then */
         TourState: {
             /** Format: date-time */
@@ -16333,10 +20363,6 @@ export interface components {
             reason?: string;
             /** @description The current 6 digit code from the Owner's own authenticator app */
             totp_code?: string;
-        };
-        UnlockSignInRequest: {
-            /** @description Why; kept in the tenant's audit log */
-            reason: string;
         };
         UnallocatedReceipt: {
             allocation?: components["schemas"]["ReceiptAllocation"];
@@ -16385,6 +20411,10 @@ export interface components {
             items?: components["schemas"]["UnallocatedReceipt"][];
             next_cursor?: string;
         };
+        UnlockSignInRequest: {
+            /** @description Why; kept in the tenant's audit log */
+            reason: string;
+        };
         /** @description Omitted fields are unchanged */
         UpdateAdvisorSettingsRequest: {
             /** @description The version of the acknowledgement text that was shown; required when switching on */
@@ -16401,6 +20431,13 @@ export interface components {
             daily_token_cap?: number;
             /** @description Switch the assistant on or off; needs core.settings.manage as well */
             enabled?: boolean;
+        };
+        UpdateApprovalRulesRequest: {
+            /** @description The administrator's own password, when they have no authenticator (ADR-046). Never stored or logged */
+            password?: string;
+            rules: components["schemas"]["ApprovalRuleChange"][];
+            /** @description The current code of the administrator's authenticator, when they have one (ADR-046). Never stored or logged */
+            totp_code?: string;
         };
         /** @description Omitted fields are unchanged. The code never changes. */
         UpdateBranchRequest: {
@@ -16504,8 +20541,11 @@ export interface components {
             customer_accounts?: boolean;
             documents?: boolean;
             price_lists?: boolean;
-            /** @enum {string} */
-            profile?: "shop" | "trade";
+            /**
+             * @description The kind of business: sets units, price_lists, customer_accounts, documents, purchasing and transfer_receipt to its preset (branch_roles and returns are left as they are); a flag sent in the same change wins
+             * @enum {string}
+             */
+            profile?: "shops" | "stores_and_shops" | "wholesale" | "wholesale_and_shops";
             purchasing?: boolean;
             returns?: boolean;
             /**
@@ -16534,6 +20574,10 @@ export interface components {
             active?: boolean;
             /** Format: uuid */
             category_id?: string;
+            /**
+             * @deprecated
+             * @description Leave it out: an item keeps the code the app gave it (issue #562). A blank code, or the item's own code in any case, is no change; any other is refused with 400 item_code_made_by_app
+             */
             code?: string;
             description?: string;
             /** @description Issue #352: only an administrator (core.settings.manage) may add or rename a product to a name another product of the same unit has, and then with a reason of at least 5 characters, stored on the product. Without it that is refused with 422 duplicate_product_name. */
@@ -16578,7 +20622,7 @@ export interface components {
             appraisal_weights?: {
                 [key: string]: number;
             };
-            /** @description Action type to amount in minor units; below it no checker is needed (FR-APR-04) */
+            /** @description Action type to amount in minor units; below it no checker is needed (FR-APR-04). A change needs totp_code or password (ADR-091); the approval rules screen uses PUT /settings/approvals */
             approval_thresholds_minor?: {
                 [key: string]: number;
             };
@@ -16586,6 +20630,16 @@ export interface components {
             approval_validity_days?: number;
             disabled_collateral_types?: string[];
             display_name?: string;
+            /**
+             * Format: int32
+             * @description The month the financial year ends in, 1 to 12; only the Owner sets it, 403 owner_only otherwise (ADR-090)
+             */
+            financial_year_end_month?: number;
+            /**
+             * Format: date
+             * @description The go-live date, today or earlier; only the Owner of the business sets it, 403 owner_only otherwise (ADR-071)
+             */
+            go_live_date?: string;
             /** Format: int32 */
             max_active_loans_per_member?: number;
             /**
@@ -16593,7 +20647,7 @@ export interface components {
              * @description Days a covered user without a second factor may keep signing in before it is required; 0 means at once. Sending it moves the deadline to now plus these days (ADR-046)
              */
             mfa_grace_days?: number;
-            /** @description Needed to turn two-step sign-in off or narrow it, from an administrator with no authenticator: their own current password (ADR-046). Never stored or logged */
+            /** @description Needed to turn two-step sign-in off, narrow it or put its date back (a later date, or a date for people required at once), or to change an approval amount, from an administrator with no authenticator: their own current password (ADR-046, ADR-091). Never stored or logged */
             password?: string;
             receipt_footer?: string;
             reports_enabled?: boolean;
@@ -16604,7 +20658,7 @@ export interface components {
             setup_dismissed?: boolean;
             /** @description #RRGGBB, or an empty string to clear it; white or near-black text on it must reach contrast 4.5 (FR-TEN-08) */
             theme_primary?: string;
-            /** @description Needed to turn two-step sign-in off or narrow it, from an administrator who has an authenticator: its current code (ADR-046). Never stored or logged */
+            /** @description Needed to turn two-step sign-in off, narrow it or put its date back (a later date, or a date for people required at once), or to change an approval amount, from an administrator who has an authenticator: its current code (ADR-046, ADR-091). Never stored or logged */
             totp_code?: string;
         };
         UpdateTenantSmsControlsRequest: {
@@ -16847,6 +20901,24 @@ export interface operations {
             };
         };
     };
+    logoutEverywhere: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     refreshSession: {
         parameters: {
             query?: never;
@@ -17061,6 +21133,112 @@ export interface operations {
             };
         };
     };
+    billingView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingView"];
+                };
+            };
+        };
+    };
+    setBillingContact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BillingContactRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingView"];
+                };
+            };
+        };
+    };
+    clearBillingContact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingView"];
+                };
+            };
+        };
+    };
+    billingNotice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingNotice"];
+                };
+            };
+        };
+    };
+    billingReceipt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+        };
+    };
     listBranches: {
         parameters: {
             query?: never;
@@ -17183,6 +21361,146 @@ export interface operations {
             };
         };
     };
+    getBranchLogo: {
+        parameters: {
+            query?: {
+                v?: string;
+            };
+            header?: {
+                "If-None-Match"?: string;
+            };
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ETag still matches */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+            /** @description No such branch, no logo of its own, or an unknown host */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+            /** @description Storage cannot be read (logo_unavailable) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+        };
+    };
+    uploadBranchLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description No such branch in the caller's scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            /** @description The branch is closed (invalid_status_transition) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            /** @description Over 1 MB (file_too_large) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            /** @description Not PNG, JPEG or WebP, or not decodable (unsupported_file_type) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            /** @description svg_not_allowed, image_too_small, image_too_large (over 4 megapixels) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+        };
+    };
+    removeBranchLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No such branch in the caller's scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            /** @description The branch is closed (invalid_status_transition) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+        };
+    };
     reopenBranch: {
         parameters: {
             query?: never;
@@ -17223,6 +21541,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Branding"];
+                };
+            };
+        };
+    };
+    getAppManifest: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The manifest of the host's business, or the BMS one */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/manifest+json": components["schemas"]["AppManifest"];
+                };
+            };
+            /** @description The ETag still matches */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/manifest+json": components["schemas"]["AppManifest"];
+                };
+            };
+        };
+    };
+    getAppIcon: {
+        parameters: {
+            query?: {
+                v?: string;
+            };
+            header?: {
+                "If-None-Match"?: string;
+            };
+            path: {
+                file: "icon-192.png" | "icon-512.png" | "icon-maskable-192.png" | "icon-maskable-512.png" | "apple-touch-icon.png";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The PNG icon drawn from the logo */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            /** @description No logo here: the BMS icon of the same name */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            /** @description The ETag still matches */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            /** @description Not one of the icon file names */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
                 };
             };
         };
@@ -17269,6 +21671,136 @@ export interface operations {
             };
         };
     };
+    getClosure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BusinessClosure"];
+                };
+            };
+        };
+    };
+    requestClosure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClosureStepUp"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BusinessClosure"];
+                };
+            };
+        };
+    };
+    cancelClosure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BusinessClosure"];
+                };
+            };
+        };
+    };
+    getDataExport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataExportStatus"];
+                };
+            };
+        };
+    };
+    createDataExport: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportRun"];
+                };
+            };
+        };
+    };
+    updateDataExportSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DataExportSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataExportStatus"];
+                };
+            };
+        };
+    };
     getDocument: {
         parameters: {
             query?: never;
@@ -17309,6 +21841,145 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DownloadUrl"];
+                };
+            };
+        };
+    };
+    listMyFeedback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackList"];
+                };
+            };
+        };
+    };
+    sendFeedback: {
+        parameters: {
+            query: {
+                kind: string;
+                message: string;
+                page_path?: string;
+            };
+            header?: {
+                "User-Agent"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    screenshot?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackItem"];
+                };
+            };
+        };
+    };
+    getMyFeedbackScreenshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+        };
+    };
+    getAskStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskStatus"];
+                };
+            };
+        };
+    };
+    askBms: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AskRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskAnswer"];
+                };
+            };
+        };
+    };
+    getSetupHelperStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupHelperStatus"];
                 };
             };
         };
@@ -17364,7 +22035,7 @@ export interface operations {
                     "application/json": components["schemas"]["PaymentMethodMappingList"];
                 };
             };
-            /** @description invalid_payment_account, unknown_branch, account_used_by_retail (cash and bank with retail on) */
+            /** @description invalid_payment_account, unknown_branch */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -17713,6 +22384,331 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CollateralValuation"];
+                };
+            };
+        };
+    };
+    getArrearsList: {
+        parameters: {
+            query?: {
+                bucket?: string;
+                officer_user_id?: string;
+                branch_id?: string[];
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArrearsList"];
+                };
+            };
+        };
+    };
+    getDueList: {
+        parameters: {
+            query?: {
+                date_from?: string;
+                date_to?: string;
+                officer_user_id?: string;
+                branch_id?: string[];
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DueList"];
+                };
+            };
+        };
+    };
+    listPromises: {
+        parameters: {
+            query?: {
+                promise_status?: string;
+                officer_user_id?: string;
+                branch_id?: string[];
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromiseList"];
+                };
+            };
+        };
+    };
+    reassignLoans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoanReassignRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanReassignResult"];
+                };
+            };
+        };
+    };
+    listExistingLoans: {
+        parameters: {
+            query?: {
+                status?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExistingLoanPage"];
+                };
+            };
+        };
+    };
+    recordExistingLoan: {
+        parameters: {
+            query?: {
+                dry_run?: boolean;
+            };
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordExistingLoanRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExistingLoan"];
+                };
+            };
+        };
+    };
+    getLendingGoLiveDate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoLiveDate"];
+                };
+            };
+        };
+    };
+    importExistingLoans: {
+        parameters: {
+            query?: {
+                dry_run?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExistingLoanImportRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExistingLoanImportResult"];
+                };
+            };
+        };
+    };
+    draftExistingLoansImport: {
+        parameters: {
+            query?: {
+                /** @description The register as typed; leave it out when a file is sent */
+                text?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description A photo, or a CSV, Excel (.xlsx) or PDF file, 5 MB at most
+                     */
+                    file?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanRegisterDraft"];
+                };
+            };
+        };
+    };
+    getExistingLoan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExistingLoan"];
+                };
+            };
+        };
+    };
+    requestExistingLoanApproval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExistingLoan"];
+                };
+            };
+        };
+    };
+    cancelExistingLoan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancelExistingLoanRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExistingLoan"];
+                };
+            };
+        };
+    };
+    requestExistingLoanReversal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancelExistingLoanRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExistingLoan"];
                 };
             };
         };
@@ -18720,6 +23716,28 @@ export interface operations {
             };
         };
     };
+    getLoanHomeSummary: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanHomeSummary"];
+                };
+            };
+        };
+    };
     getLoan: {
         parameters: {
             query?: never;
@@ -18848,6 +23866,57 @@ export interface operations {
             };
         };
     };
+    listLoanCharges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanChargeList"];
+                };
+            };
+        };
+    };
+    requestLoanChargeWaiver: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                loan_id: string;
+                charge_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChargeWaiverRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanActionOutcome"];
+                };
+            };
+        };
+    };
     setLoanCollateral: {
         parameters: {
             query?: never;
@@ -18872,6 +23941,54 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Loan"];
+                };
+            };
+        };
+    };
+    listCollectionActions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionActionList"];
+                };
+            };
+        };
+    };
+    logCollectionAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollectionActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionAction"];
                 };
             };
         };
@@ -19032,6 +24149,32 @@ export interface operations {
             };
         };
     };
+    setLoanOfficer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoanOfficerRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanReassignResult"];
+                };
+            };
+        };
+    };
     getLoanPayoffQuote: {
         parameters: {
             query?: {
@@ -19130,6 +24273,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LoanSchedule"];
+                };
+            };
+        };
+    };
+    requestLoanItemWaiver: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                loan_id: string;
+                item_no: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleItemWaiverRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanActionOutcome"];
                 };
             };
         };
@@ -20529,8 +25701,26 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description OK */
-            200: {
+            /** @description The request, new or already waiting */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReversalRequestOutcome"];
+                };
+            };
+            /** @description try_again, completed_again, provider_disagrees or not_in_review: nothing was raised */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReversalRequestOutcome"];
+                };
+            };
+            /** @description nothing_to_reverse */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -20916,6 +26106,142 @@ export interface operations {
             };
         };
     };
+    getPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BusinessPlan"];
+                };
+            };
+        };
+    };
+    cancelPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanStepUp"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanScheduledChange"];
+                };
+            };
+        };
+    };
+    undoPlanChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanScheduledChange"];
+                };
+            };
+        };
+    };
+    requestPlanModule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanModuleAsk"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanModuleRequest"];
+                };
+            };
+        };
+    };
+    stopPlanModule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                module: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanStepUp"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanScheduledChange"];
+                };
+            };
+        };
+    };
+    getPlanStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BusinessPlanStatus"];
+                };
+            };
+        };
+    };
     platformListApplications: {
         parameters: {
             query?: {
@@ -21218,6 +26544,215 @@ export interface operations {
             };
         };
     };
+    platformDueForSuspension: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DueForSuspension"];
+                };
+            };
+        };
+    };
+    platformBillingSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingSettings"];
+                };
+            };
+        };
+    };
+    platformSaveBillingSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BillingSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingSettings"];
+                };
+            };
+        };
+    };
+    platformClosures: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformClosure"][];
+                };
+            };
+        };
+    };
+    platformRemoveClosedBusiness: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                closure_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformStepUpRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformClosureRemoved"];
+                };
+            };
+        };
+    };
+    platformListFeedback: {
+        parameters: {
+            query?: {
+                status?: string;
+                since?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformFeedbackList"];
+                };
+            };
+        };
+    };
+    platformSetFeedbackLinkedIssue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformFeedbackLinkedIssueRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformFeedbackItem"];
+                };
+            };
+        };
+    };
+    platformGetFeedbackScreenshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+        };
+    };
+    platformSetFeedbackStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformFeedbackStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformFeedbackItem"];
+                };
+            };
+        };
+    };
     findStaffSignIn: {
         parameters: {
             query?: never;
@@ -21258,6 +26793,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlatformMe"];
+                };
+            };
+        };
+    };
+    platformListModuleRequests: {
+        parameters: {
+            query?: {
+                status?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformModuleRequestList"];
+                };
+            };
+        };
+    };
+    platformApproveModuleRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformModuleApproval"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanModuleRequest"];
+                };
+            };
+        };
+    };
+    platformDeclineModuleRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformModuleDecline"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanModuleRequest"];
                 };
             };
         };
@@ -21398,6 +27007,334 @@ export interface operations {
             };
         };
     };
+    platformListReferrals: {
+        parameters: {
+            query?: {
+                referrer_tenant_id?: string;
+                status?: string;
+                commission?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformReferralList"];
+                };
+            };
+        };
+    };
+    platformMarkReferralCommissionPaid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                line_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralLinePaidRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformReferralDetail"];
+                };
+            };
+        };
+    };
+    platformReverseReferralCommission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                line_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralLineReverseRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformReferralDetail"];
+                };
+            };
+        };
+    };
+    platformGetReferralDefaultRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferralDefaultRule"];
+                };
+            };
+        };
+    };
+    platformSetReferralDefaultRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralRuleRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferralDefaultRule"];
+                };
+            };
+        };
+    };
+    platformExportReferrals: {
+        parameters: {
+            query?: {
+                referrer_tenant_id?: string;
+                status?: string;
+                commission?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+        };
+    };
+    platformMarkReferralPaymentRefunded: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralPaymentRefundedRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformReferralDetail"];
+                };
+            };
+        };
+    };
+    platformGetReferral: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                referral_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformReferralDetail"];
+                };
+            };
+        };
+    };
+    platformAddReferralCommission: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                referral_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralLineRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformReferralDetail"];
+                };
+            };
+        };
+    };
+    platformSetReferralRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                referral_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralRuleRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformReferralDetail"];
+                };
+            };
+        };
+    };
+    platformListScheduledChanges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformScheduledChangeList"];
+                };
+            };
+        };
+    };
+    getShortLinkRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShortLinkRule"];
+                };
+            };
+        };
+    };
+    followShortLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Location is the shop's address or the not found page */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    followShortLink_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Location is the shop's address or the not found page */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     signUpApply: {
         parameters: {
             query?: never;
@@ -21442,6 +27379,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicantView"];
+                };
+            };
+        };
+    };
+    signUpCheckShortName: {
+        parameters: {
+            query: {
+                name: string;
+                business_name?: string;
+                town?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignUpShortNameCheck"];
                 };
             };
         };
@@ -21542,6 +27503,26 @@ export interface operations {
             };
         };
     };
+    platformTenantsWithoutOwner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantWithoutOwner"][];
+                };
+            };
+        };
+    };
     platformGetTenant: {
         parameters: {
             query?: never;
@@ -21561,6 +27542,30 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PlatformTenant"];
                 };
+            };
+        };
+    };
+    platformSetGoLiveDate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantGoLiveRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -21736,6 +27741,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlatformTenant"];
+                };
+            };
+        };
+    };
+    platformSetTenantReferrer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantReferrerRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantReferrer"];
                 };
             };
         };
@@ -22086,6 +28117,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    myReferrals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyReferrals"];
+                };
             };
         };
     };
@@ -22601,6 +28652,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailCategory"];
+                };
+            };
+        };
+    };
+    suggestRetailCategoryPrefix: {
+        parameters: {
+            query: {
+                name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailCategoryPrefixSuggestion"];
                 };
             };
         };
@@ -23260,6 +29333,28 @@ export interface operations {
             };
         };
     };
+    confirmRetailEntryWarning: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailEntryConfirmation"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     listRetailExpenseCategories: {
         parameters: {
             query?: {
@@ -23433,13 +29528,22 @@ export interface operations {
             };
         };
         responses: {
-            /** @description OK */
-            200: {
+            /** @description The expense, recorded */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["RetailExpense"];
+                };
+            };
+            /** @description Expenses ask for approval and the amount reaches the business's amount (ADR-091): the expense waits for an administrator and is not in the cash book yet */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalWaiting"];
                 };
             };
         };
@@ -23732,6 +29836,169 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailLandedCost"];
+                };
+            };
+        };
+    };
+    listRetailOfflineFailures: {
+        parameters: {
+            query?: {
+                status?: string[];
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOfflineFailurePage"];
+                };
+            };
+        };
+    };
+    reportRetailOfflineFailure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailOfflineFailureRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOfflineFailure"];
+                };
+            };
+        };
+    };
+    listMyRetailOfflineFailures: {
+        parameters: {
+            query?: {
+                client_sale_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOfflineFailurePage"];
+                };
+            };
+        };
+    };
+    discardRetailOfflineFailure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                failure_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailOfflineFailureDiscard"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOfflineFailure"];
+                };
+            };
+        };
+    };
+    retryRetailOfflineFailure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                failure_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOfflineFailure"];
+                };
+            };
+        };
+    };
+    listRetailOfflineWaiting: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOfflineWaitingPage"];
+                };
+            };
+        };
+    };
+    reportRetailOfflineWaiting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailOfflineWaitingRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOfflineWaitingAccepted"];
                 };
             };
         };
@@ -24367,6 +30634,26 @@ export interface operations {
             };
         };
     };
+    listRetailVariantOptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailVariantOptions"];
+                };
+            };
+        };
+    };
     getRetailProductFamily: {
         parameters: {
             query?: never;
@@ -24571,10 +30858,60 @@ export interface operations {
             };
         };
     };
+    generateRetailBarcodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailBarcodeGenerateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBarcodeList"];
+                };
+            };
+        };
+    };
+    findRetailProductByBarcode: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+            };
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBarcodeMatch"];
+                };
+            };
+        };
+    };
     importRetailProducts: {
         parameters: {
             query?: {
                 dry_run?: boolean;
+                /** @description Let the app make the codes (owner decision D45, issue #562): every row gets its category's next code and the file's code column is not read. Off by default: a row's code is kept and a blank one is made */
+                make_codes?: boolean;
             };
             header?: never;
             path?: never;
@@ -24593,6 +30930,63 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailProductImportResult"];
+                };
+            };
+        };
+    };
+    draftRetailProductImport: {
+        parameters: {
+            query?: {
+                /** @description The list as typed; leave it out when a file is sent */
+                text?: string;
+                /** @description The kind of shop chosen in Set up your shop, such as Hardware */
+                shop_type?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description A photo, or a CSV, Excel (.xlsx) or PDF file, 5 MB at most
+                     */
+                    file?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailItemDraft"];
+                };
+            };
+        };
+    };
+    getRetailNameHints: {
+        parameters: {
+            query: {
+                description: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailNameHints"];
                 };
             };
         };
@@ -24667,6 +31061,97 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailProduct"];
+                };
+            };
+        };
+    };
+    listRetailProductBarcodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBarcodeList"];
+                };
+            };
+        };
+    };
+    addRetailProductBarcode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailBarcodeRequest"];
+            };
+        };
+        responses: {
+            /** @description The barcode added */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBarcode"];
+                };
+            };
+        };
+    };
+    removeRetailProductBarcode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+                barcode_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The barcode was removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getRetailEntryNorms: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailEntryNorms"];
                 };
             };
         };
@@ -25291,6 +31776,32 @@ export interface operations {
             };
         };
     };
+    quickAddRetailItem: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailQuickAddRequest"];
+            };
+        };
+        responses: {
+            /** @description The item, and the stock added when some was */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailQuickAdd"];
+                };
+            };
+        };
+    };
     listRetailQuotations: {
         parameters: {
             query?: {
@@ -25639,6 +32150,28 @@ export interface operations {
             };
         };
     };
+    getRetailHomeSummary: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailHomeSummary"];
+                };
+            };
+        };
+    };
     getRetailMargins: {
         parameters: {
             query?: {
@@ -25937,6 +32470,55 @@ export interface operations {
             };
         };
     };
+    listRetailSaleClashes: {
+        parameters: {
+            query?: {
+                status?: string;
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSaleClashPage"];
+                };
+            };
+        };
+    };
+    resolveRetailSaleClash: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clash_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailSaleClashResolve"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSaleClash"];
+                };
+            };
+        };
+    };
     listRetailSales: {
         parameters: {
             query?: {
@@ -26226,6 +32808,28 @@ export interface operations {
             };
         };
     };
+    getRetailSaleReceiptPrinted: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailReceiptPreview"];
+                };
+            };
+        };
+    };
     listRetailSaleReturns: {
         parameters: {
             query?: never;
@@ -26291,13 +32895,22 @@ export interface operations {
             };
         };
         responses: {
-            /** @description OK */
+            /** @description The sale, voided */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["RetailSale"];
+                };
+            };
+            /** @description Sale voids ask for approval and this sale's total reaches the amount: the void waits for an administrator and nothing changed yet */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalWaiting"];
                 };
             };
         };
@@ -26553,13 +33166,22 @@ export interface operations {
             };
         };
         responses: {
-            /** @description OK */
-            200: {
+            /** @description The correction, made */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["RetailStockCorrection"];
+                };
+            };
+            /** @description Stock corrections ask for approval and the value of the difference reaches the amount (ADR-091): the correction waits for an administrator and the quantity is unchanged */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalWaiting"];
                 };
             };
         };
@@ -26647,6 +33269,28 @@ export interface operations {
             };
         };
     };
+    listRetailUnfinishedStocktakes: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOpenStocktake"][];
+                };
+            };
+        };
+    };
     getRetailStocktake: {
         parameters: {
             query?: never;
@@ -26670,6 +33314,32 @@ export interface operations {
         };
     };
     commitRetailStocktake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stocktake_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RetailStocktakeCommitRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailStocktake"];
+                };
+            };
+        };
+    };
+    discardRetailStocktake: {
         parameters: {
             query?: never;
             header?: never;
@@ -27122,6 +33792,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailSupplierOpenItems"];
+                };
+            };
+        };
+    };
+    getRetailSupplierStatement: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path: {
+                supplier_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSupplierStatement"];
                 };
             };
         };
@@ -27579,6 +34274,52 @@ export interface operations {
             };
         };
     };
+    getApprovalRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalRules"];
+                };
+            };
+        };
+    };
+    updateApprovalRules: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateApprovalRulesRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalRules"];
+                };
+            };
+        };
+    };
     uploadLogo: {
         parameters: {
             query?: never;
@@ -27686,6 +34427,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotificationSettings"];
+                };
+            };
+        };
+    };
+    getShortLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShortLink"];
                 };
             };
         };
@@ -28062,6 +34823,28 @@ export interface operations {
                 "application/json": components["schemas"]["RoleAssignmentRequest"][];
             };
         };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+        };
+    };
+    signOutUserDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description OK */
             200: {

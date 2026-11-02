@@ -76,7 +76,7 @@ describe('slow movers section', () => {
     expect(screen.getByRole('heading', { name: 'Slow movers: more than 4 months of stock' })).toBeTruthy();
     expect(screen.getByText('40.0')).toBeTruthy();
     expect(screen.getByText('over 120.0')).toBeTruthy();
-    expect(screen.getAllByText('2026-10-11').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('11 Oct 2026').length).toBeGreaterThan(0);
     expect(screen.getByText('Money tied up')).toBeTruthy();
     expect(screen.getByText('UGX 4,000')).toBeTruthy();
     expect(screen.getByText(/Money tied up in slow stock: UGX 6,000/)).toBeTruthy();
@@ -119,10 +119,10 @@ describe('slow movers section', () => {
 });
 
 describe('slow mover settings', () => {
-  const read = { capabilities: { profile: 'shop', slow_mover_months: 4, slow_mover_min_sold: 0 }, version: 7 } as never;
+  const read = { capabilities: { profile: 'shops', slow_mover_months: 4, slow_mover_min_sold: 0 }, version: 7 } as never;
 
   it('saves both rules with the settings version', async () => {
-    change.mockResolvedValue({ capabilities: { profile: 'shop', slow_mover_months: 6, slow_mover_min_sold: 2 }, version: 8 });
+    change.mockResolvedValue({ capabilities: { profile: 'shops', slow_mover_months: 6, slow_mover_min_sold: 2 }, version: 8 });
     show(<SlowMoverSetting read={read} />);
     const save = screen.getByRole('button', { name: 'Save' });
     expect((save as HTMLButtonElement).disabled).toBe(true);

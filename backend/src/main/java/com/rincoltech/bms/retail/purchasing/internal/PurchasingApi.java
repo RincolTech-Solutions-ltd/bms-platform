@@ -78,7 +78,22 @@ final class PurchasingApi {
             @Schema(
                     description = "A pack unit of the product (units capability): the quantities and cost_minor are"
                             + " then in that unit and stock moves in base units. Absent or the base unit: as before")
-            UUID unitId) {}
+            UUID unitId,
+
+            @Positive
+            @Digits(integer = 11, fraction = 3)
+            @Schema(
+                    type = "string",
+                    example = "30",
+                    description = "With unit_id (D23, issue #554): how many base units each pack held in this delivery,"
+                            + " at least 1. Kept on the line only; stock and the cost per base unit use it. Absent means"
+                            + " the pack's usual size")
+            BigDecimal packSize,
+
+            @Schema(
+                    description = "With pack_size: also make it the pack's usual size from now on (needs"
+                            + " retail.catalogue.manage). Selling always uses the usual size")
+            Boolean useFromNowOn) {}
 
     @Schema(name = "RetailPurchaseRequest")
     record PurchaseRequest(
@@ -88,7 +103,13 @@ final class PurchasingApi {
             @NotNull @Schema(description = "Not in the future")
             LocalDate purchasedOn,
 
-            @NotNull @Pattern(regexp = "cash|bank|credit") String paymentMethod,
+            @NotNull
+            @Pattern(regexp = "cash|mobile_money|bank|credit")
+            @Schema(
+                    description =
+                            "cash, mobile_money, bank, or credit: owed to the supplier, who is then required (issue #557)")
+            String paymentMethod,
+
             @Size(max = 300) String note,
             @NotEmpty @Size(max = 500) List<@Valid @NotNull PurchaseLineRequest> lines) {}
 
@@ -141,7 +162,41 @@ final class PurchasingApi {
             @Schema(
                     description =
                             "The unit the item is usually kept in (issue #351), to tell a line entered in another unit")
-            String baseUnit) {}
+            String baseUnit,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "On the response that made the line only: true when use_from_now_on was left out because"
+                                    + " the pack has its own price and the caller may not change prices (issue #624)")
+            Boolean sizeKept,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(description = "Why the usual size was kept, in one plain sentence, with size_kept")
+            String sizeKeptNote) {
+
+        PurchaseLine withSizeKept(String note) {
+            return new PurchaseLine(
+                    id,
+                    lineNo,
+                    productId,
+                    code,
+                    description,
+                    costMinor,
+                    sellMinor,
+                    qtyTotal,
+                    lineTotalMinor,
+                    qtyByBranch,
+                    unitId,
+                    unit,
+                    unitFactor,
+                    unitQtyTotal,
+                    unitCostMinor,
+                    baseUnit,
+                    true,
+                    note);
+        }
+    }
 
     @Schema(name = "RetailPurchase")
     record Purchase(

@@ -7,8 +7,10 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
@@ -25,25 +27,79 @@ final class CatalogueApi {
 
     static final String COST_ONLY = "Present only with retail.profit.read";
 
+    static final String CODE_PREFIX =
+            "Issue #493, ADR-081: 2 to 4 letters, unique in the business, that start the item codes the app makes in this category, such as BLB for BLB-0001.";
+
     private CatalogueApi() {}
 
     @Schema(name = "RetailCategoryRequest")
-    record CategoryRequest(@NotBlank @Size(max = 100) String name) {}
+    record CategoryRequest(
+            @NotBlank @Size(max = 100) String name,
+
+            @Size(max = 4)
+            @Schema(description = CODE_PREFIX + " Left out or blank, the app suggests one from the name.")
+            String codePrefix) {}
 
     @Schema(name = "RetailUnitRequest")
-    record UnitRequest(@NotBlank @Size(max = 30) String name) {}
+    record UnitRequest(
+            @NotBlank @Size(max = 30) String name, @Valid UsualPackRequest usualPack) {}
+
+    /** Issue #625, ADR-100: a unit that is a pack, with its usual size in a smaller unit and what it is for. Never a price. */
+    @Schema(
+            name = "RetailUsualPackRequest",
+            description =
+                    "The usual size of this pack in a smaller unit, such as a roll of 100 metres, and what it is for")
+    record UsualPackRequest(
+            @NotNull
+            @DecimalMin("1")
+            @Digits(integer = 11, fraction = 3)
+            @Schema(type = "string", description = "How many of the smaller unit, at least 1, up to three places")
+            BigDecimal size,
+
+            @NotNull @Schema(description = "The smaller unit, such as Metre or Piece")
+            UUID ofUnitId,
+
+            @NotNull
+            @Pattern(regexp = RetailCatalogue.PACK_PURPOSES)
+            @Schema(
+                    allowableValues = {"buy", "sell", "both"},
+                    description = "What the pack is for, the values of a pack's purpose on an item (#624); an item's"
+                            + " pack of this unit added with no purpose takes it")
+            String purpose) {}
 
     @Schema(name = "RetailCategoryUpdate", description = "Omitted fields are unchanged; a category is never deleted")
-    record UpdateCategoryRequest(@Size(min = 1, max = 100) String name, Boolean active) {}
+    record UpdateCategoryRequest(
+            @Size(min = 1, max = 100) String name,
+            Boolean active,
+
+            @Size(min = 2, max = 4) @Schema(description = CODE_PREFIX + " Items made before keep their codes.")
+            String codePrefix) {}
 
     @Schema(name = "RetailUnitUpdate", description = "Omitted fields are unchanged; a unit is never deleted")
-    record UpdateUnitRequest(@Size(min = 1, max = 30) String name, Boolean active) {}
+    record UpdateUnitRequest(
+            @Size(min = 1, max = 30) String name,
+            Boolean active,
+
+            @Valid @Schema(description = "Issue #625: sets the usual pack; left out, it is unchanged")
+            UsualPackRequest usualPack,
+
+            @Schema(
+                    description = "Issue #637: true to clear the usual pack; not sent with usual_pack. Items' packs are"
+                            + " unchanged")
+            Boolean clearUsualPack) {}
 
     @Schema(name = "RetailCategory")
     record Category(
             UUID id,
             String name,
             boolean active,
+
+            @Schema(description = CODE_PREFIX) String codePrefix,
+
+            @Schema(
+                    description =
+                            "The code the next item added here without a typed code would get now, such as BLB-0004; a hint only (issue #493)")
+            String nextCode,
 
             @Schema(description = "Products (active or not) that use this category")
             int productCount,
@@ -61,7 +117,43 @@ final class CatalogueApi {
             int productCount,
 
             @Schema(description = "Send as If-Match when updating")
-            int version) {}
+            int version,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(description = "Issue #625: present only when this unit is a pack with a usual size")
+            UsualPack usualPack,
+
+            @Schema(
+                    description =
+                            "Issue #689 (ADR-106): the name is a package word, such as Box or Carton, so it can be"
+                                    + " a pack but never the single unit of a new item")
+            boolean isPackage,
+
+            @Schema(
+                    description = "Issue #709 (ADR-110): one of the standard units every shop gets, under any spelling;"
+                            + " the list shows them first, in the standard order")
+            boolean standard,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Issue #709 (ADR-110, D98): present only for a package of a fixed size, 12 for a dozen;"
+                                    + " every pack of it holds exactly this many of the level it holds")
+            Integer fixedCount) {}
+
+    @Schema(name = "RetailUsualPack", description = "The usual size of a pack in a smaller unit, and what it is for")
+    record UsualPack(
+            @Schema(description = "How many of the smaller unit, three places, for example 100.000")
+            String size,
+
+            UUID ofUnitId,
+            @Schema(description = "The smaller unit's name") String ofUnit,
+
+            @Schema(allowableValues = {"buy", "sell", "both"})
+            String purpose) {}
+
+    @Schema(name = "RetailCategoryPrefixSuggestion")
+    record PrefixSuggestion(String codePrefix) {}
 
     @Schema(name = "RetailCategoryList")
     record CategoryList(List<Category> items) {}
@@ -71,7 +163,11 @@ final class CatalogueApi {
 
     @Schema(name = "CreateRetailProductRequest")
     record CreateProductRequest(
-            @NotBlank @Size(max = 40) @Schema(description = "Unique ignoring case and surrounding spaces")
+            @Schema(
+                    deprecated = true,
+                    description =
+                            "Leave it out: the app always gives the category's next code, such as BLB-0001 (issue #562, ADR-081"
+                                    + " as amended). A code that is not blank is refused with 400 item_code_made_by_app")
             String code,
 
             @NotBlank @Size(max = 300) String description,
@@ -85,13 +181,27 @@ final class CatalogueApi {
             Long sellMinor,
 
             @Size(max = 300) @Schema(description = DUPLICATE_REASON)
-            String duplicateReason) {}
+            String duplicateReason,
+
+            @Size(max = 10)
+            @Schema(
+                    description = "Issue #689 (ADR-106): packages made with the item in its transaction, checked as"
+                            + " POST /products/{id}/units checks them; all are saved with the item or none is")
+            // Review of #692: each pack is validated by the service, so its problems carry pack_index and packs[i]
+            // names.
+            List<PackRequest> packs) {}
 
     @Schema(
             name = "UpdateRetailProductRequest",
             description = "Omitted fields are unchanged; prices change only through /prices")
     record UpdateProductRequest(
-            @Size(min = 1, max = 40) String code,
+            @Schema(
+                    deprecated = true,
+                    description =
+                            "Leave it out: an item keeps the code the app gave it (issue #562). A blank code, or the item's own"
+                                    + " code in any case, is no change; any other is refused with 400 item_code_made_by_app")
+            String code,
+
             @Size(min = 1, max = 300) String description,
             UUID categoryId,
             UUID unitId,
@@ -223,7 +333,66 @@ final class CatalogueApi {
                     description =
                             "Issue #384: the id of the photo of the item this size belongs to, which it shows while it has"
                                     + " none of its own; absent when the item has none")
-            UUID itemPhotoId) {
+            UUID itemPhotoId,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Issue #345: the barcodes of this product and of its pack sizes, sent by the list, the get and"
+                                    + " the barcode lookup; scan any of them to find the product")
+            List<Barcode> barcodes) {
+
+        /** Every field but the barcodes, the shape every read had before barcodes (issue #345). */
+        Product(
+                UUID id,
+                String code,
+                String description,
+                UUID categoryId,
+                String category,
+                UUID unitId,
+                String unit,
+                Long sellMinor,
+                Long costMinor,
+                String currency,
+                boolean active,
+                Instant createdAt,
+                Instant updatedAt,
+                int version,
+                String qty,
+                Boolean negative,
+                List<Pack> packs,
+                String stockOnHand,
+                Integer stockBranches,
+                VariantOf variant,
+                String reservedQty,
+                UUID photoId,
+                UUID itemPhotoId) {
+            this(
+                    id,
+                    code,
+                    description,
+                    categoryId,
+                    category,
+                    unitId,
+                    unit,
+                    sellMinor,
+                    costMinor,
+                    currency,
+                    active,
+                    createdAt,
+                    updatedAt,
+                    version,
+                    qty,
+                    negative,
+                    packs,
+                    stockOnHand,
+                    stockBranches,
+                    variant,
+                    reservedQty,
+                    photoId,
+                    itemPhotoId,
+                    null);
+        }
 
         /** Every field but the photo, the shape every read had before item photos (issue #384). */
         Product(
@@ -468,7 +637,8 @@ final class CatalogueApi {
                     variant,
                     reservedQty,
                     photoId,
-                    itemPhotoId);
+                    itemPhotoId,
+                    barcodes);
         }
 
         Product withStock(String total, int branches) {
@@ -495,7 +665,8 @@ final class CatalogueApi {
                     variant,
                     reservedQty,
                     photoId,
-                    itemPhotoId);
+                    itemPhotoId,
+                    barcodes);
         }
 
         /** ADR-055: no selling price and no cost, for a caller who may see neither (a storekeeper). */
@@ -527,7 +698,8 @@ final class CatalogueApi {
                     variant,
                     reservedQty,
                     photoId,
-                    itemPhotoId);
+                    itemPhotoId,
+                    barcodes);
         }
 
         Product withoutCost() {
@@ -554,7 +726,8 @@ final class CatalogueApi {
                     variant,
                     reservedQty,
                     photoId,
-                    itemPhotoId);
+                    itemPhotoId,
+                    barcodes);
         }
 
         /** The same product with what customer orders keep aside of the branch balance (issue #385). */
@@ -582,7 +755,8 @@ final class CatalogueApi {
                     variant,
                     reserved,
                     photoId,
-                    itemPhotoId);
+                    itemPhotoId,
+                    barcodes);
         }
 
         Product withVariant(VariantOf v) {
@@ -609,7 +783,8 @@ final class CatalogueApi {
                     v,
                     reservedQty,
                     photoId,
-                    itemPhotoId);
+                    itemPhotoId,
+                    barcodes);
         }
 
         Product withPhoto(UUID photo, UUID itemPhoto) {
@@ -636,7 +811,36 @@ final class CatalogueApi {
                     variant,
                     reservedQty,
                     photo,
-                    itemPhoto);
+                    itemPhoto,
+                    barcodes);
+        }
+
+        Product withBarcodes(List<Barcode> codes) {
+            return new Product(
+                    id,
+                    code,
+                    description,
+                    categoryId,
+                    category,
+                    unitId,
+                    unit,
+                    sellMinor,
+                    costMinor,
+                    currency,
+                    active,
+                    createdAt,
+                    updatedAt,
+                    version,
+                    qty,
+                    negative,
+                    packs,
+                    stockOnHand,
+                    stockBranches,
+                    variant,
+                    reservedQty,
+                    photoId,
+                    itemPhotoId,
+                    codes);
         }
     }
 
@@ -666,10 +870,12 @@ final class CatalogueApi {
             @Size(max = 30) @Schema(description = "A colour or a print")
             String colour,
 
-            @Size(max = 40)
             @Schema(
+                    deprecated = true,
                     description =
-                            "The variant's own code; by default the base code, the size and the colour in capitals, as ROMP-03M-BLUE")
+                            "Leave it out: the app makes the code from the item's base code, the size and the colour in"
+                                    + " capitals, as BLB-0007-03M-BLUE (issue #562). One that is not blank is refused with 400"
+                                    + " item_code_made_by_app")
             String code,
 
             @PositiveOrZero
@@ -691,9 +897,11 @@ final class CatalogueApi {
             @NotBlank @Size(max = 200) @Schema(description = "The item's name, as Baby romper")
             String name,
 
-            @NotBlank
-            @Size(max = 24)
-            @Schema(description = "What every variant's code starts with, as ROMP; unique codes ignore case")
+            @Schema(
+                    deprecated = true,
+                    description =
+                            "Leave it out: every variant's code starts with the category's next code, as BLB-0007 (issue"
+                                    + " #562). One that is not blank is refused with 400 item_code_made_by_app")
             String baseCode,
 
             @NotNull UUID categoryId,
@@ -716,7 +924,38 @@ final class CatalogueApi {
             @Size(max = VariantGrid.MAX_VARIANTS) List<@Valid VariantLine> variants,
 
             @Size(max = 300) @Schema(description = ITEM_DUPLICATE_REASON)
-            String duplicateReason) {}
+            String duplicateReason,
+
+            @Size(max = 10)
+            @Schema(
+                    description = "Issue #697 (ADR-111): packages every size and colour gets, made in its transaction,"
+                            + " checked as on POST /products; all are saved with the item or none is")
+            List<PackRequest> packs,
+
+            @Size(max = 1000)
+            @Schema(
+                    description = "Issue #697: a size's own selling price for one of its packages; a package price not"
+                            + " named here is the one sent, in proportion to the size's selling price")
+            List<@Valid SizePackPrice> packPrices) {}
+
+    @Schema(
+            name = "RetailSizePackPrice",
+            description = "Issue #697: one size's own selling price of one of its packages")
+    record SizePackPrice(
+            @Size(max = 30) String size,
+            @Size(max = 30) String colour,
+            @NotNull UUID unitId,
+
+            @NotNull @PositiveOrZero @Max(RetailCatalogue.MAX_AMOUNT_MINOR)
+            Long sellMinor) {}
+
+    @Schema(name = "RetailVariantOptions", description = "Issue #697: the sizes and colours the business has used")
+    record VariantOptions(
+            @Schema(description = "Sizes of the business's items, each once ignoring case, most used first")
+            List<String> sizes,
+
+            @Schema(description = "Colours of the business's items, each once ignoring case, most used first")
+            List<String> colours) {}
 
     @Schema(
             name = "AddRetailVariantsRequest",
@@ -794,8 +1033,11 @@ final class CatalogueApi {
             @Size(min = 1, max = 200) @Schema(description = "The item's name; required for a new item")
             String name,
 
-            @Size(min = 1, max = 24)
-            @Schema(description = "What later variant codes start with; by default the first item's code")
+            @Schema(
+                    deprecated = true,
+                    description =
+                            "Leave it out: later variant codes start with the first item's code (issue #562). One that is not"
+                                    + " blank is refused with 400 item_code_made_by_app")
             String baseCode,
 
             @Schema(description = "The item's category; by default the first item's")
@@ -965,7 +1207,12 @@ final class CatalogueApi {
     @Schema(name = "RetailProductImportRow")
     record ImportRow(
             int line,
+
+            @Schema(
+                    description =
+                            "Empty on a dry run for a row whose code the category makes; the made code once applied (issue #493)")
             String code,
+
             String description,
 
             @Schema(description = "added, skipped (the code exists already or repeats in the file) or error")
@@ -989,17 +1236,52 @@ final class CatalogueApi {
 
     // ---- Pack sizes (ADR-033, issue #194) ------------------------------------------------------
 
-    @Schema(name = "RetailPackRequest", description = "A pack size: factor base units in one pack of the unit")
+    @Schema(
+            name = "RetailPackRequest",
+            description =
+                    "A pack size: factor base units in one pack of the unit, or holds_qty of the level holds_unit_id"
+                            + " (issue #699)")
     record PackRequest(
             @NotNull UUID unitId,
 
-            @NotNull
             @DecimalMin("1")
             @Digits(integer = 11, fraction = 3)
             @Schema(
                     type = "string",
-                    description = "Base units in one pack, at least 1, up to three places, for example 12 or 12.5")
-            BigDecimal factor) {}
+                    description = "Base units in one pack, at least 1, up to three places, for example 12 or 12.5;"
+                            + " required unless holds_unit_id and holds_qty are sent, and then it must agree with them")
+            BigDecimal factor,
+
+            @Pattern(regexp = RetailCatalogue.PACK_PURPOSES)
+            @Schema(
+                    description =
+                            "What the pack is for: buy, sell or both; a pack bought only has no selling price (issue #624)."
+                                    + " Left out, both; the screens fill in the unit's usual purpose (issue #637)")
+            String purpose,
+
+            @PositiveOrZero
+            @Max(RetailCatalogue.MAX_AMOUNT_MINOR)
+            @Schema(
+                    description = "The selling price of one pack for a walk-in sale, in minor units; absent means the"
+                            + " piece price times the size. Needs retail.price.edit (issue #624)")
+            Long sellMinor,
+
+            @Schema(
+                    description =
+                            "Issue #699 (ADR-107): the level one pack holds, the item's own unit or another pack's"
+                                    + " unit of the item (in a new item's packs, one of its other packs); sent with holds_qty")
+            UUID holdsUnitId,
+
+            @Min(PackLadder.MIN_HOLDS)
+            @Max(PackLadder.MAX_HOLDS)
+            @Schema(description = "Issue #699: how many of holds_unit_id are in one pack, a whole number of 2 or more")
+            Integer holdsQty,
+
+            @Schema(
+                    description =
+                            "Issue #699: true for the level the shop usually buys the item in, which Buy stock opens"
+                                    + " on; never on a pack only for selling. Clears it on the item's other packs")
+            Boolean usualBuy) {}
 
     @Schema(
             name = "RetailPackUpdate",
@@ -1012,7 +1294,39 @@ final class CatalogueApi {
                     description = "Base units in one pack, at least 1; required to switch a pack on again")
             BigDecimal factor,
 
-            Boolean active) {}
+            Boolean active,
+
+            @Pattern(regexp = RetailCatalogue.PACK_PURPOSES)
+            @Schema(description = "buy, sell or both; a pack made buy only loses its selling price (issue #624)")
+            String purpose,
+
+            @PositiveOrZero
+            @Max(RetailCatalogue.MAX_AMOUNT_MINOR)
+            @Schema(description = "A new selling price of one pack; needs retail.price.edit (issue #624)")
+            Long sellMinor,
+
+            @Schema(
+                    description = "True to drop the pack's own price, so it sells at the piece price times the size"
+                            + " again; needs retail.price.edit (issue #624)")
+            Boolean clearSellMinor,
+
+            @Schema(
+                    description =
+                            "Issue #699 (ADR-107): the level one pack holds, the item's own unit or another active"
+                                    + " pack's unit of the item; sent with holds_qty. Every bigger level that holds this one is"
+                                    + " worked out again; stock, kept in the item's unit, never changes")
+            UUID holdsUnitId,
+
+            @Min(PackLadder.MIN_HOLDS)
+            @Max(PackLadder.MAX_HOLDS)
+            @Schema(
+                    description = "Issue #699: how many of the level held are in one pack, a whole number of 2 or more."
+                            + " With factor"
+                            + " alone, a pack that holds another level must stay a whole number of it (422 not_whole)")
+            Integer holdsQty,
+
+            @Schema(description = "Issue #699: true to make this the level Buy stock opens on, false to clear it")
+            Boolean usualBuy) {}
 
     @Schema(name = "RetailPack")
     record Pack(
@@ -1027,8 +1341,148 @@ final class CatalogueApi {
             boolean active,
 
             @Schema(description = "Send as If-Match when updating")
-            int version) {}
+            int version,
+
+            @Schema(description = "buy, sell or both (issue #624)")
+            String purpose,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "The pack's own selling price for a walk-in sale; absent when it has none (it then sells"
+                                    + " at suggested_sell_minor) or the caller may not see prices (issue #624)")
+            Long sellMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "The piece price times the size, rounded half up once: what the pack sells at without its"
+                                    + " own price, and the price the app suggests (issue #624)")
+            Long suggestedSellMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "For a selling pack and a caller holding retail.profit.read: true when its price is not"
+                                    + " above the size times the item's average cost per piece (ADR-079); absent otherwise")
+            Boolean belowCost,
+
+            @Schema(
+                    description =
+                            "True when the pack has its own selling price, sent to every caller (the amount only to"
+                                    + " one who may see prices): a new usual size or making it buy only then needs"
+                                    + " retail.price.edit (issue #624)")
+            boolean hasOwnPrice,
+
+            @Schema(
+                    description =
+                            "Issue #650 (ADR-103): true for the item's standard pack, the one its stock is shown and"
+                                    + " counted in; at most one pack of an item")
+            boolean standard,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Issue #699 (ADR-107): the level one pack holds, the item's own unit or another pack's"
+                                    + " unit; absent when the pack holds factor of the item's unit and says no more")
+            UUID holdsUnitId,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(description = "Issue #699: the name of that level's unit")
+            String holdsUnit,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(description = "Issue #699: how many of that level are in one pack; factor is this times its factor")
+            Integer holdsQty,
+
+            @Schema(description = "Issue #699: true for the level the shop usually buys the item in")
+            boolean usualBuy) {
+
+        /** True when the pack may be used on a sale, a scan at the till, a quotation or an order. */
+        boolean sells() {
+            return !RetailCatalogue.PACK_BUY.equals(purpose);
+        }
+
+        /** The pack as this caller may read it: prices only with {@code prices}, the cost flag only with {@code cost}. */
+        Pack forCaller(boolean prices, boolean cost) {
+            return new Pack(
+                    id,
+                    productId,
+                    unitId,
+                    unit,
+                    factor,
+                    active,
+                    version,
+                    purpose,
+                    prices ? sellMinor : null,
+                    prices ? suggestedSellMinor : null,
+                    prices && cost && sells() ? belowCost : null,
+                    hasOwnPrice,
+                    standard,
+                    holdsUnitId,
+                    holdsUnit,
+                    holdsQty,
+                    usualBuy);
+        }
+    }
 
     @Schema(name = "RetailPackList")
     record PackList(List<Pack> items) {}
+
+    // ---- Barcodes (ADR-070, issue #345; FR-RET-68) ----------------------------------------------------
+
+    @Schema(
+            name = "RetailBarcode",
+            description = "Issue #345: one barcode of a product, for its base unit or one pack size")
+    record Barcode(
+            UUID id,
+            UUID productId,
+            String code,
+
+            @Schema(description = "ean13, ean8, upca or code128")
+            String format,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(description = "The pack size this barcode is on; absent for the product's own unit")
+            UUID unitId,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = "The name of that pack's unit")
+            String unit,
+
+            @Schema(
+                    description = "True for a code the system made for the product's labels: a shop EAN-13 from 210"
+                            + " (#524), or a Code 128 IN code made before")
+            boolean generated) {}
+
+    @Schema(name = "RetailBarcodeRequest", description = "Issue #345: add a barcode to a product")
+    record BarcodeRequest(
+            @NotBlank
+            @Size(max = Barcodes.MAX_LENGTH)
+            @Schema(description = "As printed or scanned; EAN-13, EAN-8 and UPC-A check digits are checked")
+            String code,
+
+            @Size(max = 10)
+            @Schema(
+                    description =
+                            "ean13, ean8, upca or code128; by default read from the code (13, 12 or 8 digits, else Code 128)")
+            String format,
+
+            @Schema(
+                    description =
+                            "A pack size of the product (the units capability); absent for the product's own unit")
+            UUID unitId) {}
+
+    @Schema(name = "RetailBarcodeList")
+    record BarcodeList(List<Barcode> items) {}
+
+    @Schema(name = "RetailBarcodeMatch", description = "Issue #345: the active product a scanned barcode belongs to")
+    record BarcodeMatch(
+            Product product,
+            Barcode barcode,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "The pack size the barcode is on, to add the line in that unit; absent for the base unit")
+            UUID unitId) {}
 }

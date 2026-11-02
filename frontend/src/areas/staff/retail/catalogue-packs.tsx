@@ -1,15 +1,44 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { retail, type Pack, type Product } from '../../../api/retail';
+import { Link } from '@tanstack/react-router';
+import type { Me } from '../../../api/client';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { RetailError, retail, type Pack, type Product, type Unit } from '../../../api/retail';
 import { useStaff } from '../context';
 import { showQty } from './maths';
-import { Problem } from './ui';
-import { UNITS, capabilityOn, holds } from './permissions';
-import { factorMilli } from './units-state';
+import { Money, Problem, money } from './ui';
+import { SETTINGS_MANAGE, UNITS, capabilityOn, holds } from './permissions';
+import { factorMilli, hasOwnPrice, orExistingUnit, packPriceMinor, quantityIn, unitWord, unitWords, type AddedUnit } from './units-state';
+import { WORDS } from '../../../app/glossary';
+import { AddByName } from '../../../app/ui/EmptyChoice';
+import { PickerWithAdd } from '../../../app/ui/PickerWithAdd';
+import { HelpTip } from '../../../app/ui/HelpTip';
+import { Hint } from '../../../app/ui/Hint';
+import { RowChevron } from '../../../app/ui/ListRow';
+import { MoneyInput } from '../../../app/ui/MoneyInput';
+import { Segmented } from '../../../app/ui/Segmented';
+import { Sheet } from '../../../app/ui/Sheet';
+import { ItemLadder } from './package-ladder';
 
-// Pack sizes of an item (ADR-033, issue #194): a unit and the number of base units in one pack, for
-// example a carton of twelve pieces. Offered only while /me lists the units capability and the user may
-// manage the catalogue. The sale and restock forms then offer the item in each active pack.
+// The packs of an item (ADR-033, issue #194): a unit and the number of base units in one pack, for example a carton of
+// twelve pieces. Issue #624 (ADR-099): each pack says what it is for, and a selling pack has its own selling price, which a
+// walk-in sale takes; the app suggests the piece price times the size. Edit item shows them in one small table (pack, size,
+// price), and Change opens the pack in a sheet. Offered only while /me lists the units capability and the user may manage
+// the catalogue; the price is set only by someone who may change prices (retail.price.edit).
+
+/** What a pack is for, the one list (issue #637): its values, its Used for label and its words in a sentence. The first is the default. */
+export const PURPOSES = [
+  { value: 'both', label: 'Both', use: 'for buying and selling' },
+  { value: 'buy', label: 'Buying', use: 'for buying' },
+  { value: 'sell', label: 'Selling', use: 'for selling' },
+] as const;
+
+export type Purpose = (typeof PURPOSES)[number]['value'];
+
+/** The purpose of `value` from PURPOSES, or the first (both) for anything else. */
+export function asPurpose(value: string | undefined): Purpose {
+  return (PURPOSES.find((o) => o.value === value) ?? PURPOSES[0]).value;
+}
 
 /** True when the text is a factor the server accepts: at least 1, at most three places, no comma. */
 export function factorProblem(text: string): string | null {
@@ -18,97 +47,386 @@ export function factorProblem(text: string): string | null {
   return null;
 }
 
-function PackRow({ productId, pack }: { productId: string; pack: Pack }) {
+export function purposeOf(pack: Pack): Purpose {
+  return asPurpose(pack.purpose);
+}
+
+/** The price a walk-in sale takes for the pack, and whether it is the pack's own or the suggested one; null when not sold. */
+export function shownPackPrice(product: Product, pack: Pack): { minor: number; own: boolean } | null {
+  if (purposeOf(pack) === 'buy') return null;
+  if (pack.sell_minor !== undefined) return { minor: pack.sell_minor, own: true };
+  return { minor: pack.suggested_sell_minor ?? packPriceMinor(product.sell_minor ?? 0, pack.factor), own: false };
+}
+
+/** "Suggested UGX 1,200: 12 at UGX 100 each." The piece price times the size, as the server suggests it. */
+export function suggestedHint(product: Product, factor: string): string | null {
+  if (product.sell_minor === undefined || factorProblem(factor) !== null) return null;
+  return `Suggested ${money(packPriceMinor(product.sell_minor, factor))}: ${showQty(factor)} at ${money(product.sell_minor)} each. Leave it empty to use it.`;
+}
+
+/**
+ * The warning while a price is typed (review of #624), only when the caller can see cost: the pack's price (the typed one, else
+ * the suggested one) is not above its size times the last price paid per piece. The saved pack's Below cost is judged on the
+ * server against the average cost per piece (ADR-079); a sale below cost is refused unless the seller may sell below cost.
+ */
+export function packBelowCostHint(product: Product, factor: string, priceMinor: number | null): string | null {
+  const cost = product.cost_minor;
+  if (cost === undefined || cost <= 0 || factorProblem(factor) !== null) return null;
+  const packCost = packPriceMinor(cost, factor);
+  const price = priceMinor ?? packPriceMinor(product.sell_minor ?? 0, factor);
+  if (price > packCost) return null;
+  return `This price is not above the buying price of ${quantityIn(factor, product.unit ?? '')} at the last price paid, ${money(packCost)}. A sale at it is refused unless the seller may sell below the buying price.`;
+}
+
+/**
+ * The request that saves a pack's sheet: only what changed. An emptied price drops the pack's own price, so it sells at the
+ * suggested one again; a pack made for buying only loses its price on the server, so none is sent.
+ */
+export function packChange(pack: Pack, form: { factor: string; purpose: Purpose; priceMinor: number | null }, mayPrice: boolean) {
+  const body: { factor?: string; purpose?: Purpose; sell_minor?: number; clear_sell_minor?: boolean } = {};
+  if (form.factor.trim() !== showQty(pack.factor ?? '')) body.factor = form.factor.trim();
+  if (form.purpose !== purposeOf(pack)) body.purpose = form.purpose;
+  if (mayPrice && form.purpose !== 'buy') {
+    if (form.priceMinor === null && pack.sell_minor !== undefined) body.clear_sell_minor = true;
+    else if (form.priceMinor !== null && form.priceMinor !== pack.sell_minor) body.sell_minor = form.priceMinor;
+  }
+  return body;
+}
+
+function PackSheet({ product, pack, mayPrice, onClose, fixed }: {
+  product: Product;
+  pack: Pack;
+  mayPrice: boolean;
+  onClose: () => void;
+  /** Review of #722 (ADR-110): a dozen's 12, which this sheet shows and never changes. */
+  fixed?: number;
+}) {
   const queryClient = useQueryClient();
   const [factor, setFactor] = useState(showQty(pack.factor ?? ''));
+  const [purpose, setPurpose] = useState<Purpose>(purposeOf(pack));
+  const [priceMinor, setPriceMinor] = useState<number | null>(pack.sell_minor ?? null);
   const change = useMutation({
-    mutationFn: (body: { factor?: string; active?: boolean }) => retail.updatePack(productId, pack.unit_id ?? '', pack.version ?? 1, body),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['retail'] }),
+    mutationFn: (body: Parameters<typeof retail.updatePack>[3]) => retail.updatePack(product.id ?? '', pack.unit_id ?? '', pack.version ?? 1, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['retail'] });
+      onClose();
+    },
+    meta: {
+      success: (_r: unknown, v: Parameters<typeof retail.updatePack>[3]) => (v?.active === false ? 'Pack switched off' : v?.active === true ? 'Pack switched on' : 'Pack saved'),
+      // A switch on or off can be taken back from the toast (#682): the same change the other way, on the version it made.
+      undo: (r: Awaited<ReturnType<typeof retail.updatePack>>, v: Parameters<typeof retail.updatePack>[3]) =>
+        v?.active === undefined || typeof r?.version !== 'number' ? null : () => retail.updatePack(product.id ?? '', pack.unit_id ?? '', r.version ?? 1, { active: !v.active }),
+    },
   });
   const problem = factorProblem(factor);
+  const body = packChange(pack, { factor, purpose, priceMinor }, mayPrice);
+  // Review of #624: a pack with its own price keeps its size and stays sold for someone who may not change prices. The flag
+  // comes to every caller, the amount only to one who may see prices.
+  const locked = hasOwnPrice(pack) && !mayPrice;
+  const low = purpose === 'buy' ? null : packBelowCostHint(product, factor, mayPrice ? priceMinor : (pack.sell_minor ?? null));
+  const id = pack.unit_id ?? '';
   return (
-    <li className="rt-card">
-      <p>
-        <strong>{pack.unit}</strong> {pack.active === false && <span className="badge badge-warning">Switched off</span>}
-      </p>
-      <label htmlFor={`pack-factor-${pack.unit_id}`}>Items in one {pack.unit}</label>
+    <Sheet
+      open
+      onClose={onClose}
+      title={`${unitWord(pack.unit)} of ${product.description}`}
+      actions={
+        <>
+          <BusyButton busy={change.isPending && change.variables?.active === undefined} type="button" className="rt-primary" disabled={problem !== null || change.isPending || Object.keys(body).length === 0} onClick={() => change.mutate(body)}>
+            Save
+          </BusyButton>
+          {/* Switching on again confirms the number: the item's unit may have changed while the pack was off. */}
+          <BusyButton busy={change.isPending && change.variables?.active !== undefined} type="button" aria-label={`${pack.active === false ? 'Switch on' : 'Switch off'} the ${unitWord(pack.unit)} pack`} disabled={change.isPending || (pack.active === false && problem !== null)} onClick={() => change.mutate(pack.active === false ? { active: true, factor: factor.trim() } : { active: false })}>
+            {pack.active === false ? 'Switch on' : 'Switch off'}
+          </BusyButton>
+        </>
+      }
+    >
+      <label htmlFor={`pack-factor-${id}`}>{`${product.unit ? unitWords(product.unit) : 'Items'} in one ${unitWord(pack.unit)}`}</label>
       <input
-        id={`pack-factor-${pack.unit_id}`}
+        id={`pack-factor-${id}`}
         inputMode="decimal"
         value={factor}
         onChange={(e) => setFactor(e.target.value)}
+        readOnly={locked || fixed !== undefined}
         aria-invalid={problem !== null}
-        aria-describedby={problem !== null ? `pack-factor-problem-${pack.unit_id}` : undefined}
+        aria-describedby={problem !== null ? `pack-factor-problem-${id}` : undefined}
       />
-      {problem !== null && <p id={`pack-factor-problem-${pack.unit_id}`} className="rt-flag">{problem}</p>}
-      <p className="cluster">
-        <button type="button" className="btn-sm" aria-label={`Save the number for ${pack.unit}`} disabled={problem !== null || change.isPending || factor.trim() === showQty(pack.factor ?? '')} onClick={() => change.mutate({ factor: factor.trim() })}>
-          Save the number
-        </button>
-        {/* Switching on again confirms the number: the item's unit may have changed while the pack was off. */}
-        <button type="button" className="btn-sm" aria-label={`${pack.active === false ? 'Switch on' : 'Switch off'} the ${pack.unit} pack`} disabled={change.isPending || (pack.active === false && problem !== null)} onClick={() => change.mutate(pack.active === false ? { active: true, factor: factor.trim() } : { active: false })}>
-          {pack.active === false ? 'Switch on' : 'Switch off'}
-        </button>
-      </p>
+      {problem !== null && <p id={`pack-factor-problem-${id}`} className="rt-flag">{problem}</p>}
+      {fixed !== undefined && <p className="hint">{`A ${unitWord(pack.unit).toLowerCase()} always holds ${fixed}. For another number, use a box.`}</p>}
+      <p className="field-label">Used for</p>
+      <Segmented label="Used for" options={locked ? PURPOSES.filter((o) => o.value !== 'buy') : PURPOSES} value={purpose} onChange={setPurpose} />
+      {purpose === 'buy' ? (
+        <Hint>A pack only for buying is not offered when selling, so it has no selling price.</Hint>
+      ) : mayPrice ? (
+        <MoneyInput id={`pack-price-${id}`} label={`Selling price of one ${unitWord(pack.unit)}`} valueMinor={priceMinor} onChange={setPriceMinor} hint={suggestedHint(product, factor) ?? undefined} />
+      ) : (
+        <Hint full>
+          {locked
+            ? 'This pack has its own price. Ask someone who may change prices to change its size or make it only for buying.'
+            : 'Only someone who may change prices sets a pack\'s selling price.'}
+        </Hint>
+      )}
+      {low !== null && <p className="rt-flag">{low}</p>}
+      {pack.below_cost === true && purpose !== 'buy' && (
+        <p role="note" className="alert alert-warning">
+          {`This price is not above the average buying price of ${quantityIn(pack.factor ?? '', product.unit ?? '')}. A sale at it needs permission to sell below the buying price.`}
+        </p>
+      )}
       <Problem error={change.error} />
-    </li>
+    </Sheet>
   );
+}
+
+/** Issue #625: the unit's usual pack size, when it counts what this item is counted in, as the number to start from. */
+export function usualFactor(unit: Unit | undefined, product: Pick<Product, 'unit_id'>): string | null {
+  const pack = unit?.usual_pack;
+  return pack?.size && pack.of_unit_id === product.unit_id ? showQty(pack.size) : null;
+}
+
+/**
+ * Review of #628: the size to show when another unit is chosen. A size filled in from the last unit's usual pack (or none) makes
+ * way for this unit's usual size, or for nothing when it has none; a size the owner typed stays.
+ */
+export function factorForUnit(factor: string, filled: string, usual: string | null): string {
+  return factor.trim() === '' || factor === filled ? (usual ?? '') : factor;
+}
+
+/**
+ * Merge of #627 and #628: a pack on an item starts with the unit's usual Used for, the same purpose (ADR-099, ADR-100). A Used
+ * for filled in from the last unit (or the starting Both) makes way for it, or for Both when the unit has none; one the owner
+ * chose stays.
+ */
+export function purposeForUnit(purpose: Purpose, filled: Purpose, unit: Unit | undefined): Purpose {
+  return purpose !== filled ? purpose : asPurpose(unit?.usual_pack?.purpose);
 }
 
 export function PackEditor({ product }: { product: Product }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const allowed = capabilityOn(me, 'retail', UNITS) && holds(me, 'retail.catalogue.manage');
+  const mayPrice = holds(me, 'retail.price.edit');
   const id = product.id ?? '';
   const packs = useQuery({ queryKey: ['retail', 'packs', id], queryFn: () => retail.listPacks(id), enabled: allowed });
   const units = useQuery({ queryKey: ['retail', 'catalogue', 'units'], queryFn: () => retail.listUnits(), enabled: allowed });
   const [unitId, setUnitId] = useState('');
   const [factor, setFactor] = useState('');
+  const [purpose, setPurpose] = useState<Purpose>('both');
+  const [priceMinor, setPriceMinor] = useState<number | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  // The size and Used for last filled in from a unit's usual pack (issue #625): another unit replaces them, but never what the
+  // owner chose.
+  const [filled, setFilled] = useState<{ factor: string; purpose: Purpose }>({ factor: '', purpose: 'both' });
+  const chooseUnit = (unit: Unit | undefined) => {
+    setUnitId(unit?.id ?? '');
+    // Issue #709 (ADR-110): a dozen always holds 12, filled in and not changed.
+    const nextFactor = unit?.fixed_count ? String(unit.fixed_count) : factorForUnit(factor, filled.factor, usualFactor(unit, product));
+    const nextPurpose = purposeForUnit(purpose, filled.purpose, unit);
+    setFactor(nextFactor);
+    setPurpose(nextPurpose);
+    // Only what changed counts as filled in, so a size or Used for the owner chose is never taken for one the app filled.
+    setFilled({ factor: nextFactor === factor ? filled.factor : nextFactor, purpose: nextPurpose === purpose ? filled.purpose : nextPurpose });
+  };
   const add = useMutation({
-    mutationFn: () => retail.addPack(id, { unit_id: unitId, factor: factor.trim() }),
+    mutationFn: () =>
+      retail.addPack(id, {
+        unit_id: unitId,
+        factor: factor.trim(),
+        purpose,
+        ...(mayPrice && purpose !== 'buy' && priceMinor !== null ? { sell_minor: priceMinor } : {}),
+      }),
     onSuccess: () => {
       setUnitId('');
       setFactor('');
+      setPurpose('both');
+      setPriceMinor(null);
+      setFilled({ factor: '', purpose: 'both' });
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
+    meta: { success: 'Pack added' },
   });
   if (!allowed) return null;
-  const used = new Set((packs.data ?? []).map((k) => k.unit_id));
+  const rows = packs.data ?? [];
+  const used = new Set(rows.map((k) => k.unit_id));
   // The item's own unit and the units that are packs already are not offered; a switched-off unit cannot be chosen.
   const choices = (units.data ?? []).filter((u) => u.active !== false && u.id !== product.unit_id && !used.has(u.id));
   const problem = factorProblem(factor);
+  const fixed = choices.find((u) => u.id === unitId)?.fixed_count;
+  const open = rows.find((k) => k.unit_id === editing);
+  const low = purpose === 'buy' ? null : packBelowCostHint(product, factor, mayPrice ? priceMinor : null);
   return (
     <fieldset data-testid="pack-editor" onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}>
-      <legend>Pack sizes</legend>
-      <p className="hint">
-        Sell or buy this item by the pack, for example a carton of 12 {product.unit}. Stock is always counted in {product.unit}.
-      </p>
+      <legend>{WORDS.packs}</legend>
+      <Hint full>Sell or buy this item by the pack, each with its own price. Stock is always kept in {unitWords(product.unit ?? '')}.</Hint>
       {packs.isPending && <p className="loading">Loading</p>}
       <Problem error={packs.error} />
-      {packs.data && packs.data.length === 0 && <p className="empty-state">No pack sizes yet.</p>}
-      <ul style={{ listStyle: 'none', padding: 0 }}>
-        {(packs.data ?? []).map((k) => <PackRow key={`${k.unit_id}-${k.version}`} productId={id} pack={k} />)}
-      </ul>
-      <label htmlFor="pack-unit">Add a pack</label>
-      <select id="pack-unit" value={unitId} onChange={(e) => setUnitId(e.target.value)}>
-        <option value="">Choose a unit</option>
-        {choices.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-      </select>
+      {packs.data && rows.length === 0 && <p className="empty-state">No cartons, boxes or other packs yet.</p>}
+      {/* Issue #699 (ADR-107): the packs as a ladder, single unit first since issue #709 (D99), each saying what it holds. */}
+      {/* Only someone who manages the catalogue reaches this editor (`allowed` above), so the ladder is editable here. */}
+      {packs.data && <ItemLadder product={product} packs={rows} mayManage={allowed} mayPrice={mayPrice} />}
+      {rows.length > 0 && (
+        <div className="table-wrap" tabIndex={0}>
+          <table data-testid="pack-table" className="pack-table">
+            <caption className="visually-hidden">{`The packs of ${product.description}: size and selling price`}</caption>
+            {/* Issue #709: the price under the size, so the table fits a phone 412 wide with no amount cut (pack-table.layout.test.ts). */}
+            <thead>
+              <tr>
+                <th scope="col">Pack</th>
+                <th scope="col" className="num">Size and selling price</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">{unitWord(product.unit)}</th>
+                <td className="num pack-size-price">
+                  <span className="pack-size">1</span>
+                  {product.sell_minor !== undefined && <span className="pack-price"><Money minor={product.sell_minor} /></span>}
+                </td>
+              </tr>
+              {rows.map((k) => {
+                const price = shownPackPrice(product, k);
+                return (
+                  <tr key={`${k.unit_id}-${k.version}`}>
+                    <th scope="row">
+                      {unitWord(k.unit)}
+                      {k.active === false && <> <span className="badge badge-warning">Switched off</span></>}
+                      {purposeOf(k) === 'buy' && <> <span className="badge">Buying only</span></>}
+                      {purposeOf(k) === 'sell' && <> <span className="badge">Selling only</span></>}
+                    </th>
+                    <td className="num pack-size-price">
+                      <span className="pack-size">{quantityIn(k.factor ?? '', product.unit ?? '')}</span>
+                      <span className="pack-price">
+                        {price === null ? 'Not sold' : (
+                          <>
+                            <Money minor={price.minor} />
+                            {!price.own && <span className="hint"> suggested</span>}
+                          </>
+                        )}
+                      </span>
+                      {price !== null && k.below_cost === true && <span className="badge badge-warning">Below buying price</span>}
+                      <button type="button" className="btn-sm" aria-label={`Change the ${unitWord(k.unit)} pack`} onClick={() => setEditing(k.unit_id ?? null)}>
+                        Change
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {open && <PackSheet key={`${open.unit_id}-${open.version}`} product={product} pack={open} mayPrice={mayPrice} onClose={() => setEditing(null)} fixed={(units.data ?? []).find((u) => u.id === open.unit_id)?.fixed_count} />}
+      {/* The pack's unit, with "+ Add a unit" in a sheet over the pack form (issue #688). */}
+      <PickerWithAdd
+        id="pack-unit"
+        label="Add a pack"
+        tip={<HelpTip tip="package" />}
+        addText="+ Add your own"
+        thing="unit"
+        placeholder="Choose a unit"
+        options={choices.map((u) => ({ value: u.id ?? '', label: u.name ?? '' }))}
+        value={unitId}
+        onChange={(next) => chooseUnit(choices.find((u) => u.id === next) ?? (next ? { id: next } : undefined))}
+        canAdd
+        loading={units.data === undefined}
+        load={units}
+        empty="No other unit to make a pack of yet."
+        form={(done, cancel) => (
+          <AddByName id="pack-unit-add" onCancel={cancel} add={{
+            label: 'Add a unit', name: 'Name of the new unit, such as carton', send: 'Add unit', maxLength: 50,
+            create: (name) => orExistingUnit(retail.createUnit(name)),
+            onAdded: (unit: AddedUnit) => {
+              if (!unit.reused) queryClient.setQueryData<Unit[]>(['retail', 'catalogue', 'units'], (was) => [...(was ?? []).filter((u) => u.id !== unit.id), unit]);
+              void queryClient.invalidateQueries({ queryKey: ['retail', 'catalogue', 'units'] });
+              done({ value: unit.id ?? '', label: unit.name ?? '' });
+            },
+          }} />
+        )}
+      />
       <label htmlFor="pack-factor">Items in one pack</label>
       <input
         id="pack-factor"
         inputMode="decimal"
         value={factor}
+        readOnly={fixed !== undefined}
         onChange={(e) => setFactor(e.target.value)}
         aria-invalid={factor.trim() !== '' && problem !== null}
         aria-describedby={factor.trim() !== '' && problem !== null ? 'pack-factor-problem' : undefined}
         placeholder="12"
       />
       {factor.trim() !== '' && problem !== null && <p id="pack-factor-problem" className="rt-flag">{problem}</p>}
+      {fixed && <p className="hint">{`A ${unitWord(choices.find((u) => u.id === unitId)?.name).toLowerCase()} always holds ${fixed}. For another number, use a box.`}</p>}
+      <p className="field-label">Used for</p>
+      <Segmented label="Used for" options={PURPOSES} value={purpose} onChange={setPurpose} />
+      {mayPrice && purpose !== 'buy' && (
+        <MoneyInput id="pack-price" label="Selling price of one pack" valueMinor={priceMinor} onChange={setPriceMinor} hint={suggestedHint(product, factor) ?? 'Leave it empty to sell at the piece price times the size.'} />
+      )}
+      {!mayPrice && purpose !== 'buy' && <Hint>Only someone who may change prices sets a pack&apos;s price; until then it sells at the piece price times the size.</Hint>}
+      {low !== null && <p className="rt-flag">{low}</p>}
       <Problem error={add.error} />
-      <button type="button" disabled={unitId === '' || problem !== null || add.isPending} onClick={() => add.mutate()}>
-        {add.isPending ? 'Saving' : 'Add pack'}
-      </button>
+      <BusyButton busy={add.isPending} type="button" disabled={unitId === '' || problem !== null} onClick={() => add.mutate()}>
+        Add pack
+      </BusyButton>
     </fieldset>
+  );
+}
+
+export const PACKS_QUESTION = 'Also sold or bought in cartons or boxes?';
+export const ASK_OWNER_PACKS = 'Ask the owner to turn on cartons in Retail settings.';
+
+/** The /me of every signed-in query with packs listed among the retail capabilities. */
+export function withPacksOn(me: Me): Me {
+  const retailOn = me.module_capabilities?.retail ?? [];
+  return retailOn.includes(UNITS) ? me : { ...me, module_capabilities: { ...me.module_capabilities, retail: [...retailOn, UNITS].sort() } };
+}
+
+/**
+ * Issue #630: while packs are off, the item form says in one line that they exist. Someone who manages settings turns them on
+ * here, through the capabilities route with its If-Match, and the pack section shows at once (on Add an item, its package
+ * question, issue #689); anyone else reads who can.
+ */
+export function PacksTurnOn() {
+  const { me } = useStaff();
+  const queryClient = useQueryClient();
+  const turnOn = useMutation({
+    mutationFn: async () => {
+      // Read, then send only units with that version; the server merges it. A change by someone else in between is read
+      // again once, and a second conflict is shown.
+      for (let attempt = 0; ; attempt += 1) {
+        const read = await retail.capabilities();
+        if (read.capabilities.units === true) return read;
+        try {
+          return await retail.changeCapabilities({ units: true }, read.version);
+        } catch (error) {
+          if (attempt > 0 || !(error instanceof RetailError && error.code === 'version_conflict')) throw error;
+        }
+      }
+    },
+    onSuccess: (next) => {
+      queryClient.setQueryData(['retail', 'capabilities'], next);
+      queryClient.setQueriesData<Me>({ queryKey: ['me'] }, (was) => (was ? withPacksOn(was) : was));
+      void queryClient.invalidateQueries({ queryKey: ['me'] });
+    },
+    meta: { success: 'Packs switched on' },
+  });
+  if (!holds(me, 'retail.catalogue.manage')) return null;
+  if (capabilityOn(me, 'retail', UNITS)) return null;
+  return (
+    <div className="stack" data-testid="packs-turn-on">
+      <p>{PACKS_QUESTION}</p>
+      {holds(me, SETTINGS_MANAGE) ? (
+        <>
+          <Problem error={turnOn.error} />
+          {/* .btn is the secondary style (buttons.css): Add item or Save changes stays the one primary action (rule 6). */}
+          <BusyButton busy={turnOn.isPending} type="button" className="btn" onClick={() => turnOn.mutate()}>Turn on cartons</BusyButton>
+        </>
+      ) : (
+        <p className="hint" data-testid="packs-ask">{ASK_OWNER_PACKS}</p>
+      )}
+      <Link className="link-row" to="/staff/help/$articleId" params={{ articleId: 'sell-or-buy-in-cartons' }}>
+        How do I sell or buy in cartons?
+        <RowChevron />
+      </Link>
+    </div>
   );
 }

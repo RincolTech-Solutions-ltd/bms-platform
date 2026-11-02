@@ -2,16 +2,19 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { Highlight, NoResults, SearchBox, SearchResults } from '../../app/ui/SearchBox';
 import { useLiveSearch } from '../../app/ui/useLiveSearch';
-import { fetchHealth, listMembers } from '../../api/client';
+import { listMembers } from '../../api/client';
 import { branchFilter } from '../../auth/branch';
 import { EmptyState, SkeletonList } from '../../components/states';
 import { useStaff } from './context';
+import { HomeCards } from './home-cards';
+import { FirstItemsCard } from './retail/first-items';
 
-// Staff home: the member list of the active branch (FR-BR-04), where the user may read members.
+// Staff home: a shop with no items yet starts from the card that leads to adding them (issue #615), then a card per module
+// the business uses (issue #471, home-cards.tsx), then the member list of the active branch
+// (FR-BR-04), where the user may read members.
 
 export function StaffHome() {
   const { me, branch } = useStaff();
-  const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth });
   // The lending module's screens are offered only to a tenant that has it (issue #185).
   const canReadMembers = (me.permissions ?? []).includes('lending.members.read') && (!me.modules || me.modules.includes('lending'));
   const search = useLiveSearch();
@@ -27,11 +30,10 @@ export function StaffHome() {
   return (
     <main>
       <div className="page-header" data-tour="staff-home-header">
-        <h1>Staff area</h1>
-        <span className={health.data === 'UP' ? 'badge badge-success' : 'badge'}>
-          API: {health.data ?? 'checking'}
-        </span>
+        <h1>Home</h1>
       </div>
+      <FirstItemsCard />
+      <HomeCards />
       {canReadMembers && (
         <section aria-labelledby="members-title" data-tour="lending-members">
           <h2 id="members-title">Members</h2>
@@ -42,7 +44,7 @@ export function StaffHome() {
           {members.isError && <p role="alert" className="alert alert-danger">Could not load members.</p>}
           {members.data && found.length === 0 && search.term && <NoResults term={search.term} onClear={search.clear} noun="members" />}
           {members.data && found.length === 0 && !search.term && (
-            <EmptyState art="noApplications" title="No members yet.">Members of this branch appear here.</EmptyState>
+            <EmptyState title="No members yet.">Members of this branch appear here.</EmptyState>
           )}
           {members.data && found.length > 0 && (
             <SearchResults fetching={fetching}>

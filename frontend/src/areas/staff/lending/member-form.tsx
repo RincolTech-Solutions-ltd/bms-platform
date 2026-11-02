@@ -8,8 +8,12 @@ import { branchLabel } from '../../../auth/branch';
 import { useStaff } from '../context';
 import { newIdempotencyKey } from '../retail/idempotency';
 import { Problem } from '../retail/ui';
+import { sayDone } from '../retail/toast';
 import { Group, SaveBar, SelectField, TextField, useFormErrors } from './form-fields';
-import { localDate } from './loan-state';
+import { FieldsNeededNote } from '../../../app/ui/Field';
+import { businessToday } from '../../../api/retail';
+import { currencyOf, tenantCurrency } from './loan-state';
+import { exponentOf } from '../../../components/money';
 import { MembersGate } from './member-ui';
 import { SaveGuardNotice, useSaveGuard } from './save-guard';
 import { mayCreateMember, mayEditMember, memberBranches } from './member-permissions';
@@ -18,6 +22,8 @@ import {
   updateBody, type MemberDraft,
 } from './member-state';
 import { PhotoQueueControl, usePhotoQueue, type Sender } from './photo-queue';
+import { NoAccess } from '../../../app/ui/EmptyState';
+import { useComeBack } from '../../../app/ui/EmptyChoice';
 
 // Create and edit a member (issue #280, FR-MEM-01 to FR-MEM-04, FR-MEM-09, FR-MEM-10). One column, big inputs, a sticky save
 // bar. Before anything is saved the screen asks the server for likely duplicates by phone, national ID and name and shows
@@ -110,11 +116,15 @@ export function MemberForm({ member: loaded, onSaved }: { member?: MemberRecord;
   const [stale, setStale] = useState(false);
   const guard = useSaveGuard<DuplicateCandidate>();
   const [serverPhone, setServerPhone] = useState(false);
-  const [saved, setSaved] = useState<MemberRecord | null>(null);
+  // The new member whose ID photos still need sending: its retry screen shows only when a photo failed, and then `finish` (the
+  // toast) has not run, so success is said once.
+  const [photosFor, setPhotosFor] = useState<MemberRecord | null>(null);
   const idFront = usePhotoQueue();
   const idBack = usePhotoQueue();
   const original = useMemo(() => (member ? draftOf(member) : undefined), [member]);
-  const problems = memberProblems(draft, localDate(), editing, original);
+  // Income is typed in the member's currency, or the business's for a new member (issue #289).
+  const currency = member ? currencyOf(member.currency) : tenantCurrency(me);
+  const problems = memberProblems(draft, businessToday(), editing, original, currency);
   const form = useFormErrors(problems, 'mf');
   const mayCheck = !editing || (me.permissions ?? []).includes('lending.members.create');
   const found = useDuplicates(draft, member?.id, mayCheck);
@@ -135,9 +145,13 @@ export function MemberForm({ member: loaded, onSaved }: { member?: MemberRecord;
 
   const photosBusy = idFront.busy || idBack.busy;
 
+  const back = useComeBack();
   const finish = (m: MemberRecord) => {
+    sayDone(editing ? 'Member saved' : 'Member added');
     void queryClient.invalidateQueries({ queryKey: ['members'] });
     if (onSaved) onSaved(m);
+    // Opened from a member search that found nobody (issue #619): the new member takes the person back to the form that needed one.
+    else if (!editing && back) back();
     else void navigate({ to: '/staff/lending/members/$memberId', params: { memberId: m.id ?? '' } });
   };
 
@@ -167,8 +181,8 @@ export function MemberForm({ member: loaded, onSaved }: { member?: MemberRecord;
         finish(await api.update(member.id ?? '', member.version ?? 0, body));
         return;
       }
-      const created = await api.create(createBody(draft), idempotencyKey);
-      setSaved(created);
+      const created = await api.create(createBody(draft, currency), idempotencyKey);
+      setPhotosFor(created);
       if (idFront.waiting + idBack.waiting === 0 || (await sendPhotos(created.id ?? ''))) finish(created);
     } catch (raw) {
       const error = asFormError(raw);
@@ -186,22 +200,23 @@ export function MemberForm({ member: loaded, onSaved }: { member?: MemberRecord;
 
   const branchName = branchLabel((me.branches ?? []).find((b) => b.id === draft.branchId));
   const blocked = hold === 'nin' ? 'This national ID is already registered.' : hold === 'phone' ? 'Tick the box above to say this is a different person.' : guard.blocked ? 'Wait for the check above before saving again.' : photosBusy ? 'Wait for the photo to be ready.' : undefined;
-  const photoSender = (kind: 'id_front' | 'id_back'): Sender<unknown> | undefined => (saved ? (p, o) => api.uploadDocument(saved.id ?? '', kind, p.blob, p.fileName, o) : undefined);
+  const photoSender = (kind: 'id_front' | 'id_back'): Sender<unknown> | undefined => (photosFor ? (p, o) => api.uploadDocument(photosFor.id ?? '', kind, p.blob, p.fileName, o) : undefined);
 
-  if (saved) {
+  if (photosFor) {
     return (
       <section className="rt-card stack" aria-live="polite">
-        <h2>{saved.full_name} is saved</h2>
-        <p>Member number {saved.member_no}. A photo did not go through. Send it again, or open the member and add it later.</p>
+        <h2>{photosFor.full_name} is saved</h2>
+        <p>Member number {photosFor.member_no}. A photo did not go through. Send it again, or open the member and add it later.</p>
         <PhotoQueueControl id="mf-front-retry" label="Photo of the front of the ID" queue={idFront} sender={photoSender('id_front')} />
         <PhotoQueueControl id="mf-back-retry" label="Photo of the back of the ID" queue={idBack} sender={photoSender('id_back')} />
-        <Link to="/staff/lending/members/$memberId" params={{ memberId: saved.id ?? '' }} className="btn btn-block rt-primary">Open the member</Link>
+        <Link to="/staff/lending/members/$memberId" params={{ memberId: photosFor.id ?? '' }} className="btn btn-block rt-primary">Open the member</Link>
       </section>
     );
   }
 
   return (
     <form className="mf" onSubmit={(e) => void submit(e)} noValidate aria-label={editing ? 'Change member details' : 'Add a member'} data-tour="member-form">
+      <FieldsNeededNote />
       {form.count(ORDER) > 0 && (
         <p role="alert" className="alert alert-danger">Some entries need a look. They are marked below.</p>
       )}
@@ -217,7 +232,8 @@ export function MemberForm({ member: loaded, onSaved }: { member?: MemberRecord;
           <p className="field-hint">Branch: {branchName}. To move a member to another branch, ask an administrator.</p>
         ) : (
           <SelectField name="branch_id" label="Branch" form={form} required value={draft.branchId} onChange={(v) => set('branchId', v)}
-            options={allowed.map((b) => ({ value: b.id ?? '', label: branchLabel(b) }))} blankLabel="Choose a branch" />
+            options={allowed.map((b) => ({ value: b.id ?? '', label: branchLabel(b) }))} blankLabel="Choose a branch"
+            empty={{ text: 'No branch where you may add members.', ask: 'Ask the owner to give you a branch first.' }} />
         )}
         <TextField name="full_name" label="Full name" form={form} required value={draft.fullName} onChange={(v) => set('fullName', v)} autoComplete="off" maxLength={200} />
         <TextField name="phone" label="Phone number" form={form} required type="tel" inputMode="tel" value={draft.phone} onChange={(v) => { setServerPhone(false); set('phone', v); }}
@@ -237,11 +253,11 @@ export function MemberForm({ member: loaded, onSaved }: { member?: MemberRecord;
       <DuplicateList candidates={candidates} phoneShared={phoneShared} hold={hold} confirmed={draft.confirmedNotDuplicate} onConfirm={(yes) => set('confirmedNotDuplicate', yes)} />
       {checking && candidates.length === 0 && <p className="field-hint" role="status">Checking whether this member is already registered</p>}
       <Group title="About the member">
-        <TextField name="date_of_birth" label="Date of birth" form={form} type="date" value={draft.dateOfBirth} onChange={(v) => set('dateOfBirth', v)} max={localDate()} />
+        <TextField name="date_of_birth" label="Date of birth" form={form} type="date" value={draft.dateOfBirth} onChange={(v) => set('dateOfBirth', v)} max={businessToday()} />
         <SelectField name="gender" label="Gender" form={form} value={draft.gender} onChange={(v) => set('gender', v)} options={GENDERS} />
         <SelectField name="marital_status" label="Marital status" form={form} value={draft.maritalStatus} onChange={(v) => set('maritalStatus', v)} options={MARITAL} />
         <TextField name="occupation" label="Work or business" form={form} value={draft.occupation} onChange={(v) => set('occupation', v)} maxLength={120} />
-        <TextField name="monthly_income_minor" label="Usual income a month (UGX)" form={form} inputMode="numeric" value={draft.monthlyIncome} onChange={(v) => set('monthlyIncome', v)}
+        <TextField name="monthly_income_minor" label={`Usual income a month (${currency})`} form={form} inputMode={exponentOf(currency) ? 'decimal' : 'numeric'} value={draft.monthlyIncome} onChange={(v) => set('monthlyIncome', v)}
           hint={editing && original?.monthlyIncome !== '' ? 'A saved income can be changed but not removed. Type 0 for none.' : undefined} />
       </Group>
       <Group title="Where the member lives">
@@ -262,7 +278,7 @@ export function MemberForm({ member: loaded, onSaved }: { member?: MemberRecord;
         </Group>
       )}
       <Problem error={failure ? new Error(failure) : null} />
-      <SaveBar label={editing ? 'Save changes' : 'Save member'} busyLabel="Saving" busy={busy} blocked={blocked}
+      <SaveBar label={editing ? 'Save changes' : 'Save member'} busy={busy} blocked={blocked}
         cancel={<Link to={editing ? '/staff/lending/members/$memberId' : '/staff/lending/members'} params={editing ? { memberId: member?.id ?? '' } : undefined as never} className="btn btn-ghost">Cancel</Link>}
         tourId="member-save" />
     </form>
@@ -273,7 +289,7 @@ function NewMember() {
   const { me } = useStaff();
   return (
     <MembersGate title="Add a member" tourId="member-new">
-      {mayCreateMember(me) ? <MemberForm /> : <p className="empty-state">You do not have access to add members.</p>}
+      {mayCreateMember(me) ? <MemberForm /> : <NoAccess what="add members" />}
     </MembersGate>
   );
 }
@@ -289,7 +305,7 @@ function EditMember() {
     <MembersGate title="Change member details" tourId="member-edit">
       {member.isPending && <p className="loading">Loading the member</p>}
       <Problem error={member.error} />
-      {member.data && (mayEditMember(me, member.data.branch_id) ? <MemberForm member={member.data} /> : <p className="empty-state">You do not have access to change this member.</p>)}
+      {member.data && (mayEditMember(me, member.data.branch_id) ? <MemberForm member={member.data} /> : <NoAccess what="change this member" />)}
     </MembersGate>
   );
 }

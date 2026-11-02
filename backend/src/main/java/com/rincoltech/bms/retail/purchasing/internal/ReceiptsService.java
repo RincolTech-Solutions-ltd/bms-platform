@@ -1,10 +1,10 @@
 package com.rincoltech.bms.retail.purchasing.internal;
 
+import com.rincoltech.bms.core.approvals.Approvals;
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.operations.Idempotency;
 import com.rincoltech.bms.core.operations.Idempotency.Outcome;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
-import com.rincoltech.bms.core.tenancy.TenantSettings;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.BusinessClock;
@@ -42,9 +42,11 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -87,7 +89,7 @@ class ReceiptsService {
     private final CurrentTenant tenant;
     private final BusinessClock clock;
     private final AuditLog audit;
-    private final TenantSettings tenantSettings;
+    private final Approvals approvals;
 
     ReceiptsService(
             ReceiptsRepository repo,
@@ -106,7 +108,7 @@ class ReceiptsService {
             CurrentTenant tenant,
             BusinessClock clock,
             AuditLog audit,
-            TenantSettings tenantSettings) {
+            Approvals approvals) {
         this.repo = repo;
         this.landed = landed;
         this.orderRepo = orderRepo;
@@ -123,7 +125,7 @@ class ReceiptsService {
         this.tenant = tenant;
         this.clock = clock;
         this.audit = audit;
-        this.tenantSettings = tenantSettings;
+        this.approvals = approvals;
     }
 
     @Transactional
@@ -241,7 +243,7 @@ class ReceiptsService {
                     continue;
                 }
             }
-            Planned p = lines.plan(field, productId, unitId, l.qty(), cost, problems, ol != null);
+            Planned p = lines.plan(field, productId, unitId, l.qty(), cost, problems, ol != null, l.packSize());
             if (p != null) {
                 items.add(new Item(i, ol, l, p));
             }
@@ -253,12 +255,15 @@ class ReceiptsService {
             overReceipt(order, items, orderLines);
         }
         limitUnauthorised(order, items);
+        PurchaseLines.requireUseFromNowOn(items.stream().anyMatch(x -> usesFromNowOn(x.request())));
         new TreeSet<>(items.stream().map(x -> x.planned().product().id()).toList()).forEach(catalogue::lock);
 
         UUID id = UUID.randomUUID();
         UUID by = CurrentPrincipal.require().userId();
         Numbered no = lines.next("GR", "retail_goods_receipt_no", branch);
         List<NewLine> newLines = new ArrayList<>();
+        // D23, issue #554: the lines whose size becomes the pack's usual size, by the line's own id.
+        Set<UUID> fromNowOn = new HashSet<>();
         List<Movement> movements = new ArrayList<>();
         long total = 0;
         long stocked = 0;
@@ -284,6 +289,9 @@ class ReceiptsService {
                     p.stocked()));
             movements.add(new Movement(
                     branch, p.product().id(), "purchase", p.baseQty(), p.costBase(), RECEIPT, id, lineId, null, null));
+            if (usesFromNowOn(item.request())) {
+                fromNowOn.add(lineId);
+            }
         }
         // Lines are applied in request order, so when two lines name one product the later line's cost is the product's
         // cost afterwards (latest receipt wins, ADR-020 decision 5), each change with its own history row.
@@ -301,8 +309,14 @@ class ReceiptsService {
                     "Permission denied",
                     "Setting the selling price needs the permission to change prices. Leave the selling price empty.");
         }
+        Map<UUID, String> sizesKept = new HashMap<>();
         for (NewLine l : newLines) {
             catalogue.applyPurchasePrices(l.productId(), l.costMinor(), l.sellMinor(), id);
+            // D23, issue #554: under the product lock taken above, before any balance row (ADR-079 lock order).
+            if (fromNowOn.contains(l.id())
+                    && !catalogue.useBuyingSize(l.productId(), l.unitId(), l.unitFactor(), RECEIPT, id)) {
+                sizesKept.put(l.id(), PurchaseLines.sizeKeptNote(l.unitFactor()));
+            }
         }
         stock.record(on, movements);
         // Goods received not invoiced is owed as entered; inventory carries the movements' value; the difference, which
@@ -352,7 +366,19 @@ class ReceiptsService {
             after.put("held_for_costing", true);
         }
         audit.record(AuditLog.Entry.created("retail.goods_receipt.created", RECEIPT, id, branch, after));
-        return view(repo.find(id, false).orElseThrow(), true);
+        Receipt made = view(repo.find(id, false).orElseThrow(), true);
+        if (sizesKept.isEmpty() || made.lines() == null) {
+            return made;
+        }
+        // Issue #624: the line whose "use from now on" was left out says so, so nobody is told the opposite.
+        return made.withLines(made.lines().stream()
+                .map(l -> sizesKept.containsKey(l.id()) ? l.withSizeKept(sizesKept.get(l.id())) : l)
+                .toList());
+    }
+
+    /** D23, issue #554: the line asks for its size to become the pack's usual size. */
+    private static boolean usesFromNowOn(ReceiptLineRequest l) {
+        return Boolean.TRUE.equals(l.useFromNowOn()) && l.packSize() != null;
     }
 
     /** True when the unit being received is the unit the line was ordered in (naming the base unit is the base unit). */
@@ -368,17 +394,19 @@ class ReceiptsService {
     }
 
     /**
-     * With an approval threshold set for purchase orders (retail_purchase_order), goods cannot be received past what a second
+     * While purchase orders ask for approval (retail_purchase_order, ADR-091), goods cannot be received past what a second
      * person authorised, or the threshold would limit nothing: a receipt with no order is refused when it is worth the
      * threshold or more (raise an order, which a second person approves), and a receipt against an order is refused when the
      * value received on it, with this receipt, would pass the order's value plus the over-receipt tolerance (a price above the
-     * order's is as much an over-receipt as a quantity above it). With no threshold set neither limit applies.
+     * order's is as much an over-receipt as a quantity above it). With the approval off neither limit applies; on with no amount,
+     * every delivery needs an order.
      */
     private void limitUnauthorised(OrderRow order, List<Item> items) {
-        long threshold = tenantSettings.approvalThresholdMinor(PurchaseOrderAction.TYPE);
-        if (threshold <= 0) {
+        Approvals.Rule rule = approvals.rule(PurchaseOrderAction.TYPE);
+        if (!rule.on()) {
             return;
         }
+        long threshold = rule.thresholdMinor();
         long total = items.stream().mapToLong(x -> x.planned().lineTotal()).reduce(0, Math::addExact);
         if (order == null) {
             if (total >= threshold) {
@@ -412,23 +440,39 @@ class ReceiptsService {
         int bp = settings.current().overReceiptBp();
         Map<UUID, BigDecimal> already = repo.receivedByOrderLine(order.id());
         Map<UUID, BigDecimal> now = new HashMap<>();
-        items.forEach(x -> now.merge(x.orderLine().id(), x.planned().baseQty(), BigDecimal::add));
+        items.forEach(x -> now.merge(x.orderLine().id(), inOrderUnit(x), BigDecimal::add));
         for (Map.Entry<UUID, BigDecimal> e : now.entrySet()) {
             OrdersRepository.LineRow ol = orderLines.get(e.getKey());
             BigDecimal had = already.getOrDefault(e.getKey(), BigDecimal.ZERO);
-            BigDecimal limit =
-                    ol.qty().multiply(BigDecimal.valueOf(10000L + bp)).movePointLeft(4);
+            BigDecimal ordered = OrdersService.orderedInUnit(ol);
+            BigDecimal limit = ordered.multiply(BigDecimal.valueOf(10000L + bp)).movePointLeft(4);
             if (had.add(e.getValue()).compareTo(limit) > 0) {
                 BigDecimal room = limit.subtract(had).max(BigDecimal.ZERO);
                 throw ApiException.rule(
                         "receipt_exceeds_order",
-                        "Line " + ol.lineNo() + " of " + order.orderNo() + " ordered " + Quantities.format(ol.qty())
+                        "Line " + ol.lineNo() + " of " + order.orderNo() + " ordered " + Quantities.format(ordered)
                                 + " and " + Quantities.format(had) + " has been received, so at most "
                                 + room.setScale(Quantities.SCALE, java.math.RoundingMode.DOWN)
                                         .toPlainString()
                                 + " more can be received.");
             }
         }
+    }
+
+    /**
+     * D23, issue #554: what a line receives, in its order line's own unit, as {@code OrdersRepository.RECEIVED_IN_ORDER_UNIT}
+     * counts it: packs of the order's unit count as packs whatever each held this time.
+     */
+    private static BigDecimal inOrderUnit(Item x) {
+        OrdersRepository.LineRow ol = x.orderLine();
+        Planned p = x.planned();
+        if (ol.unitId() == null) {
+            return p.baseQty();
+        }
+        if (p.pack() != null && p.pack().unitId().equals(ol.unitId())) {
+            return p.unitQty();
+        }
+        return p.baseQty().divide(ol.unitFactor(), Quantities.SCALE, java.math.RoundingMode.HALF_UP);
     }
 
     // ---- Void ------------------------------------------------------------------------------
@@ -689,6 +733,8 @@ class ReceiptsService {
                 l.sellMinor(),
                 l.lineTotalMinor(),
                 billed ? Quantities.format(l.billedQty()) : null,
-                costs ? l.landedMinor() : null);
+                costs ? l.landedMinor() : null,
+                null,
+                null);
     }
 }

@@ -1,16 +1,20 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, createLazyRoute, getRouteApi } from '@tanstack/react-router';
 import { useState } from 'react';
-import { lending, type Loan, type LoanSchedule, type LoanTransaction, type RepaymentResult } from '../../../api/lending';
+import { lending, type Loan, type LoanSchedule, type LoanScheduleRow, type LoanTransaction, type RepaymentResult } from '../../../api/lending';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
+import { HelpTip } from '../../../app/ui/HelpTip';
 import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
+import { APPLICATION_STATUSES, ApplicationPanel } from './application-view';
 import { CollectPanel } from './collect';
 import { DisburseForm, PayoffQuotePanel, RepaymentForm, RepaymentReceipt, ReverseForm, WriteOffForm } from './actions';
 import { LendingGate } from './loans';
 import { methodWords, money, statusBadge, txnWords, words } from './loan-state';
-import { actionsFor, canReverse, type LoanAction } from './permissions';
+import { actionsFor, canReverse, mayWaiveItem, type LoanAction } from './permissions';
 import { showSavings } from './savings-permissions';
+import { WaiveItemSheet } from './waive-item';
+import { waivable } from './waive-state';
 
 // One loan (FR-DIS-04, FR-REP): its status and balances, the schedule with its totals row, and
 // its money events. The actions the session may take on a loan in this status sit under the
@@ -104,7 +108,8 @@ export function BalancesCard({ loan }: { loan: Loan }) {
   );
 }
 
-export function ScheduleTable({ schedule, currency }: { schedule: LoanSchedule; currency: string | undefined }) {
+/** The schedule; with `onWaive`, a row with fees or interest still due offers Waive fee or interest (FR-ARR-04, #265). */
+export function ScheduleTable({ schedule, currency, onWaive }: { schedule: LoanSchedule; currency: string | undefined; onWaive?: (row: LoanScheduleRow) => void }) {
   const c = schedule.currency ?? currency;
   const rows = schedule.items ?? [];
   const t = schedule.totals;
@@ -116,12 +121,13 @@ export function ScheduleTable({ schedule, currency }: { schedule: LoanSchedule; 
           <tr>
             <th className="num">No</th>
             <th>Due date</th>
+            {onWaive && <th>Waive fee or interest</th>}
             <th className="num">Principal</th>
             <th className="num">Interest</th>
             <th className="num">Fees</th>
             <th className="num">Total due</th>
             <th className="num">Paid</th>
-            <th className="num">Outstanding</th>
+            <th className="num" aria-label="Outstanding">Outstanding <HelpTip tip="outstanding" /></th>
             <th>Status</th>
           </tr>
         </thead>
@@ -130,6 +136,15 @@ export function ScheduleTable({ schedule, currency }: { schedule: LoanSchedule; 
             <tr key={r.no}>
               <td className="num">{r.no}</td>
               <td>{r.due_date}</td>
+              {onWaive && (
+                <td>
+                  {waivable(r) && (
+                    <button type="button" className="ln-row-action" onClick={() => onWaive(r)} aria-label={`Waive fee or interest on item ${r.no ?? ''}`}>
+                      Waive
+                    </button>
+                  )}
+                </td>
+              )}
               <td className="num">{money(r.principal_due_minor, c)}</td>
               <td className="num">{money(r.interest_due_minor, c)}</td>
               <td className="num">{money(r.fees_due_minor, c)}</td>
@@ -143,7 +158,7 @@ export function ScheduleTable({ schedule, currency }: { schedule: LoanSchedule; 
         {t && (
           <tfoot>
             <tr>
-              <td colSpan={2}>Totals</td>
+              <td colSpan={onWaive ? 3 : 2}>Totals</td>
               <td className="num">{money(t.principal_due_minor, c)}</td>
               <td className="num">{money(t.interest_due_minor, c)}</td>
               <td className="num">{money(t.fees_due_minor, c)}</td>
@@ -177,6 +192,7 @@ export function TransactionList({ loan, items }: { loan: Loan; items: LoanTransa
             {t.payment_method_key && `, ${methodWords(t.payment_method_key)}`}
             {t.external_reference && `, ref ${t.external_reference}`}
           </p>
+          {t.historic && <p className="ln-muted">From the paper register, before go-live: not in the app's cash book.</p>}
           {t.reversed_by_txn_id && <p><span className="badge badge-danger">Reversed</span></p>}
           {t.reason && <p className="ln-muted">Reason: {t.reason}</p>}
           {canReverse(me, loan.status, t) &&
@@ -193,13 +209,31 @@ export function TransactionList({ loan, items }: { loan: Loan; items: LoanTransa
   );
 }
 
-/** The loan page body, given the loan; the schedule and transactions load beside it. */
+/**
+ * The loan page body, given the loan. An application (nothing paid out) shows where it stands and its next step (issue #280);
+ * a loan that was paid out shows its balances, schedule and transactions. Two components, so a loan that moves from one to the
+ * other keeps the rules of hooks.
+ */
 export function LoanView({ loan, memberName }: { loan: Loan; memberName?: string }) {
+  if (APPLICATION_STATUSES.includes(loan.status ?? '')) {
+    return (
+      <>
+        <LoanHeader loan={loan} memberName={memberName} />
+        <ApplicationPanel loan={loan} />
+      </>
+    );
+  }
+  return <ServicingView loan={loan} memberName={memberName} />;
+}
+
+/** A loan approved or paid out: its actions, balances, schedule and transactions. */
+function ServicingView({ loan, memberName }: { loan: Loan; memberName?: string }) {
   const { me } = useStaff();
   const loanId = loan.id ?? '';
   const [open, setOpen] = useState<LoanAction | null>(null);
   const [receipt, setReceipt] = useState<RepaymentResult | null>(null);
   const [round, setRound] = useState(0);
+  const [waiving, setWaiving] = useState<LoanScheduleRow | null>(null);
   const schedule = useQuery({ queryKey: ['lending', 'loan', loanId, 'schedule'], queryFn: () => lending.getSchedule(loanId), enabled: loan.status !== 'approved' });
   const txns = useQuery({ queryKey: ['lending', 'loan', loanId, 'transactions'], queryFn: () => lending.listTransactions(loanId) });
   const actions = actionsFor(me, loan.status);
@@ -237,15 +271,20 @@ export function LoanView({ loan, memberName }: { loan: Loan; memberName?: string
         </section>
       )}
       {!open && receipt && <RepaymentReceipt result={receipt} currency={loan.currency} />}
+      {loan.status === 'approved' && <ApplicationPanel loan={loan} />}
       <BalancesCard loan={loan} />
       <h2 id="ln-schedule" data-tour="loan-schedule">Schedule</h2>
       {loan.status === 'approved' ? (
-        <p className="empty-state">The schedule is set when the loan is disbursed.</p>
+        // The application panel above shows the payments it would mean, once; this says where the real schedule comes from.
+        <p className="empty-state">The schedule is set when the loan is disbursed. Until then, see Payments it would mean above.</p>
       ) : (
         <>
           {schedule.isPending && <p className="loading">Loading the schedule</p>}
           <Problem error={schedule.error} />
-          {schedule.data && <ScheduleTable schedule={schedule.data} currency={loan.currency} />}
+          {schedule.data && (
+            <ScheduleTable schedule={schedule.data} currency={loan.currency} onWaive={mayWaiveItem(me, loan) ? setWaiving : undefined} />
+          )}
+          {waiving && <WaiveItemSheet loan={loan} row={waiving} memberName={memberName} onClose={() => setWaiving(null)} />}
         </>
       )}
       <h2 data-tour="loan-transactions">Transactions</h2>

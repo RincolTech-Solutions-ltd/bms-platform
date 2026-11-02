@@ -21,7 +21,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * bms_app, never as the owner. Tables are enumerated from the catalogue, so a tenant-owned table
  * added by a later migration is covered without touching this file.
  */
-class RlsIsolationIT {
+public class RlsIsolationIT {
 
     static TestDatabase.Fixture a;
     static TestDatabase.Fixture b;
@@ -43,7 +43,7 @@ class RlsIsolationIT {
      * evaluated against rows, so an empty table would pass the fail-closed test vacuously;
      * {@link #everyTenantOwnedTableHasAFactoryRow} fails when a new table is added without one.
      */
-    static void seedOneRowInEveryTable(TestDatabase.Fixture t) {
+    public static void seedOneRowInEveryTable(TestDatabase.Fixture t) {
         JdbcClient owner = TestDatabase.owner();
         UUID user = UUID.randomUUID();
         owner.sql(
@@ -78,7 +78,7 @@ class RlsIsolationIT {
                 .update();
         owner.sql(
                         "INSERT INTO auth_sessions (id, tenant_id, user_id, family_id, refresh_token_hash, expires_at, idle_expires_at)"
-                                + " VALUES (?, ?, ?, ?, ?, now() + interval '7 days', now() + interval '12 hours')")
+                                + " VALUES (?, ?, ?, ?, ?, now() + interval '7 days', now() + interval '7 days')")
                 .params(UUID.randomUUID(), t.tenantId(), user, UUID.randomUUID(), randomHash())
                 .update();
         owner.sql("INSERT INTO user_role_assignments (id, tenant_id, user_id, role_key, branch_id, granted_by)"
@@ -125,6 +125,10 @@ class RlsIsolationIT {
                         VALUES (?, ?, 'upload', 'core.tenant', ?, ?, 'image/png', 5, repeat('1', 64))
                         """)
                 .params(logo, t.tenantId(), t.tenantId(), "tenants/" + t.tenantId() + "/upload/rls/" + logo + ".png")
+                .update();
+        // A shop's own logo (migration V85, #461): the second branch points at the tenant's logo document.
+        owner.sql("UPDATE branches SET logo_document_id = ? WHERE id = ?")
+                .params(logo, t.secondBranch())
                 .update();
         owner.sql("""
                         INSERT INTO lending_member_documents (id, tenant_id, member_id, doc_kind, document_id, uploaded_by)
@@ -239,9 +243,15 @@ class RlsIsolationIT {
                         """)
                 .params(UUID.randomUUID(), t.tenantId(), t.headOffice(), retailProduct, openingMovement, user)
                 .update();
-        owner.sql("INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty) VALUES (?, ?, ?, 2)")
+        owner.sql(
+                        "INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty, avg_cost_minor) VALUES (?, ?, ?, 2, 100)")
                 .params(t.tenantId(), t.headOffice(), retailProduct)
                 .update();
+        // The part of a landed cost line that went into a branch's average (V94, ADR-079).
+        owner.sql("""
+                        INSERT INTO retail_cost_spreads (tenant_id, line_id, branch_id, product_id, inventory_minor)
+                        VALUES (?, gen_random_uuid(), ?, ?, 100)
+                        """).params(t.tenantId(), t.headOffice(), retailProduct).update();
         UUID stocktake = UUID.randomUUID();
         owner.sql(
                         "INSERT INTO retail_stocktakes (id, tenant_id, branch_id, status, created_by) VALUES (?, ?, ?, 'draft', ?)")
@@ -332,6 +342,7 @@ class RlsIsolationIT {
                         """).params(UUID.randomUUID(), t.tenantId(), user).update();
         // A subscription payment the operator recorded (migration V75, issue #407), by a fabricated operator.
         UUID recorder = UUID.randomUUID();
+        UUID subscriptionPayment = UUID.randomUUID();
         owner.sql("INSERT INTO platform_users (id, email, full_name) VALUES (?, ?, 'Test Operator 09')")
                 .params(recorder, "rls-op-" + recorder + "@example.test")
                 .update();
@@ -341,7 +352,20 @@ class RlsIsolationIT {
                         SELECT ?, s.tenant_id, s.id, s.plan_id, 1000, 'UGX', 'other', DATE '2026-01-01', 1, DATE '2026-01-01',
                                DATE '2026-01-31', ?
                           FROM subscriptions s WHERE s.tenant_id = ?
-                        """).params(UUID.randomUUID(), recorder, t.tenantId()).update();
+                        """).params(subscriptionPayment, recorder, t.tenantId()).update();
+        // Its receipt and a subscription reminder (migration V92, issue #480).
+        owner.sql("""
+                        INSERT INTO subscription_receipts (id, tenant_id, payment_id, receipt_no, business_name, plan_name,
+                                                           issued_on)
+                        VALUES (?, ?, ?, 'RT-2026-' || lpad(nextval('subscription_receipt_numbers')::text, 6, '0'),
+                                'Test Business', 'Test Plan', DATE '2026-01-01')
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), subscriptionPayment)
+                .update();
+        owner.sql("""
+                        INSERT INTO subscription_reminders (id, tenant_id, kind, due_on, channels)
+                        VALUES (?, ?, 'due_in_7', DATE '2026-01-31', '{email}')
+                        """).params(UUID.randomUUID(), t.tenantId()).update();
         owner.sql(
                         "INSERT INTO audit_log (id, tenant_id, actor_kind, action, entity_type) VALUES (?, ?, 'system', 'test.fixture.created', 'test')")
                 .params(UUID.randomUUID(), t.tenantId())
@@ -432,6 +456,25 @@ class RlsIsolationIT {
                                'Test write-off', ?, ?
                           FROM retail_sales s WHERE s.tenant_id = ? LIMIT 1
                         """).params(t.tenantId(), entry, user, t.tenantId()).update();
+        // Retail sales offline (ADR-067, #458): a clash of the fixture sale, a refused offline sale reported by a
+        // device and a sale waiting on a phone.
+        // JUSTIFICATION-A3: a fixture row for each new table; the isolation test needs one row per tenant table.
+        owner.sql("""
+                        INSERT INTO retail_sale_clashes (id, tenant_id, sale_id, branch_id, kind, words)
+                        SELECT gen_random_uuid(), ?, s.id, s.branch_id, 'clock_ahead', 'Test clock ahead'
+                          FROM retail_sales s WHERE s.tenant_id = ? LIMIT 1
+                        """).params(t.tenantId(), t.tenantId()).update();
+        owner.sql("""
+                        INSERT INTO retail_offline_failures (id, tenant_id, client_sale_id, branch_id, made_by, occurred_at,
+                                                             payment_method, total_minor, request, code, message)
+                        VALUES (gen_random_uuid(), ?, gen_random_uuid(), ?, ?, now(), 'cash', 100, '{}', 'period_closed',
+                                'Test refusal')
+                        """).params(t.tenantId(), t.headOffice(), user).update();
+        owner.sql("""
+                        INSERT INTO retail_offline_waiting (id, tenant_id, client_sale_id, branch_id, made_by, occurred_at,
+                                                            total_minor, reported_by)
+                        VALUES (gen_random_uuid(), ?, gen_random_uuid(), ?, ?, now(), 100, ?)
+                        """).params(t.tenantId(), t.headOffice(), user, user).update();
         // Optional purchasing (ADR-033, #198): an order and its line, a receipt against it and its line, a supplier
         // invoice
         // with its line and entry, a payment with its allocation, and the tolerances.
@@ -608,7 +651,7 @@ class RlsIsolationIT {
                 .params(UUID.randomUUID(), t.tenantId(), transfer, t.tenantId())
                 .update();
         // Retail branch roles (ADR-033, #191).
-        owner.sql("INSERT INTO retail_branch_roles (tenant_id, branch_id, role) VALUES (?, ?, 'store')")
+        owner.sql("INSERT INTO retail_branch_roles (tenant_id, branch_id, role) VALUES (?, ?, 'shop')")
                 .params(t.tenantId(), t.secondBranch())
                 .update();
         // Retail optional documents (ADR-033, #197): a prefix, a counter, a quotation with a line and its document.
@@ -638,7 +681,7 @@ class RlsIsolationIT {
                         INSERT INTO retail_documents (id, tenant_id, created_by, type, number, seq_no, branch_id, issue_date,
                                                       sale_id, buyer_name, currency, total_minor, snapshot)
                         VALUES (?, ?, ?, 'invoice', 'TAX-HQ-000001', 1, ?, DATE '2026-01-15', ?, 'Test Buyer 01', 'UGX', 150,
-                                '{"v": 1}')
+                                '{"v": 1, "buyer": {"name": "Test Buyer 01", "contact": "+256700000004", "tin": "1000000001"}}')
                         """)
                 .params(UUID.randomUUID(), t.tenantId(), user, t.headOffice(), sale)
                 .update();
@@ -686,6 +729,44 @@ class RlsIsolationIT {
                                                             interest_due_minor, status)
                         VALUES (?, ?, ?, 1, DATE '2026-02-15', 100000, 10000, 'pending')
                         """).params(item, t.tenantId(), loan).update();
+        UUID charge = UUID.randomUUID();
+        owner.sql("""
+                        INSERT INTO lending_loan_charges (id, tenant_id, loan_id, schedule_item_id, charge_type, period_no,
+                                                          business_date, amount_minor)
+                        VALUES (?, ?, ?, ?, 'penalty', 1, DATE '2026-02-16', 1000)
+                        """).params(charge, t.tenantId(), loan, item).update();
+        owner.sql("""
+                        INSERT INTO lending_charge_waivers (id, tenant_id, loan_id, charge_id, amount_minor, business_date,
+                                                            reason, requested_by)
+                        VALUES (?, ?, ?, ?, 400, DATE '2026-02-17', 'Test waiver', ?)
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), loan, charge, user)
+                .update();
+        owner.sql("""
+                        INSERT INTO lending_item_waivers (id, tenant_id, loan_id, schedule_item_id, component, amount_minor,
+                                                          business_date, reason, requested_by)
+                        VALUES (?, ?, ?, ?, 'interest', 300, DATE '2026-02-17', 'Test waiver', ?)
+                        """).params(UUID.randomUUID(), t.tenantId(), loan, item, user).update();
+        owner.sql("""
+                        INSERT INTO lending_collection_actions (id, tenant_id, loan_id, action_type, note, performed_by,
+                                                                performed_at)
+                        VALUES (?, ?, ?, 'call', 'Test call', ?, now())
+                        """).params(UUID.randomUUID(), t.tenantId(), loan, user).update();
+        owner.sql("""
+                        INSERT INTO lending_loan_notices (id, tenant_id, loan_id, schedule_item_id, template_key,
+                                                          business_date)
+                        VALUES (?, ?, ?, ?, 'loan.overdue_1', DATE '2026-02-17')
+                        """).params(UUID.randomUUID(), t.tenantId(), loan, item).update();
+        // A repayment brought in from a paper register (ADR-071, #466).
+        owner.sql("""
+                        INSERT INTO lending_brought_in_repayments (id, tenant_id, loan_id, line_no, value_date,
+                                                                   amount_minor, payment_method_key, note)
+                        VALUES (?, ?, ?, 1, DATE '2026-02-10', 5000, 'cash', 'Test receipt 01')
+                        """).params(UUID.randomUUID(), t.tenantId(), loan).update();
+        owner.sql("""
+                        INSERT INTO lending_arrears_runs (tenant_id, business_date, started_at, lease_until, finished_at)
+                        VALUES (?, DATE '2026-02-17', now(), now(), now())
+                        """).params(t.tenantId()).update();
         UUID repayment = UUID.randomUUID();
         owner.sql("""
                         INSERT INTO lending_loan_transactions (id, tenant_id, branch_id, loan_id, txn_type, amount_minor,
@@ -701,6 +782,13 @@ class RlsIsolationIT {
                         VALUES (?, ?, ?, ?, ?, 'principal', 1000)
                         """)
                 .params(UUID.randomUUID(), t.tenantId(), repayment, repayment, item)
+                .update();
+        owner.sql("""
+                        INSERT INTO lending_charge_cancels (id, tenant_id, loan_id, charge_id, amount_minor, business_date,
+                                                            reason, cause_txn_id)
+                        VALUES (?, ?, ?, ?, 100, DATE '2026-02-17', 'paid_before_charged', ?)
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), loan, charge, repayment)
                 .update();
         // Savings (increment 9, #151): a product, an account, a deposit on the fixture journal, an
         // end-of-day balance and an interest posting.
@@ -945,7 +1033,7 @@ class RlsIsolationIT {
                         "INSERT INTO retail_notice_runs (tenant_id, kind, run_on) VALUES (?, 'daily_summary', DATE '2026-01-15')")
                 .param(t.tenantId())
                 .update();
-        // The merchant statement, its line, a reconciliation run and one of its findings (migration V85, #317).
+        // The merchant statement, its line, a reconciliation run and one of its findings (migration V123, #317).
         // JUSTIFICATION-A3: one factory row per tenant table; they point at the fixture user, intent and journal entry
         // above.
         UUID statement = UUID.randomUUID();
@@ -984,6 +1072,340 @@ class RlsIsolationIT {
                         "INSERT INTO payment_reconciliation_findings (id, tenant_id, run_id, kind, intent_id) VALUES (?, ?, ?, 'pending_over_24h', ?)")
                 .params(UUID.randomUUID(), t.tenantId(), run, intent)
                 .update();
+        // A feedback item a member of staff sent from inside the app (migration V80, #447).
+        owner.sql("""
+                        INSERT INTO feedback_items (id, tenant_id, sender_user_id, kind, message, app_version)
+                        VALUES (?, ?, ?, 'idea', 'Test feedback message', 'test (abc123)')
+                        """).params(UUID.randomUUID(), t.tenantId(), user).update();
+        // The Owner's own plan (migration V90, #472): a module asked for and a cancellation scheduled.
+        owner.sql("""
+                        INSERT INTO subscription_module_requests (id, tenant_id, module_key, requested_by)
+                        VALUES (?, ?, 'retail', ?)
+                        """).params(UUID.randomUUID(), t.tenantId(), user).update();
+        owner.sql("""
+                        INSERT INTO subscription_scheduled_changes (id, tenant_id, kind, effective_on, requested_by)
+                        VALUES (?, ?, 'cancel', DATE '2026-12-01', ?)
+                        """).params(UUID.randomUUID(), t.tenantId(), user).update();
+        // A barcode on a product (migration V87, #345).
+        owner.sql("""
+                        INSERT INTO retail_product_barcodes (id, tenant_id, product_id, code, format)
+                        VALUES (?, ?, ?, 'TEST-RLS-01', 'code128')
+                        """).params(UUID.randomUUID(), t.tenantId(), retailProduct).update();
+        // Download my data (migration V91, #334): the weekly email switch, and a week skipped for want of an Owner.
+        owner.sql("""
+                        INSERT INTO data_export_settings (id, tenant_id, weekly_email, updated_by)
+                        VALUES (?, ?, false, ?)
+                        """).params(UUID.randomUUID(), t.tenantId(), user).update();
+        owner.sql("""
+                        INSERT INTO data_export_weekly (id, tenant_id, week_of, status, reason, finished_at)
+                        VALUES (?, ?, DATE '2026-10-05', 'skipped', 'no_owner_email', now())
+                        """).params(UUID.randomUUID(), t.tenantId()).update();
+        // A business this one referred and a commission line the operator typed (migration V88, #464); the referral
+        // code
+        // of every business is written by the trigger on tenants.
+        UUID referred = UUID.randomUUID();
+        owner.sql(
+                        "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, ?, 'Test Referred Shop', '00000000-0000-4000-8000-000000000001')")
+                .params(referred, "rls-ref-" + referred.toString().substring(0, 8))
+                .update();
+        UUID referral = UUID.randomUUID();
+        owner.sql("""
+                        INSERT INTO tenant_referrals (id, tenant_id, referred_tenant_id, code, source)
+                        VALUES (?, ?, ?, 'TESTRF22', 'operator')
+                        """).params(referral, t.tenantId(), referred).update();
+        owner.sql("""
+                        INSERT INTO referral_commission_lines (id, tenant_id, referral_id, kind, amount_minor, currency, note)
+                        VALUES (?, ?, ?, 'manual', 1000, 'UGX', 'Test commission')
+                        """).params(UUID.randomUUID(), t.tenantId(), referral).update();
+        // The billing contact and a cancelled request to close the business (migration V102, #571).
+        owner.sql("""
+                        INSERT INTO billing_contacts (tenant_id, full_name, email, phone_e164, updated_by)
+                        VALUES (?, 'Test Accountant 01', ?, '+256700000091', ?)
+                        """)
+                .params(t.tenantId(), "acct-" + t.slug() + "@example.test", user)
+                .update();
+        owner.sql("""
+                        INSERT INTO tenant_closures (id, tenant_id, status, requested_by, remove_after, cancelled_by,
+                                                     cancelled_at)
+                        VALUES (?, ?, 'cancelled', ?, DATE '2026-12-01', ?, now())
+                        """).params(UUID.randomUUID(), t.tenantId(), user, user).update();
+        // Ask BMS (migration V108, #20): a question in the spend log (a hash, never text) and a cached answer.
+        owner.sql("""
+                        INSERT INTO help_ask_questions (id, tenant_id, user_id, asked_at, question_hash, locale, outcome,
+                                                        provider, model, counted, cited_article, cost_currency)
+                        VALUES (?, ?, ?, now(), repeat('b', 64), 'en', 'model', 'gemini', 'test-model', true,
+                                'invite-someone', 'USD')
+                        """).params(UUID.randomUUID(), t.tenantId(), user).update();
+        owner.sql("""
+                        INSERT INTO help_ask_answers (tenant_id, cache_key, answer, cited_article, provider, model, revision,
+                                                      created_at, expires_at)
+                        VALUES (?, repeat('c', 64), 'Open Staff and tap Invite someone.', 'invite-someone', 'gemini',
+                                'test-model', '0123456789abcdef', now(), now() + interval '1 day')
+                        """).param(t.tenantId()).update();
+        owner.sql("""
+                        INSERT INTO help_ask_tickets (id, tenant_id, user_id, at, kind) VALUES (?, ?, ?, now(), 'provider')
+                        """).params(UUID.randomUUID(), t.tenantId(), user).update();
+        owner.sql("""
+                        INSERT INTO help_ask_spend (id, tenant_id, provider, model, reserved_at, cost_micro, cost_currency)
+                        VALUES (?, ?, 'gemini', 'test-model', now(), 0, 'USD')
+                        """).params(UUID.randomUUID(), t.tenantId()).update();
+        // The setup helper (migration V112, #626): a draft's row of counts, never the list.
+        owner.sql("""
+                        INSERT INTO help_setup_drafts (id, tenant_id, user_id, asked_at, kind, source, outcome, provider,
+                                                       model, rows_drafted, cost_currency)
+                        VALUES (?, ?, ?, now(), 'retail', 'text', 'drafted', 'gemini', 'test-model', 3, 'USD')
+                        """).params(UUID.randomUUID(), t.tenantId(), user).update();
+    }
+
+    /**
+     * Referrals (V88, #464, ADR-069): bound to A, no code, referral or commission line of B is read; the application role
+     * writes none of them; the operator's cross-business functions refuse a tenant-bound call; and A's own list holds only A's
+     * referrals.
+     */
+    @Test
+    void referralsAreIsolatedPerBusiness() throws SQLException {
+        for (String table : List.of("referral_codes", "tenant_referrals", "referral_commission_lines")) {
+            long ofB = asApp(
+                    a.tenantId(),
+                    c -> count(c, "SELECT count(*) FROM " + table + " WHERE tenant_id = ?", b.tenantId()));
+            long ofA = asApp(a.tenantId(), c -> count(c, "SELECT count(*) FROM " + table));
+            assertThat(ofB).as("rows of B in %s", table).isZero();
+            assertThat(ofA).as("rows of A in %s", table).isPositive();
+            assertThatThrownBy(() -> asApp(
+                            a.tenantId(),
+                            c -> count(c, "WITH d AS (DELETE FROM " + table + " RETURNING 1) SELECT count(*) FROM d")))
+                    .as("DELETE on %s", table)
+                    .hasStackTraceContaining("permission denied");
+        }
+        assertThatThrownBy(() -> asApp(a.tenantId(), c -> {
+                    try (PreparedStatement ps = c.prepareStatement("""
+                            INSERT INTO tenant_referrals (id, tenant_id, referred_tenant_id, code, source)
+                            VALUES (gen_random_uuid(), ?, ?, 'TESTRF33', 'operator')
+                            """)) {
+                        ps.setObject(1, a.tenantId());
+                        ps.setObject(2, b.tenantId());
+                        return ps.executeUpdate();
+                    }
+                }))
+                .hasStackTraceContaining("permission denied");
+        assertThatThrownBy(() -> asApp(
+                        a.tenantId(),
+                        c -> count(
+                                c,
+                                "SELECT count(*) FROM platform_referrals_list(NULL, NULL, NULL, NULL, NULL, 10, 0)")))
+                .hasStackTraceContaining("platform operator only");
+        assertThatThrownBy(() -> asApp(
+                        a.tenantId(),
+                        c -> count(
+                                c,
+                                "SELECT count(*) FROM platform_referral_set_referrer(?, NULL, NULL, now())",
+                                a.tenantId())))
+                .hasStackTraceContaining("platform operator only");
+        // The sign-up's and Activate's functions refuse a tenant-bound call too (review of #467): no oracle on another
+        // business's administrators, no referral written for another business, no cross-business read of a line.
+        for (String call : List.of(
+                // count(f(..)) consumes the result, so the planner cannot drop the call.
+                "SELECT count(referral_is_self(?, 'someone@example.test', NULL))",
+                "SELECT count(*) FROM (SELECT onboarding_application_set_referrer(gen_random_uuid(), ?, 'TESTRF22')) x",
+                "SELECT count(platform_referral_of_line(?))",
+                "SELECT count(platform_referral_mark_payment_refunded(?, NULL, now()))",
+                "SELECT count(*) FROM onboarding_application_referrer(?)",
+                "SELECT count(*) FROM platform_referral_from_application(gen_random_uuid(), ?, NULL)")) {
+            assertThatThrownBy(() -> asApp(a.tenantId(), c -> count(c, call, b.tenantId())))
+                    .as(call)
+                    .satisfiesAnyOf(
+                            e -> assertThat(e).hasStackTraceContaining(" only"),
+                            e -> assertThat(e).hasStackTraceContaining("platform operator's"));
+        }
+        // A typed commission line refuses a tenant-bound call even bound to the referrer itself, with a real referral
+        // of
+        // that referrer and an active operator: the beneficiary never writes commission to itself (review of #467).
+        UUID operator = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql("INSERT INTO platform_users (id, email, full_name) VALUES (?, ?, 'Test Operator 12')")
+                .params(operator, "rls-ref-op-" + operator.toString().substring(0, 8) + "@example.test")
+                .update();
+        UUID referralOfA = TestDatabase.owner()
+                .sql("SELECT id FROM tenant_referrals WHERE tenant_id = ? LIMIT 1")
+                .param(a.tenantId())
+                .query(UUID.class)
+                .single();
+        long linesOfA = TestDatabase.owner()
+                .sql("SELECT count(*) FROM referral_commission_lines WHERE tenant_id = ?")
+                .param(a.tenantId())
+                .query(Long.class)
+                .single();
+        assertThatThrownBy(() -> asApp(
+                        a.tenantId(),
+                        c -> count(
+                                c,
+                                "SELECT count(platform_referral_add_manual_line(gen_random_uuid(), ?, 1000, 'UGX', 'Test', ?))",
+                                referralOfA,
+                                operator)))
+                .hasStackTraceContaining("typed by the platform operator only");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM referral_commission_lines WHERE tenant_id = ?")
+                        .param(a.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(linesOfA);
+        for (String table : List.of("referral_commission_rules", "referral_settings", "referral_payment_outcomes")) {
+            assertThatThrownBy(() -> asApp(a.tenantId(), c -> count(c, "SELECT count(*) FROM " + table)))
+                    .as("SELECT on %s", table)
+                    .hasStackTraceContaining("permission denied");
+        }
+        long mine = asApp(a.tenantId(), c -> count(c, "SELECT count(*) FROM tenant_referrals_mine()"));
+        long all = TestDatabase.owner()
+                .sql("SELECT count(*) FROM tenant_referrals WHERE tenant_id = ? AND ended_at IS NULL")
+                .param(a.tenantId())
+                .query(Long.class)
+                .single();
+        assertThat(mine).isEqualTo(all).isPositive();
+    }
+
+    /**
+     * Referrals through the application role, adversarially (test review of #467): bound to A, no referral row of B or of A
+     * itself is changed or added by statement, no operator function acts on B's referral or line, no commission is worked out
+     * for B's payment, and the business A referred sees none of the commission its payments earn A. B's rows are as they were.
+     */
+    @Test
+    void referralRowsAreNeverChangedOrWorkedOutThroughTheAppRole() throws SQLException {
+        JdbcClient owner = TestDatabase.owner();
+        UUID lineOfB = owner.sql("SELECT id FROM referral_commission_lines WHERE tenant_id = ? LIMIT 1")
+                .param(b.tenantId())
+                .query(UUID.class)
+                .single();
+        UUID referralOfB = owner.sql("SELECT id FROM tenant_referrals WHERE tenant_id = ? LIMIT 1")
+                .param(b.tenantId())
+                .query(UUID.class)
+                .single();
+        UUID lineOfA = owner.sql("SELECT id FROM referral_commission_lines WHERE tenant_id = ? LIMIT 1")
+                .param(a.tenantId())
+                .query(UUID.class)
+                .single();
+        UUID referralOfA = owner.sql("SELECT id FROM tenant_referrals WHERE tenant_id = ? LIMIT 1")
+                .param(a.tenantId())
+                .query(UUID.class)
+                .single();
+        UUID referredByA = owner.sql("SELECT referred_tenant_id FROM tenant_referrals WHERE id = ?")
+                .param(referralOfA)
+                .query(UUID.class)
+                .single();
+        UUID paymentOfB = owner.sql("SELECT id FROM subscription_payments WHERE tenant_id = ? LIMIT 1")
+                .param(b.tenantId())
+                .query(UUID.class)
+                .single();
+        String linesOfB = owner.sql(
+                        "SELECT string_agg(to_jsonb(l)::text, ',' ORDER BY id) FROM referral_commission_lines l WHERE tenant_id = ?")
+                .param(b.tenantId())
+                .query(String.class)
+                .single();
+
+        for (Map.Entry<String, UUID> write : List.of(
+                Map.entry(
+                        "UPDATE referral_commission_lines SET paid_on = current_date, paid_at = now() WHERE id = ?",
+                        lineOfB),
+                Map.entry(
+                        "UPDATE referral_commission_lines SET paid_on = current_date, paid_at = now() WHERE id = ?",
+                        lineOfA),
+                Map.entry(
+                        "UPDATE referral_commission_lines SET amount_minor = 999999 WHERE tenant_id = ?", a.tenantId()),
+                Map.entry("UPDATE tenant_referrals SET tenant_id = tenant_id WHERE id = ?", referralOfB),
+                Map.entry("UPDATE tenant_referrals SET rule_id = NULL WHERE id = ?", referralOfA),
+                Map.entry("UPDATE referral_codes SET code = 'TESTRF99' WHERE tenant_id = ?", b.tenantId()),
+                Map.entry("""
+                        INSERT INTO referral_commission_lines (id, tenant_id, referral_id, kind, amount_minor, currency, note)
+                        SELECT gen_random_uuid(), tenant_id, id, 'manual', 1000000, 'UGX', 'Test' FROM tenant_referrals WHERE id = ?
+                        """, referralOfA))) {
+            assertThatThrownBy(() -> asApp(a.tenantId(), c -> {
+                        try (PreparedStatement ps = c.prepareStatement(write.getKey())) {
+                            ps.setObject(1, write.getValue());
+                            return ps.executeUpdate();
+                        }
+                    }))
+                    .as(write.getKey())
+                    .hasStackTraceContaining("permission denied");
+        }
+        for (String call : List.of(
+                "SELECT count(platform_referral_mark_paid(?, current_date, 'cash', NULL, NULL, true, NULL, now()))",
+                "SELECT count(platform_referral_reverse_line(gen_random_uuid(), ?, 'Test', true, NULL, now()))",
+                "SELECT count(*) FROM platform_referral_lines(?)",
+                "SELECT count(platform_referral_set_rule(?, '00000000-0000-4000-8000-000000000890'))")) {
+            UUID target = call.contains("set_rule") || call.contains("_lines(") ? referralOfB : lineOfB;
+            assertThatThrownBy(() -> asApp(a.tenantId(), c -> count(c, call, target)))
+                    .as(call)
+                    .satisfiesAnyOf(
+                            e -> assertThat(e).hasStackTraceContaining(" only"),
+                            e -> assertThat(e).hasStackTraceContaining("platform operator's"));
+        }
+        assertThatThrownBy(
+                        () -> asApp(
+                                a.tenantId(),
+                                c -> count(
+                                        c,
+                                        "SELECT count(platform_referral_add_rule(gen_random_uuid(), 'percent_of_payment', 10000, NULL, NULL, NULL, NULL, NULL))")))
+                .hasStackTraceContaining("platform operator's");
+        assertThatThrownBy(
+                        () -> asApp(
+                                a.tenantId(),
+                                c -> count(
+                                        c,
+                                        "SELECT count(platform_referral_set_default_rule('00000000-0000-4000-8000-000000000890', NULL, now()))")))
+                .hasStackTraceContaining("platform operator's");
+        // The commission of a payment is worked out only for the bound business's own payment.
+        assertThatThrownBy(() -> asApp(
+                        a.tenantId(),
+                        c -> count(
+                                c,
+                                "SELECT count(*) FROM platform_referral_commission_for_payment(?, NULL)",
+                                paymentOfB)))
+                .hasStackTraceContaining("unknown payment");
+        // The business A referred sees no referral and no commission line, though its payments are what earn them.
+        for (String table : List.of("referral_codes", "tenant_referrals", "referral_commission_lines")) {
+            long seen = asApp(
+                    referredByA, c -> count(c, "SELECT count(*) FROM " + table + " WHERE tenant_id = ?", a.tenantId()));
+            assertThat(seen).as("rows of the referrer in %s", table).isZero();
+        }
+        long mineOfReferred = asApp(referredByA, c -> count(c, "SELECT count(*) FROM tenant_referrals_mine()"));
+        assertThat(mineOfReferred).isZero();
+        assertThat(owner.sql(
+                                "SELECT string_agg(to_jsonb(l)::text, ',' ORDER BY id) FROM referral_commission_lines l WHERE tenant_id = ?")
+                        .param(b.tenantId())
+                        .query(String.class)
+                        .single())
+                .isEqualTo(linesOfB);
+    }
+
+    /**
+     * Shop logos (V85, #461): bound to A, no branch of B and its logo is read, and A cannot point one of its branches at a
+     * document of B (the key is on the tenant and the document).
+     */
+    @Test
+    void shopLogosAreIsolatedPerTenant() throws SQLException {
+        long ofB = asApp(
+                a.tenantId(),
+                c -> count(
+                        c,
+                        "SELECT count(*) FROM branches WHERE logo_document_id IS NOT NULL AND tenant_id = ?",
+                        b.tenantId()));
+        long ofA =
+                asApp(a.tenantId(), c -> count(c, "SELECT count(*) FROM branches WHERE logo_document_id IS NOT NULL"));
+        assertThat(ofB).isZero();
+        assertThat(ofA).isOne();
+        UUID logoOfB = TestDatabase.owner()
+                .sql("SELECT logo_document_id FROM branches WHERE id = ?")
+                .param(b.secondBranch())
+                .query(UUID.class)
+                .single();
+        assertThatThrownBy(() -> asApp(a.tenantId(), c -> {
+                    try (PreparedStatement ps =
+                            c.prepareStatement("UPDATE branches SET logo_document_id = ? WHERE id = ?")) {
+                        ps.setObject(1, logoOfB);
+                        ps.setObject(2, a.secondBranch());
+                        return ps.executeUpdate();
+                    }
+                }))
+                .hasStackTraceContaining("branches_logo_fk");
     }
 
     /**
@@ -1066,7 +1488,7 @@ class RlsIsolationIT {
                 .update();
     }
 
-    static List<String> tenantOwnedTables() {
+    public static List<String> tenantOwnedTables() {
         return TestDatabase.owner().sql("""
                         SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                          WHERE n.nspname = 'public' AND c.relkind = 'r'

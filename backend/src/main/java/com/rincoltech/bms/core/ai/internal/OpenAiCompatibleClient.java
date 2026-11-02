@@ -56,6 +56,9 @@ final class OpenAiCompatibleClient implements LlmClient {
     private final URI endpoint;
     private final String apiKey;
     private final String model;
+    /** Sent as {@code reasoning_effort} when not null (Ask BMS's Gemini, #601); other providers never get it. */
+    private final String reasoningEffort;
+
     private final Duration budget;
     private final HttpClient http;
     private final ObjectMapper mapper;
@@ -72,9 +75,23 @@ final class OpenAiCompatibleClient implements LlmClient {
             LongSupplier nanoClock,
             Sleeper sleeper,
             DoubleSupplier jitter) {
+        this(endpoint, apiKey, model, null, budget, mapper, nanoClock, sleeper, jitter);
+    }
+
+    OpenAiCompatibleClient(
+            URI endpoint,
+            String apiKey,
+            String model,
+            String reasoningEffort,
+            Duration budget,
+            ObjectMapper mapper,
+            LongSupplier nanoClock,
+            Sleeper sleeper,
+            DoubleSupplier jitter) {
         this.endpoint = endpoint;
         this.apiKey = apiKey;
         this.model = model;
+        this.reasoningEffort = reasoningEffort;
         this.budget = budget;
         this.mapper = mapper;
         this.nanoClock = nanoClock;
@@ -233,9 +250,15 @@ final class OpenAiCompatibleClient implements LlmClient {
     }
 
     private byte[] body(Request request) {
-        List<Map<String, String>> messages = new ArrayList<>();
+        List<Map<String, Object>> messages = new ArrayList<>();
         for (Message m : request.messages()) {
-            messages.add(Map.of("role", m.role(), "content", m.content()));
+            // A picture goes as the OpenAI vision shape: the text, then the picture as a data URL (ADR-102).
+            Object content = m.imageDataUrl() == null
+                    ? m.content()
+                    : List.of(
+                            Map.of("type", "text", "text", m.content()),
+                            Map.of("type", "image_url", "image_url", Map.of("url", m.imageDataUrl())));
+            messages.add(Map.of("role", m.role(), "content", content));
         }
         Map<String, Object> json = new LinkedHashMap<>();
         json.put("model", model);
@@ -243,6 +266,9 @@ final class OpenAiCompatibleClient implements LlmClient {
         json.put("max_tokens", request.maxTokens());
         json.put("temperature", 0);
         json.put("stream", false);
+        if (reasoningEffort != null) {
+            json.put("reasoning_effort", reasoningEffort);
+        }
         if (request.json()) {
             json.put("response_format", Map.of("type", "json_object"));
         }
@@ -279,6 +305,7 @@ final class OpenAiCompatibleClient implements LlmClient {
 
     @Override
     public String toString() {
-        return "OpenAiCompatibleClient[model=" + model + "]";
+        // The endpoint holds no secret (the key is a header), and shows where a client calls.
+        return "OpenAiCompatibleClient[endpoint=" + endpoint + ", model=" + model + "]";
     }
 }

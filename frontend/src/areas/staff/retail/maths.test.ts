@@ -1,5 +1,7 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { lineTotalMinor, milliOf, parseCount, parseQty, qtyString, showPercent, showQty } from './maths';
+import { bigDrop, lineTotalMinor, milliOf, parseCount, parseQty, qtyString, showPercent, showQty } from './maths';
 
 describe('retail quantity maths', () => {
   it('parses quantities with up to three places', () => {
@@ -34,6 +36,9 @@ describe('retail quantity maths', () => {
     expect(lineTotalMinor(1001, 500)).toBe(501);
     expect(lineTotalMinor(3, 500)).toBe(2);
     expect(lineTotalMinor(9_000_000_000, 9_000_000)).toBe(81_000_000_000_000);
+    // Stock below zero (issue #680): exact, and a half rounds away from zero as the server does.
+    expect(lineTotalMinor(15000, -2000)).toBe(-30000);
+    expect(lineTotalMinor(3, -500)).toBe(-2);
   });
 });
 
@@ -46,5 +51,28 @@ describe('percent from basis points', () => {
     expect(showPercent(-250)).toBe('-2.5%');
     expect(showPercent(0)).toBe('0%');
     expect(showPercent(undefined)).toBe('n/a');
+  });
+});
+
+/** Issue #656: the server's cases, read from its unit test; a missing file fails with what to do, not a bare ENOENT. */
+function serverCases(url: URL): string {
+  const path = fileURLToPath(url);
+  if (!existsSync(path)) throw new Error(`The server's big drop cases are not at ${path}. Run the tests from a full checkout of the repository, or fix the path here if StockServiceBigDropTest.java moved.`);
+  return readFileSync(path, 'utf8');
+}
+
+// Issue #636: the server refuses a commit that leaves out a big drop, so the screen must ask for every tick the server needs.
+// The rows of the server's unit test are the shared cases: the client rule gives the same answer for each.
+describe('the big drop rule', () => {
+  const java = serverCases(new URL('../../../../../backend/src/test/java/com/rincoltech/bms/retail/stock/internal/StockServiceBigDropTest.java', import.meta.url));
+  const rows = [...java.matchAll(/"(-?[\d.]+), (-?[\d.]+), (true|false)"/g)].map((m) => [m[1]!, m[2]!, m[3] === 'true'] as const);
+
+  it('says where the server cases were looked for when the file is missing (issue #656)', () => {
+    expect(() => serverCases(new URL('./NoSuchBigDropTest.java', import.meta.url))).toThrow(/The server's big drop cases are not at .*NoSuchBigDropTest\.java\. Run the tests from a full checkout/);
+  });
+
+  it('agrees with the server on every shared case: half, nothing held, a negative balance, fractions', () => {
+    expect(rows.length).toBeGreaterThanOrEqual(10);
+    for (const [expected, counted, big] of rows) expect(bigDrop({ expected_qty: expected, counted_qty: counted }), `${expected} to ${counted}`).toBe(big);
   });
 });

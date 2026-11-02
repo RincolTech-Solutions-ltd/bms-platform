@@ -10,7 +10,11 @@ import { PURCHASE_CREATE, canUse, holdsAt } from './permissions';
 import { canCancelOrder, canEditOrder, canReceiveOrder, canSendOrder, inLineUnit, orderStatusWords, sendOutcomeWords } from './purchasing-state';
 import { Facts, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys } from './purchasing-ui';
 import { showDate } from './transfers';
+import type { ToastTone } from './toast';
 import { Problem, Success, money, useBranchName, useToast } from './ui';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { NoAccess } from '../../../app/ui/EmptyState';
+import { Hint } from '../../../app/ui/Hint';
 
 // One purchase order (the purchasing capability, ADR-033, issue #198): its lines with ordered, received and (for whoever manages
 // supplier invoices) billed, its status and its receipts, and what may be done next: change a draft, send it, cancel it, or
@@ -92,18 +96,20 @@ export function PurchaseOrderPage() {
   const allowed = canUse(me, 'purchaseOrders');
   const order = useQuery({ queryKey: ['retail', 'purchase-order', orderId], queryFn: () => retail.getPurchaseOrder(orderId), enabled: allowed });
   useCrumbLabel(order.data?.order_no);
-  const done = (text: string) => {
+  const done = (text: string, tone: ToastTone = 'success') => {
     setMessage(text);
-    show(text);
+    show(text, tone);
     void queryClient.invalidateQueries({ queryKey: ['retail'] });
   };
+  // toast-exempt: done above shows the success toast through show(text, tone), its tone 'success' unless it waits for approval
   const send = useMutation({
     mutationFn: () => retail.sendPurchaseOrder(orderId, keys.keyFor(orderId, 'send')),
     onSuccess: (r) => {
       keys.done(orderId);
-      done(sendOutcomeWords(r));
+      done(sendOutcomeWords(r), r.executed === false ? 'info' : 'success');
     },
   });
+  // toast-exempt: done above shows the success toast through show(text, tone), its tone 'success' by default
   const cancel = useMutation({
     mutationFn: (reason: string) => retail.cancelPurchaseOrder(orderId, reason, keys.keyFor(orderId, reason)),
     onSuccess: (o) => {
@@ -115,7 +121,7 @@ export function PurchaseOrderPage() {
     return (
       <main className="rt">
         <h1>Purchase order</h1>
-        <p className="empty-state">You do not have access to this page.</p>
+        <NoAccess />
       </main>
     );
   }
@@ -124,7 +130,6 @@ export function PurchaseOrderPage() {
   return (
     <main className="rt rt-wide">
       <h1>{o?.order_no ?? 'Purchase order'}</h1>
-      <p><Link to="/staff/retail/purchase-orders">Back to purchase orders</Link></p>
       {order.isPending && <SkeletonList label="Loading the order" />}
       <Problem error={order.error} />
       {message && <Success>{message}</Success>}
@@ -133,10 +138,11 @@ export function PurchaseOrderPage() {
         <div className="stack" data-tour="order-actions">
           <p className="cluster">
             {canEditOrder(o) && <Link className="btn-sm" to="/staff/retail/purchase-orders/$orderId/edit" params={{ orderId }}>Change this order</Link>}
-            {canSendOrder(o) && <button type="button" className="rt-primary" disabled={send.isPending} onClick={() => send.mutate()}>{send.isPending ? 'Sending' : 'Send to the supplier'}</button>}
+            {canSendOrder(o) && <BusyButton type="button" className="rt-primary" busy={send.isPending} onClick={() => send.mutate()}>Send to the supplier</BusyButton>
+}
             {canReceiveOrder(o) && <Link className="btn rt-primary" to="/staff/retail/purchase-orders/$orderId/receive" params={{ orderId }}>Receive goods</Link>}
           </p>
-          {canSendOrder(o) && <p className="hint">Sending locks the order. A large order needs a second person to approve it first.</p>}
+          {canSendOrder(o) && <Hint full>Sending locks the order. A large order needs a second person to approve it first.</Hint>}
           <Problem error={send.error} />
           {canCancelOrder(o) && (
             <ReasonPanel openLabel="Cancel this order" question="Why is it cancelled?" hint="What was already received stays received. Nothing more can be received against a cancelled order." confirmLabel="Cancel the order" busy={cancel.isPending} error={cancel.error} onSubmit={(reason) => cancel.mutate(reason)} />

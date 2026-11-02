@@ -14,7 +14,7 @@ public interface Approvals {
     Outcome request(ActionRequest request);
 
     /**
-     * As {@link #request}, for a request the platform raises (a payment the provider reported reversed): the maker is the tenant's
+     * As {@link #request(ActionRequest)}, for a request the platform raises (a payment the provider reported reversed): the maker is the tenant's
      * non-login system user, who holds no permission, or a person the caller names who asked the platform to raise it again (and who
      * then, as the maker, can never decide it); the maker's permission is not asked. It never executes
      * at once (an action with a threshold is refused here), the checker is a person, and a request for the same action and
@@ -30,8 +30,34 @@ public interface Approvals {
     boolean markStale(String actionType, java.util.UUID subjectId, String note);
 
     /**
+     * As {@link #request(ActionRequest)}, weighed against the rule the caller already read to decide to ask (ADR-091), so the rule
+     * is read once: a switch saved between the caller's read and this call cannot run at once an action the caller will answer as
+     * waiting. The request then waits for a checker as the caller decided.
+     */
+    Outcome request(ActionRequest request, Rule decided);
+
+    /**
+     * ADR-091: the bound business's rule for an action type: whether it asks now and from what amount. A module that decides for
+     * itself whether to ask (a return, a write-off, a void) reads this, so the switch on the approval rules is kept everywhere.
+     */
+    Rule rule(String actionType);
+
+    /**
+     * @param on whether the action asks for a second person at all; always true for an action that is not switchable
+     * @param thresholdMinor the amount from which it asks; 0 means every one asks
+     */
+    record Rule(boolean on, long thresholdMinor) {
+
+        public boolean asks(long amountMinor) {
+            return on && amountMinor >= thresholdMinor;
+        }
+    }
+
+    /**
      * @param subjectVersion the subject's {@code version} now, checked again on approval
-     * @param amountMinor the amount the threshold and the queue show, or {@code null}
+     * @param amountMinor the amount the queue and the checker see, or {@code null}
+     * @param thresholdMinor the amount weighed against the tenant's threshold: the same as {@code amountMinor} unless
+     *     the action weighs a running total (a waiver weighs everything waived on the loan with it)
      * @param payload the snapshot executed on approval (FR-APR-08); JSON-compatible values only
      */
     record ActionRequest(
@@ -40,8 +66,21 @@ public interface Approvals {
             UUID subjectId,
             Integer subjectVersion,
             Long amountMinor,
+            Long thresholdMinor,
             String currency,
-            Map<String, Object> payload) {}
+            Map<String, Object> payload) {
+
+        public ActionRequest(
+                String actionType,
+                UUID branchId,
+                UUID subjectId,
+                Integer subjectVersion,
+                Long amountMinor,
+                String currency,
+                Map<String, Object> payload) {
+            this(actionType, branchId, subjectId, subjectVersion, amountMinor, amountMinor, currency, payload);
+        }
+    }
 
     /** @param approvalId the pending request, or {@code null} when the action executed at once */
     record Outcome(boolean executed, UUID approvalId) {}

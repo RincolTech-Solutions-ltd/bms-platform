@@ -3,13 +3,16 @@ package com.rincoltech.bms.lending.loans.internal;
 import com.rincoltech.bms.core.operations.Idempotency.Outcome;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.ActionOutcome;
+import com.rincoltech.bms.lending.loans.internal.ServicingApi.ChargeList;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.DisbursementRequest;
+import com.rincoltech.bms.lending.loans.internal.ServicingApi.ItemWaiverRequest;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.PayoffQuote;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.ReasonRequest;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.RepaymentRequest;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.RepaymentResult;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.Schedule;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.TransactionList;
+import com.rincoltech.bms.lending.loans.internal.ServicingApi.WaiverRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -38,9 +41,11 @@ import org.springframework.web.bind.annotation.RestController;
 class ServicingController {
 
     private final ServicingService service;
+    private final ItemWaiverService itemWaivers;
 
-    ServicingController(ServicingService service) {
+    ServicingController(ServicingService service, ItemWaiverService itemWaivers) {
         this.service = service;
+        this.itemWaivers = itemWaivers;
     }
 
     @PostMapping("/disbursements")
@@ -124,6 +129,43 @@ class ServicingController {
             @RequestHeader(name = "Idempotency-Key", required = false) String key,
             @Valid @RequestBody ReasonRequest request) {
         return action(service.requestWriteOff(id, key, request));
+    }
+
+    @GetMapping("/charges")
+    @RequiresPermission("lending.loans.read")
+    @Operation(
+            summary = "The loan's penalty charges with what each still allows a waiver to take (R-PEN)",
+            operationId = "listLoanCharges")
+    ChargeList charges(@PathVariable("loan_id") UUID id) {
+        return service.charges(id);
+    }
+
+    @PostMapping("/charges/{charge_id}/waive")
+    @RequiresPermission("lending.charges.waive_request")
+    @Operation(
+            summary = "Request a waiver of all or part of a penalty, with a reason (FR-ARR-04)",
+            operationId = "requestLoanChargeWaiver")
+    ResponseEntity<ActionOutcome> waive(
+            @PathVariable("loan_id") UUID id,
+            @PathVariable("charge_id") UUID chargeId,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key,
+            @Valid @RequestBody WaiverRequest request) {
+        return action(service.requestWaiver(id, chargeId, key, request));
+    }
+
+    @PostMapping("/schedule/{item_no}/waive")
+    @RequiresPermission("lending.charges.waive_request")
+    @Operation(
+            summary =
+                    "Request a waiver of all or part of a schedule item's fees or interest, with a reason (FR-ARR-04);"
+                            + " the checker needs the accountant's permission; 201 when executed, 202 when it waits",
+            operationId = "requestLoanItemWaiver")
+    ResponseEntity<ActionOutcome> waiveItem(
+            @PathVariable("loan_id") UUID id,
+            @PathVariable("item_no") int itemNo,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key,
+            @Valid @RequestBody ItemWaiverRequest request) {
+        return action(itemWaivers.requestWaiver(id, itemNo, key, request));
     }
 
     private static ResponseEntity<ActionOutcome> action(Outcome<ActionOutcome> o) {

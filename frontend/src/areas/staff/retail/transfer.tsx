@@ -6,11 +6,25 @@ import { branchLabel } from '../../../auth/branch';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
 import { ToStock } from './analytics-ui';
-import { showQty } from './maths';
-import { buildTransfer, transferLineHint, transferProblem, type TransferDraft } from './transfer-state';
+import { parseQty, showQty } from './maths';
+import { buildTransfer, lineMilli, linePack, transferLineHint, transferProblem, withPacks, type TransferDraft } from './transfer-state';
 import { milliOf } from './maths';
-import { TRANSFER, TRANSFER_RECEIPT, capabilityOn, holdsAt, needsOf } from './permissions';
-import { BranchRequired, Gate, NoStockHere, ProductPicker, Problem, money, useProfitAccess, useStockingBranch } from './ui';
+import { TRANSFER, TRANSFER_RECEIPT, UNITS, capabilityOn, holdsAt, needsOf } from './permissions';
+import { BranchRequired, Gate, NoStockHere, PacksAndPiecesFields, ProductPicker, Problem, money, useProfitAccess, useStockingBranch } from './ui';
+import { ScanBar } from './scan';
+import { NextSteps, mayCountAt } from './next-steps';
+import { PACK_UNUSABLE, plusOne, scanInto } from './barcode-state';
+import { useItemAdded } from './toast';
+import { chosenPack, packsAndPiecesProblem, samePack, standardPack, unitWords } from './units-state';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { ActionBar } from '../../../app/ui/ActionBar';
+import { showDate } from './maths';
+import { RowChevron } from '../../../app/ui/ListRow';
+import { Hint } from '../../../app/ui/Hint';
+import { entryWarnings } from './entry-checks-state';
+import { useEntryChecks, useEntryNorms } from './entry-checks';
+import { EmptyChoice } from '../../../app/ui/EmptyChoice';
+import { canManageBranches } from '../branches/state';
 
 // Move stock to another branch (FR-RET-16). The branch chosen at the top of the page is the one the
 // stock leaves; it moves at cost, so nothing is gained or lost. One idempotency key per draft, kept
@@ -48,14 +62,40 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
   const save = useMutation({
     mutationFn: () => retail.createTransfer(buildTransfer(fromBranchId, draft), key),
     onSuccess: (t) => {
+      entry.saved();
       finish();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onSaved?.(t);
     },
   });
   const update = (patch: Partial<TransferDraft>) => setDraft((d) => ({ ...d, ...patch }));
-  const add = (p: Product) =>
-    setDraft((d) => (d.lines.some((l) => l.product.id === p.id) ? d : { ...d, lines: [...d.lines, { product: p, qty: '1' }] }));
+  // Every add says so (issue #498): a short toast with the quantity to move, and the line flashes once. The lines as of the
+  // last add are kept, as on the sale, so a scan answered after a render, or two before one, sees the latest.
+  const { added, already, flashOf, toast } = useItemAdded();
+  const current = useRef(draft.lines);
+  current.current = draft.lines;
+  const land = (p: Product, next: TransferDraft['lines']) => {
+    current.current = next;
+    setDraft((d) => ({ ...d, lines: next }));
+    added(p.id ?? '', p.description, next.find((l) => l.product.id === p.id)?.qty);
+  };
+  const add = (p: Product) => {
+    if (current.current.some((l) => l.product.id === p.id)) {
+      already(`${p.description} is already on the move. Change its quantity below.`);
+      return;
+    }
+    land(p, [...current.current, { product: p, qty: '1' }]);
+  };
+  // A scan (issue #345): the item at 1, or one more on its line; a move is counted in the item's own unit, so a barcode
+  // on a pack adds the pack's factor (a carton of 12 adds 12). A pack it cannot use is refused, never moved as one piece.
+  const unitsOn = capabilityOn(me, 'retail', UNITS);
+  const scanAdd = (p: Product, unitId?: string) => {
+    const pack = unitsOn ? chosenPack(p, unitId) : undefined;
+    if (unitId && !pack) return PACK_UNUSABLE;
+    const step = pack ? (parseQty(pack.factor ?? '') ?? 1000) : 1000;
+    land(p, scanInto(current.current, p, undefined, (l) => ({ ...l, qty: plusOne(l.qty, step) }), () => ({ product: p, qty: plusOne('', step) })));
+    return undefined;
+  };
   // Memoised so the prefill effect below does not run again on every render.
   const destinations = useMemo(
     () => (me.branches ?? []).filter((b) => b.id !== fromBranchId && b.stocks_goods !== false),
@@ -76,12 +116,23 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
   const problem = transferProblem(fromBranchId, draft);
   // With the two-step transfer on (ADR-033) the stock leaves now and is counted at the destination once received.
   const sends = capabilityOn(me, 'retail', TRANSFER_RECEIPT);
+  // Issue #353: each line against the item's own moves (or its purchases while it has few moves), said before saving, never blocking.
+  const norms = useEntryNorms(draft.lines.map((l) => l.product.id));
+  const warnings = draft.lines.flatMap((l, i) => entryWarnings(norms(l.product.id), {
+    screen: 'move', product: l.product, lineKey: l.product.id ?? String(i), qtyMilli: lineMilli(l), qtyFieldId: `tq-${i}`,
+  }));
+  const entry = useEntryChecks('move', fromBranchId, warnings, () => save.mutate(), draft.lines);
 
   return (
-    <form onSubmit={(e) => { e.preventDefault(); if (!problem && !save.isPending) save.mutate(); }}>
+    <form onSubmit={(e) => { e.preventDefault(); if (!problem && !save.isPending) entry.check(); }}>
       <p>From: {label(fromBranchId)}</p>
       <NoStockHere branchId={fromBranchId} />
       <div data-tour="transfer-to">
+      {destinations.length === 0 ? (
+        <EmptyChoice id="transfer-to" label="To branch" text="No other branch or store to move stock to." ask="Ask the owner to add a branch first."
+          add={canManageBranches(me) ? { label: 'Add a branch', to: '/staff/setup/branches' } : null} />
+      ) : (
+      <>
       <label htmlFor="transfer-to">To branch</label>
       <select id="transfer-to" value={draft.toBranchId} onChange={(e) => update({ toBranchId: e.target.value })}>
         <option value="">Choose a branch</option>
@@ -89,25 +140,46 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
           <option key={b.id} value={b.id}>{label(b.id)}</option>
         ))}
       </select>
+      </>
+      )}
       </div>
-      {destinations.length === 0 && <p>You have no other branch to move stock to.</p>}
-      {sends && <p className="hint">The stock leaves this branch now. The other branch counts it once they receive it.</p>}
+      {sends && <Hint full>The stock leaves this branch now. The other branch counts it once they receive it.</Hint>}
 
       <div data-tour="transfer-search">
       <ProductPicker id="transfer-search" branchId={fromBranchId} onAdd={add} />
       </div>
+      <ScanBar id="transfer-scan" branchId={fromBranchId} onFound={scanAdd} autoFocus toasts />
 
       <h2 data-tour="transfer-items">Items to move</h2>
-      {draft.lines.length === 0 && <p>No items yet. Search above and tap Add.</p>}
+      {draft.lines.length === 0 && <p>No items yet. Type an item above and tap it in the list, or scan it.</p>}
       {draft.lines.map((l, i) => {
         const hint = transferLineHint(l);
+        const change = (patch: Partial<TransferDraft['lines'][number]>) => setDraft((d) => ({ ...d, lines: d.lines.map((x, n) => (n === i ? { ...x, ...patch } : x)) }));
+        // Issue #650: an item with a standard pack is moved in cartons and pieces, or pieces alone, with the total in pieces.
+        const pack = linePack(l);
+        const now = standardPack(l.product);
+        const unit = l.product.unit;
+        const inPacks = pack?.unit && unit ? { unit: pack.unit, factor: pack.factor } : null;
+        // The fields say a quantity they cannot read themselves; the line's hint says the rest, such as more than the branch holds.
+        const unreadable = inPacks && unit ? packsAndPiecesProblem(l.packs ?? '', l.qty, unit, inPacks.unit) !== null : false;
         return (
-          <div key={l.product.id} className="rt-card">
-            <strong>{l.product.description}</strong>
-            <label htmlFor={`tq-${i}`}>Quantity ({l.product.unit})</label>
-            <input id={`tq-${i}`} inputMode="decimal" value={l.qty} aria-invalid={hint !== null}
-              onChange={(e) => setDraft((d) => ({ ...d, lines: d.lines.map((x, n) => (n === i ? { ...x, qty: e.target.value } : x)) }))} />
-            {hint && <p role="alert" className="rt-flag">{hint}</p>}
+          <div key={l.product.id} className="rt-card line-card">
+            {flashOf(l.product.id ?? '')}
+            <strong id={`tq-${i}-name`}>{l.product.description}</strong>
+            {inPacks && unit ? (
+              <PacksAndPiecesFields id={`tq-${i}`} nameId={`tq-${i}-name`} unit={unit} pack={inPacks} totalWord="Moving"
+                packs={l.packs ?? ''} pieces={l.qty} onPacks={(v) => setDraft((d) => ({ ...d, lines: d.lines.map((x, n) => (n === i ? withPacks(x, v) : x)) }))} onPieces={(v) => change({ qty: v })} invalid={hint !== null && !unreadable} />
+            ) : (
+              <>
+                <label htmlFor={`tq-${i}`}>Quantity ({l.product.unit})</label>
+                <input id={`tq-${i}`} inputMode="decimal" value={l.qty} aria-invalid={hint !== null} onChange={(e) => change({ qty: e.target.value })} />
+              </>
+            )}
+            {inPacks && unit && (l.packs ?? '').trim() !== '' && !samePack(inPacks, now ? { unit: now.unit, factor: now.factor } : undefined) && (
+              <p className="hint">{`Moving in ${unitWords(inPacks.unit).toLowerCase()} of ${showQty(inPacks.factor ?? '')}, as when you typed them. This item's pack has changed since.`}</p>
+            )}
+            {hint && !unreadable && <p role="alert" className="rt-flag">{hint}</p>}
+            {entry.notes(l.product.id ?? String(i))}
             <button type="button" aria-label={`Remove ${l.product.description}`}
               onClick={() => setDraft((d) => ({ ...d, lines: d.lines.filter((_, n) => n !== i) }))}>Remove</button>
           </div>
@@ -115,33 +187,35 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
       })}
 
       <label htmlFor="transfer-date">Date</label>
-      <input id="transfer-date" type="date" value={draft.transferDate} onChange={(e) => update({ transferDate: e.target.value })} />
+      <input id="transfer-date" type="date" max={businessToday()} value={draft.transferDate} onChange={(e) => update({ transferDate: e.target.value })} />
       <label htmlFor="transfer-note">Note (optional)</label>
       <input id="transfer-note" maxLength={300} value={draft.note} onChange={(e) => update({ note: e.target.value })} />
 
       {problem && draft.lines.length > 0 && <p>{problem}</p>}
       <Problem error={save.error} />
-      <span data-tour="transfer-save">
-        <button type="submit" className="rt-primary" disabled={problem !== null || save.isPending}>
-          {save.isPending ? 'Saving' : sends ? 'Send stock' : 'Move stock'}
-        </button>
-      </span>
+      <ActionBar>
+        <BusyButton type="submit" className="rt-primary" busy={save.isPending} notReady={problem !== null} data-tour="transfer-save">
+          {sends ? 'Send stock' : 'Move stock'}
+        </BusyButton>
+      </ActionBar>
       {(draft.lines.length > 0 || draft.toBranchId !== '') && !save.isPending && (
         <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this form</button>
       )}
+      {toast}
     </form>
   );
 }
 
-const HEADING: Record<string, string> = { voided: 'Cancelled', in_transit: 'Stock sent', received: 'Stock received', cancelled: 'Taken back' };
+const HEADING: Record<string, string> = { voided: 'Undone', in_transit: 'Stock sent', received: 'Stock received', cancelled: 'Taken back' };
 
 export function TransferSummary({ transfer, onNew }: { transfer: Transfer; onNew?: () => void }) {
   const label = useBranchLabel();
+  const { me, chooseBranch } = useStaff();
   const profit = useProfitAccess();
   return (
     <section aria-label="Saved">
       <h2>{HEADING[transfer.status ?? 'completed'] ?? 'Stock moved'}</h2>
-      <p>From <ToStock>{label(transfer.from_branch_id)}</ToStock> to <ToStock>{label(transfer.to_branch_id)}</ToStock> on {transfer.transfer_date}.</p>
+      <p>From <ToStock>{label(transfer.from_branch_id)}</ToStock> to <ToStock>{label(transfer.to_branch_id)}</ToStock> on {showDate(transfer.transfer_date)}.</p>
       {transfer.status === 'in_transit' && <p>It is on its way. It is in neither branch's stock until the other branch receives it (see On the way).</p>}
       <ul>
         {(transfer.lines ?? []).map((l) => {
@@ -157,9 +231,18 @@ export function TransferSummary({ transfer, onNew }: { transfer: Transfer; onNew
       {transfer.note && <p>Note: {transfer.note}</p>}
       {profit && transfer.cost_total_minor !== undefined && <p>Value at cost: {money(transfer.cost_total_minor)}</p>}
       {profit && transfer.shortage_cost_minor !== undefined && transfer.shortage_cost_minor > 0 && <p>Lost on the way, at cost: {money(transfer.shortage_cost_minor)}</p>}
-      {transfer.status === 'voided' && <p>Cancelled: {transfer.void_reason}</p>}
+      {transfer.status === 'voided' && <p>Undone: {transfer.void_reason}</p>}
       {transfer.status === 'cancelled' && <p>Taken back: {transfer.void_reason}</p>}
-      {onNew && <button type="button" className="rt-primary" onClick={onNew}>Move more stock</button>}
+      {/* Issue #700: once the goods are there, the next job is to count them at the branch that took them in. */}
+      {/* Move more stock stays the primary: a clear form here, or Move stock where a past move is only shown. */}
+      <NextSteps at="moveDone" lead steps={[
+        onNew ? { label: 'Move more stock', onClick: onNew } : { label: 'Move more stock', screen: 'transfer', to: '/staff/retail/transfer' },
+        {
+          label: 'Count stock at the receiving branch', words: `Count stock at ${label(transfer.to_branch_id)}`, screen: 'stocktake', to: '/staff/retail/stocktake',
+          onClick: () => chooseBranch?.(transfer.to_branch_id ?? ''),
+          show: (transfer.status === 'completed' || transfer.status === 'received') && chooseBranch !== undefined && mayCountAt(me, transfer.to_branch_id),
+        },
+      ]} />
     </section>
   );
 }
@@ -184,7 +267,7 @@ export function MoveStock() {
       ) : (
         <TransferForm key={`${branchId}-${round}`} fromBranchId={branchId} onSaved={setDone} prefill={round === 0 ? prefill : null} />
       )}
-      <p><Link to={'/staff/retail/transfers' as never}>See stock moves</Link></p>
+      <Link className="link-row" to={'/staff/retail/transfers' as never}>See stock moves<RowChevron /></Link>
     </Gate>
   );
 }

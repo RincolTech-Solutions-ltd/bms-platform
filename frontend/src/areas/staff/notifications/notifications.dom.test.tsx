@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { THEME_KEY, resetThemeMemory } from '../../../app/theme-mode';
 import type { createPush, PushState } from '../../../push/push';
+
+/** A button that may be pressed: not disabled, and not a primary button whose form is still not ready (issue #526). */
+const ready = (b: unknown) => !(b as HTMLButtonElement).disabled && (b as HTMLElement).getAttribute('data-not-ready') !== 'true';
 
 // The "Notifications on this device" switch and the list of the person's devices (ADR-050). The permission question belongs to the
 // tap: opening the page asks nothing. A state the person cannot change (blocked in the browser, not possible on this browser, not
@@ -49,7 +53,7 @@ describe('the switch', () => {
   it('asks nothing when the page opens, and shows the device as off', async () => {
     const push = fakePush('off');
     await show(push);
-    await waitFor(() => expect(toggle().disabled).toBe(false));
+    await waitFor(() => expect(ready(toggle())).toBe(true));
     expect(toggle().checked).toBe(false);
     expect(push.enable).not.toHaveBeenCalled();
     expect(screen.getByRole('status').textContent).toContain('Off');
@@ -58,7 +62,7 @@ describe('the switch', () => {
   it('turns on with one tap, which is the only place permission is asked', async () => {
     const push = fakePush('off');
     await show(push);
-    await waitFor(() => expect(toggle().disabled).toBe(false));
+    await waitFor(() => expect(ready(toggle())).toBe(true));
     fireEvent.click(toggle());
     await waitFor(() => expect(toggle().checked).toBe(true));
     expect(push.enable).toHaveBeenCalledTimes(1);
@@ -96,7 +100,7 @@ describe('the switch', () => {
     const push = fakePush('off');
     push.enable.mockRejectedValue(new Error('Could not turn notifications on for this device.'));
     await show(push);
-    await waitFor(() => expect(toggle().disabled).toBe(false));
+    await waitFor(() => expect(ready(toggle())).toBe(true));
     fireEvent.click(toggle());
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Could not turn notifications on'));
     expect(toggle().checked).toBe(false);
@@ -122,10 +126,38 @@ describe('the devices', () => {
     expect(await screen.findByText(/No device receives notifications for you yet/)).toBeTruthy();
   });
 
-  it('carries the anchors of the tour on the install control, the switch and the list', async () => {
+  it('carries the anchors of the tour on the install control, the appearance choice, the switch and the list', async () => {
     const view = await show(fakePush('off'));
-    for (const id of ['install-app', 'notifications-toggle', 'notifications-devices']) {
+    for (const id of ['install-app', 'appearance', 'notifications-toggle', 'notifications-devices']) {
       expect(view.container.querySelector(`[data-tour="${id}"]`)).not.toBeNull();
     }
+  });
+});
+
+describe('the appearance (issue #452)', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    resetThemeMemory();
+  });
+
+  it('offers Light, Dark and Same as my phone in plain words, the current choice checked', async () => {
+    window.localStorage.setItem(THEME_KEY, 'dark');
+    await show(fakePush('off'));
+    const group = screen.getByRole('radiogroup', { name: 'Appearance' });
+    expect(group.getAttribute('aria-describedby')).toBe('appearance-words');
+    expect(screen.getByText('How BMS looks on this device.')).toBeTruthy();
+    const radios = within(group).getAllByRole('radio') as HTMLInputElement[];
+    expect(radios.map((r) => [r.parentElement?.textContent?.trim(), r.checked])).toEqual([['Same as my phone', false], ['Light', false], ['Dark', true]]);
+  });
+
+  it('changes the theme on this device, the same choice the header button holds', async () => {
+    await show(fakePush('off'));
+    fireEvent.click(screen.getByRole('radio', { name: 'Dark' }));
+    expect(window.localStorage.getItem(THEME_KEY)).toBe('dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect((screen.getByRole('radio', { name: 'Dark' }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole('radio', { name: 'Same as my phone' }));
+    expect(window.localStorage.getItem(THEME_KEY)).toBeNull();
+    expect((screen.getByRole('radio', { name: 'Same as my phone' }) as HTMLInputElement).checked).toBe(true);
   });
 });

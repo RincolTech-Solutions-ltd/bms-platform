@@ -13,7 +13,9 @@ import { showQty } from './maths';
 import { PAYABLE_MANAGE, canUse, holdsAt } from './permissions';
 import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys, useCursorList } from './purchasing-ui';
 import { showDate } from './transfers';
-import { Gate, Problem, Success, money, useBranchName, useToast } from './ui';
+import { Gate, Problem, money, useBranchName, useToast } from './ui';
+import { NoAccess } from '../../../app/ui/EmptyState';
+import { Hint } from '../../../app/ui/Hint';
 
 // Supplier credit notes (the purchasing capability, issue #199): goods sent back to a supplier, or money the supplier takes off an
 // invoice. The list, found by our number, the supplier's credit note number or the supplier, and one credit note with its lines. A
@@ -42,10 +44,10 @@ export function SupplierCreditsPage() {
   const list = useCursorList(['retail', 'supplier-credits', query, status], (cursor, signal) => retail.listSupplierCredits({ query, status, cursor, signal }));
   return (
     <Gate screen="supplierCredits" title="Supplier credit notes">
-      <p className="hint" data-tour="credits-help">
+      <Hint tour="credits-help">
         A credit note is what a supplier gives you when you send goods back, or when an invoice charged too much. It is recorded against the supplier invoice,
         and what it takes comes off what that invoice leaves you to pay. Start from the invoice itself, or from the button below.
-      </p>
+      </Hint>
       <p className="cluster">
         <Link className="btn rt-primary" to="/staff/retail/supplier-credits/new" data-tour="credit-new">New credit note</Link>
         <Link className="btn-sm" to="/staff/retail/supplier-bills">Supplier invoices</Link>
@@ -138,7 +140,6 @@ export function SupplierCreditPage() {
   const { show, toast } = useToast();
   const nameOf = useBranchName();
   const keys = useActionKeys();
-  const [message, setMessage] = useState<string | null>(null);
   const allowed = canUse(me, 'supplierCredits');
   const credit = useQuery({ queryKey: ['retail', 'supplier-credit', creditId], queryFn: () => retail.getSupplierCredit(creditId), enabled: allowed });
   useCrumbLabel(credit.data?.credit_no);
@@ -146,9 +147,7 @@ export function SupplierCreditPage() {
     mutationFn: (reason: string) => retail.voidSupplierCredit(creditId, reason, keys.keyFor(creditId, reason)),
     onSuccess: (c) => {
       keys.done(creditId);
-      const text = `Voided ${c.credit_no ?? 'the credit note'}. The invoice is owed for what the credit note took off.`;
-      setMessage(text);
-      show(text);
+      show(`Voided ${c.credit_no ?? 'the credit note'}. The invoice is owed for what the credit note took off.`, 'success');
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
   });
@@ -156,7 +155,7 @@ export function SupplierCreditPage() {
     return (
       <main className="rt">
         <h1>Supplier credit note</h1>
-        <p className="empty-state">You do not have access to this page.</p>
+        <NoAccess />
       </main>
     );
   }
@@ -164,10 +163,8 @@ export function SupplierCreditPage() {
   return (
     <main className="rt rt-wide">
       <h1>{c?.credit_no ?? 'Supplier credit note'}</h1>
-      <p><Link to="/staff/retail/supplier-credits">Back to supplier credit notes</Link></p>
       {credit.isPending && <SkeletonList label="Loading the credit note" />}
       <Problem error={credit.error} />
-      {message && <Success>{message}</Success>}
       {c && <SupplierCreditView credit={c} nameOf={nameOf} payable={canUse(me, 'supplierPayments')} />}
       {c && c.status === 'posted' && holdsAt(me, PAYABLE_MANAGE, c.branch_id) && (
         <div data-tour="credit-void">

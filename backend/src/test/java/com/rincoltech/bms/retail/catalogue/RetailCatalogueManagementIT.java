@@ -76,6 +76,32 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                 .list();
     }
 
+    // JUSTIFICATION-A3: the review of #715 asks for this switch-off of a stored duplicate to be proven by an IT.
+    /**
+     * Review of #715 (issue #698): a pair stored before names compared spaces inside ("Test Cables" and "test  cables") can
+     * still have one switched off, which is the only way to retire it; only a new name is checked.
+     */
+    @Test
+    void aDuplicateStoredBeforeCanStillBeSwitchedOff() {
+        UUID kept = api.category("Test Cables");
+        UUID spaced = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql(
+                        "INSERT INTO retail_categories (id, tenant_id, name, code_prefix) VALUES (?, ?, 'test  cables', 'TCX')")
+                .params(spaced, t.tenantId())
+                .update();
+        ResponseEntity<JsonNode> off = patch("/categories/" + spaced, Map.of("active", false), ADMIN);
+        assertThat(off.getStatusCode()).as("%s", off.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(off.getBody().get("active").asBoolean()).isFalse();
+        ResponseEntity<JsonNode> recoded = patch("/categories/" + spaced, Map.of("code_prefix", "TCY"), ADMIN);
+        assertThat(recoded.getStatusCode()).as("%s", recoded.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(recoded.getBody().get("code_prefix").asString()).isEqualTo("TCY");
+        // Renaming it to the other spelling is still a duplicate.
+        ResponseEntity<JsonNode> renamed = patch("/categories/" + spaced, Map.of("name", "TEST CABLES"), ADMIN);
+        assertThat(renamed.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(renamed.getBody().get("existing_id").asString()).isEqualTo(kept.toString());
+    }
+
     @Test
     void aCategoryIsRenamedAndDeactivatedNeverDeleted() {
         UUID product = api.product("MGT-1", 1_000, 1_500);
@@ -159,6 +185,179 @@ class RetailCatalogueManagementIT extends IntegrationTest {
         assertThat(patch("/units/" + unit, Map.of("name", " "), ADMIN).getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(actions()).contains("retail.unit.updated");
+    }
+
+    /** Issue #625, ADR-100: a unit can be a pack with a usual size in another unit and a use, set on create or later. */
+    @Test
+    void aUnitKeepsItsUsualPackSizeAndUse() {
+        UUID metre = api.unit("test-metre");
+        ResponseEntity<JsonNode> roll = api.post(
+                "/units",
+                Map.of(
+                        "name",
+                        "test-roll",
+                        "usual_pack",
+                        Map.of("size", "100", "of_unit_id", metre, "purpose", "both")),
+                ADMIN);
+        assertThat(roll.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        JsonNode pack = roll.getBody().get("usual_pack");
+        assertThat(pack.get("size").asString()).isEqualTo("100.000");
+        assertThat(pack.get("of_unit").asString()).isEqualTo("test-metre");
+        assertThat(pack.get("purpose").asString()).isEqualTo("both");
+        assertThat(roll.getBody().has("price")).isFalse();
+
+        // A plain unit has none; setting one later is an update, and the list shows it.
+        UUID box = api.unit("test-box");
+        UUID piece = api.unit("test-piece");
+        assertThat(patch(
+                                "/units/" + box,
+                                Map.of("usual_pack", Map.of("size", "50", "of_unit_id", piece, "purpose", "buy")),
+                                ADMIN)
+                        .getBody()
+                        .get("usual_pack")
+                        .get("size")
+                        .asString())
+                .isEqualTo("50.000");
+        JsonNode listed = null;
+        for (JsonNode u : api.get("/units", ADMIN).getBody().get("items")) {
+            if (u.get("id").asString().equals(box.toString())) {
+                listed = u;
+            }
+            if (u.get("id").asString().equals(piece.toString())) {
+                assertThat(u.has("usual_pack")).isFalse();
+            }
+        }
+        assertThat(listed.get("usual_pack").get("purpose").asString()).isEqualTo("buy");
+
+        // A pack of itself, of a unit it does not have, a size under one or an unknown use is refused.
+        Map<String, Object> self = Map.of("usual_pack", Map.of("size", "2", "of_unit_id", box, "purpose", "both"));
+        assertThat(patch("/units/" + box, self, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        Map<String, Object> unknown = Map.of(
+                "name",
+                "test-bale",
+                "usual_pack",
+                Map.of("size", "2", "of_unit_id", UUID.randomUUID(), "purpose", "both"));
+        assertThat(api.post("/units", unknown, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        Map<String, Object> small = Map.of(
+                "name", "test-bale", "usual_pack", Map.of("size", "0.5", "of_unit_id", piece, "purpose", "both"));
+        assertThat(api.post("/units", small, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        Map<String, Object> use = Map.of(
+                "name", "test-bale", "usual_pack", Map.of("size", "2", "of_unit_id", piece, "purpose", "renting"));
+        assertThat(api.post("/units", use, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(api.post(
+                                "/units",
+                                Map.of(
+                                        "name",
+                                        "test-bale",
+                                        "usual_pack",
+                                        Map.of("size", "2", "of_unit_id", piece, "purpose", "both")),
+                                READER)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(actions()).contains("retail.unit.created", "retail.unit.updated");
+        // The audit names the smaller unit, as a person reads it, never its id.
+        String audited = TestDatabase.owner()
+                .sql("SELECT string_agg(cast(data AS text),"
+                        + " ' ') FROM audit_log WHERE tenant_id = ? AND action LIKE 'retail.unit.%'")
+                .param(t.tenantId())
+                .query(String.class)
+                .single();
+        assertThat(audited)
+                .contains("100.000 test-metre both", "50.000 test-piece buy")
+                .doesNotContain(metre.toString())
+                .doesNotContain(piece.toString());
+    }
+
+    /**
+     * Issue #637: a usual pack is changed or cleared with clear_usual_pack, which items' packs never follow, and a usual
+     * pack is one level only (ADR-100 note), so Roll of Metre and Metre of Roll can never both be kept.
+     */
+    @Test
+    void aUsualPackIsChangedOrClearedAndIsOneLevelOnly() {
+        UUID metre = api.unit("test-metre");
+        UUID roll = RetailTestSupport.id(api.post(
+                "/units",
+                Map.of("name", "test-roll", "usual_pack", Map.of("size", "50", "of_unit_id", metre, "purpose", "both")),
+                ADMIN));
+        JsonNode changed = patch(
+                        "/units/" + roll,
+                        Map.of("usual_pack", Map.of("size", "100", "of_unit_id", metre, "purpose", "sell")),
+                        ADMIN)
+                .getBody();
+        assertThat(changed.get("usual_pack").get("size").asString()).isEqualTo("100.000");
+        assertThat(changed.get("usual_pack").get("purpose").asString()).isEqualTo("sell");
+
+        // Setting and clearing at once is refused; clearing alone removes it, and clearing again changes nothing.
+        Map<String, Object> both = Map.of(
+                "clear_usual_pack", true, "usual_pack", Map.of("size", "100", "of_unit_id", metre, "purpose", "both"));
+        assertThat(patch("/units/" + roll, both, ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        ResponseEntity<JsonNode> cleared = patch("/units/" + roll, Map.of("clear_usual_pack", true), ADMIN);
+        assertThat(cleared.getStatusCode()).as("%s", cleared.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(cleared.getBody().has("usual_pack")).isFalse();
+        int version = cleared.getBody().get("version").asInt();
+        assertThat(patch("/units/" + roll, Map.of("clear_usual_pack", true), ADMIN)
+                        .getBody()
+                        .get("version")
+                        .asInt())
+                .isEqualTo(version);
+        String audited = TestDatabase.owner()
+                .sql("SELECT string_agg(cast(data AS text), ' ') FROM audit_log WHERE tenant_id = ?"
+                        + " AND action = 'retail.unit.updated'")
+                .param(t.tenantId())
+                .query(String.class)
+                .single();
+        assertThat(audited).contains("100.000 test-metre sell");
+
+        // Issue #699 (ADR-107): a usual pack may count another pack, a box of 2 rolls of 100 metres; only a loop is
+        // refused, so Metre cannot be a pack of Roll while Roll is a pack of Metre, nor of the box of rolls.
+        patch(
+                "/units/" + roll,
+                Map.of("usual_pack", Map.of("size", "100", "of_unit_id", metre, "purpose", "both")),
+                ADMIN);
+        ResponseEntity<JsonNode> cycle = patch(
+                "/units/" + metre,
+                Map.of("usual_pack", Map.of("size", "2", "of_unit_id", roll, "purpose", "both")),
+                ADMIN);
+        assertThat(cycle.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(cycle.getBody().get("errors").get(0).get("code").asString()).isEqualTo("would_loop");
+        ResponseEntity<JsonNode> box = api.post(
+                "/units",
+                Map.of(
+                        "name",
+                        "test-box-of-rolls",
+                        "usual_pack",
+                        Map.of("size", "2", "of_unit_id", roll, "purpose", "buy")),
+                ADMIN);
+        assertThat(box.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(box.getBody().get("usual_pack").get("of_unit_id").asString()).isEqualTo(roll.toString());
+        ResponseEntity<JsonNode> deep = patch(
+                "/units/" + metre,
+                Map.of(
+                        "usual_pack",
+                        Map.of(
+                                "size",
+                                "1",
+                                "of_unit_id",
+                                box.getBody().get("id").asString(),
+                                "purpose",
+                                "both")),
+                ADMIN);
+        assertThat(deep.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(deep.getBody().get("errors").get(0).get("code").asString()).isEqualTo("would_loop");
+
+        // Review of #710: a loop already stored (only a direct write could leave one) ends the check in a refusal at
+        // once.
+        UUID bag = api.unit("test-bag");
+        UUID sack = api.unit("test-sack");
+        String loop = "UPDATE retail_units SET pack_size = 2, pack_of_unit_id = ?, pack_purpose = 'buy' WHERE id = ?";
+        TestDatabase.owner().sql(loop).params(sack, bag).update();
+        TestDatabase.owner().sql(loop).params(bag, sack).update();
+        ResponseEntity<JsonNode> stored = patch(
+                "/units/" + api.unit("test-bundle"),
+                Map.of("usual_pack", Map.of("size", "3", "of_unit_id", bag, "purpose", "buy")),
+                ADMIN);
+        assertThat(stored.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(stored.getBody().get("errors").get(0).get("code").asString()).isEqualTo("would_loop");
     }
 
     @Test
@@ -262,7 +461,7 @@ class RetailCatalogueManagementIT extends IntegrationTest {
 
     /** A product's code is normalised like the importer's, a duplicate says so, and the audit holds no cost. */
     @Test
-    void productCodesAreNormalisedAndAuditHoldsNoCost() {
+    void aTypedCodeIsRefusedAndAuditHoldsNoCost() {
         api.product("MGT-6", 7_777, 9_999);
         UUID category = api.category("Test Cat Z");
         UUID unit = api.unit("kg");
@@ -280,8 +479,9 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                 "sell_minor",
                 2);
         ResponseEntity<JsonNode> again = api.post("/products", body, ADMIN);
-        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-        assertThat(again.getBody().get("detail").asString()).contains("code exists");
+        // Issue #562: the app makes every new item's code.
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(again.getBody().get("code").asString()).isEqualTo("item_code_made_by_app");
         String audited = TestDatabase.owner()
                 .sql("SELECT string_agg(cast(data AS text),"
                         + " ' ') FROM audit_log WHERE tenant_id = ? AND action LIKE 'retail.product.%'")
@@ -341,9 +541,13 @@ class RetailCatalogueManagementIT extends IntegrationTest {
                     patchIfMatch(target.path(), Map.of("name", "Test Second " + target.table()), ADMIN, "1");
             assertThat(stale.getStatusCode()).as(target.table()).isEqualTo(HttpStatus.CONFLICT);
             assertThat(stale.getBody().get("code").asString()).isEqualTo("version_conflict");
+            // A category name is stored in the display style (issue #698, ADR-109); the others as typed.
+            String stored = target.table().equals("retail_categories")
+                    ? CatalogueNames.display("Test First " + target.table())
+                    : "Test First " + target.table();
             assertThat(target.row())
                     .as(target.table())
-                    .containsEntry("name", "Test First " + target.table())
+                    .containsEntry("name", stored)
                     .containsEntry("version", 2);
         }
     }

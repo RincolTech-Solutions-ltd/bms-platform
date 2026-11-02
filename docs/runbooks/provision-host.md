@@ -8,7 +8,13 @@ production VM. Nothing is shared between the two environments.
 
 ## 1. Create the VM
 
-- 2 vCPU, 4 GB RAM, 40 GB disk, Ubuntu LTS (for example Hetzner Cloud CX22), in the region
+The production server, its firewall, the DNS records, the R2 buckets with the backup lock and the host's tokens are created
+by Terraform (`infra/production/`, Hetzner or AWS, ADR-063 proposed; runbook `docs/runbooks/terraform-production.md`) on
+production day, and cloud-init does section 2 with `bms` as the service user instead of `deploy`. Follow that runbook for a
+new production host; the sections below still say what the host needs. The deploy SSH key and GitHub Environment of sections
+2 and 5 belong to ADR-006's tag deploy, which ADR-063 proposes to replace.
+
+- 2 vCPU, 4 GB RAM, 40 GB disk, Ubuntu LTS (for example Hetzner Cloud CX23), in the region
   confirmed for NFR-DP-07.
 - Firewall: inbound 22 from the team's addresses only; 80 and 443 (TCP) and 443 (UDP) from
   anywhere. Nothing else.
@@ -115,7 +121,7 @@ two fabricated tenants.
 ## 8. The ARM64 staging host (shared, behind a Cloudflare Tunnel)
 
 **Host:** the existing Raspberry Pi 4 (8 GB, Debian 13, `linux/arm64`, SD card) at the Rincol home
-site, shared with other workloads. BMS gets about 900 MB of memory, hard-capped by `bms.slice`.
+site, shared with other workloads. BMS gets about 1.6 GB of memory, hard-capped by `bms.slice` (900 MB until 24 Oct 2026; raised for no-gap deploys, pending ADR-083).
 No inbound port is opened, now or later (ADR-018, chapter 9 section 9.13). Run everything below
 as root unless it says otherwise.
 
@@ -239,6 +245,19 @@ Later changes to the unit files arrive in `/opt/bms/systemd/` with each release;
 `/etc/systemd/system/` and `systemctl daemon-reload` when a release changes them (`bms-pull.service`
 now logs a notice when the shipped units differ from the installed ones, ADR-018 finding L2).
 
+**Cron is an accepted way to run the timer jobs (issue #580).** The nightly backup always runs from the
+`bms` user's crontab (01:15, section 8.5). The weekly restore drill may run from the timer or from that
+crontab (Sunday 03:30); the staging host uses cron for both, and nothing on the host needs to change.
+The puller's unit check accepts this: a unit that is not installed at all, whose service's `ExecStart`
+script a line of the `bms` user's crontab runs (a commented-out line does not count), is not named in the
+log. An installed unit that differs from the shipped one is always named. Do not run a job both ways: if
+you later install `bms-restore-drill.timer`, remove its cron line in the same change.
+
+The puller keeps the images of the live and previous release and every image a container uses, running
+or stopped, and removes the other release images. Under ADR-083 the proxy keeps an older release's image
+while its caddy binary and Caddyfiles are unchanged, so that image stays until the proxy is recreated;
+Docker never has to refuse a removal (`deploy/tests/cleanup-test.sh`).
+
 ### 8.5 First deploy and checks
 
 If the hosted runners are unavailable (for example the organisation's private-repo minutes are used up),
@@ -272,4 +291,9 @@ crontab -u bms -e
 ```
 
 Run `/opt/bms/backup.sh` once as `bms` and confirm the file appears in R2 under `staging/`. Then install
-`bms-monitor.timer` and `bms-restore-drill.timer` (`docs/runbooks/monitoring-and-alerts.md` section 2).
+`bms-monitor.timer` and `bms-restore-drill.timer` (`docs/runbooks/monitoring-and-alerts.md` section 2), or
+run the drill from the same crontab instead of its timer (section 8.4 says why both are accepted):
+
+```bash
+30 3 * * 0 /opt/bms/restore-drill.sh >> /opt/bms/state/restore-drill.log 2>&1
+```

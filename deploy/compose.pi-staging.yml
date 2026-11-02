@@ -15,12 +15,23 @@
 # the api's management port, so a wrong tunnel ingress rule or a leaked onboarding token cannot
 # expose the database or the actuator directly.
 #
-# Memory budget: about 900 MB for all of BMS staging on a host it shares with other workloads.
+# Memory budget: about 1.6 GB for all of BMS staging (was 900 MB until 24 Oct 2026, D37) on a host it shares with other workloads.
 # Every container runs under the systemd slice bms.slice (deploy/systemd/bms.slice), whose
-# MemoryMax=900M is the hard cap for the whole stack, including the one-shot migrate container.
+# MemoryMax=1600M is the hard cap for the whole stack, including the one-shot migrate container.
 # The per-container limits below add up to 736 MB steady, 896 MB while a migration runs:
 #
-#   postgres 176  api 448  web 32  proxy 32  cloudflared 48  (migrate 160, only during a deploy)
+#   postgres 176  api 448  web 32  proxy 32  cloudflared 48  (migrate 160, only during a deploy;
+#   keep-assets 32 runs alone, before the switch, ADR-078)
+#
+# During a switch a second api and a second web run beside the old ones until the new ones are healthy
+# (ADR-083). deploy.sh starts the second api only while its own limit plus 64 MB (512 MB) is free below
+# the slice's MemoryHigh and on the host, so the new JVM's start-up peak can never bring the slice's OOM
+# killer onto the old api or postgres (reclaim, a slowdown, stays possible); otherwise it restarts the
+# api in place, with the old short gap. With the slice at MemoryHigh=1500M, MemoryMax=1600M (D37) and the
+# stack using about 790 MB, about 710 MB is free, so the overlap is the expected path on this host: two api
+# containers for the length of each switch, 1216 MB by limits at most. An in-place restart here means the
+# slice has filled up; see docs/runbooks/deploy.md.
+# BMS_ROLL_MIN_FREE_MB in .env replaces the limit with a measured start-up peak (memory.peak).
 
 name: bms
 
@@ -82,7 +93,11 @@ services:
     cpus: 1.0
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+      # The host's fixed copy, not this release's own (releases/<tag>/postgres/initdb): a bind source that changes with
+      # every release changes the service's config hash, so Compose recreated (restarted) postgres on every deploy.
+      # An absolute path, so deploy.sh (run from releases/<tag>/) and the top-level compose.yml mount the same folder.
+      # initdb only runs on an empty data volume anyway.
+      - ${BMS_HOST_ROOT:-/opt/bms}/postgres/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d bms"]
       interval: 10s
@@ -127,6 +142,8 @@ services:
       BMS_PLATFORM_HOST: ${BMS_PLATFORM_HOST:?}
       BMS_SCHEDULER_ENABLED: ${BMS_SCHEDULER_ENABLED:-true}
       BMS_OPENAPI_ENABLED: ${BMS_OPENAPI_ENABLED:-true}
+      # Empty: every app build is served. Set for a release old screens cannot use (#576, docs/runbooks/deploy.md).
+      BMS_MIN_CLIENT_BUILD: ${BMS_MIN_CLIENT_BUILD:-}
       BMS_TOKEN_SIGNING_JWK: ${BMS_TOKEN_SIGNING_JWK:?}
       BMS_DATA_KEY: ${BMS_DATA_KEY:?}
       BMS_DATA_KEY_ID: ${BMS_DATA_KEY_ID:-k1}
@@ -194,6 +211,45 @@ services:
       BMS_AI_BUDGET_SECONDS: ${BMS_AI_BUDGET_SECONDS:-}
       BMS_AI_MAX_TOKENS_PER_CALL: ${BMS_AI_MAX_TOKENS_PER_CALL:-}
       BMS_AI_MAX_INPUT_TOKENS_PER_CALL: ${BMS_AI_MAX_INPUT_TOKENS_PER_CALL:-}
+      # Ask BMS (issue #20, ADR-096, docs/runbooks/ask-bms.md). Off for every business until BMS_HELP_ASK_TENANTS names it;
+      # a provider without a key is skipped, and with none the matching help articles are shown. Never Claude.
+      BMS_HELP_ASK_TENANTS: ${BMS_HELP_ASK_TENANTS:-}
+      BMS_HELP_ASK_GEMINI_API_KEY: ${BMS_HELP_ASK_GEMINI_API_KEY:-}
+      BMS_HELP_ASK_GEMINI_MODEL: ${BMS_HELP_ASK_GEMINI_MODEL:-gemini-3.5-flash-lite}
+      BMS_HELP_ASK_GEMINI_REASONING: ${BMS_HELP_ASK_GEMINI_REASONING:-minimal}
+      BMS_HELP_ASK_GROQ_API_KEY: ${BMS_HELP_ASK_GROQ_API_KEY:-}
+      BMS_HELP_ASK_GROQ_MODEL: ${BMS_HELP_ASK_GROQ_MODEL:-llama-3.1-8b-instant}
+      BMS_HELP_ASK_DEEPSEEK_API_KEY: ${BMS_HELP_ASK_DEEPSEEK_API_KEY:-}
+      BMS_HELP_ASK_DEEPSEEK_MODEL: ${BMS_HELP_ASK_DEEPSEEK_MODEL:-deepseek-chat}
+      BMS_HELP_ASK_DEEPSEEK_PRICE_INPUT_MICRO_PER_MILLION: ${BMS_HELP_ASK_DEEPSEEK_PRICE_INPUT_MICRO_PER_MILLION:-0}
+      BMS_HELP_ASK_DEEPSEEK_PRICE_OUTPUT_MICRO_PER_MILLION: ${BMS_HELP_ASK_DEEPSEEK_PRICE_OUTPUT_MICRO_PER_MILLION:-0}
+      # Optional tuning; empty means the application's default (100 questions a business a day, 30 a person an hour,
+      # 5000000 micro-units of DeepSeek a month for every business together, 10 seconds a provider, 400 output tokens, 30 days
+      # in the cache, USD). 0 stops the providers; the articles are still shown. DeepSeek runs only with both prices set.
+      BMS_HELP_ASK_DAILY_QUESTIONS: ${BMS_HELP_ASK_DAILY_QUESTIONS:-}
+      BMS_HELP_ASK_USER_HOURLY_QUESTIONS: ${BMS_HELP_ASK_USER_HOURLY_QUESTIONS:-}
+      BMS_HELP_ASK_DEEPSEEK_MONTHLY_COST_MICRO: ${BMS_HELP_ASK_DEEPSEEK_MONTHLY_COST_MICRO:-}
+      BMS_HELP_ASK_BUDGET_SECONDS: ${BMS_HELP_ASK_BUDGET_SECONDS:-}
+      BMS_HELP_ASK_MAX_TOKENS: ${BMS_HELP_ASK_MAX_TOKENS:-}
+      BMS_HELP_ASK_CACHE_DAYS: ${BMS_HELP_ASK_CACHE_DAYS:-}
+      BMS_HELP_ASK_COST_CURRENCY: ${BMS_HELP_ASK_COST_CURRENCY:-}
+      # Only if a free tier ends: Gemini's and Groq's prices, micro-units per million tokens.
+      BMS_HELP_ASK_GEMINI_PRICE_INPUT_MICRO_PER_MILLION: ${BMS_HELP_ASK_GEMINI_PRICE_INPUT_MICRO_PER_MILLION:-0}
+      BMS_HELP_ASK_GEMINI_PRICE_OUTPUT_MICRO_PER_MILLION: ${BMS_HELP_ASK_GEMINI_PRICE_OUTPUT_MICRO_PER_MILLION:-0}
+      BMS_HELP_ASK_GROQ_PRICE_INPUT_MICRO_PER_MILLION: ${BMS_HELP_ASK_GROQ_PRICE_INPUT_MICRO_PER_MILLION:-0}
+      BMS_HELP_ASK_GROQ_PRICE_OUTPUT_MICRO_PER_MILLION: ${BMS_HELP_ASK_GROQ_PRICE_OUTPUT_MICRO_PER_MILLION:-0}
+      # The setup helper (issue #626, ADR-102, docs/runbooks/ask-bms.md): Ask BMS's providers and keys read a business's
+      # list, photo or file into draft rows for its import. Off for every business until BMS_SETUP_AI_TENANTS names it,
+      # since the list is business data. Optional tuning; empty means the default (30 drafts a business a day, 10 a person
+      # an hour, 25 seconds a provider, 8000 output tokens, 30000 characters of list). A photo goes to Gemini, and to Groq only with a vision model.
+      BMS_SETUP_AI_TENANTS: ${BMS_SETUP_AI_TENANTS:-}
+      BMS_SETUP_AI_DAILY_DRAFTS: ${BMS_SETUP_AI_DAILY_DRAFTS:-}
+      BMS_SETUP_AI_USER_HOURLY_DRAFTS: ${BMS_SETUP_AI_USER_HOURLY_DRAFTS:-}
+      BMS_SETUP_AI_BUDGET_SECONDS: ${BMS_SETUP_AI_BUDGET_SECONDS:-}
+      BMS_SETUP_AI_MAX_TOKENS: ${BMS_SETUP_AI_MAX_TOKENS:-}
+      BMS_SETUP_AI_MAX_TEXT_CHARS: ${BMS_SETUP_AI_MAX_TEXT_CHARS:-}
+      BMS_SETUP_AI_GEMINI_PHOTO_MODEL: ${BMS_SETUP_AI_GEMINI_PHOTO_MODEL:-}
+      BMS_SETUP_AI_GROQ_PHOTO_MODEL: ${BMS_SETUP_AI_GROQ_PHOTO_MODEL:-}
       # Global sign-up caps per hour (chapter 7 section 7.10); defaults 30 and 60.
       BMS_SIGNUP_MAX_APPLICATIONS_PER_HOUR: ${BMS_SIGNUP_MAX_APPLICATIONS_PER_HOUR:-30}
       BMS_SIGNUP_MAX_VERIFICATION_EMAILS_PER_HOUR: ${BMS_SIGNUP_MAX_VERIFICATION_EMAILS_PER_HOUR:-60}
@@ -246,6 +302,67 @@ services:
       BMS_PLATFORM_HOST: ${BMS_PLATFORM_HOST:?}
     mem_limit: 32m
     cpus: 0.5
+    # deploy.sh starts a new web container beside the old one and stops the old one once this passes (ADR-083).
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    # Hashed files of earlier builds, read-only; the Caddyfile falls back to them (ADR-078).
+    volumes:
+      - type: volume
+        source: web_assets
+        target: /srv/previous
+        read_only: true
+        volume:
+          nocopy: true
+
+  # One-shot: deploy.sh runs it with the OUTGOING web image just before web is replaced (ADR-078).
+  # It copies that build's hashed files into web_assets, where the new web container still serves
+  # them, so a phone on the previous app copy keeps loading its screens; it first removes files that
+  # left the live build more than BMS_KEEP_ASSETS_DAYS days ago, then copies, refreshing the date of a
+  # file it already holds. Hashed names never clash, so nothing is ever overwritten.
+  keep-assets:
+    # Never pulled: only the outgoing image already on the host, which its own deploy verified.
+    pull_policy: never
+    cgroup_parent: bms.slice
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    read_only: true
+    mem_limit: 32m
+    image: ${KEEP_ASSETS_IMAGE:-${WEB_IMAGE:?WEB_IMAGE is set by deploy.sh}}
+    profiles: ["keep-assets"]
+    restart: "no"
+    # Root (with no capability) only to write the volume, which Docker creates root-owned; no network, nothing else.
+    user: "0:0"
+    network_mode: none
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -eu
+        case "$${KEEP_DAYS}" in
+          ''|*[!0-9]*) echo "BMS_KEEP_ASSETS_DAYS is not a whole number of days: '$${KEEP_DAYS}'" >&2; exit 1 ;;
+        esac
+        # Prune first, so the copy never raises the peak; -mmin, since -mtime +14 means 15 whole days.
+        find /previous -type f \( -name '*.part' -o -mmin +$$(( KEEP_DAYS * 1440 )) \) -delete
+        find /previous -mindepth 1 -type d -empty -delete
+        cd /srv
+        { find assets -type f; find . -maxdepth 1 -type f -name 'workbox-*.js' | sed 's|^\./||'; } |
+          while IFS= read -r f; do
+            if [ -e "/previous/$$f" ]; then
+              touch "/previous/$$f"
+              continue
+            fi
+            mkdir -p "/previous/$$(dirname "$$f")"
+            cp "$$f" "/previous/$$f.part" || { rm -f "/previous/$$f.part"; exit 1; }
+            mv "/previous/$$f.part" "/previous/$$f"
+          done
+        echo "kept $$(find /previous -type f | wc -l) hashed files of earlier builds ($$(du -sh /previous | cut -f1))"
+    environment:
+      KEEP_DAYS: ${BMS_KEEP_ASSETS_DAYS:-14}
+    volumes:
+      - web_assets:/previous
 
   # The one internal origin of the tunnel: the proxy image with its tunnel configuration. On both
   # networks, since it is the only service the edge network's cloudflared may reach (ADR-018 M6).
@@ -276,6 +393,9 @@ services:
       # The tunnel's connector token (Cloudflare Zero Trust, Networks, Tunnels). Its public
       # hostnames point at http://proxy:8080 (docs/runbooks/provision-host.md section 8).
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?}
+      # HTTP/2 over TCP rather than the default QUIC over UDP (ADR-097): on the staging Pi's mobile
+      # uplink QUIC streams time out and requests take seconds. CLOUDFLARE_TUNNEL_PROTOCOL in .env overrides.
+      TUNNEL_TRANSPORT_PROTOCOL: ${CLOUDFLARE_TUNNEL_PROTOCOL:-http2}
     mem_limit: 48m
     cpus: 0.5
     depends_on:
@@ -283,3 +403,4 @@ services:
 
 volumes:
   pgdata:
+  web_assets:

@@ -2,6 +2,7 @@ package com.rincoltech.bms.retail.stock;
 
 import static com.rincoltech.bms.retail.RetailTestSupport.ADMIN;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -57,6 +59,14 @@ class RetailBranchRolesIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.OK);
     }
 
+    /** Marks the branch a Store or a selling branch through the flag (ADR-048), which is where a store lives since ADR-104. */
+    void sells(UUID branch, boolean sells) {
+        TestDatabase.owner()
+                .sql("UPDATE branches SET sells_goods = ? WHERE id = ?")
+                .params(sells, branch)
+                .update();
+    }
+
     ResponseEntity<JsonNode> setRole(UUID branch, String role, String perms) {
         return api.call(HttpMethod.PUT, "/branch-roles/" + branch, Map.of("role", role), perms, "*", Map.of());
     }
@@ -90,32 +100,55 @@ class RetailBranchRolesIT extends IntegrationTest {
         ResponseEntity<JsonNode> listed = api.get("/branch-roles", ADMIN);
         assertThat(listed.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(code(listed)).isEqualTo("capability_not_enabled");
+        // Issue #257: plain words for API callers, the code kept for clients.
+        assertThat(listed.getBody().get("detail").asString())
+                .isEqualTo("This feature is not switched on for your business.");
         // A role row can exist while the capability is off (set directly); it is ignored.
         TestDatabase.owner()
-                .sql("INSERT INTO retail_branch_roles (tenant_id, branch_id, role) VALUES (?, ?, 'store')")
+                .sql("INSERT INTO retail_branch_roles (tenant_id, branch_id, role) VALUES (?, ?, 'shop')")
                 .params(t.tenantId(), t.secondBranch())
                 .update();
+        // The role can no longer say store: a store is the branch flag (ADR-104), so the two never disagree.
+        assertThatThrownBy(() -> TestDatabase.owner()
+                        .sql("INSERT INTO retail_branch_roles (tenant_id, branch_id, role) VALUES (?, ?, 'store')")
+                        .params(t.tenantId(), t.headOffice())
+                        .update())
+                .isInstanceOf(DataIntegrityViolationException.class);
         assertThat(api.sell(t.secondBranch(), "cash", product, "1").getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
         assertThat(api.sell(t.headOffice(), "cash", product, "1").getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
         JsonNode group = api.get("/settings/capabilities", SETTINGS).getBody();
-        assertThat(group.get("profile").asString()).isEqualTo("shop");
+        assertThat(group.get("profile").asString()).isEqualTo("shops");
         assertThat(group.get("branch_roles").asBoolean()).isFalse();
     }
 
-    /** Acceptance 1: the matrix of spec 2.1, role by role. Restock and transfer are never role limited. */
+    /**
+     * Acceptance 1: the matrix of spec 2.1, role by role. A store is the Store flag (ADR-104) and reads as one; restock and
+     * transfer are never role limited.
+     */
     @Test
     void theRoleMatrixHoldsForStoreShopAndBoth() {
         switchOn();
         for (String role : List.of("store", "shop", "both")) {
-            assertThat(setRole(t.secondBranch(), role, ROLE_MANAGE).getStatusCode())
-                    .as("set %s", role)
-                    .isEqualTo(HttpStatus.OK);
+            boolean store = role.equals("store");
+            sells(t.secondBranch(), !store);
+            if (!store) {
+                assertThat(setRole(t.secondBranch(), role, ROLE_MANAGE).getStatusCode())
+                        .as("set %s", role)
+                        .isEqualTo(HttpStatus.OK);
+            }
+            JsonNode listed = api.get("/branch-roles", ADMIN).getBody().get("items");
+            for (JsonNode i : listed) {
+                if (i.get("branch_id").asString().equals(t.secondBranch().toString())) {
+                    assertThat(i.get("role").asString()).isEqualTo(role);
+                    assertThat(i.get("can_sell").asBoolean()).isEqualTo(!store);
+                }
+            }
             ResponseEntity<JsonNode> sale = api.sell(t.secondBranch(), "cash", product, "1");
-            if (role.equals("store")) {
+            if (store) {
                 assertThat(sale.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-                assertThat(code(sale)).isEqualTo("branch_role_forbids_sales");
+                assertThat(code(sale)).isEqualTo("branch_does_not_sell");
             } else {
                 assertThat(sale.getStatusCode()).as("sale at %s", role).isEqualTo(HttpStatus.CREATED);
             }
@@ -138,8 +171,7 @@ class RetailBranchRolesIT extends IntegrationTest {
         ResponseEntity<JsonNode> earlier = api.sell(t.headOffice(), "cash", product, "1");
         assertThat(earlier.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         UUID earlierSale = RetailTestSupport.id(earlier);
-        assertThat(setRole(t.headOffice(), "store", ROLE_MANAGE).getStatusCode())
-                .isEqualTo(HttpStatus.OK);
+        sells(t.headOffice(), false);
         assertThat(setRole(t.secondBranch(), "shop", ROLE_MANAGE).getStatusCode())
                 .isEqualTo(HttpStatus.OK);
 
@@ -147,7 +179,7 @@ class RetailBranchRolesIT extends IntegrationTest {
         assertThat(transfer(t.headOffice(), t.secondBranch()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(api.sell(t.secondBranch(), "cash", product, "1").getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
-        assertThat(code(api.sell(t.headOffice(), "cash", product, "1"))).isEqualTo("branch_role_forbids_sales");
+        assertThat(code(api.sell(t.headOffice(), "cash", product, "1"))).isEqualTo("branch_does_not_sell");
         // A sale made while the branch was a seller can still be voided.
         ResponseEntity<JsonNode> voided = api.post(
                 "/sales/" + earlierSale + "/void",
@@ -190,30 +222,46 @@ class RetailBranchRolesIT extends IntegrationTest {
                                 UUID.randomUUID().toString())
                         .getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
-        // Nor does it widen the scope: a seller scoped to head office cannot sell at the shop.
+        // Nor does it widen the scope: a seller scoped to head office cannot sell at the shop. Spec section 2.2
+        // (issue #257): 404 for a branch outside scope, the code unknown_branch kept at the top and on the field.
         ResponseEntity<JsonNode> outside = api.postKeyed(
                 "/sales",
                 body,
                 "retail.sale.create",
                 t.headOffice().toString(),
                 UUID.randomUUID().toString());
-        assertThat(outside.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(outside.getBody().toString()).contains("unknown_branch");
+        assertThat(outside.getStatusCode()).as("%s", outside.getBody()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(outside.getBody().get("code").asString()).isEqualTo("unknown_branch");
+        assertThat(outside.getBody().get("errors").get(0).get("code").asString())
+                .isEqualTo("unknown_branch");
+        assertThat(outside.getBody().get("detail").asString()).doesNotContain("scope");
+        assertThat(outside.getBody().get("errors").get(0).get("message").asString())
+                .isEqualTo("That branch is not one you work in.");
     }
 
-    /** Changing a role needs retail.branch_role.manage, validates the role and is audited. */
+    /**
+     * Changing a role needs retail.branch_role.manage, validates the role and is audited. A store is not a role any more
+     * (ADR-104): the role store is refused, and so is a role for a branch that is a Store, so the two never disagree.
+     */
     @Test
     void changingARoleNeedsThePermissionIsValidatedAndAudited() {
         switchOn();
-        assertThat(setRole(t.secondBranch(), "store", ADMIN).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(setRole(t.secondBranch(), "shop", ADMIN).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(setRole(t.secondBranch(), "warehouse", ROLE_MANAGE).getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(setRole(UUID.randomUUID(), "store", ROLE_MANAGE).getStatusCode())
+        ResponseEntity<JsonNode> store = setRole(t.secondBranch(), "store", ROLE_MANAGE);
+        assertThat(store.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(store)).isEqualTo("validation_failed");
+        assertThat(setRole(UUID.randomUUID(), "shop", ROLE_MANAGE).getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
-        assertThat(setRole(t.secondBranch(), "store", ROLE_MANAGE).getStatusCode())
+        sells(t.headOffice(), false);
+        ResponseEntity<JsonNode> ofAStore = setRole(t.headOffice(), "shop", ROLE_MANAGE);
+        assertThat(ofAStore.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(ofAStore)).isEqualTo("branch_is_store");
+        assertThat(setRole(t.secondBranch(), "shop", ROLE_MANAGE).getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         // Setting the same role again writes and audits nothing.
-        assertThat(setRole(t.secondBranch(), "store", ROLE_MANAGE).getStatusCode())
+        assertThat(setRole(t.secondBranch(), "shop", ROLE_MANAGE).getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         assertThat(TestDatabase.owner()
                         .sql(
@@ -233,44 +281,73 @@ class RetailBranchRolesIT extends IntegrationTest {
         assertThat(scoped.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
-    /** Spec 1.1 and 1.2: absent keys are off, a profile writes a preset, flags stay toggleable, audited. */
+    /**
+     * Spec 1.1 and 1.2, issue #424: absent keys are off, a kind of business writes its preset of the switches it governs, branch
+     * roles and returns are left as they are, flags stay toggleable, and every change is audited.
+     */
     @Test
-    void theProfileIsAPresetOfTheFlagsAndEveryChangeIsAudited() {
-        assertThat(putCapabilities(Map.of("profile", "trade"), ADMIN).getStatusCode())
+    void theKindOfBusinessIsAPresetOfTheFlagsAndEveryChangeIsAudited() {
+        assertThat(putCapabilities(Map.of("profile", "wholesale"), ADMIN).getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
         // An unknown key never reaches the group: the request body refuses unknown properties (400).
         // The group's own refusal of unknown keys is covered by RetailCapabilityGroupTest.
         ResponseEntity<JsonNode> unknown = putCapabilities(Map.of("unknown_flag", true), SETTINGS);
         assertThat(unknown.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(code(unknown)).isEqualTo("malformed_request");
-        assertThat(putCapabilities(Map.of("profile", "wholesale"), SETTINGS).getStatusCode())
+        // The names from before the kinds are refused on a write.
+        ResponseEntity<JsonNode> oldName = putCapabilities(Map.of("profile", "trade"), SETTINGS);
+        assertThat(oldName.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(oldName)).isEqualTo("validation_failed");
+        assertThat(oldName.getBody().toString()).contains("profile");
+        assertThat(putCapabilities(Map.of("profile", "shop"), SETTINGS).getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
 
-        JsonNode trade = putCapabilities(Map.of("profile", "trade"), SETTINGS).getBody();
-        assertThat(trade.get("profile").asString()).isEqualTo("trade");
-        for (String on :
-                List.of("branch_roles", "units", "price_lists", "customer_accounts", "returns", "transfer_receipt")) {
-            assertThat(trade.get(on).asBoolean()).as(on).isTrue();
+        assertThat(putCapabilities(Map.of("returns", true), SETTINGS).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        JsonNode wholesale =
+                putCapabilities(Map.of("profile", "wholesale"), SETTINGS).getBody();
+        assertThat(wholesale.get("profile").asString()).isEqualTo("wholesale");
+        for (String on : List.of("units", "price_lists", "customer_accounts", "documents", "purchasing", "returns")) {
+            assertThat(wholesale.get(on).asBoolean()).as(on).isTrue();
         }
-        assertThat(trade.get("documents").asBoolean()).isFalse();
-        assertThat(trade.get("purchasing").asBoolean()).isFalse();
+        assertThat(wholesale.get("transfer_receipt").asBoolean()).isFalse();
+        assertThat(wholesale.get("branch_roles").asBoolean()).isFalse();
+
+        JsonNode stores = putCapabilities(Map.of("profile", "stores_and_shops", "price_lists", true), SETTINGS)
+                .getBody();
+        assertThat(stores.get("profile").asString()).isEqualTo("stores_and_shops");
+        assertThat(stores.get("transfer_receipt").asBoolean()).isTrue();
+        assertThat(stores.get("price_lists").asBoolean())
+                .as("a flag sent with the kind wins")
+                .isTrue();
+        assertThat(stores.get("documents").asBoolean()).isFalse();
+        assertThat(stores.get("returns").asBoolean())
+                .as("returns belong to no kind")
+                .isTrue();
 
         JsonNode tweaked = putCapabilities(Map.of("returns", false, "documents", true), SETTINGS)
                 .getBody();
+        assertThat(tweaked.get("profile").asString()).isEqualTo("stores_and_shops");
         assertThat(tweaked.get("returns").asBoolean()).isFalse();
         assertThat(tweaked.get("documents").asBoolean()).isTrue();
-        assertThat(tweaked.get("branch_roles").asBoolean()).isTrue();
 
-        JsonNode shop = putCapabilities(Map.of("profile", "shop"), SETTINGS).getBody();
-        assertThat(shop.get("branch_roles").asBoolean()).isFalse();
-        assertThat(shop.get("documents").asBoolean()).isFalse();
-        assertThat(TestDatabase.owner()
-                        .sql(
-                                "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.capabilities.changed'")
-                        .params(t.tenantId())
-                        .query(Long.class)
-                        .single())
-                .isEqualTo(3);
+        JsonNode shops = putCapabilities(Map.of("profile", "shops"), SETTINGS).getBody();
+        assertThat(shops.get("profile").asString()).isEqualTo("shops");
+        for (String off : List.of("price_lists", "customer_accounts", "documents", "purchasing", "transfer_receipt")) {
+            assertThat(shops.get(off).asBoolean()).as(off).isFalse();
+        }
+        assertThat(shops.get("units").asBoolean())
+                .as("a kind only ever turns packs on (issue #630)")
+                .isTrue();
+        List<String> kinds = TestDatabase.owner()
+                .sql(
+                        "SELECT coalesce(data #>> '{before,profile}', '') || '>' || (data #>> '{after,profile}') FROM audit_log"
+                                + " WHERE tenant_id = ? AND action = 'retail.capabilities.changed' ORDER BY created_at, id")
+                .params(t.tenantId())
+                .query(String.class)
+                .list();
+        assertThat(kinds).hasSize(5);
+        assertThat(kinds).contains("shops>wholesale", "wholesale>stores_and_shops", "stores_and_shops>shops");
     }
 
     /** A write without the current settings version is refused like PATCH /settings. */

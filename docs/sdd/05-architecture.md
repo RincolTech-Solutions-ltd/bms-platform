@@ -108,13 +108,14 @@ core.* (non-kernel)   -> core.tenancy, core.identity, core.audit
 core.identity         -> core.tenancy, core.audit, core.notifications
 core.approvals        -> core.tenancy, core.audit, core.jobs
                          (executes through a registry the verticals register into; never imports them, ADR-015)
-core.platform         -> core.tenancy, core.identity, core.audit, core.operations (the platform console, ADR-016; the Idempotency-Key of a payment, ADR-056)
+core.platform         -> core.tenancy, core.identity, core.audit, core.operations, core.feedback (the platform console, ADR-016; the Idempotency-Key of a payment, ADR-056; the operator's feedback list through FeedbackInbox, ADR-065)
+core.feedback         -> core.tenancy, core.audit, core.documents, core.notifications (in-app feedback, ADR-065: the screenshot is a core document, the operator email goes through the outbox)
 core.onboarding       -> core.tenancy, core.platform, core.audit, core.notifications
                          (Activate creates the tenant through core.platform's TenantProvisioning, ADR-024)
 core.notifications    -> core.audit (the operator's "send again" is audited)
 core.imports          -> core.ledger, core.documents   (templates register into it)
 core.payments         -> core.tenancy, core.audit, core.jobs, core.ledger, core.operations, core.approvals (the unallocated receipts queue and the reversal of a gateway payment are approval actions it registers, #224; built in #213; booking is delegated through the PurposeHandler registry of beans the owning modules supply; it depends on no vertical)
-core.reporting        -> core.tenancy, core.audit, core.documents, core.jobs, core.operations
+core.reporting        -> core.tenancy, core.audit, core.documents, core.jobs, core.operations, core.notifications (the weekly data export email and its attachment port, ADR-074)
                          (queued runs, the snapshot transaction, the spool, the JSON, CSV, PDF and Excel renderers, the file
                          expiry; the PDF is laid out by core.documents' shared report template under the letterhead of
                          core.tenancy, the Excel by a streaming writer of its own; verticals register reports, it names none; ADR-038)
@@ -157,6 +158,7 @@ registers into through its manifest at startup:
 |---|---|---|
 | Module manifest | Module key, routers, permissions, default chart of accounts entries, notification templates | `lending` |
 | Module settings group | A tenant settings group the core stores as opaque jsonb, validates through the vertical and lists in `/me` (ADR-033; built: `retail.capabilities`, supplied by `retail.manifest`, which also carries the policy `credit_sale_recognition`, ADR-043: `retail.reports` reads it through `RetailCapabilities` and `ProfitFigures` decides the basis of the profit figures for the daily profit report, the dashboard and the cash book's daily savings, so they cannot disagree) | Retail capability flags |
+| Module set-up | One `ModuleSetUp` bean: the vertical's own rows when its module is switched on for a tenant, at creation or later, in the switching transaction bound to that tenant, safe to run again (ADR-098) | Retail: the default units (`DefaultUnits` in `retail.catalogue`) |
 | Approval actions | One `ApprovalAction` bean per action type it owns (ADR-015) | `loan_disbursement` executes the disbursement |
 | Branch deactivation guards | Whether a branch still has open accounts of the module | Loans, savings, investments |
 | Branch selling checks | What the module still has open at a branch's till before it is marked as a Store (issue #366, ADR-048): read only, never moves or posts | Retail: credit sales with a balance owing |
@@ -212,12 +214,13 @@ to other modules.
 | `core.identity` | `...core.identity` | Staff and platform sign-in, TOTP and recovery codes, sessions, the authentication filter and permission interceptor, invitations, users and roles, `/me`, the development authentication stub (ADR-014) |
 | `core.audit` | `...core.audit` | `AuditLog.record`, `PlatformAuditLog`, masking identifiers, audit search and CSV export |
 | `core.approvals` | `...core.approvals` | `Approvals.request`, the `ApprovalAction` registry, the queue and decisions, nightly expiry (ADR-015) |
-| `core.notifications` | `...core.notifications` | The `Notifier` port and a recording fake adapter; no provider yet |
+| `core.notifications` | `...core.notifications` | The `Notifier` port: a recording fake adapter in the dev and test profiles only, and everywhere else `LogOnlyNotifier`, which sends and keeps nothing (issue #324, ADR-085); no provider yet |
 | `core.platform` | `...core.platform` | The platform console API: tenants, modules, subscriptions, admin MFA reset (ADR-016); the price book, payments entered by the operator and the Business page overview (ADR-056) |
+| `core.feedback` | `...core.feedback` | In-app feedback (issue #447, ADR-065): the staff send with an optional screenshot, the sender's own list, the ten-an-hour limit, the operator email through the outbox, and the public port `FeedbackInbox` the platform console serves the operator's list, status change and screenshot through |
 | `core.ledger` | `...core.ledger` | `LedgerPosting.post` (`post_entry`) |
 | `core.documents` | `...core.documents` | `Documents` (upload, find), the `DocumentAccess` registry, the object storage port with the R2 adapter and the dev and test fake, signed download URLs (#12) |
 | `core.jobs` | `...core.jobs` | `TenantJobs`, db-scheduler tasks (ADR-008) |
-| `core.operations` | `...core.operations` | `/version`, the migrations readiness check, the database role guard |
+| `core.operations` | `...core.operations` | `/version` and the `Bms-Build` header with the 426 `app_too_old` refusal (ADR-088), the migrations readiness check, the database role guard |
 | `lending.manifest` | `...lending.manifest` | The lending module's registration (`ModuleManifest`) |
 | `lending.collateral` | `...lending.collateral` | The collateral register: items, valuations, the append-only custody timeline, photos and scans, and `collateral_release` as an approval action (#13) |
 | `lending.loans` | `...lending.loans` | Origination: draft, edit, guarantors, collateral pledges, submit, return, cancel, appraisal, decision, the status history; registers `CollateralPledges` so pledged items are not released (#41 to #43). Servicing (#108, ADR-026): disbursement, schedule, repayments with R-ALLOC, payoff quote, reversal with re-allocation, closure, write-off and recovery, each posting through `post_entry`; registers the `loan_disbursement`, `repayment_reversal` and `loan_write_off` approval actions; `LoanServicing`, the port for commands without a principal |

@@ -8,7 +8,9 @@ import { formatMinor } from '../../../components/money';
 import { useStaff } from '../context';
 import { AddPanel } from './catalogue';
 import { STATUS_LABEL, belowCostHint, buildItemRequest, emptyItemForm, fromQty, itemProblem, unitChoices, withProduct, type ItemForm } from './price-list-state';
-import { Gate, Note, ProductPicker, Problem, Success, changeFailureText, requireVersion } from './ui';
+import { Gate, Note, ProductPicker, Problem, changeFailureText, requireVersion } from './ui';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { useComeBack } from '../../../app/ui/EmptyChoice';
 
 // Price lists (ADR-033, issue #195; docs/specs/trade-capabilities.md section 3). A list holds the price of an item in a
 // unit (its base unit or a pack) from a quantity and for a date range. The retail price stays the item's own and is
@@ -27,6 +29,7 @@ export function ListCard({ list, selected, busy, onOpen, onChange }: {
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(list.name ?? '');
+  const [pressed, setPressed] = useState<'name' | 'strict' | 'active' | null>(null);
   const off = list.active === false;
   return (
     <li className="rt-card" data-testid="price-list-card">
@@ -41,7 +44,7 @@ export function ListCard({ list, selected, busy, onOpen, onChange }: {
           <label htmlFor={`list-name-${list.id}`}>Name</label>
           <input id={`list-name-${list.id}`} value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
           <p className="cluster">
-            <button type="button" disabled={busy || name.trim() === ''} onClick={() => { onChange({ name: name.trim() }); setEditing(false); }}>Save</button>
+            <BusyButton type="button" busy={busy === true && pressed === 'name'} disabled={busy || name.trim() === ''} onClick={() => { setPressed('name'); onChange({ name: name.trim() }); setEditing(false); }}>Save</BusyButton>
             <button type="button" className="btn-ghost" onClick={() => { setName(list.name ?? ''); setEditing(false); }}>Cancel</button>
           </p>
         </div>
@@ -49,17 +52,17 @@ export function ListCard({ list, selected, busy, onOpen, onChange }: {
         <p className="cluster">
           <button type="button" className="btn-sm" aria-pressed={selected} onClick={onOpen} aria-label={`Prices in ${list.name}`}>{selected ? 'Hide prices' : 'Prices'}</button>
           <button type="button" className="btn-sm" onClick={() => setEditing(true)} aria-label={`Rename ${list.name}`}>Rename</button>
-          <button type="button" className="btn-sm" disabled={busy} onClick={() => onChange({ strict: !list.strict })} aria-label={`${list.strict ? 'Stop requiring' : 'Require'} a price for every item in ${list.name}`}>
+          <BusyButton type="button" className="btn-sm" busy={busy === true && pressed === 'strict'} disabled={busy} onClick={() => { setPressed('strict'); onChange({ strict: !list.strict }); }} aria-label={`${list.strict ? 'Stop requiring' : 'Require'} a price for every item in ${list.name}`}>
             {list.strict ? 'Allow retail fallback' : 'Make strict'}
-          </button>
-          <button type="button" className="btn-sm" disabled={busy} onClick={() => onChange({ active: off })} aria-label={`${off ? 'Switch on' : 'Switch off'} ${list.name}`}>{off ? 'Switch on' : 'Switch off'}</button>
+          </BusyButton>
+          <BusyButton type="button" className="btn-sm" busy={busy === true && pressed === 'active'} disabled={busy} onClick={() => { setPressed('active'); onChange({ active: off }); }} aria-label={`${off ? 'Switch on' : 'Switch off'} ${list.name}`}>{off ? 'Switch on' : 'Switch off'}</BusyButton>
         </p>
       )}
     </li>
   );
 }
 
-export function ItemRow({ item, showCost, busy, onEnd }: { item: PriceListItem; showCost: boolean; busy?: boolean; onEnd: (item: PriceListItem) => void }) {
+export function ItemRow({ item, showCost, busy, ending, onEnd }: { item: PriceListItem; showCost: boolean; busy?: boolean; ending?: boolean; onEnd: (item: PriceListItem) => void }) {
   return (
     <tr data-testid="price-item">
       <td>{item.description} <span className="hint">({item.code})</span></td>
@@ -71,7 +74,7 @@ export function ItemRow({ item, showCost, busy, onEnd }: { item: PriceListItem; 
       <td>{STATUS_LABEL[item.status ?? 'current'] ?? item.status}</td>
       <td>
         {!item.valid_to && item.status !== 'ended' && (
-          <button type="button" className="btn-sm" disabled={busy} onClick={() => onEnd(item)} aria-label={`End the price of ${item.description} in ${item.unit}`}>End</button>
+          <BusyButton type="button" className="btn-sm" busy={ending === true} disabled={busy} onClick={() => onEnd(item)} aria-label={`End the price of ${item.description} in ${item.unit}`}>End</BusyButton>
         )}
       </td>
     </tr>
@@ -103,6 +106,7 @@ export function AddPriceForm({ today, busy, error, onSubmit, onCancel }: {
         >
           <p><strong>{form.product.description}</strong> ({form.product.code}), retail price {money(form.product.sell_minor ?? 0)} per {form.product.unit}</p>
           <label htmlFor="price-unit">Price for</label>
+          {/* empty: the item's own unit is always the first choice. */}
           <select id="price-unit" value={form.unitId} onChange={(e) => setForm({ ...form, unitId: e.target.value })}>
             {units.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
           </select>
@@ -114,11 +118,11 @@ export function AddPriceForm({ today, busy, error, onSubmit, onCancel }: {
           <input id="price-from" type="date" value={form.validFrom} min={today} onChange={(e) => setForm({ ...form, validFrom: e.target.value })} />
           <label htmlFor="price-to">Last day (leave empty for no end)</label>
           <input id="price-to" type="date" value={form.validTo} onChange={(e) => setForm({ ...form, validTo: e.target.value })} />
-          {warn && <p role="alert" className="rt-flag">This price is not above what the item costs. It can be saved, but a seller needs permission to sell below cost.</p>}
+          {warn && <p role="alert" className="rt-flag">This price is not above the item's buying price. It can be saved, but a seller needs permission to sell below the buying price.</p>}
           {problem && form.price !== '' && <Note>{problem}</Note>}
           <Problem error={error} />
           <p className="cluster">
-            <button type="submit" className="rt-primary" disabled={problem !== null || busy}>{busy ? 'Saving' : 'Save price'}</button>
+            <BusyButton type="submit" className="rt-primary" busy={busy === true} notReady={problem !== null}>Save price</BusyButton>
             <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
           </p>
         </form>
@@ -133,7 +137,6 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
   const search = useLiveSearch();
   const [ended, setEnded] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const query = search.term;
   const today = businessToday();
@@ -149,17 +152,18 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ['retail'] });
   const add = useMutation({
     mutationFn: (form: ItemForm) => retail.addPriceListItem(list.id ?? '', buildItemRequest(form)),
-    onSuccess: (item) => {
+    onSuccess: () => {
       setAdding(false);
-      setMessage(`Saved the price of ${item.description} in ${item.unit}.${item.status === 'scheduled' ? ` It starts on ${item.valid_from}.` : ''}`);
       refresh();
     },
+    meta: { success: (item: PriceListItem) => (item.description ? `Price saved for ${item.description}` : 'Price saved') },
   });
   const end = useMutation({
     mutationFn: (item: PriceListItem) => retail.endPriceListItem(list.id ?? '', item.id ?? '', today),
-    onMutate: () => { setMessage(null); setFailure(null); },
-    onSuccess: (item) => { setMessage(`The price of ${item.description} in ${item.unit} ends today.`); refresh(); },
+    onMutate: () => setFailure(null),
+    onSuccess: () => refresh(),
     onError: (error) => setFailure(changeFailureText(error, queryClient)),
+    meta: { success: (item: PriceListItem) => (item.description ? `Price ended for ${item.description}` : 'Price ended') },
   });
   return (
     <section aria-label={`Prices in ${list.name}`} data-tour="price-list-items">
@@ -168,9 +172,8 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
       {adding ? (
         <AddPriceForm today={today} busy={add.isPending} error={add.error} onSubmit={(f) => add.mutate(f)} onCancel={() => { setAdding(false); add.reset(); }} />
       ) : (
-        <p><button type="button" onClick={() => { setAdding(true); setMessage(null); }}>Add a price</button></p>
+        <p><button type="button" onClick={() => setAdding(true)}>Add a price</button></p>
       )}
-      {message && <Success>{message}</Success>}
       <Problem error={failure && new Error(failure)} />
       <SearchBox id="price-search" label="Search prices by item name or code" search={search} fetching={finding} count={rows.data ? items.length : undefined} more={rows.hasNextPage} />
       <label><input type="checkbox" checked={ended} onChange={(e) => setEnded(e.target.checked)} /> Show ended prices</label>
@@ -182,10 +185,10 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
         <div className="table-wrap" tabIndex={0}>
           <table>
             <thead>
-              <tr><th>Item</th><th>Unit</th><th>Quantity</th><th className="num">Price</th><th>First day</th><th>Last day</th><th>Status</th><th><span className="visually-hidden">Actions</span></th></tr>
+              <tr><th>Item</th><th>Unit</th><th>Quantity</th><th className="num">Selling price</th><th>First day</th><th>Last day</th><th>Status</th><th><span className="visually-hidden">Actions</span></th></tr>
             </thead>
             <tbody>
-              {items.map((i) => <ItemRow key={i.id} item={i} showCost={showCost} busy={end.isPending} onEnd={(x) => end.mutate(x)} />)}
+              {items.map((i) => <ItemRow key={i.id} item={i} showCost={showCost} busy={end.isPending} ending={end.isPending && end.variables?.id === i.id} onEnd={(x) => end.mutate(x)} />)}
             </tbody>
           </table>
         </div>
@@ -199,6 +202,7 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
 export function PriceLists() {
   const { me } = useStaff();
   const queryClient = useQueryClient();
+  const back = useComeBack();
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
@@ -207,13 +211,24 @@ export function PriceLists() {
   const lists = useQuery({ queryKey: ['retail', 'price-lists'], queryFn: () => retail.listPriceLists() });
   const create = useMutation({
     mutationFn: () => retail.createPriceList({ name: name.trim(), strict }),
-    onSuccess: (l) => { setName(''); setStrict(false); setAdding(false); setOpen(l.id ?? null); void queryClient.invalidateQueries({ queryKey: ['retail'] }); },
+    onSuccess: (l) => {
+      setName(''); setStrict(false); setAdding(false); setOpen(l.id ?? null); void queryClient.invalidateQueries({ queryKey: ['retail'] });
+      // Opened from an empty list on a form (issue #619): what was added takes the person back to that form.
+      back?.();
+    },
+    meta: { success: 'Price list added' },
   });
   const change = useMutation({
     mutationFn: (v: { list: PriceList; body: { name?: string; strict?: boolean; active?: boolean } }) => retail.updatePriceList(v.list.id ?? '', requireVersion(v.list.version), v.body),
     onMutate: () => setFailure(null),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['retail'] }),
     onError: (error) => setFailure(changeFailureText(error, queryClient)),
+    meta: {
+      success: (_: unknown, v: { body: { active?: boolean } }) => (v.body.active === false ? 'Price list switched off' : v.body.active === true ? 'Price list switched on' : 'Changes saved'),
+      // A switch on or off can be taken back from the toast (#682): the same change the other way, on the version it made.
+      undo: (r: PriceList, v: { body: { active?: boolean } }) =>
+        v.body.active === undefined ? null : () => retail.updatePriceList(r.id ?? '', requireVersion(r.version), { active: !v.body.active }),
+    },
   });
   const selected = (lists.data ?? []).find((l) => l.id === open);
   return (
@@ -224,7 +239,8 @@ export function PriceLists() {
           <label htmlFor="new-list-name">Name</label>
           <input id="new-list-name" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} autoComplete="off" />
           <label><input type="checkbox" checked={strict} onChange={(e) => setStrict(e.target.checked)} /> Strict: an item that is not in this list cannot be sold to its customers</label>
-          <button type="submit" className="rt-primary" disabled={create.isPending || name.trim() === ''}>{create.isPending ? 'Adding' : 'Add price list'}</button>
+          <BusyButton type="submit" className="rt-primary" busy={create.isPending} notReady={name.trim() === ''}>Add price list</BusyButton>
+
           <Problem error={create.error} />
         </form>
       </AddPanel>

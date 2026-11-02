@@ -27,7 +27,8 @@ public class RetailCapabilities {
     public static final String DOCUMENTS = "documents";
     public static final String RETURNS = "returns";
     public static final String PURCHASING = "purchasing";
-    private static final String MODULE = "retail";
+    /** The module key of the settings group. */
+    public static final String MODULE = "retail";
 
     /** Credit sales count when they are made: the behaviour before ADR-043 and the default. */
     public static final String ON_SALE = "on_sale";
@@ -47,6 +48,15 @@ public class RetailCapabilities {
 
     public boolean enabled(String capability) {
         return Boolean.TRUE.equals(settings.group(MODULE).get(capability));
+    }
+
+    /**
+     * As {@link #enabled}, read under a shared lock on the settings row until the caller's
+     * transaction ends, so the capability cannot be switched off before what the caller writes on
+     * the strength of it has committed (issue #239). Needs a read-write transaction.
+     */
+    public boolean enabledHeld(String capability) {
+        return Boolean.TRUE.equals(settings.groupHeld(MODULE).get(capability));
     }
 
     /** The tenant's credit sale recognition, {@link #ON_SALE} unless the owner chose {@link #ON_PAYMENT} (ADR-043). */
@@ -100,14 +110,14 @@ public class RetailCapabilities {
         return settings.group(MODULE).get("slow_mover_min_sold") instanceof Number n ? n.intValue() : 0;
     }
 
-    /** 404 {@code capability_not_enabled} for a route of a capability that is off. */
+    /** 404 {@code capability_not_enabled} for a route of a capability that is off, in plain words (issue #257). */
     public void require(String capability) {
         if (!enabled(capability)) {
             throw new ApiException(
                     HttpStatus.NOT_FOUND,
                     "capability_not_enabled",
-                    "Capability not enabled",
-                    "This capability is not enabled for the tenant.");
+                    "Not switched on",
+                    "This feature is not switched on for your business.");
         }
     }
 

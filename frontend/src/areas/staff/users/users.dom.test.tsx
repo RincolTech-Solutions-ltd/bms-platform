@@ -8,13 +8,14 @@ import type { StaffUser } from '../../../api/users';
 import { mockMe } from '../../../api/retail-mock';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
+import { DoneToast } from '../retail/toast';
 
 // The Users screens in a browser (issue #319), with the API client replaced: the form refuses a bad phone or an empty role before
 // anything is sent, a double tap invites once, the one-time link is shown once with Copy and WhatsApp and is gone when the box is
 // closed, a branch is asked for only when the role is not the administrator, the plan's refusal is shown, and someone who may only
 // read sees the list and no action. Every name, number and link below is invented.
 
-const api = { list: vi.fn(), roles: vi.fn(), branches: vi.fn(), invite: vi.fn(), reissue: vi.fn(), setRoles: vi.fn(), deactivate: vi.fn(), transferOwnership: vi.fn() };
+const api = { list: vi.fn(), roles: vi.fn(), branches: vi.fn(), invite: vi.fn(), reissue: vi.fn(), setRoles: vi.fn(), deactivate: vi.fn(), signOutDevices: vi.fn(), transferOwnership: vi.fn() };
 
 vi.mock('../../../api/users', async (original) => {
   const real = await original<typeof import('../../../api/users')>();
@@ -66,6 +67,7 @@ function shell(node: ReactElement, permissions: string[] = ADMIN, mfaEnabled = f
     <RouterContextProvider router={router}>
       <QueryClientProvider client={client}>
         <StaffContext.Provider value={{ me, branch: null }}>{node}</StaffContext.Provider>
+        <DoneToast />
       </QueryClientProvider>
     </RouterContextProvider>,
   );
@@ -167,7 +169,7 @@ describe('the invite form', () => {
     expect(screen.queryByRole('option', { name: 'Purchasing' })).toBeNull();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Test Branch Two (KLA)' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Test Store (ST), a store' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: /Can also record purchases and restocks/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Can also buy stock and record purchases/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Invite' }));
     await waitFor(() => expect(api.invite).toHaveBeenCalledWith({
       full_name: 'Test Cashier 05',
@@ -191,9 +193,30 @@ describe('the invite form', () => {
     fireEvent.click(button);
     fireEvent.submit(screen.getByRole('form', { name: 'Invite a staff user' }));
     expect(api.invite).toHaveBeenCalledTimes(1);
-    expect((screen.getByRole('button', { name: 'Inviting' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'Invite' }).getAttribute('aria-busy')).toBe('true');
     finish({ user: { full_name: 'Test Cashier 05' }, invitation: { url: LINK, expires_at: '2026-10-22T10:00:00Z' } });
     await screen.findByRole('heading', { name: 'Test Cashier 05 is invited' });
+  });
+
+  // JUSTIFICATION-A3: the busy-button test case issue #456 asks for.
+  it('shows the Invite button as busy while the invitation is sent, and a double click invites once', async () => {
+    let finish: (v: unknown) => void = () => undefined;
+    api.invite.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    shell(<InviteScreen />);
+    await fillInvite();
+    const button = screen.getByRole('button', { name: 'Invite' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(button.getAttribute('aria-busy')).toBe('true'));
+    const busy = screen.getByRole('button', { name: 'Invite' });
+    expect(busy).toBe(button);
+    expect(busy.getAttribute('aria-disabled')).toBe('true');
+    expect(busy.querySelector('.busy-spinner')).not.toBeNull();
+    fireEvent.click(busy);
+    expect(api.invite).toHaveBeenCalledTimes(1);
+    finish({ user: { full_name: 'Test Cashier 05' }, invitation: { url: LINK, expires_at: '2026-10-22T10:00:00Z' } });
+    await screen.findByRole('heading', { name: 'Test Cashier 05 is invited' });
+    expect(api.invite).toHaveBeenCalledTimes(1);
   });
 
   it('shows the plan\'s refusal in plain words', async () => {
@@ -434,7 +457,7 @@ describe('the staff list', () => {
     fireEvent.click(within(card).getByRole('checkbox', { name: 'Every shop and store' }));
     fireEvent.click(within(card).getByRole('button', { name: 'Save the roles' }));
     await waitFor(() => expect(api.setRoles).toHaveBeenCalledWith('u-wait', [{ role_key: 'cashier' }]));
-    expect(await screen.findByText('The roles of Test Seller 02 are saved.')).toBeTruthy();
+    expect(await screen.findByText('Roles saved for Test Seller 02')).toBeTruthy();
   });
 });
 
@@ -456,7 +479,7 @@ describe('who sees what', () => {
 
   it('sends someone without the permission away from both pages, with no request', () => {
     shell(<UsersScreen />, ['core.settings.manage']);
-    expect(screen.getByText('You do not have access to this page.')).toBeTruthy();
+    expect(screen.getByText(/^You do not have access to this page\. The owner or an administrator/)).toBeTruthy();
     cleanup();
     shell(<InviteScreen />, READER);
     expect(screen.getByText(/Only an administrator can invite staff/)).toBeTruthy();
@@ -477,7 +500,7 @@ describe('a role on a branch that has closed', () => {
     expect(old.checked).toBe(true);
     expect((within(card).getByRole('checkbox', { name: 'Every shop and store' }) as HTMLInputElement).checked).toBe(false);
     expect(within(card).getByText(/This branch is closed. Take it off/)).toBeTruthy();
-    expect((within(card).getByRole('button', { name: 'Save the roles' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(card).getByRole('button', { name: 'Save the roles' }) as HTMLButtonElement).getAttribute('data-not-ready')).toBe('true');
     fireEvent.click(old);
     fireEvent.click(within(card).getByRole('checkbox', { name: 'Test Branch Two (KLA)' }));
     expect(within(card).queryByText(/This branch is closed/)).toBeNull();
@@ -519,6 +542,7 @@ describe('taking the administrator role off yourself', () => {
     fireEvent.click(within(card).getByRole('button', { name: 'Save the roles' }));
     expect(within(card).getByText(/taking the administrator role off/)).toBeTruthy();
     expect(api.setRoles).not.toHaveBeenCalled();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve)); await new Promise((resolve) => setTimeout(resolve)); });
     fireEvent.click(within(card).getByRole('button', { name: 'Yes, remove my administrator role' }));
     await waitFor(() => expect(api.setRoles).toHaveBeenCalledWith('u-self', [{ role_key: 'cashier' }]));
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['me'] }));
@@ -591,7 +615,7 @@ describe('Reset sign-in (issue #339)', () => {
     fireEvent.click(within(card).getByRole('button', { name: 'Reset sign-in' }));
     fireEvent.change(within(card).getByLabelText('Code from your authenticator app'), { target: { value: '12' } });
     expect(within(card).getByText('Type the 6 digits from your authenticator app.')).toBeTruthy();
-    expect((within(card).getByRole('button', { name: 'Make the link' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(card).getByRole('button', { name: 'Make the link' }) as HTMLButtonElement).getAttribute('data-not-ready')).toBe('true');
     fireEvent.change(within(card).getByLabelText('Code from your authenticator app'), { target: { value: '123456' } });
     fireEvent.click(within(card).getByRole('button', { name: 'Make the link' }));
 
@@ -653,9 +677,136 @@ describe('Reset sign-in (issue #339)', () => {
     await act(async () => finish({ url: RESET_LINK, expiresAt: '2026-10-22T10:00:00Z' }));
     await screen.findByRole('heading', { name: 'Sign-in link for Test Seller 07' });
   });
+
+  // Issue #369, from the review of #360.
+  it('says why nothing was sent when another action is still being sent, instead of clearing the password silently', async () => {
+    let finish: (v: { url: string; expires_at: string }) => void = () => {};
+    api.reissue.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    shell(<UsersScreen />);
+    const card = (await screen.findByText('Test Seller 07')).closest('li') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Reset sign-in' }));
+    fireEvent.click(within(screen.getByText('Test Seller 02').closest('li') as HTMLElement).getByRole('button', { name: 'Send a new link' }));
+    fireEvent.change(within(card).getByLabelText('Your own password'), { target: { value: 'invented-password-1' } });
+    fireEvent.submit(within(card).getByRole('form'));
+    expect(await within(card).findByText(/Another change is still being sent/)).toBeTruthy();
+    expect(resetUserSignIn).not.toHaveBeenCalled();
+    await act(async () => finish({ url: LINK, expires_at: '2026-10-22T10:00:00Z' }));
+  });
+
+  it('keeps the other actions disabled while the reset is being sent', async () => {
+    let finish: (v: { url: string; expiresAt: string }) => void = () => {};
+    resetUserSignIn.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    shell(<UsersScreen />);
+    const card = (await screen.findByText('Test Seller 07')).closest('li') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Reset sign-in' }));
+    fireEvent.change(within(card).getByLabelText('Your own password'), { target: { value: 'invented-password-1' } });
+    fireEvent.submit(within(card).getByRole('form'));
+    const resend = within(screen.getByText('Test Seller 02').closest('li') as HTMLElement).getByRole('button', { name: 'Send a new link' }) as HTMLButtonElement;
+    await waitFor(() => expect(resend.disabled).toBe(true));
+    await act(async () => finish({ url: RESET_LINK, expiresAt: '2026-10-22T10:00:00Z' }));
+    await waitFor(() => expect(resend.disabled).toBe(false));
+  });
+
+  it('reads who you are again when the server asks for the other kind of proof', async () => {
+    resetUserSignIn.mockRejectedValue(new SignInResetError('Enter the current 6 digit code from your authenticator app.', 422, 'totp_required'));
+    shell(<UsersScreen />);
+    const invalidate = vi.spyOn(lastClient, 'invalidateQueries');
+    const card = (await screen.findByText('Test Seller 07')).closest('li') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Reset sign-in' }));
+    fireEvent.change(within(card).getByLabelText('Your own password'), { target: { value: 'invented-password-1' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Make the link' }));
+    expect(await within(card).findByText(/6 digit code/)).toBeTruthy();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['me'] });
+  });
+
+  it('does not read who you are again for a wrong code', async () => {
+    resetUserSignIn.mockRejectedValue(new SignInResetError('That code is not right.', 422, 'invalid_mfa_code'));
+    shell(<UsersScreen />, ADMIN, true);
+    const invalidate = vi.spyOn(lastClient, 'invalidateQueries');
+    const card = (await screen.findByText('Test Seller 07')).closest('li') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Reset sign-in' }));
+    fireEvent.change(within(card).getByLabelText('Code from your authenticator app'), { target: { value: '000000' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Make the link' }));
+    expect(await within(card).findByText(/not right/)).toBeTruthy();
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['me'] });
+  });
+
+  it('keeps the digits of a pasted code with a space in it', async () => {
+    resetUserSignIn.mockResolvedValue({ url: RESET_LINK, expiresAt: '2026-10-22T10:00:00Z' });
+    shell(<UsersScreen />, ADMIN, true);
+    const card = (await screen.findByText('Test Seller 07')).closest('li') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Reset sign-in' }));
+    const field = within(card).getByLabelText('Code from your authenticator app') as HTMLInputElement;
+    expect(field.maxLength).toBe(-1);
+    fireEvent.change(field, { target: { value: ' 123 456 ' } });
+    expect(field.value).toBe('123456');
+    fireEvent.click(within(card).getByRole('button', { name: 'Make the link' }));
+    await screen.findByRole('heading', { name: 'Sign-in link for Test Seller 07' });
+    expect(resetUserSignIn).toHaveBeenCalledWith('u-seller', { totpCode: '123456' });
+  });
+
+  it('warns that the link already shown closes when a reset link is made', async () => {
+    api.reissue.mockResolvedValue({ url: LINK, expires_at: '2026-10-22T10:00:00Z' });
+    shell(<UsersScreen />);
+    const card = (await screen.findByText('Test Seller 07')).closest('li') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Reset sign-in' }));
+    expect(within(card).queryByRole('note')).toBeNull();
+    fireEvent.click(within(card).getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(within(screen.getByText('Test Seller 02').closest('li') as HTMLElement).getByRole('button', { name: 'Send a new link' }));
+    await screen.findByRole('heading', { name: 'New link for Test Seller 02' });
+    fireEvent.click(within(card).getByRole('button', { name: 'Reset sign-in' }));
+    expect(within(card).getByRole('note').textContent).toContain('The link for Test Seller 02 shown above closes when this one is made');
+  });
 });
 
 // The Owner of the business (ADR-062, FR-IAM-18): the badge, the actions an administrator is not offered, and the transfer.
+describe('sign out their devices (issue #647)', () => {
+  it('is offered only on an active person who is not you, asks first, and signs them out at once', async () => {
+    api.signOutDevices.mockResolvedValue({ ...SECOND_ADMIN });
+    shell(<UsersScreen />);
+    const card = (await screen.findByText('Test Admin 03')).closest('li') as HTMLElement;
+    expect(screen.getAllByRole('button', { name: 'Sign out their devices' })).toHaveLength(1);
+    const self = screen.getByText('Test Owner 01').closest('li') as HTMLElement;
+    expect(within(self).queryByRole('button', { name: 'Sign out their devices' })).toBeNull();
+    const waiting = screen.getByText('Test Seller 02').closest('li') as HTMLElement;
+    expect(within(waiting).queryByRole('button', { name: 'Sign out their devices' })).toBeNull();
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Sign out their devices' }));
+    expect(api.signOutDevices).not.toHaveBeenCalled();
+    expect(within(card).getByText(/every phone and computer/)).toBeTruthy();
+    const yes = within(card).getByRole('button', { name: 'Yes, sign them out' });
+    fireEvent.click(yes);
+    fireEvent.click(yes);
+    await waitFor(() => expect(api.signOutDevices).toHaveBeenCalledWith('u-admin2'));
+    expect(api.signOutDevices).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('Test Admin 03 signed out everywhere')).toBeTruthy();
+  });
+
+  it('sends nothing when cancelled', async () => {
+    shell(<UsersScreen />);
+    const card = (await screen.findByText('Test Admin 03')).closest('li') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Sign out their devices' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Cancel' }));
+    expect(api.signOutDevices).not.toHaveBeenCalled();
+    expect(within(card).getByRole('button', { name: 'Sign out their devices' })).toBeTruthy();
+  });
+
+  it('shows a refusal in plain words inside the question', async () => {
+    api.signOutDevices.mockRejectedValue(new UsersError('Only the owner of the business can add, remove or change an administrator.', 403, 'owner_only'));
+    shell(<UsersScreen />);
+    const card = (await screen.findByText('Test Admin 03')).closest('li') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Sign out their devices' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Yes, sign them out' }));
+    expect((await within(card).findByRole('alert')).textContent).toMatch(/Only the owner/);
+  });
+
+  it('is not offered to someone who may only read the list', async () => {
+    shell(<UsersScreen />, READER);
+    await screen.findByText('Test Admin 03');
+    expect(screen.queryByRole('button', { name: 'Sign out their devices' })).toBeNull();
+  });
+});
+
 describe('the owner', () => {
   const OWNER: StaffUser = { id: 'u-owner', full_name: 'Test Owner 09', email: 'owner09@example.com', status: 'active', is_owner: true, roles: [{ role_key: 'tenant_admin' }] };
   const SELF_ADMIN: StaffUser = { ...SELF, full_name: 'Test Admin 01' };
@@ -689,7 +840,7 @@ describe('the owner', () => {
     const yes = within(form).getByRole('button', { name: 'Yes, make Test Admin 03 the owner' });
     fireEvent.click(yes);
     fireEvent.click(yes);
-    await screen.findByText(/Test Admin 03 is now the owner of the business/);
+    await screen.findByText('Owner changed to Test Admin 03');
     expect(api.transferOwnership).toHaveBeenCalledTimes(1);
     expect(api.transferOwnership).toHaveBeenCalledWith('u-admin2', { password: 'Fabricated-Pass-2026' });
   });

@@ -40,6 +40,9 @@ on:
   push:
     branches: [main]
     tags: ["v*.*.*"]
+  # A push to main that GitHub never turned into a run (22 Oct 2026: #460 and #469 fired no workflow at all) can be
+  # deployed by hand from main with `gh workflow run Deploy --ref main`; it builds and points staging exactly as a push does.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -50,11 +53,12 @@ env:
 jobs:
   meta:
     name: Resolve tags
-    if: github.repository == 'RincolTech-Solutions-ltd/bms-platform'
+    if: github.repository == 'RincolTech-Solutions-ltd/bms-platform' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
     runs-on: ${{ fromJSON(vars.DEPLOY_RUNS_ON || '["self-hosted","bms-deploy"]') }}
     outputs:
       sha_tag: ${{ steps.tags.outputs.sha_tag }}
       version: ${{ steps.tags.outputs.version }}
+      built: ${{ steps.tags.outputs.built }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -76,6 +80,8 @@ jobs:
         run: |
           commit="$(git rev-parse HEAD)"
           echo "sha_tag=sha-${commit:0:7}" >> "$GITHUB_OUTPUT"
+          # The commit time, UTC YYYYMMDDHHMMSS: the web app sends it, and the API compares it with BMS_MIN_CLIENT_BUILD (#576).
+          echo "built=$(TZ=UTC git show -s --date=format-local:%Y%m%d%H%M%S --format=%cd "$commit")" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             if ! printf '%s' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
               echo "::error::Release tags are vMAJOR.MINOR.PATCH; got $GITHUB_REF_NAME"
@@ -105,6 +111,11 @@ jobs:
         include:
           - image: api
             context: backend
+            # The help articles Ask BMS answers from (ADR-096): the Dockerfile copies them from this named context.
+            # The one list of unit words (ADR-109), read by the server from the PWA's file.
+            build_contexts: |
+              help=frontend/src/help/articles
+              words=frontend/src/words
           - image: web
             context: frontend
           - image: proxy
@@ -138,10 +149,13 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file || format('{0}/Dockerfile', matrix.context) }}
+          build-contexts: ${{ matrix.build_contexts }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ env.IMAGE_PREFIX }}-${{ matrix.image }}:${{ needs.meta.outputs.sha_tag }}
-          build-args: GIT_SHA=${{ needs.meta.outputs.sha_tag }}
+          build-args: |
+            GIT_SHA=${{ needs.meta.outputs.sha_tag }}
+            GIT_TIME=${{ needs.meta.outputs.built }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}

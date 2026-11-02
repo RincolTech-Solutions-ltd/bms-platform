@@ -112,6 +112,8 @@ class OutboxTemplates {
 
                     After that, sign in at {sign_in_url}
 
+                    Your shop's short link is {short_link}. Share it with your customers.
+
                     Rincol Tech
                     """,
                     "Set my password",
@@ -128,6 +130,8 @@ class OutboxTemplates {
                     {link}
 
                     After that, sign in at {sign_in_url}
+
+                    Your shop's short link is {short_link}. Share it with your customers.
 
                     Rincol Tech
                     """,
@@ -317,6 +321,312 @@ class OutboxTemplates {
                     null,
                     "You got this email because someone asked for the BMS sign-in page of this address."));
 
+    // In-app feedback (issue #447, ADR-065): one email per active platform operator for each item a business sends. The
+    // message is the sender's own words, shown as text (every value is escaped in the HTML part); the link is the
+    // operator's Feedback page on the platform host.
+    private static final Map<String, Template> EMAIL_FEEDBACK = Map.of(
+            "feedback.new",
+            new Template(
+                    "New feedback from {business_name}: {kind}",
+                    """
+                    {sender_name} at {business_name} sent feedback ({kind}) from the page {page}:
+
+                    {message}
+
+                    Open the Feedback page of the operator portal to mark it seen or done and to reply:
+
+                    {portal_url}
+                    """,
+                    "Open the Feedback page",
+                    "You got this email because you are a BMS platform operator."));
+
+    // The weekly copy of the business's data (issue #334, ADR-074): to the Owner, with the workbook attached, or with a
+    // link to Business set-up when the file is too large to attach. The attached copy leaves out contact details and ID
+    // numbers (decision 6), and the email says so; the full copy is made and downloaded by the signed-in Owner from the
+    // business's own sign-in page, never through a link that works without signing in.
+    private static final Map<String, Template> EMAIL_DATA_EXPORT = Map.of(
+            "core.data_export_weekly",
+            new Template(
+                    "Your weekly copy of {business_name}'s data",
+                    """
+                    Hello {owner_name},
+
+                    This week's copy of the data of {business_name}, as it stood on {as_of}, is attached as an Excel \
+                    workbook, with a sheet for each table.
+
+                    Because email can be forwarded and read on any phone, this copy leaves out phone numbers, \
+                    addresses, dates of birth and ID numbers: contact details and ID numbers are only in the copy you \
+                    download after signing in. To get that copy, sign in and press Download my data in Business set-up:
+
+                    {link}
+
+                    To stop these emails, untick the weekly email under Download my data in Business set-up.
+
+                    Rincol Tech
+                    """,
+                    "Open Business set-up",
+                    "You got this email because you are the Owner of {business_name} on BMS."),
+            "core.data_export_weekly_link",
+            new Template(
+                    "Your weekly copy of {business_name}'s data is too large to email",
+                    """
+                    Hello {owner_name},
+
+                    This week's copy of the data of {business_name}, as it stood on {as_of}, is too large to attach \
+                    to an email. Sign in and press Download my data in Business set-up to make your copy and save it:
+
+                    {link}
+
+                    That copy is complete: contact details and ID numbers are only in the copy you download after \
+                    signing in.
+
+                    To stop these emails, untick the weekly email under Download my data in Business set-up.
+
+                    Rincol Tech
+                    """,
+                    "Open Business set-up",
+                    "You got this email because you are the Owner of {business_name} on BMS."),
+            "core.data_export_weekly_failed",
+            new Template(
+                    "Your weekly copy of {business_name}'s data could not be made",
+                    """
+                    Hello {owner_name},
+
+                    Your weekly copy of the data of {business_name} could not be made this week. Nothing in the \
+                    business changed. You can download a copy now from Business set-up, under Download my data:
+
+                    {link}
+
+                    To stop these emails, untick the weekly email under Download my data in Business set-up.
+
+                    Rincol Tech
+                    """,
+                    "Open Business set-up",
+                    "You got this email because you are the Owner of {business_name} on BMS."));
+
+    // The Owner's own plan (issue #472, ADR-073): the Owner is told the operator's decision on a module they asked for,
+    // and
+    // every active platform operator is told of a request, a module stopped, a cancellation or an undo. No price or
+    // figure.
+    private static final Map<String, Template> EMAIL_PLAN = Map.of(
+            "platform.plan_request_decided",
+            new Template(
+                    "{business_name}: your request for {module} was answered",
+                    """
+                    Hello,
+
+                    Your request to add {module} to {business_name} was {decision}.
+
+                    The Plan and modules card in Business set-up shows it:
+
+                    {link}
+
+                    Rincol Tech
+                    """,
+                    "Open Business set-up",
+                    "You got this email because you are the owner of this business in BMS."),
+            "platform.plan_change_for_operator",
+            new Template(
+                    "{business_name}: a change to the plan",
+                    """
+                    The owner of {business_name} {change}.
+
+                    The module requests and the changes still to come are in the operator portal:
+
+                    {portal_url}
+                    """,
+                    "Open the operator portal",
+                    "You got this email because you are a BMS platform operator."));
+
+    // Closing the business (issue #571, ADR-090): the Owner is told the request was made, with the day the platform
+    // operator may
+    // remove the business, and told again when the request is cancelled.
+    private static final Map<String, Template> EMAIL_CLOSURE = Map.of(
+            "platform.closure_requested",
+            new Template(
+                    "{business_name}: your request to close the business",
+                    """
+                    Hello {owner_name},
+
+                    You asked to close {business_name} on BMS. From now on it is read only: everyone can still sign in, \
+                    look at everything and download the data, but nobody can add or change anything.
+
+                    A full copy of your data is being prepared. Save it from Download my data in Business set-up:
+
+                    {link}
+
+                    Rincol Tech may remove the business from {remove_after}. Removal deletes the names, phone numbers, \
+                    ID numbers and other personal details. The money records the law requires are kept without them \
+                    for a time, then deleted. Until the removal you can cancel the closing in Business set-up, and \
+                    the business works again as before.
+
+                    If you did not ask for this, sign in and cancel it now, and call Rincol Tech.
+
+                    Rincol Tech
+                    """,
+                    "Open Business set-up",
+                    "You got this email because you are the owner of {business_name} on BMS."),
+            "platform.closure_cancelled",
+            new Template(
+                    "{business_name}: the closing was cancelled",
+                    """
+                    Hello {owner_name},
+
+                    The request to close {business_name} was cancelled. The business works again as before and \
+                    nothing will be removed.
+
+                    {link}
+
+                    Rincol Tech
+                    """,
+                    "Open Business set-up",
+                    "You got this email because you are the owner of {business_name} on BMS."));
+
+    // Subscription billing (issue #480, ADR-075): the reminders to the Owner of a business before the last day paid for
+    // or
+    // the last day of the free month, and the receipt of a payment the operator recorded (the PDF is attached when the
+    // email
+    // is sent, EmailAttachments). Plain words; the amount is the plan's price from the price book; how to pay is the
+    // operator's own text.
+    private static final Map<String, Template> EMAIL_BILLING = Map.of(
+            "billing.due_in_7",
+            new Template(
+                    "Your BMS subscription is due on {due_date}",
+                    """
+                    Hello {owner_name},
+
+                    The BMS subscription of {business_name} is paid until {due_date}, 7 days from today. Pay before then to keep using BMS without a break. {amount_line}
+
+                    How to pay:
+
+                    {how_to_pay}
+
+                    Your plan, what is paid and your receipts are on the Plan and billing page:
+
+                    {link}
+
+                    Rincol Tech
+                    """,
+                    "Open Plan and billing",
+                    "You got this email because you receive the bills of {business_name} on BMS."),
+            "billing.due_in_1",
+            new Template(
+                    "Your BMS subscription is due tomorrow",
+                    """
+                    Hello {owner_name},
+
+                    The BMS subscription of {business_name} is paid until tomorrow, {due_date}. Pay before then to keep using BMS without a break. {amount_line}
+
+                    How to pay:
+
+                    {how_to_pay}
+
+                    Your plan, what is paid and your receipts are on the Plan and billing page:
+
+                    {link}
+
+                    Rincol Tech
+                    """,
+                    "Open Plan and billing",
+                    "You got this email because you receive the bills of {business_name} on BMS."),
+            "billing.due_today",
+            new Template(
+                    "Your BMS subscription is due today",
+                    """
+                    Hello {owner_name},
+
+                    The BMS subscription of {business_name} is paid until today, {due_date}. Pay today to keep using BMS without a break. {amount_line}
+
+                    How to pay:
+
+                    {how_to_pay}
+
+                    Your plan, what is paid and your receipts are on the Plan and billing page:
+
+                    {link}
+
+                    Rincol Tech
+                    """,
+                    "Open Plan and billing",
+                    "You got this email because you receive the bills of {business_name} on BMS."),
+            "billing.trial_in_7",
+            new Template(
+                    "Your free month of BMS ends in 7 days",
+                    """
+                    Hello {owner_name},
+
+                    The free month of {business_name} on BMS ends on {due_date}, 7 days from today. To keep using BMS after that, pay for your plan. {amount_line}
+
+                    How to pay:
+
+                    {how_to_pay}
+
+                    Your plan, what is paid and your receipts are on the Plan and billing page:
+
+                    {link}
+
+                    Rincol Tech
+                    """,
+                    "Open Plan and billing",
+                    "You got this email because you receive the bills of {business_name} on BMS."),
+            "billing.trial_in_1",
+            new Template(
+                    "Your free month of BMS ends tomorrow",
+                    """
+                    Hello {owner_name},
+
+                    The free month of {business_name} on BMS ends tomorrow, {due_date}. To keep using BMS after that, pay for your plan. {amount_line}
+
+                    How to pay:
+
+                    {how_to_pay}
+
+                    Your plan, what is paid and your receipts are on the Plan and billing page:
+
+                    {link}
+
+                    Rincol Tech
+                    """,
+                    "Open Plan and billing",
+                    "You got this email because you receive the bills of {business_name} on BMS."),
+            "billing.trial_today",
+            new Template(
+                    "Your free month of BMS ends today",
+                    """
+                    Hello {owner_name},
+
+                    The free month of {business_name} on BMS ends today, {due_date}. To keep using BMS after today, pay for your plan. {amount_line}
+
+                    How to pay:
+
+                    {how_to_pay}
+
+                    Your plan, what is paid and your receipts are on the Plan and billing page:
+
+                    {link}
+
+                    Rincol Tech
+                    """,
+                    "Open Plan and billing",
+                    "You got this email because you receive the bills of {business_name} on BMS."),
+            "billing.receipt",
+            new Template(
+                    "Receipt {receipt_no} for your BMS subscription",
+                    """
+                    Hello {owner_name},
+
+                    Thank you. We received {amount} for the BMS subscription of {business_name}, for {period}. Your \
+                    receipt {receipt_no} is attached.
+
+                    Your receipts are also on the Plan and billing page:
+
+                    {link}
+
+                    Rincol Tech
+                    """,
+                    "Open Plan and billing",
+                    "You got this email because you receive the bills of {business_name} on BMS."));
+
     private static final Map<String, Template> EMAIL = emailTemplates();
 
     private static Map<String, Template> emailTemplates() {
@@ -325,6 +635,11 @@ class OutboxTemplates {
         all.putAll(EMAIL_RETAIL);
         all.putAll(EMAIL_POLICY);
         all.putAll(EMAIL_FIND_SIGN_IN);
+        all.putAll(EMAIL_FEEDBACK);
+        all.putAll(EMAIL_DATA_EXPORT);
+        all.putAll(EMAIL_PLAN);
+        all.putAll(EMAIL_BILLING);
+        all.putAll(EMAIL_CLOSURE);
         return Map.copyOf(all);
     }
 
@@ -338,6 +653,13 @@ class OutboxTemplates {
                     "retail.sale_voided",
                     new Template(
                             "A sale was voided", "A sale at {branch_name} was voided. Open it to see the reason.")),
+            // ADR-067: a sale made offline was recorded with something that changed meanwhile. No item, no amount.
+            Map.entry(
+                    "retail.sale_clash",
+                    new Template(
+                            "An offline sale needs a look",
+                            "A sale made offline at {branch_name} was recorded with a stock or price clash. Open it to"
+                                    + " resolve it.")),
             Map.entry(
                     "retail.write_off_alone",
                     new Template(
@@ -347,9 +669,9 @@ class OutboxTemplates {
             Map.entry(
                     "core.approval_policy_weakened",
                     new Template(
-                            "An approval limit was raised",
-                            "The amount that can be done without a second person was raised for {action_label}. If you did"
-                                    + " not expect this, check Business set-up.")),
+                            "An approval rule was loosened",
+                            "Fewer of these now need a second person: {action_label}. If you did not expect this, check"
+                                    + " Approval rules in Business set-up.")),
             Map.entry(
                     "core.signin_policy_weakened",
                     new Template(
@@ -382,9 +704,16 @@ class OutboxTemplates {
                     new Template(
                             "Your order was delivered",
                             "An order you took at {branch_name} was delivered and is now a sale.")),
+            // A loan the nightly arrears run could not update two nights running (#270 review): a safeguard, no switch.
+            Map.entry(
+                    "lending.arrears_loan_failing",
+                    new Template(
+                            "A loan was not updated overnight",
+                            "Loan {loan_no} failed the nightly arrears run two nights in a row. Its arrears may be out of"
+                                    + " date: tell support.")),
             Map.entry(
                     "retail.low_stock",
-                    new Template("Stock is running low", "{item_name} at {branch_name} is {reason}. Restock it soon.")),
+                    new Template("Stock is running low", "{item_name} at {branch_name} is {reason}. Buy more soon.")),
             Map.entry(
                     "retail.credit_due",
                     new Template(
@@ -443,6 +772,45 @@ class OutboxTemplates {
                             null,
                             "{tenant_name}: the phone or email of the BMS owner sign-in was changed. Not you? Call Rincol Tech"
                                     + " support at once.")),
+            // Subscription reminders to the Owner of a business (issue #480, ADR-075), only when the platform's billing
+            // SMS is
+            // switched on: no amount and no link, the email carries them.
+            Map.entry(
+                    "billing.due_in_7",
+                    new Template(
+                            null,
+                            "{tenant_name}: your BMS subscription is paid until {due_date}. Pay before then to keep using"
+                                    + " BMS. Rincol Tech")),
+            Map.entry(
+                    "billing.due_in_1",
+                    new Template(
+                            null,
+                            "{tenant_name}: your BMS subscription is paid until tomorrow, {due_date}. Pay to keep using"
+                                    + " BMS. Rincol Tech")),
+            Map.entry(
+                    "billing.due_today",
+                    new Template(
+                            null,
+                            "{tenant_name}: your BMS subscription is paid until today, {due_date}. Pay today to keep"
+                                    + " using BMS. Rincol Tech")),
+            Map.entry(
+                    "billing.trial_in_7",
+                    new Template(
+                            null,
+                            "{tenant_name}: your free month of BMS ends on {due_date}. Pay for your plan to keep using"
+                                    + " BMS. Rincol Tech")),
+            Map.entry(
+                    "billing.trial_in_1",
+                    new Template(
+                            null,
+                            "{tenant_name}: your free month of BMS ends tomorrow, {due_date}. Pay for your plan to keep"
+                                    + " using BMS. Rincol Tech")),
+            Map.entry(
+                    "billing.trial_today",
+                    new Template(
+                            null,
+                            "{tenant_name}: your free month of BMS ends today, {due_date}. Pay for your plan to keep using"
+                                    + " BMS. Rincol Tech")),
             Map.entry(
                     "savings.deposit",
                     new Template(
@@ -498,6 +866,38 @@ class OutboxTemplates {
                             null,
                             "{tenant_name}: Investment {account_no} of {currency} {amount} matures on {maturity_date}."
                                     + " Please contact us about your instruction.")),
+            // The reminders and arrears notices of FR-NTF-02 (issue #227), queued by the nightly arrears run, in the
+            // wording of chapter 11 section 11.3.1: the business, the loan number, the amount and the due date or the
+            // days overdue, never the member's name or anyone else, and never a threat (the chapter's "to avoid
+            // penalties" is left out for that reason). The first notice says "overdue" without a count, so it never
+            // reads "1 days".
+            Map.entry(
+                    "loan.due_in_3_days",
+                    new Template(
+                            null,
+                            "{tenant_name}: Reminder, {currency} {amount} for loan {loan_no} is due on {due_date}.")),
+            Map.entry(
+                    "loan.due_today",
+                    new Template(
+                            null, "{tenant_name}: {currency} {amount} for loan {loan_no} is due today, {due_date}.")),
+            Map.entry(
+                    "loan.overdue_1",
+                    new Template(
+                            null,
+                            "{tenant_name}: Loan {loan_no} is overdue. Amount in arrears {currency} {arrears}. Please pay or"
+                                    + " contact us.")),
+            Map.entry(
+                    "loan.overdue_7",
+                    new Template(
+                            null,
+                            "{tenant_name}: Loan {loan_no} is {dpd} days overdue. Amount in arrears {currency} {arrears}."
+                                    + " Please pay or contact us.")),
+            Map.entry(
+                    "loan.overdue_30",
+                    new Template(
+                            null,
+                            "{tenant_name}: Loan {loan_no} is {dpd} days overdue. Amount in arrears {currency} {arrears}."
+                                    + " Please pay or contact us.")),
             Map.entry(
                     "investment.paid_out",
                     new Template(
@@ -523,7 +923,24 @@ class OutboxTemplates {
             throw new IllegalArgumentException("no " + channel + " template " + templateKey);
         }
         return new Rendered(
-                template.subject() == null ? null : fill(template.subject(), params), fill(template.text(), params));
+                template.subject() == null ? null : fill(template.subject(), params),
+                fill(withoutMissingOptional(template.text(), params), params));
+    }
+
+    /**
+     * Parameters a row queued before they existed may lack (ADR-108: an activation email queued before the short link
+     * release): the paragraph holding one is left out instead of failing the message.
+     */
+    static final java.util.Set<String> OPTIONAL = java.util.Set.of("short_link");
+
+    private static String withoutMissingOptional(String text, Map<String, String> params) {
+        String out = text;
+        for (String name : OPTIONAL) {
+            if (!params.containsKey(name)) {
+                out = out.replaceAll("(?m)^[^\\n]*\\{" + name + "}[^\\n]*\\n\\n?", "");
+            }
+        }
+        return out;
     }
 
     /**
@@ -539,7 +956,7 @@ class OutboxTemplates {
         }
         return EmailLayout.content(
                 fill(template.subject(), params),
-                template.text(),
+                withoutMissingOptional(template.text(), params),
                 params,
                 template.button(),
                 template.reason(),

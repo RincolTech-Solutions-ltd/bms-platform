@@ -143,4 +143,137 @@ export const plansPage: Tour = {
   ],
 };
 
-export const OPERATOR_TOURS: readonly Tour[] = [businessesPage, businessPage, plansPage];
+// Due for suspension (issue #480, ADR-075): businesses past the grace period, and the grace period and how to pay.
+export const dueForSuspensionPage: Tour = {
+  id: 'page-operator-billing',
+  version: 1,
+  title: 'This page: due for suspension',
+  audience: forOperator,
+  autoStart: false,
+  page: '/platform/billing',
+  steps: [
+    {
+      id: 'intro',
+      target: 'due-intro',
+      title: 'Nothing is automatic',
+      body: 'A business that pays late keeps working through the grace period. After it, the business is listed here for you to decide.',
+    },
+    {
+      id: 'list',
+      target: 'due-list',
+      title: 'Overdue past the grace period',
+      body: 'Each business overdue for longer than the grace period, most overdue first. Nothing is suspended for you: open the business and suspend it there.',
+      optional: true,
+    },
+    {
+      id: 'settings',
+      target: 'billing-settings',
+      title: 'Grace period and how to pay',
+      body: 'How many days an overdue business keeps working before it is listed here. How to pay, in your words, goes in every reminder.',
+    },
+  ],
+};
+
+// Businesses closing (issue #571, ADR-090).
+export const closuresPage: Tour = {
+  id: 'page-operator-closures',
+  version: 1,
+  title: 'This page: businesses closing',
+  audience: forOperator,
+  autoStart: false,
+  page: '/platform/closures',
+  steps: [
+    {
+      id: 'intro',
+      target: 'closures-intro',
+      title: 'The owner asks, you remove',
+      body: 'An owner who closes their business asks from Business set-up. The business is read only at once and the owner gets a copy of the data.',
+    },
+    {
+      id: 'list',
+      target: 'closures-list',
+      title: 'Waiting, then removable',
+      body: 'Each request shows the day it can be removed. Until then the owner can cancel it.',
+      optional: true,
+    },
+    {
+      id: 'remove',
+      target: 'closures-remove',
+      title: 'Removing',
+      body: 'Removal needs your own code and a reason. Personal data goes; money records stay without names until the date shown. It cannot be undone.',
+      optional: true,
+    },
+  ],
+};
+
+// Businesses with no owner (issue #571, ADR-062).
+export const noOwnerPage: Tour = {
+  id: 'page-operator-no-owner',
+  version: 1,
+  title: 'This page: businesses with no owner',
+  audience: forOperator,
+  autoStart: false,
+  page: '/platform/no-owner',
+  steps: [
+    {
+      id: 'intro',
+      target: 'no-owner-intro',
+      title: 'Every business needs an owner',
+      body: 'Only the owner changes the plan, closes the business and manages the administrators. These businesses have none yet.',
+    },
+    {
+      id: 'list',
+      target: 'no-owner-list',
+      title: 'Their administrators',
+      body: 'Each business with its active administrators, when they last signed in.',
+      optional: true,
+    },
+    {
+      id: 'set',
+      target: 'no-owner-set',
+      title: 'Set the owner',
+      body: 'Choose the administrator who owns the business. It needs your own code and a reason, kept in both histories.',
+      optional: true,
+    },
+  ],
+};
+
+// Feedback from every business (issue #447, ADR-065).
+export const feedbackInboxPage: Tour = {
+  id: 'page-operator-feedback',
+  version: 1,
+  title: 'This page: feedback',
+  audience: forOperator,
+  autoStart: false,
+  page: '/platform/feedback',
+  steps: [
+    {
+      id: 'filter',
+      target: 'feedback-filter',
+      title: 'Show by status',
+      body: 'New is what nobody has read yet. Seen is read and still open. Done is finished. All shows everything, newest first.',
+    },
+    {
+      id: 'list',
+      target: 'feedback-list',
+      title: 'One card per message',
+      body: 'Each card shows the business, who sent it, the page, the version and the browser. Show the screenshot opens the picture they added.',
+    },
+    {
+      id: 'reply',
+      target: 'feedback-reply',
+      title: 'Reply',
+      body: 'Write a reply here. The sender sees it on their own Feedback page.',
+      optional: true,
+    },
+    {
+      id: 'actions',
+      target: 'feedback-actions',
+      title: 'Mark it seen or done',
+      body: 'A message moves forward only: new, then seen, then done. Save the reply keeps the status as it is.',
+      optional: true,
+    },
+  ],
+};
+
+export const OPERATOR_TOURS: readonly Tour[] = [businessesPage, businessPage, plansPage, dueForSuspensionPage, closuresPage, noOwnerPage, feedbackInboxPage];

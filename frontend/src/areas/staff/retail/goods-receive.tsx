@@ -1,6 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, createLazyRoute, getRouteApi, useNavigate } from '@tanstack/react-router';
-import type { ReactNode } from 'react';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { createLazyRoute, getRouteApi, useNavigate } from '@tanstack/react-router';
+import { useState, type ReactNode } from 'react';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { retail, type GoodsReceiptRequest, type Product, type PurchaseOrder } from '../../../api/retail';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { SkeletonList } from '../../../components/states';
@@ -8,13 +9,19 @@ import { useOptionalStaff, useStaff } from '../context';
 import { newIdempotencyKey, usePersistedDraft } from './idempotency';
 import { UNITS, canUse, capabilityOn } from './permissions';
 import {
-  blankReceipt, blindLineFor, buildReceiptRequest, isReceived, overOrdered, receiptProblem, receiveFormFor, receiveLineProblem, receiveTotal, withReceiveUnit,
-  type ReceiveForm, type ReceiveLineForm,
+  blankReceipt, blindLineFor, buildReceiptRequest, isReceived, overOrdered, receiptProblem, receiveFactor, receiveFormFor, receiveLineProblem, receiveTotal,
+  sizeDiffers, withReceiveUnit, type ReceiveForm, type ReceiveLineForm,
 } from './purchasing-state';
+import { Field, FieldsNeededNote } from '../../../app/ui/Field';
+import { howManyInEach, useFromNowOn } from '../../../app/glossary';
 import { useOrderBranches } from './purchase-order-form';
 import { BranchField, SupplierField, useSuppliers, type SupplierOption } from './purchasing-ui';
 import { showQty } from './maths';
 import { Gate, Problem, ProductPicker, money } from './ui';
+import { ScanBar } from './scan';
+import { PACK_UNUSABLE, plusOne } from './barcode-state';
+import { OWN_PRICE_KEEPS_SIZE, hasOwnPrice, mayKeepSize } from './units-state';
+import { Hint } from '../../../app/ui/Hint';
 
 // Goods received (the purchasing capability, ADR-033, issue #198): what arrived from a supplier, against an order or with none (a
 // "blind" receipt, which needs the supplier). Saving puts the goods into stock at the cost typed and, when a new selling price
@@ -34,6 +41,13 @@ function LineCard({ line, index, order, onChange, onRemove }: {
   // Outside the staff layout (a test of the line alone) the server is the only judge, so the field shows.
   const staff = useOptionalStaff();
   const canPrice = !staff || (staff.me.permissions ?? []).includes('retail.price.edit');
+  // D23 (#554): changing how many usually come in a pack changes the item, so it is offered only to someone who manages items.
+  const canManageItems = !staff || (staff.me.permissions ?? []).includes('retail.catalogue.manage');
+  const canChangePrices = !staff || (staff.me.permissions ?? []).includes('retail.price.edit');
+  const pack = line.packs.find((k) => k.unit_id === line.unitId) ?? (line.packHasOwnPrice ? { has_own_price: true } : undefined);
+  const keeps = mayKeepSize(pack, canManageItems, canChangePrices);
+  const factor = receiveFactor(line);
+  const differs = sizeDiffers(line);
   return (
     <li className="rt-card" data-testid={`receive-line-${index}`}>
       <p><strong>{line.description}</strong> ({line.code})</p>
@@ -43,11 +57,34 @@ function LineCard({ line, index, order, onChange, onRemove }: {
       {line.packs.length > 0 && (
         <>
           <label htmlFor={`rc-unit-${index}`}>Received by</label>
+          {/* empty: drawn only when the item has packs; its own unit is always there. */}
           <select id={`rc-unit-${index}`} value={line.unitId ?? ''} onChange={(e) => onChange(withReceiveUnit(line, e.target.value))}>
             <option value="">{line.baseUnit}</option>
             {line.packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{k.unit} ({showQty(k.factor ?? '')} each)</option>)}
           </select>
         </>
+      )}
+      {line.unitId && (
+        <div data-testid={`receive-size-${index}`}>
+          <Field id={`rc-size-${index}`} required inputMode="decimal" label={howManyInEach(line.baseUnit, line.unitLabel)}
+            hint={`${line.orderLineId ? 'Ordered at' : 'Usually'} ${showQty(line.usualSize ?? '')}. Change it when this delivery's ${line.unitLabel} held a different number.`}
+            error={factor === null ? 'Enter 1 or more, with at most three decimals.' : null}
+            value={line.packSize ?? showQty(line.usualSize ?? '')} onChange={(e) => onChange({ ...line, packSize: e.target.value })} />
+          {differs && canManageItems && !keeps && <p className="hint">{OWN_PRICE_KEEPS_SIZE}</p>}
+          {differs && keeps && (
+            <label>
+              <input type="checkbox" checked={line.fromNowOn === true} onChange={(e) => onChange({ ...line, fromNowOn: e.target.checked })} />
+              <span>{useFromNowOn(showQty(factor ?? ''))}</span>
+            </label>
+          )}
+          {differs && (
+            <p className="hint" data-testid={`receive-size-note-${index}`}>
+              {line.fromNowOn && keeps
+                ? `Every ${line.unitLabel} bought or sold after this one counts as ${showQty(factor ?? '')}.`
+                : `Only this delivery counts as ${showQty(factor ?? '')} in each ${line.unitLabel}.`}
+            </p>
+          )}
+        </div>
       )}
       <div className="rt-row">
         <div>
@@ -90,6 +127,7 @@ export function ReceiveFormView({ form, blind, order, suppliers, branches, picke
   const setLine = (i: number, line: ReceiveLineForm) => onChange({ ...form, lines: form.lines.map((l, n) => (n === i ? line : l)) });
   return (
     <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!problem && !busy) onSubmit(); }} data-tour="receive-form">
+      {form.lines.some((l) => l.unitId) && <FieldsNeededNote />}
       <div className="stack" data-tour="receive-who">
         {blind ? (
           <SupplierField id="receive-supplier" value={form.supplierId} suppliers={suppliers} onChange={(supplierId) => onChange({ ...form, supplierId })} />
@@ -109,11 +147,11 @@ export function ReceiveFormView({ form, blind, order, suppliers, branches, picke
           <input type="checkbox" checked={form.hold === true} onChange={(e) => onChange({ ...form, hold: e.target.checked })} />
           <span>Hold until the landed cost is in</span>
         </label>
-        <p className="hint">Tick this when freight or duty is still to come. The delivery shows as held, not costed, until you add the landed cost or release the hold.</p>
+        <Hint full>Tick this when freight or duty is still to come. The delivery shows as held, not costed, until you add the landed cost or release the hold.</Hint>
       </div>
       {picker && <div data-tour="receive-items">{picker}</div>}
       <h2>What arrived</h2>
-      {form.lines.length === 0 && <p className="empty-state">{blind ? 'No items yet. Find an item above and add it.' : 'Everything on this order has arrived.'}</p>}
+      {form.lines.length === 0 && <p className="empty-state">{blind ? 'No items yet. Type an item above and tap it in the list, or scan it.' : 'Everything on this order has arrived.'}</p>}
       <ul style={{ listStyle: 'none', padding: 0 }} data-tour="receive-lines">
         {form.lines.map((l, i) => (
           <LineCard key={l.key} line={l} index={i} order={order} onChange={(line) => setLine(i, line)} onRemove={blind ? () => onChange({ ...form, lines: form.lines.filter((_, n) => n !== i) }) : undefined} />
@@ -122,12 +160,15 @@ export function ReceiveFormView({ form, blind, order, suppliers, branches, picke
       <p className="rt-total" aria-live="polite" data-testid="receive-total">Worth {money(receiveTotal(form.lines))}</p>
       {problem && form.lines.length > 0 && <p role="alert" className="rt-flag">{problem}</p>}
       <Problem error={error} />
-      <button type="submit" className="rt-primary" disabled={problem !== null || busy} data-tour="receive-save">{busy ? 'Saving' : 'Save goods received'}</button>
+      <BusyButton busy={busy ?? false} type="submit" className="rt-primary" notReady={problem !== null} data-tour="receive-save">Save goods received</BusyButton>
     </form>
   );
 }
 
-function useSaveReceipt(key: string, finish: () => void, build: () => GoodsReceiptRequest) {
+/** Issue #624: the receipt saved, and the lines whose "use from now on" was left out, said before opening the receipt. */
+type SizesKept = { receiptId: string; notes: string[] };
+
+function useSaveReceipt(key: string, finish: () => void, build: () => GoodsReceiptRequest, setKept: (kept: SizesKept) => void) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
@@ -135,9 +176,27 @@ function useSaveReceipt(key: string, finish: () => void, build: () => GoodsRecei
     onSuccess: (receipt) => {
       finish();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
-      void navigate({ to: '/staff/retail/goods-received/$receiptId', params: { receiptId: receipt.id ?? '' } });
+      const notes = (receipt.lines ?? []).flatMap((l) => (l.size_kept && l.size_kept_note ? [`${l.description}: ${l.size_kept_note}`] : []));
+      if (notes.length > 0) setKept({ receiptId: receipt.id ?? '', notes });
+      else void navigate({ to: '/staff/retail/goods-received/$receiptId', params: { receiptId: receipt.id ?? '' } });
     },
+    // A receipt with sizes kept opens the Goods received saved note instead, which says it.
+    meta: { success: (r: Awaited<ReturnType<typeof retail.createGoodsReceipt>>) => ((r?.lines ?? []).some((l) => l.size_kept && l.size_kept_note) ? null : 'Goods received saved') },
   });
+}
+
+/** Issue #624: goods received are saved, but a pack with its own price kept its usual size; said before moving on. */
+export function SizesKeptNote({ kept }: { kept: SizesKept }) {
+  const navigate = useNavigate();
+  return (
+    <section aria-label="Goods received saved" data-testid="sizes-kept">
+      <h2>Goods received saved</h2>
+      {kept.notes.map((n) => <p key={n} role="note" className="alert alert-info">{n}</p>)}
+      <button type="button" className="rt-primary" onClick={() => void navigate({ to: '/staff/retail/goods-received/$receiptId', params: { receiptId: kept.receiptId } })}>
+        Open the goods received
+      </button>
+    </section>
+  );
 }
 
 const orderRoute = getRouteApi('/staff/retail/purchase-orders/$orderId/receive');
@@ -152,16 +211,23 @@ export function ReceiveAgainstOrderPage() {
   useCrumbLabel(order.data?.order_no ? `Receive ${order.data.order_no}` : undefined);
   const { key, draft, setDraft, finish } = usePersistedDraft<ReceiveForm>(`goods-received:${me.user_id ?? ''}:${orderId}`, blankReceipt(defaultBranch));
   // Until something is edited the form is the order's own: what is still to come, at the cost ordered. The first edit keeps the whole form.
-  const form = draft.lines.length === 0 && order.data ? { ...receiveFormFor(order.data, defaultBranch), ...(draft.branchId ? { branchId: draft.branchId } : {}) } : draft;
-  const save = useSaveReceipt(key, finish, () => buildReceiptRequest(form, orderId));
+  const base = draft.lines.length === 0 && order.data ? { ...receiveFormFor(order.data, defaultBranch), ...(draft.branchId ? { branchId: draft.branchId } : {}) } : draft;
+  // Issue #624: the order's lines carry no packs, so the items' packs are read to know which has its own selling price.
+  const unitsOn = capabilityOn(me, 'retail', UNITS);
+  const productIds = [...new Set((order.data?.lines ?? []).flatMap((l) => (l.unit_id && l.product_id ? [l.product_id] : [])))];
+  const packs = useQueries({ queries: productIds.map((id) => ({ queryKey: ['retail', 'packs', id], queryFn: () => retail.listPacks(id), enabled: allowed && unitsOn })) });
+  const priced = new Set(packs.flatMap((q) => (q.data ?? []).filter((k) => hasOwnPrice(k)).map((k) => `${k.product_id}:${k.unit_id}`)));
+  const form = priced.size === 0 ? base : { ...base, lines: base.lines.map((l) => (priced.has(`${l.productId}:${l.unitId}`) ? { ...l, packHasOwnPrice: true } : l)) };
+  const [kept, setKept] = useState<SizesKept | null>(null);
+  const save = useSaveReceipt(key, finish, () => buildReceiptRequest(form, orderId), setKept);
   const open = order.data?.status === 'sent' || order.data?.status === 'partly_received';
   return (
     <Gate screen="goodsReceived" title={order.data?.order_no ? `Receive goods for ${order.data.order_no}` : 'Receive goods'}>
-      <p><Link to="/staff/retail/purchase-orders/$orderId" params={{ orderId }}>Back to the order</Link></p>
       {order.isPending && <SkeletonList label="Loading the order" />}
       <Problem error={order.error} />
       {order.data && !open && <p className="empty-state">Goods can be received only against an order that has been sent and is not yet complete.</p>}
-      {order.data && open && (
+      {kept && <SizesKeptNote kept={kept} />}
+      {order.data && open && !kept && (
         <ReceiveFormView form={form} blind={false} order={order.data} suppliers={[]} branches={branches} busy={save.isPending} error={save.error} onChange={(f) => setDraft(() => f)} onSubmit={() => save.mutate()} />
       )}
     </Gate>
@@ -175,16 +241,33 @@ export function ReceiveBlindPage() {
   const unitsOn = capabilityOn(me, 'retail', UNITS);
   const { key, draft, setDraft, finish, discard } = usePersistedDraft<ReceiveForm>(`goods-received:${me.user_id ?? ''}:blind`, blankReceipt(defaultBranch));
   const suppliers = useSuppliers(draft.supplierId);
-  const save = useSaveReceipt(key, finish, () => buildReceiptRequest(draft));
+  const [kept, setKept] = useState<SizesKept | null>(null);
+  const save = useSaveReceipt(key, finish, () => buildReceiptRequest(draft), setKept);
+  // A scan (issue #345): the item arrives at 1, or one more on its line in the pack the barcode is on.
+  const scanAdd = (p: Product, unitId?: string) => {
+    const fresh = blindLineFor(p, unitsOn, newIdempotencyKey());
+    const unit = fresh.packs.some((k) => k.unit_id === unitId) ? unitId : undefined;
+    // A pack this form cannot use is refused, never received as one piece.
+    if (unitId && !unit) return PACK_UNUSABLE;
+    setDraft((d) => {
+      const at = d.lines.findIndex((l) => l.productId === p.id && !l.orderLineId && (l.unitId ?? '') === (unit ?? ''));
+      return at < 0
+        ? { ...d, lines: [...d.lines, { ...(unit ? withReceiveUnit(fresh, unit) : fresh), qty: '1' }] }
+        : { ...d, lines: d.lines.map((l, i) => (i === at ? { ...l, qty: plusOne(l.qty) } : l)) };
+    });
+    return undefined;
+  };
   const picker = (
-    <ProductPicker id="receive-search" showStock={false} onAdd={(p: Product) => setDraft((d) => ({ ...d, lines: [...d.lines, blindLineFor(p, unitsOn, newIdempotencyKey())] }))} />
+    <>
+      <ProductPicker id="receive-search" showStock={false} onAdd={(p: Product) => setDraft((d) => ({ ...d, lines: [...d.lines, blindLineFor(p, unitsOn, newIdempotencyKey())] }))} />
+      <ScanBar id="receive-scan" onFound={scanAdd} />
+    </>
   );
   return (
     <Gate screen="goodsReceived" title="Receive goods without an order">
-      <p><Link to="/staff/retail/goods-received">Back to goods received</Link></p>
-      <p className="hint">Use this when goods arrive with no purchase order. Choose the supplier, add what arrived and what it cost.</p>
-      <ReceiveFormView form={draft} blind suppliers={suppliers} branches={branches} picker={picker} busy={save.isPending} error={save.error} onChange={(f) => setDraft(() => f)} onSubmit={() => save.mutate()} />
-      {draft.lines.length > 0 && !save.isPending && <button type="button" className="btn-ghost" onClick={() => { discard(); save.reset(); }}>Clear this form</button>}
+      <Hint>Use this when goods arrive with no purchase order. Choose the supplier, add what arrived and what it cost.</Hint>
+      {kept ? <SizesKeptNote kept={kept} /> : <ReceiveFormView form={draft} blind suppliers={suppliers} branches={branches} picker={picker} busy={save.isPending} error={save.error} onChange={(f) => setDraft(() => f)} onSubmit={() => save.mutate()} />}
+      {!kept && draft.lines.length > 0 && !save.isPending && <button type="button" className="btn-ghost" onClick={() => { discard(); save.reset(); }}>Clear this form</button>}
     </Gate>
   );
 }

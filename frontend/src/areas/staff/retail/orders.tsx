@@ -1,6 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { businessToday, retail, type Product } from '../../../api/retail';
 import { retailOrders, type Delivered, type Order, type OrderQuery, type OrderSource } from '../../../api/retail-orders';
 import { NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
@@ -16,8 +17,10 @@ import {
 import { UNITS, capabilityOn, holdsAt } from './permissions';
 import { newLine, withUnit } from './sale-state';
 import { SaleLineCard } from './sale';
+import { CustomerPicker } from './customer-picker';
 import { ScreenLink } from './screen-link';
 import { Gate, Note, Problem, ProductPicker, money, useBranchName, useBranchView, useSingleBranch } from './ui';
+import { Hint } from '../../../app/ui/Hint';
 
 // Customer orders with delivery (issue #385, ADR-052): orders that come by WhatsApp, Instagram, Facebook, a phone call or at the
 // counter. Saving an order keeps its items aside so the till cannot sell them; nothing is paid yet. The order is packed, sent out
@@ -29,6 +32,8 @@ const invalidate = (client: ReturnType<typeof useQueryClient>) => {
   void client.invalidateQueries({ queryKey: ['retail', 'order'] });
   void client.invalidateQueries({ queryKey: ['retail', 'stock'] });
   void client.invalidateQueries({ queryKey: ['retail', 'products'] });
+  // Home's open orders, and on delivery its sales and takings (issue #485).
+  void client.invalidateQueries({ queryKey: ['retail', 'home'] });
 };
 
 /** The money the customer pays on delivery, how, and what is left on credit. */
@@ -36,6 +41,7 @@ export function DeliverPanel({ order, onDone }: { order: Order; onDone: (d: Deli
   const client = useQueryClient();
   const [form, setForm] = useState<DeliverForm>(blankDeliver());
   const [key, setKey] = useState(newIdempotencyKey);
+  // toast-exempt: success screen, OrderActions puts its Delivered, Sale made words in place of the order buttons through onDone
   const deliver = useMutation({
     mutationFn: () => retailOrders.deliver(order.id ?? '', buildDeliverRequest(order, form), key),
     onSuccess: (d) => {
@@ -85,9 +91,9 @@ export function DeliverPanel({ order, onDone }: { order: Order; onDone: (d: Deli
       <input id={`deliver-note-${order.id}`} value={form.note} maxLength={500} onChange={(e) => setForm({ ...form, note: e.target.value })} />
       {problem && <p role="alert" className="rt-flag">{problem}</p>}
       <Problem error={deliver.error} />
-      <button type="button" className="rt-primary" disabled={problem !== null || deliver.isPending} onClick={() => deliver.mutate()}>
-        {deliver.isPending ? 'Saving' : 'Save: delivered and paid'}
-      </button>
+      <BusyButton busy={deliver.isPending} type="button" className="rt-primary" notReady={problem !== null} onClick={() => deliver.mutate()}>
+        Save: delivered and paid
+      </BusyButton>
     </fieldset>
   );
 }
@@ -104,9 +110,9 @@ export function OrderActions({ order, onDelivered }: { order: Order; onDelivered
     setPanel(null);
     invalidate(client);
   };
-  const pack = useMutation({ mutationFn: () => retailOrders.pack(order.id ?? ''), onSuccess: after });
-  const send = useMutation({ mutationFn: () => retailOrders.send(order.id ?? '', rider.trim()), onSuccess: after });
-  const cancel = useMutation({ mutationFn: () => retailOrders.cancel(order.id ?? '', reason.trim()), onSuccess: after });
+  const pack = useMutation({ mutationFn: () => retailOrders.pack(order.id ?? ''), onSuccess: after, meta: { success: 'Order packed' } });
+  const send = useMutation({ mutationFn: () => retailOrders.send(order.id ?? '', rider.trim()), onSuccess: after, meta: { success: 'Order out for delivery' } });
+  const cancel = useMutation({ mutationFn: () => retailOrders.cancel(order.id ?? '', reason.trim()), onSuccess: after, meta: { success: 'Order cancelled' } });
   const steps = nextSteps(order);
   // Delivering records a sale, so it is offered to whoever may sell at the order's shop.
   const maySell = holdsAt(me, 'retail.sale.create', order.branch_id);
@@ -121,7 +127,7 @@ export function OrderActions({ order, onDelivered }: { order: Order; onDelivered
   return (
     <>
       <div className="rt-row">
-        {steps.includes('pack') && <button type="button" className="btn-sm" disabled={pack.isPending} onClick={() => pack.mutate()}>Packed</button>}
+        {steps.includes('pack') && <BusyButton busy={pack.isPending} type="button" className="btn-sm" onClick={() => pack.mutate()}>Packed</BusyButton>}
         {steps.includes('send') && <button type="button" className="btn-sm" onClick={() => setPanel(panel === 'send' ? null : 'send')}>Out for delivery</button>}
         {steps.includes('deliver') && maySell && <button type="button" className="btn-sm" onClick={() => setPanel(panel === 'deliver' ? null : 'deliver')}>Delivered</button>}
         {steps.includes('cancel') && <button type="button" className="btn-sm" onClick={() => setPanel(panel === 'cancel' ? null : 'cancel')}>Cancel</button>}
@@ -131,7 +137,7 @@ export function OrderActions({ order, onDelivered }: { order: Order; onDelivered
           <legend>Out for delivery</legend>
           <label htmlFor={`rider-${order.id}`}>Who takes it? (for example the rider&apos;s name)</label>
           <input id={`rider-${order.id}`} value={rider} maxLength={120} onChange={(e) => setRider(e.target.value)} />
-          <button type="button" disabled={rider.trim() === '' || send.isPending} onClick={() => send.mutate()}>{send.isPending ? 'Saving' : 'Save: out for delivery'}</button>
+          <BusyButton busy={send.isPending} type="button" disabled={rider.trim() === ''} onClick={() => send.mutate()}>Save: out for delivery</BusyButton>
         </fieldset>
       )}
       {panel === 'deliver' && <DeliverPanel order={order} onDone={(d) => { setDone(d); setPanel(null); onDelivered?.(d); }} />}
@@ -140,7 +146,7 @@ export function OrderActions({ order, onDelivered }: { order: Order; onDelivered
           <legend>Cancel this order</legend>
           <label htmlFor={`cancel-${order.id}`}>Why? (it stays on record, and the items go back on the shelf)</label>
           <input id={`cancel-${order.id}`} value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} />
-          <button type="button" disabled={reason.trim().length < 3 || cancel.isPending} onClick={() => cancel.mutate()}>{cancel.isPending ? 'Cancelling' : 'Cancel the order'}</button>
+          <BusyButton busy={cancel.isPending} type="button" disabled={reason.trim().length < 3} onClick={() => cancel.mutate()}>Cancel the order</BusyButton>
         </fieldset>
       )}
       <Problem error={pack.error ?? send.error ?? cancel.error} />
@@ -210,6 +216,7 @@ export function OrderForm({ branchId, onSaved }: { branchId: string; onSaved: (o
       finish();
       onSaved(o);
     },
+    meta: { success: (o: Order) => (o.order_no ? `Order ${o.order_no} saved` : 'Order saved') },
   });
   const update = (patch: Partial<OrderDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const setLine = (i: number, patch: { qty?: string; price?: string }) => setDraft((d) => ({ ...d, lines: d.lines.map((l, n) => (n === i ? { ...l, ...patch } : l)) }));
@@ -242,15 +249,8 @@ export function OrderForm({ branchId, onSaved }: { branchId: string; onSaved: (o
         )}
         <label htmlFor="order-name">Name</label>
         <input id="order-name" value={draft.name} maxLength={200} onChange={(e) => update({ name: e.target.value })} />
-        {(customers.data ?? []).length > 0 && (
-          <>
-            <label htmlFor="order-buyer">Credit buyer on the list (optional, needed to sell to them on credit when customer accounts are on)</label>
-            <select id="order-buyer" value={draft.customerId} onChange={(e) => update({ customerId: e.target.value })}>
-              <option value="">Not on the list</option>
-              {(customers.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </>
-        )}
+        <CustomerPicker id="order-buyer" label="Customer from the list (optional, needed to sell to them on credit when customer accounts are on)"
+          placeholder="Not on the list" customers={customers} value={draft.customerId} onChange={(customerId) => update({ customerId })} quietWhenEmpty />
         <p id="order-source-label">Where did the order come from?</p>
         <div className="rt-row" role="radiogroup" aria-labelledby="order-source-label" data-tour="order-source">
           {SOURCES.map((s) => (
@@ -265,7 +265,7 @@ export function OrderForm({ branchId, onSaved }: { branchId: string; onSaved: (o
         <ProductPicker id="order-search" branchId={branchId} showPrice onAdd={add} />
       </div>
       <h2>Items</h2>
-      {draft.lines.length === 0 && <EmptyState art="noSales" title="No items yet.">Search above and tap Add.</EmptyState>}
+      {draft.lines.length === 0 && <EmptyState title="No items yet.">Type an item above and tap it in the list.</EmptyState>}
       {draft.lines.map((l, i) => (
         <SaleLineCard
           key={`${l.product.id}-${i}`}
@@ -291,12 +291,12 @@ export function OrderForm({ branchId, onSaved }: { branchId: string; onSaved: (o
         <input id="order-notes" value={draft.notes} maxLength={500} onChange={(e) => update({ notes: e.target.value })} />
       </fieldset>
       <p className="rt-total" aria-live="polite">Items {money(items)}, delivery {money(fee)}, total {money(items + fee)}</p>
-      <p className="hint">Saving keeps these items aside, so they are not sold at the till. Nothing is paid until the order is delivered.</p>
+      <Hint full>Saving keeps these items aside, so they are not sold at the till. Nothing is paid until the order is delivered.</Hint>
       {problem && draft.lines.length > 0 && <Note>{problem}</Note>}
       <Problem error={save.error} />
-      <button type="submit" className="rt-primary" disabled={problem !== null || save.isPending} data-tour="order-save">
-        {save.isPending ? 'Saving' : 'Save the order'}
-      </button>
+      <BusyButton busy={save.isPending} type="submit" className="rt-primary" notReady={problem !== null} data-tour="order-save">
+        Save the order
+      </BusyButton>
       {draft.lines.length > 0 && !save.isPending && <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this order</button>}
     </form>
   );
@@ -320,7 +320,7 @@ const queryOf = (view: View): Pick<OrderQuery, 'status' | 'due'> =>
   view === 'today' ? { due: 'today' } : view === 'overdue' ? { due: 'overdue' } : view === 'all' ? {} : { status: view };
 
 export function OrdersPage() {
-  const { all, branchId, branchName } = useBranchView();
+  const { all, branchId } = useBranchView();
   const nameOf = useBranchName();
   const single = useSingleBranch();
   const { me } = useStaff();
@@ -331,7 +331,6 @@ export function OrdersPage() {
   const [source, setSource] = useState<OrderSource | ''>('');
   const [making, setMaking] = useState(false);
   const [formKey, setFormKey] = useState(0);
-  const [saved, setSaved] = useState<Order | null>(null);
   const scope = all ? undefined : (branchId ?? undefined);
   const board = useQuery({ queryKey: ['retail', 'orders', 'board', scope ?? 'all'], queryFn: ({ signal }) => retailOrders.board(scope, signal), enabled: all || branchId !== null });
   const list = useInfiniteQuery({
@@ -354,8 +353,7 @@ export function OrdersPage() {
   ];
   return (
     <Gate screen="orders" title="Orders" wide>
-      <p className="branch-line">Branch: <strong>{all ? 'All branches' : branchName}</strong></p>
-      <p className="hint" data-tour="orders-help">Orders that come by WhatsApp, Instagram, Facebook, a phone call or at the counter. Saving an order keeps its items aside. The money is taken when it is delivered, and then it is a normal sale.</p>
+      <Hint tour="orders-help">Orders that come by WhatsApp, Instagram, Facebook, a phone call or at the counter. Saving an order keeps its items aside. The money is taken when it is delivered, and then it is a normal sale.</Hint>
       <div className="rt-row" data-tour="orders-board" aria-label="Orders at each step">
         {tiles.map((t) => (
           <button key={t.view} type="button" className={view === t.view ? 'btn-sm rt-primary' : 'btn-sm'} aria-pressed={view === t.view} onClick={() => setView(t.view)}>
@@ -366,21 +364,19 @@ export function OrdersPage() {
       </div>
       {atStore && <p className="hint">{single.branchName} is a store, and a store does not sell. Choose a shop to take an order.</p>}
       {!making && !atStore && (
-        <button type="button" className="rt-primary" disabled={single.branchId === null} data-tour="order-new" onClick={() => { setMaking(true); setSaved(null); }}>
+        <button type="button" className="rt-primary" disabled={single.branchId === null} data-tour="order-new" onClick={() => setMaking(true)}>
           New order
         </button>
       )}
       {!making && !atStore && single.branchId === null && <p className="hint">Choose one shop at the top of the page to take an order.</p>}
-      {saved && <p role="status" className="alert alert-success">Order {saved.order_no} saved for {saved.customer_name}. Its items are kept aside.</p>}
       {making && !atStore && single.branchId !== null && (
         <section aria-label="New order">
           <h2>New order for {single.branchName}</h2>
           <OrderForm
             key={formKey}
             branchId={single.branchId}
-            onSaved={(o) => {
+            onSaved={() => {
               setMaking(false);
-              setSaved(o);
               setFormKey((k) => k + 1);
               invalidate(client);
             }}

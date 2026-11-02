@@ -5,6 +5,7 @@ import com.rincoltech.bms.core.documents.Documents.AssetMeta;
 import com.rincoltech.bms.core.documents.Documents.ImagePolicy;
 import com.rincoltech.bms.core.tenancy.Letterheads;
 import com.rincoltech.bms.core.tenancy.TenantModules;
+import com.rincoltech.bms.core.tenancy.internal.BranchController.BranchResponse;
 import com.rincoltech.bms.core.tenancy.internal.SettingsController.SettingsResponse;
 import com.rincoltech.bms.kernel.ApiException;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -58,16 +59,23 @@ class BrandingService implements Letterheads {
     private final SettingsService settings;
     private final Documents documents;
     private final TenantModules modules;
+    private final BranchService branches;
 
-    BrandingService(SettingsService settings, Documents documents, TenantModules modules) {
+    BrandingService(SettingsService settings, Documents documents, TenantModules modules, BranchService branches) {
         this.settings = settings;
         this.documents = documents;
         this.modules = modules;
+        this.branches = branches;
     }
 
     /** The file is checked and re-encoded before a transaction opens, so no connection waits on it. */
     SettingsResponse uploadLogo(byte[] bytes) {
         return settings.replaceLogo(documents.prepareImage(bytes, LOGO));
+    }
+
+    /** A shop's own logo (issue #461, ADR-068): the rules and the processing of the business logo, checked the same way. */
+    BranchResponse uploadBranchLogo(UUID branchId, byte[] bytes) {
+        return branches.replaceLogo(branchId, documents.prepareImage(bytes, LOGO));
     }
 
     @Transactional(readOnly = true)
@@ -82,25 +90,59 @@ class BrandingService implements Letterheads {
                 modules.enabledKeys());
     }
 
+    /** What the installed app's manifest and icons are drawn from (ADR-066): the name, a readable colour or none, the logo. */
+    record AppBrand(String displayName, Optional<String> themeColour, Optional<Logo> logo) {}
+
+    @Transactional(readOnly = true)
+    AppBrand appBrand() {
+        SettingsResponse s = settings.current();
+        Optional<String> colour = BrandColour.readableText(s.themePrimary())
+                .map(t -> s.themePrimary().toUpperCase());
+        return new AppBrand(s.displayName(), colour, logo());
+    }
+
     /** The platform's own colour (the PWA's default {@code --brand}), for a tenant without a readable one. */
     static final String DEFAULT_BRAND = "#0D5C75";
 
     @Override
     @Transactional(readOnly = true)
     public Letterhead current() {
+        return letterhead(Optional.empty());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Letterhead forBranch(UUID branchId) {
+        return letterhead(
+                branchId == null
+                        ? Optional.empty()
+                        : branchLogo(branchId).map(l -> new ShopLogo(l, BranchService.logoUrl(branchId, l.id()))));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Letterhead forBranchCode(String code) {
+        return letterhead(
+                code == null
+                        ? Optional.empty()
+                        : branches.logoByCode(code)
+                                .flatMap(b -> servable(b.documentId())
+                                        .map(l -> new ShopLogo(l, BranchService.logoUrl(b.branchId(), l.id())))));
+    }
+
+    /**
+     * The shop's own logo when its bytes can be read, else the business logo (issue #461, ADR-068): a shop logo whose stored file
+     * is gone or unreadable falls back to the business logo rather than leaving the document without one.
+     */
+    private Letterhead letterhead(Optional<ShopLogo> branchLogo) {
         SettingsResponse s = settings.current();
         String colour = s.themePrimary() != null
                         && BrandColour.readableText(s.themePrimary()).isPresent()
                 ? s.themePrimary().toUpperCase()
                 : DEFAULT_BRAND;
-        Optional<Letterheads.Logo> logo;
-        try {
-            logo = logo().flatMap(
-                            l -> bytes(l).map(b -> new Letterheads.Logo(l.meta().contentType(), b)));
-        } catch (ApiException e) {
-            // A document without its logo is better than no document; the header keeps the name.
-            log.warn("the tenant logo is unavailable for a generated document: {}", e.code());
-            logo = Optional.empty();
+        Optional<Letterheads.Logo> logo = branchLogo.flatMap(b -> letterheadLogo(b.logo(), b.path()));
+        if (logo.isEmpty()) {
+            logo = logo().flatMap(l -> letterheadLogo(l, LOGO_PATH + "?v=" + l.id()));
         }
         return new Letterhead(
                 s.displayName(),
@@ -108,6 +150,19 @@ class BrandingService implements Letterheads {
                 BrandColour.readableText(colour).orElse(BrandColour.LIGHT_TEXT),
                 s.receiptFooter() == null ? "" : s.receiptFooter(),
                 logo);
+    }
+
+    /** A shop's own logo with the path it is served at. */
+    private record ShopLogo(Logo logo, String path) {}
+
+    /** A logo's bytes for a document, or empty when they cannot be read: a document without its logo is better than none. */
+    private Optional<Letterheads.Logo> letterheadLogo(Logo l, String path) {
+        try {
+            return bytes(l).map(b -> new Letterheads.Logo(l.meta().contentType(), b, path));
+        } catch (ApiException e) {
+            log.warn("a logo is unavailable for a generated document: {}", e.code());
+            return Optional.empty();
+        }
     }
 
     @Override
@@ -123,14 +178,24 @@ class BrandingService implements Letterheads {
 
     @Transactional(readOnly = true)
     Optional<Logo> logo() {
-        SettingsResponse s = settings.current();
-        if (s.logoDocumentId() == null) {
-            return Optional.empty();
-        }
+        return Optional.ofNullable(settings.current().logoDocumentId()).flatMap(this::servable);
+    }
+
+    /**
+     * A shop's own logo (issue #461, ADR-068), from the database only, like {@link #logo()}. Empty for a branch with none and
+     * for a branch of another business, which row-level security hides.
+     */
+    @Transactional(readOnly = true)
+    Optional<Logo> branchLogo(UUID branchId) {
+        return branches.logoDocumentId(branchId).flatMap(this::servable);
+    }
+
+    /** A core.tenant document of this tenant whose stored type the public routes may send. */
+    private Optional<Logo> servable(UUID documentId) {
         return documents
-                .publicAssetMeta(TenantDocumentAccess.SUBJECT, s.logoDocumentId())
+                .publicAssetMeta(TenantDocumentAccess.SUBJECT, documentId)
                 .filter(m -> SERVABLE.contains(m.contentType()))
-                .map(m -> new Logo(s.logoDocumentId(), m));
+                .map(m -> new Logo(documentId, m));
     }
 
     /**

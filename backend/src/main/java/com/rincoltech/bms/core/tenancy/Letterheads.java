@@ -1,6 +1,7 @@
 package com.rincoltech.bms.core.tenancy;
 
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * The bound tenant's letterhead for generated documents (ADR-034, FR-TEN-08): its display name,
@@ -10,6 +11,16 @@ import java.util.Optional;
 public interface Letterheads {
 
     Letterhead current();
+
+    /**
+     * The letterhead of a document made at one shop (issue #461, ADR-068): {@link #current()} with the shop's own logo in
+     * place of the business logo when it has one. A null id, a branch with no logo, or a logo storage cannot read keeps the
+     * business logo.
+     */
+    Letterhead forBranch(UUID branchId);
+
+    /** As {@link #forBranch} by the branch code, which never changes: what an issued document's snapshot keeps. */
+    Letterhead forBranchCode(String code);
 
     /**
      * The same-origin path of the bound tenant's servable logo, versioned by its document id
@@ -26,5 +37,14 @@ public interface Letterheads {
     record Letterhead(
             String displayName, String brandColour, String textOnBrand, String receiptFooter, Optional<Logo> logo) {}
 
-    record Logo(String contentType, byte[] bytes) {}
+    /**
+     * @param path the same-origin, versioned path the logo is served at, publicly and cacheably: the shop's own
+     *     ({@code /api/v1/branches/<id>/logo?v=<id>}) or the business logo's, whichever these bytes are (issue #500)
+     */
+    record Logo(String contentType, byte[] bytes, String path) {
+
+        public Logo(String contentType, byte[] bytes) {
+            this(contentType, bytes, null);
+        }
+    }
 }

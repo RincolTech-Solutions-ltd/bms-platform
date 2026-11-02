@@ -7,6 +7,9 @@ import type { Product, Purchase } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 
+/** A button that may be pressed: not disabled, and not a primary button whose form is still not ready (issue #526). */
+const ready = (b: unknown) => !(b as HTMLButtonElement).disabled && (b as HTMLElement).getAttribute('data-not-ready') !== 'true';
+
 // Correcting a mistaken restock as a person does it (issue #351): who is offered the button, the reason it needs, one request
 // however often it is pressed, a retry that repeats its Idempotency-Key, "void and enter it again" opening the form with the same
 // lines, a voided restock shown as voided, the hint about a unit, and each refusal in plain words. Fabricated names and amounts.
@@ -38,6 +41,7 @@ const { RetailError } = await import('../../../api/retail');
 const { retailMessage } = await import('../../../api/retail-errors');
 const { CorrectPanel, RestockCard } = await import('./restocks');
 const { RestockForm } = await import('./restock');
+const { DoneToast, doneToasts } = await import('./toast');
 const { chosenUnitHint, redraftOf, unitHint, voidReasonOf } = await import('./restock-correct-state');
 
 afterEach(() => {
@@ -65,6 +69,18 @@ function screenOf(me: ReturnType<typeof mockMe>, node: ReactElement) {
   );
 }
 
+/** As screenOf, with the app's success toast: one success signal per action (review of #685). */
+function toastScreenOf(me: ReturnType<typeof mockMe>, node: ReactElement) {
+  return render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } }, mutationCache: doneToasts() })}>
+      <StaffContext.Provider value={{ me, branch }}>{node}</StaffContext.Provider>
+      <DoneToast />
+    </QueryClientProvider>,
+  );
+}
+
+const toasts = () => Array.from(document.querySelectorAll('.toast')).map((t) => t.textContent ?? '');
+
 const reason = () => screen.getByLabelText(/Why is it being corrected/) as HTMLInputElement;
 const again = () => screen.getByRole('button', { name: 'Void and enter it again' }) as HTMLButtonElement;
 const only = () => screen.getByRole('button', { name: 'Void only' }) as HTMLButtonElement;
@@ -72,13 +88,13 @@ const only = () => screen.getByRole('button', { name: 'Void only' }) as HTMLButt
 describe('the restock card', () => {
   it('offers Correct this restock to someone who manages every branch it touched, and to nobody else', () => {
     screenOf(admin, <ul><RestockCard purchase={restock} supplier="Test Supplier 01" onDone={() => undefined} /></ul>);
-    expect(screen.getByRole('button', { name: 'Correct restock RP00000001' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Correct purchase RP00000001' })).toBeTruthy();
     expect(screen.getByText(/Test Supplier 01/)).toBeTruthy();
     cleanup();
     const twoBranches: Purchase = { ...restock, lines: [{ ...(restock.lines?.[0] ?? {}), qty_by_branch: [{ branch_id: branch, qty: '10.000' }, { branch_id: other, qty: '10.000' }] }] };
     const oneBranch = { ...admin, permission_scopes: { ...admin.permission_scopes, 'retail.purchase.create': { all_branches: false, branch_ids: [branch] } } };
     screenOf(oneBranch, <ul><RestockCard purchase={twoBranches} onDone={() => undefined} /></ul>);
-    expect(screen.queryByRole('button', { name: 'Correct restock RP00000001' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Correct purchase RP00000001' })).toBeNull();
     expect(screen.getByText(/Only someone who manages every branch/)).toBeTruthy();
     cleanup();
     screenOf(seller, <ul><RestockCard purchase={restock} onDone={() => undefined} /></ul>);
@@ -102,14 +118,16 @@ describe('the restock card', () => {
   it('hints when a line was entered in a unit that is not the item\'s usual one', () => {
     const metres: Purchase = { ...restock, lines: [{ ...(restock.lines?.[0] ?? {}), unit_id: 'u2', unit: 'metre', unit_qty_total: '200.000', base_unit: 'roll' }] };
     screenOf(admin, <ul><RestockCard purchase={metres} onDone={() => undefined} /></ul>);
-    expect(screen.getByTestId('unit-hint').textContent).toContain('Entered in metre but this item is kept in roll?');
+    expect(screen.getByTestId('unit-hint').textContent).toContain('Entered in metres but this item is kept in rolls?');
     expect(screen.getByText(/200 metre/)).toBeTruthy();
     expect(unitHint({ unit: 'roll', base_unit: 'roll' })).toBeNull();
     expect(unitHint({ base_unit: 'roll' })).toBeNull();
     // The same words on the restock form, where the unit is the one chosen for the line.
-    expect(chosenUnitHint('metre', 'roll')).toBe('Entered in metre but this item is kept in roll? If that is wrong, correct this restock and enter it again in the right unit.');
+    expect(chosenUnitHint('metre', 'roll')).toBe('Entered in metres but this item is kept in rolls? If that is wrong, correct this purchase and enter it again in the right unit.');
     expect(chosenUnitHint(undefined, 'roll')).toBeNull();
     expect(chosenUnitHint('roll', 'roll')).toBeNull();
+    // Review of #687: a short code a shop typed reads as its full word.
+    expect(chosenUnitHint('ctn', 'pc')).toBe('Entered in cartons but this item is kept in pieces? If that is wrong, correct this purchase and enter it again in the right unit.');
   });
 });
 
@@ -122,26 +140,28 @@ describe('correcting a restock', () => {
     expect(again().disabled).toBe(true);
     fireEvent.change(reason(), { target: { value: 'Entered twenty, there were ten' } });
     expect(again().disabled).toBe(false);
-    expect(only().disabled).toBe(false);
+    expect(ready(only())).toBe(true);
     expect(voidReasonOf('  abcde ')).toBe('abcde');
     expect(voidReasonOf('abcd')).toBeNull();
   });
 
-  it('voids once however often the button is pressed, says so, and keeps one key for a retry', async () => {
+  it('voids once however often the button is pressed, says so in one toast, and keeps one key for a retry', async () => {
     let finish: (v: unknown) => void = () => undefined;
     voidPurchase.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
     const done = vi.fn();
-    screenOf(admin, <CorrectPanel purchase={restock} onDone={done} onCancel={() => undefined} />);
+    toastScreenOf(admin, <CorrectPanel purchase={restock} onDone={done} onCancel={() => undefined} />);
     fireEvent.change(reason(), { target: { value: 'Entered twenty, there were ten' } });
     fireEvent.click(only());
     fireEvent.click(only());
-    fireEvent.submit(screen.getByRole('form', { name: 'Correct this restock' }));
+    fireEvent.submit(screen.getByRole('form', { name: 'Correct this purchase' }));
     await waitFor(() => expect(voidPurchase).toHaveBeenCalledTimes(1));
     expect(voidPurchase.mock.calls[0]?.slice(0, 2)).toEqual(['r1', 'Entered twenty, there were ten']);
     const firstKey = voidPurchase.mock.calls[0]?.[2];
     expect(typeof firstKey).toBe('string');
     finish({ ...restock, status: 'voided' });
-    await waitFor(() => expect(done).toHaveBeenCalledWith(expect.stringContaining('RP00000001 is voided')));
+    await waitFor(() => expect(toasts()).toEqual(['Purchase RP00000001 voided']));
+    // The panel closes with no words of its own: the toast is the one success signal.
+    expect(done).toHaveBeenCalledWith(null);
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -160,7 +180,10 @@ describe('correcting a restock', () => {
     fireEvent.click(only());
     expect((await screen.findByRole('alert')).textContent).toContain('only 12 are in stock there now');
     voidPurchase.mockResolvedValueOnce({ ...restock, status: 'voided' });
+    await new Promise((r) => setTimeout(r));
+    await new Promise((r) => setTimeout(r));
     fireEvent.click(only());
+
     await waitFor(() => expect(voidPurchase).toHaveBeenCalledTimes(2));
     expect(voidPurchase.mock.calls[1]?.[2]).toBe(voidPurchase.mock.calls[0]?.[2]);
   });
@@ -202,7 +225,7 @@ describe('entering a voided restock again', () => {
 });
 
 describe('the date of a restock entered again', () => {
-  const draft = { supplierId: '', newSupplier: '', purchasedOn: '2020-01-01', method: 'cash' as const, lines: [] };
+  const draft = { supplierId: '', purchasedOn: '2020-01-01', method: 'cash' as const, lines: [] };
 
   it('warns in plain words when it is dated before today', () => {
     screenOf(admin, <RestockForm draftName="restock-again:test:r1" initial={draft} again />);

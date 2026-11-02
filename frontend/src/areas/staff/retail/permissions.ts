@@ -1,5 +1,6 @@
 import type { Me } from '../../../api/client';
 import type { BranchRole } from '../../../api/retail';
+import { WORDS } from '../../../app/glossary';
 
 // Which retail screens a session may use. The API is the authority; this only decides what the
 // menu and the routes offer, from the same /me permissions the rest of the app reads. Cost,
@@ -15,10 +16,11 @@ export const ALL_SELLERS = 'retail.sale.all_sellers';
 
 export type RetailScreen =
   | 'sale' | 'creditSales' | 'salesHistory' | 'orders' | 'ordersReport' | 'restock' | 'usage' | 'stock' | 'stocktake' | 'transfer' | 'transfers' | 'valuation' | 'profit' | 'salesAnalysis' | 'margins' | 'stockHealth' | 'creditControl' | 'evaluation' | 'controls'
-  | 'catalogue' | 'products' | 'categories' | 'units' | 'suppliers' | 'buyers' | 'importer'
+  | 'catalogue' | 'quickAdd' | 'products' | 'categories' | 'units' | 'suppliers' | 'buyers' | 'importer' | 'labels' | 'shopSetup'
   // The trade screens of ADR-033: offered only while their capability is on (SCREEN_CAPABILITY below).
   | 'stockByLocation' | 'inTransit' | 'priceLists' | 'customerGroups' | 'customerAccounts' | 'customerAgeing' | 'documents' | 'quotations' | 'returns'
-  // Optional purchasing (ADR-033, issue #198): orders and goods received, then supplier invoices, payments and what is owed.
+  // Optional purchasing (ADR-033, issue #198): orders and goods received, then supplier invoices, payments and what is owed. Payments
+  // and what is owed need no capability since issue #557 (ADR-084): they pay what Buy stock bought on credit.
   | 'purchaseOrders' | 'goodsReceived' | 'supplierBills' | 'supplierPayments' | 'supplierPayables'
   // Landed costs and supplier credit notes (issue #199), also under the purchasing capability.
   | 'landedCosts' | 'supplierCredits'
@@ -46,14 +48,12 @@ export const SCREEN_CAPABILITY: Partial<Record<RetailScreen, string>> = {
   purchaseOrders: 'purchasing',
   goodsReceived: 'purchasing',
   supplierBills: 'purchasing',
-  supplierPayments: 'purchasing',
-  supplierPayables: 'purchasing',
   landedCosts: 'purchasing',
   supplierCredits: 'purchasing',
 };
 
 /** The catalogue management screens (#146); the Catalogue tile opens when any of them may be used. */
-export const CATALOGUE_SCREENS: RetailScreen[] = ['products', 'categories', 'units', 'suppliers', 'buyers'];
+export const CATALOGUE_SCREENS: RetailScreen[] = ['products', 'categories', 'units', 'suppliers', 'buyers', 'labels'];
 
 export const TRANSFER = 'retail.stock.transfer';
 /** Take, pack, send, deliver and cancel customer orders, and read their reports (issue #385). */
@@ -158,6 +158,9 @@ const NEEDS: Record<RetailScreen, string[]> = {
   // The Catalogue home needs nothing itself: canUse opens it when any screen under it may be used.
   catalogue: [],
   // The lists these screens read are stock, purchase and sale reads; changing them needs the manage permissions.
+  // Quick add (issue #632): making the item is a catalogue change; adding its stock also needs retail.stocktake.commit at the
+  // branch, without which the form adds the item with no stock and says who to ask.
+  quickAdd: ['retail.catalogue.manage', 'retail.stock.read'],
   products: ['retail.catalogue.manage', 'retail.stock.read'],
   categories: ['retail.catalogue.manage', 'retail.stock.read'],
   units: ['retail.catalogue.manage', 'retail.stock.read'],
@@ -165,6 +168,10 @@ const NEEDS: Record<RetailScreen, string[]> = {
   buyers: ['retail.customer.manage', 'retail.sale.read'],
   // Importing items needs the catalogue permission; core.settings.manage is the administrator's (#146).
   importer: ['retail.catalogue.manage', 'retail.stock.read', 'core.settings.manage'],
+  // Barcode labels (issue #345): making a code for an item is a catalogue change, so the catalogue permission.
+  labels: ['retail.catalogue.manage', 'retail.stock.read'],
+  // Set up your shop (issue #625) adds categories and units, so it needs what Categories and Units need.
+  shopSetup: ['retail.catalogue.manage', 'retail.stock.read'],
   // The cash book screens each need the permission that records on them; the lists and reports on
   // them need retail.cashbook.read, and a void needs retail.cashbook.void (checked where it is offered).
   savings: [SAVINGS_RECORD, TILL],
@@ -292,7 +299,7 @@ export function capabilityOn(me: Pick<Me, 'module_capabilities'>, module: string
 /**
  * Whether a sale may be made at the branch. `roles` is undefined while branch_roles is off or not yet
  * read, and then every branch sells, as before roles existed. The server refuses a sale at a store
- * whatever this says (422 branch_role_forbids_sales).
+ * whatever this says (422 branch_does_not_sell; a store is the branch's sells_goods flag, ADR-104).
  */
 export function sellsAt(roles: BranchRole[] | undefined, branchId: string | null | undefined): boolean {
   if (!roles || !branchId) return true;
@@ -304,16 +311,22 @@ export function sellingBranches<B extends { id?: string; stocks_goods?: boolean;
   return branches.filter((b) => b.stocks_goods !== false && b.sells_goods !== false && sellsAt(roles, b.id));
 }
 
+/** The money pages under the phone's Money tab (areas/staff/tabs.tsx): the cash book, then who owes and what is owed. */
+export const MONEY_SCREENS: RetailScreen[] = [
+  'cashSummary', 'banking', 'savings', 'expenses', 'withdrawals', 'advances', 'creditSales', 'creditControl', 'customerAccounts', 'customerAgeing', 'supplierPayables',
+];
+
 export const SCREENS: { screen: RetailScreen; path: string; label: string; hint: string }[] = [
   { screen: 'sale', path: '/staff/retail/sale', label: 'Record a sale', hint: 'Sell items and take payment' },
   { screen: 'creditSales', path: '/staff/retail/credit-sales', label: 'Credit sales', hint: 'Who owes, how much, and by when' },
   { screen: 'salesHistory', path: '/staff/retail/sales', label: 'All sales', hint: 'Every sale, with filters' },
   { screen: 'orders', path: '/staff/retail/orders', label: 'Orders', hint: 'Orders by WhatsApp, Instagram, Facebook or phone, packed, delivered and paid' },
   { screen: 'ordersReport', path: '/staff/retail/orders-report', label: 'Delivery fees and cancellations', hint: 'Delivery fees taken, and orders cancelled and why' },
-  { screen: 'restock', path: '/staff/retail/restock', label: 'Restock', hint: 'Record stock bought from a supplier' },
+  { screen: 'restock', path: '/staff/retail/restock', label: WORDS.buyStock, hint: 'Record stock bought from a supplier' },
   { screen: 'usage', path: '/staff/retail/usage', label: 'Usage and damage', hint: 'Items used or damaged' },
   { screen: 'stock', path: '/staff/retail/stock', label: 'Stock', hint: 'What is on the shelf' },
-  { screen: 'stocktake', path: '/staff/retail/stocktake', label: 'Stock-take', hint: 'Count and correct stock' },
+  { screen: 'stocktake', path: '/staff/retail/stocktake', label: WORDS.countStock, hint: 'Count and correct stock' },
+  { screen: 'quickAdd', path: '/staff/retail/quick-add', label: 'Quick add', hint: 'An item, its prices and how many you have, in one tap' },
   { screen: 'transfer', path: '/staff/retail/transfer', label: 'Move stock', hint: 'Send stock to another branch' },
   { screen: 'stockByLocation', path: '/staff/retail/stock-by-location', label: 'Stores and shops', hint: 'Stock in each store and shop, and on the way' },
   { screen: 'transfers', path: '/staff/retail/transfers', label: 'Stock moves', hint: 'Stock sent between branches' },
@@ -322,11 +335,11 @@ export const SCREENS: { screen: RetailScreen; path: string; label: string; hint:
   { screen: 'profit', path: '/staff/retail/profit', label: 'Daily profit', hint: 'Profit per day' },
   { screen: 'salesAnalysis', path: '/staff/retail/sales-analysis', label: 'Sales analysis', hint: 'Sales by day, shop, item and seller' },
   { screen: 'margins', path: '/staff/retail/margins', label: 'Margins', hint: 'Profit by item, low margins, price changes' },
-  { screen: 'stockHealth', path: '/staff/retail/stock-health', label: 'Stock health', hint: 'Days of cover, reorder, dead stock, shrinkage' },
+  { screen: 'stockHealth', path: '/staff/retail/stock-health', label: 'Stock health', hint: 'Days of cover, reorder, dead stock, lost or damaged stock' },
   { screen: 'creditControl', path: '/staff/retail/credit-control', label: 'Credit control', hint: 'Who owes, how late, payments received' },
   { screen: 'evaluation', path: '/staff/retail/evaluation', label: 'Business evaluation', hint: 'Profit to date and what the stock is worth' },
-  { screen: 'controls', path: '/staff/retail/controls', label: 'Controls', hint: 'Sales cancelled, goods taken back and prices changed, by shop and person' },
-  { screen: 'catalogue', path: '/staff/retail/catalogue', label: 'Catalogue', hint: 'Items, categories, units, suppliers and credit buyers' },
+  { screen: 'controls', path: '/staff/retail/controls', label: 'Controls', hint: 'Sales cancelled, goods taken back, credit written off and prices changed, by shop and person' },
+  { screen: 'catalogue', path: '/staff/retail/catalogue', label: 'Catalogue', hint: 'Items, categories, units, suppliers and customers who owe' },
   { screen: 'banking', path: '/staff/retail/banking', label: 'Banking', hint: 'Cash banked, and what to expect' },
   { screen: 'savings', path: '/staff/retail/savings', label: 'Savings', hint: 'Set money aside for the day' },
   { screen: 'expenses', path: '/staff/retail/expenses', label: 'Expenses', hint: 'Money spent, by category' },
@@ -339,7 +352,7 @@ export const SCREENS: { screen: RetailScreen; path: string; label: string; hint:
   { screen: 'priceLists', path: '/staff/retail/price-lists', label: 'Price lists', hint: 'Different prices for different customers, with quantity discounts' },
   { screen: 'customerGroups', path: '/staff/retail/customer-groups', label: 'Customer groups', hint: 'Group customers that share a price list' },
   { screen: 'customerAccounts', path: '/staff/retail/accounts', label: 'Customer accounts', hint: 'Credit limits, statements and payments from customers' },
-  { screen: 'customerAgeing', path: '/staff/retail/customer-ageing', label: 'Customer ageing', hint: 'What each credit buyer owes, by how late it is' },
+  { screen: 'customerAgeing', path: '/staff/retail/customer-ageing', label: 'Customer ageing', hint: 'What each customer who owes has to pay, by how late it is' },
   { screen: 'documents', path: '/staff/retail/documents', label: 'Documents', hint: 'Invoices, delivery notes and quotations, with their numbers' },
   { screen: 'quotations', path: '/staff/retail/quotations', label: 'Quotations', hint: 'Prices offered to a buyer until a date' },
   { screen: 'returns', path: '/staff/retail/returns', label: 'Customer returns', hint: 'Goods taken back from customers, and their credit notes' },
@@ -347,20 +360,32 @@ export const SCREENS: { screen: RetailScreen; path: string; label: string; hint:
   { screen: 'goodsReceived', path: '/staff/retail/goods-received', label: 'Goods received', hint: 'Deliveries from suppliers, with or without an order' },
   { screen: 'supplierBills', path: '/staff/retail/supplier-bills', label: 'Supplier invoices', hint: 'What suppliers have billed you for the goods received' },
   { screen: 'supplierPayments', path: '/staff/retail/supplier-payments', label: 'Supplier payments', hint: 'Money paid to suppliers, and what each payment cleared' },
-  { screen: 'supplierPayables', path: '/staff/retail/supplier-payables', label: 'What you owe suppliers', hint: 'Owed to each supplier, by how late it is' },
+  { screen: 'supplierPayables', path: '/staff/retail/supplier-payables', label: WORDS.whatIOweSuppliers, hint: 'What each supplier is owed for stock bought on credit, with a total' },
   { screen: 'landedCosts', path: '/staff/retail/landed-costs', label: 'Landed costs', hint: 'Freight, duty and clearing, added to what the goods cost' },
   { screen: 'supplierCredits', path: '/staff/retail/supplier-credits', label: 'Supplier credit notes', hint: 'Goods sent back to a supplier, or money taken off an invoice' },
   { screen: 'branchRoles', path: '/staff/retail/branch-roles', label: 'Branch roles', hint: 'Which branches are stores and which are shops' },
-  { screen: 'settings', path: '/staff/retail/settings', label: 'Retail settings', hint: 'Shop or trade, and the features you use' },
+  { screen: 'settings', path: '/staff/retail/settings', label: 'Retail settings', hint: 'What kind of business, and the features you use' },
+];
+
+/**
+ * The wholesale tools' pages (issue #424, ADR-092): price lists and customer prices, credit to shops, quotations, invoices and
+ * delivery notes, and purchasing. The Retail page lists them under their own Wholesale heading, as the menu does; each is offered
+ * only while its switch is on (SCREEN_CAPABILITY), so a business of shops only has none.
+ */
+export const WHOLESALE_SCREENS: readonly RetailScreen[] = [
+  'priceLists', 'customerGroups', 'customerAccounts', 'customerAgeing', 'quotations', 'documents',
+  'purchaseOrders', 'goodsReceived', 'supplierBills', 'landedCosts', 'supplierCredits',
 ];
 
 /** The screens under Catalogue, in the order the Catalogue home lists them. */
 export const CATALOGUE_LINKS: { screen: RetailScreen; path: string; label: string; hint: string }[] = [
+  { screen: 'quickAdd', path: '/staff/retail/quick-add', label: 'Quick add', hint: 'An item, its prices and how many you have, in one tap' },
   { screen: 'products', path: '/staff/retail/catalogue/products', label: 'Items', hint: 'Add or change an item, change its price' },
-  { screen: 'categories', path: '/staff/retail/catalogue/categories', label: 'Categories', hint: 'Group your items' },
+  { screen: 'categories', path: '/staff/retail/catalogue/categories', label: 'Categories', hint: 'Group your items and add new ones inside a category' },
   { screen: 'units', path: '/staff/retail/catalogue/units', label: 'Units', hint: 'Piece, roll, kilogram and so on' },
   { screen: 'suppliers', path: '/staff/retail/catalogue/suppliers', label: 'Suppliers', hint: 'Who you buy from' },
-  { screen: 'buyers', path: '/staff/retail/catalogue/buyers', label: 'Credit buyers', hint: 'Who buys on credit' },
+  { screen: 'buyers', path: '/staff/retail/catalogue/buyers', label: WORDS.customersWhoOwe, hint: 'Who buys on credit' },
+  { screen: 'labels', path: '/staff/retail/catalogue/labels', label: 'Barcode labels', hint: 'Print labels with a barcode for your items' },
 ];
 
 /**

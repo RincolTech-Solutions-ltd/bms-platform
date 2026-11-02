@@ -1,0 +1,159 @@
+import { RetailError, type Category, type RetailApi, type Unit } from '../../../api/retail';
+import { PURPOSES, asPurpose, type Purpose } from './catalogue-packs';
+import type { ShopType } from './shop-starters';
+import { listedWord } from './units-state';
+
+// Set up your shop (issue #625): what a starting set would add to this shop, and adding it through the routes that add one
+// category or one unit, so no new endpoint is needed. A name the shop has already, in any case and switched on or off, is
+// skipped and never made twice, so running it again adds nothing new. A pack whose name is a unit the shop has without a usual
+// size gets the size and purpose set on that unit (the default units of ADR-098 include Box and Pack); a unit that has one keeps it.
+
+export type ItemKind = 'category' | 'unit' | 'pack';
+
+export interface SetupItem {
+  kind: ItemKind;
+  name: string;
+  /** add: not in the shop. size: a unit the shop has, given its usual pack size. there: in the shop, skipped. */
+  status: 'add' | 'size' | 'there';
+  /** Packs only: the usual size and the smaller unit it counts, and what the pack is for. */
+  size?: number;
+  of?: string;
+  purpose?: Purpose;
+}
+
+export const key = (kind: ItemKind, name: string) => `${kind}:${name.toLowerCase()}`;
+// Issue #698: a unit in another spelling of the one list is the same ("Pcs" is Piece), as the server holds it.
+const same = (a: string | undefined, b: string) => listedWord(a ?? '') === listedWord(b);
+
+/** The starting set against what the shop has: each category, unit and pack, with what adding it would do. */
+export function planSetup(type: ShopType, categories: Category[], units: Unit[]): SetupItem[] {
+  const unit = (name: string) => units.find((u) => same(u.name, name));
+  return [
+    ...type.categories.map((name): SetupItem => ({ kind: 'category', name, status: categories.some((c) => same(c.name, name)) ? 'there' : 'add' })),
+    ...type.units.map((name): SetupItem => ({ kind: 'unit', name, status: unit(name) ? 'there' : 'add' })),
+    ...type.packs.map((p): SetupItem => {
+      const had = unit(p.name);
+      return { kind: 'pack', name: p.name, size: p.size, of: p.of, purpose: p.purpose, status: !had ? 'add' : had.usual_pack ? 'there' : 'size' };
+    }),
+  ];
+}
+
+/** A pack in plain words: "100 Metre, for buying and selling". */
+export function packText(size: number | string, of: string, purpose: Purpose | string | undefined): string {
+  const what = (PURPOSES.find((o) => o.value === asPurpose(purpose)) ?? PURPOSES[0]).use;
+  return `${Number(size)} ${of}, ${what}`;
+}
+
+/** Why a pack whose smaller unit the shop has switched off is left out; it is not tickable, since the shop has it. */
+export const switchedOffText = (of: string) => `${of} is switched off. Switch it on in Units, or this pack is left out.`;
+
+/**
+ * Why a pack cannot be added as ticked, or null when it can: its smaller unit is switched off in the shop (review of #628: it
+ * shows as already there, so ticking it is no way out), or it is neither in the shop nor ticked. The screen says so on the
+ * pack's row and Add these passes it over, so the owner ticks the unit, switches it on, or leaves the pack.
+ */
+export function packNeeds(item: SetupItem, ticked: Set<string>, units: Unit[]): string | null {
+  if (item.kind !== 'pack' || !item.of) return null;
+  const had = units.find((u) => same(u.name, item.of!));
+  if (had) return had.active === false ? switchedOffText(item.of) : null;
+  // Issue #699 (ADR-107): a pack may hold another pack of the set, a Box of rolls of 2 Roll.
+  return ticked.has(key('unit', item.of)) || ticked.has(key('pack', item.of)) ? null : `Tick ${item.of} too, or this pack is left out.`;
+}
+
+export interface SetupResult {
+  added: { kind: ItemKind; name: string; detail?: string }[];
+  /** Ticked but not added, with why: already there when added (another phone added it first), or its smaller unit was missing. */
+  skipped: { name: string; why: string }[];
+  error: unknown;
+}
+
+export const ADDED_MEANWHILE = 'Your shop has it already.';
+
+/** Issue #699: true when `of`, through the usual packs it counts, already counts the unit `id`, so a pack of it would loop. */
+function loops(units: Unit[], of: Unit, id: string): boolean {
+  const seen = new Set<string>();
+  for (let at: Unit | undefined = of; at?.id && !seen.has(at.id); at = units.find((u) => u.id === at?.usual_pack?.of_unit_id)) {
+    if (at.id === id) return true;
+    seen.add(at.id);
+  }
+  return false;
+}
+
+/**
+ * Adds what is ticked, one at a time: categories, then units, then packs, so a pack finds the unit it counts. It stops at the first
+ * failure and says what was added before it; running it again adds only what is still missing.
+ */
+export async function applySetup(api: Pick<RetailApi, 'createCategory' | 'createUnit' | 'updateUnit' | 'listUnits'>, items: SetupItem[], ticked: Set<string>, units: Unit[]): Promise<SetupResult> {
+  const result: SetupResult = { added: [], skipped: [], error: null };
+  let known = [...units];
+  const chosen = items.filter((i) => i.status !== 'there' && ticked.has(key(i.kind, i.name)));
+  const order: ItemKind[] = ['category', 'unit', 'pack'];
+  // Issue #699: a pack of another pack of the set (a Box of rolls) comes after the pack it holds.
+  // Review of #710: by how deep it sits, any depth (a pallet of boxes of rolls after the box after the roll); a loop stops.
+  const depth = (i: SetupItem, seen: Set<string> = new Set()): number => {
+    const held = i.kind === 'pack' ? chosen.find((x) => x.kind === 'pack' && same(x.name, i.of ?? '')) : undefined;
+    if (!held || seen.has(held.name)) return 0;
+    return 1 + depth(held, new Set([...seen, i.name]));
+  };
+  chosen.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || depth(a) - depth(b));
+  for (const item of chosen) {
+    try {
+      if (item.kind === 'category') {
+        const made = await api.createCategory(item.name);
+        result.added.push({ kind: 'category', name: made.name ?? item.name, ...(made.code_prefix ? { detail: `Item codes start with ${made.code_prefix}` } : {}) });
+        continue;
+      }
+      if (item.kind === 'unit') {
+        known.push(await api.createUnit(item.name));
+        result.added.push({ kind: 'unit', name: item.name });
+        continue;
+      }
+      const of = known.find((u) => same(u.name, item.of ?? ''));
+      if (!of?.id || of.active === false) {
+        result.skipped.push({ name: item.name, why: of ? switchedOffText(item.of ?? '') : `${item.of} is not in your shop, so this pack was left out.` });
+        continue;
+      }
+      const had = known.find((u) => same(u.name, item.name));
+      // Issue #699 (ADR-107, amending the ADR-100 note of #637): a usual pack may count another pack; only a loop is left out.
+      if (had?.id && loops(known, of, had.id)) {
+        result.skipped.push({ name: item.name, why: `${of.name ?? ''} holds ${had.name ?? ''} already, so this pack was left out.` });
+        continue;
+      }
+      const pack = { size: String(item.size), of_unit_id: of.id, purpose: asPurpose(item.purpose) };
+      if (had?.id && item.status === 'size') await api.updateUnit(had.id, had.version ?? 1, { usual_pack: pack });
+      else known.push(await api.createUnit(item.name, pack));
+      result.added.push({ kind: 'pack', name: item.name, detail: packText(pack.size, of.name ?? '', pack.purpose) });
+    } catch (error) {
+      // Added meanwhile, on another phone: it is there, which is what was asked.
+      // Issue #698: a unit the shop has under another spelling ("Pcs" for Piece) answers unit_exists, which is the same.
+      if (error instanceof RetailError && (error.code === 'duplicate_category' || error.code === 'unit_exists')) {
+        // Review of #628 (issue #637): a unit added meanwhile is read back, so its packs find it and are not skipped as missing,
+        // and a pack's unit added there with no usual size gets this one.
+        try {
+          if (item.kind !== 'category') known = await api.listUnits();
+          const now = item.kind === 'pack' ? known.find((u) => same(u.name, item.name)) : undefined;
+          const of = known.find((u) => same(u.name, item.of ?? ''));
+          if (now?.id && !now.usual_pack && of?.id && of.active !== false) {
+            // Issue #662: the same loop check as above, so a unit another phone made a pack of is skipped, not refused.
+            if (loops(known, of, now.id)) {
+              result.skipped.push({ name: item.name, why: `${of.name ?? ''} holds ${now.name ?? ''} already, so this pack was left out.` });
+              continue;
+            }
+            const pack = { size: String(item.size), of_unit_id: of.id, purpose: asPurpose(item.purpose) };
+            await api.updateUnit(now.id, now.version ?? 1, { usual_pack: pack });
+            result.added.push({ kind: 'pack', name: item.name, detail: packText(pack.size, of.name ?? '', pack.purpose) });
+            continue;
+          }
+        } catch (again) {
+          result.error = again;
+          return result;
+        }
+        result.skipped.push({ name: item.name, why: ADDED_MEANWHILE });
+        continue;
+      }
+      result.error = error;
+      return result;
+    }
+  }
+  return result;
+}

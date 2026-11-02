@@ -323,6 +323,8 @@ class RetailStockCorrectionIT extends IntegrationTest {
         assertThat(refused.getBody().get("detail").asString())
                 .contains("changed while you were typing")
                 .contains("8");
+        // Issue #370: the refusal carries the quantity on the shelf now, so the form shows it and never the stale one.
+        assertThat(refused.getBody().get("current_qty").asString()).isEqualTo("8.000");
         assertThat(stockAt(hq)).isEqualByComparingTo("8");
         assertThat(scalar("SELECT count(*) FROM retail_stock_corrections WHERE tenant_id = ?", t.tenantId()))
                 .isZero();
@@ -347,7 +349,7 @@ class RetailStockCorrectionIT extends IntegrationTest {
         ResponseEntity<JsonNode> refused = correct(hq, "6", "entry_mistake", null);
         assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(code(refused)).isEqualTo("stocktake_in_progress");
-        assertThat(refused.getBody().get("detail").asString()).contains("Finish it first");
+        assertThat(refused.getBody().get("detail").asString()).contains("tap Commit the count first");
         assertThat(stockAt(hq)).isEqualByComparingTo("10");
 
         // Another branch is not covered by it, and once it is committed the correction is allowed again.

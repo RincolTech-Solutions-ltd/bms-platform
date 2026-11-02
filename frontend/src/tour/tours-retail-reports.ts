@@ -21,7 +21,9 @@ const rangeStep = (target: string, what: string): TourStep =>
 
 export const retailHomePage: Tour = {
   id: 'page-retail-home',
-  version: 3,
+  // Version 4 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
+  // Version 5 says buying price for cost (issue #680).
+  version: 5,
   title: 'This page: Retail',
   audience: (me) => (me.permissions ?? []).some((p) => p.startsWith('retail.')),
   autoStart: false,
@@ -29,7 +31,7 @@ export const retailHomePage: Tour = {
   steps: [
     retail({ id: 'tiles', target: 'retail-tiles', title: 'One button for each job', body: 'Tap a button to open that page. You only see the pages you may use.' }),
     retail({ id: 'sale', target: 'retail-sale', needs: [SELL], optional: true, title: 'Record a sale', body: 'Tap here when a customer pays. Pick the items, then save the sale.' }),
-    retail({ id: 'restock', target: 'retail-restock', needs: [RESTOCK], optional: true, title: 'Restock', body: 'Tap here when new goods arrive. Stock goes up and the cost is saved.' }),
+    retail({ id: 'restock', target: 'retail-restock', needs: [RESTOCK], optional: true, title: 'Buy stock', body: 'Tap here when new goods arrive. Stock goes up and the buying price is saved.' }),
     retail({ id: 'stock', target: 'retail-stock', needs: [STOCK_READ], optional: true, title: 'Check your stock', body: 'Tap here to see how much of each item you hold, shop by shop.' }),
     // ADR-055: a seller sees their own figures; everybody's sales, profit and the value of the stock are the owner's.
     // Issue #428: every figure on the page follows the days picked here, set against the days before.
@@ -40,22 +42,29 @@ export const retailHomePage: Tour = {
 
 export const restockPage: Tour = {
   id: 'page-restock',
-  version: 1,
-  title: 'This page: restock',
+  // Version 2 adds the Scan here step (issue #345, ADR-070).
+  // Version 3 words the Add the items step for the picker that lists items only while you type (issue #534).
+  // Version 4 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
+  // Version 5 says a line unusual for the item is asked about before saving (issue #353, ADR-093).
+  // Version 6 says buying price and selling price (issue #680).
+  version: 6,
+  title: 'This page: buy stock',
   audience: (me) => held(me, RESTOCK),
   autoStart: false,
   page: '/staff/retail/restock',
   steps: [
     retail({ id: 'supplier', target: 'restock-supplier', title: 'Who supplied it', body: 'Pick the supplier, or type a new one. You can also leave it as No supplier.' }),
-    retail({ id: 'search', target: 'restock-search', title: 'Add the items', body: 'Type part of the name or code. Tap Add on each item you bought. Then fill in the cost, the sell price and how many went to each branch.' }),
+    retail({ id: 'search', target: 'restock-search', title: 'Add the items', body: 'Type part of the name or code, and tap each item you bought in the list under the box. Then fill in the buying price, the selling price and how many went to each branch.' }),
+    retail({ id: 'scan', target: 'scan-bar', title: 'Scan here', body: 'Or scan each item in the Scan box. It is added for the branch at the top, and a second scan adds one more.' }),
     retail({ id: 'paid', target: 'restock-paid', title: 'How you paid', body: 'Choose Cash, Bank or Credit. Credit means you pay the supplier later.' }),
-    retail({ id: 'save', target: 'restock-save', title: 'Save the restock', body: 'Tap Save restock. Stock goes up, and the cost and sell price of each item change to what you typed.' }),
+    retail({ id: 'save', target: 'restock-save', title: 'Save the purchase', body: 'Tap Save the purchase. Stock goes up, and the buying and selling price of each item change to what you typed. If a quantity or unit is unusual for an item, a note beside it asks you to Confirm or Change it first.' }),
   ],
 };
 
 export const usagePage: Tour = {
   id: 'page-usage',
-  version: 1,
+  // Version 2 words the Add the items step for the picker that lists items only while you type (issue #534).
+  version: 2,
   title: 'This page: usage and damage',
   audience: (me) => held(me, USAGE),
   autoStart: false,
@@ -63,23 +72,27 @@ export const usagePage: Tour = {
   steps: [
     retail({ id: 'kind', target: 'usage-kind', title: 'What happened', body: 'Choose Used in the shop, or Damaged or lost.' }),
     retail({ id: 'reason', target: 'usage-reason', title: 'Say why', body: 'Type a short reason. It is kept with the record.' }),
-    retail({ id: 'search', target: 'usage-search', title: 'Add the items', body: 'Type part of the name or code. Tap Add, then type the quantity for each item.' }),
+    retail({ id: 'search', target: 'usage-search', title: 'Add the items', body: 'Type part of the name or code, and tap the item in the list under the box. Then type the quantity for each item.' }),
     retail({ id: 'save', target: 'usage-save', title: 'Save', body: 'Tap Save. The items leave your stock.' }),
   ],
 };
 
 export const transferPage: Tour = {
   id: 'page-transfer',
-  version: 1,
+  // Version 2 adds the Scan here step (issue #345, ADR-070).
+  // Version 3 words the Add the items step for the picker that lists items only while you type (issue #534).
+  // Version 4 says a quantity unusual for the item is asked about before saving (issue #353, ADR-093).
+  version: 4,
   title: 'This page: move stock',
   audience: (me) => held(me, TRANSFER) && held(me, STOCK_READ),
   autoStart: false,
   page: '/staff/retail/transfer',
   steps: [
     retail({ id: 'to', target: 'transfer-to', title: 'Where it goes', body: 'The branch chosen at the top of the page is where the stock leaves from. Pick the branch it goes to.' }),
-    retail({ id: 'search', target: 'transfer-search', title: 'Add the items', body: 'Type part of the name or code. Tap Add on each item to move.' }),
+    retail({ id: 'search', target: 'transfer-search', title: 'Add the items', body: 'Type part of the name or code, and tap each item to move in the list under the box.' }),
+    retail({ id: 'scan', target: 'scan-bar', title: 'Scan here', body: 'Or scan each item in the Scan box. It is added, and a second scan adds one more.' }),
     retail({ id: 'items', target: 'transfer-items', title: 'How many', body: 'Type the quantity for each item. You cannot move more than the branch holds.' }),
-    retail({ id: 'save', target: 'transfer-save', title: 'Save the move', body: 'Tap Move stock, or Send stock if the other branch must receive it first.' }),
+    retail({ id: 'save', target: 'transfer-save', title: 'Save the move', body: 'Tap Move stock, or Send stock if the other branch must receive it first. If a quantity is unusual for an item, a note beside it asks you to Confirm or Change it first.' }),
   ],
 };
 
@@ -98,27 +111,30 @@ export const transfersPage: Tour = {
 
 export const valuationPage: Tour = {
   id: 'page-valuation',
-  version: 1,
+  // Version 2 trades the Which branch step, now the title of the top bar, for the stock at price in large figures (issue #526).
+  // Version 3 says buying price and selling price (issue #680).
+  version: 3,
   title: 'This page: stock value',
   audience: (me) => held(me, STOCK_READ),
   autoStart: false,
   page: '/staff/retail/valuation',
   steps: [
-    retail({ id: 'branch', target: 'valuation-branch', title: 'Which branch', body: 'The figures are for the branch chosen at the top of the page. Choose All branches to see every branch.' }),
-    retail({ id: 'figures', target: 'valuation-figures', title: 'What your stock is worth', body: 'See the value at price, by category and by item. If you may see costs, you also see the cost and the profit you expect. Tap an item to open it in Stock.' }),
+    retail({ id: 'total', target: 'valuation-total', title: 'What your stock is worth', body: 'The large figure is your stock at the price you sell it, for the branch at the top of the page.' }),
+    retail({ id: 'figures', target: 'valuation-figures', title: 'By category and item', body: 'See the value at selling price, by category and by item. If you may see buying prices, you also see the value at buying price and the profit you expect. Tap an item to open it in Stock.' }),
   ],
 };
 
 export const profitPage: Tour = {
   id: 'page-profit',
-  version: 1,
+  // Version 2 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
+  version: 2,
   title: 'This page: daily profit',
   audience: (me) => held(me, PROFIT),
   autoStart: false,
   page: '/staff/retail/profit',
   steps: [
     rangeStep('profit-range', 'The report shows each day in between.'),
-    retail({ id: 'figures', target: 'profit-figures', title: 'Profit for the period', body: 'See sales, cost, usage and the stock-take difference for each day. The total is at the top. Tap the link under it to see the sales.' }),
+    retail({ id: 'figures', target: 'profit-figures', title: 'Profit for the period', body: 'See sales, cost, usage and the stock count difference for each day. The total is at the top. Tap the link under it to see the sales.' }),
   ],
 };
 
@@ -170,7 +186,8 @@ export const stockHealthPage: Tour = {
 
 export const creditControlPage: Tour = {
   id: 'page-credit-control',
-  version: 1,
+  // Version 2 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
+  version: 2,
   title: 'This page: credit control',
   audience: (me) => held(me, SALES_READ),
   autoStart: false,
@@ -178,7 +195,7 @@ export const creditControlPage: Tour = {
   steps: [
     rangeStep('credit-range', 'It chooses which payments are listed. What is owed is always as of today.'),
     retail({ id: 'sort', target: 'credit-sort', title: 'Order the overdue list', body: 'Show the biggest amounts first, or the oldest first.' }),
-    retail({ id: 'results', target: 'credit-results', title: 'Who owes you', body: 'See what credit buyers owe and how late it is. Tap a buyer to open their account, or the link at the top to see the credit sales.' }),
+    retail({ id: 'results', target: 'credit-results', title: 'Who owes you', body: 'See what customers who owe have to pay and how late it is. Tap a buyer to open their account, or the link at the top to see the credit sales.' }),
   ],
 };
 

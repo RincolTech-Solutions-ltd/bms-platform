@@ -44,6 +44,9 @@ class ModularityTest {
                         "core.platform",
                         "core.onboarding",
                         "core.reporting",
+                        "core.feedback",
+                        "core.help",
+                        "core.referrals",
                         "lending.advisor",
                         "lending.collateral",
                         "lending.insights",
@@ -110,7 +113,9 @@ class ModularityTest {
     @Test
     void theCashBookDeclaresOnlyItsAllowedDependenciesAndOnlyTheImporterUsesIt() {
         ApplicationModule cashbook = MODULES.getModuleByName("retail.cashbook").orElseThrow();
-        // ADR-022 decision 1 says the declared list is exactly these ten (core.operations joined with #177).
+        // ADR-022 decision 1 says the declared list is exactly these (core.operations joined with #177, core.approvals
+        // with the
+        // expense approval of #343, ADR-091).
         assertThat(com.rincoltech.bms.retail.cashbook.CashBookHistory.class
                         .getPackage()
                         .getAnnotation(org.springframework.modulith.ApplicationModule.class)
@@ -118,6 +123,7 @@ class ModularityTest {
                 .containsExactlyInAnyOrder(
                         "kernel",
                         "core.tenancy",
+                        "core.approvals",
                         "core.audit",
                         "core.ledger",
                         "core.documents",
@@ -132,6 +138,7 @@ class ModularityTest {
                 .isSubsetOf(
                         "kernel",
                         "core.tenancy",
+                        "core.approvals",
                         "core.audit",
                         "core.ledger",
                         "core.documents",

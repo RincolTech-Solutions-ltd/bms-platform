@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { StaffUser } from '../../../api/users';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { resetProofProblem } from './state';
 
 // Hand ownership to another administrator (ADR-062, FR-IAM-18). Only the Owner sees it, and only the active administrators are
@@ -26,6 +27,7 @@ export function TransferOwner({ targets, mfaEnabled, onSend, onCancel }: {
   async function send() {
     if (!ready || !to || sending.current) return;
     sending.current = true;
+    // toast-exempt: the Staff users screen says who is now the owner through onSend
     setBusy(true);
     setError(null);
     const credential = mfaEnabled ? { totpCode: typed.trim() } : { password: typed };
@@ -56,6 +58,7 @@ export function TransferOwner({ targets, mfaEnabled, onSend, onCancel }: {
       }}
     >
       <label htmlFor="transfer-to">Who becomes the owner</label>
+      {/* empty: with no other administrator the dialog returns early above and says to make one first. */}
       <select id="transfer-to" value={toId} disabled={busy} onChange={(e) => setToId(e.target.value)}>
         <option value="">Choose an administrator</option>
         {targets.map((t) => (
@@ -83,10 +86,10 @@ export function TransferOwner({ targets, mfaEnabled, onSend, onCancel }: {
       {problem && <p role="alert" className="field-error">{problem}</p>}
       {error && <p role="alert" className="alert alert-danger">{error}</p>}
       <p className="cluster">
-        <button type="submit" className="btn-danger" disabled={!ready || busy}>
-          {busy ? 'Handing over' : to ? `Yes, make ${to.full_name} the owner` : 'Hand over ownership'}
-        </button>
-        <button type="button" className="btn-ghost" disabled={busy} onClick={onCancel}>Cancel</button>
+        <BusyButton type="submit" className="btn-danger" busy={busy} disabled={!ready}>
+          {to ? `Yes, make ${to.full_name} the owner` : 'Hand over ownership'}
+        </BusyButton>
+        <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={busy} onClick={onCancel}>Cancel</button>
       </p>
     </form>
   );

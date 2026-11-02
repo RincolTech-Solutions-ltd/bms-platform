@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { businessToday, retail, type Banking, type BankingDay, type BankingExpected } from '../../../api/retail';
 import { useStaff } from '../context';
 import { alreadyBankedLabel, bankingPrefill } from './banking-state';
@@ -12,6 +13,8 @@ import { ScreenLink } from './screen-link';
 import { useToast } from './toast';
 import { BranchRequired, Gate, Problem, money, useBranchName, useSingleBranch } from './ui';
 import { showDate } from './transfers';
+import { ActionBar } from '../../../app/ui/ActionBar';
+import { Hint } from '../../../app/ui/Hint';
 
 // Cash banked (FR-RET-21 to FR-RET-23). The server works out what to expect: every caller sees "Cash
 // expected" (takings less what was paid out of the till). Only a caller with retail.profit.read also gets
@@ -27,8 +30,8 @@ export function ExpectedFigures({ expected, date }: { expected: BankingExpected;
         <span>Cash expected</span>
         <strong>{money(expected.cash_expected_minor ?? 0)}</strong>
       </p>
-      <p className="hint">Takings less what was paid out of the till for expenses and advances, plus advance repayments received.</p>
-      {expected.cash_purchases_minor !== undefined && <p className="rt-row"><span>Cash restocks, at cost</span><strong>{money(expected.cash_purchases_minor)}</strong></p>}
+      <Hint>Takings less what was paid out of the till for expenses and advances, plus advance repayments received.</Hint>
+      {expected.cash_purchases_minor !== undefined && <p className="rt-row"><span>Stock bought with cash, at cost</span><strong>{money(expected.cash_purchases_minor)}</strong></p>}
       {expected.savings_minor !== undefined && <p className="rt-row"><span>Savings set aside</span><strong>{money(expected.savings_minor)}</strong></p>}
       {expected.expected_minor !== undefined && <p className="rt-row"><span>Expected to bank</span><strong>{money(expected.expected_minor)}</strong></p>}
       <p className="rt-row"><span>{alreadyBankedLabel(date ?? expected.business_date, businessToday())}</span><strong>{money(expected.banked_so_far_minor ?? 0)}</strong></p>
@@ -43,6 +46,7 @@ export function BankingForm({ branchId, onSaved }: { branchId: string; onSaved?:
   const expected = useQuery({ queryKey: ['retail', 'banking-expected', branchId, draft.date], queryFn: () => retail.bankingExpected({ branchId, date: draft.date }) });
   const shown = draft.amount ?? bankingPrefill(expected.data);
   const minor = amountOrNull(shown);
+  // toast-exempt: success screen, the Saved panel replaces the form
   const save = useMutation({
     mutationFn: () => retail.createBanking({ branch_id: branchId, business_date: draft.date, amount_minor: minor ?? 0, ...(draft.reference.trim() ? { reference: draft.reference.trim() } : {}) }, key),
     onSuccess: (saved) => {
@@ -64,9 +68,11 @@ export function BankingForm({ branchId, onSaved }: { branchId: string; onSaved?:
       <label htmlFor="banking-reference">Bank reference (optional)</label>
       <input id="banking-reference" maxLength={100} value={draft.reference} onChange={(e) => setDraft((d) => ({ ...d, reference: e.target.value }))} />
       <Problem error={save.error} />
-      <button type="submit" className="rt-primary" disabled={blocked}>
-        {save.isPending ? 'Saving' : 'Save banking'}
-      </button>
+      <ActionBar>
+        <BusyButton busy={save.isPending} type="submit" className="rt-primary" notReady={blocked}>
+          Save banking
+        </BusyButton>
+      </ActionBar>
     </form>
   );
 }
@@ -140,13 +146,12 @@ export function BankingScreen() {
         </Saved>
       ) : (
         <>
-          <p className="branch-line">Branch: <strong>{branchName}</strong></p>
-          <BankingForm key={`${branchId}-${round}`} branchId={branchId} onSaved={(b) => { setSaved(b); show('Banking recorded.'); }} />
+          <BankingForm key={`${branchId}-${round}`} branchId={branchId} onSaved={setSaved} />
         </>
       )}
       </div>
       {toast}
-      {holds(me, CASHBOOK_READ) && <BankingRecords onVoided={show} />}
+      {holds(me, CASHBOOK_READ) && <BankingRecords onVoided={(text) => show(text, 'success')} />}
     </Gate>
   );
 }
@@ -208,7 +213,7 @@ export function BankingReportView({ days }: { days: BankingDay[] }) {
       {imported.length > 0 && (
         <section aria-label="Imported days">
           <h2>Days imported from the old app <ImportedBadge /></h2>
-          <p className="hint">These days are shown for reference. They are not part of the unbanked total above.</p>
+          <Hint full>These days are shown for reference. They are not part of the unbanked total above.</Hint>
           <BankingDays days={imported} />
         </section>
       )}
@@ -225,7 +230,7 @@ export function BankingReportScreen() {
   });
   return (
     <Gate screen="bankingReport" title="Banking report">
-      <p><ScreenLink screen="banking" to="/staff/retail/banking" tour="banking-back-link">Record banking</ScreenLink></p>
+      <p><ScreenLink screen="banking" to="/staff/retail/banking" tour="banking-back-link" action>Record banking</ScreenLink></p>
       <div data-tour="banking-report-window"><WindowFields id="banking-report" window={window} /></div>
       {report.isError && <Problem error={report.error} />}
       {report.isPending && <p className="loading">Loading</p>}

@@ -1,5 +1,7 @@
 package com.rincoltech.bms.lending.products;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -9,6 +11,16 @@ public interface ProductCatalog {
 
     /** The product's current version, whatever its status; the caller checks {@code productStatus}. */
     Optional<ProductTerms> current(UUID productId);
+
+    /** {@link #current} by the product's code, exactly as stored (an import names products by code, issue #466). */
+    Optional<ProductTerms> currentByCode(String code);
+
+    /**
+     * The version in force at the end of {@code date} in {@code zone}: the latest created by then, or the first version
+     * when the product did not exist yet. A loan brought in from a paper register takes the terms of its disbursement
+     * date, not of today (issue #466, ADR-071).
+     */
+    Optional<ProductTerms> inForceOn(UUID productId, LocalDate date, ZoneId zone);
 
     /** A specific version, for loans that keep the terms they were created with (FR-PRD-04). */
     Optional<ProductTerms> version(UUID productVersionId);
@@ -28,6 +40,18 @@ public interface ProductCatalog {
     /** One fee for one principal; {@code timing} is {@code deducted_at_disbursement}, {@code added_to_loan} or {@code paid_upfront}. */
     record FeeCharge(String name, String timing, long amountMinor) {}
 
+    /**
+     * R-PEN, chapter 3 section 3.4: the version's penalty rule. {@code method} is {@code none},
+     * {@code flat_per_period} or {@code percent_of_overdue_per_period}; the amount fields are null
+     * when the method does not use them, and {@code capBp} is null for no cap.
+     */
+    record PenaltyRule(String method, int graceDays, String periodUnit, Long flatMinor, Integer rateBp, Integer capBp) {
+
+        public boolean charges() {
+            return !"none".equals(method);
+        }
+    }
+
     record ProductTerms(
             UUID productId,
             String productCode,
@@ -44,7 +68,8 @@ public interface ProductCatalog {
             Integer minCollateralCoverBp,
             boolean requiresGuarantor,
             List<String> allocationOrder,
-            boolean flatEarlySettlementRebate) {
+            boolean flatEarlySettlementRebate,
+            PenaltyRule penalty) {
 
         public ProductTerms {
             allocationOrder = List.copyOf(allocationOrder);

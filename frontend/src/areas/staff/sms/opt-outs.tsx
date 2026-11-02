@@ -1,12 +1,15 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
+import { businessZone } from '../../../api/retail';
 import { SmsError, sms, type SmsImportResult, type SmsOptOut } from '../../../api/sms';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { Highlight, NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { useStaff } from '../context';
 import { LiftConfirm } from './lift';
 import { mayManageSettings, mayReadNotifications } from './state';
+import { NoAccess } from '../../../app/ui/EmptyState';
 
 // The SMS opt-out list (extras slice B3, issue #218; ADR-036 decision 8): who is not to be texted. A row is about a member
 // (it follows the member to any number; staff make these on the member's own page) or about a number alone (a person who
@@ -72,10 +75,10 @@ export function OptOutRows({ items, term, canManage, busy, onRemove }: {
               </td>
               <td className="num">{i.recipient_masked ? <Highlight text={i.recipient_masked} term={term} /> : 'Any number'}</td>
               <td>{SCOPE_WORDS[i.scope] ?? i.scope}</td>
-              <td>{new Date(i.created_at).toLocaleDateString(undefined, { dateStyle: 'medium' })}</td>
+              <td>{new Date(i.created_at).toLocaleDateString(undefined, { dateStyle: 'medium', timeZone: businessZone() })}</td>
               {canManage && (
                 <td>
-                  <button type="button" className="btn-ghost btn-sm" disabled={busy} onClick={() => onRemove(i)} aria-label={`Lift the opt-out for ${i.recipient_masked ?? 'this member'}`}>
+                  <button type="button" /* busy-exempt: opens the confirmation */ className="btn-ghost btn-sm" disabled={busy} onClick={() => onRemove(i)} aria-label={`Lift the opt-out for ${i.recipient_masked ?? 'this member'}`}>
                     Lift
                   </button>
                 </td>
@@ -95,6 +98,7 @@ function AddNumber({ onAdded }: { onAdded: () => void }) {
   const add = useMutation({
     mutationFn: () => sms.addOptOut(phone, scope, reason.trim() === '' ? undefined : reason.trim()),
     onSuccess: () => { setPhone(''); setReason(''); onAdded(); },
+    meta: { success: 'Number added' },
   });
   const error = add.error instanceof SmsError ? add.error : null;
   return (
@@ -117,11 +121,10 @@ function AddNumber({ onAdded }: { onAdded: () => void }) {
       <input id="sms-oo-reason" autoComplete="off" maxLength={200} value={reason} onChange={(e) => { setReason(e.target.value); add.reset(); }} aria-invalid={error !== null && error.fields.reason !== undefined} />
       <p className="field-hint">Needed only when the number is already stopped for every message and you choose reminders only. Words about why, not names or numbers.</p>
       {error?.fields.reason && <p role="alert" className="field-error">{error.fields.reason}</p>}
-      {add.isSuccess && <p role="status" className="alert alert-success">Added.</p>}
       <p>
-        <button type="submit" className="rt-primary" disabled={phone.trim() === '' || add.isPending}>
-          {add.isPending ? 'Adding' : 'Add to the list'}
-        </button>
+        <BusyButton type="submit" className="rt-primary" busy={add.isPending} notReady={phone.trim() === ''}>
+          Add to the list
+        </BusyButton>
       </p>
     </form>
   );
@@ -134,12 +137,13 @@ function PasteList({ onAdded }: { onAdded: () => void }) {
   const run = useMutation({
     mutationFn: (dryRun: boolean) => sms.importOptOuts(text, scope, dryRun),
     onSuccess: (result) => {
-      setChecked(result);
+      setChecked(result.dry_run ? result : null);
       if (!result.dry_run) {
         setText('');
         onAdded();
       }
     },
+    meta: { success: (result: SmsImportResult) => (result.dry_run ? null : result.added + result.changed === 1 ? '1 number added' : `${result.added + result.changed} numbers added`) },
   });
   const error = run.error instanceof SmsError ? run.error : null;
   const invalid = checked?.rows.filter((r) => r.outcome === 'invalid_phone') ?? [];
@@ -162,18 +166,18 @@ function PasteList({ onAdded }: { onAdded: () => void }) {
       {error && <p role="alert" className="field-error">{error.fields.numbers ?? error.message}</p>}
       {checked && (
         <div role="status" className="alert alert-info stack">
-          <p>{checked.dry_run ? 'Checked, nothing added yet: ' : 'Done: '}{importWords(checked)}.</p>
+          <p>Checked, nothing added yet: {importWords(checked)}.</p>
           {invalid.length > 0 && <p>Not read: {invalid.map((r) => `number ${r.line}`).join(', ')}.</p>}
         </div>
       )}
       <p className="cluster">
-        <button type="submit" className="btn-ghost" disabled={text.trim() === '' || run.isPending}>
+        <BusyButton type="submit" className="btn-ghost" busy={run.isPending && run.variables === true} disabled={text.trim() === '' || run.isPending}>
           Check the list
-        </button>
+        </BusyButton>
         {checked?.dry_run && checked.added + checked.changed > 0 && (
-          <button type="button" className="rt-primary" disabled={run.isPending} onClick={() => run.mutate(false)}>
-            {run.isPending ? 'Adding' : `Add ${checked.added + checked.changed} to the list`}
-          </button>
+          <BusyButton type="button" className="rt-primary" busy={run.isPending && run.variables === false} disabled={run.isPending} onClick={() => run.mutate(false)}>
+            {`Add ${checked.added + checked.changed} to the list`}
+          </BusyButton>
         )}
       </p>
     </form>
@@ -207,8 +211,9 @@ export function OptOutsScreen() {
       return refresh();
     },
     onError: refresh,
+    meta: { success: 'Number taken off the list' },
   });
-  if (!allowed) return <p className="empty-state">You do not have access to the opt-out list.</p>;
+  if (!allowed) return <NoAccess what="the opt-out list" />;
   const canManage = mayManageSettings(me);
   const items = (pages.data?.pages ?? []).flatMap((p) => p.items);
   const fetching = pages.isPlaceholderData || (pages.isFetching && !pages.isFetchingNextPage);

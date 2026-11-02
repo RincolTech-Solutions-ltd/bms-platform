@@ -40,13 +40,6 @@ export const UNKNOWN_PERSON = 'Unknown person';
 
 export type PeriodKind = 'today' | 'week' | 'month' | 'custom';
 
-export const PERIODS: { kind: PeriodKind; label: string }[] = [
-  { kind: 'today', label: 'Today' },
-  { kind: 'week', label: 'This week' },
-  { kind: 'month', label: 'This month' },
-  { kind: 'custom', label: 'Choose days' },
-];
-
 /** The days of a period, both ends counted: today; Monday to today; the 1st to today; or the two days the person typed. */
 export function periodRange(kind: PeriodKind, today: string, custom: { from: string; to: string }): { from: string; to: string } {
   if (kind === 'today') return { from: today, to: today };
@@ -84,9 +77,10 @@ export const METRICS: MetricWords[] = [
   { metric: 'voided_sales', title: 'Sales cancelled', noun: 'sales', what: () => 'Sales that were recorded and then cancelled (voided). The goods went back into stock.' },
   { metric: 'quick_cancels', title: 'Cancelled at once', noun: 'sales', what: (m) => `Sales cancelled within ${m} ${m === 1 ? 'minute' : 'minutes'} of being recorded, often a slip at the till.` },
   { metric: 'returns', title: 'Goods taken back', noun: 'returns', what: () => 'Customer returns, each with a credit note.' },
+  { metric: 'credit_writeoffs', title: 'Credit written off', noun: 'sales', what: () => 'Sales on credit the buyer never paid, written off. The value is what the buyer still owed.' },
   { metric: 'price_overrides', title: 'Prices changed', noun: 'lines', what: () => 'Sale lines where the price typed was not the price the system chose. A reason is always given.' },
   { metric: 'discounts', title: 'Discounts given', noun: 'lines', what: () => 'Sale lines sold for less than the price the system chose. The money is what was given up.' },
-  { metric: 'restock_voids', title: 'Restocks cancelled', noun: 'restocks', what: () => 'Restocks entered wrongly and voided, one line for each shop the restock stocked. The stock, the books and the prices went back. The value is the quantity at the selling price now. No rate: it is not about sales.' },
+  { metric: 'restock_voids', title: 'Purchases cancelled', noun: 'purchases', what: () => 'Purchases of stock entered wrongly and voided, one line for each shop the purchase stocked. The stock, the books and the prices went back. The value is the quantity at the selling price now. No rate: it is not about sales.' },
   { metric: 'quantity_corrections', title: 'Quantities corrected', noun: 'corrections', what: () => 'Stock quantities changed on the stock list as an entry mistake or a miscount. The value is the change at the selling price now. No rate: it is not about sales.' },
   { metric: 'below_cost', title: 'Sold below cost', noun: 'lines', what: () => 'Sale lines priced under what the item cost. Shown only to people who may read profit.' },
 ];
@@ -189,11 +183,14 @@ export const whoWords = (r: Pick<ControlsRecord, 'user_name' | 'user_status'>): 
   return r.user_status === 'deactivated' ? `${name} (deactivated)` : name;
 };
 
-/** "Cancelled by Test Admin One", "Taken back by ..." or "Voided by ..."; empty for a price, a cost or a correction, which have no approver. */
+/** The word before an approver's name; a sale is otherwise cancelled. */
+const APPROVED: Record<string, string> = { returns: 'Taken back', credit_writeoffs: 'Written off', restock_voids: 'Voided' };
+
+/** "Cancelled by Test Admin One", "Taken back by ...", "Written off by ..." or "Voided by ..."; empty for a price, a cost or a correction, which have no approver. */
 export function approverWords(r: Pick<ControlsRecord, 'approver_id' | 'approver_name' | 'approver_status'>, metric: string): string {
   if (!r.approver_id) return '';
   const name = r.approver_name ?? UNKNOWN_PERSON;
-  return `${metric === 'returns' ? 'Taken back' : metric === 'restock_voids' ? 'Voided' : 'Cancelled'} by ${r.approver_status === 'deactivated' ? `${name} (deactivated)` : name}`;
+  return `${APPROVED[metric] ?? 'Cancelled'} by ${r.approver_status === 'deactivated' ? `${name} (deactivated)` : name}`;
 }
 
 const SALE_ENDING: Record<string, string> = {
@@ -263,7 +260,7 @@ export function groupsCsv(level: ControlsLevel, groups: ControlsGroup[], metric 
 /** The records on screen as a CSV. */
 export function recordsCsv(records: ControlsRecord[], metric: string): string {
   const who = metric === 'restock_voids' ? 'Entered by' : metric === 'quantity_corrections' ? 'Corrected by' : 'Person (whose sale)';
-  const number = metric === 'restock_voids' ? 'Restock' : metric === 'quantity_corrections' ? 'Record' : 'Sale';
+  const number = metric === 'restock_voids' ? 'Purchase' : metric === 'quantity_corrections' ? 'Record' : 'Sale';
   if (isStockMetric(metric)) {
     // No credit note to give.
     return csvOf([

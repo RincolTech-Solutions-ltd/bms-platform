@@ -19,6 +19,82 @@
   margin-bottom: var(--space-4);
 }
 
+/* Issue #680: the shop the page works in, drawn by the staff layout above every page's content, a 48px target that opens the
+   branch picker in one tap. */
+.shop-here {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  min-height: var(--tap);
+  margin: 0 0 var(--space-4);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: var(--weight-semibold);
+}
+
+.shop-here:has(.shop-here-select:focus-visible) {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.shop-here-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shop-here-icon,
+.shop-here-chevron {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+.shop-here-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.shop-here-chevron svg {
+  width: 16px;
+  height: 16px;
+  transform: rotate(90deg);
+}
+
+.shop-here-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* Issue #728: the shop a form adds stock to, beside its quantity, and Change, a 48px button with the picker laid over it. */
+.adds-to {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-2) 0;
+}
+
+.adds-to-change {
+  position: relative;
+}
+
+.adds-to-change:has(.shop-here-select:focus-visible) {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
 .rt label {
   margin: var(--space-4) 0 6px;
 }
@@ -26,6 +102,26 @@
 .rt label:has(> input[type='radio']),
 .rt label:has(> input[type='checkbox']) {
   margin: var(--space-2) 0 0;
+}
+
+/* The kind of business on Retail settings (issue #424): each choice is a whole row to tap, at least 48px, its name above its words. */
+.rt label.rt-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: var(--tap);
+  padding: var(--space-3) 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.rt label.rt-choice > input {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.rt label.rt-choice strong {
+  display: block;
 }
 
 .rt-row {
@@ -51,6 +147,163 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
+}
+
+/* Issue #680: one shop's stock on a phone, a card per item with the quantity large and the prices small under it. */
+.stock-cards {
+  list-style: none;
+  padding: 0;
+}
+
+.stock-card p {
+  margin: var(--space-1) 0;
+}
+
+.stock-card-qty {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* The quantity reads from the left under the name, and the total in pieces wraps with a large font instead of widening the page. */
+.stock-card-qty .num {
+  text-align: start;
+}
+
+.stock-card-qty .qty-packs .qty-total {
+  white-space: normal;
+}
+
+.stock-card .hint .num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Issue #728: "0 here. 456 at Test Store" and its switch, under the quantity; in a table cell it reads from the left. */
+.stock-elsewhere {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  text-align: start;
+  font-size: var(--text-base);
+  font-weight: var(--weight-regular);
+}
+
+.stock-elsewhere p {
+  margin: 0;
+}
+
+/* Issue #690: finding an item on a phone. The search and the category chips stay under the 56px top bar while the list scrolls,
+   on the page's own background so the rows pass under them. The chips are one row that scrolls sideways inside itself; the
+   page never does. A chip is a 48px target; the chosen one is filled, with no stripe. */
+.find-bar {
+  margin-bottom: var(--space-3);
+}
+
+@media (max-width: 719px) {
+  .find-bar {
+    position: sticky;
+    /* The top bar's measured height (FindBar sets it), 56px until it is measured. */
+    top: var(--find-top, 56px);
+    z-index: calc(var(--z-nav) - 1);
+    margin-inline: calc(-1 * var(--space-4));
+    padding: var(--space-2) var(--space-4) var(--space-2);
+    background: var(--color-bg);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .find-bar .sb {
+    margin-bottom: 0;
+  }
+}
+
+.find-chips {
+  position: relative;
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding-bottom: var(--space-1);
+}
+
+.find-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.find-chip {
+  flex: none;
+  min-height: var(--tap);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: var(--color-surface);
+  box-shadow: none;
+  color: var(--color-text);
+  font-weight: var(--weight-regular);
+  white-space: nowrap;
+}
+
+.find-chip-count {
+  margin-left: var(--space-1);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The chosen chip keeps its fill under the pointer, over the plain button's hover. */
+.find-chip[aria-pressed='true'],
+.find-chip[aria-pressed='true']:hover:not(:disabled) {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-on-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.find-chip[aria-pressed='true'] .find-chip-count {
+  color: inherit;
+}
+
+.find-chip:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* Issue #697: the ready sizes and colours on Add an item, the same 48px chips, wrapping onto more rows instead of scrolling. */
+.option-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* The words over the price at the right of an item's row: Selling price, small and muted. */
+.find-row-word {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+  text-align: right;
+}
+
+.find-none .cluster {
+  justify-content: center;
+}
+
+/* Items and Categories, the first two entries of My stock, side by side; one under the other when a large font needs the width. */
+.find-entries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.find-entries > * {
+  flex: 1 1 140px;
+}
+
+.find-entries:empty {
+  display: none;
 }
 
 .rt-card > strong:first-child {
@@ -101,7 +354,6 @@
   border-radius: var(--radius);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-left: 4px solid var(--color-accent);
   font-size: var(--text-xl);
   font-weight: var(--weight-bold);
   font-variant-numeric: tabular-nums;
@@ -143,65 +395,6 @@
   gap: var(--space-2);
   color: var(--color-text-muted);
   font-size: var(--text-sm);
-}
-
-/* Retail home: big touch tiles, two per row on a phone. */
-.tile-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr));
-  gap: var(--space-3);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.tile {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  height: 100%;
-  min-height: 132px;
-  padding: var(--space-4);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  color: var(--color-text);
-  text-decoration: none;
-  transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
-}
-
-.tile:hover {
-  border-color: var(--color-accent);
-  box-shadow: var(--shadow-lg);
-  text-decoration: none;
-}
-
-.tile:active {
-  transform: scale(0.98);
-}
-
-.tile strong {
-  font-size: var(--text-base);
-  line-height: 1.3;
-}
-
-.tile .tile-hint {
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  line-height: 1.4;
-}
-
-@media (min-width: 720px) {
-  .tile-grid {
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: var(--space-4);
-  }
-
-  .tile {
-    min-height: 160px;
-    padding: var(--space-5);
-  }
 }
 
 /* A line's total with its Remove action on the right. */
@@ -317,11 +510,6 @@
   overflow-wrap: anywhere;
 }
 
-.an-placeholder {
-  border-style: dashed;
-  background: var(--color-surface-muted);
-}
-
 .an-sparks {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -363,6 +551,80 @@
 .rt-row + .table-wrap,
 .rt-row + .rt-total {
   margin-top: var(--space-4);
+}
+
+/* The sale's total as the hero of the screen (#508, docs/ui-rules.md rule 8): the word small, the amount at the display size. */
+.rt-total-hero {
+  flex-wrap: wrap;
+}
+
+.rt-total-hero > span:first-child {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-muted);
+}
+
+.rt-total-amount {
+  font-size: var(--text-display);
+  font-weight: var(--weight-display);
+  line-height: var(--leading-tight);
+}
+
+/*
+ * The sale's one primary action (#508, docs/ui-rules.md rule 6): the button carries the live total. On a phone the bar sticks full
+ * width to the bottom of the screen, edge to edge over the page gutter, and the toast rises above it; from 720px it sits in the form.
+ */
+.sale-bar .sale-bar-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 56px;
+}
+
+.sale-bar-amount {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+}
+
+/* ActionBar (the sale's bar) sets --bottom-bar to its measured height while it sticks. A field scrolled into view, by a tap that opens the keyboard
+   or by Tab or Next, stops above the bar, and the form ends with room for it, so the bar never covers a field. */
+:root {
+  scroll-padding-bottom: calc(var(--bottom-bar, 0px) + var(--tab-bar-offset, 0px) + var(--space-4));
+}
+
+.sale-form {
+  padding-bottom: var(--bottom-bar, 0px);
+}
+
+/* An item going on the sale (#508): a new line slides up 8px and fades in, and the count beside Items pops on every add or
+   top-up, without overshoot. Both are keyed by the add in sale.tsx, so nothing moves on a removal or a refused duplicate. The
+   pop is its own class, set only after an add, so a badge that mounts with lines restored from a saved draft stays still. */
+.line-new {
+  animation: rt-line-in var(--motion) var(--ease-out);
+}
+
+.count-badge {
+  margin-left: var(--space-1);
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+.count-pop {
+  animation: rt-count-pop var(--motion) var(--ease-out);
+}
+
+@keyframes rt-line-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes rt-count-pop {
+  from {
+    transform: scale(0.8);
+  }
 }
 
 /*
@@ -412,7 +674,7 @@
   border: 5px solid transparent;
   border-left-color: var(--color-text-muted);
   border-right-width: 0;
-  transition: transform 120ms ease;
+  transition: transform var(--motion-fast) var(--ease-out);
 }
 
 .cat-head[aria-expanded='true']::before {
@@ -440,11 +702,6 @@ th[scope='rowgroup'] {
 
 th[scope='rowgroup'] .cat-head {
   border-width: 0;
-}
-
-.cat-scroll {
-  max-height: 220px;
-  overflow-y: auto;
 }
 
 @media (max-width: 719px) {
@@ -816,15 +1073,612 @@ th[scope='rowgroup'] .cat-head {
   width: 16px;
   height: 0;
   vertical-align: middle;
-  border-top: 3px solid var(--color-primary);
+  border-bottom: 3px solid var(--color-primary);
 }
 
 .rc-key-prev {
-  border-top: 2px dashed var(--color-text-muted);
+  border-bottom: 2px dashed var(--color-text-muted);
 }
 
 .rc-links {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+/* Scanning (ADR-070, issue #345): the scan box over a form's lines and the camera view. */
+.scan-bar {
+  margin-bottom: var(--space-3);
+}
+
+.scan-bar .rt-row input {
+  flex: 1;
+}
+
+.scan-bar > label {
+  font-weight: 600;
+}
+
+.scan-bar .scan-camera {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+}
+
+/* The count line the last scan counted (issue #345). */
+.rt-card.scan-hit {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.camera-scan {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+  background: var(--color-surface);
+}
+
+.camera-scan video {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  object-fit: cover;
+  border-radius: var(--radius);
+  background: var(--rt-black);
+}
+
+/* Printable labels (issue #345): an A4 sheet of 3 by 8 labels of 70 by 37 mm. The bars are the fixed black on white
+   pair, like the QR code, so a label scans whatever the theme. */
+.label-sheet {
+  display: grid;
+  grid-template-columns: repeat(3, 70mm);
+  grid-auto-rows: 37mm;
+  gap: 0;
+  width: 210mm;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.label {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 2mm 4mm;
+  overflow: hidden;
+  color: var(--rt-black);
+  background: var(--rt-white);
+  border: 1px dashed var(--color-border);
+  font-size: 9pt;
+  line-height: 1.2;
+}
+
+.label-name {
+  font-weight: var(--weight-semibold);
+  max-height: 2.4em;
+  overflow: hidden;
+}
+
+.label svg {
+  display: block;
+  width: 100%;
+  height: 14mm;
+}
+
+/* An EAN-13 at GS1's nominal module of 0.33 mm: 113 modules (with the quiet zones) by 44. */
+.label svg[data-format='ean13'] {
+  width: 37.3mm;
+  height: 14.5mm;
+  max-width: 100%;
+  align-self: center;
+}
+
+.label-code {
+  font-size: 8pt;
+  text-align: center;
+}
+
+/* For a printer that cannot print to the edge of the paper: 4 mm kept clear inside every label. */
+.label-sheet.label-safe .label {
+  padding: 4mm;
+}
+
+@media print {
+  /* Only the label sheet prints. Everything that neither is the sheet, holds it nor sits in it leaves the layout
+     (display none, not visibility hidden, which keeps its space), and the elements that hold it lose their own margins,
+     padding and position, so the shell's menu and header can never push the 70 by 37 mm grid off the label stock. */
+  body:has(.label-sheet) *:not(.label-sheet, .label-sheet *, :has(.label-sheet)) {
+    display: none !important;
+  }
+
+  body:has(.label-sheet),
+  body:has(.label-sheet) *:has(.label-sheet) {
+    display: block !important;
+    position: static !important;
+    width: auto !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: none !important;
+    overflow: visible !important;
+  }
+
+  .label-sheet {
+    max-width: none;
+    overflow: visible;
+  }
+
+  .label-hint {
+    display: none;
+  }
+
+  .label {
+    border: 0;
+    break-inside: avoid;
+  }
+
+  @page {
+    size: A4;
+    margin: 0;
+  }
+}
+
+/* The next step after a finished task, under its main action (issue #534: New sale under Share receipt). */
+.rt-next {
+  width: 100%;
+  min-height: 48px;
+  margin-top: var(--space-4);
+}
+
+/* A stock-take line (#534): the count box and its 0 button on one row, the button a full 48px tap. */
+.count-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.count-entry input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.count-entry button {
+  flex: none;
+  min-width: 48px;
+  min-height: 48px;
+}
+
+/* Savings (issue #538, ADR-080): the day's profit, expenses and what is available to save, one line each. */
+.rt-figures {
+  margin: var(--space-2) 0;
+}
+
+.rt-figures > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+}
+
+.rt-figures dt {
+  color: var(--color-text-muted);
+}
+
+.rt-figures dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* An entry warning (issue #353): a tinted note next to the field it is about, its words in the text colour for reading, the
+   icon in the warning colour, and Confirm and Change as two ordinary 48px buttons. No stripe, no shadow of its own. */
+.entry-warning p {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text);
+}
+
+.entry-warning-icon {
+  flex: none;
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+}
+
+.entry-warning-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.entry-warning-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.entry-warning-actions button {
+  min-height: 48px;
+  min-width: 112px;
+}
+
+/* A count that wipes or halves an item's stock (issue #629): the entry warning's note under its line on Review the difference,
+   with a 48px tick in words, so the check never rests on the tint alone. */
+.count-drop-row td {
+  padding-top: 0;
+}
+
+.count-drop-row .alert {
+  margin: 0;
+}
+
+.count-drop-tick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap);
+  color: var(--color-text);
+}
+
+.count-drop-tick input {
+  width: var(--space-5);
+  height: var(--space-5);
+  margin: 0;
+}
+
+/* Did you mean and the category of similar items while a new item is named (issue #353): a neutral note with one row per
+   item and its 48px button, then a one-line hint with a button to choose the category. */
+.name-hints-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.name-hints-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.name-hints-list button,
+.name-hints-category button {
+  min-height: 48px;
+}
+
+.name-hints-category {
+  margin: 0 0 var(--space-4);
+}
+
+.name-hints-category .hint {
+  margin: 0 0 var(--space-2);
+}
+
+/* The photo of a new item (issue #617): each button is the visible label of its file input, which keeps the keyboard ring. */
+.photo-choice-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.photo-choice label.btn {
+  display: inline-flex;
+  cursor: pointer;
+}
+
+.photo-choice label.btn:focus-within {
+  box-shadow: var(--focus-ring);
+}
+
+/* Issue #650: an item counted or moved in cartons and pieces: the two boxes, each under its own label, share the row. */
+.count-packs {
+  align-items: flex-end;
+}
+
+.count-part {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.count-part label {
+  overflow-wrap: anywhere;
+}
+
+/* Issue #699: a box for every level of a ladder wraps on a phone rather than squeezing each box. */
+.count-levels {
+  flex-wrap: wrap;
+}
+
+.count-levels .count-part {
+  min-width: 88px;
+}
+
+/* Issue #650: stock in cartons and pieces is a short sentence, so its cell wraps between words, the total in pieces on its own line, instead of widening the table. */
+td.num.qty-packs {
+  white-space: normal;
+}
+
+.qty-packs .qty-total {
+  display: block;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
+/*
+ * Issue #699 (ADR-107): the package ladder, biggest first. A numbered dot per level on a plain grey line, a card per level,
+ * and the pieces in words under it. The dot and the picture take the chart colours by level (data-colour names the role);
+ * no stripe, no gradient, nothing moves.
+ */
+.ladder {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ladder-rung {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.ladder-rung::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 21px;
+  width: 2px;
+  background: var(--color-border);
+}
+
+.ladder-rung:first-child::before {
+  top: 22px;
+}
+
+.ladder-rung:last-child::before {
+  bottom: calc(100% - 22px);
+}
+
+.ladder-dot {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: var(--space-2) 0 0 8px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  color: var(--color-surface);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.ladder-dot[data-colour='--viz-1-value'],
+.ladder-swatch[data-colour='--viz-1-value'] {
+  background: var(--viz-1-value);
+}
+
+.ladder-dot[data-colour='--viz-2-value'],
+.ladder-swatch[data-colour='--viz-2-value'] {
+  background: var(--viz-2-value);
+}
+
+.ladder-dot[data-colour='--viz-3-value'],
+.ladder-swatch[data-colour='--viz-3-value'] {
+  background: var(--viz-3-value);
+}
+
+.ladder-dot[data-colour='--color-link'],
+.ladder-swatch[data-colour='--color-link'] {
+  background: var(--color-link);
+}
+
+.ladder-card {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-bottom: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.ladder-card-changed {
+  background: var(--color-warning-tint);
+}
+
+.ladder-card p {
+  margin: 0;
+}
+
+.ladder-name {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+/* Issue #709: "Single unit" as the glossary writes it, never in capitals. */
+.ladder-tag {
+  margin-left: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+/* Issue #709: an item's pack table on a phone, the selling price under the size, each on its own line, wrapping in its cell. */
+.pack-size-price > span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.pack-size-price > .badge,
+.pack-size-price > .btn-sm {
+  display: inline-block;
+  margin-top: var(--space-1);
+}
+
+/* Two columns that wrap, the pack's badges under its name, so nothing pushes the table past a phone's width. */
+.pack-table th,
+.pack-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.pack-table .badge {
+  white-space: normal;
+}
+
+/* An amount is never broken in the middle of its figures. */
+.pack-table .pack-price .num {
+  white-space: nowrap;
+}
+
+.ladder-says,
+.ladder-caption {
+  color: var(--color-text-muted);
+}
+
+.ladder-says strong,
+.ladder-sum strong {
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.ladder-sum {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--color-neutral-tint);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ladder-check {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius);
+  background: var(--color-warning-tint);
+}
+
+.ladder-check p,
+.ladder-check ul {
+  margin: 0;
+}
+
+.ladder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.ladder-actions > button {
+  min-height: 48px;
+}
+
+.ladder-look select {
+  min-height: 48px;
+}
+
+.ladder-picture {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius);
+  background: var(--color-bg);
+}
+
+.ladder-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  margin-bottom: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.ladder-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ladder-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+}
+
+@media (min-width: 900px) {
+  .ladder-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    column-gap: var(--space-5);
+  }
+
+  .ladder-panel > * {
+    grid-column: 1;
+  }
+
+  .ladder-panel > .ladder-look {
+    grid-column: 2;
+    grid-row: 1 / span 8;
+  }
+}
+
+/* The Next row (issue #700): the next jobs as plain full size buttons, side by side on a laptop, one under another on a phone. */
+.next-steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.next-steps .btn,
+.next-steps button:not(.help-tip-button) {
+  min-height: var(--tap);
+}
+
+.next-step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+@media (max-width: 719px) {
+  .next-steps {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .next-steps > .btn,
+  .next-steps > button,
+  .next-step > .btn {
+    width: 100%;
+  }
+
+  .next-step > .btn {
+    flex: 1;
+  }
 }

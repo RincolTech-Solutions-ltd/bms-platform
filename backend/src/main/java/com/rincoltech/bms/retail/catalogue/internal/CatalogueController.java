@@ -1,5 +1,8 @@
 package com.rincoltech.bms.retail.catalogue.internal;
 
+import com.rincoltech.bms.kernel.ApiException;
+import com.rincoltech.bms.kernel.ApiException.FieldProblem;
+import com.rincoltech.bms.kernel.Problems;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Category;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.CategoryList;
@@ -23,13 +26,19 @@ import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdatePackReque
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdateProductRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdateUnitRequest;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.net.URI;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -39,6 +48,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import tools.jackson.core.JacksonException;
 
 /** {@code /api/v1/retail} catalogue routes (chapter 7 section 7.11.20; FR-RET-01, FR-RET-02). */
 @RestController
@@ -71,9 +81,20 @@ class CatalogueController {
                 .body(created);
     }
 
+    @GetMapping("/categories/prefix-suggestion")
+    @RequiresPermission("retail.catalogue.manage")
+    @Operation(
+            summary = "The code start a new category of this name would get, free in the business (issue #493)",
+            operationId = "suggestRetailCategoryPrefix")
+    CatalogueApi.PrefixSuggestion suggestPrefix(@RequestParam(name = "name") String name) {
+        return service.suggestPrefix(name);
+    }
+
     @PatchMapping("/categories/{category_id}")
     @RequiresPermission("retail.catalogue.manage")
-    @Operation(summary = "Rename or deactivate a category (#146); never deleted", operationId = "updateRetailCategory")
+    @Operation(
+            summary = "Rename, change the code start of, or deactivate a category (#146, #493); never deleted",
+            operationId = "updateRetailCategory")
     ResponseEntity<Category> updateCategory(
             @PathVariable("category_id") UUID id,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
@@ -144,8 +165,15 @@ class CatalogueController {
             operationId = "importRetailProducts")
     ImportResult importProducts(
             @RequestParam(name = "dry_run", required = false, defaultValue = "true") boolean dryRun,
+            @Parameter(
+                            description =
+                                    "Let the app make the codes (owner decision D45, issue #562): every row gets its category's"
+                                            + " next code and the file's code column is not read. Off by default: a row's code is kept"
+                                            + " and a blank one is made")
+                    @RequestParam(name = "make_codes", required = false, defaultValue = "false")
+                    boolean makeCodes,
             @Valid @RequestBody ImportRequest request) {
-        return importer.run(request.csv(), dryRun);
+        return importer.run(request.csv(), dryRun, makeCodes);
     }
 
     @GetMapping("/products/similar")
@@ -234,5 +262,39 @@ class CatalogueController {
     @Operation(summary = "Every price change of a product (FR-RET-02)", operationId = "getRetailPriceHistory")
     PriceHistory history(@PathVariable("product_id") UUID id) {
         return service.history(id);
+    }
+
+    /**
+     * Review of #692, round 5: a new item's package whose value cannot be read (a size that is not a number) is a validation
+     * problem on {@code packs[i].factor} with {@code pack_index}, as every other refusal of a package is; any other unreadable
+     * body is the kernel's 400 malformed_request, unchanged.
+     */
+    // JUSTIFICATION-A3: round 5 of the #692 review asks that binding errors under packs name their package.
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    ResponseEntity<ProblemDetail> unreadable(HttpMessageNotReadableException e) {
+        if (e.getCause() instanceof JacksonException j) {
+            List<JacksonException.Reference> path = j.getPath();
+            if (path.size() >= 3
+                    && "packs".equals(path.get(0).getPropertyName())
+                    && path.get(1).getIndex() >= 0) {
+                int i = path.get(1).getIndex();
+                String field = path.get(2).getPropertyName();
+                ApiException api = new ApiException(
+                        HttpStatus.UNPROCESSABLE_CONTENT,
+                        "validation_failed",
+                        "Validation failed",
+                        "One or more fields are invalid.",
+                        List.of(new FieldProblem(
+                                "packs[" + i + "]." + field,
+                                "invalid",
+                                "factor".equals(field)
+                                        ? "Type how many are in one package, as a number."
+                                        : "This value cannot be read.")),
+                        Map.of("pack_index", i));
+                return ResponseEntity.status(api.status()).body(Problems.of(api));
+            }
+        }
+        return ResponseEntity.badRequest()
+                .body(Problems.of(HttpStatus.BAD_REQUEST, "malformed_request", "Bad Request", "Bad Request."));
     }
 }

@@ -2,9 +2,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { users } from '../../../api/users';
-import { type Choice, type Policy, twoStep } from '../../../api/two-step';
+import { type Choice, type Policy, TwoStepError, twoStep } from '../../../api/two-step';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { useStaff } from '../context';
 import { DEFAULT_GRACE, canManageTwoStep, choiceOf, deadlineWords, differs, graceChoices, needsProof, policyOf, ready, reviewLines } from './state';
+import { NoAccess } from '../../../app/ui/EmptyState';
+import { sayDone } from '../retail/toast';
 
 // Two-step sign-in (issue #348; ADR-046): who must use a code from their phone as well as their password. It is optional until an
 // administrator chooses otherwise. Three choices (nobody, chosen roles, everyone), a grace period, and a plain-words review that is read
@@ -29,7 +32,8 @@ export function TwoStepPolicyScreen() {
   const [busy, setBusy] = useState(false);
   // The proof of an administrator who relaxes the rule: a code from their authenticator, or their own password when they have none.
   const [proof, setProof] = useState('');
-  const [notice, setNotice] = useState<string | null>(null);
+  // The server asked for the proof the screen did not think was needed (the settings changed meanwhile, issue #377).
+  const [serverAsks, setServerAsks] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // One save at a time: a second tap before the first answer must not send a second request.
   const working = useRef(false);
@@ -44,7 +48,7 @@ export function TwoStepPolicyScreen() {
     return (
       <main className="rt ln" data-tour="twostep-page">
         <h1>Two-step sign-in</h1>
-        <p className="empty-state">You do not have access to this page.</p>
+        <NoAccess />
       </main>
     );
   }
@@ -54,18 +58,20 @@ export function TwoStepPolicyScreen() {
   const current = saved ? choiceOf(saved) : null;
   const savedState = saved && current ? { choice: current, enforceFrom: saved.mfa_enforce_from, timezone: saved.timezone } : null;
   const changed = choice !== null && current !== null && differs(choice, current);
+  const proofAsked = (c: Choice) => serverAsks || (savedState !== null && needsProof(savedState, c, new Date()));
 
   function pick(policy: Policy) {
     if (!choice) return;
     setReviewing(false);
-    setNotice(null);
     setProof('');
+    setServerAsks(false);
     setChoice({ ...choice, policy });
   }
 
   function toggle(key: string) {
     if (!choice) return;
     setReviewing(false);
+    setServerAsks(false);
     const has = choice.roles.includes(key);
     setChoice({ ...choice, roles: has ? choice.roles.filter((k) => k !== key) : [...choice.roles, key] });
   }
@@ -76,18 +82,13 @@ export function TwoStepPolicyScreen() {
     setBusy(true);
     setError(null);
     try {
-      const asked = savedState && needsProof(savedState, choice, new Date()) ? (me.mfa_enabled ? { totp_code: proof.trim() } : { password: proof }) : {};
+      const asked = proofAsked(choice) ? (me.mfa_enabled ? { totp_code: proof.trim() } : { password: proof }) : {};
       const after = await twoStep.save(saved.version ?? 1, choice, current, asked);
       setProof('');
+      setServerAsks(false);
       const now = policyOf(after);
       const date = deadlineWords(after.mfa_enforce_from, after.timezone);
-      setNotice(
-        now === 'off'
-          ? 'Saved. Two-step sign-in is optional again.'
-          : date
-            ? `Saved. People who have not set it up have until the end of ${date}.`
-            : 'Saved. People who have not set it up are asked at their next sign-in.',
-      );
+      sayDone(now === 'off' ? 'Saved, now optional' : date ? `Saved, due by ${date}` : 'Saved, asked at sign in');
       setReviewing(false);
       setChoice(choiceOf(after));
       await queryClient.invalidateQueries({ queryKey: ['settings'] });
@@ -95,6 +96,13 @@ export function TwoStepPolicyScreen() {
       await queryClient.invalidateQueries({ queryKey: ['me'] });
     } catch (e) {
       setError(messageOf(e));
+      if (e instanceof TwoStepError && (e.code === 'proof_required' || e.code === 'totp_required' || e.code === 'password_required')) {
+        // Show the proof field and read the settings again (the version moved). A code or password asked for that /me does not
+        // expect means /me is out of date: read it again so the field asks for the right one.
+        setServerAsks(true);
+        void queryClient.invalidateQueries({ queryKey: ['settings'] });
+        if (e.code !== 'proof_required') void queryClient.invalidateQueries({ queryKey: ['me'] });
+      }
     } finally {
       working.current = false;
       setBusy(false);
@@ -108,11 +116,6 @@ export function TwoStepPolicyScreen() {
         Two-step sign-in asks for a code from a person&apos;s phone as well as their password. Then nobody can sign in as them, even if they learn
         the password. It takes each person about two minutes to set up.
       </p>
-      {notice && (
-        <p role="status" className="alert alert-success">
-          {notice}
-        </p>
-      )}
       {settings.isPending && <p className="loading">Loading your choice</p>}
       {settings.isError && (
         <p role="alert" className="alert alert-danger">
@@ -156,6 +159,7 @@ export function TwoStepPolicyScreen() {
         <div data-tour="twostep-grace">
           <label>
             How long do people have to set it up?
+            {/* empty: graceChoices always holds the fixed choices of days. */}
             <select
               value={choice.graceDays}
               disabled={busy}
@@ -183,7 +187,7 @@ export function TwoStepPolicyScreen() {
       )}
       {choice && !reviewing && (
         <p className="cluster">
-          <button type="button" className="rt-primary" disabled={busy || !changed || !ready(choice)} onClick={() => setReviewing(true)}>
+          <button type="button" /* busy-exempt: opens the review */ className="rt-primary" disabled={busy || !changed || !ready(choice)} onClick={() => setReviewing(true)}>
             Review and save
           </button>
           {!changed && <span className="hint">Nothing has changed yet.</span>}
@@ -199,7 +203,7 @@ export function TwoStepPolicyScreen() {
               <li key={line}>{line}</li>
             ))}
           </ul>
-          {savedState && needsProof(savedState, choice, new Date()) && (
+          {proofAsked(choice) && (
             <label>
               {me.mfa_enabled ? 'The current code from your authenticator app' : 'Your own password'}
               <input
@@ -213,10 +217,10 @@ export function TwoStepPolicyScreen() {
             </label>
           )}
           <p className="cluster">
-            <button type="button" className="rt-primary" disabled={busy || (savedState !== null && needsProof(savedState, choice, new Date()) && proof.trim() === '')} onClick={() => void save()}>
-              {busy ? 'Saving' : choice.policy === 'off' ? 'Yes, make it optional' : 'Yes, save this'}
-            </button>
-            <button type="button" className="btn-ghost" disabled={busy} onClick={() => setReviewing(false)}>
+            <BusyButton type="button" className="rt-primary" busy={busy} notReady={proofAsked(choice) && proof.trim() === ''} onClick={() => void save()}>
+              {choice.policy === 'off' ? 'Yes, make it optional' : 'Yes, save this'}
+            </BusyButton>
+            <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={busy} onClick={() => setReviewing(false)}>
               Go back
             </button>
           </p>

@@ -1,6 +1,9 @@
-import { keepPreviousData, useQuery, type QueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
+import { useQuery, type QueryClient } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
+import { useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { TOAST_MS, useToast as useToastOf } from './toast';
+import { Highlight } from '../../../app/ui/SearchBox';
+import { ItemCombobox } from '../../../app/ui/ItemCombobox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import type { Me } from '../../../api/client';
 import { RETAIL_CURRENCY, RetailError, retail, type BranchRole, type Product } from '../../../api/retail';
@@ -8,16 +11,26 @@ import { ALL_BRANCHES, branchLabel } from '../../../auth/branch';
 import { formatMinor } from '../../../components/money';
 import { useStockedBranches } from '../branch-picker';
 import { useStaff } from '../context';
-import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
 import { ItemPhoto, shownPhoto } from './item-photo';
-import { showQty } from './maths';
+import { parseCount, qtyString, showQty } from './maths';
+import { ladderLevels, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, unitWords, type PackSize } from './units-state';
+import { plural } from '../../../app/glossary';
 import { BRANCH_ROLES, branchesWhere, canSeeProfit, canUse, capabilityOn, sellingBranches, type RetailScreen } from './permissions';
 import { keptWords } from './orders-state';
+import { NoAccess } from '../../../app/ui/EmptyState';
 
 // Shared pieces of the retail screens. Phone first: one column, 44px tap targets, labels on every
 // input, a visible focus ring, and state shown in words as well as colour.
 
 export const money = (minor: number): string => formatMinor(minor, RETAIL_CURRENCY);
+
+/**
+ * An amount on the screen, always in tabular figures (docs/ui-rules.md rule 8), so amounts in a list or a statement line up digit
+ * by digit. Use it wherever an amount is drawn; money() stays for words built as text (a label, a toast, an aria-label).
+ */
+export function Money({ minor }: { minor: number }) {
+  return <span className="num">{money(minor)}</span>;
+}
 
 // The look lives in src/app/ui/retail.css with the shared design tokens (#95). The screens used to
 // carry an inline <style> here, which the production CSP (style-src 'self') refuses; this stays as
@@ -40,20 +53,29 @@ export function Success({ children }: { children: ReactNode }) {
 }
 
 /**
+ * What the person who asked sees while a void, a stock correction or an expense waits for an administrator (issue #343, ADR-091
+ * decision 9): nothing changed yet, an administrator was told, and the request is on Approvals, where they can see or cancel it.
+ * A neutral note, not a success: the action has not happened.
+ */
+export function WaitingForApproval({ what }: { what: string }) {
+  return (
+    <div role="status" className="alert alert-info stack" data-testid="approval-waiting">
+      <p>
+        <strong>Sent for approval.</strong> {what} Nothing changes until an administrator approves it.
+      </p>
+      <Link to="/staff/approvals" className="link-row">See it, or cancel it, on Approvals</Link>
+    </div>
+  );
+}
+
+/**
  * A short toast above the bottom bar (`.toast`), gone after four seconds. It repeats the on-screen
  * success message and is hidden from assistive technology, which already has that message (#146).
- * Render `toast` anywhere in the screen and call `show` when a save succeeds.
+ * Render `toast` anywhere in the screen and call `show(text, 'success')` when a save succeeds, or `'info'` when it only waits
+ * for an approval.
  */
-export function useToast(): { show: (message: string) => void; toast: ReactNode } {
-  const [text, setText] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(timer.current), []);
-  const show = (message: string) => {
-    setText(message);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => setText(null), 4000);
-  };
-  return { show, toast: text ? <p className="toast" aria-hidden="true">{text}</p> : null };
+export function useToast() {
+  return useToastOf(TOAST_MS, true);
 }
 
 /** The debounce of the shared search hook (#241), kept here for the screens that import it from this file. */
@@ -90,7 +112,7 @@ export function Gate({ screen, title, children, wide }: { screen: RetailScreen; 
     return (
       <main className="rt">
         <h1>{title}</h1>
-        <p className="empty-state">You do not have access to this page.</p>
+        <NoAccess />
       </main>
     );
   }
@@ -106,15 +128,20 @@ export function Gate({ screen, title, children, wide }: { screen: RetailScreen; 
  * The roles of the branches (ADR-033): undefined while the capability is off, the session cannot read
  * stock, or the read is on its way, and then every branch behaves as before roles existed.
  */
-export function useBranchRoles(me: Pick<Me, 'permissions' | 'module_capabilities'>): BranchRole[] | undefined {
-  const enabled = capabilityOn(me, 'retail', BRANCH_ROLES) && (me.permissions ?? []).includes('retail.stock.read');
-  const roles = useQuery({ queryKey: ['retail', 'branch-roles'], queryFn: () => retail.branchRoles(), enabled, staleTime: 60_000, retry: 1 });
-  return enabled ? roles.data : undefined;
+export function useBranchRoles(me: Pick<Me, 'permissions' | 'module_capabilities'>, wanted = true): BranchRole[] | undefined {
+  return useBranchRolesRead(me, wanted).roles;
 }
 
-/** True unless branch roles are on and every branch the session can sell at is a store. */
-export function useCanSellAnywhere(me: Me): boolean {
-  const roles = useBranchRoles(me);
+/** As {@link useBranchRoles}, with `loading` true while roles it wants are still being read (a failed read counts as read). */
+export function useBranchRolesRead(me: Pick<Me, 'permissions' | 'module_capabilities'>, wanted = true): { roles: BranchRole[] | undefined; loading: boolean } {
+  const enabled = wanted && capabilityOn(me, 'retail', BRANCH_ROLES) && (me.permissions ?? []).includes('retail.stock.read');
+  const roles = useQuery({ queryKey: ['retail', 'branch-roles'], queryFn: () => retail.branchRoles(), enabled, staleTime: 60_000, retry: 1 });
+  return { roles: enabled ? roles.data : undefined, loading: enabled && roles.isPending };
+}
+
+/** True unless branch roles are on and every branch the session can sell at is a store. `wanted` false skips the branch roles read. */
+export function useCanSellAnywhere(me: Me, wanted = true): boolean {
+  const roles = useBranchRoles(me, wanted);
   return sellingBranches(branchesWhere(me, 'retail.sale.create'), roles).length > 0;
 }
 
@@ -152,22 +179,8 @@ export function useBranchName(): (id: string | undefined) => string {
   return (id) => branchLabel((me.branches ?? []).find((b) => b.id === id));
 }
 
-const PHONE = '(max-width: 719px)';
-const subscribePhone = (notify: () => void) => {
-  if (typeof window === 'undefined' || !window.matchMedia) return () => undefined;
-  const query = window.matchMedia(PHONE);
-  query.addEventListener('change', notify);
-  return () => query.removeEventListener('change', notify);
-};
-
-/** True below 720px, where a wide table gives way to one card per row. False when rendered without a window. */
-export function useIsPhone(): boolean {
-  return useSyncExternalStore(
-    subscribePhone,
-    () => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia(PHONE).matches,
-    () => false,
-  );
-}
+/** True below 720px, where a wide table gives way to one card per row. Shared with the phone side menu (issue #455). */
+export { useIsPhone } from '../../../components/side-menu';
 
 /**
  * Says plainly when the chosen branch holds no stock (#103), with a button for each of the user's
@@ -223,7 +236,7 @@ export function BranchRequired({ permissions, stocking = false }: { permissions:
   return (
     <div role="note" className="alert alert-info">
       <div className="stack">
-        {chosen && <p><strong>{branchLabel(chosen)}</strong> keeps no goods, so nothing is sold, restocked, moved or counted there.</p>}
+        {chosen && <p><strong>{branchLabel(chosen)}</strong> keeps no goods, so nothing is sold, bought in, moved or counted there.</p>}
         <p>Choose a branch to continue:</p>
         <p className="cluster">
           {branches.map((b) => (
@@ -243,10 +256,19 @@ export function useProfitAccess(): boolean {
 
 /**
  * Search the catalogue and add an item, each with what `branchId` holds (negative flagged). The
- * sale screen shows the selling price too; the stock move screen shows the source branch's stock.
+ * sale screen shows the price too; the stock move screen shows the source branch's stock. The matches
+ * show only while something is typed and close once one is picked (ItemCombobox, issue #534): there is
+ * no browsable list here, the Stock page has the whole list.
  */
-export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStock = true, addLabel = 'Add' }: {
+export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStock = true, addLabel = 'Add', label = 'Find an item by name, code or category', notFound }: {
   id: string;
+  /**
+   * Drawn under the box once a search has found nothing, with what was typed (Sell's Add it here, issue #615). `hold` keeps it
+   * drawn while a form it opened is open, so a later search that finds something never wipes what was typed (review of #616).
+   */
+  notFound?: (term: string, clear: () => void, hold: (open: boolean) => void) => ReactNode;
+  /** The box's label; a second picker on a screen has its own, so the two are told apart. */
+  label?: string;
   /** Absent for a screen that is about an item and not a branch's stock (the price list editor), which also sets showStock false. */
   branchId?: string;
   onAdd: (p: Product) => void;
@@ -258,46 +280,140 @@ export function ProductPicker({ id, branchId, onAdd, showPrice = false, showStoc
   const products = useQuery({
     queryKey: ['retail', 'products', branchId, search.term],
     queryFn: ({ signal }) => retail.listProducts({ query: search.term, branchId, signal }),
-    placeholderData: keepPreviousData,
+    enabled: search.term !== '',
   });
-  const finding = products.isPlaceholderData || products.isFetching;
-  // The first 20 matches, in category groups when there is more than one category (category-groups.tsx).
-  const shown = (products.data ?? []).slice(0, 20);
-  const g = useCategoryGroups({ screen: 'picker', items: shown, categoryOf: (p) => p.category, resetKey: `${branchId ?? ''}|${search.term}`, searching: search.term !== '', pending: products.isPlaceholderData, minGroups: 2 });
-  const card = (p: Product) => (
-    <li key={p.id} className="rt-card">
-      <div className="rt-row">
-        <ItemPhoto photoId={shownPhoto(p)} label={p.description ?? ''} size={44} />
-        <span>
-          <strong>{p.description}</strong> ({p.code})
-          <br />
-          {!g.active && <CategoryLabel category={p.category} />}
-          {!g.active && p.category && <br />}
-          {showPrice && p.sell_minor !== undefined && `${money(p.sell_minor)} each${showStock ? ', ' : ''}`}
-          {showStock && (
-            <>
-              in stock here:{' '}
-              {p.qty !== undefined && p.qty.startsWith('-') ? <span className="rt-flag">{showQty(p.qty)} (negative)</span> : showQty(p.qty ?? '0')}{' '}
-              {p.unit}
-              {keptWords(p.qty, p.reserved_qty) && <> ({keptWords(p.qty, p.reserved_qty)})</>}
-            </>
-          )}
-        </span>
-        <button type="button" onClick={() => onAdd(p)} aria-label={`${addLabel} ${p.description}`}>
-          {addLabel}
-        </button>
-      </div>
-    </li>
-  );
+  const nothing = notFound && search.term !== '' && !search.pending && products.data !== undefined && products.data.length === 0;
+  const [held, setHeld] = useState(false);
   return (
     <>
-      <SearchBox id={id} label="Find an item by name, code or category" search={search} fetching={finding} count={products.data ? Math.min(products.data.length, 20) : undefined} more={(products.data?.length ?? 0) > 20} />
-      {products.isError && <Problem error={products.error} />}
-      {products.data && products.data.length === 0 && search.term && <NoResults term={search.term} onClear={search.clear} noun="items" />}
-      <SearchResults fetching={finding}>
-      {shown.length > 0 && <GroupControls state={g} />}
-      {g.active ? <GroupedCards state={g} renderItem={card} scroll /> : <ul style={{ listStyle: 'none', padding: 0, maxHeight: 220, overflowY: 'auto' }}>{shown.map(card)}</ul>}
-      </SearchResults>
+    <ItemCombobox
+      id={id}
+      label={label}
+      search={search}
+      // Only the answer to the term in the box: an earlier term's matches are never shown, so never picked.
+      results={search.term === '' ? undefined : products.data}
+      // Waiting only for a term with no answer yet: a background refresh of a cached answer keeps its options in view.
+      fetching={products.isPending}
+      error={products.isError ? <Problem error={products.error} /> : undefined}
+      optionKey={(p) => p.id ?? p.code ?? ''}
+      onPick={onAdd}
+      renderOption={(p) => {
+        const facts = [p.category, showPrice && p.sell_minor !== undefined ? `${money(p.sell_minor)} each` : null].filter(Boolean).join(', ');
+        return (
+          <>
+            <ItemPhoto photoId={shownPhoto(p)} label={p.description ?? ''} size={40} />
+            <span className="cb-text">
+              <strong><Highlight text={p.description ?? ''} term={search.term} /></strong> (<Highlight text={p.code ?? ''} term={search.term} />)
+              <span className="cb-meta">
+                {facts}
+                {showStock && (
+                  <>
+                    {facts && ', '}
+                    in stock here:{' '}
+                    {p.qty !== undefined && p.qty.startsWith('-') ? <span className="rt-flag">{showQty(p.qty)} (negative)</span> : showQty(p.qty ?? '0')}{' '}
+                    {p.unit}
+                    {keptWords(p.qty, p.reserved_qty) && <> ({keptWords(p.qty, p.reserved_qty)})</>}
+                  </>
+                )}
+              </span>
+            </span>
+            <span className="cb-verb" aria-hidden="true">{addLabel}</span>
+          </>
+        );
+      }}
+    />
+    {notFound && (nothing || held) && notFound(search.term, search.clear, setHeld)}
+    </>
+  );
+}
+
+/**
+ * Issue #650: the quantity of an item with a standard pack on Count stock and Move stock, typed as whole packs and the pieces
+ * left, or as pieces alone, with the total in pieces under it before anything is sent. Each box has its own label and is
+ * named with the item (`nameId`); the pieces box takes `id`, so a scan, a warning and the cursor find it as before.
+ */
+export function PacksAndPiecesFields({ id, nameId, unit, pack, packs, pieces, onPacks, onPieces, onBlur, onPiecesKeyDown, totalWord, after, invalid = false }: {
+  id: string;
+  nameId: string;
+  unit: string;
+  pack: PackSize & { unit: string };
+  /** The packages typed; with every level of a ladder (issue #699), one count per level biggest first, joined by "|". */
+  packs: string;
+  pieces: string;
+  onPacks: (text: string) => void;
+  onPieces: (text: string) => void;
+  onBlur?: () => void;
+  onPiecesKeyDown?: (e: KeyboardEvent<HTMLInputElement>) => void;
+  /** "Counted" or "Moving", before the total. */
+  totalWord: string;
+  /** Shown at the end of the row, such as the 0 button of a count. */
+  after?: ReactNode;
+  /** The quantity is refused for a reason of its own, such as more than the branch holds: both boxes are marked. */
+  invalid?: boolean;
+}) {
+  const problem = packsAndPiecesProblem(packs, pieces, unit, ladderLevels(pack)?.map((l) => l.unit) ?? pack.unit);
+  const total = problem === null ? packsAndPiecesMilli(packs, pieces, pack) : null;
+  // Going from one box to the other is not leaving the quantity: a count line moves to Counted items only once both are done.
+  const leave = (other: string) => (e: FocusEvent<HTMLInputElement>) => { if (e.relatedTarget?.id !== other) onBlur?.(); };
+  // Issue #699 (ADR-107): an item with a ladder is counted with a box for each level, big to small, and the pieces left.
+  // JUSTIFICATION-A3: the count of every level is this field's own job, beside its one pack form below.
+  const levels = ladderLevels(pack);
+  if (levels) {
+    const parts = levels.map((_, i) => packs.split('|')[i] ?? '');
+    const boxId = (i: number) => (i === 0 ? `${id}-packs` : `${id}-packs-${i}`);
+    const others = new Set([id, ...levels.map((_, i) => boxId(i))]);
+    const leaveAll = (e: FocusEvent<HTMLInputElement>) => { if (!others.has(e.relatedTarget?.id ?? '')) onBlur?.(); };
+    return (
+      <>
+        <div className="count-entry count-packs count-levels">
+          {levels.map((l, i) => (
+            <span className="count-part" key={l.unit}>
+              <label id={`${boxId(i)}-label`} htmlFor={boxId(i)}>{plural(l.unit)}</label>
+              <input id={boxId(i)} inputMode="numeric" value={parts[i]} aria-labelledby={`${nameId} ${boxId(i)}-label`}
+                aria-invalid={invalid || ((parts[i] ?? '').trim() !== '' && !/^\d+$/.test((parts[i] ?? '').trim()))}
+                onChange={(e) => {
+                  const next = parts.map((p, j) => (j === i ? e.target.value.replace(/\|/g, '') : p));
+                  onPacks(next.every((p) => p.trim() === '') ? '' : next.join('|'));
+                }} onBlur={leaveAll}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById(i + 1 < levels.length ? boxId(i + 1) : id)?.focus(); } }} />
+            </span>
+          ))}
+          <span className="count-part">
+            <label id={`${id}-label`} htmlFor={id}>{plural(unit)}</label>
+            <input id={id} inputMode="decimal" value={pieces} aria-labelledby={`${nameId} ${id}-label`} aria-describedby={`${id}-total`}
+              aria-invalid={invalid || (pieces.trim() !== '' && parseCount(pieces) === null)} onChange={(e) => onPieces(e.target.value)} onBlur={leaveAll}
+              onKeyDown={onPiecesKeyDown} />
+          </span>
+          {after}
+        </div>
+        <p id={`${id}-total`} className="hint count-total" aria-live="polite">
+          {total !== null ? `${totalWord} ${packsAndPieces(qtyString(total), unit, pack)}` : 'Type what you counted at every level, big to small. The app adds them up.'}
+        </p>
+        {problem && <p role="alert" className="rt-flag">{problem}</p>}
+      </>
+    );
+  }
+  return (
+    <>
+      <div className="count-entry count-packs">
+        <span className="count-part">
+          <label id={`${id}-packs-label`} htmlFor={`${id}-packs`}>{plural(pack.unit)}</label>
+          <input id={`${id}-packs`} inputMode="numeric" value={packs} aria-labelledby={`${nameId} ${id}-packs-label`}
+            aria-invalid={invalid || (packs.trim() !== '' && !/^\d+$/.test(packs.trim()))} onChange={(e) => onPacks(e.target.value)} onBlur={leave(id)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById(id)?.focus(); } }} />
+        </span>
+        <span className="count-part">
+          <label id={`${id}-label`} htmlFor={id}>{plural(unit)}</label>
+          <input id={id} inputMode="decimal" value={pieces} aria-labelledby={`${nameId} ${id}-label`} aria-describedby={`${id}-total`}
+            aria-invalid={invalid || (pieces.trim() !== '' && parseCount(pieces) === null)} onChange={(e) => onPieces(e.target.value)} onBlur={leave(`${id}-packs`)}
+            onKeyDown={onPiecesKeyDown} />
+        </span>
+        {after}
+      </div>
+      <p id={`${id}-total`} className="hint count-total" aria-live="polite">
+        {total !== null ? `${totalWord} ${packsAndPieces(qtyString(total), unit, pack)}` : `Type the ${unitWords(pack.unit).toLowerCase()} and the ${unitWords(unit).toLowerCase()} left, or all of it in ${unitWords(unit).toLowerCase()}.`}
+      </p>
+      {problem && <p role="alert" className="rt-flag">{problem}</p>}
     </>
   );
 }

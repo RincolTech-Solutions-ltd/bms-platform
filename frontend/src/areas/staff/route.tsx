@@ -1,29 +1,37 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, Outlet, createLazyRoute, useNavigate, useRouterState } from '@tanstack/react-router';
+import { Outlet, createLazyRoute, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { api, fetchMe, fetchSettings, type Me } from '../../api/client';
-import { loadRetailMock, retailMockEnabled } from '../../api/retail';
-import { getAccessToken, refreshSession, setAccessToken, subscribe } from '../../auth/session';
+import { loadRetailMock, retailMockEnabled, setBusinessZone } from '../../api/retail';
+import { endPendingLogout, getAccessToken, logoutPending, markLogoutPending, refreshFailedOffline, refreshSession, setAccessToken, subscribe } from '../../auth/session';
+import { OfflineProvider, lastProfile, useOfflineSupport, waitingNow } from '../../offline/offline-context';
+import { SignOutWarning } from '../../offline/sign-out-warning';
+import { OthersWaitingNote, SyncStatus } from '../../offline/sync-status';
 import { InstallPrompt } from '../../install/InstallPrompt';
+import { NewLogoCard } from '../../install/NewIcon';
 import { createPush } from '../../push/push';
 import { TurnOnCard } from '../../push/TurnOnCard';
-import { HelpMenu, TourProvider } from '../../tour/host';
+import { TourProvider } from '../../tour/host';
 import { CrumbProvider, StaffBreadcrumbs } from '../../components/breadcrumbs';
 import { icons } from '../../components/icons';
+import { MenuItemLink, SideMenu, SideNav, useCloseMenu, useIsPhone } from '../../components/side-menu';
+import { BusyButton } from '../../app/ui/BusyButton';
+import { RefreshButton } from '../../app/refresh-button';
+import { useHelpSheet } from '../../tour/host';
 import { BrandLoader } from '../../components/states';
-import { BranchPicker, useActiveBranch } from './branch-picker';
-import { StaffContext } from './context';
-import { canConfigureAdvisor, showInsights } from './insights/permissions';
-import { showInvestments } from './lending/investment-state';
-import { showCollateral, showMembers } from './lending/member-permissions';
-import { showLending } from './lending/permissions';
-import { showSavings } from './lending/savings-permissions';
-import { showReports } from './reports/permissions';
-import { RetailNav } from './retail/nav';
-import { canSeeProfit, showRetail } from './retail/permissions';
-import { showReceivePayments, showReconciliation, showUnallocated } from './payments/state';
-import { showSms } from './sms/state';
-import { showUsers } from './users/state';
+import { BillingBanner } from './billing/banner';
+import { MenuShop, ShopHere, initials, useActiveBranch, useBranchSwitch } from './branch-picker';
+import { BranchTitle, OfflineBanner, SignOutEverywhere, TopMenu } from './top-bar';
+import { StaffContext, useOptionalStaff } from './context';
+import { FeatureSearch } from './feature-search';
+import { PlanNotice } from './plan';
+import { FOOT_LINKS, roleOf, staffMenu, useMenuCounts } from './menu';
+import { useSells } from './retail/nav';
+import { StaffTabBar } from './tabs';
+import { canSeeProfit } from './retail/permissions';
+import { rememberPage } from './feedback/feedback-state';
+import { useAskEnabled } from './help/ask';
+import { AskButton, HowDoILink } from './help/how-do-i';
 import { TwoStepNotices } from './two-step/notices';
 import { OwnTwoStep } from './two-step/own';
 import { mustSetUp } from './two-step/state';
@@ -39,6 +47,19 @@ function useAccessToken() {
 // This device's notifications (ADR-050): registered again under whoever is signed in, and dropped on sign-out.
 const push = createPush();
 
+/**
+ * The signed-in business's zone for every default date (#667). Set as the shell draws, so the screens drawn in the same pass
+ * already take it, and again in an effect whose cleanup forgets it (#670), so StrictMode's mount, unmount and mount ends on the
+ * business's zone and leaving the shell goes back to Kampala (#672).
+ */
+export function useBusinessZone(zone: string | undefined | null): void {
+  setBusinessZone(zone);
+  useEffect(() => {
+    setBusinessZone(zone);
+    return () => setBusinessZone(undefined);
+  }, [zone]);
+}
+
 // A tenant admin who has not dismissed the set-up checklist lands on it once per page load.
 let setupShown = false;
 
@@ -49,24 +70,55 @@ function StaffLayout() {
   // VITE_RETAIL_MOCK=1: a fake session so the retail screens run without a backend.
   const mock = retailMockEnabled();
   const [restoring, setRestoring] = useState(token === null && !mock);
+  // ADR-067: opened with no network, the last person's saved profile lets them sell; the session is restored when online.
+  const [offlineMe, setOfflineMe] = useState<Me | null>(null);
+  const [askSignOut, setAskSignOut] = useState(0);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
+  const [askEverywhere, setAskEverywhere] = useState(false);
 
   useEffect(() => {
     if (token !== null || mock) return;
-    void refreshSession().then((ok) => {
+    if (logoutPending()) {
+      // ADR-067 decision 9: an offline sign-out ends its server session first; the app stays on sign-in until it has.
+      void endPendingLogout().then(() => navigate({ to: '/sign-in' }));
+      return;
+    }
+    void refreshSession().then(async (ok) => {
+      const saved = !ok && refreshFailedOffline() ? await lastProfile() : null;
+      setOfflineMe(saved);
       setRestoring(false);
-      if (!ok) void navigate({ to: '/sign-in' });
+      if (!ok && !saved) void navigate({ to: '/sign-in' });
     });
   }, [token, navigate, mock]);
 
   const me = useQuery({ queryKey: ['me', token], queryFn: (): Promise<Me> => (mock ? loadRetailMock().then((m) => m.mockMe(import.meta.env.VITE_RETAIL_MOCK_ROLE)) : fetchMe()),
     enabled: token !== null || mock,
   });
-  const { branch, choose, ready } = useActiveBranch(me.data);
+  const profileNow = me.data ?? offlineMe ?? undefined;
+  useBusinessZone(profileNow?.tenant_timezone);
+  const active = useActiveBranch(profileNow);
+  const { branch, ready } = active;
+  const { choose, toast: switchToast } = useBranchSwitch(profileNow, branch, active.choose);
   const signedIn = me.data !== undefined;
+  const offline = useOfflineSupport(mock ? undefined : profileNow, signedIn);
+  useEffect(() => {
+    // Back online after opening offline: restore the session, or ask for a sign-in.
+    if (!offline || !offlineMe || token !== null) return;
+    return offline.connectivity.subscribe(() => {
+      if (!offline.connectivity.online()) return;
+      void refreshSession().then((ok) => {
+        if (ok) setOfflineMe(null);
+        else if (!refreshFailedOffline()) void navigate({ to: '/sign-in' });
+      });
+    });
+  }, [offline, offlineMe, token, navigate]);
   useEffect(() => {
     if (signedIn && !mock) void push.sync();
   }, [signedIn, mock]);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  // Feedback sends the page the person came from (issue #447).
+  useEffect(() => rememberPage(pathname), [pathname]);
   const managesSettings = (me.data?.permissions ?? []).includes('core.settings.manage');
   const settings = useQuery({ queryKey: ['settings'], queryFn: fetchSettings, enabled: managesSettings && !mock });
 
@@ -77,83 +129,258 @@ function StaffLayout() {
     void navigate({ to: '/staff/setup', replace: true });
   }, [pathname, settings.data, navigate]);
 
-  if (restoring || !me.data || !ready) {
+  if (restoring || !profileNow || !ready) {
     return me.isError ? <p role="alert" className="alert alert-danger">Could not load your profile.</p> : <BrandLoader />;
   }
 
-  const profile = me.data;
+  const profile = profileNow;
   if (mock) void loadRetailMock().then((m) => m.setMockProfitAccess(canSeeProfit(profile)));
-  async function signOut() {
-    // This device stops hearing this person's notifications before the session ends (it needs the session to say so).
-    if (!mock) await push.forget();
-    await api.POST('/api/v1/auth/logout');
-    setAccessToken(null);
-    queryClient.clear();
-    await navigate({ to: '/sign-in' });
+  async function signOut(confirmed = false, everywhere = false) {
+    // ADR-067 decision 9: sales still on this phone are never signed out of without asking (Sign out everywhere asks in its sheet).
+    if (!confirmed && !everywhere && waitingNow(offline) > 0) {
+      setAskSignOut((n) => n + 1);
+      return;
+    }
+    setSigningOut(true);
+    setSignOutError(null);
+    try {
+      // This device stops hearing this person's notifications before the session ends (it needs the session to say so).
+      let ended: boolean;
+      try {
+        if (!mock) await push.forget();
+        ended = (await api.POST(everywhere ? '/api/v1/auth/logout-everywhere' : '/api/v1/auth/logout')).response.ok;
+      } catch {
+        ended = false;
+      }
+      // Sign out everywhere ends other devices' sessions, which only the server can do: without an answer nothing is signed out.
+      if (!ended && everywhere && !mock) {
+        // Still signed in here: this device hears this person's notifications again.
+        void push.sync();
+        setSignOutError('Connect to the internet to sign out everywhere.');
+        setAskEverywhere(false);
+        return;
+      }
+      // No answer: the server session (its HttpOnly cookie) is still alive. It is ended on the next start before anything
+      // restores it; without a place to note that, this person stays signed in (ADR-067 decision 9).
+      if (!ended && !mock && !markLogoutPending()) {
+        setSignOutError('Connect to the internet to sign out.');
+        return;
+      }
+      // Keeps the outbox: sales still waiting are sent when this person signs in here again (offline-context.dom.test.tsx).
+      await offline?.forget();
+      offline?.engine.stop();
+      setAskEverywhere(false);
+      setOfflineMe(null);
+      setBusinessZone(undefined);
+      setAccessToken(null);
+      queryClient.clear();
+      await navigate({ to: '/sign-in' });
+    } finally {
+      setSigningOut(false);
+    }
   }
 
   const recoveryCodesLeft = profile.unused_recovery_codes ?? 0;
 
   return (
-    <StaffContext.Provider value={{ me: profile, branch, chooseBranch: choose }}>
+    <StaffContext.Provider value={{ me: profile, branch, chooseBranch: choose, signOut: () => void signOut(), signingOut }}>
+      <OfflineProvider value={offline}>
       <TourProvider me={profile} saveProgress={!mock}>
         <CrumbProvider>
-        <StaffBar me={profile} branch={branch} onBranch={choose} onSignOut={() => void signOut()} />
-        <InstallPrompt />
-        {!mock && <TurnOnCard push={push} />}
-        {profile.mfa_enabled && recoveryCodesLeft <= 2 && (
-          <p role="status" className="alert alert-warning">
-            You have {recoveryCodesLeft} recovery codes left. Ask an admin to reset your MFA if you run out.
-          </p>
-        )}
-        <TwoStepNotices me={profile} pathname={pathname} />
-        {pathname.startsWith('/staff/retail') && showRetail(profile) && <RetailNav me={profile} />}
-        <StaffBreadcrumbs />
-        {mustSetUp(profile) ? <OwnTwoStep blocking /> : <Outlet />}
+          <div className="nav-layout">
+            <StaffSideNav me={profile} onBranch={choose} busy={signingOut} onSignOut={() => void signOut()} />
+            <div className="nav-layout-main">
+              <StaffBar me={profile} branch={branch} onBranch={choose} busy={signingOut} onSignOut={() => void signOut()} onSignOutEverywhere={() => setAskEverywhere(true)} signOutInBar={mustSetUp(profile)} />
+              <InstallPrompt />
+              <OthersWaitingNote />
+              {!mock && <NewLogoCard />}
+              {!mock && <TurnOnCard push={push} />}
+              {profile.mfa_enabled && recoveryCodesLeft <= 2 && (
+                <p role="status" className="alert alert-warning">
+                  You have {recoveryCodesLeft} recovery codes left. Ask an admin to reset your MFA if you run out.
+                </p>
+              )}
+              {signOutError && (
+                <p role="alert" className="alert alert-danger">
+                  {signOutError}
+                </p>
+              )}
+              <TwoStepNotices me={profile} pathname={pathname} />
+              {!mock && <BillingBanner canOpenBilling={(profile.permissions ?? []).includes('core.billing.read')} />}
+              {!mock && <PlanNotice />}
+              <div className="crumb-row">
+                <StaffBreadcrumbs />
+                {!mustSetUp(profile) && <HowDoILink pathname={pathname} me={profile} />}
+              </div>
+              {!mustSetUp(profile) && <ShopHere me={profile} branch={branch} onChoose={choose} />}
+              {mustSetUp(profile) ? <OwnTwoStep blocking /> : <Outlet />}
+              <SignOutWarning ask={askSignOut} onSignOut={() => void signOut(true)} />
+              <SignOutEverywhere open={askEverywhere} waiting={waitingNow(offline)} busy={signingOut} onConfirm={() => void signOut(true, true)} onClose={() => setAskEverywhere(false)} />
+              {switchToast}
+            </div>
+            {!mustSetUp(profile) && <StaffTabBar me={profile} />}
+          </div>
         </CrumbProvider>
       </TourProvider>
+      </OfflineProvider>
     </StaffContext.Provider>
   );
 }
 
+const [NOTIFICATIONS] = FOOT_LINKS;
+// The anchors of the menu's head and foot, which the drawer opens for as it does for its links.
+const FOOT_TOURS = ['nav-notifications', 'nav-feedback'];
+
+/** The staff menu's groups for the session, with the open orders and the items low on stock (issue #564). */
+function useStaffGroups(me: Me) {
+  const sells = useSells(me);
+  const counts = useMenuCounts(me);
+  const ask = useAskEnabled();
+  return staffMenu(me, { sells, counts, ask });
+}
+
 /**
- * Who is signed in, Help, the branch switcher, sign out and the area tabs. Carries the data-tour
- * anchors the first-run tours light up (tour/tours.ts).
+ * The foot of the staff menu (issue #564): Notifications, Help and feedback, which opens the Help sheet with its tours and Send
+ * feedback, then the person's initials, name and role, and Sign out. In the drawer Help closes the drawer before the sheet opens.
  */
-export function StaffBar({ me, branch, onBranch, onSignOut }: { me: Me; branch: string | null; onBranch: (selection: string) => void; onSignOut: () => void }) {
-  const permissions = me.permissions ?? [];
+function StaffMenuFoot({ me, busy, onSignOut, onHelp }: { me: Me; busy: boolean; onSignOut: () => void; onHelp: () => void }) {
+  const close = useCloseMenu();
+  const role = roleOf(me);
   return (
-    <header className="staff-bar">
-      <div className="staff-bar-top">
-        <span className="staff-user">
-          <span className="avatar">{icons.user}</span>
-          <span className="staff-user-name">{me.full_name}</span>
+    <>
+      <ul className="side-menu-foot-list">
+        <li>
+          <MenuItemLink to={NOTIFICATIONS?.to ?? '/staff/notifications'} label="Notifications" icon={icons.bell} tour="nav-notifications" />
+        </li>
+        <li>
+          <button
+            type="button"
+            className="side-menu-help"
+            aria-haspopup="dialog"
+            data-tour="nav-feedback"
+            onClick={() => {
+              close();
+              window.setTimeout(onHelp, 0);
+            }}
+          >
+            {icons.help}
+            <span className="side-menu-label">Help and feedback</span>
+          </button>
+        </li>
+      </ul>
+      <div className="side-menu-me">
+        <span className="side-menu-avatar" aria-hidden="true">
+          {initials(me.full_name ?? '')}
         </span>
-        <HelpMenu />
-        <BranchPicker me={me} branch={branch} onChoose={onBranch} />
-        <button className="btn-ghost btn-sm" onClick={onSignOut}>Sign out</button>
+        <span className="side-menu-me-text">
+          <span className="side-menu-me-name">{me.full_name}</span>
+          {role && <span className="side-menu-me-role">{role}</span>}
+        </span>
+        <BusyButton type="button" className="btn-ghost side-menu-sign-out" busy={busy} onClick={onSignOut}>
+          {icons.signOut}
+          Sign out
+        </BusyButton>
       </div>
-      <nav className="tabs" aria-label="Staff areas" data-tour="nav-areas">
-        <Link to="/staff" activeOptions={{ exact: true }}>Home</Link>
-        {permissions.includes('core.approvals.read') && <Link to="/staff/approvals" data-tour="nav-approvals">Approvals</Link>}
-        {showLending(me) && <Link to="/staff/lending" activeOptions={{ exact: true }} data-tour="nav-lending">Loans</Link>}
-        {showMembers(me) && <Link to="/staff/lending/members" data-tour="nav-members">Members</Link>}
-        {!showMembers(me) && showCollateral(me) && <Link to="/staff/lending/collateral">Collateral</Link>}
-        {showSavings(me) && <Link to="/staff/lending/savings">Savings</Link>}
-        {showInvestments(me) && <Link to="/staff/lending/investments">Investments</Link>}
-        {showInsights(me) && <Link to="/staff/insights" data-tour="nav-insights">Insights</Link>}
-        {canConfigureAdvisor(me) && <Link to="/staff/assistant">AI assistant</Link>}
-        {showReports(me) && <Link to="/staff/reports">Reports</Link>}
-        {showRetail(me) && <Link to="/staff/retail" data-tour="nav-retail">Retail</Link>}
-        {showSms(me) && <Link to="/staff/sms">SMS</Link>}
-        {showReceivePayments(me) && <Link to="/staff/payments">Receive payments</Link>}
-        {showUnallocated(me) && <Link to="/staff/payments/unallocated">Unallocated payments</Link>}
-        {showReconciliation(me) && <Link to="/staff/payments/reconciliation">Payment reconciliation</Link>}
-        {showUsers(me) && <Link to="/staff/users" data-tour="nav-users">Users</Link>}
-        <Link to="/staff/notifications" data-tour="nav-notifications">Notifications</Link>
-        {permissions.includes('core.settings.manage') && <Link to="/staff/setup">Business set-up</Link>}
-      </nav>
-    </header>
+    </>
+  );
+}
+
+/**
+ * The staff menu as a fixed sidebar at the left from 720px (issues #455, #564): the business, its role and the branch at the top,
+ * the groups, then the foot; nothing on a phone, where the menu button of the top bar opens the same list in a drawer.
+ */
+export function StaffSideNav(props: { me: Me; onBranch?: (selection: string) => void; busy?: boolean; onSignOut?: () => void }) {
+  // The phone check comes first, so on a phone the menu's reads and the Help sheet run once, in the drawer.
+  return useIsPhone() ? null : <StaffSidebar {...props} />;
+}
+
+function StaffSidebar({ me, onBranch = () => undefined, busy = false, onSignOut = () => undefined }: { me: Me; onBranch?: (selection: string) => void; busy?: boolean; onSignOut?: () => void }) {
+  const groups = useStaffGroups(me);
+  const branch = useOptionalStaff()?.branch ?? null;
+  const help = useHelpSheet(true);
+  return (
+    <>
+      <SideNav
+        label="Staff areas"
+        tour="nav-areas"
+        groups={groups}
+        head={<MenuShop me={me} branch={branch} role={roleOf(me)} onChoose={onBranch} tour="branch-picker" />}
+        foot={<StaffMenuFoot me={me} busy={busy} onSignOut={onSignOut} onHelp={help.open} />}
+      />
+      {help.sheet}
+    </>
+  );
+}
+
+/** The menu button at the top left of the phone's top bar and its drawer: the same list as the sidebar (issue #564). */
+function StaffDrawer({ me, branch, onBranch, busy, onSignOut }: { me: Me; branch: string | null; onBranch: (selection: string) => void; busy: boolean; onSignOut: () => void }) {
+  const groups = useStaffGroups(me);
+  const help = useHelpSheet(true);
+  return (
+    <>
+      <SideMenu
+        label="Staff areas"
+        tour="nav-areas"
+        groups={groups}
+        tours={FOOT_TOURS}
+        onSignOut={onSignOut}
+        busy={busy}
+        head={<MenuShop me={me} branch={branch} role={roleOf(me)} onChoose={onBranch} />}
+        foot={<StaffMenuFoot me={me} busy={busy} onSignOut={onSignOut} onHelp={help.open} />}
+      />
+      {help.sheet}
+    </>
+  );
+}
+
+/**
+ * The one top bar of the staff area (issue #526, replacing the brand bar and the staff bar of two rows): on a phone the business
+ * and the branch in use as the title, which switches branch (from 720px they are at the top of the sidebar only, #564); Search (issue #551); Refresh beside it
+ * (issue #631); the Online dot only while it has something to say; and one menu holding who is signed in, Help, Light or dark and Sign out. Below 720px the menu button at its left opens
+ * the staff menu's drawer (issue #564), Sign out moves to the drawer and the More tab's page (it stays in the top menu while
+ * two-step set-up blocks the page, which has no tabs) and Sell is the first bottom tab (issue #539). With StaffSideNav and the tab
+ * bar it carries the data-tour anchors the first-run tours light up (tour/tours.ts).
+ */
+export function StaffBar({
+  me,
+  branch,
+  onBranch,
+  onSignOut,
+  onSignOutEverywhere,
+  busy = false,
+  signOutInBar = false,
+}: {
+  me: Me;
+  branch: string | null;
+  onBranch: (selection: string) => void;
+  onSignOut: () => void;
+  /** Opens the sheet that asks before signing out on every device (issue #647). */
+  onSignOutEverywhere?: () => void;
+  /** True while signing out runs: Sign out shows its spinner and takes no second press. */
+  busy?: boolean;
+  /** Sign out in the menu on a phone too: while two-step set-up blocks the page there are no tabs and no More page to reach it. */
+  signOutInBar?: boolean;
+}) {
+  const phone = useIsPhone();
+  return (
+    <>
+      <header className="staff-bar">
+        <div className="staff-bar-top">
+          {phone && <StaffDrawer me={me} branch={branch} onBranch={onBranch} busy={busy} onSignOut={onSignOut} />}
+          {/* From 720px the sidebar's top holds the logo, the business and the branch picker, so the bar does not repeat them (#564). */}
+          {phone ? <BranchTitle me={me} branch={branch} onChoose={onBranch} /> : <span className="staff-bar-spacer" />}
+          <SyncStatus />
+          {/* Refresh beside Search on every staff screen (issue #631): its icon alone below 720px, a 48px target named Refresh. Ask
+              keeps its place on Search's other side (issue #603). */}
+          <RefreshButton />
+          <FeatureSearch me={me} />
+          {/* The Ask button (issue #603); none while two-step set-up blocks the page, whose header is kept minimal. */}
+          {!mustSetUp(me) && <AskButton />}
+          <TopMenu me={me} busy={busy} onSignOut={onSignOut} onSignOutEverywhere={onSignOutEverywhere} signOut={!phone || signOutInBar} />
+        </div>
+      </header>
+      <OfflineBanner />
+    </>
   );
 }
 

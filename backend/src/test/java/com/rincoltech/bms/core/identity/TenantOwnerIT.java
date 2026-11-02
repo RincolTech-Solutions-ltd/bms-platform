@@ -149,6 +149,10 @@ class TenantOwnerIT extends IntegrationTest {
                 HttpStatus.FORBIDDEN,
                 "owner_protected");
         assertRefused(patchEmail(owner, adminSession), HttpStatus.FORBIDDEN, "owner_protected");
+        assertRefused(
+                api.post(ownerBase + "/sign-out", null, adminSession.accessToken()),
+                HttpStatus.FORBIDDEN,
+                "owner_protected");
 
         assertRefused(invite("tenant_admin", null, adminSession), HttpStatus.FORBIDDEN, "owner_only");
         assertRefused(
@@ -164,6 +168,10 @@ class TenantOwnerIT extends IntegrationTest {
                 HttpStatus.FORBIDDEN,
                 "owner_only");
         assertRefused(patchEmail(adminB, adminSession), HttpStatus.FORBIDDEN, "owner_only");
+        assertRefused(
+                api.post("/api/v1/users/" + adminB + "/sign-out", null, adminSession.accessToken()),
+                HttpStatus.FORBIDDEN,
+                "owner_only");
 
         // Nothing changed: the Owner is still the one Owner and an active administrator, B is still an administrator.
         assertThat(owners(t.tenantId())).containsExactly(owner);
@@ -202,6 +210,13 @@ class TenantOwnerIT extends IntegrationTest {
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         assertThat(patchEmail(adminA, ownerSession).getStatusCode()).isEqualTo(HttpStatus.OK);
+        // Issue #647: the Owner signs another administrator out on every device; the administrator stays active.
+        ResponseEntity<JsonNode> signedOut =
+                api.post("/api/v1/users/" + adminA + "/sign-out", null, ownerSession.accessToken());
+        assertThat(signedOut.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(signedOut.getBody().get("status").asString()).isEqualTo("active");
+        assertThat(api.get("/api/v1/me", adminSession.accessToken()).getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(api.post("/api/v1/users/" + adminA + "/deactivate", null, ownerSession.accessToken())
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
@@ -440,6 +455,41 @@ class TenantOwnerIT extends IntegrationTest {
         makeOwner(t.tenantId(), owner);
         assertThat(owners(t.tenantId())).containsExactly(owner);
         assertThat(owners(other.tenantId())).containsExactly(otherAdmin);
+    }
+
+    /**
+     * Issue #325: a member of staff, the Owner included, is deactivated and never deleted. No route deletes a user, even for
+     * the Owner, who holds every administrator permission; and the application role cannot, directly, through a role it is
+     * a member of or through PUBLIC.
+     */
+    @Test
+    void staffAccountsAreNeverDeleted() {
+        for (UUID target : List.of(cashier, adminA, owner)) {
+            ResponseEntity<JsonNode> r =
+                    api.call(HttpMethod.DELETE, "/api/v1/users/" + target, null, ownerSession.accessToken());
+            assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
+        }
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM users WHERE id IN (?, ?, ?)")
+                        .params(cashier, adminA, owner)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(3L);
+        // has_table_privilege fails on a role that does not exist and follows inherited roles and PUBLIC.
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT has_table_privilege('bms_app', 'public.users', 'UPDATE')")
+                        .query(Boolean.class)
+                        .single())
+                .isTrue();
+        for (String privilege : List.of("DELETE", "TRUNCATE")) {
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT has_table_privilege('bms_app', 'public.users', ?)")
+                            .param(privilege)
+                            .query(Boolean.class)
+                            .single())
+                    .as(privilege)
+                    .isFalse();
+        }
     }
 
     /** NFR-ISO-01: the Owner of one business cannot see, change or hand ownership to the staff of another. */

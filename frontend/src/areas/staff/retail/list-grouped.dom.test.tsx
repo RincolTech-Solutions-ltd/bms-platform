@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, configure, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AllBranchesStock, Purchase, PurchasesSummary, PurchasesSummaryGroup, PurchasesSummaryQuery, StockRow, StockSummary, StockSummaryGroup, StockSummaryQuery } from '../../../api/retail';
@@ -65,7 +65,12 @@ afterEach(() => {
   for (const f of [stockSummary, purchasesSummary, listStock, listStockAllBranches, listPurchases]) f.mockReset();
 });
 
-const head = (name: RegExp | string) => screen.findByRole('button', { name });
+// A group's header, not the category chip of the same name above the list (issue #690).
+const head = (name: RegExp | string) => waitFor(() => {
+  const found = screen.getAllByRole('button', { name }).find((b) => !b.closest('.find-chips'));
+  if (!found) throw new Error(`No group header ${String(name)}`);
+  return found;
+});
 
 // ---- stock -------------------------------------------------------------------------------------
 
@@ -88,14 +93,14 @@ describe('the stock list, grouped', () => {
 
   it('is the flat list until Grouped is chosen, and asks for no summary', async () => {
     show(<StockPage />);
-    expect(await screen.findByRole('button', { name: 'Flat list' })).toHaveProperty('ariaPressed', 'true');
+    expect(await screen.findByRole('radio', { name: 'Flat list' })).toHaveProperty('ariaChecked', 'true');
     expect(listStockAllBranches).toHaveBeenCalled();
     expect(stockSummary).not.toHaveBeenCalled();
   });
 
   it('opens from the shop to the category to the items, each level asked with what was opened above it', async () => {
     show(<StockPage />);
-    const grouped = await screen.findByRole('button', { name: 'Grouped' });
+    const grouped = await screen.findByRole('radio', { name: 'Grouped' });
     listStockAllBranches.mockClear();
     fireEvent.click(grouped);
     const gayaza = await head(/Test Branch Gayaza/);
@@ -120,14 +125,14 @@ describe('the stock list, grouped', () => {
   it('shows no cost when the server sent none', async () => {
     stockSummary.mockImplementation(stockAnswer(false));
     show(<StockPage />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Grouped' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Grouped' }));
     const gayaza = await head(/Test Branch Gayaza/);
     expect(gayaza.textContent).not.toContain('at cost');
   });
 
   it('with one shop chosen at the top leaves the shop level out, and remembers the choice for the person', async () => {
     show(<StockPage />, hq);
-    fireEvent.click(await screen.findByRole('button', { name: 'Grouped' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Grouped' }));
     await head(/Test Category Cables/);
     expect(stockSummary.mock.calls[0]?.[0]).toMatchObject({ level: 'category', chain: ['category'], branchId: hq });
     expect(localStorage.getItem(`bms.listView.stock.${user}`)).toBe('grouped');
@@ -174,42 +179,53 @@ describe('the past restocks, grouped', () => {
   it('groups by the chain with the counts, the voided apart and the cost the server sent', async () => {
     writeChainOf(user, 'restocks', ['year', 'supplier']);
     show(<RestocksPage />);
-    const grouped = await screen.findByRole('button', { name: 'Grouped' });
+    const grouped = await screen.findByRole('radio', { name: 'Grouped' });
     listPurchases.mockClear();
     fireEvent.click(grouped);
-    const y = await head(/2026/);
-    expect(y.textContent).toContain('2 restocks');
+    const y = await head(/^2026/);
+    expect(y.textContent).toContain('2 purchases');
     expect(y.textContent).toContain('1 voided (not counted)');
     expect(y.textContent).toContain('20,000');
     expect(purchasesSummary.mock.calls.map((c) => c[0]).find((q) => q.level === 'year')).toMatchObject({ level: 'year', chain: ['year', 'supplier'] });
     expect(listPurchases).not.toHaveBeenCalled();
   });
 
+  it('asks the summary and the restocks for the status chosen in Show (#372)', async () => {
+    writeChainOf(user, 'restocks', ['supplier']);
+    show(<RestocksPage />);
+    fireEvent.change(await screen.findByLabelText('Show'), { target: { value: 'voided' } });
+    fireEvent.click(await screen.findByRole('radio', { name: 'Grouped' }));
+    fireEvent.click(await head(/Test Supplier 01/));
+    await screen.findByText('RP00000001');
+    expect(purchasesSummary.mock.calls.map((c) => c[0]).find((q) => q.level === 'supplier')).toMatchObject({ status: 'voided' });
+    expect(listPurchases).toHaveBeenLastCalledWith(expect.objectContaining({ supplierId: 's1', status: 'voided' }));
+  });
+
   it('leaves the cost out when the server sent none', async () => {
     writeChainOf(user, 'restocks', ['year']);
     purchasesSummary.mockImplementation(purchaseAnswer(false));
     show(<RestocksPage />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Grouped' }));
-    const y = await head(/2026/);
+    fireEvent.click(await screen.findByRole('radio', { name: 'Grouped' }));
+    const y = await head(/^2026/);
     expect(y.textContent).not.toContain('20,000');
   });
 
   it('lists the restocks of the last opened group with the cards that correct them', async () => {
     writeChainOf(user, 'restocks', ['supplier']);
     show(<RestocksPage />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Grouped' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Grouped' }));
     fireEvent.click(await head(/Test Supplier 01/));
     expect(await screen.findByText('RP00000001')).toBeTruthy();
     expect(listPurchases).toHaveBeenCalledWith(expect.objectContaining({ supplierId: 's1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Correct restock RP00000001' }));
-    expect(screen.getByRole('form', { name: 'Correct this restock' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Correct purchase RP00000001' }));
+    expect(screen.getByRole('form', { name: 'Correct this purchase' })).toBeTruthy();
   });
 
   it('passes what was opened above to the next level and to the restocks', async () => {
     writeChainOf(user, 'restocks', ['year', 'supplier']);
     show(<RestocksPage />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Grouped' }));
-    fireEvent.click(await head(/2026/));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Grouped' }));
+    fireEvent.click(await head(/^2026/));
     fireEvent.click(await head(/Test Supplier 01/));
     // The group's year is narrowed by the page's own dates, so a restock outside them is never asked for.
     const asked = purchasesSummary.mock.calls.map((c) => c[0]).find((q) => q.level === 'supplier');

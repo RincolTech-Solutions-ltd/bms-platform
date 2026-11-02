@@ -17,11 +17,13 @@
             "kernel",
             "core.tenancy",
             "core.audit",
+            "core.approvals",
             "core.ledger",
             "core.jobs",
             "core.notifications",
             "core.operations",
-            "retail.catalogue"
+            "retail.catalogue",
+            "retail.manifest"
         })
 package com.rincoltech.bms.retail.stock;
 

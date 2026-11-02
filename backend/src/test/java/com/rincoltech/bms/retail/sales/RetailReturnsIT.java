@@ -496,6 +496,35 @@ class RetailReturnsIT extends IntegrationTest {
         assertThat(code(again)).isEqualTo("sale_voided");
     }
 
+    /**
+     * Issue #257: a return needs only retail.sale.return. A clerk without any stock permission (no restock, count or
+     * transfer) takes goods back written off and back into stock alike; the restock branch is checked against the return's
+     * own permission, never through RetailBranchContext.resolve, so the new 403 there cannot reach a return.
+     */
+    @Test
+    void aClerkWithOnlyTheReturnPermissionTakesGoodsBackWithOrWithoutRestock() {
+        String clerk = CLERK + ",retail.sale.return";
+        UUID s = cashSale(hq, "5", null);
+        ResponseEntity<JsonNode> written = ret(
+                s,
+                List.of(line(lineOf(s, 0), "1", "write_off")),
+                "cash",
+                null,
+                clerk,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(written.getStatusCode()).as("%s", written.getBody()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> restocked = ret(
+                s,
+                List.of(line(lineOf(s, 0), "1", "restock")),
+                "cash",
+                null,
+                clerk,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(restocked.getStatusCode()).as("%s", restocked.getBody()).isEqualTo(HttpStatus.CREATED);
+    }
+
     @Test
     void damagedGoodsAreWrittenOffAndNeverEnterStock() {
         UUID s = cashSale(hq, "5", null);
@@ -1209,6 +1238,15 @@ class RetailReturnsIT extends IntegrationTest {
                 .update();
     }
 
+    /** ADR-091: the switch an administrator saves on the approval rules, written as the store writes it. */
+    void switched(boolean on) {
+        TestDatabase.owner().sql("""
+                        UPDATE tenant_settings SET settings = settings || jsonb_build_object('approval_switches',
+                               coalesce(settings->'approval_switches', '{}'::jsonb) || jsonb_build_object('retail_sale_return', ?))
+                         WHERE tenant_id = ?
+                        """).params(on, t.tenantId()).update();
+    }
+
     ResponseEntity<JsonNode> decide(String approval, RetailTestSupport who, String perms) {
         return http.exchange(
                 "/api/v1/approvals/" + approval + "/approve",
@@ -1480,6 +1518,44 @@ class RetailReturnsIT extends IntegrationTest {
                         .get("returns_approval_threshold_minor")
                         .asLong())
                 .isEqualTo(500);
+    }
+
+    /**
+     * ADR-091: switched on with no amount every return waits, and the capabilities answer says so with 0; switched off, an amount
+     * set before asks nothing, and the answer has no amount.
+     */
+    @Test
+    void theApprovalRulesSwitchDecidesWhetherAReturnWaits() {
+        UUID s = cashSale(hq, "20", null);
+        UUID l = lineOf(s, 0);
+        switched(true);
+        assertThat(api.get("/settings/capabilities", SETTINGS)
+                        .getBody()
+                        .get("returns_approval_threshold_minor")
+                        .asLong())
+                .isZero();
+        ResponseEntity<JsonNode> one = ret(s, List.of(line(l, "1", "restock")), "cash");
+        assertThat(one.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(one.getBody().get("executed").asBoolean()).isFalse();
+        // Cancelled by its maker, so the sale has no request waiting.
+        assertThat(http.exchange(
+                                "/api/v1/approvals/"
+                                        + one.getBody().get("approval_id").asString() + "/cancel",
+                                HttpMethod.POST,
+                                new org.springframework.http.HttpEntity<>(
+                                        null, api.headers(RETURNER + ",core.approvals.read", "*", Map.of())),
+                                JsonNode.class)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        threshold(500);
+        switched(false);
+        assertThat(api.get("/settings/capabilities", SETTINGS).getBody().has("returns_approval_threshold_minor"))
+                .isFalse();
+        JsonNode done = back(s, List.of(line(l, "10", "restock")), "cash");
+        assertThat(done.get("total_minor").asLong()).isEqualTo(1_000);
+        // Its void asks nothing either, although it is worth the amount.
+        assertThat(voidReturn(uuid(done, "id"), "Entered twice").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
     }
 
     @Test

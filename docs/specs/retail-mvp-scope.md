@@ -47,7 +47,7 @@ to R3 have merged. Target: usable on staging by 2026-10-07.
 | FR-RET-05 | A credit sale records the buyer and a proposed payment date. Payments against it reduce the trade debtor balance and may be partial. |
 | FR-RET-06 | A restock records the supplier and per-branch quantities. Cost and sell price on its lines update the product and the history in the same transaction. |
 | FR-RET-07 | Usage and damage reports reduce stock, record a reason and are valued at cost. |
-| FR-RET-08 | A stock-take records counted quantities per branch and product and the balance when counted, shows the variance and on commit writes an adjustment of counted less that balance, so trading between count and commit stays in the balance. If later movements would make the result negative, the commit is refused (`stock_moved_since_count`) and those lines are recounted. |
+| FR-RET-08 | A stock-take records counted quantities per branch and product and the balance when counted, shows the variance and on commit writes an adjustment of counted less that balance, so trading between count and commit stays in the balance. If later movements would make the result negative, the commit is refused (`stock_moved_since_count`) and those lines are recounted. A line that takes an item holding stock to 0, or to less than half of it, is committed only when the commit acknowledges it (`big_drop_not_acknowledged`, issue #636). |
 | FR-RET-09 | Valuation shows quantity times cost and quantity times sell price per branch and product, with totals. |
 | FR-RET-10 | Daily profit per branch and day equals sale lines less cost snapshots less usage at cost, and is readable only with `retail.profit.read`. |
 | FR-RET-11 | Sales, their cost, restocks, usage and voids post balanced entries to the right branch through `post_entry`. |
@@ -63,8 +63,11 @@ These are adopted into chapter 3 section 3.28 by R1; FR-RET-16 by issue #84.
 
 Cash book (expenses, banking, withdrawals, advances to the owner or company, a daily savings
 target), wider financial and sales reports, receipt photos and location capture, offline use,
-barcode scanning, weighted average cost, supplier statements beyond
-trade creditors, SMS receipts, returns other than a void. The cash book is designed in ADR-022
+weighted average cost, supplier statements beyond
+trade creditors, SMS receipts, returns other than a void. Barcode scanning was out of the first
+release and is now built (issue #345, ADR-070, FR-RET-68, migration `V87`): barcodes on items and
+their pack sizes, scanning with a USB or Bluetooth scanner, a typed code or the phone camera on the
+sale, restock, move stock and stock count forms, and printed labels for items without a code. The cash book is designed in ADR-022
 (proposed): a retail sub-domain, not core, with its requirements in FR-RET-17 to FR-RET-32
 and the comparison with the pilot app in `docs/specs/retail-cash-book.md`.
 

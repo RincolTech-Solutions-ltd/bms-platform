@@ -1,16 +1,19 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { retail, type Customer, type Supplier } from '../../../api/retail';
 import { useStaff } from '../context';
 import { BuyerAccount } from './buyer-account';
 import { BuyerPricing } from './buyer-pricing';
-import { AddPanel, BackToCatalogue } from './catalogue';
+import { AddPanel } from './catalogue';
 import { canUse } from './permissions';
 import { ScreenLink } from './screen-link';
-import { Gate, Problem, Success, changeFailureText, money, requireVersion, useToast } from './ui';
+import { Gate, Problem, changeFailureText, money, requireVersion, useToast } from './ui';
+import { WORDS } from '../../../app/glossary';
+import { useComeBack } from '../../../app/ui/EmptyChoice';
 
 // Suppliers and Credit buyers (#146): a name and a contact, added and edited by the shop. A supplier
 // can be switched off (it stays on its past restocks); a credit buyer is never removed. The contact
@@ -50,16 +53,17 @@ export function PersonRow({ row, busy, extra, onSave, onToggle }: {
           <label htmlFor={`contact-${row.id}`}>Phone or other contact</label>
           <input id={`contact-${row.id}`} value={contact} maxLength={100} onChange={(e) => setContact(e.target.value)} />
           <p className="cluster">
-            <button
+            <BusyButton
+              busy={busy ?? false}
               type="button"
-              disabled={busy || name.trim() === ''}
+              disabled={name.trim() === ''}
               onClick={() => {
                 onSave({ ...(name.trim() !== row.name ? { name: name.trim() } : {}), ...(contact.trim() !== (row.contact ?? '') ? { contact: contact.trim() } : {}) });
                 setEditing(false);
               }}
             >
               Save
-            </button>
+            </BusyButton>
             <button type="button" className="btn-ghost" onClick={() => { setName(row.name ?? ''); setContact(row.contact ?? ''); setEditing(false); }}>Cancel</button>
           </p>
         </div>
@@ -67,9 +71,9 @@ export function PersonRow({ row, busy, extra, onSave, onToggle }: {
         <p className="cluster">
           <button type="button" className="btn-sm" onClick={() => setEditing(true)} aria-label={`Edit ${row.name}`}>Edit</button>
           {onToggle && (
-            <button type="button" className="btn-sm" disabled={busy} onClick={onToggle} aria-label={`${off ? 'Switch on' : 'Switch off'} ${row.name}`}>
+            <BusyButton busy={busy ?? false} type="button" className="btn-sm" onClick={onToggle} aria-label={`${off ? 'Switch on' : 'Switch off'} ${row.name}`}>
               {off ? 'Switch on' : 'Switch off'}
-            </button>
+            </BusyButton>
           )}
         </p>
       )}
@@ -92,8 +96,8 @@ function PeopleList({ noun, plural, queryKey, list, create, update, canAdd, canS
   searchable?: boolean;
 }) {
   const queryClient = useQueryClient();
+  const back = useComeBack();
   const { show, toast } = useToast();
-  const [message, setMessage] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [contact, setContact] = useState('');
@@ -110,24 +114,25 @@ function PeopleList({ noun, plural, queryKey, list, create, update, canAdd, canS
   const finding = rows.isPlaceholderData || (rows.isFetching && !rows.isFetchingNextPage);
   const people = (rows.data?.pages ?? []).flatMap((p) => p.items ?? []);
   const done = (text: string) => {
-    setMessage(text);
-    show(text);
+    show(text, 'success');
     void queryClient.invalidateQueries({ queryKey: ['retail'] });
   };
   const add = useMutation({
     mutationFn: () => create({ name: name.trim(), ...(contact.trim() ? { contact: contact.trim() } : {}) }),
-    onMutate: () => setMessage(null),
-    onSuccess: (row) => { setName(''); setContact(''); setAdding(false); done(`Added the ${noun} "${row.name}".`); },
+    onSuccess: (row) => {
+      setName(''); setContact(''); setAdding(false); done(`Added the ${noun} "${row.name}".`);
+      // Opened from an empty list on a form (issue #619): what was added takes the person back to that form.
+      back?.();
+    },
   });
   const change = useMutation({
     mutationFn: (v: { id: string; version: number | undefined; body: PersonEdit & { active?: boolean }; text: (row: Person) => string }) => update(v.id, requireVersion(v.version), v.body).then((row) => ({ row, text: v.text })),
-    onMutate: () => { setMessage(null); setFailure(null); },
+    onMutate: () => setFailure(null),
     onSuccess: ({ row, text }) => done(text(row)),
     onError: (error) => setFailure(changeFailureText(error, queryClient)),
   });
   return (
     <>
-      <BackToCatalogue />
       {note && <p className="hint">{note}</p>}
       {canAdd && (
         <div data-tour="person-add">
@@ -137,13 +142,12 @@ function PeopleList({ noun, plural, queryKey, list, create, update, canAdd, canS
           <input id={`new-${queryKey}-name`} value={name} maxLength={200} onChange={(e) => setName(e.target.value)} autoComplete="off" />
           <label htmlFor={`new-${queryKey}-contact`}>Phone or other contact (optional)</label>
           <input id={`new-${queryKey}-contact`} value={contact} maxLength={100} onChange={(e) => setContact(e.target.value)} autoComplete="off" />
-          <button type="submit" className="rt-primary" disabled={add.isPending || name.trim() === ''}>{add.isPending ? 'Adding' : `Add ${noun}`}</button>
+          <BusyButton busy={add.isPending} type="submit" className="rt-primary" notReady={name.trim() === ''}>{`Add ${noun}`}</BusyButton>
         </form>
         <Problem error={add.error} />
         </AddPanel>
         </div>
       )}
-      {message && <Success>{message}</Success>}
       <Problem error={failure && new Error(failure)} />
       {rows.isPending && <p className="loading">Loading</p>}
       <Problem error={rows.error} />
@@ -173,7 +177,7 @@ function PeopleList({ noun, plural, queryKey, list, create, update, canAdd, canS
                       version: r.version,
                       body: { active: 'active' in r && r.active === false },
                       text: (x) => ('active' in x && x.active === false
-                        ? `"${x.name}" is switched off. It stays on past restocks; new restocks cannot choose it.`
+                        ? `"${x.name}" is switched off. It stays on past purchases; new purchases cannot choose it.`
                         : `"${x.name}" is switched on again.`),
                     }),
                 }
@@ -205,10 +209,10 @@ export function SuppliersPage() {
 
 export function BuyersPage() {
   return (
-    <Gate screen="buyers" title="Credit buyers">
+    <Gate screen="buyers" title={WORDS.customersWhoOwe}>
       <PeopleList
         note="What each buyer owes is counted over all the branches you may read, whichever branch is chosen."
-        noun="credit buyer" plural="credit buyers" queryKey="buyers"
+        noun="customer" plural="customers who owe" queryKey="buyers"
         list={(q) => retail.listCustomerPage(q)} create={(b) => retail.createCustomer(b)}
         update={(id, v, b) => retail.updateCustomer(id, v, b)}
         canAdd canSwitch={false} searchable

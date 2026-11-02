@@ -20,6 +20,7 @@ import { chainUser, effectiveChain, usableChain, usableLevels, type Selection } 
 import { GroupBy } from './sales-group-by';
 import { useSalesVariantLevel } from './catalogue-variants';
 import { PaySaleAction, VoidSaleAction, WriteOffSaleAction } from './sale-actions';
+import { PeriodPicker } from '../../../app/ui/PeriodPicker';
 
 // Credit sales and All sales (#145): the lists the pilot's app has, 'Credit sales' and the sales
 // history, read from the sales list API in the branch chosen at the top of the page (every branch the
@@ -124,7 +125,7 @@ export function SaleDetail({ sale, today, branchName }: { sale: Sale; today: str
           <tr>
             <th>Item</th>
             {!phone && <th className="num">Qty</th>}
-            {!phone && <th className="num">Price</th>}
+            {!phone && <th className="num">Selling price</th>}
             <th className="num">Total</th>
           </tr>
         </thead>
@@ -268,7 +269,7 @@ const OWING: { value: Owing; label: string }[] = [
 ];
 
 export function CreditSales() {
-  const { all, branchId, branchName } = useBranchView();
+  const { all, branchId } = useBranchView();
   const nameOf = useBranchName();
   const search = useLiveSearch();
   const [owing, setOwing] = useState<Owing>('all');
@@ -291,7 +292,6 @@ export function CreditSales() {
         <OpenSale id={open} onClose={() => setOpen(null)} />
       ) : (
         <>
-          <p className="branch-line">Branch: <strong>{all ? 'All branches' : branchName}</strong></p>
           <SearchBox id="credit-buyer" label="Buyer, phone or sale number" search={search} {...figures} />
           <label htmlFor="credit-owing">Show</label>
           <select id="credit-owing" data-tour="credit-owing" value={owing} onChange={(e) => setOwing(e.target.value as Owing)}>
@@ -316,7 +316,7 @@ export function CreditSales() {
 }
 
 export function AllSales() {
-  const { all, branchId, branchName } = useBranchView();
+  const { all, branchId } = useBranchView();
   const nameOf = useBranchName();
   const today = businessToday();
   // Empty to start with: every year shows, grouped by the chain the person chose, with nothing open (issues #328, #341).
@@ -345,12 +345,7 @@ export function AllSales() {
         <OpenSale id={open} onClose={() => setOpen(null)} />
       ) : (
         <>
-          <p className="branch-line">Branch: <strong>{all ? 'All branches' : branchName}</strong></p>
-          <div className="rt-row" data-tour="sales-range">
-            <div><label htmlFor="sales-from">From</label><input id="sales-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
-            <div><label htmlFor="sales-to">To</label><input id="sales-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
-          </div>
-          {from > to && <p role="alert" className="rt-flag">The start date must not be after the end date.</p>}
+          <PeriodPicker from={from} to={to} openStart tour="sales-range" onChange={(range) => { setFrom(range.from); setTo(range.to); }} />
           <SearchBox id="sales-buyer" label="Buyer, phone or sale number" search={search} {...figures} />
           <label htmlFor="sales-method">Paid by</label>
           <select id="sales-method" value={method} onChange={(e) => setMethod(e.target.value as SalePayment | '')}>
@@ -361,6 +356,7 @@ export function AllSales() {
           {itemSearch !== '' && (
             <>
               <label htmlFor="sales-item">Choose the item</label>
+              {/* empty: a filter of what the search found; Any of these is always there. */}
               <select id="sales-item" value={productId} onChange={(e) => setProductId(e.target.value)}>
                 <option value="">Any of these</option>
                 {(products.data ?? []).map((p) => <option key={p.id} value={p.id}>{p.description} ({p.code})</option>)}

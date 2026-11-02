@@ -31,6 +31,7 @@ async function inRouter(node: ReactElement): Promise<string> {
 const filled: SignUpForm = {
   ...EMPTY_SIGN_UP,
   business_name: 'Test Hardware Shop',
+  short_name: 'testhardware',
   contact_name: 'Test Applicant 01',
   contact_email: 'applicant01@example.test',
   contact_phone: '0700 000 001',
@@ -38,12 +39,13 @@ const filled: SignUpForm = {
 };
 
 const noop = () => undefined;
+const free = () => Promise.resolve({ available: true });
 
 describe('sign-up form checks (FR-ONB-01)', () => {
   it('accepts a complete form and names each missing field', () => {
     expect(signUpProblems(filled)).toEqual({});
     const problems = signUpProblems(EMPTY_SIGN_UP);
-    expect(Object.keys(problems).sort()).toEqual(['business_name', 'contact_email', 'contact_name', 'contact_phone', 'modules']);
+    expect(Object.keys(problems).sort()).toEqual(['business_name', 'contact_email', 'contact_name', 'contact_phone', 'modules', 'short_name']);
   });
 
   it('caps lengths and refuses a bad agent code', () => {
@@ -64,7 +66,7 @@ describe('sign-up form checks (FR-ONB-01)', () => {
 describe('the sign-up page (FR-ONB-01, FR-ONB-03)', () => {
   const view = (patch: Partial<Parameters<typeof SignUpView>[0]> = {}) =>
     renderToStaticMarkup(
-      <SignUpView form={filled} problems={{}} busy={false} error={null} done={false} onChange={noop} onSubmit={noop} {...patch} />,
+      <SignUpView form={filled} problems={{}} busy={false} error={null} done={false} onChange={noop} onSubmit={noop} checkName={free} {...patch} />,
     );
 
   it('labels every field and asks for the phone before the email', () => {
@@ -85,7 +87,7 @@ describe('the sign-up page (FR-ONB-01, FR-ONB-03)', () => {
   });
 
   it('disables the button while sending, so a double tap sends once', () => {
-    expect(view({ busy: true })).toMatch(/<button class="btn-brand" type="submit" disabled="">Sending<\/button>/);
+    expect(view({ busy: true })).toMatch(/<button type="submit" class="btn-brand busy-button" aria-disabled="true" aria-busy="true">Send application<span class="busy-spinner"/);
     expect(view()).toContain('Send application');
   });
 
@@ -138,18 +140,28 @@ describe('the applicant page (FR-ONB-02, FR-ONB-04)', () => {
     expect(readLinkToken('')).toBeNull();
   });
 
+  it('changes a confirmed short name only when the applicant presses the button (ADR-108)', async () => {
+    const html = await page({ view: { ...base, short_name: 'testduka', pending_short_name: 'testduka-gulu' } });
+    expect(html).toContain('Change your short name?');
+    expect(html).toMatch(/Your short name will change from <strong>testduka<\/strong> to <strong>testduka-gulu<\/strong>/);
+    // Keep is the default answer and comes first; only Change applies the new name.
+    expect(html.indexOf('Keep testduka')).toBeGreaterThan(-1);
+    expect(html.indexOf('Keep testduka')).toBeLessThan(html.indexOf('Change to testduka-gulu'));
+    expect(await page({ view: { ...base, short_name: 'testduka' } })).not.toContain('Change your short name?');
+  });
+
   it('shows the status in plain words with the reference', async () => {
     const html = await page({});
     expect(html).toContain('A-TEST0001');
     expect(html).toContain('Waiting for review');
-    expect(html).toContain('Shop: sales, stock and restocking');
+    expect(html).toContain('Shop: sales, stock and buying stock');
   });
 
   it('confirms the email only on the button, never on opening the link (review N4)', async () => {
     const unconfirmed = await page({ view: { ...base, email_verified: false } });
     expect(unconfirmed).toContain('Confirm my email');
     expect(unconfirmed).not.toContain('We are looking at your application');
-    expect(await page({ view: { ...base, email_verified: false }, confirming: true })).toMatch(/disabled="">Confirming/);
+    expect(await page({ view: { ...base, email_verified: false }, confirming: true })).toMatch(/aria-disabled="true" aria-busy="true">Confirm my email<span class="busy-spinner"/);
     expect(await page({})).not.toContain('Confirm my email');
     expect(await page({ view: { ...base, status: 'needs_info', email_verified: false, operator_note: 'Q?' } })).toContain(
       'Confirm my email',
@@ -160,7 +172,7 @@ describe('the applicant page (FR-ONB-02, FR-ONB-04)', () => {
     const html = await page({ view: { ...base, status: 'needs_info', operator_note: 'Which town is the shop in?' } });
     expect(html).toContain('Which town is the shop in?');
     expect(html).toContain('for="reply"');
-    expect(html).toMatch(/disabled="">Send answer/);
+    expect(html).toMatch(/data-not-ready="true">Send answer/);
   });
 
   it('shows loading, an invalid link and the reason of a rejection', async () => {

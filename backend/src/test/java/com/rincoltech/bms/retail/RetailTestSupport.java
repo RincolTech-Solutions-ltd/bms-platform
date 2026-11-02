@@ -8,6 +8,7 @@ import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
 
@@ -100,12 +101,16 @@ public final class RetailTestSupport {
         return postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString());
     }
 
-    /** Brings a branch's balance to {@code qty} with a committed stock-take, as an admin. */
+    /**
+     * Brings a branch's balance to {@code qty} with a committed stock-take, as an admin; a drop to it is acknowledged
+     * (issue #636).
+     */
     public void stockUp(UUID branchId, UUID productId, String qty) {
         Map<String, Object> body = Map.of(
                 "branch_id", branchId, "lines", java.util.List.of(Map.of("product_id", productId, "counted_qty", qty)));
         UUID stocktake = id(post("/stocktakes", body, ADMIN));
-        ResponseEntity<JsonNode> committed = post("/stocktakes/" + stocktake + "/commit", Map.of(), ADMIN);
+        ResponseEntity<JsonNode> committed = post(
+                "/stocktakes/" + stocktake + "/commit", Map.of("acknowledged", java.util.List.of(productId)), ADMIN);
         if (!committed.getStatusCode().is2xxSuccessful()) {
             throw new AssertionError("stock-take commit: " + committed.getBody());
         }
@@ -128,12 +133,12 @@ public final class RetailTestSupport {
                 .update();
         TestDatabase.owner()
                 .sql("""
-                        INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty)
-                        VALUES (?, ?, ?, CAST(? AS numeric))
+                        INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty, avg_cost_minor)
+                        SELECT ?, ?, p.id, CAST(? AS numeric), p.cost_minor FROM retail_products p WHERE p.id = ?
                         ON CONFLICT (tenant_id, branch_id, product_id)
                         DO UPDATE SET qty = retail_stock_balances.qty + EXCLUDED.qty
                         """)
-                .params(tenant.tenantId(), branchId, productId, qty)
+                .params(tenant.tenantId(), branchId, qty, productId)
                 .update();
     }
 
@@ -141,22 +146,71 @@ public final class RetailTestSupport {
         return id(post("/categories", Map.of("name", name), ADMIN));
     }
 
+    /**
+     * A new unit of this name; fails loudly when the business has it already in any spelling (409 unit_exists, issue #698), so
+     * a test that means two units never shares one without noticing.
+     */
     public UUID unit(String name) {
-        return id(post("/units", Map.of("name", name), ADMIN));
+        ResponseEntity<JsonNode> made = post("/units", Map.of("name", name), ADMIN);
+        if (made.getStatusCode() != HttpStatus.CREATED) {
+            throw new AssertionError("The unit " + name + " was not made: " + made.getBody());
+        }
+        return id(made);
     }
 
-    /** A product in a fresh category and unit; prices in minor units. */
+    /** The unit of this name, or the one the business already has in another spelling, for a test that means to reuse it. */
+    public UUID unitOrExisting(String name) {
+        ResponseEntity<JsonNode> made = post("/units", Map.of("name", name), ADMIN);
+        if (made.getStatusCode() == HttpStatus.CONFLICT
+                && "unit_exists".equals(made.getBody().get("code").asString())) {
+            return UUID.fromString(made.getBody().get("existing_id").asString());
+        }
+        return id(made);
+    }
+
+    /**
+     * A product in a fresh category and unit; prices in minor units. The app makes its code (issue #562); the test's code is
+     * then written as the owner, as the pilot importer brings an item in with the code it already had, so the tests that
+     * scan, search or report by code keep their fabricated codes.
+     */
     public UUID product(String code, long costMinor, long sellMinor) {
         UUID category = category("Test Category " + code);
         UUID unit = unit("u-" + code.toLowerCase());
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("code", code);
         body.put("description", "Test Product " + code);
         body.put("category_id", category);
         body.put("unit_id", unit);
         body.put("cost_minor", costMinor);
         body.put("sell_minor", sellMinor);
-        return id(post("/products", body, ADMIN));
+        UUID id = id(post("/products", body, ADMIN));
+        existingCode(id, code);
+        return id;
+    }
+
+    /**
+     * POST /products for a fixture whose body names a {@code code}: the app makes the code (issue #562), so the item is
+     * added without it and then given the fixture's code as an existing item's (see {@link #existingCode}). Answers as the
+     * add does, 201 with the item as it now reads, or the refusal unchanged.
+     */
+    public ResponseEntity<JsonNode> postItem(Map<String, Object> body, String permissions) {
+        Map<String, Object> made = new LinkedHashMap<>(body);
+        Object code = made.remove("code");
+        ResponseEntity<JsonNode> added = post("/products", made, permissions);
+        if (code == null || added.getStatusCode().value() != 201) {
+            return added;
+        }
+        UUID id = id(added);
+        existingCode(id, code.toString().strip());
+        ResponseEntity<JsonNode> now = get("/products/" + id, ADMIN);
+        return ResponseEntity.status(201).headers(now.getHeaders()).body(now.getBody());
+    }
+
+    /** Gives an item the code it held before the app made codes (issue #562): an existing item keeps its code. */
+    public void existingCode(UUID productId, String code) {
+        TestDatabase.owner()
+                .sql("UPDATE retail_products SET code = ? WHERE id = ?")
+                .params(code, productId)
+                .update();
     }
 
     public static UUID id(ResponseEntity<JsonNode> response) {

@@ -6,7 +6,10 @@ import { useStaff } from '../context';
 import { usePersistedDraft } from '../retail/idempotency';
 import { Problem } from '../retail/ui';
 import { instructionWords, investmentTxnWords, percent } from './investment-state';
-import { isIsoDate, localDate, money, words } from './loan-state';
+import { businessToday } from '../../../api/retail';
+import { isIsoDate, money, onToday, words } from './loan-state';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { DateReset, SentBefore, sentMax } from './actions';
 
 // The forms of the investment page: funding, return payout, maturity payout, rollover, early
 // withdrawal (with its quote), the maturity instruction and a reversal. Each write keeps its draft
@@ -44,21 +47,26 @@ function Waiting({ executed, done }: { executed: boolean; done: string }) {
   );
 }
 
-interface FundDraft { date: string; method: PaymentMethod; reference: string }
+interface FundDraft { date: string; method: PaymentMethod; reference: string; startedOn: string }
 
 export function FundForm({ inv }: { inv: Investment }) {
   const { me } = useStaff();
   const id = inv.id ?? '';
   const refresh = useRefresh(id);
-  const { key, draft, setDraft, finish } = usePersistedDraft<FundDraft>(`invest-fund:${me.user_id ?? ''}:${id}`, {
-    date: localDate(),
+  const today = businessToday();
+  const { key, draft, setDraft, finish, sending, mended, unmend, sent, sentBefore } = usePersistedDraft<FundDraft>(`invest-fund:${me.user_id ?? ''}:${id}`, {
+    date: today,
     method: 'cash',
     reference: '',
-  });
+    startedOn: today,
+  }, (d) => onToday(d, 'date', today));
   const update = (patch: Partial<FundDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  // toast-exempt: success screen, the Funded screen replaces the form
   const save = useMutation({
-    mutationFn: () =>
-      investments.fund(id, { value_date: draft.date, payment_method_key: draft.method, external_reference: draft.reference.trim() || undefined }, key),
+    mutationFn: () => {
+      sending();
+      return investments.fund(id, { value_date: draft.date, payment_method_key: draft.method, external_reference: draft.reference.trim() || undefined }, key);
+    },
     onSuccess: () => {
       finish();
       refresh();
@@ -67,19 +75,21 @@ export function FundForm({ inv }: { inv: Investment }) {
   if (save.data) return <Waiting executed={save.data.executed} done="Funded. The investment is active and its schedule is below." />;
   return (
     <form aria-label="Record funding" onSubmit={(e) => { e.preventDefault(); if (isIsoDate(draft.date) && !save.isPending) save.mutate(); }}>
+      <SentBefore kind="funding" on={sentBefore} />
       <p>
         Receives {money(inv.principal_minor, inv.currency)} from the member. Above the business's approval limit a checker
         approves it first.
       </p>
       <label htmlFor="fund-date">Date received</label>
-      <input id="fund-date" type="date" max={localDate()} value={draft.date} onChange={(e) => update({ date: e.target.value })} />
+      <input id="fund-date" type="date" max={sentMax(sent, today)} value={draft.date} onChange={(e) => { update({ date: e.target.value }); unmend(); }} />
+      {mended && <DateReset />}
       <MethodChoice name="fund-method" value={draft.method} onChange={(m) => update({ method: m })} />
       <label htmlFor="fund-ref">Reference (optional)</label>
       <input id="fund-ref" maxLength={100} value={draft.reference} onChange={(e) => update({ reference: e.target.value })} autoComplete="off" />
       <Problem error={save.error} />
-      <button type="submit" className="rt-primary" disabled={!isIsoDate(draft.date) || save.isPending}>
-        {save.isPending ? 'Saving' : 'Record funding'}
-      </button>
+      <BusyButton busy={save.isPending} type="submit" className="rt-primary" notReady={!isIsoDate(draft.date)}>
+        Record funding
+      </BusyButton>
     </form>
   );
 }
@@ -97,6 +107,7 @@ export function PayForm({ inv, kind }: { inv: Investment; kind: 'pay_return' | '
     kind === 'pay_return'
       ? inv.return_available_minor ?? 0
       : (inv.principal_held_minor ?? 0) + (inv.return_accrued_minor ?? 0) - (inv.return_paid_minor ?? 0);
+  // toast-exempt: success screen, the Paid screen with the voucher replaces the form
   const save = useMutation<TransactionResult>({
     mutationFn: () => {
       const body = { payment_method_key: draft.method, external_reference: draft.reference.trim() || undefined };
@@ -124,9 +135,9 @@ export function PayForm({ inv, kind }: { inv: Investment; kind: 'pay_return' | '
       <label htmlFor={`${kind}-ref`}>Reference (optional)</label>
       <input id={`${kind}-ref`} maxLength={100} value={draft.reference} onChange={(e) => setDraft((d) => ({ ...d, reference: e.target.value }))} autoComplete="off" />
       <Problem error={save.error} />
-      <button type="submit" className="rt-primary" disabled={save.isPending}>
-        {save.isPending ? 'Paying' : 'Pay now'}
-      </button>
+      <BusyButton busy={save.isPending} type="submit" className="rt-primary">
+        Pay now
+      </BusyButton>
     </form>
   );
 }
@@ -147,6 +158,7 @@ export function RolloverForm({ inv, onDone }: { inv: Investment; onDone: (nextId
       refresh();
       if (r.next?.id) onDone(r.next.id);
     },
+    meta: { success: 'Investment rolled over' },
   });
   return (
     <form aria-label="Roll over" onSubmit={(e) => { e.preventDefault(); if (!save.isPending) save.mutate(); }}>
@@ -163,9 +175,9 @@ export function RolloverForm({ inv, onDone }: { inv: Investment; onDone: (nextId
         </label>
       </fieldset>
       <Problem error={save.error} />
-      <button type="submit" className="rt-primary" disabled={save.isPending}>
-        {save.isPending ? 'Rolling over' : 'Roll over'}
-      </button>
+      <BusyButton busy={save.isPending} type="submit" className="rt-primary">
+        Roll over
+      </BusyButton>
     </form>
   );
 }
@@ -178,6 +190,7 @@ export function EarlyWithdrawalForm({ inv }: { inv: Investment }) {
   const refresh = useRefresh(id);
   const quote = useQuery({ queryKey: ['lending', 'investment', id, 'early-quote'], queryFn: () => investments.earlyQuote(id) });
   const { key, draft, setDraft, finish } = usePersistedDraft<EarlyDraft>(`invest-early:${me.user_id ?? ''}:${id}`, { method: 'cash', reason: '' });
+  // toast-exempt: success screen, the Withdrawn screen replaces the form
   const save = useMutation({
     mutationFn: () => investments.earlyWithdraw(id, { payment_method_key: draft.method, reason: draft.reason.trim() }, key),
     onSuccess: () => {
@@ -213,9 +226,9 @@ export function EarlyWithdrawalForm({ inv }: { inv: Investment }) {
       <label htmlFor="early-reason">Why does the member withdraw early?</label>
       <textarea id="early-reason" rows={2} maxLength={500} value={draft.reason} onChange={(e) => setDraft((d) => ({ ...d, reason: e.target.value }))} />
       <Problem error={save.error} />
-      <button type="submit" className="btn-danger btn-block" disabled={!q || draft.reason.trim() === '' || save.isPending}>
-        {save.isPending ? 'Sending' : 'Request early withdrawal'}
-      </button>
+      <BusyButton busy={save.isPending} type="submit" className="btn-danger btn-block" disabled={!q || draft.reason.trim() === ''}>
+        Request early withdrawal
+      </BusyButton>
     </form>
   );
 }
@@ -226,7 +239,7 @@ export function InstructionForm({ inv }: { inv: Investment }) {
   const id = inv.id ?? '';
   const refresh = useRefresh(id);
   const [choice, setChoice] = useState<string>(inv.maturity_instruction ?? 'payout');
-  const save = useMutation({ mutationFn: () => investments.instruct(id, choice), onSuccess: refresh });
+  const save = useMutation({ mutationFn: () => investments.instruct(id, choice), onSuccess: refresh, meta: { success: 'Choice saved' } });
   return (
     <form aria-label="Maturity instruction" onSubmit={(e) => { e.preventDefault(); if (!save.isPending) save.mutate(); }}>
       <fieldset>
@@ -240,10 +253,9 @@ export function InstructionForm({ inv }: { inv: Investment }) {
       </fieldset>
       {inv.product_type === 'recurring' && <p className="field-hint">A recurring deposit renews with its return when no choice is given.</p>}
       <Problem error={save.error} />
-      {save.isSuccess && <p role="status" className="alert alert-success">Saved.</p>}
-      <button type="submit" className="rt-primary" disabled={save.isPending}>
-        {save.isPending ? 'Saving' : 'Save the choice'}
-      </button>
+      <BusyButton busy={save.isPending} type="submit" className="rt-primary">
+        Save the choice
+      </BusyButton>
     </form>
   );
 }
@@ -253,6 +265,7 @@ export function ReverseForm({ inv, txn }: { inv: Investment; txn: InvestmentTran
   const id = inv.id ?? '';
   const refresh = useRefresh(id);
   const { key, draft, setDraft, finish } = usePersistedDraft<string>(`invest-reverse:${me.user_id ?? ''}:${txn.id ?? ''}`, '');
+  // toast-exempt: success screen, the Reversed screen replaces the form
   const save = useMutation({
     mutationFn: () => investments.reverse(id, txn.id ?? '', draft.trim(), key),
     onSuccess: () => {
@@ -266,9 +279,9 @@ export function ReverseForm({ inv, txn }: { inv: Investment; txn: InvestmentTran
       <label htmlFor={`reverse-${txn.id ?? ''}`}>Why reverse this {investmentTxnWords(txn.txn_type).toLowerCase()}?</label>
       <textarea id={`reverse-${txn.id ?? ''}`} rows={2} maxLength={500} value={draft} onChange={(e) => setDraft(e.target.value)} />
       <Problem error={save.error} />
-      <button type="submit" className="btn-danger btn-block" disabled={draft.trim() === '' || save.isPending}>
-        {save.isPending ? 'Sending' : 'Request reversal'}
-      </button>
+      <BusyButton busy={save.isPending} type="submit" className="btn-danger btn-block" disabled={draft.trim() === ''}>
+        Request reversal
+      </BusyButton>
     </form>
   );
 }

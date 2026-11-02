@@ -15,6 +15,10 @@ import {
 } from './returns-state';
 import { showDate } from './transfers';
 import { Problem, Success, money } from './ui';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { NoAccess } from '../../../app/ui/EmptyState';
+import { Hint } from '../../../app/ui/Hint';
+import { EmptyChoice } from '../../../app/ui/EmptyChoice';
 
 // Take goods back against a sale (returns capability, ADR-033, issue #201). Each line of the sale shows what was sold, what has
 // come back already and what can still come back; the person enters a quantity, the reason and where the goods go, then how the
@@ -58,7 +62,7 @@ export function ReturnRow({ line, row, back, branches, onChange }: {
           <input id={`qty-${id}`} inputMode="decimal" value={row.qty} onChange={(e) => onChange({ ...row, qty: e.target.value })} aria-invalid={problem !== null} />
           {unit && (
             <>
-              <label htmlFor={`unit-${id}`}>Counted in</label>
+              <label htmlFor={`unit-${id}`}>Returned in</label>
               <select id={`unit-${id}`} value={row.entered} onChange={(e) => onChange({ ...row, entered: e.target.value as RowForm['entered'] })}>
                 <option value="line">{unit}</option>
                 <option value="base">single units</option>
@@ -77,14 +81,20 @@ export function ReturnRow({ line, row, back, branches, onChange }: {
               </select>
               {row.disposition === 'restock' && (
                 <>
+                  {branches.some((b) => b.stocks_goods !== false) ? (
+                  <>
                   <label htmlFor={`branch-${id}`}>Put them back at</label>
                   <select id={`branch-${id}`} value={row.restockBranchId} onChange={(e) => onChange({ ...row, restockBranchId: e.target.value })}>
                     <option value="">Choose a branch or store</option>
                     {branches.filter((b) => b.stocks_goods !== false).map((b) => <option key={b.id} value={b.id}>{branchLabel(b)}</option>)}
                   </select>
+                  </>
+                  ) : (
+                    <EmptyChoice id={`branch-${id}`} label="Put them back at" text="No branch or store where you may put stock back." ask="Ask the owner to give you one first." />
+                  )}
                 </>
               )}
-              {row.disposition === 'write_off' && <p className="hint">Damaged goods never go back into stock. Their cost is written off.</p>}
+              {row.disposition === 'write_off' && <Hint full>Damaged goods never go back into stock. Their cost is written off.</Hint>}
             </>
           )}
           {problem && <p role="alert" className="rt-flag">{problem}</p>}
@@ -135,6 +145,7 @@ export function ReturnFormView({ sale, back, form: chosen, branches, usualIsStor
         {plan.moneyMinor > 0 && (tills.length > 1 || (usualIsStore && tills.length > 0)) && (
           <>
             <label htmlFor="refund-branch">Pay the money out of the till of</label>
+            {/* empty: drawn only when there is a till to choose. */}
             <select id="refund-branch" value={form.refundBranchId} onChange={(e) => onChange({ ...form, refundBranchId: e.target.value })}>
               <option value="">{sale.branch_id && !usualIsStore ? 'The usual branch' : 'Choose a branch'}</option>
               {tills.map((b) => <option key={b.id} value={b.id}>{branchLabel(b)}</option>)}
@@ -162,7 +173,8 @@ export function ReturnFormView({ sale, back, form: chosen, branches, usualIsStor
       </section>
       {problem && planned.length > 0 && <p role="alert" className="rt-flag">{problem}</p>}
       <Problem error={error} />
-      <button type="submit" className="rt-primary" disabled={problem !== null || busy} data-tour="return-save">{busy ? 'Saving' : 'Record the return'}</button>
+      <BusyButton type="submit" className="rt-primary" busy={busy === true} notReady={problem !== null} data-tour="return-save">Record the return</BusyButton>
+
     </form>
   );
 }
@@ -185,6 +197,7 @@ export function ReturnNewPage() {
   const usualIsStore = (me.branches ?? []).some((b) => b.id === sale.data?.branch_id && b.sells_goods === false);
   const tills = sellingBranches(branches, undefined);
   const form = usualIsStore && draft.refundBranchId === '' && tills.length === 1 ? { ...draft, refundBranchId: tills[0]?.id ?? '' } : draft;
+  // toast-exempt: success screen, the return outcome
   const send = useMutation({
     mutationFn: (s: Sale) => retail.createSaleReturn(saleId, buildReturnRequest(s, form, back), key),
     onSuccess: (r) => {
@@ -197,7 +210,7 @@ export function ReturnNewPage() {
     return (
       <main className="rt">
         <h1>Take goods back</h1>
-        <p className="empty-state">You do not have access to this page.</p>
+        <NoAccess />
       </main>
     );
   }
@@ -205,7 +218,6 @@ export function ReturnNewPage() {
   return (
     <main className="rt rt-wide">
       <h1>Take goods back</h1>
-      <p><Link to="/staff/retail/returns">Back to customer returns</Link></p>
       {(sale.isPending || earlier.isPending) && <SkeletonList label="Loading the sale" />}
       <Problem error={sale.error ?? earlier.error} />
       {outcome?.executed && outcome.sale_return && (

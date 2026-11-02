@@ -1,0 +1,150 @@
+// @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Me } from '../../../api/client';
+import { RetailError, type Unit } from '../../../api/retail';
+import { mockMe } from '../../../api/retail-mock';
+import { StaffContext } from '../context';
+import { ScreenToast } from './toast';
+
+// Issue #619: Counted in on both item forms never leaves a person stuck. With no units it says so and adds one by its name, which
+// is then chosen; with units there is still "Add a new unit"; someone who may not add one is told to ask the owner. Fabricated
+// units.
+
+const createUnit = vi.fn();
+
+vi.mock('../../../api/retail', async (original) => {
+  const real = await original<typeof import('../../../api/retail')>();
+  return { ...real, retail: { ...real.retail, createUnit: (...a: unknown[]) => createUnit(...a), listUnits: () => Promise.resolve([]) } };
+});
+
+const { UnitPicker } = await import('./unit-picker');
+const { ADD_CHOICE } = await import('../../../app/ui/PickerWithAdd');
+
+afterEach(() => {
+  cleanup();
+  createUnit.mockReset();
+});
+
+const piece: Unit = { id: 'u1', name: 'piece', active: true, version: 1 };
+
+function Harness({ units, failed = false }: { units: Unit[]; failed?: boolean }) {
+  const [value, setValue] = useState('');
+  return (
+    <>
+      <UnitPicker id="item-unit" units={units} loading={failed} load={{ isError: failed, refetch: () => undefined }} value={value} onChange={setValue} error={value === '' ? 'Choose a unit.' : null} showError={false} />
+      <output data-testid="chosen">{value}</output>
+    </>
+  );
+}
+
+function open(units: Unit[], me: Me = mockMe('admin')) {
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <StaffContext.Provider value={{ me, branch: '' }}><Harness units={units} /></StaffContext.Provider>
+    </QueryClientProvider>,
+  );
+}
+
+describe('Counted in (issue #619)', () => {
+  it('says there are no units yet, and typing a name adds the unit and chooses it', async () => {
+    createUnit.mockResolvedValue({ id: 'u7', name: 'tray', active: true, version: 1 });
+    open([]);
+    expect(screen.getByText('No units yet.')).toBeTruthy();
+    expect(screen.queryByText(/Choose a unit/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '+ Add a unit' }));
+    expect(await screen.findByRole('dialog', { name: 'Add a unit' })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/^Name of the new unit/), { target: { value: ' tray ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add unit' }));
+    await waitFor(() => expect(screen.getByTestId('chosen').textContent).toBe('u7'));
+    expect(createUnit).toHaveBeenCalledWith('tray');
+  });
+
+  it('ends the list with + Add a unit, and Enter in its sheet adds it without sending the item form (issue #688)', async () => {
+    createUnit.mockResolvedValue({ id: 'u8', name: 'dozen', active: true, version: 1 });
+    const submitted = vi.fn((e: Event) => e.preventDefault());
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <StaffContext.Provider value={{ me: mockMe('admin'), branch: '' }}>
+          <form onSubmit={(e) => submitted(e.nativeEvent)}><Harness units={[piece]} /></form>
+        </StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    const select = screen.getByLabelText(/^Single unit/) as HTMLSelectElement;
+    // Issue #709 (ADR-110): the standard units are listed first, so the add is "+ Add your own".
+    expect([...select.options].map((o) => o.text)).toEqual(['Choose a unit', 'piece', '+ Add your own']);
+    fireEvent.change(select, { target: { value: ADD_CHOICE } });
+    expect(await screen.findByRole('dialog', { name: 'Add a unit' })).toBeTruthy();
+    const name = screen.getByLabelText(/^Name of the new unit/);
+    fireEvent.change(name, { target: { value: 'dozen' } });
+    fireEvent.keyDown(name, { key: 'Enter' });
+    await waitFor(() => expect(screen.getByTestId('chosen').textContent).toBe('u8'));
+    expect(submitted).not.toHaveBeenCalled();
+    // Back on the form, with the new unit chosen and named at once.
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect((screen.getByLabelText(/^Single unit/) as HTMLSelectElement).selectedOptions[0]?.text).toBe('dozen');
+  });
+
+  it('never opens the add sheet when an arrow key on the closed list lands on + Add a unit (review of #691)', async () => {
+    open([piece]);
+    const select = screen.getByLabelText(/^Single unit/) as HTMLSelectElement;
+    fireEvent.keyDown(select, { key: 'ArrowDown' });
+    fireEvent.change(select, { target: { value: ADD_CHOICE } });
+    fireEvent.keyUp(select, { key: 'ArrowDown' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByTestId('chosen').textContent).toBe('');
+    // Enter in the open list, or a click, still opens it.
+    fireEvent.keyDown(select, { key: 'Enter' });
+    fireEvent.change(select, { target: { value: ADD_CHOICE } });
+    expect(await screen.findByRole('dialog', { name: 'Add a unit' })).toBeTruthy();
+  });
+
+  it('chooses Piece when "pcs" is typed and the shop has Piece, and says so plainly (issue #698)', async () => {
+    createUnit.mockRejectedValue(new RetailError('You already have Piece.', 409, 'unit_exists', { code: 'unit_exists', existing_id: 'u1', existing_name: 'Piece', existing_active: true }));
+    const toast = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <StaffContext.Provider value={{ me: mockMe('admin'), branch: '' }}>
+          <ScreenToast.Provider value={toast}><Harness units={[{ ...piece, name: 'Piece' }]} /></ScreenToast.Provider>
+        </StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    fireEvent.change(screen.getByLabelText(/^Single unit/), { target: { value: ADD_CHOICE } });
+    fireEvent.change(await screen.findByLabelText(/^Name of the new unit/), { target: { value: 'pcs' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add unit' }));
+    await waitFor(() => expect(screen.getByTestId('chosen').textContent).toBe('u1'));
+    expect(createUnit).toHaveBeenCalledWith('pcs');
+    expect(toast).toHaveBeenCalledWith('You already have Piece. It is chosen.', 'success');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('keeps the form open with the server words when the unit cannot be added', async () => {
+    createUnit.mockRejectedValue(new Error('A unit with this name already exists.'));
+    open([]);
+    fireEvent.click(screen.getByRole('button', { name: '+ Add a unit' }));
+    fireEvent.change(await screen.findByLabelText(/^Name of the new unit/), { target: { value: 'piece' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add unit' }));
+    expect((await screen.findByText('A unit with this name already exists.')).getAttribute('role')).toBe('alert');
+    expect(screen.getByRole('dialog', { name: 'Add a unit' })).toBeTruthy();
+    expect(screen.getByTestId('chosen').textContent).toBe('');
+  });
+
+  it('says the units could not be loaded when their read fails, never that there are none (review of #619)', () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <StaffContext.Provider value={{ me: mockMe('admin'), branch: '' }}><Harness units={[]} failed /></StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole('alert').textContent).toBe('This list could not be loaded. Check the connection.');
+    expect(screen.queryByText('No units yet.')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
+  it('tells someone who may not add units to ask the owner', () => {
+    open([], mockMe('sales'));
+    expect(screen.getByText('No units yet. Ask the owner to add a unit first.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '+ Add a unit' })).toBeNull();
+  });
+});

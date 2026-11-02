@@ -66,7 +66,7 @@ describe('the setting', () => {
     const client = new QueryClient();
     const html = renderToString(
       <QueryClientProvider client={client}>
-        <CreditRecognitionSetting read={{ capabilities: { profile: 'shop' }, version: 1 }} />
+        <CreditRecognitionSetting read={{ capabilities: { profile: 'shops' }, version: 1 }} />
       </QueryClientProvider>,
     );
     expect(html).toContain('When the sale is made');
@@ -84,13 +84,13 @@ describe('the setting', () => {
   it('says since when the saved rule stands', () => {
     const html = renderToString(
       <QueryClientProvider client={new QueryClient()}>
-        <CreditRecognitionSetting read={{ capabilities: { profile: 'shop', credit_sale_recognition: 'on_payment', credit_recognition_effective_from: '2026-10-20' }, version: 2 }} />
+        <CreditRecognitionSetting read={{ capabilities: { profile: 'shops', credit_sale_recognition: 'on_payment', credit_recognition_effective_from: '2026-10-20' }, version: 2 }} />
       </QueryClientProvider>,
     );
     expect(html).toContain('This rule has stood since 2026-10-20');
     const future = renderToString(
       <QueryClientProvider client={new QueryClient()}>
-        <CreditRecognitionSetting read={{ capabilities: { profile: 'shop', credit_sale_recognition: 'on_payment', credit_recognition_effective_from: '2999-01-01' }, version: 2 }} />
+        <CreditRecognitionSetting read={{ capabilities: { profile: 'shops', credit_sale_recognition: 'on_payment', credit_recognition_effective_from: '2999-01-01' }, version: 2 }} />
       </QueryClientProvider>,
     );
     expect(future).toContain('This rule will stand from 2999-01-01');
@@ -103,7 +103,7 @@ describe('the setting', () => {
     expect(ruleStarted({ credit_sale_recognition: 'on_sale' }, '2026-10-20')).toBe(false);
     const started = renderToString(
       <QueryClientProvider client={new QueryClient()}>
-        <CreditRecognitionSetting read={{ capabilities: { profile: 'shop', credit_sale_recognition: 'on_payment', credit_recognition_effective_from: '2026-10-20' }, version: 2 }} />
+        <CreditRecognitionSetting read={{ capabilities: { profile: 'shops', credit_sale_recognition: 'on_payment', credit_recognition_effective_from: '2026-10-20' }, version: 2 }} />
       </QueryClientProvider>,
     );
     expect(started).toContain(CANNOT_SWITCH_OFF);
@@ -111,7 +111,7 @@ describe('the setting', () => {
     expect(started).not.toContain('Review change');
     const pending = renderToString(
       <QueryClientProvider client={new QueryClient()}>
-        <CreditRecognitionSetting read={{ capabilities: { profile: 'shop', credit_sale_recognition: 'on_payment', credit_recognition_effective_from: '2999-01-01' }, version: 2 }} />
+        <CreditRecognitionSetting read={{ capabilities: { profile: 'shops', credit_sale_recognition: 'on_payment', credit_recognition_effective_from: '2999-01-01' }, version: 2 }} />
       </QueryClientProvider>,
     );
     expect(pending).not.toContain(CANNOT_SWITCH_OFF);
@@ -122,7 +122,7 @@ describe('the setting', () => {
   it('starts on the buyer pays choice when that is saved', () => {
     const html = renderToString(
       <QueryClientProvider client={new QueryClient()}>
-        <CreditRecognitionSetting read={{ capabilities: { profile: 'shop', credit_sale_recognition: 'on_payment' }, version: 2 }} />
+        <CreditRecognitionSetting read={{ capabilities: { profile: 'shops', credit_sale_recognition: 'on_payment' }, version: 2 }} />
       </QueryClientProvider>,
     );
     expect(html).toMatch(/checked=""[^>]*\/><span><strong>When the buyer pays/);
@@ -141,6 +141,7 @@ describe('the home cards', () => {
     expect(html).toContain('Cash and mobile money');
     expect(html).toContain('UGX 3,000');
     expect(html).toContain('Profit today');
+    expect(html).toContain('aria-label="More about On credit"');
   });
 
   it('say Sold, money collected, On credit now and profit of the money received when the buyer pays', () => {
@@ -160,6 +161,8 @@ describe('the home cards', () => {
     expect(html).toContain('Money received today');
     expect(html).toContain('Profit today');
     expect(html).not.toContain('UGX 3,000');
+    // Issue #707: On credit carries its help tip.
+    expect(html).toContain('aria-label="More about On credit"');
   });
 
   it('show no profit to a caller without it, and the money collected still', () => {
@@ -232,7 +235,7 @@ describe('the daily profit report', () => {
     expect(summary).not.toContain('not collected');
     expect(html).not.toContain('Profit from money received');
     // The 2026-10-10 row: Sold, Received (the 400 deposit that day), then what counted for profit.
-    const cells = /<td>2026-10-10<\/td><td class="num">([^<]*)<\/td><td class="num">([^<]*)<\/td><td class="num">([^<]*)<\/td>/.exec(html);
+    const cells = /<td>10 Oct 2026<\/td><td class="num">([^<]*)<\/td><td class="num">([^<]*)<\/td><td class="num">([^<]*)<\/td>/.exec(html);
     expect(cells?.slice(1, 4)).toEqual(['UGX 1,000', 'UGX 400', 'UGX 1,000']);
   });
 

@@ -22,8 +22,9 @@
 #      copies of compose.yml and the host scripts from it. A failed release
 #      keeps the previous release live and this script un-replaced; releases/<tag>/ stays for
 #      inspection.
-#   7. On success, keep the images of this and the previous release and remove older ones (the SD
-#      card is small).
+#   7. On success, keep the images of this and the previous release, and every image a container
+#      uses, and remove older ones (the SD card is small). Under ADR-083 the proxy keeps running an
+#      older release's image while its binary and Caddyfiles are unchanged, so that image stays.
 #
 # Exit status: 0 nothing to do or deployed; non-zero a failed deploy (see state/history.log).
 # To retry a failed tag: rm state/last_failed_tag, or run ./deploy.sh <tag> by hand.
@@ -47,6 +48,68 @@ write_state() {
     printf '%s\n' "$content" > "$file.tmp"
     sync "$file.tmp" 2>/dev/null || true
     mv -f "$file.tmp" "$file"
+}
+
+# The unit check of step 6 (issue #580): a unit that differs from the installed copy is named in the log. A timer job may
+# run from this user's crontab instead (the restore drill, Sunday 03:30, as docs/runbooks/provision-host.md section 8.5
+# allows), so a unit that is not installed at all, whose service's ExecStart script a crontab line runs, is the installed
+# way and is not named. deploy/tests/cleanup-test.sh runs this function with a stub crontab.
+# Copies a release's postgres/initdb into the host's fixed $ROOT/postgres/initdb, the folder compose mounts into
+# postgres. It updates the folder in place (never removes and re-creates it) so the mount keeps pointing at it,
+# drops files the release no longer has, and leaves everything readable by the postgres uid despite UMask=0077.
+sync_initdb() {
+    local from="$1/postgres/initdb" to="$ROOT/postgres/initdb" f
+    mkdir -p "$to"
+    for f in "$to"/* "$to"/.[!.]*; do
+        [[ -e "$f" && ! -e "$from/$(basename "$f")" ]] && rm -rf "$f"
+    done
+    cp -R "$from/." "$to/"
+    chmod -R a+rX "$ROOT/postgres"
+}
+
+unit_drift_notices() {
+    local units="$1" installed="$2" jobs unit name script
+    jobs="$(crontab -l 2>/dev/null | grep -v '^[[:space:]]*#' || true)"
+    for unit in "$units"/*; do
+        name="$(basename "$unit")"
+        if cmp -s "$unit" "$installed/$name" 2>/dev/null; then
+            continue
+        fi
+        if [[ ! -e "$installed/$name" ]]; then
+            # The script is the first absolute path ending in .sh after the systemd prefixes (- @ + !), so
+            # ExecStart=/bin/bash /opt/bms/x.sh names x.sh, not bash; a cron line must have it as one whole field.
+            # No service, or no .sh in its ExecStart, leaves it empty: || true, since this script runs under set -e.
+            script="$(sed -n 's/^ExecStart=[-@+!]*//p' "$units/${name%.*}.service" 2>/dev/null | head -n 1 \
+                | grep -oE '(^|[[:space:]])/[^[:space:]]+\.sh([[:space:]]|$)' | head -n 1 | tr -d '[:space:]' || true)"
+            if [[ -n "$script" ]] && awk -v s="$script" '{ for (i = 1; i <= NF; i++) if ($i == s) found = 1 } END { exit !found }' <<< "$jobs"; then
+                continue
+            fi
+        fi
+        log "notice: systemd/${name} differs from the installed unit; copy it by hand and run 'systemctl daemon-reload' (docs/runbooks/provision-host.md)"
+    done
+}
+
+# Step 7 (issue #580): remove the release images other than the two kept tags. An image any container uses, running or
+# stopped, is kept whatever its tag: under ADR-083 the proxy keeps an older release's image while what it runs is
+# unchanged, and Docker refuses to remove an image a container uses. Compose runs images by digest, so the match is on
+# the image ID, not the name. deploy/tests/cleanup-test.sh runs this function against a stub docker.
+remove_old_images() {
+    local keep_tag="$1" keep_previous="$2" in_use ref id
+    # A container removed between ps and inspect only drops out of the list. If the list comes back empty, Docker's own
+    # refusal to remove an image in use is the backstop, and the caller ignores this function's status.
+    in_use="$(docker ps --all --quiet | xargs -r docker inspect --format '{{.Image}}' 2>/dev/null || true)"
+    docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' \
+        | grep -E "^${RELEASE_PREFIX//./\\.}-(api|web|proxy):sha-[0-9a-f]+ " \
+        | while read -r ref id; do
+            if [[ "${ref##*:}" == "$keep_tag" || "${ref##*:}" == "$keep_previous" ]]; then
+                continue
+            fi
+            if grep -qxF -- "$id" <<< "$in_use"; then
+                log "keeping ${ref}: a container uses it"
+                continue
+            fi
+            docker image rm "$ref" > /dev/null || true
+        done
 }
 
 # One run at a time; a run that finds the previous one still deploying just ends.
@@ -132,9 +195,16 @@ done
 # The unit runs with UMask=0077, but the postgres container (another uid) must read initdb/ and sql/.
 # Both hold no secrets, only scripts and SQL.
 chmod -R a+rX "$release_dir/postgres" "$release_dir/sql"
+# postgres mounts the host's fixed postgres/initdb (compose.pi-staging.yml), which is refreshed only after a deploy
+# succeeds. On a new host it is missing, or empty when a compose command ran first (Docker creates a missing bind
+# source as an empty folder), so seed it from this release before the first deploy. The seed comes from a release
+# that has not deployed yet; if that deploy fails the seed stays until the next good deploy refreshes it.
+if [[ -z "$(ls -A "$ROOT/postgres/initdb" 2> /dev/null)" ]]; then
+    sync_initdb "$release_dir"
+fi
 
 status=0
-DOCKER_CONFIG="$ROOT/dockercfg" BMS_STATE_DIR="$ROOT/state" BMS_COSIGN_PUBKEY="$ROOT/cosign.pub" BMS_ENV_FILE="$ROOT/.env" \
+BMS_HOST_ROOT="$ROOT" DOCKER_CONFIG="$ROOT/dockercfg" BMS_STATE_DIR="$ROOT/state" BMS_COSIGN_PUBKEY="$ROOT/cosign.pub" BMS_ENV_FILE="$ROOT/.env" \
     BMS_EDGE_SERVICES="cloudflared" \
     "$release_dir/deploy.sh" "$tag" || status=$?
 case "$status" in
@@ -148,18 +218,16 @@ case "$status" in
         for script in deploy.sh backup.sh restore-drill.sh monitor.sh pull-staging.sh; do
             install -m 755 "$release_dir/$script" "$script.new" && mv -f "$script.new" "$script"
         done
-        for dir in postgres sql systemd; do
+        for dir in sql systemd; do
             rm -rf "$dir" && cp -R "$release_dir/$dir" "$dir"
         done
+        # postgres/initdb is bind-mounted into the running postgres, so it is updated in place, never removed.
+        rm -rf postgres/recommended && mkdir -p postgres && cp -R "$release_dir/postgres/recommended" postgres/recommended
+        sync_initdb "$release_dir"
         # ADR-018 finding L2: this user has no privilege to install unit files itself, so at least
         # make drift visible in this job's own log instead of silent (docs/runbooks/provision-host.md
         # section 8.4 still requires a human to copy a changed unit and run daemon-reload).
-        for unit in systemd/*; do
-            name="$(basename "$unit")"
-            if ! cmp -s "$unit" "/etc/systemd/system/$name" 2>/dev/null; then
-                log "notice: systemd/${name} differs from the installed unit; copy it by hand and run 'systemctl daemon-reload' (docs/runbooks/provision-host.md)"
-            fi
-        done
+        unit_drift_notices systemd /etc/systemd/system
         ;;
     3)
         log "another deploy holds the lock; trying again on the next run"
@@ -174,14 +242,8 @@ case "$status" in
         ;;
 esac
 
-log "removing release images other than ${tag} and ${current:-none}"
-docker image ls --format '{{.Repository}}:{{.Tag}}' \
-    | grep -E "^${RELEASE_PREFIX//./\\.}-(api|web|proxy):sha-[0-9a-f]+$" \
-    | while read -r ref; do
-        if [[ "${ref##*:}" != "$tag" && "${ref##*:}" != "$current" ]]; then
-            docker image rm "$ref" > /dev/null || true
-        fi
-    done || true
+log "removing release images other than ${tag}, ${current:-none} and those a container uses"
+remove_old_images "$tag" "$current" || true
 docker image prune --force > /dev/null || true
 
 log "removing releases/ directories other than ${tag} and ${current:-none}"

@@ -3,6 +3,7 @@ import { Link, createLazyRoute } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { UsersError, users } from '../../../api/users';
 import { useShellBrand } from '../../../app/branding';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { useStaff } from '../context';
 import { LinkBox, type ShownLink } from './link-box';
 import { RolePick } from './role-pick';
@@ -51,6 +52,7 @@ export function InviteScreen() {
     setTouched(true);
     if (hasProblems(problems) || sending.current) return;
     sending.current = true;
+    // toast-exempt: success screen, the invitation link screen replaces the form
     setBusy(true);
     setError(null);
     setLookInList(false);
@@ -136,7 +138,7 @@ export function InviteScreen() {
         {purchasingOffered(draft.roleKey, roleChoices(roles.data ?? [], me.modules)) && (
           <label className="check">
             <input type="checkbox" checked={draft.purchasing} onChange={(e) => set({ purchasing: e.target.checked })} />
-            Can also record purchases and restocks (with the buying prices), in the same shops and stores
+            Can also buy stock and record purchases (with the buying prices), in the same shops and stores
           </label>
         )}
         {purchasingOffered(draft.roleKey, roleChoices(roles.data ?? [], me.modules), TILL) && (
@@ -154,7 +156,7 @@ export function InviteScreen() {
           </p>
         )}
         <p className="cluster">
-          <button type="submit" className="rt-primary" data-tour="invite-send" disabled={busy || roles.isPending}>{busy ? 'Inviting' : 'Invite'}</button>
+          <BusyButton type="submit" className="rt-primary" data-tour="invite-send" busy={busy} disabled={roles.isPending}>Invite</BusyButton>
           <Link to="/staff/users" className="btn-ghost btn">Cancel</Link>
         </p>
       </form>

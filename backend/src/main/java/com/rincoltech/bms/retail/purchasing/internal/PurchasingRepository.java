@@ -270,10 +270,10 @@ class PurchasingRepository {
             sql.append(" AND p.created_by = :createdBy");
             params.put("createdBy", createdBy);
         }
-        // Which restocks are listed (issue #350): one movement row must match the branch, the category and the item
-        // asked
-        // for together, as the grouped summary counts them, so a scoped caller cannot probe for what went to branches
-        // outside their scope. What each restock then shows is scoped by the caller's own branches (branchIds) alone.
+        // Which restocks are listed (issue #350): one movement row must match the branch, the category and the
+        // item asked for together, as the grouped summary counts them, so a scoped caller cannot probe for what went
+        // to branches outside their scope. What each restock then shows is scoped by the caller's own branches
+        // (branchIds) alone.
         if (listedBranches != null || categoryId != null || productId != null) {
             sql.append(" AND EXISTS (SELECT 1 FROM retail_stock_movements m");
             if (categoryId != null) {
@@ -390,7 +390,9 @@ class PurchasingRepository {
                             decimal(rs.getBigDecimal("unit_factor")),
                             decimal(rs.getBigDecimal("unit_qty_total")),
                             rs.getObject("unit_cost_minor", Long.class),
-                            rs.getString("base_unit")));
+                            rs.getString("base_unit"),
+                            null,
+                            null));
         });
         return purchases.stream()
                 .map(p -> withLines(p, byPurchase.getOrDefault(p.id(), List.of()), branchIds))
@@ -462,7 +464,9 @@ class PurchasingRepository {
                 l.unitFactor(),
                 l.unitId() == null ? null : Quantities.format(unitQty),
                 l.unitCostMinor(),
-                l.baseUnit());
+                l.baseUnit(),
+                null,
+                null);
     }
 
     private static Purchase header(ResultSet rs) throws SQLException {

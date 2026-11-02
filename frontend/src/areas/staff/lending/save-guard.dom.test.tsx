@@ -15,6 +15,9 @@ import { CollateralForm } from './collateral-form';
 import { MemberForm } from './member-form';
 import { usePhotoQueue } from './photo-queue';
 
+/** A button that may be pressed: not disabled, and not a primary button whose form is still not ready (issue #526). */
+const ready = (b: unknown) => !(b as HTMLButtonElement).disabled && (b as HTMLElement).getAttribute('data-not-ready') !== 'true';
+
 // A save whose answer may have been lost (issue #280): the raw failure a dropped connection really gives, a look at what was saved
 // that itself can fail, and no second record in any of those cases. Also the shared phone box when the check did not find anyone,
 // a phone that was not changed, and a photo still being shrunk. Fabricated names, numbers and amounts.
@@ -51,7 +54,7 @@ describe('a member saved while the answer is lost', () => {
     type(/^Phone number/, '0700000099');
     type(/^Kind of ID/, 'none');
   };
-  const saveButton = () => screen.getByRole('button', { name: /Save member|Saving/ }) as HTMLButtonElement;
+  const saveButton = () => screen.getByRole('button', { name: /Save member/ }) as HTMLButtonElement;
 
   it('takes the raw failure of a dropped connection as a lost answer, finds the member and blocks a second save', async () => {
     const mock = createMembersMock();
@@ -113,7 +116,7 @@ describe('collateral saved while the answer is lost', () => {
     mount(<CollateralForm memberId={holder.id} />, createMembersMock([holder]).api, api);
     await screen.findByText('Test Holder 01');
     type(/^Describe the item/, 'Test television set');
-    const save = () => screen.getByRole('button', { name: /Register collateral|Saving/ }) as HTMLButtonElement;
+    const save = () => screen.getByRole('button', { name: /Register collateral/ }) as HTMLButtonElement;
     fireEvent.click(save());
     expect(await screen.findByText(/item is already saved\. It was not saved a second time/)).toBeTruthy();
     expect(save().disabled).toBe(true);
@@ -133,7 +136,7 @@ describe('the shared phone box', () => {
     type(/^Full name/, 'Test Borrower 99');
     type(/^Phone number/, '0700000001');
     type(/^Kind of ID/, 'none');
-    const save = () => screen.getByRole('button', { name: /Save member|Saving/ }) as HTMLButtonElement;
+    const save = () => screen.getByRole('button', { name: /Save member/ }) as HTMLButtonElement;
     fireEvent.click(save());
     const tick = await screen.findByLabelText(/different person who shares the phone/i);
     expect(save().disabled).toBe(true);
@@ -151,7 +154,7 @@ describe('the shared phone box', () => {
     mount(<MemberForm member={holder} onSaved={() => undefined} />, { ...mock.api, duplicateCheck: check }, undefined, updateOnly);
     type(/^Work or business/, 'Test trader');
     const save = screen.getByRole('button', { name: /Save changes/ }) as HTMLButtonElement;
-    expect(save.disabled).toBe(false);
+    expect(ready(save)).toBe(true);
     fireEvent.click(save);
     await waitFor(() => expect(mock.calls.update).toHaveLength(1));
     expect(check).not.toHaveBeenCalled();

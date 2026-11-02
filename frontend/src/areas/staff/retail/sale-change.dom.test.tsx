@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Product, Sale } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
+import { pickItem } from '../../../test-utils/item-picker';
 
 // The amount received and the change to give on the sale form (issue #346), as a seller uses it: the field for cash only, a
 // short amount refused in plain words, the change shown, the receipt with received and change, the field gone for the next sale,
@@ -49,13 +50,14 @@ function open() {
 }
 
 async function addBoth() {
-  fireEvent.click(await screen.findByRole('button', { name: 'Add LED bulb 9W screw' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Add LED bulb 15W screw' }));
+  await pickItem('LED bulb 9W screw');
+  await pickItem('LED bulb 15W screw');
 }
 
 const field = () => screen.getByLabelText('Amount received (UGX)') as HTMLInputElement;
 const type = (v: string) => fireEvent.change(field(), { target: { value: v } });
-const saveButton = () => screen.getByRole('button', { name: 'Save sale' }) as HTMLButtonElement;
+const saveButton = () => screen.getByRole('button', { name: /^Record sale/ }) as HTMLButtonElement;
+const totalLine = () => document.querySelector('.rt-total-hero')?.textContent;
 const pay = (name: string) => fireEvent.click(screen.getByLabelText(name));
 
 afterEach(() => {
@@ -84,18 +86,18 @@ describe('amount received on the sale form', () => {
   it('refuses an amount below the total in plain words and shows the change once it covers the total', async () => {
     open();
     await addBoth();
-    expect(screen.getByText('Total UGX 15,500')).toBeTruthy();
+    expect(totalLine()).toBe('Total UGX 15,500');
     type('10000');
     expect(screen.getByRole('alert').textContent).toBe('Enter at least the total, UGX 15,500.');
-    expect(saveButton().disabled).toBe(true);
+    expect(saveButton().getAttribute('data-not-ready')).toBe('true');
     expect(screen.queryByTestId('change-due')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Exact' }));
     expect(field().value).toBe('15500');
     expect(screen.getByTestId('change-due').textContent).toBe('Change to giveUGX 0');
-    expect(saveButton().disabled).toBe(false);
+    expect(saveButton().getAttribute('data-not-ready')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '20,000' }));
     expect(screen.getByTestId('change-due').textContent).toBe('Change to giveUGX 4,500');
-    expect(saveButton().disabled).toBe(false);
+    expect(saveButton().getAttribute('data-not-ready')).toBeNull();
   });
 
   it('refuses a negative, a decimal and a non numeric entry, and a very large one', async () => {
@@ -103,17 +105,17 @@ describe('amount received on the sale form', () => {
     await addBoth();
     type('-5000');
     expect(screen.getByRole('alert').textContent).toMatch(/cannot be negative/);
-    expect(saveButton().disabled).toBe(true);
+    expect(saveButton().getAttribute('data-not-ready')).toBe('true');
     type('20000.50');
     expect(screen.getByRole('alert').textContent).toMatch(/whole shillings/);
     type('twenty');
     expect(screen.getByRole('alert').textContent).toMatch(/numbers only/);
     type('99999999999999999999');
     expect(screen.getByRole('alert').textContent).toMatch(/too large/);
-    expect(saveButton().disabled).toBe(true);
+    expect(saveButton().getAttribute('data-not-ready')).toBe('true');
     type('1,000,000');
     expect(screen.getByTestId('change-due').textContent).toBe('Change to giveUGX 984,500');
-    expect(saveButton().disabled).toBe(false);
+    expect(saveButton().getAttribute('data-not-ready')).toBeNull();
   });
 
   it('saves the sale at its total, keeps the amount out of the request, and shows received and change on the receipt', async () => {
@@ -178,5 +180,27 @@ describe('amount received on the sale form', () => {
     expect(createSale).toHaveBeenCalledTimes(1);
     finish(answer(15500));
     expect(await screen.findByTestId('receipt-change')).toBeTruthy();
+  });
+
+  // JUSTIFICATION-A3: the busy-button test case issue #456 asks for.
+  it('shows Record sale as busy while the sale is sent, and a double click records it once', async () => {
+    let finish: (s: Sale) => void = () => undefined;
+    createSale.mockReturnValue(new Promise<Sale>((resolve) => { finish = resolve; }));
+    open();
+    await addBoth();
+    type('20000');
+    const button = saveButton();
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(button.getAttribute('aria-busy')).toBe('true'));
+    const busy = saveButton();
+    expect(busy).toBe(button);
+    expect(busy.getAttribute('aria-disabled')).toBe('true');
+    expect(busy.querySelector('.busy-spinner')).not.toBeNull();
+    fireEvent.click(busy);
+    expect(createSale).toHaveBeenCalledTimes(1);
+    finish(answer(15500));
+    expect(await screen.findByTestId('receipt-change')).toBeTruthy();
+    expect(createSale).toHaveBeenCalledTimes(1);
   });
 });

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { Product, Sale } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
-import { PackEditor } from './catalogue-packs';
+import { PackEditor, factorForUnit, purposeForUnit } from './catalogue-packs';
 import { Receipt, SaleForm, SaleLineCard } from './sale';
 import { newLine } from './sale-state';
 
@@ -37,9 +37,30 @@ describe('pack sizes on the item', () => {
 
   it('is offered to a catalogue manager once the capability is on', () => {
     const html = page(withUnits, <PackEditor product={pen} />);
-    expect(html).toContain('Pack sizes');
+    expect(html).toContain('Cartons, boxes and other packs');
     expect(html).toContain('Add pack');
     expect(html).toContain('for="pack-factor"');
+  });
+});
+
+describe('the size a chosen unit fills in (issue #625)', () => {
+  it('fills in the usual size, replaces a filled one, clears it for a unit with none, and keeps a typed one', () => {
+    expect(factorForUnit('', '', '100')).toBe('100');
+    expect(factorForUnit('100', '100', '50')).toBe('50');
+    expect(factorForUnit('100', '100', null)).toBe('');
+    expect(factorForUnit('12', '100', '50')).toBe('12');
+    expect(factorForUnit('12', '', null)).toBe('12');
+  });
+});
+
+describe('the Used for a chosen unit fills in (one pack idea, ADR-099 and ADR-100)', () => {
+  const roll = (purpose: 'buy' | 'sell' | 'both') => ({ id: 'u-roll', name: 'Roll', usual_pack: { size: '100.000', of_unit_id: 'u-m', of_unit: 'Metre', purpose } });
+  it("takes the unit's usual purpose, replaces a filled one, goes back to Both for a unit with none, and keeps a chosen one", () => {
+    expect(purposeForUnit('both', 'both', roll('sell'))).toBe('sell');
+    expect(purposeForUnit('sell', 'sell', roll('buy'))).toBe('buy');
+    expect(purposeForUnit('buy', 'buy', { id: 'u-box', name: 'Box' })).toBe('both');
+    expect(purposeForUnit('buy', 'both', roll('sell'))).toBe('buy');
+    expect(purposeForUnit('both', 'both', undefined)).toBe('both');
   });
 });
 
@@ -71,15 +92,15 @@ describe('a sale line', () => {
   it('offers the pack as a way to sell when the capability is on', () => {
     const html = card(withPacks, true);
     expect(html).toContain('Sell by');
-    expect(html).toContain('carton (12 piece)');
+    expect(html).toContain('carton (12 pieces)');
     expect(html).toContain('data-tour="sale-unit"');
-    expect(html).toContain('Quantity (piece)');
+    expect(html).toContain('Quantity (pieces)');
   });
 
   it('prices and counts in the pack once it is chosen', () => {
     const html = card(withPacks, true, 'u1');
-    expect(html).toContain('Quantity (carton)');
-    expect(html).toContain('Price per carton');
+    expect(html).toContain('Quantity (cartons)');
+    expect(html).toContain('Selling price per carton');
   });
 
   it('is exactly the old line when the capability is off, packs or not', () => {
@@ -87,15 +108,26 @@ describe('a sale line', () => {
       const html = card(product, false, 'u1');
       expect(html).not.toContain('Sell by');
       expect(html).not.toContain('carton');
-      expect(html).toContain('Quantity (piece)');
-      expect(html).toContain('Unit price');
+      expect(html).toContain('Quantity (pieces)');
+      expect(html).toContain('>Selling price</label>');
     }
+  });
+
+  // Review of #687: a shop whose units are stored as short codes reads full words on Sell, never "pc" or "per ctn".
+  it('says a short code unit and pack in full words', () => {
+    const short: Product = { ...pen, unit: 'pc', packs: [{ id: 'k2', product_id: 'p1', unit_id: 'u2', unit: 'ctn', factor: '24.000', active: true, version: 1 }] };
+    const html = card(short, true, 'u2');
+    expect(html).toContain('>piece</option>');
+    expect(html).toContain('carton (24 pieces)');
+    expect(html).toContain('Quantity (cartons)');
+    expect(html).toContain('Selling price per carton');
+    expect(html).not.toMatch(/\bpc\b|\bctn\b/);
   });
 
   it('is the old line for an item without packs even when the capability is on', () => {
     const html = card(pen, true);
     expect(html).not.toContain('Sell by');
-    expect(html).toContain('Unit price');
+    expect(html).toContain('>Selling price</label>');
   });
 });
 

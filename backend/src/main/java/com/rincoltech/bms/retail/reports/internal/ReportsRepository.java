@@ -54,8 +54,12 @@ class ReportsRepository {
         }
         StringBuilder sql = new StringBuilder(
                 "SELECT q.branch_id, q.product_id, p.code, p.description, p.category_id, c.name AS category,"
-                        + " u.name AS unit, q.qty, p.cost_minor, p.sell_minor FROM (" + quantities + ") q"
+                        + " u.name AS unit, q.qty, coalesce(a.avg_cost_minor, p.cost_minor) AS cost_minor, p.sell_minor"
+                        + " FROM (" + quantities + ") q"
                         + " JOIN retail_products p ON p.id = q.product_id JOIN retail_units u ON u.id = p.unit_id"
+                        // ADR-079: each branch's average cost now; a valuation as of an earlier date reads it too.
+                        + " LEFT JOIN retail_stock_balances a ON a.tenant_id = p.tenant_id AND a.branch_id = q.branch_id"
+                        + " AND a.product_id = q.product_id"
                         + " JOIN retail_categories c ON c.id = p.category_id"
                         + " WHERE q.qty <> 0");
         if (branchIds != null) {
@@ -114,25 +118,16 @@ class ReportsRepository {
      * entered and dated before the start day count at the sale, as they always did.
      */
     List<DayFigures> daily(List<UUID> branchIds, LocalDate from, LocalDate to, CreditPeriods periods) {
-        return daily(branchIds, from, to, periods, false);
-    }
-
-    private List<DayFigures> daily(
-            List<UUID> branchIds, LocalDate from, LocalDate to, CreditPeriods periods, boolean cashOnly) {
         Map<String, Object> periodParams = new LinkedHashMap<>();
-        String deferredSale = cashOnly
-                ? " AND s.payment_method <> 'credit'"
-                : periods.isEmpty()
-                        ? ""
-                        : " AND (s.payment_method <> 'credit' OR s.historical OR NOT "
-                                + periods.sql("s.sale_date", "s.created_at", periodParams, "crpS") + ")";
-        String deferredReturn = cashOnly
-                ? "true"
-                : periods.isEmpty()
-                        ? "false"
-                        : "EXISTS (SELECT 1 FROM retail_sales rs WHERE rs.tenant_id = r.tenant_id AND rs.id = r.sale_id"
-                                + " AND rs.payment_method = 'credit' AND NOT rs.historical AND "
-                                + periods.sql("rs.sale_date", "rs.created_at", periodParams, "crpR") + ")";
+        String deferredSale = periods.isEmpty()
+                ? ""
+                : " AND (s.payment_method <> 'credit' OR s.historical OR NOT "
+                        + periods.sql("s.sale_date", "s.created_at", periodParams, "crpS") + ")";
+        String deferredReturn = periods.isEmpty()
+                ? "false"
+                : "EXISTS (SELECT 1 FROM retail_sales rs WHERE rs.tenant_id = r.tenant_id AND rs.id = r.sale_id"
+                        + " AND rs.payment_method = 'credit' AND NOT rs.historical AND "
+                        + periods.sql("rs.sale_date", "rs.created_at", periodParams, "crpR") + ")";
         // Spelled outside the text blocks below, which strip the space at the end of a line.
         String returnSales = " CASE WHEN " + deferredReturn + " THEN 0 ELSE -r.total_minor END,";
         String returnCost = " CASE WHEN " + deferredReturn + " THEN 0 ELSE -r.cost_minor END,";

@@ -41,6 +41,8 @@ class MigrationOrderIT {
      * Merge order matters because {@code outOfOrder} is off: V41 (the retail price lists, #247, merged)
      * came before V42 (the loan pledge guard, #176, merged), then V43 (payment methods, #160, merged),
      * then V44 (the retail customer accounts, #196), then V45 (customer returns, #201, merged). Nothing here enforces the order, merge order does.
+     * Today V80 to V91 are merged (V91 is download my data, #478); V92 is billing, this pull request (#482). A number above
+     * them is allowed only as an ordered claim (AGENTS.md), merged in its turn or renumbered at merge.
      */
     static final List<String> MERGED = List.of(
             "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "20", "21", "22", "23", "26",
@@ -50,7 +52,13 @@ class MigrationOrderIT {
      * Columns a later migration adds to a table these cases watch, left out of the "keeps its shape" comparisons: each case
      * answers for its own migration. V70 (customer orders, #385) adds retail_sale_lines.price_overridden_by.
      */
-    static final String LATER_COLUMNS = " AND column_name <> 'price_overridden_by'";
+    static final String LATER_COLUMNS = " AND column_name <> 'price_overridden_by'"
+            // V86 (offline sales, #458) adds four columns to retail_sales, which are not the earlier migrations' to
+            // answer
+            // for; named with their table, so a column of that name elsewhere (stock movements' occurred_at) still
+            // counts.
+            + " AND NOT (table_name = 'retail_sales'"
+            + " AND column_name IN ('client_sale_id', 'occurred_at', 'recorded_offline', 'request_hash'))";
 
     /** Every migration file on the classpath in numeric order: a new migration only adds its file. */
     static final List<String> VERSIONS = discoveredVersions();
@@ -61,7 +69,8 @@ class MigrationOrderIT {
                     Path.of(MigrationOrderIT.class.getResource("/db/migration").toURI());
             try (Stream<Path> files = Files.list(dir)) {
                 return files.map(f -> f.getFileName().toString())
-                        .filter(n -> n.matches("V\\d+__.*\\.sql"))
+                        // A Java migration (V120, V121) is its compiled class here; its records are not migrations.
+                        .filter(n -> n.matches("V\\d+__[^$]*\\.(sql|class)"))
                         .map(n -> n.substring(1, n.indexOf("__")))
                         .sorted(Comparator.comparingInt(Integer::parseInt))
                         .toList();
@@ -1412,12 +1421,12 @@ class MigrationOrderIT {
     }
 
     /**
-     * The unallocated receipts queue (#224, V84) on a database a server already migrated to the version before it and that holds a staff user, a
+     * The unallocated receipts queue (#224, V122) on a database a server already migrated to the version before it and that holds a staff user, a
      * payment intent and an open receipt: the receipt keeps its row and stays {@code open} and bare, the new columns take their
      * defaults, the swap of {@code users_kind_check} keeps the staff user and lets the new {@code system} kind in (and nothing
      * else), the swap of the receipts' status check lets {@code reversed} in, a second system user is refused, the guard trigger
      * refuses a status the queue does not know, and the new permission lands on the three roles that decide it.
-     * JUSTIFICATION-A3: a new test case; no existing case migrates a populated receipts or users table across V84.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates a populated receipts or users table across V122.
      */
     @Test
     void unallocatedReceiptsQueueMigrationKeepsPopulatedRowsAndSwapsTheChecks() {
@@ -1428,11 +1437,11 @@ class MigrationOrderIT {
     }
 
     /**
-     * The payment reconciliation (#317, V85) on a database a server already migrated to V84 and that holds a tenant, its user and a
+     * The payment reconciliation (#317, V123) on a database a server already migrated to V122 and that holds a tenant, its user and a
      * payment intent: the five new tables come empty and closed to anything but the grants they were given (a statement is never
      * updated or removed by the application role, a run may be), the findings of a removed run go with it, no existing row
      * changes, and the permission lands on the tenant admin and the accountant only.
-     * JUSTIFICATION-A3: a new test case; no existing case migrates across V85.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates across V123.
      */
     @Test
     void paymentReconciliationMigrationAddsFourClosedTablesAndOnePermission() {
@@ -1444,7 +1453,7 @@ class MigrationOrderIT {
 
     /** The body of the case above, on any empty database that has the roles of {@code 01-roles.sh}. */
     static void verifyReconciliationMigration(String url) {
-        assertThat(flyway(url, "84").migrate().targetSchemaVersion).isEqualTo("84");
+        assertThat(flyway(url, "122").migrate().targetSchemaVersion).isEqualTo("122");
         JdbcClient owner =
                 JdbcClient.create(new DriverManagerDataSource(url, "bms_owner", TestDatabase.OWNER_PASSWORD));
         UUID tenant = UUID.randomUUID();
@@ -1452,7 +1461,7 @@ class MigrationOrderIT {
         UUID staff = UUID.randomUUID();
         UUID intent = UUID.randomUUID();
         owner.sql(
-                        "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v62', 'Test Tenant V85', '00000000-0000-4000-8000-000000000001')")
+                        "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v62', 'Test Tenant V123', '00000000-0000-4000-8000-000000000001')")
                 .param(tenant)
                 .update();
         owner.sql(
@@ -1460,7 +1469,7 @@ class MigrationOrderIT {
                 .params(branch, tenant)
                 .update();
         owner.sql(
-                        "INSERT INTO users (id, tenant_id, kind, full_name, email, status) VALUES (?, ?, 'staff', 'Test Staff V85', 'staff-v62@example.test', 'active')")
+                        "INSERT INTO users (id, tenant_id, kind, full_name, email, status) VALUES (?, ?, 'staff', 'Test Staff V123', 'staff-v62@example.test', 'active')")
                 .params(staff, tenant)
                 .update();
         owner.sql("""
@@ -1481,7 +1490,7 @@ class MigrationOrderIT {
         long permissions =
                 owner.sql("SELECT count(*) FROM permissions").query(Long.class).single();
 
-        assertThat(flyway(url, "85").migrate().targetSchemaVersion).isEqualTo("85");
+        assertThat(flyway(url, "123").migrate().targetSchemaVersion).isEqualTo("123");
 
         for (String table : List.of(
                 "payment_statements",
@@ -1575,9 +1584,8 @@ class MigrationOrderIT {
 
     /** The body of the case above, on any empty database that has the roles of {@code 01-roles.sh}. */
     static void verifyUnallocatedReceiptsMigration(String url) {
-        // The version just before V84 on this branch (V79 today, V83 once the lending migrations V80 to V83 are on
-        // main).
-        String before = VERSIONS.get(VERSIONS.indexOf("84") - 1);
+        // The version just before V122 (V121 today).
+        String before = VERSIONS.get(VERSIONS.indexOf("122") - 1);
         assertThat(flyway(url, before).migrate().targetSchemaVersion).isEqualTo(before);
         JdbcClient owner =
                 JdbcClient.create(new DriverManagerDataSource(url, "bms_owner", TestDatabase.OWNER_PASSWORD));
@@ -1589,7 +1597,7 @@ class MigrationOrderIT {
         UUID period = UUID.randomUUID();
         UUID entry = UUID.randomUUID();
         owner.sql(
-                        "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v61', 'Test Tenant V84', '00000000-0000-4000-8000-000000000001')")
+                        "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v61', 'Test Tenant V122', '00000000-0000-4000-8000-000000000001')")
                 .param(tenant)
                 .update();
         owner.sql(
@@ -1601,7 +1609,7 @@ class MigrationOrderIT {
                 .query((rs, n) -> 1)
                 .single();
         owner.sql(
-                        "INSERT INTO users (id, tenant_id, kind, full_name, email, status) VALUES (?, ?, 'staff', 'Test Staff V84', 'staff-v61@example.test', 'active')")
+                        "INSERT INTO users (id, tenant_id, kind, full_name, email, status) VALUES (?, ?, 'staff', 'Test Staff V122', 'staff-v61@example.test', 'active')")
                 .params(staff, tenant)
                 .update();
         owner.sql("INSERT INTO gl_periods (id, tenant_id, year, month, status) VALUES (?, ?, 2026, 1, 'open')")
@@ -1614,7 +1622,7 @@ class MigrationOrderIT {
         owner.sql(
                         "WITH e AS (INSERT INTO journal_entries (id, tenant_id, branch_id, entry_no, entry_date, period_id,"
                                 + " reference, source_module, source_type) VALUES (?, ?, ?, 'JE99999999', DATE '2026-01-15', ?,"
-                                + " 'V84-FIXTURE', 'test', 'fixture') RETURNING id)"
+                                + " 'V122-FIXTURE', 'test', 'fixture') RETURNING id)"
                                 + " INSERT INTO journal_lines (id, tenant_id, entry_id, line_no, account_id, debit, credit, currency)"
                                 + " SELECT ?, ?, e.id, 1, ?, 1000, 0, 'UGX' FROM e UNION ALL SELECT ?, ?, e.id, 2, ?, 0, 1000, 'UGX' FROM e")
                 .params(
@@ -1648,7 +1656,7 @@ class MigrationOrderIT {
                         INSERT INTO unallocated_receipts (id, tenant_id, branch_id, intent_id, purpose, subject_type, subject_id,
                                                           amount_minor, currency, value_date, confirmation_code, refusal_code,
                                                           journal_entry_id)
-                        VALUES (?, ?, ?, ?, 'test.payment', 'test_subject', ?, 1500, 'UGX', DATE '2026-01-15', 'V84-CONF-1',
+                        VALUES (?, ?, ?, ?, 'test.payment', 'test_subject', ?, 1500, 'UGX', DATE '2026-01-15', 'V122-CONF-1',
                                 'loan_closed', ?)
                         """)
                 .params(receipt, tenant, branch, intent, UUID.randomUUID(), entry)
@@ -1656,7 +1664,7 @@ class MigrationOrderIT {
         long permissions =
                 owner.sql("SELECT count(*) FROM permissions").query(Long.class).single();
 
-        assertThat(flyway(url, "84").migrate().targetSchemaVersion).isEqualTo("84");
+        assertThat(flyway(url, "122").migrate().targetSchemaVersion).isEqualTo("122");
 
         Map<String, Object> row = owner.sql("SELECT * FROM unallocated_receipts WHERE id = ?")
                 .param(receipt)
@@ -1697,7 +1705,7 @@ class MigrationOrderIT {
                                 .param(receipt)
                                 .update())
                 .hasMessageContaining("unallocated_receipts_reversed_complete");
-        // The replaced guard of payment_intents: the moves V84 added are allowed, the ones it narrows or never had are
+        // The replaced guard of payment_intents: the moves V122 added are allowed, the ones it narrows or never had are
         // refused.
         UUID other = UUID.randomUUID();
         owner.sql("""
@@ -1722,7 +1730,7 @@ class MigrationOrderIT {
                     .update();
             owner.sql("""
                             UPDATE payment_intents SET status = 'paid', paid_amount_minor = 1500, paid_currency = 'UGX',
-                                   confirmation_code = 'V84-CONF', paid_at = now(), verified_at = now() WHERE id = ?
+                                   confirmation_code = 'V122-CONF', paid_at = now(), verified_at = now() WHERE id = ?
                             """).param(id).update();
         }
         owner.sql(
@@ -1732,7 +1740,7 @@ class MigrationOrderIT {
         owner.sql("UPDATE payment_intents SET status = 'reversed_pending_review' WHERE id = ?")
                 .param(intent)
                 .update();
-        // V84: a payment reported reversed and then completed again goes back to booked.
+        // V122: a payment reported reversed and then completed again goes back to booked.
         owner.sql("UPDATE payment_intents SET status = 'booked' WHERE id = ?")
                 .param(intent)
                 .update();
@@ -1751,7 +1759,7 @@ class MigrationOrderIT {
                         .param(intent)
                         .update())
                 .hasMessageContaining("is not an allowed transition");
-        // V84 narrows needs_attention to reversed: refused for an order that carries a booked transaction.
+        // V122 narrows needs_attention to reversed: refused for an order that carries a booked transaction.
         owner.sql(
                         "UPDATE payment_intents SET status = 'needs_attention', booked_subject_txn_id = ?, booked_at = now() WHERE id = ?")
                 .params(UUID.randomUUID(), other)
@@ -1839,16 +1847,22 @@ class MigrationOrderIT {
         assertThat(owner.sql(columns).query(String.class).single())
                 .as("the existing tables keep their shape")
                 .isEqualTo(before);
-        // V48 adds no permission; V55 (the AI assistant, #226) adds the two advisor ones and V57 (#233) the payment
-        // account
-        // one, V84 (the unallocated receipts queue, #224) the payments allocate_approve one and V85 (the
-        // reconciliation,
-        // #317) the payments manage one, which are not V48's to answer for.
+        // V48 adds no permission; V55 (the AI assistant, #226) adds the two advisor ones, V57 (#233) the payment
+        // account one, V83 (collections, #266) the two collection list ones, V86 (offline sales, #458)
+        // retail.offline.resolve, V88 (referrals, #464) core.referrals.read, V89 (existing loans, #466)
+        // lending.loans.bring_in, V91 (download my data, #334) its own, V92 (billing, #480) core.billing.read, V107
+        // (fee and interest waivers, #265) lending.charges.waive_fee_interest and V122 (the unallocated receipts queue,
+        // #224) core.payments.allocate_approve and V123 (the reconciliation, #317) core.payments.manage, which are not
+        // V48's to answer for.
         assertThat(owner.sql(
                                 "SELECT count(*) FROM permissions WHERE key NOT IN ('lending.advisor.use', 'lending.advisor.configure',"
                                         + " 'core.payment_account.manage', 'retail.controls.read', 'retail.credit.write_off',"
                                         + " 'retail.order.manage', 'retail.sale.all_sellers', 'retail.till.close',"
-                                        + " 'core.payments.allocate_approve', 'core.payments.manage')")
+                                        + " 'retail.offline.resolve', 'lending.members.contact',"
+                                        + " 'lending.collections.all_officers', 'core.referrals.read',"
+                                        + " 'lending.loans.bring_in', 'core.data_export.run', 'core.billing.read',"
+                                        + " 'lending.charges.waive_fee_interest', 'core.payments.allocate_approve',"
+                                        + " 'core.payments.manage')")
                         .query(Long.class)
                         .single())
                 .as("no permission is added")
@@ -2001,9 +2015,10 @@ class MigrationOrderIT {
             assertThat(owner.sql("""
                                     SELECT count(*) FROM retail_products
                                      WHERE id = ? AND family_id IS NULL AND variant_size IS NULL AND variant_colour IS NULL
-                                       AND variant_sort IS NULL AND description = 'Test romper' AND code = 'T1' AND version = 1
+                                       AND variant_sort IS NULL AND description = 'Test Romper' AND code = 'T1' AND version = 2
                                     """).param(product).query(Long.class).single())
-                    .as("the item is its own single variant, untouched")
+                    // V120 (issue #698) moved only the case of its name, and its version with it.
+                    .as("the item is its own single variant, untouched but for the case of its name")
                     .isEqualTo(1);
             assertThat(owner.sql("SELECT qty::text FROM retail_stock_balances WHERE product_id = ?")
                             .param(product)
@@ -2357,6 +2372,209 @@ class MigrationOrderIT {
         }
     }
 
+    /**
+     * #464 (ADR-069): the referral migration gives every business that already exists its own code, and a business made
+     * afterwards gets one from the trigger; the default commission rule is the product owner's (ADR-069 decision 14), audited
+     * once.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates a database with businesses across V88.
+     */
+    @Test
+    void referralsMigrationGivesEveryExistingBusinessACode() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("88") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            for (String slug : List.of("dodos-shop", "dodos-mart", "x9-42")) {
+                owner.sql(
+                                "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, ?, 'Test Tenant V88', '00000000-0000-4000-8000-000000000001')")
+                        .params(UUID.randomUUID(), slug)
+                        .update();
+            }
+
+            DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+
+            List<String> codes = owner.sql(
+                            "SELECT c.code FROM referral_codes c JOIN tenants t ON t.id = c.tenant_id ORDER BY t.slug")
+                    .query(String.class)
+                    .list();
+            assertThat(codes).hasSize(3).doesNotHaveDuplicates();
+            assertThat(codes.get(0)).startsWith("DODOS");
+            assertThat(codes.get(1)).startsWith("DODOS");
+            UUID later = UUID.randomUUID();
+            owner.sql(
+                            "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'later-shop', 'Test Tenant Later', '00000000-0000-4000-8000-000000000001')")
+                    .param(later)
+                    .update();
+            assertThat(owner.sql("SELECT code FROM referral_codes WHERE tenant_id = ?")
+                            .param(later)
+                            .query(String.class)
+                            .single())
+                    .startsWith("LATER");
+            assertThat(owner.sql(
+                                    "SELECT r.kind || ' ' || r.percent_bp || ' ' || r.months || ' ' || (r.cap_minor IS NULL)"
+                                            + " FROM referral_settings s JOIN referral_commission_rules r ON r.id = s.default_rule_id")
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("percent_of_payment 1000 12 true");
+            assertThat(owner.sql("SELECT data->>'reason' FROM platform_audit_log"
+                                    + " WHERE action = 'platform.referral.default_rule_changed'")
+                            .query(String.class)
+                            .list())
+                    .containsExactly("default set by product owner decision 22 Oct 2026");
+        }
+    }
+
+    /**
+     * V89 (existing loans, #466, ADR-071) backfills the default go-live date no later than the real start: a business
+     * whose only surviving administrator session is from March, but which was created in January, goes live in January;
+     * a business nobody has signed in to gets none; a date already stored is kept.
+     */
+    @Test
+    void existingLoansMigrationDatesTheGoLiveNoLaterThanTheRealStart() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("89") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID pruned = UUID.randomUUID();
+            UUID quiet = UUID.randomUUID();
+            UUID kept = UUID.randomUUID();
+            int n = 0;
+            for (UUID tenant : List.of(pruned, quiet, kept)) {
+                n++;
+                owner.sql("""
+                                INSERT INTO tenants (id, slug, name, plan_id, created_at)
+                                VALUES (?, ?, 'Test Tenant V89', '00000000-0000-4000-8000-000000000001',
+                                        TIMESTAMPTZ '2026-01-05 09:00:00+03')
+                                """).params(tenant, "test-v89-" + n).update();
+            }
+            for (UUID tenant : List.of(pruned, kept)) {
+                UUID user = UUID.randomUUID();
+                owner.sql("""
+                                INSERT INTO users (id, tenant_id, kind, full_name, email, status, last_login_at)
+                                VALUES (?, ?, 'staff', 'Test Staff V89', ?, 'active', TIMESTAMPTZ '2026-03-20 09:00:00+03')
+                                """).params(user, tenant, user + "@example.test").update();
+                owner.sql("""
+                                INSERT INTO user_role_assignments (id, tenant_id, user_id, role_key, branch_id, granted_by)
+                                VALUES (gen_random_uuid(), ?, ?, 'tenant_admin', NULL, ?)
+                                """).params(tenant, user, user).update();
+                owner.sql("""
+                                INSERT INTO auth_sessions (id, tenant_id, created_at, user_id, family_id, refresh_token_hash,
+                                                           expires_at, idle_expires_at)
+                                VALUES (gen_random_uuid(), ?, TIMESTAMPTZ '2026-03-02 09:00:00+03', ?, gen_random_uuid(),
+                                        ?, now(), now())
+                                """)
+                        .params(tenant, user, "%064d".formatted(Math.abs(user.hashCode())))
+                        .update();
+            }
+            owner.sql("""
+                            INSERT INTO tenant_settings (id, tenant_id, settings)
+                            VALUES (gen_random_uuid(), ?, '{"go_live_date": "2025-12-01", "go_live_source": "set"}')
+                            """).param(kept).update();
+
+            DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+
+            assertThat(owner.sql("SELECT settings->>'go_live_date' FROM tenant_settings WHERE tenant_id = ?")
+                            .param(pruned)
+                            .query(String.class)
+                            .single())
+                    .as("the day the business was created, before the surviving session")
+                    .isEqualTo("2026-01-05");
+            assertThat(owner.sql("SELECT count(*) FROM tenant_settings WHERE tenant_id = ?"
+                                    + " AND settings->>'go_live_date' IS NOT NULL")
+                            .param(quiet)
+                            .query(Long.class)
+                            .single())
+                    .isZero();
+            assertThat(owner.sql("SELECT settings->>'go_live_date' FROM tenant_settings WHERE tenant_id = ?")
+                            .param(kept)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("2025-12-01");
+        }
+    }
+
+    /**
+     * V92 (ADR-075) on a database at the migration before it, migrated by an owner without BYPASSRLS, so forced row security applies to it: every
+     * payment recorded before gets a receipt, numbered in the order the payments were recorded across businesses, the
+     * sequence continues after them, and the tables end with FORCE ROW LEVEL SECURITY again.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates subscription payments across the billing migration.
+     */
+    @Test
+    void billingMigrationNumbersEveryEarlierPaymentEvenUnderForcedRowSecurity() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            flyway(postgres, VERSIONS.get(VERSIONS.indexOf("92") - 1)).migrate();
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID operator = UUID.randomUUID();
+            owner.sql(
+                            "INSERT INTO platform_users (id, email, full_name) VALUES (?, 'op-v92@example.test', 'Test Operator')")
+                    .param(operator)
+                    .update();
+            String plan = "00000000-0000-4000-8000-000000000001";
+            // Each payment: business, recorded at. The second business paid first.
+            UUID first = UUID.randomUUID();
+            UUID second = UUID.randomUUID();
+            Object[][] payments = {
+                {second, "2026-03-01 09:00:00+03", UUID.randomUUID()},
+                {first, "2026-05-01 09:00:00+03", UUID.randomUUID()},
+                {second, "2026-06-01 09:00:00+03", UUID.randomUUID()},
+            };
+            int n = 0;
+            for (UUID tenant : List.of(first, second)) {
+                n++;
+                owner.sql("INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, ?, ?, ?::uuid)")
+                        .params(tenant, "test-v92-" + n, "Test Business V92 " + n, plan)
+                        .update();
+                owner.sql("INSERT INTO subscriptions (id, tenant_id, plan_id, status) VALUES (?, ?, ?::uuid, 'active')")
+                        .params(tenant, tenant, plan)
+                        .update();
+            }
+            for (Object[] p : payments) {
+                owner.sql("""
+                                INSERT INTO subscription_payments (id, tenant_id, subscription_id, plan_id, amount_minor,
+                                    currency, method, paid_on, months, period_start, period_end,
+                                    recorded_by_platform_user_id, created_at)
+                                VALUES (?, ?, ?, ?::uuid, 10000, 'UGX', 'mtn_momo', ?::timestamptz::date, 1,
+                                        ?::timestamptz::date, ?::timestamptz::date + 29, ?, ?::timestamptz)
+                                """)
+                        .params(p[2], p[0], p[0], plan, p[1], p[1], p[1], operator, p[1])
+                        .update();
+            }
+            JdbcClient superuser = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()));
+            superuser.sql("ALTER ROLE bms_owner NOBYPASSRLS").update();
+
+            MigrateResult result =
+                    DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+            assertThat(result.success).isTrue();
+
+            for (int i = 0; i < payments.length; i++) {
+                assertThat(superuser
+                                .sql("SELECT receipt_no FROM subscription_receipts WHERE payment_id = ?")
+                                .param(payments[i][2])
+                                .query(String.class)
+                                .single())
+                        .isEqualTo("RT-2026-%06d".formatted(i + 1));
+            }
+            assertThat(superuser
+                            .sql("SELECT nextval('subscription_receipt_numbers')")
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(4);
+            assertThat(superuser.sql("""
+                                    SELECT bool_and(relforcerowsecurity) FROM pg_class
+                                     WHERE relname IN ('tenants', 'subscription_payments', 'subscription_receipts')
+                                    """).query(Boolean.class).single())
+                    .as("forced row security is back on every table")
+                    .isTrue();
+        }
+    }
+
     @Test
     void noTwoMigrationsShareAVersion() {
         try (PostgreSQLContainer postgres = database()) {
@@ -2365,6 +2583,289 @@ class MigrationOrderIT {
             assertThat(Arrays.stream(all).map(i -> i.getVersion().getVersion()).toList())
                     .containsExactlyElementsOf(VERSIONS);
             assertThat(Arrays.stream(all).map(MigrationInfo::getState)).containsOnly(MigrationState.PENDING);
+        }
+    }
+
+    /**
+     * V94 (ADR-079, issue #523) on a database at the migration before it: every stock balance row of every business takes its
+     * product's cost as today's average, so the valuation does not move on the day of the deploy, and the quantity is kept.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates stock balances across the average cost migration.
+     */
+    @Test
+    void averageCostMigrationSetsTodaysAverageFromEachProductsCost() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("94") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID tenant = UUID.randomUUID();
+            UUID branch = UUID.randomUUID();
+            UUID cheap = UUID.randomUUID();
+            UUID dear = UUID.randomUUID();
+            UUID later = UUID.randomUUID();
+            owner.sql(
+                            "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v94', 'Test Tenant V94', '00000000-0000-4000-8000-000000000001')")
+                    .param(tenant)
+                    .update();
+            owner.sql(
+                            "INSERT INTO branches (id, tenant_id, code, name, is_head_office) VALUES (?, ?, 'HQ', 'Head Office', true)")
+                    .params(branch, tenant)
+                    .update();
+            owner.sql("SELECT platform_set_tenant_modules(?, ?::text[], NULL)")
+                    .params(tenant, "{retail}")
+                    .query((rs, n) -> 1)
+                    .single();
+            owner.sql("""
+                            WITH c AS (INSERT INTO retail_categories (id, tenant_id, name) VALUES (gen_random_uuid(), ?, 'Test')
+                                       RETURNING id),
+                                 u AS (INSERT INTO retail_units (id, tenant_id, name) VALUES (gen_random_uuid(), ?, 'pcs')
+                                       RETURNING id)
+                            INSERT INTO retail_products (id, tenant_id, code, description, category_id, unit_id, cost_minor,
+                                                         sell_minor, currency)
+                            SELECT x.id, ?, x.code, 'Test item ' || x.code, c.id, u.id, x.cost, x.cost * 2, 'UGX'
+                              FROM c, u, (VALUES (?::uuid, 'A1', 750), (?::uuid, 'A2', 4000), (?::uuid, 'A3', 500))
+                                   AS x (id, code, cost)
+                            """).params(tenant, tenant, tenant, cheap, dear, later).update();
+            owner.sql("INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty) VALUES (?, ?, ?, 48)")
+                    .params(tenant, branch, cheap)
+                    .update();
+            owner.sql("INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty) VALUES (?, ?, ?, -2)")
+                    .params(tenant, branch, dear)
+                    .update();
+
+            MigrateResult result =
+                    DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+
+            assertThat(result.success).isTrue();
+            assertThat(owner.sql("""
+                                    SELECT qty::text || ' ' || avg_cost_minor FROM retail_stock_balances
+                                     WHERE tenant_id = ? ORDER BY qty DESC
+                                    """).param(tenant).query(String.class).list())
+                    .containsExactly("48.000 750", "-2.000 4000");
+            // A writer from before V94 that leaves the average out (an old instance during a deploy) gets the product's
+            // last paid cost, never zero; one that names it keeps it.
+            owner.sql("INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty) VALUES (?, ?, ?, 3)")
+                    .params(tenant, branch, later)
+                    .update();
+            assertThat(owner.sql("SELECT avg_cost_minor FROM retail_stock_balances WHERE product_id = ?")
+                            .param(later)
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(500);
+            assertThat(owner.sql("""
+                                    SELECT convalidated FROM pg_constraint
+                                     WHERE conname = 'retail_stock_balances_avg_cost_range'
+                                    """).query(Boolean.class).single()).isTrue();
+        }
+    }
+
+    /**
+     * V96 (ADR-081, issue #493) on a database at the migration before it: every category of every business gets a code start
+     * suggested from its name and free in that business, the oldest first, and no item's code changes. A writer that leaves the
+     * code start out (an old instance during a deploy) gets a suggested one.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates categories across the item codes migration.
+     */
+    @Test
+    void itemCodesMigrationGivesEveryCategoryACodeStartAndLeavesItemCodes() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("96") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID tenant = UUID.randomUUID();
+            UUID other = UUID.randomUUID();
+            for (UUID id : List.of(tenant, other)) {
+                owner.sql("INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, ?, 'Test Tenant V96', "
+                                + "'00000000-0000-4000-8000-000000000001')")
+                        .params(id, "test-v96-" + id.toString().substring(0, 8))
+                        .update();
+            }
+            owner.sql("""
+                            WITH c AS (INSERT INTO retail_categories (id, tenant_id, name, created_at)
+                                       VALUES (gen_random_uuid(), ?, 'Bulbs', now() - interval '2 days'),
+                                              (gen_random_uuid(), ?, 'Blub', now() - interval '1 day'),
+                                              (gen_random_uuid(), ?, 'Phone accessories', now())
+                                       RETURNING id, name),
+                                 u AS (INSERT INTO retail_units (id, tenant_id, name) VALUES (gen_random_uuid(), ?, 'pcs')
+                                       RETURNING id)
+                            INSERT INTO retail_products (id, tenant_id, code, description, category_id, unit_id, cost_minor,
+                                                         sell_minor, currency)
+                            SELECT gen_random_uuid(), ?, 'OLD-' || c.name, 'Test item ' || c.name, c.id, u.id, 100, 200, 'UGX'
+                              FROM c, u
+                            """).params(tenant, tenant, tenant, tenant, tenant).update();
+            owner.sql("INSERT INTO retail_categories (id, tenant_id, name) VALUES (gen_random_uuid(), ?, 'Bulbs')")
+                    .param(other)
+                    .update();
+
+            MigrateResult result =
+                    DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+
+            assertThat(result.success).isTrue();
+            assertThat(owner.sql(
+                                    "SELECT name || ' ' || code_prefix FROM retail_categories WHERE tenant_id = ? ORDER BY name")
+                            .param(tenant)
+                            .query(String.class)
+                            .list())
+                    // V120 (issue #698, ADR-109) puts the name in the display style, by case only.
+                    .containsExactly("Blub BLBA", "Bulbs BLB", "Phone Accessories PHA");
+            assertThat(owner.sql("SELECT code_prefix FROM retail_categories WHERE tenant_id = ?")
+                            .param(other)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("BLB");
+            assertThat(owner.sql("SELECT code FROM retail_products WHERE tenant_id = ? ORDER BY code")
+                            .param(tenant)
+                            .query(String.class)
+                            .list())
+                    .containsExactly("OLD-Blub", "OLD-Bulbs", "OLD-Phone accessories");
+            owner.sql("INSERT INTO retail_categories (id, tenant_id, name) VALUES (gen_random_uuid(), ?, 'TVs')")
+                    .param(tenant)
+                    .update();
+            assertThat(owner.sql("SELECT code_prefix FROM retail_categories WHERE tenant_id = ? AND name = 'TVs'")
+                            .param(tenant)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("TV");
+        }
+    }
+
+    /**
+     * V109 (issue #618, ADR-098) gives the eight default units to every retail business with no unit at all, and leaves a
+     * business that has a unit, a business without retail and a closed business exactly as they were.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates retail businesses across the default units backfill.
+     */
+    @Test
+    void defaultUnitsMigrationFillsOnlyRetailBusinessesWithNoUnit() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("109") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID empty = UUID.randomUUID();
+            UUID withUnit = UUID.randomUUID();
+            UUID lendingOnly = UUID.randomUUID();
+            UUID closed = UUID.randomUUID();
+            for (UUID id : List.of(empty, withUnit, lendingOnly, closed)) {
+                owner.sql("INSERT INTO tenants (id, slug, name, plan_id, status) VALUES (?, ?, 'Test Tenant V109', "
+                                + "'00000000-0000-4000-8000-000000000001', ?)")
+                        .params(
+                                id,
+                                "test-v109-" + id.toString().substring(0, 8),
+                                id.equals(closed) ? "closed" : "active")
+                        .update();
+                owner.sql("INSERT INTO tenant_modules (tenant_id, module_key) VALUES (?, ?)")
+                        .params(id, id.equals(lendingOnly) ? "lending" : "retail")
+                        .update();
+            }
+            owner.sql("INSERT INTO retail_units (id, tenant_id, name) VALUES (gen_random_uuid(), ?, 'piece')")
+                    .param(withUnit)
+                    .update();
+
+            // Stopped at V109: V121 (issue #709) gives every retail business the standard units it lacks, tested below.
+            MigrateResult result = flyway(postgres, "109").migrate();
+
+            assertThat(result.success).isTrue();
+            assertThat(owner.sql(
+                                    "SELECT name FROM retail_units WHERE tenant_id = ? AND created_by IS NULL ORDER BY name")
+                            .param(empty)
+                            .query(String.class)
+                            .list())
+                    .containsExactly("Box", "Kg", "Litre", "Metre", "Pack", "Pair", "Piece", "Set");
+            assertThat(owner.sql("SELECT name FROM retail_units WHERE tenant_id = ?")
+                            .param(withUnit)
+                            .query(String.class)
+                            .list())
+                    .containsExactly("piece");
+            for (UUID untouched : List.of(lendingOnly, closed)) {
+                assertThat(owner.sql("SELECT count(*) FROM retail_units WHERE tenant_id = ?")
+                                .param(untouched)
+                                .query(Long.class)
+                                .single())
+                        .isZero();
+            }
+        }
+    }
+
+    /**
+     * V121 (issue #709, ADR-110) gives every retail business the standard units it lacks, matching its own spellings (Pcs is
+     * Piece, Doz is Dozen), and touches nothing it made; a business without retail and a closed business get nothing.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates retail businesses across the standard units backfill.
+     */
+    @Test
+    void standardUnitsMigrationAddsOnlyWhatEachShopLacks() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("121") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID empty = UUID.randomUUID();
+            UUID own = UUID.randomUUID();
+            UUID lendingOnly = UUID.randomUUID();
+            UUID closed = UUID.randomUUID();
+            for (UUID id : List.of(empty, own, lendingOnly, closed)) {
+                owner.sql("INSERT INTO tenants (id, slug, name, plan_id, status) VALUES (?, ?, 'Test Tenant V121', "
+                                + "'00000000-0000-4000-8000-000000000001', ?)")
+                        .params(
+                                id,
+                                "test-v121-" + id.toString().substring(0, 8),
+                                id.equals(closed) ? "closed" : "active")
+                        .update();
+                owner.sql("INSERT INTO tenant_modules (tenant_id, module_key) VALUES (?, ?)")
+                        .params(id, id.equals(lendingOnly) ? "lending" : "retail")
+                        .update();
+            }
+            UUID pcs = UUID.randomUUID();
+            for (String name : List.of("Pcs", "Doz", "kgs", "Bulb", "Pack")) {
+                owner.sql("INSERT INTO retail_units (id, tenant_id, name, active, version) VALUES (?, ?, ?, ?, 3)")
+                        .params(name.equals("Pcs") ? pcs : UUID.randomUUID(), own, name, !name.equals("Doz"))
+                        .update();
+            }
+
+            MigrateResult result =
+                    DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+
+            assertThat(result.success).isTrue();
+            List<String> standard = List.of(
+                    "Bag", "Bale", "Box", "Bundle", "Carton", "Crate", "Dozen", "Gram", "Kg", "Litre", "Metre", "Ml",
+                    "Packet", "Pair", "Piece", "Roll", "Set");
+            assertThat(owner.sql("SELECT name FROM retail_units WHERE tenant_id = ? ORDER BY name")
+                            .param(empty)
+                            .query(String.class)
+                            .list())
+                    .containsExactlyElementsOf(standard);
+            List<String> added = owner.sql(
+                            "SELECT name FROM retail_units WHERE tenant_id = ? AND created_by IS NULL AND version = 1")
+                    .param(own)
+                    .query(String.class)
+                    .list();
+            assertThat(added)
+                    .containsExactlyInAnyOrderElementsOf(standard.stream()
+                            .filter(n -> !List.of("Piece", "Dozen", "Kg").contains(n))
+                            .toList());
+            assertThat(owner.sql("SELECT name || ' ' || active || ' ' || version FROM retail_units"
+                                    + " WHERE tenant_id = ? AND version = 3")
+                            .param(own)
+                            .query(String.class)
+                            .list())
+                    .as("the shop's own units are kept as they were, a switched off one too")
+                    .containsExactlyInAnyOrder("Bulb true 3", "Doz false 3", "Pack true 3", "Pcs true 3", "kgs true 3");
+            assertThat(owner.sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.unit.created'"
+                                    + " AND actor_kind = 'system' AND data -> 'after' ->> 'source' = 'V121'")
+                            .param(own)
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(added.size());
+            for (UUID untouched : List.of(lendingOnly, closed)) {
+                assertThat(owner.sql("SELECT count(*) FROM retail_units WHERE tenant_id = ?")
+                                .param(untouched)
+                                .query(Long.class)
+                                .single())
+                        .isZero();
+            }
         }
     }
 

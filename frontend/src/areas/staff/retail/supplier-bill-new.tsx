@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, createLazyRoute, useNavigate } from '@tanstack/react-router';
+import { createLazyRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { businessToday, retail, type SupplierBillMatch } from '../../../api/retail';
 import { useStaff } from '../context';
@@ -12,6 +12,8 @@ import {
 } from './payables-state';
 import { SupplierField, useSuppliers, type SupplierOption } from './purchasing-ui';
 import { Gate, Problem, money } from './ui';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { Hint } from '../../../app/ui/Hint';
 
 // The supplier invoice form (the purchasing capability, ADR-033, issue #198). Choose the supplier and the goods received from them
 // that the invoice is for, then type what the invoice says: its number, dates, the supplier's price and the total as printed. The
@@ -144,7 +146,8 @@ export function BillFormView({ form, suppliers, loadingLines, match, checking, m
       <input id="bill-note" value={form.note} maxLength={300} onChange={(e) => onChange({ ...form, note: e.target.value })} />
       {problem && ticked(form).length > 0 && <p role="alert" className="rt-flag">{problem}</p>}
       <Problem error={error} />
-      <button type="submit" className="rt-primary" disabled={problem !== null || busy || checking} data-tour="bill-save">{busy ? 'Saving' : 'Save supplier invoice'}</button>
+      <BusyButton type="submit" className="rt-primary" busy={busy === true} disabled={checking} notReady={problem !== null} data-tour="bill-save">Save supplier invoice</BusyButton>
+
     </form>
   );
 }
@@ -186,11 +189,11 @@ export function SupplierBillNewPage() {
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       void navigate({ to: '/staff/retail/supplier-bills/$billId', params: { billId: bill.id ?? '' } });
     },
+    meta: { success: 'Invoice saved' },
   });
   return (
     <Gate screen="supplierBills" title="New supplier invoice">
-      <p><Link to="/staff/retail/supplier-bills">Back to supplier invoices</Link></p>
-      <p className="hint">Record an invoice against goods you have already received. Use the number, the dates and the total printed on the invoice.</p>
+      <Hint>Record an invoice against goods you have already received. Use the number, the dates and the total printed on the invoice.</Hint>
       <BillFormView
         form={form}
         suppliers={suppliers}

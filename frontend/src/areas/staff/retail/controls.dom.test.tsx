@@ -112,6 +112,28 @@ describe('the cards', () => {
     expect(await screen.findByText(/48 sales entered, UGX 14,400 sold/)).toBeTruthy();
   });
 
+  it('show credit written off with its rate, and open its records onto the sale with who wrote it off', async () => {
+    summary.mockImplementation(async () => ({ ...SUMMARY, cards: [...(SUMMARY.cards ?? []), card('credit_writeoffs', 2, { value_minor: 3000, rate_per_100: '4.2', previous_count: 0, share_of_sales_bp: 2083 })] }));
+    records.mockImplementation(async () => ({ metric: 'credit_writeoffs', currency: 'UGX', items: [{ ...RECORD, reason: 'Test buyer moved away', value_minor: 2000 }], has_more: false }));
+    show();
+    const written = (await screen.findByText('Credit written off', { selector: '.an-stat-label' })).closest('button') as HTMLElement;
+    expect(written.textContent).toContain('Worth UGX 3,000');
+    expect(written.textContent).toContain('4.2 per 100 sales');
+    expect(written.textContent).toContain('Up: 2, none in the 3 days before');
+    expect(written.textContent).toContain('20.83% of the value of sales');
+    fireEvent.click(written);
+    expect(await screen.findByRole('heading', { name: 'Credit written off' })).toBeTruthy();
+    fireEvent.click(await head(new RegExp(`^${GAYAZA}`)));
+    fireEvent.click(await screen.findByRole('button', { name: 'Show the records here' }));
+    const row = (await screen.findByText('S-0001')).closest('li') as HTMLElement;
+    expect(row.textContent).toContain('Written off by Test Admin One');
+    expect(row.textContent).toContain('Reason: Test buyer moved away');
+    expect(row.textContent).toContain('UGX 2,000');
+    expect(records).toHaveBeenLastCalledWith('credit_writeoffs', expect.objectContaining({ branchId: 'b1' }), 0);
+    fireEvent.click(screen.getByRole('button', { name: 'Open sale S-0001' }));
+    await waitFor(() => expect(getSale).toHaveBeenCalledWith('sale-1'));
+  });
+
   it('say so when a card depends on a capability that is off, and leave out the card of cost for someone who may not read profit', async () => {
     show();
     const returns = (await screen.findByText('Goods taken back', { selector: '.an-stat-label' })).closest('button') as HTMLElement;
@@ -126,7 +148,8 @@ describe('the cards', () => {
     const first = summary.mock.calls[0]?.[0];
     expect(first?.withinMinutes).toBe(10);
     expect((first?.from ?? '') <= (first?.to ?? '')).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Today' }));
+    // The days are the one PeriodPicker (issue #526): a Segmented, whose options are radios.
+    fireEvent.click(screen.getByRole('radio', { name: 'Today' }));
     await waitFor(() => {
       const last = summary.mock.calls.at(-1)?.[0];
       expect(last?.from).toBe(last?.to);
@@ -284,7 +307,7 @@ describe('the CSV of what is on screen', () => {
 describe('who may open the page', () => {
   it('shuts it to a sales person', () => {
     show(mockMe('sales'));
-    expect(screen.getByText('You do not have access to this page.')).toBeTruthy();
+    expect(screen.getByText(/^You do not have access to this page\. The owner or an administrator/)).toBeTruthy();
     expect(summary).not.toHaveBeenCalled();
   });
 });
