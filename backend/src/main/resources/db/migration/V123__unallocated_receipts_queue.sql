@@ -1,9 +1,9 @@
 -- V123: the unallocated receipts queue (extras slice A5/7, first part, issue #224; ADR-035 and its amendment of 2026-10-19 for
--- slice A5; docs/specs/client-extras.md sections 3.7, 3.8 and 3.16; FR-PAY-04). Flyway runs with outOfOrder off: V123 (the onboarding
+-- slice A5; docs/specs/client-extras.md sections 3.7, 3.8 and 3.16; FR-PAY-04). Flyway runs with outOfOrder off: V122 (the onboarding
 -- link fix, #747) comes first, so this file takes V123, the next. The number is checked again at merge time against what is then on main.
 --
 -- Expand only, safe on a populated database. Six things and nothing else (4 to 6 belong to the governed reversal of a gateway
--- payment, the same slice; the nightly reconciliation of the second part of #224 takes V123):
+-- payment, the same slice; the nightly reconciliation of the second part of #224 takes V124):
 --
 --   1. `unallocated_receipts` stops being append-only: a receipt that is `open` may end exactly once, as `allocated` (the money
 --      became a loan repayment or a savings deposit through the servicing ports) or as `refunded` (the money went back out),
