@@ -7427,6 +7427,21 @@
           }
         }
       },
+      "PaymentLinkText" : {
+        "properties" : {
+          "already_sent" : {
+            "type" : "boolean"
+          },
+          "expires_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "intent_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }
+      },
       "PaymentMethodMapping" : {
         "properties" : {
           "account_code" : {
@@ -9399,6 +9414,13 @@
             "format" : "date-time",
             "type" : "string"
           },
+          "files" : {
+            "description" : "The files of a ready run that has not expired: one, or for a pack the PDF and the workbook",
+            "items" : {
+              "$ref" : "#/components/schemas/ReportRunFile"
+            },
+            "type" : "array"
+          },
           "finished_at" : {
             "format" : "date-time",
             "type" : "string"
@@ -9447,6 +9469,19 @@
             "type" : "string"
           },
           "title" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ReportRunFile" : {
+        "description" : "The files of a ready run that has not expired: one, or for a pack the PDF and the workbook",
+        "properties" : {
+          "document_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "format" : {
+            "description" : "json, csv, pdf or xlsx",
             "type" : "string"
           }
         }
@@ -20045,8 +20080,15 @@
             "format" : "uuid",
             "type" : "string"
           },
+          "code" : {
+            "description" : "The item's code, name and unit, so a list across items needs no lookup (#145)",
+            "type" : "string"
+          },
           "correction" : {
             "$ref" : "#/components/schemas/RetailStockMovementCorrection"
+          },
+          "description" : {
+            "type" : "string"
           },
           "historical" : {
             "type" : "boolean"
@@ -20057,6 +20099,11 @@
           },
           "kind" : {
             "type" : "string"
+          },
+          "line_cost_minor" : {
+            "description" : "The quantity, without its sign, at the unit cost, rounded half up as the posting is (#145); present only with retail.profit.read",
+            "format" : "int64",
+            "type" : "integer"
           },
           "note" : {
             "type" : "string"
@@ -20077,6 +20124,9 @@
             "type" : "string"
           },
           "source_type" : {
+            "type" : "string"
+          },
+          "unit" : {
             "type" : "string"
           },
           "unit_cost_minor" : {
@@ -33144,6 +33194,34 @@
         "tags" : [ "payments" ]
       }
     },
+    "/api/v1/payments/intents/{intent_id}/sms" : {
+      "post" : {
+        "operationId" : "textPaymentLink",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "intent_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaymentLinkText"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Send the payment link to the payer's number by SMS, once per intent, while it is open; refused when SMS or collections are off",
+        "tags" : [ "payments" ]
+      }
+    },
     "/api/v1/payments/merchant-account" : {
       "delete" : {
         "operationId" : "removeMerchantAccount",
@@ -44857,6 +44935,17 @@
           "schema" : {
             "format" : "date",
             "type" : "string"
+          }
+        }, {
+          "description" : "Only these movement kinds, for example usage and damage (#145)",
+          "in" : "query",
+          "name" : "kind",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
           }
         }, {
           "in" : "query",

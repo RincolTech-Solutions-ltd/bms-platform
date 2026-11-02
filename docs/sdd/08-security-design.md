@@ -459,7 +459,7 @@ Notes:
   an ID number. The daily digest settings need `core.settings.manage`.
 - Client extras (issue #210): the permissions `lending.advisor.use` and `lending.advisor.configure` are in the matrix above (migration `V55`, issue #226); `core.payments.manage` is not yet (its migration adds the row, with #224). The grants: `core.payments.manage`
   to the tenant admin and accountant, `lending.advisor.use` to the tenant admin, branch manager, accountant and auditor,
-  `lending.advisor.configure` to the tenant admin. `core.payments.collect` starts a gateway collection (the loan page offers "Collect by mobile money or card" to a holder of it together with `lending.loans.read`, on an active loan; slice #216, and the savings account page offers it with `lending.savings.read` on an active or dormant account; slice #219) and `core.payments.manage` uploads the
+  `lending.advisor.configure` to the tenant admin. `core.payments.collect` starts a gateway collection (the loan page offers "Collect by mobile money or card" to a holder of it together with `lending.loans.read`, on an active loan; slice #216, and the savings account page offers it with `lending.savings.read` on an active or dormant account; slice #219), and in the intent's branch also texts an open payment link to the payer once per intent, at most 3 a member an hour (`POST /payments/intents/{id}/sms`, slice #231; no new permission), and `core.payments.manage` uploads the
   merchant statement and reads the reconciliation (ADR-035); switching collections on needs `core.settings.manage`. The
   AI assistant (ADR-037) needs `lending.advisor.use` to read the brief and ask, `lending.advisor.configure` to read the
   call log and set caps, and `core.settings.manage` to switch it on after the acknowledgement. The stored daily brief covers every branch, so it is returned only to a user whose scope covers every branch of the tenant in `lending.advisor.use`, `lending.insights.read` and `lending.insights.all_officers` and who holds the last (a branch manager holds all officers for their own branches only, so is not one); everyone else gets the automatic summary computed for their own scope. The tenant's SMS settings (its own switch with the acknowledgement, the sender
@@ -495,6 +495,25 @@ Notes:
   The weekly copy emailed to the Owner leaves out the columns of personal data (members' phones, ID numbers, dates of birth
   and villages, the arrears phone, customers' and suppliers' contacts); they are only in the full workbook downloaded after
   sign-in (ADR-074 decision 6).
+  Built (extras slice D5, issue #229): the monthly pack `lending.monthly_pack` runs under `lending.reports.portfolio` and the permission
+  of each of its eight reports (`lending.reports.collections`, `lending.reports.members`, `lending.reports.compliance`), with
+  `lending.insights.read`; a requester missing any is refused 403 and does not see the pack in the catalogue, and can still run the
+  reports they hold one at a time. Each report in the pack freezes its own scope as when it is run alone (names, phones and owner
+  details by branch, the requester's own loans without `lending.insights.all_officers`), and a download of either file of the pack is
+  refused when any report's check fails. The ready email names the pack and its date only; no file is attached. No permission and no
+  seeded row are added.
+  Built (extras slice D4, issue #225): `lending.collateral_register` runs under `lending.reports.members` in the branches the requester
+  holds it in, prints who owns an item (the member number and name, the reference, which can be an ID number, a plate or a title
+  number, and the description) only where they hold `lending.members.read` in the member's branch, and without
+  `lending.insights.all_officers` lists only the items securing the requester's own loans and names only those loans; all of it is
+  frozen with the run and checked again at download.
+  `lending.regulatory_summary` runs under `lending.reports.compliance` with `lending.insights.read` and its scope. No permission and no
+  seeded row are added.
+  Built (extras slice D3, issue #222): `lending.disbursements` runs under `lending.reports.portfolio`, and
+  `lending.expected_vs_collected`, `lending.arrears_list` and `lending.officer_performance` under `lending.reports.collections`; each also
+  needs `lending.insights.read`, and without `lending.insights.all_officers` covers only the caller's own loans. The arrears list prints a
+  borrower's name only in the branches where the requester holds `lending.members.read` and the phone in full only where they hold
+  `lending.members.contact`, both frozen with the run and checked again at download. No permission and no seeded row are added.
   Built (extras slice D2, issue #217): the PDF and Excel renderers and `lending.portfolio_outstanding` add no permission and no seeded
   row either (both lending reports run under `lending.reports.portfolio`); `PermissionMatrixIT` still passes and this matrix equals the
   seeds. A spreadsheet cell is never a formula: text is written as a string cell and text that begins with `=`, `+`, `-`, `@`, a tab or a

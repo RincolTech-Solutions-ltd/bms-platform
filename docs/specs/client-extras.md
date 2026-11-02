@@ -710,6 +710,28 @@ overdue" with no count.
 Template `payment.link`: the hosted order URL for an open intent, sent from the collection screen to
 the payer's number, category `transactional`, once per intent, only while the intent is open.
 
+Built in slice #231 (no migration). Where the build sharpens the text above:
+
+- **The route is the payments module's.** `POST /payments/intents/{intent_id}/sms`, `core.payments.collect` in the intent's
+  branch. It queues through `SmsEvents` like the money events; the member for the opt-out comes from the purpose handler's new
+  `memberOf` (a loan's borrower, an account's holder), so the payments core still names no vertical.
+- **Once per intent.** The outbox key is per intent and member; a repeat answers `already_sent: true` and writes nothing.
+- **Open only, and it expires with the intent.** `pending` with a link and before `expires_at`; a transactional message now
+  takes the earlier of its own expiry and its usual hour.
+- **Polite refusals, nothing written.** `collections_disabled`, `sms_off` (either switch off, or a cap of 0),
+  `member_opted_out` (an opt-out of all SMS; a reminders-only opt-out does not block a link), and 429 `too_many_link_texts`
+  above 3 link texts per member in an hour and 429 `link_text_daily_limit` above 200 per business in 24 hours (a user who
+  types one number on many payments cannot spend the business's credit on it), both counted from the audit rows through
+  the index `audit_log_by_time`, under one lock per business. The intent is read again under its row lock before the
+  open check. A text the channel
+  would not queue (a switch turned off in between, a cap reached) is refused `link_text_not_queued`: `already_sent` is
+  answered only when this intent's audit row exists, which is written in the same transaction as the outbox row.
+- **Audited** `core.payments.intent.link_texted` with the member id, never the number.
+- **The wording.** `{tenant_name}: Pay {currency} {amount} for {reference} at {link}`, where `reference` is `loan <loan_no>` or
+  `savings account <account_no>` with any dash written as a space (`loan LN HQ 000123`), so the words of the text carry
+  no dash; only the provider's address may. No name, no balance. The hosted address is about 113 characters, so the text is two GSM-7
+  segments; it is not one of the wordings a tenant can override (section 4.16).
+
 ### 4.14 Threat model (SMS)
 
 | Threat | Control |
@@ -1320,6 +1342,12 @@ reports in the order above) and one workbook (a sheet per report plus Parameters
 every report's permission; otherwise the pack is refused and the reports can still be run singly. Loan
 officers see their own loans in the collections and officer reports.
 
+**As built in slice D5 (issue #229).** `lending.monthly_pack`, offered as the format `pack`: the eight reports (collections is two),
+each prepared with its own rules and queried in the run's one snapshot, as one merged PDF (cover, contents with start pages, sign off,
+then each report with "part n of 8" in its footer and blanks for missing figures) and one workbook (Parameters, then every report's sheets
+numbered by part). No migration and no permission: the second file is a second `documents` row of the run, listed under `files`. The
+requester is told by a push notice and an email. The Reports screen became the report centre. Chapter 14 section 14.10 has the details.
+
 ### 6.5 Catalogue and permissions
 
 `GET /reports` lists what the user may run (FR-RPT-01). No new permission is needed: the existing report
@@ -1369,10 +1397,23 @@ finishes on that heap but fills the old generation, so it stays a setting for ho
 Chapter 14 sections 14.3 and 14.4. The collections equation (total collected equals collected on due plus
 arrears recovered plus prepayments plus penalties plus overpayments) is printed and asserted.
 
+**As built in slice D3 (issue #222).** `lending.expected_vs_collected`, `lending.arrears_list`, `lending.disbursements` and
+`lending.officer_performance` as PDF, Excel, CSV and JSON, through four new methods of `InsightsFigures` over `FlowFigures` (grouped twins
+of the insights queries) and the positions of `lending.par`; no migration and no permission. The equation prints recoveries on written-off
+loans as a part of its own, and its first part is what was paid in the range on items due in it (collected on due also counts earlier
+payments toward those items). Chapter 14 section 14.10 lists the columns and the differences; the ADR-038 amendment for #222 what building
+settled.
+
 ### 6.10 Collateral register and regulator summary
 
 Chapter 14 sections 14.5 and 14.7. The regulator summary carries the cover note "Data summary. Not a
 filed return." until the client's return formats are known (scope question 5).
+
+**As built in slice D4 (issue #225).** `lending.collateral_register` and `lending.regulatory_summary` as PDF, Excel, CSV and JSON,
+through the new public port `RegisterFigures` of `lending.insights`; no migration and no permission. The register is the items as they
+stand when it is made (no `as_at`), with a table of flag counts first and the items after, cut at the PDF row cap with the pointer to the
+Excel file. The summary's book, PAR 30 and PAR 90 are `InsightsFigures.par`'s own. Chapter 14 sections 14.5 and 14.7 list the columns and
+the rules.
 
 ### 6.11 Operations and threats
 

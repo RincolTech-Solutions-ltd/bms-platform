@@ -2793,6 +2793,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/payments/intents/{intent_id}/sms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send the payment link to the payer's number by SMS, once per intent, while it is open; refused when SMS or collections are off */
+        post: operations["textPaymentLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/payments/merchant-account": {
         parameters: {
             query?: never;
@@ -11395,6 +11412,13 @@ export interface components {
             subject_id?: string;
             subject_type?: string;
         };
+        PaymentLinkText: {
+            already_sent?: boolean;
+            /** Format: date-time */
+            expires_at?: string;
+            /** Format: uuid */
+            intent_id?: string;
+        };
         PaymentMethodMapping: {
             account_code?: string;
             /**
@@ -12332,6 +12356,8 @@ export interface components {
              * @description When the file is deleted
              */
             expires_at?: string;
+            /** @description The files of a ready run that has not expired: one, or for a pack the PDF and the workbook */
+            files?: components["schemas"]["ReportRunFile"][];
             /** Format: date-time */
             finished_at?: string;
             format?: string;
@@ -12358,6 +12384,13 @@ export interface components {
             /** @description queued, running, ready, failed or cancelled */
             status?: string;
             title?: string;
+        };
+        /** @description The files of a ready run that has not expired: one, or for a pack the PDF and the workbook */
+        ReportRunFile: {
+            /** Format: uuid */
+            document_id?: string;
+            /** @description json, csv, pdf or xlsx */
+            format?: string;
         };
         ReportRunRequest: {
             /** @description json, csv, pdf or xlsx */
@@ -17986,11 +18019,19 @@ export interface components {
             branch_id?: string;
             /** Format: uuid */
             by?: string;
+            /** @description The item's code, name and unit, so a list across items needs no lookup (#145) */
+            code?: string;
             correction?: components["schemas"]["RetailStockMovementCorrection"];
+            description?: string;
             historical?: boolean;
             /** Format: uuid */
             id?: string;
             kind?: string;
+            /**
+             * Format: int64
+             * @description The quantity, without its sign, at the unit cost, rounded half up as the posting is (#145); present only with retail.profit.read
+             */
+            line_cost_minor?: number;
             note?: string;
             /** Format: uuid */
             product_id?: string;
@@ -18000,6 +18041,7 @@ export interface components {
             /** Format: uuid */
             source_id?: string;
             source_type?: string;
+            unit?: string;
             /**
              * Format: int64
              * @description Present only with retail.profit.read
@@ -25730,6 +25772,28 @@ export interface operations {
             };
         };
     };
+    textPaymentLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                intent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentLinkText"];
+                };
+            };
+        };
+    };
     getMerchantAccount: {
         parameters: {
             query?: never;
@@ -33193,6 +33257,8 @@ export interface operations {
                 product_id?: string;
                 from?: string;
                 to?: string;
+                /** @description Only these movement kinds, for example usage and damage (#145) */
+                kind?: string[];
                 newest_first?: boolean;
                 limit?: number;
                 cursor?: string;

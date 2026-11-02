@@ -188,6 +188,25 @@ outside this system need `core.payments.manage` (tenant admin, accountant) **in 
    (`lending_loan_transactions_manual_reference`, `lending_savings_transactions_manual_reference`); drop the function `payment_statement_rows_guard()` (its trigger goes with the statement rows table); and delete the permission `core.payments.manage` and its two role rows. The fees already posted are ordinary ledger entries (source type `statement_fee`) and stay; they are reversed only by the accountant, one entry at a time, if a statement was wrong, and the right fee is posted by manual journal entry (step 2).
 6. **Deploying V124 on a large business.** The four indexes V124 adds to existing tables are built without `CONCURRENTLY`, inside the migration's transaction. Each holds a SHARE lock on its table until the commit: while they build, new orders and status changes on `payment_intents`, and repayments and deposits on `lending_loan_transactions` and `lending_savings_transactions`, wait (reads go on). `lock_timeout` bounds only the wait for the lock, not the build. Build time grows with the rows of those tables, so before deploying count them (`SELECT count(*) FROM payment_intents`, and the same for the two transaction tables, as the owner role): for the first lenders it is well under a second, but where any table holds millions of rows deploy in a quiet window (outside office hours, not near month end) and tell the lenders' staff that payments may pause for the length of the build. If that is not acceptable, ask the developer for a follow-up migration that builds the indexes `CONCURRENTLY` instead.
 
+## 4g. Sending the payment link by text message (issue #231)
+
+On the loan and savings collection panels, "Send the link by text message" texts an open payment link to the payer's number
+(`POST /payments/intents/{id}/sms`, template `payment.link`, category transactional). It needs nothing switched on of its own:
+it works only where collections are on (4d step 1) **and** both SMS switches are on (the operator's and the business's own,
+`docs/specs/client-extras.md` section 4.16). Nothing is switched on for any tenant by this change; the SMS add-on stays off by
+default, and on staging the SMS mode is `sink` against the provider's sandbox.
+
+1. **Once per payment.** A second press, or a second person, sends nothing and the screen says it went before. To send again,
+   make a new payment link.
+2. **Only while open.** A link that expired, or a payment that was paid or cancelled, is refused (`intent_not_open`); the text
+   itself expires with the payment, so the outbox never sends a lapsed link.
+3. **Refusals in plain words, nothing written:** `collections_disabled`, `sms_off`, `member_opted_out` (the member asked for no
+   SMS at all; a reminders-only opt-out does not block it), `too_many_link_texts` above 3 link texts to one member in an hour,
+   `link_text_daily_limit` above 200 link texts for the business in 24 hours, and `link_text_not_queued` when the SMS channel
+   would not take it (never shown as sent).
+4. **Where to look.** The audit log (`core.payments.intent.link_texted`, with the member id and never the number), the outbox
+   row (`template_key = 'payment.link'`) and its `sms_deliveries` row, as for any SMS.
+
 ## 4a. Rotating the data key
 
 The lenders' stored credentials and every user's second-factor seed (and the platform operators') are sealed with `BMS_DATA_KEY`; each box carries
@@ -284,8 +303,16 @@ minutes, pending over 24 hours, provider 401 or 5xx rate, breaker open, reversal
   save of that account.
 - **A key that cannot be read is refused.** If a saved account's key box cannot be opened (a data key dropped from `BMS_DATA_KEY_PREVIOUS` before
   the re-seal finished, or a damaged row) the account counts as refused: it is not a verified account, no intent is created for it, a test marks
-  it `failed` (`account_not_allowed`), and the host logs one line `a payment account's consumer key could not be opened`. Restore the key in
-  `BMS_DATA_KEY_PREVIOUS` (section 4a) and the lender tests again.
+  it `failed` (`account_unreadable`, issue #311), and the host logs the line `a payment account's consumer key could not be opened` with the
+  tenant id, at most once an hour per tenant. Restore the key in `BMS_DATA_KEY_PREVIOUS` (section 4a) and the lender tests again.
+- **Duplicate account found on re-seal.** If the re-seal job logs `payment accounts of tenant <id> could not be re-sealed: duplicate account
+  found`, the new digest of that tenant's key is already held by another business's account: the same merchant account is connected twice
+  (for example a row saved before #310 with a key that differs only in letter case). Only a clash on the key digest
+  (`payment_gateway_accounts_consumer_key_hmac_key`) in the payment accounts part gives this line; any other failure logs its type. The
+  tenant's accounts are left as they are and the run counts a failure. Find the two businesses from the tenant id, ask which one owns the
+  merchant account, release the other one's account from the console, and the next run finishes.
+- **An unreadable key, from the lender's side.** Test connection says the saved key and secret could not be read. The lender can paste them
+  again and test (a save seals them anew and never opens the old box); restoring `BMS_DATA_KEY_PREVIOUS` fixes every such account at once.
 - **Intent creation and a key change.** An intent reads the lender's account row `FOR SHARE` in the transaction that records it; saving a new
   key holds the same row `FOR UPDATE`. So an intent is created under the merchant that is current when it commits, never under the one a key
   change is replacing.

@@ -464,6 +464,27 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   by branch, product or officer) are offered in all four formats, from `InsightsFigures.par` and `.portfolio`, with tests that every group
   equals the insights endpoints for the same filter and caller. `ReportMemoryIT` runs both reports as PDF and Excel on the 224 MB
   heap. The Reports screen offers the PDF first. Visual check: `make document-samples` and `docs/ui/report-samples/`.
+- **Built (extras slice D5, issue #229, ADR-038 amendment):** no migration and no permission. The monthly pack `lending.monthly_pack`
+  (format `pack`): the eight lending reports for one month, every one prepared with its own rules (names, phones and owner details
+  per branch, an officer's own loans) and queried in one snapshot, rendered as one merged PDF (cover with the parameters, contents with
+  the page each report starts on, a sign off block; each report's footer says which part it is) and one workbook (Parameters, then
+  every report's sheets numbered by part); both files are documents of the run (`files` on the run), expire together and are
+  rechecked at download against every part. The requester needs every report's permission; a push and an email say the pack is
+  ready. `core.reporting` gains the public `ReportPack`; `core.documents` gains `pdfPages` and `mergePdfs`. The Reports screen is the
+  report centre: the pack first, the reports in groups, the runs with a filter, each file's download and Run again.
+  `LendingPackIT` proves the figures agree across the reports and with the insights page.
+- **Built (extras slice D4, issue #225, ADR-038 amendment):** no migration and no permission. `lending.collateral_register` (flag counts,
+  then every item with its valuation, custody, linked loans and flags: release overdue, imported and not verified, no valuation; cut at
+  the PDF row cap with the pointer to the workbook) and `lending.regulatory_summary` (cover note "Data summary. Not a filed return.";
+  borrowers by gender, the book by product with rates and by purpose, PAR 30 and 90 from `InsightsFigures.par`, disbursed, written off,
+  savings, investments, branches, staff), in all four formats, through the new public port `RegisterFigures` of `lending.insights`;
+  `LendingRegistersReportsIT` proves the flags, the row cap and that PAR equals `lending.par` and the insights page.
+- **Built (extras slice D3, issue #222, ADR-038 amendment):** no migration and no permission. `lending.expected_vs_collected` (expected,
+  collected on due, rate and the printed collections equation), `lending.arrears_list` (late loans by bucket with the last payment,
+  follow up and open promise; name and phone as the collection lists decide, frozen with the run), `lending.disbursements` (each loan,
+  upfront fees, average and median) and `lending.officer_performance`, in all four formats, through `InsightsFigures.collections`,
+  `.disbursements`, `.arrears` and `.officers` over `FlowFigures` (grouped twins of the insights queries); `LendingCollectionsReportsIT`
+  proves the hand-computed figures, the equation, the officer scope and that every total equals the insights page.
 - **Built (Download my data, issue #334 step 1, ADR-074, FR-RPT-09 to FR-RPT-11):** migration `V91` (`data_export_settings`,
   `data_export_weekly`, the permission `core.data_export.run` for `tenant_admin`, and `app_data_export_weekly_tenants`; the runner's definer functions stay as V90
   left them, so a business the operator suspended gets no run). The report `core.data_export` (`ReportDefinition.everyBusiness`: offered whatever `reports_enabled` says) writes
@@ -842,6 +863,15 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   answer; the Sell line's price field is Selling price, and the sale lines export sheet's price column too. Tests:
   `shop-here.dom.test.tsx`, `stock-cards.dom.test.tsx`, `layout/my-stock.layout.test.ts`, `design-guard.test.ts`,
   `glossary.test.ts`, `maths.test.ts`, `DataExportIT`.
+- **Built (Past usage and damage, issue #145, AppSheet "Damaged or used stock not sold"):** no migration and no permission.
+  `GET /retail/stock/movements` takes a repeatable `kind` filter (422 for an unknown or blank kind) and each row carries the
+  item's `code`, `description` and `unit`, and for a profit reader `line_cost_minor`, the value the screen shows as is. The page `/staff/retail/usage-history` (`usage-history.tsx`, `retail.stock.read`), linked
+  from Usage and damage, lists used and damaged stock newest first by date range, the Branch box and item, with the reason, and
+  the value at buying price only with `retail.profit.read`; tour `page-usage-history` v1, `page-usage` v3. The parity table
+  (`docs/specs/retail-ui-parity.md`) is refreshed. Each line is dated on the business clock, the day the server's from and to
+  filter by; an empty list offers Record usage or damage (or Show the last year without the usage permission). The known kinds
+  are `JdbcStockLedger.KINDS`, pinned to the table's check by `RetailPaymentsAndUsageIT`. Tests: `RetailPaymentsAndUsageIT`,
+  `usage-history.dom.test.tsx`, `tours-retail-reports.test.tsx`, `layout/usage-history.layout.test.ts`.
 
 ## Reading order
 
@@ -1309,6 +1339,11 @@ Pending (cite only as "pending ADR-NNN"):
 - ADR-012 Credit scoring model beyond the rules-based default
 - ADR-013 USSD aggregator (the SMS half is settled by ADR-036)
 - ADR-022 The cash book: expenses, banking and advances, likely partly core (ADR-020)
+- ADR-113 Shop words (written as Proposed, plan only, #683; not settled until the owner accepts it): one list of keys, one
+  label function, a `tenant_words` table of the changes only and a Words page; plan in `docs/specs/shop-words-plan.md`
+- ADR-114 Custom Home cards (written as Proposed, plan only, #684; not settled until the owner accepts it): stable card keys,
+  a `home_layouts` table per person with one business default, and Arrange home with buttons; plan in
+  `docs/specs/home-cards-plan.md`
 
 ## Team
 
