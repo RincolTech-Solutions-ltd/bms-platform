@@ -32,7 +32,7 @@ export function UploadStatement({ onUploaded }: { onUploaded: (s: PaymentStateme
       if (!file) throw new Error('Choose the statement file.');
       return statements.upload(file, file.name, from && to ? { from, to } : undefined);
     },
-    onSuccess: (detail) => onUploaded(detail, false),
+    onSuccess: (r) => onUploaded(r.detail, r.replayed),
     meta: { success: 'Statement uploaded' },
   });
   const problem = file ? fileProblem(file) : null;
@@ -158,6 +158,32 @@ export function StatementView({ detail, canMark }: { detail: PaymentStatementDet
   );
 }
 
+// JUSTIFICATION-A3: review item 12 asks for past statements to be reopened; statements.list and get had no screen.
+/** The statements uploaded before, newest first; one can be opened again to see how its lines matched. */
+export function PastStatements({ onOpen }: { onOpen: (detail: PaymentStatementDetail) => void }) {
+  const list = useQuery({ queryKey: ['payments', 'statements'], queryFn: statements.list });
+  const open = useMutation({ mutationFn: (id: string) => statements.get(id), onSuccess: onOpen });
+  const items = list.data ?? [];
+  return (
+    <section className="rt-card stack" aria-labelledby="stmt-past">
+      <h2 id="stmt-past">Statements uploaded before</h2>
+      {list.error && <p role="alert" className="alert alert-danger">{messageOf(list.error)}</p>}
+      {list.data && items.length === 0 && <p className="empty-state">No statement has been uploaded yet.</p>}
+      <ul className="stack list-plain">
+        {items.map((s) => (
+          <li key={s.id}>
+            {s.file_name}, {s.row_count} lines from {s.period_from} to {s.period_to}, uploaded {when(s.created_at)}{' '}
+            <BusyButton type="button" className="btn-ghost" busy={open.isPending && open.variables === s.id} onClick={() => s.id && open.mutate(s.id)}>
+              Open
+            </BusyButton>
+          </li>
+        ))}
+      </ul>
+      {open.error && <p role="alert" className="alert alert-danger">{messageOf(open.error)}</p>}
+    </section>
+  );
+}
+
 export function ReconciliationPage() {
   const { me } = useStaff();
   const queryClient = useQueryClient();
@@ -192,10 +218,17 @@ export function ReconciliationPage() {
           onUploaded={(detail, replayed) => {
             setUploaded({ detail, replayed });
             void queryClient.invalidateQueries({ queryKey: ['payments', 'reconciliation'] });
+            void queryClient.invalidateQueries({ queryKey: ['payments', 'statements'] });
           }}
         />
       )}
+      {uploaded?.replayed && (
+        <p role="status" className="alert alert-info">
+          This file was uploaded before, so nothing new was recorded. Its statement is shown below.
+        </p>
+      )}
       {uploaded && <StatementView detail={uploaded.detail} canMark={manage} />}
+      {manage && <PastStatements onOpen={(detail) => setUploaded({ detail, replayed: false })} />}
       <section className="rt-card stack" aria-labelledby="recon-report" data-tour="reconciliation-report">
         <h2 id="recon-report">Differences</h2>
         {report.error && <p role="alert" className="alert alert-danger">{messageOf(report.error)}</p>}
@@ -213,6 +246,15 @@ export function ReconciliationPage() {
           </p>
         )}
         {data?.run && findings.length === 0 && <p role="status" className="alert alert-success">Nothing differs.</p>}
+        {Object.keys(data?.counts_by_kind ?? {}).length > 0 && (
+          <ul className="list-plain" aria-label="How many of each">
+            {Object.entries(data?.counts_by_kind ?? {}).map(([kind, count]) => (
+              <li key={kind}>
+                {findingWords(kind).title}: <strong>{count}</strong>
+              </li>
+            ))}
+          </ul>
+        )}
         <ul className="stack list-plain">
           {findings.map((f) => {
             const words = findingWords(f.kind);
@@ -229,7 +271,7 @@ export function ReconciliationPage() {
             );
           })}
         </ul>
-        {data?.findings_truncated && <p className="hint">Only the first 500 are shown.</p>}
+        {data?.findings_truncated && <p className="hint">Only the first 500 are shown, the most serious first; the counts above are complete.</p>}
         {run.error && <p role="alert" className="alert alert-danger">{messageOf(run.error)}</p>}
         {manage && (
           <p>

@@ -149,12 +149,23 @@ export const statements = {
     return unwrap(await api.GET('/api/v1/payments/statements/{statement_id}', { params: { path: { statement_id: id } } }), 'Could not load the statement.');
   },
 
-  /** Uploads the CSV. A file with an unreadable line is refused whole: the FormError carries a message per line. */
-  async upload(file: Blob, fileName: string, covered?: { from: string; to: string }): Promise<PaymentStatementDetail> {
-    return postFile<PaymentStatementDetail>('/api/v1/payments/statements', file, fileName, covered ? { covered_from: covered.from, covered_to: covered.to } : {});
+  /**
+   * Uploads the CSV. A file with an unreadable line is refused whole: the FormError carries a message per line. The same file again is the
+   * statement already uploaded (200 instead of 201): `replayed` says so.
+   */
+  async upload(file: Blob, fileName: string, covered?: { from: string; to: string }): Promise<{ detail: PaymentStatementDetail; replayed: boolean }> {
+    let status = 0;
+    const detail = await postFile<PaymentStatementDetail>(
+      '/api/v1/payments/statements',
+      file,
+      fileName,
+      covered ? { covered_from: covered.from, covered_to: covered.to } : {},
+      { onStatus: (s) => (status = s) },
+    );
+    return { detail, replayed: status === 200 };
   },
 
-  /** Marks a line no order of ours has as money for something outside this system; it is no longer reported. */
+  /** Asks to mark a line no order of ours has as outside this system: a second person confirms it before it stops being reported. */
   async markOutside(statementId: string, rowNo: number, note: string): Promise<PaymentStatementRow> {
     return unwrap(
       await api.POST('/api/v1/payments/statements/{statement_id}/rows/{row_no}/outside-system', {

@@ -51,6 +51,7 @@ const MANAGER = ['core.payments.read', 'core.payments.manage'];
 
 beforeEach(() => {
   reconciliation.latest.mockResolvedValue(report);
+  statements.list.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -66,6 +67,8 @@ describe('the report', () => {
     expect(screen.getByText('Entered by hand and also paid online')).toBeTruthy();
     expect(screen.getByText(/CONF-TEST-1/)).toBeTruthy();
     expect(screen.getAllByTestId('finding')).toHaveLength(2);
+    // The counts of every kind are shown, so a difference beyond the first 500 rows is never out of sight.
+    expect(screen.getByRole('list', { name: 'How many of each' }).textContent).toContain('Paid but not recorded: 1');
   });
 
   it('says when a run could not read everything and shows no business-wide counts to a branch reader', async () => {
@@ -109,12 +112,15 @@ describe('the statement upload', () => {
 
   it('uploads a CSV and shows how each line matched and what fee was recorded', async () => {
     statements.upload.mockResolvedValue({
-      statement: { id: 's1', file_name: 'statement.csv', row_count: 2, period_from: '2026-10-16', period_to: '2026-10-16', currency: 'UGX', matched_count: 1, different_count: 0, unmatched_count: 1, fees_posted_minor: 5200 },
-      rows: [
-        { row_no: 1, confirmation_code: 'CONF-TEST-1', amount_minor: 520000, fee_minor: 5200, match_status: 'matched', fee_status: 'posted' },
-        { row_no: 2, confirmation_code: 'CONF-TEST-9', amount_minor: 70000, fee_minor: 0, match_status: 'unmatched', fee_status: 'none' },
-      ],
-      rows_truncated: false,
+      detail: {
+        statement: { id: 's1', file_name: 'statement.csv', row_count: 2, period_from: '2026-10-16', period_to: '2026-10-16', currency: 'UGX', matched_count: 1, different_count: 0, unmatched_count: 1, fees_posted_minor: 5200 },
+        rows: [
+          { row_no: 1, confirmation_code: 'CONF-TEST-1', amount_minor: 520000, fee_minor: 5200, match_status: 'matched', fee_status: 'posted' },
+          { row_no: 2, confirmation_code: 'CONF-TEST-9', amount_minor: 70000, fee_minor: 0, match_status: 'unmatched', fee_status: 'none' },
+        ],
+        rows_truncated: false,
+      },
+      replayed: false,
     });
     shell(MANAGER);
     fireEvent.change(await screen.findByLabelText('Statement file (CSV)'), { target: { files: [csv()] } });
@@ -146,9 +152,12 @@ describe('the statement upload', () => {
 
   it('lets a manager mark a line no payment of ours has as outside this system, with a note', async () => {
     statements.upload.mockResolvedValue({
-      statement: { id: 's1', file_name: 'statement.csv', row_count: 1, period_from: '2026-10-16', period_to: '2026-10-16', currency: 'UGX', matched_count: 0, different_count: 0, unmatched_count: 1, fees_posted_minor: 0 },
-      rows: [{ row_no: 1, confirmation_code: 'CONF-TEST-9', amount_minor: 70000, fee_minor: 0, match_status: 'unmatched', fee_status: 'none', reviewed_outside: false }],
-      rows_truncated: false,
+      detail: {
+        statement: { id: 's1', file_name: 'statement.csv', row_count: 1, period_from: '2026-10-16', period_to: '2026-10-16', currency: 'UGX', matched_count: 0, different_count: 0, unmatched_count: 1, fees_posted_minor: 0 },
+        rows: [{ row_no: 1, confirmation_code: 'CONF-TEST-9', amount_minor: 70000, fee_minor: 0, match_status: 'unmatched', fee_status: 'none', reviewed_outside: false }],
+        rows_truncated: false,
+      },
+      replayed: false,
     });
     statements.markOutside.mockResolvedValue({ row_no: 1, reviewed_outside: false, outside_awaiting_confirmation: true });
     shell(MANAGER);
@@ -163,8 +172,21 @@ describe('the statement upload', () => {
     expect(await screen.findByText(/waiting for a second person to confirm/)).toBeTruthy();
   });
 
+  it('says when the file was uploaded before, and reopens a past statement', async () => {
+    const past = { statement: { id: 's3', file_name: 'october.csv', row_count: 1, period_from: '2026-10-16', period_to: '2026-10-16', currency: 'UGX' }, rows: [], rows_truncated: false };
+    statements.upload.mockResolvedValue({ detail: past, replayed: true });
+    statements.list.mockResolvedValue([past.statement]);
+    statements.get.mockResolvedValue(past);
+    shell(MANAGER);
+    fireEvent.change(await screen.findByLabelText('Statement file (CSV)'), { target: { files: [csv()] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Upload' }));
+    expect(await screen.findByText(/uploaded before, so nothing new was recorded/)).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
+    await waitFor(() => expect(statements.get).toHaveBeenCalledWith('s3'));
+  });
+
   it('sends the days the export is complete for, both or neither', async () => {
-    statements.upload.mockResolvedValue({ statement: { id: 's2', file_name: 'statement.csv', row_count: 1, currency: 'UGX' }, rows: [], rows_truncated: false });
+    statements.upload.mockResolvedValue({ detail: { statement: { id: 's2', file_name: 'statement.csv', row_count: 1, currency: 'UGX' }, rows: [], rows_truncated: false }, replayed: false });
     shell(MANAGER);
     fireEvent.change(await screen.findByLabelText('Statement file (CSV)'), { target: { files: [csv()] } });
     fireEvent.change(screen.getByLabelText('Complete from (optional)'), { target: { value: '2026-10-14' } });

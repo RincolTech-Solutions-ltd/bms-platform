@@ -1981,6 +1981,33 @@ class PaymentReconciliationIT extends LoanFixtures {
         }
     }
 
+    /**
+     * Review items 5 and 8: a fee is taken only from money booked in the clearing account, and days stated as complete must meet
+     * the file's lines (and are not quietly dropped when the same file comes again with others).
+     * JUSTIFICATION-A3: a new test case; no case uploads a fee for an order that is paid but not booked.
+     */
+    @Test
+    void aFeeIsPostedOnlyForABookedPaymentAndStatedDaysMustMeetTheFile() {
+        JsonNode unbooked = paidAndUnbooked(activeLoan(), 520_000, "CONF-224-1160", Duration.ofMinutes(20));
+        long before = feeEntries();
+        ResponseEntity<JsonNode> r =
+                uploadAsAccountant(csv(line(unbooked, "CONF-224-1160", 520_000, 5_000, "2026-10-16")));
+        assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(201);
+        assertThat(feeEntries()).as("no fee from money not booked").isEqualTo(before);
+        assertThat(r.getBody().get("rows").get(0).get("fee_status").asString()).isEqualTo("held");
+        JsonNode booked = bookedRepayment(activeLoan(), 310_000, "CONF-224-1161");
+        String file = csv(line(booked, "CONF-224-1161", 310_000, 0, "2026-10-16"));
+        ResponseEntity<JsonNode> far = uploadCovered(file, "2026-09-01", "2026-09-30");
+        assertThat(far.getStatusCode().value()).as("%s", far.getBody()).isEqualTo(422);
+        assertThat(uploadCovered(file, "2026-10-16", "2026-10-16")
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(201);
+        ResponseEntity<JsonNode> again = uploadCovered(file, "2026-10-01", "2026-10-16");
+        assertThat(again.getStatusCode().value()).as("%s", again.getBody()).isEqualTo(409);
+        assertThat(again.getBody().get("code").asString()).isEqualTo("covered_differs");
+    }
+
     /** JUSTIFICATION-A3: a new test case for review item 6; no case keys the duplicate in another branch. */
     @Test
     void aDuplicateKeyedInAnotherBranchShowsTheOrderOnlyToTheOrdersOwnBranch() {

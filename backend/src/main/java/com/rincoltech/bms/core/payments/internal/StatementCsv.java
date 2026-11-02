@@ -31,8 +31,10 @@ import java.util.regex.Pattern;
  * same thing, a line with another number of cells than the header, and a quote left open at the end of the file all refuse the
  * file: a stray quote must not swallow the lines after it. Amounts are the decimal the provider shows ({@code 5200} or
  * {@code 5,200.00}); a fraction a currency cannot hold is refused, never rounded. A date is ISO ({@code 2026-10-19}, a time after
- * it is ignored) or day first with slashes ({@code 19/10/2026}) when the first number can only be a day; {@code 10/11/2026} is
- * refused as ambiguous. A date after the day of the upload is refused. A code or method that starts with {@code = + - @} is
+ * it is ignored) or with slashes, day first or month first as the file shows: one date whose first number can only be a day
+ * ({@code 19/10/2026}) makes the whole file day first, one whose second number can only be a day ({@code 10/19/2026}) month
+ * first; a file with both is refused, and in a file with neither a slash date is refused as ambiguous unless its day and
+ * month are the same. A date after the day of the upload is refused. A code or method that starts with {@code = + - @} is
  * refused, so the file can never carry a spreadsheet formula into a screen or an export.
  */
 final class StatementCsv {
@@ -158,6 +160,7 @@ final class StatementCsv {
         if (dataRows > MAX_ROWS) {
             throw invalid(0, "file", "The file has more than " + MAX_ROWS + " lines; upload it in parts.");
         }
+        SlashOrder order = slashOrder(lines, columns.get("date"));
         List<Row> rows = new ArrayList<>();
         Set<String> seenTracking = new HashSet<>();
         Set<String> seenCodeOnly = new HashSet<>();
@@ -211,7 +214,7 @@ final class StatementCsv {
             Long amount = money(cells, columns.get("amount"), currency, line, "amount", false, problems);
             Long fee = money(cells, columns.get("fee"), currency, line, "fee", true, problems);
             Long settled = money(cells, columns.get("settled"), currency, line, "settled", true, problems);
-            LocalDate paidOn = date(cell(cells, columns.get("date")), line, today, problems);
+            LocalDate paidOn = date(cell(cells, columns.get("date")), line, today, order, problems);
             String method = blankToNull(cell(cells, columns.get("method")));
             if (method != null
                     && (!METHOD.matcher(method).matches()
@@ -276,8 +279,44 @@ final class StatementCsv {
     }
 
     private static final DateTimeFormatter DAY_FIRST = DateTimeFormatter.ofPattern("d/M/uuuu");
+    private static final DateTimeFormatter MONTH_FIRST = DateTimeFormatter.ofPattern("M/d/uuuu");
 
-    private static LocalDate date(String raw, int line, LocalDate today, List<FieldProblem> problems) {
+    /** How the file writes its slash dates, decided from all its lines. */
+    enum SlashOrder {
+        DAY_FIRST,
+        MONTH_FIRST,
+        UNKNOWN,
+        MIXED
+    }
+
+    /**
+     * A first number above 12 can only be a day, and so can a second number above 12: one such date decides the whole file. A
+     * file with neither cannot be told; a file with both mixes the two and is refused.
+     * JUSTIFICATION-A3: review item 4 asks for the format to be decided from all lines; the reader looked at one line at a time.
+     */
+    static SlashOrder slashOrder(List<Rec> lines, Integer column) {
+        boolean dayFirst = false;
+        boolean monthFirst = false;
+        for (int n = 1; n < lines.size(); n++) {
+            String s = blankToNull(cell(lines.get(n).cells(), column));
+            String[] parts = s == null ? new String[0] : s.split("/");
+            if (parts.length != 3) {
+                continue;
+            }
+            try {
+                dayFirst |= Integer.parseInt(parts[0].trim()) > 12;
+                monthFirst |= Integer.parseInt(parts[1].trim()) > 12;
+            } catch (NumberFormatException e) {
+                // The line's own reading reports it.
+            }
+        }
+        return dayFirst && monthFirst
+                ? SlashOrder.MIXED
+                : dayFirst ? SlashOrder.DAY_FIRST : monthFirst ? SlashOrder.MONTH_FIRST : SlashOrder.UNKNOWN;
+    }
+
+    private static LocalDate date(
+            String raw, int line, LocalDate today, SlashOrder order, List<FieldProblem> problems) {
         String s = blankToNull(raw);
         if (s == null) {
             problems.add(problem(line, "date", "Missing."));
@@ -287,17 +326,27 @@ final class StatementCsv {
         try {
             if (s.length() >= 10 && s.charAt(4) == '-') {
                 day = LocalDate.parse(s.substring(0, 10));
-            } else {
-                int slash = s.indexOf('/');
-                int first = slash > 0 ? Integer.parseInt(s.substring(0, slash).trim()) : 0;
-                if (first <= 12) {
+            } else if (order == SlashOrder.MIXED) {
+                problems.add(problem(
+                        line,
+                        "date",
+                        "The file writes some dates day first and some month first: use one way, or 2026-10-19."));
+                return null;
+            } else if (order == SlashOrder.UNKNOWN) {
+                // No date in the file tells day first from month first: only a date whose day and month are the same
+                // reads.
+                String[] parts = s.split("/");
+                if (parts.length != 3 || !parts[0].trim().equals(parts[1].trim())) {
                     problems.add(problem(
                             line,
                             "date",
-                            "Ambiguous date: write it as 2026-10-19 (or day first, such as 19/10/2026)."));
+                            "Ambiguous date: no date in the file shows whether the day or the month comes first. Write it as"
+                                    + " 2026-10-19."));
                     return null;
                 }
                 day = LocalDate.parse(s, DAY_FIRST);
+            } else {
+                day = LocalDate.parse(s, order == SlashOrder.DAY_FIRST ? DAY_FIRST : MONTH_FIRST);
             }
         } catch (DateTimeParseException | NumberFormatException e) {
             problems.add(problem(line, "date", "Use 2026-10-19 or 19/10/2026."));

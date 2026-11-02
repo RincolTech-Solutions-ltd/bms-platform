@@ -272,15 +272,15 @@ class ReconciliationService {
         long fresh = findings.stream().filter(f -> !before.contains(f.key())).count();
 
         UUID runId = UUID.randomUUID();
-        jdbc.sql("""
-                        INSERT INTO payment_reconciliation_runs (id, tenant_id, created_at, ran_on, trigger, started_by,
+        // created_at is the database's clock, and so are the 90 day purge and the time the report shows: one clock.
+        Instant createdAt = jdbc.sql("""
+                        INSERT INTO payment_reconciliation_runs (id, tenant_id, ran_on, trigger, started_by,
                             window_from, intents_examined, statements_used, finding_count, truncated)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?)
+                        RETURNING created_at
                         """)
                 .params(
                         runId,
-                        // The application's clock, the one the 90 day purge and the report read.
-                        Timestamp.from(now),
                         Date.valueOf(today),
                         trigger,
                         startedBy,
@@ -289,7 +289,9 @@ class ReconciliationService {
                         periods.size(),
                         findings.size(),
                         truncated)
-                .update();
+                .query(Timestamp.class)
+                .single()
+                .toInstant();
         // Many rows per statement, not one round trip per difference.
         for (int start = 0; start < findings.size(); start += INSERT_BATCH) {
             List<Finding> chunk = findings.subList(start, Math.min(findings.size(), start + INSERT_BATCH));
@@ -332,7 +334,7 @@ class ReconciliationService {
                     .param("ids", List.copyOf(requeue))
                     .update();
         }
-        purgeOld(now);
+        purgeOld();
         Map<String, Integer> byKind = new LinkedHashMap<>();
         findings.forEach(f -> byKind.merge(f.kind(), 1, Integer::sum));
         Map<String, Object> after = new LinkedHashMap<>();
@@ -356,7 +358,7 @@ class ReconciliationService {
         }
         return Optional.of(new RunView(
                 runId,
-                now,
+                createdAt,
                 today,
                 trigger,
                 windowFrom,
@@ -388,9 +390,10 @@ class ReconciliationService {
                 .list());
     }
 
-    private void purgeOld(Instant now) {
-        jdbc.sql("DELETE FROM payment_reconciliation_runs WHERE created_at < ?")
-                .param(Timestamp.from(now.minus(KEEP)))
+    /** Runs older than 90 days by the database's clock, the one that wrote their created_at. */
+    private void purgeOld() {
+        jdbc.sql("DELETE FROM payment_reconciliation_runs WHERE created_at < now() - make_interval(days => ?)")
+                .param((int) KEEP.toDays())
                 .update();
     }
 

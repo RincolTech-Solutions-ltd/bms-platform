@@ -57,6 +57,8 @@ class StatementService {
     private static final int ROW_LIMIT = 1000;
     private static final String GATEWAY_CHARGES = "gateway_charges";
     private static final String CLEARING = "gateway_clearing";
+    /** The order statuses whose money stands booked in the clearing account, the only ones a fee is taken from. */
+    static final java.util.Set<String> FEE_BOOKED = java.util.Set.of("booked", "booked_unallocated");
 
     /** The result of an upload: the statement and whether it was already there. */
     record Uploaded(StatementDetail detail, boolean replayed) {}
@@ -119,7 +121,19 @@ class StatementService {
                 .query(UUID.class)
                 .optional();
         if (existing.isPresent()) {
-            return new Uploaded(detail(existing.get()), true);
+            StatementDetail before = detail(existing.get());
+            // The same file again is the same statement; a different statement of its covered days is not quietly
+            // dropped.
+            if (coveredFrom != null
+                    && (!coveredFrom.equals(before.statement().coveredFrom())
+                            || !coveredTo.equals(before.statement().coveredTo()))) {
+                throw new ApiException(
+                        org.springframework.http.HttpStatus.CONFLICT,
+                        "covered_differs",
+                        "Uploaded before",
+                        "This file was uploaded before with other days stated as complete; the statement keeps those days.");
+            }
+            return new Uploaded(before, true);
         }
         List<Match> matches = matcher.match(rows.stream()
                 .map(r -> new StatementMatcher.Line(
@@ -129,6 +143,14 @@ class StatementService {
         LocalDate from =
                 rows.stream().map(Row::paidOn).min(LocalDate::compareTo).orElseThrow();
         LocalDate to = rows.stream().map(Row::paidOn).max(LocalDate::compareTo).orElseThrow();
+        // Days stated as complete must meet the file's own lines: a file cannot vouch for days it says nothing about.
+        if (coveredFrom != null && (coveredTo.isBefore(from) || coveredFrom.isAfter(to))) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "covered_from",
+                    "invalid",
+                    "The days stated as complete (" + coveredFrom + " to " + coveredTo
+                            + ") do not meet the file's lines (" + from + " to " + to + ").")));
+        }
         // An export may begin or end part way through a day, so by default only the days strictly between its first and
         // last
         // line count as covered; the uploader may state the days the export is complete for.
@@ -180,8 +202,11 @@ class StatementService {
             UUID rowId = UUID.randomUUID();
             UUID entry = null;
             UUID approval = null;
+            // Only an order whose money is booked into the clearing account has a fee to take out of it: never one that
+            // is paid but not booked, held for attention or reversed, so the clearing balance cannot go below nothing.
             if (r.feeMinor() > 0
                     && "matched".equals(m.status())
+                    && FEE_BOOKED.contains(m.intent().status())
                     && !feeAlreadyPosted(m.intent().id())
                     && !feeAwaitingApproval(m.intent().id())
                     && posted.add(m.intent().id())) {
@@ -377,7 +402,7 @@ class StatementService {
     void postHeldFee(ApprovalAction.Execution execution) {
         Map<String, Object> line = jdbc.sql("""
                         SELECT r.id, r.intent_id, r.fee_minor, r.currency, r.paid_on, r.fee_entry_id, r.fee_approval_id,
-                               i.branch_id, i.merchant_reference
+                               i.branch_id, i.merchant_reference, i.status AS intent_status
                           FROM payment_statement_rows r JOIN payment_intents i ON i.id = r.intent_id
                          WHERE r.id = ? FOR UPDATE OF r
                         """).param(execution.subjectId()).query().listOfRows().stream()
@@ -392,6 +417,14 @@ class StatementService {
             throw ApiException.rule("fee_changed", "The fee on the line is not the one asked about.");
         }
         BusinessLock.take(jdbc, "payments:statement:" + tenant.profile().id(), lockWait);
+        if (!FEE_BOOKED.contains(String.valueOf(line.get("intent_status")))) {
+            throw new RequestSupersededException(
+                    "payment_not_booked",
+                    "Payment not booked",
+                    "The payment is no longer booked (it is " + line.get("intent_status")
+                            + "), so its fee is not taken out of the clearing account. This request was closed.",
+                    Map.of());
+        }
         if (feeAlreadyPosted(intentId)) {
             // Nothing to decide any more: the request ends stale with this note instead of waiting, pending with an
             // error, until it expires.
@@ -615,6 +648,8 @@ class StatementService {
         List<RowView> rows = jdbc.sql("""
                         SELECT row_no, order_tracking_id, confirmation_code, amount_minor, fee_minor, settled_minor, paid_on,
                                payment_method, match_status, intent_id, fee_entry_id,
+                               EXISTS (SELECT 1 FROM payment_statement_rows o
+                                        WHERE o.intent_id = r.intent_id AND o.fee_entry_id IS NOT NULL) AS fee_elsewhere,
                                EXISTS (SELECT 1 FROM payment_statement_reviews v WHERE v.row_id = r.id) AS reviewed,
                                EXISTS (SELECT 1 FROM approval_requests q
                                         WHERE q.action_type = ? AND q.subject_id = r.id AND q.status = 'pending'
@@ -641,7 +676,11 @@ class StatementService {
                                     ? "none"
                                     : feeApproval != null
                                             ? ("pending".equals(feeApproval) ? "awaiting_approval" : "not_approved")
-                                            : "matched".equals(match) ? "already_posted" : "held";
+                                            // A clean line whose fee is not posted: posted from another line, or the
+                                            // order was not booked when the file came (held).
+                                            : "matched".equals(match) && rs.getBoolean("fee_elsewhere")
+                                                    ? "already_posted"
+                                                    : "held";
                     return new RowView(
                             rs.getInt("row_no"),
                             rs.getString("order_tracking_id"),

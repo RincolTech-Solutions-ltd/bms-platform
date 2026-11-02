@@ -164,10 +164,19 @@ class StatementCsvTest {
         String header = "order_tracking_id,amount,date\n";
         assertThat(refused(header + TRACKING + ",100,2026-10-20\n")).contains("line 2 date", "future");
         assertThat(refused(header + TRACKING + ",100,20/10/2026\n")).contains("future");
-        // 10/11/2026 is the 10th of November or the 11th of October: not guessed.
+        // 10/11/2026 is the 10th of November or the 11th of October: alone in a file, not guessed.
         assertThat(refused(header + TRACKING + ",100,10/11/2026\n")).contains("Ambiguous");
-        assertThat(refused(header + TRACKING + ",100,1/13/2026\n")).contains("Ambiguous");
         assertThat(refused(header + TRACKING + ",100,16 October\n")).contains("line 2 date");
+        // The file decides: one date whose first number can only be a day makes every slash date day first, one whose
+        // second number can only be a day makes them month first, and a file with both is refused.
+        String other = "11111111-2222-4333-8444-666666666666";
+        List<StatementCsv.Row> dayFirst = parse(header + TRACKING + ",100,05/10/2026\n" + other + ",100,16/10/2026\n");
+        assertThat(dayFirst.getFirst().paidOn()).isEqualTo(LocalDate.of(2026, 10, 5));
+        List<StatementCsv.Row> monthFirst =
+                parse(header + TRACKING + ",100,10/05/2026\n" + other + ",100,10/16/2026\n");
+        assertThat(monthFirst.getFirst().paidOn()).isEqualTo(LocalDate.of(2026, 10, 5));
+        assertThat(refused(header + TRACKING + ",100,16/10/2026\n" + other + ",100,10/16/2026\n"))
+                .contains("day first and some month first");
         // A day first date whose first number can only be a day, and today itself, are fine.
         assertThat(parse(header + TRACKING + ",100,16/10/2026\n").getFirst().paidOn())
                 .isEqualTo(LocalDate.of(2026, 10, 16));
