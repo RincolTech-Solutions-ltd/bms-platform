@@ -361,7 +361,9 @@ class RunExecutor {
                     made,
                     currency,
                     q.queried().notes());
-            Presentation pp = presentation(run.requestedBy(), def, prepared);
+            // A missing figure prints blank in every report of a pack, as the register and the summary print it alone
+            // (ADR-038 amendment for #225): a board pack reads a dash as a figure.
+            Presentation pp = presentation(run.requestedBy(), def, prepared).blankingMissing();
             sections.add(new PackPdf.Section(h, pp, q.queried().tables(), q.spool()));
             sheets.add(new XlsxWriter.PackPart(h, pp, q.queried().tables(), q.spool()));
         }
