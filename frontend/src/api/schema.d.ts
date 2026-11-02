@@ -17614,7 +17614,10 @@ export interface components {
             branch_id?: string;
             /** Format: uuid */
             by?: string;
+            /** @description The item's code, name and unit, so a list across items needs no lookup (#145) */
+            code?: string;
             correction?: components["schemas"]["RetailStockMovementCorrection"];
+            description?: string;
             historical?: boolean;
             /** Format: uuid */
             id?: string;
@@ -17628,6 +17631,7 @@ export interface components {
             /** Format: uuid */
             source_id?: string;
             source_type?: string;
+            unit?: string;
             /**
              * Format: int64
              * @description Present only with retail.profit.read
@@ -32483,6 +32487,8 @@ export interface operations {
                 product_id?: string;
                 from?: string;
                 to?: string;
+                /** @description Only these movement kinds, for example usage and damage (#145) */
+                kind?: string[];
                 newest_first?: boolean;
                 limit?: number;
                 cursor?: string;

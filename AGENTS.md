@@ -842,6 +842,13 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   answer; the Sell line's price field is Selling price, and the sale lines export sheet's price column too. Tests:
   `shop-here.dom.test.tsx`, `stock-cards.dom.test.tsx`, `layout/my-stock.layout.test.ts`, `design-guard.test.ts`,
   `glossary.test.ts`, `maths.test.ts`, `DataExportIT`.
+- **Built (Past usage and damage, issue #145, AppSheet "Damaged or used stock not sold"):** no migration and no permission.
+  `GET /retail/stock/movements` takes a repeatable `kind` filter (422 for an unknown kind) and each row carries the item's
+  `code`, `description` and `unit`. The page `/staff/retail/usage-history` (`usage-history.tsx`, `retail.stock.read`), linked
+  from Usage and damage, lists used and damaged stock newest first by date range, the Branch box and item, with the reason, and
+  the value at buying price only with `retail.profit.read`; tour `page-usage-history` v1, `page-usage` v3. The parity table
+  (`docs/specs/retail-ui-parity.md`) is refreshed. Tests: `RetailPaymentsAndUsageIT`, `usage-history.dom.test.tsx`,
+  `tours-retail-reports.test.tsx`.
 
 ## Reading order
 

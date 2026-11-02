@@ -255,6 +255,7 @@ class StockService {
             UUID productId,
             LocalDate from,
             LocalDate to,
+            List<String> kinds,
             boolean newestFirst,
             Integer limit,
             String cursor) {
@@ -267,6 +268,7 @@ class StockService {
                 productId,
                 from,
                 to,
+                kindsOf(kinds),
                 tenant.profile().timezone().getId(),
                 newestFirst,
                 after == null ? null : after.at(),
@@ -286,6 +288,9 @@ class StockService {
                                         m.at(),
                                         m.branchId(),
                                         m.productId(),
+                                        m.code(),
+                                        m.description(),
+                                        m.unit(),
                                         m.kind(),
                                         m.qty(),
                                         null,
@@ -568,6 +573,26 @@ class StockService {
                 throw ApiException.validation(
                         List.of(new FieldProblem("stock_level", "invalid", "stock_level is out or low.")));
         };
+    }
+
+    /** The kind filter (#145), null for every kind; a kind the movements table cannot hold is refused. */
+    static List<String> kindsOf(List<String> kinds) {
+        Set<String> known = Set.of(
+                "opening",
+                "purchase",
+                "sale",
+                "usage",
+                "damage",
+                "adjustment",
+                "return",
+                "legacy_balance",
+                "transfer_out",
+                "transfer_in",
+                "return_to_supplier");
+        if (kinds != null && !known.containsAll(kinds)) {
+            throw ApiException.validation(List.of(new FieldProblem("kind", "invalid", "kind is not a movement kind.")));
+        }
+        return kinds == null || kinds.isEmpty() ? null : kinds;
     }
 
     static boolean mayReadCost(UUID branchId) {

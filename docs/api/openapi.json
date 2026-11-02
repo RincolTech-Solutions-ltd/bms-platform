@@ -19669,8 +19669,15 @@
             "format" : "uuid",
             "type" : "string"
           },
+          "code" : {
+            "description" : "The item's code, name and unit, so a list across items needs no lookup (#145)",
+            "type" : "string"
+          },
           "correction" : {
             "$ref" : "#/components/schemas/RetailStockMovementCorrection"
+          },
+          "description" : {
+            "type" : "string"
           },
           "historical" : {
             "type" : "boolean"
@@ -19701,6 +19708,9 @@
             "type" : "string"
           },
           "source_type" : {
+            "type" : "string"
+          },
+          "unit" : {
             "type" : "string"
           },
           "unit_cost_minor" : {
@@ -43953,6 +43963,17 @@
           "schema" : {
             "format" : "date",
             "type" : "string"
+          }
+        }, {
+          "description" : "Only these movement kinds, for example usage and damage (#145)",
+          "in" : "query",
+          "name" : "kind",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
           }
         }, {
           "in" : "query",

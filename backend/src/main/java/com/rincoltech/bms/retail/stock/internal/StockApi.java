@@ -162,6 +162,12 @@ final class StockApi {
             Instant at,
             UUID branchId,
             UUID productId,
+
+            @Schema(description = "The item's code, name and unit, so a list across items needs no lookup (#145)")
+            String code,
+
+            String description,
+            String unit,
             String kind,
             String qty,
 

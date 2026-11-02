@@ -192,6 +192,17 @@ class RetailPaymentsAndUsageIT extends IntegrationTest {
                 .query(String.class)
                 .list();
         assertThat(kinds).containsExactly("usage", "damage");
+        // #145: the Usage and damage history asks the movements list for these two kinds only, with the reason
+        // in the note; the stock-up movement is left out and an unknown kind is refused.
+        JsonNode history = api.get("/stock/movements?kind=usage&kind=damage&newest_first=true", ADMIN)
+                .getBody()
+                .get("items");
+        assertThat(history.valueStream()
+                        .map(m ->
+                                m.get("kind").asString() + ": " + m.get("note").asString()))
+                .containsExactlyInAnyOrder("usage: Test installation", "damage: Test water damage");
+        assertThat(api.get("/stock/movements?kind=stolen", ADMIN).getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         Long shrinkage = TestDatabase.owner()
                 .sql("""
                         SELECT sum(l.debit - l.credit) FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id
