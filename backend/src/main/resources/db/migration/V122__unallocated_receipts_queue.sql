@@ -141,10 +141,12 @@ GRANT UPDATE (status, version, updated_at, requested_by, decided_by, approval_id
               refund_reference)
     ON unallocated_receipts TO bms_app;
 
+-- Both guards below keep V102's bypass for the removal and the purge of a closed business (bms_erasing), as V102 asks of
+-- every later migration that writes a guard of a business's table.
 CREATE FUNCTION unallocated_receipts_guard() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
-    IF session_user = 'bms_owner' AND coalesce(current_setting('bms.allow_mutation', true), '') = 'on' THEN
+    IF (session_user = 'bms_owner' AND coalesce(current_setting('bms.allow_mutation', true), '') = 'on') OR bms_erasing(to_jsonb(OLD)) THEN
         RETURN NEW;
     END IF;
     IF OLD.status <> 'open' THEN
@@ -208,7 +210,7 @@ DECLARE
     i integer;
     ok boolean := false;
 BEGIN
-    IF session_user = 'bms_owner' AND coalesce(current_setting('bms.allow_mutation', true), '') = 'on' THEN
+    IF (session_user = 'bms_owner' AND coalesce(current_setting('bms.allow_mutation', true), '') = 'on') OR bms_erasing(to_jsonb(OLD)) THEN
         RETURN NEW;
     END IF;
     -- What was asked for never changes: who, what for, how much, which reference, and when it lapses.
