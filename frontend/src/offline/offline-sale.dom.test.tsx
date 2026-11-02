@@ -17,7 +17,15 @@ const ready = (b: unknown) => !(b as HTMLButtonElement).disabled && (b as HTMLEl
 // once. Every request fails as with no network unless a test says otherwise. Fabricated people, items and amounts.
 
 vi.setConfig({ testTimeout: 20000 });
-vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))));
+const noNetwork = () => Promise.reject(new TypeError('Failed to fetch'));
+vi.stubGlobal('fetch', vi.fn(noNetwork));
+// The real client builds a Request from a relative address, which Node cannot; give it a base (as members-real.test.ts does).
+const BaseRequest = globalThis.Request;
+globalThis.Request = class extends BaseRequest {
+  constructor(input: RequestInfo | URL, init?: RequestInit) {
+    super(typeof input === 'string' && input.startsWith('/') ? `http://localhost${input}` : input, init);
+  }
+} as typeof Request;
 
 const createSale = vi.fn();
 const listProducts = vi.fn();
@@ -219,6 +227,41 @@ describe('Record a sale offline', () => {
     // Priced online from the live items when Save was pressed, so its prices are as of then, not of the copy on the phone.
     expect(item?.request).toEqual({ ...body, occurred_at: item?.occurredAt, recorded_offline: true, prices_as_of: item?.occurredAt });
     expect(item?.occurredAt).not.toBe(catalogue.pricesAsOf);
+  });
+
+  // JUSTIFICATION-A3: a new test the review asks for (#769), not a mechanism.
+  it.each([
+    ['slow', () => new Promise<Response>(() => {})],
+    ['failed', noNetwork],
+  ])('through the real client, a 401 with a %s refresh is never kept and says to sign in (issue #769)', async (_kind, refresh) => {
+    // The real retail.createSale and api client: a write answered 401 is shown as it is and never refreshed and sent again
+    // inside the 8 s race, so neither a slow nor a failed refresh can put the sale in the outbox.
+    const real = await vi.importActual<typeof import('../api/retail')>('../api/retail');
+    createSale.mockImplementation((body: never, key: string) => real.retail.createSale(body, key));
+    listProducts.mockResolvedValue([bulb]);
+    const urls: string[] = [];
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = input instanceof Request ? input.url : String(input);
+      urls.push(url);
+      if (url.includes('/auth/refresh')) return refresh();
+      if (url.includes('/api/v1/retail/sales')) {
+        return new Response(JSON.stringify({ code: 'unauthenticated', detail: 'Sign in again.' }), { status: 401, headers: { 'content-type': 'application/problem+json' } });
+      }
+      return noNetwork();
+    });
+    const offline = testOffline(seller, { online: true, catalogue });
+    if (!offline) throw new Error('a seller sells offline');
+    try {
+      screenWith(offline);
+      await addBulbAndRecord();
+      expect(await screen.findByText(/Your session has ended. Sign in again./)).toBeTruthy();
+      expect(screen.queryByText('Sale saved on this phone')).toBeNull();
+      expect(offline.engine.snapshot().items).toHaveLength(0);
+      expect(urls.filter((u) => u.includes('/api/v1/retail/sales'))).toHaveLength(1);
+      expect(urls.some((u) => u.includes('/auth/refresh'))).toBe(false);
+    } finally {
+      vi.mocked(fetch).mockImplementation(noNetwork);
+    }
   });
 
   // JUSTIFICATION-A3: a new test the review asks for (#769), not a mechanism.
