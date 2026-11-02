@@ -353,10 +353,16 @@ class StatementService {
                         + " on a payment of " + r.currency() + " " + ReceiptService.whole(r.amountMinor(), r.currency())
                         + " (order " + intent.merchantReference() + ") is above the automatic " + percent(feeAutoMaxBps)
                         + " of the amount: approving posts it to gateway charges.");
-        return approvals
-                .request(new ActionRequest(
-                        StatementFeeAction.TYPE, intent.branchId(), rowId, 0, r.feeMinor(), r.currency(), payload))
-                .approvalId();
+        // ADR-091: the rule is read once and passed on; a held fee is not switchable and always waits for a checker.
+        Approvals.Rule rule = approvals.rule(StatementFeeAction.TYPE);
+        Approvals.Outcome o = approvals.request(
+                new ActionRequest(
+                        StatementFeeAction.TYPE, intent.branchId(), rowId, 0, r.feeMinor(), r.currency(), payload),
+                rule);
+        if (o.executed()) {
+            throw new IllegalStateException(StatementFeeAction.TYPE + " always waits for a checker");
+        }
+        return o.approvalId();
     }
 
     private static String percent(int bps) {
@@ -508,8 +514,15 @@ class StatementService {
                             "head_office_missing",
                             "The business has no head office branch, which a whole-business request is raised in. Mark one"
                                     + " branch as the head office in Business set-up, then mark the line again."));
-            approvals.request(
-                    new ActionRequest(StatementLineOutsideAction.TYPE, headOffice, rowId, 0, null, null, payload));
+            // ADR-091: the rule is read once and passed on; the mark is not switchable and always waits for a second
+            // person.
+            Approvals.Rule rule = approvals.rule(StatementLineOutsideAction.TYPE);
+            Approvals.Outcome o = approvals.request(
+                    new ActionRequest(StatementLineOutsideAction.TYPE, headOffice, rowId, 0, null, null, payload),
+                    rule);
+            if (o.executed()) {
+                throw new IllegalStateException(StatementLineOutsideAction.TYPE + " always waits for a checker");
+            }
             audit.record(AuditLog.Entry.created(
                     "core.payments.statement.line_marked_outside",
                     "payment_statement",
