@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { PLATFORM_BRAND, RINCOLTECH_LOGO, RINCOLTECH_SITE, brandOf, themeVars } from './branding';
+import { PLATFORM_BRAND, RINCOLTECH_LOGO, RINCOLTECH_LOGO_ON_DARK, RINCOLTECH_SITE, brandOf, themeVars } from './branding';
 import { router } from './router';
 import { Shell } from './shell';
 
@@ -38,7 +38,9 @@ describe('the shared shell (FR-TEN-08)', () => {
 
   it('shows the Rincoltech brand on the platform host', () => {
     const html = renderToStaticMarkup(<Shell brand={PLATFORM_BRAND}>x</Shell>);
-    expect(html).toContain(`<img src="${RINCOLTECH_LOGO}" alt="Rincoltech"/>`);
+    // The black lettering and, for the dark theme, the light lettering (#115).
+    expect(html).toContain(`<img class="logo-on-light" src="${RINCOLTECH_LOGO}" alt="Rincoltech"/>`);
+    expect(html).toContain(`<img class="logo-on-dark" src="${RINCOLTECH_LOGO_ON_DARK}" alt="Rincoltech"/>`);
   });
 
   it('sets the theme variables only for a tenant with a colour', () => {

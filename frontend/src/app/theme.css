@@ -56,6 +56,18 @@ body {
   border-radius: var(--radius-sm);
 }
 
+/* The Rincoltech logo in both themes (#115, LogoImg of shell.tsx): the black lettering on the light theme, the light lettering
+   on the dark one, which is clear around its mark and so needs no plate. */
+:root:not([data-theme='dark']) .logo-on-dark,
+:root[data-theme='dark'] .logo-on-light {
+  display: none;
+}
+
+.brand-bar img.logo-on-dark,
+.app-footer img.logo-on-dark {
+  background: none;
+}
+
 /*
  * The theme button, at the right of the header (issue #452), and its menu. The menu hangs from the button's right edge, so it
  * stays on a 360px screen, and sits above the page; the header clips nothing.

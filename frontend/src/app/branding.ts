@@ -8,6 +8,8 @@ import { classifyHost, loadHostConfig } from './hosts';
 // the platform host and any other host show the Rincoltech brand.
 
 export const RINCOLTECH_LOGO = '/brand/rincoltech-logo.png';
+/** The same logo with light lettering on a clear background, shown on the dark theme in its place (#115). */
+export const RINCOLTECH_LOGO_ON_DARK = '/brand/rincoltech-logo-on-dark.png';
 export const RINCOLTECH_SITE = 'https://rincoltech.com';
 
 export interface ShellBrand {
