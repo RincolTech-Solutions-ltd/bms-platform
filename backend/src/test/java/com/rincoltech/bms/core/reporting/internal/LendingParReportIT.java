@@ -410,7 +410,7 @@ class LendingParReportIT extends LendingBookSupport {
         TestDatabase.Fixture t = tenant(true);
         UUID user = UUID.randomUUID();
         UUID product = product(t, user);
-        int n = 2_001;
+        int n = 2_001; // 2 * InsightsFiguresService.CHECKPOINT_EVERY (1,000) + 1; change both together
         var owner = TestDatabase.owner();
         owner.sql("""
                         INSERT INTO lending_members (id, tenant_id, branch_id, member_no, full_name, phone_e164, id_type,
@@ -437,10 +437,10 @@ class LendingParReportIT extends LendingBookSupport {
                                'due'
                           FROM generate_series(1, ?) g
                         """).params(t.tenantId(), n).update();
-        // Fresh statistics for the rows just written (issues #696 and #719). Without them the planner plans this book
-        // from figures taken earlier, when the shared test database held far fewer loans, and on a loaded runner such
-        // a plan ran into the 180 s CI statement timeout. With them the read takes about a second. Every join of the
-        // read is on an index already (loan id, and tenant and loan id on the schedule items), so it needs no new one.
+        // Fresh statistics for the rows just written (added by #720 for #719). The cause of the 180 s CI statement
+        // timeout in #696 is not confirmed: a stale-statistics plan did not reproduce it locally, and a lock wait on
+        // the shared test database fits the failures as well. It has not recurred since #720. Every join of the read
+        // is on an index already (loan id, and tenant and loan id on the schedule items), so it needs no new one.
         owner.sql("ANALYZE lending_members, lending_loans, lending_schedule_items")
                 .update();
 
