@@ -1137,10 +1137,12 @@ class OnboardingIT extends IntegrationTest {
             assertThat(activated.getBody().get("activated_now").asBoolean())
                     .as("round %d", round)
                     .isTrue();
-            assertThat(owner().sql("SELECT status FROM onboarding_applications WHERE id = ?")
+            assertThat(owner().sql(
+                                    "SELECT status FROM onboarding_applications WHERE id = ? AND link_token_hash IS NOT NULL")
                             .param(id)
                             .query(String.class)
                             .single())
+                    .as("round %d: activated, the link kept", round)
                     .isEqualTo("activated");
             assertThat(owner().sql("SELECT count(*) FROM tenants WHERE name = ?")
                             .param(business)
