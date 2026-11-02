@@ -1,4 +1,4 @@
--- V126 (written as V114, renumbered above V121 on main and the claims V122 to V125 of open pull requests): customer
+-- V127 (written as V114, renumbered above V121 on main and the claims V122 to V126 of open pull requests): customer
 -- data onboarding 1/16 (issue #127, ADR-027, spec docs/specs/customer-data-onboarding.md sections 3.7, 3.11
 -- and 5.4, SDD chapter 13 section 13.14). Expand only, safe on a populated database: three new tables and one function. No
 -- existing table, column or constraint is touched and no permission is added.
