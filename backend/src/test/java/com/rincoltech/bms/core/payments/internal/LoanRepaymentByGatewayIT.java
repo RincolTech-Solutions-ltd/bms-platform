@@ -1071,20 +1071,32 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
         String loan = activeLoan();
         JsonNode intent = intentFor(loan, 520_000);
         // A row already holds this intent's key but no link text was ever recorded for it, as when the outbox refuses
-        // the message: the answer must not be "already sent".
+        // the message: the answer must not be "already sent". The row is a complete failed row, removed again at the
+        // end, so the operator's failed list that other tests read never sees it.
+        UUID row = UUID.randomUUID();
         TestDatabase.owner()
                 .sql(
                         "INSERT INTO notification_outbox (id, channel, recipient, template_key, idempotency_key, tenant_id,"
-                                + " status) VALUES (?, 'sms', '+256700000216', 'payment.link', ?, ?, 'failed')")
+                                + " category, subject_type, subject_id, status, attempts, last_error, failed_at)"
+                                + " VALUES (?, 'sms', '+256700000216', 'payment.link', ?, ?, 'transactional', 'member', ?,"
+                                + " 'failed', 1, 'test_refused', now())")
                 .params(
-                        UUID.randomUUID(),
+                        row,
                         "sms:payment.link:" + t.tenantId() + ":"
                                 + intent.get("id").asString() + ":" + borrowerOf(loan),
-                        t.tenantId())
+                        t.tenantId(),
+                        borrowerOf(loan))
                 .update();
-        ResponseEntity<JsonNode> r = textLink(intent);
-        assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(422);
-        assertThat(r.getBody().get("code").asString()).isEqualTo("link_text_not_queued");
-        assertThat(linkAudits(intent)).isEmpty();
+        try {
+            ResponseEntity<JsonNode> r = textLink(intent);
+            assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(422);
+            assertThat(r.getBody().get("code").asString()).isEqualTo("link_text_not_queued");
+            assertThat(linkAudits(intent)).isEmpty();
+        } finally {
+            TestDatabase.owner()
+                    .sql("DELETE FROM notification_outbox WHERE id = ?")
+                    .param(row)
+                    .update();
+        }
     }
 }
