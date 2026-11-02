@@ -1045,10 +1045,12 @@ public class RlsIsolationIT {
         UUID statementRow = UUID.randomUUID();
         owner.sql("""
                         INSERT INTO payment_statement_rows (id, tenant_id, statement_id, row_no, order_tracking_id, amount_minor,
-                            fee_minor, currency, paid_on, match_status, intent_id)
-                        VALUES (?, ?, ?, 1, ?, 1500, 0, 'UGX', DATE '2026-01-15', 'matched', ?)
+                            fee_minor, currency, paid_on, match_status, intent_id, fee_entry_id)
+                        VALUES (?, ?, ?, 1, ?, 1500, 15, 'UGX', DATE '2026-01-15', 'matched', ?, ?)
                         """)
-                .params(statementRow, t.tenantId(), statement, UUID.randomUUID().toString(), intent)
+                // The line names a fee entry, so the closed business purge (V102) meets the line's key on the journal
+                // and must delete the line before the entry (BusinessClosureIT).
+                .params(statementRow, t.tenantId(), statement, UUID.randomUUID().toString(), intent, entry)
                 .update();
         // The confirmer of a review is a second person (ADR-035 decision 66).
         UUID confirmer = UUID.randomUUID();
