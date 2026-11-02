@@ -7,6 +7,7 @@ import { setAccessToken } from '../../auth/session';
 import { illustrations } from '../../components/illustrations';
 import { InstallPrompt } from '../../install/InstallPrompt';
 import { StatusPanel } from '../../components/states';
+import { TOAST_MS, useToast } from '../staff/retail/toast';
 import { ErrorLine, PasswordFields, RecoveryCodes, StepHeader, TwoStepSetup, passwordReady } from './steps';
 
 // The first run of an invited user (FR-IAM-01, issues #86 and #93). The one-time token arrives in
@@ -35,6 +36,13 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
   const [confirm, setConfirm] = useState('');
   const [code, setCode] = useState('');
   const [message, setMessage] = useState<string | null>(null);
+  // Issue #122: an error is said in a toast as well as in the error line, which stays on the page. The line already reads it
+  // out as an alert, so the toast is silent.
+  const { show, toast } = useToast(TOAST_MS, true);
+  const fail = (words: string) => {
+    setMessage(words);
+    show(words, 'error');
+  };
   const [busy, setBusy] = useState(false);
   // The password just chosen, kept in memory only until the person turns two-step on or leaves: starting the set-up asks for it.
   const chosen = useRef('');
@@ -46,7 +54,7 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
     try {
       await action();
     } catch (error) {
-      setMessage(plainProblem(problemOf(error), fallback));
+      fail(plainProblem(problemOf(error), fallback));
     } finally {
       setBusy(false);
     }
@@ -76,7 +84,7 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
   function submitPassword(e: FormEvent) {
     e.preventDefault();
     if (!token || !passwordReady(password, confirm)) {
-      setMessage('Check the password rules below the boxes.');
+      fail('Check the password rules below the boxes.');
       return;
     }
     void run(async () => {
@@ -199,6 +207,7 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
           <InstallPrompt />
         </>
       )}
+      {toast}
     </main>
   );
 }
