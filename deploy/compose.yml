@@ -109,6 +109,8 @@ services:
       R2_DOCUMENTS_ACCESS_KEY_ID: ${R2_DOCUMENTS_ACCESS_KEY_ID:?}
       R2_DOCUMENTS_SECRET_ACCESS_KEY: ${R2_DOCUMENTS_SECRET_ACCESS_KEY:?}
       R2_DOCUMENTS_BUCKET: ${R2_DOCUMENTS_BUCKET:?}
+      # The daily orphan sweep (issue #39): true only logs what it would remove.
+      BMS_DOCUMENTS_ORPHAN_SWEEP_DRY_RUN: ${BMS_DOCUMENTS_ORPHAN_SWEEP_DRY_RUN:-false}
       # Outbox senders (spec section 11, chapter 9 section 9.8). A sender whose values are empty
       # stays off and its messages wait in the outbox, except SMTP in production: with
       # BMS_ENVIRONMENT=production the API refuses to start unless BMS_SMTP_HOST, BMS_SMTP_USER,

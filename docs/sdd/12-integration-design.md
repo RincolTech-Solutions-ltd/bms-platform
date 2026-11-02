@@ -206,6 +206,7 @@ ObjectStorage
   put(key, bytes, content_type) -> {etag}
   signed_get_url(key, ttl_seconds=300, download_filename?) -> url
   delete(key)
+  list(prefix) -> stream of {key, last_modified}   (read page by page; the orphan sweep only)
 ```
 
 - Buckets: one for documents, one for backups, per environment (names in chapter 9).
@@ -216,6 +217,19 @@ ObjectStorage
   after a permission check (FR-DOC-03).
 - Upload of user files goes through the API (size and type checks, chapter 8 section
   8.8), not direct browser to bucket, in the MVP.
+- Orphan sweep (issue #39). An upload stores its object before its row commits, so a process
+  that dies in between, or a failed delete after a rollback, leaves an object with no
+  `documents` row. The db-scheduler task `core.documents.orphan-sweep` runs daily at 04:10
+  Kampala time: for each active business it lists `tenants/<tenant_id>/upload/` and removes
+  each object that storage wrote more than 24 hours ago and that no `documents.object_key`
+  names, checked in a short transaction per batch of 500 keys just before the deletes. Each
+  removal writes a log line with the key, an audit row `core.document.orphan_removed` (actor
+  `system`) and a count on the metric `bms.documents.orphans.removed`. No transaction is
+  open while storage is listed or an object deleted. The run is leased by db-scheduler (a
+  picked row with a heartbeat; a dead execution is run again by another instance) and every
+  step repeats safely. Generated objects (receipts, reports) are out of its scope.
+  `BMS_DOCUMENTS_ORPHAN_SWEEP_DRY_RUN=true` only logs what it would remove;
+  `BMS_DOCUMENTS_ORPHAN_SWEEP_ENABLED=false` removes the task.
 
 ## 12.6 Transactional email
 
