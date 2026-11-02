@@ -6,8 +6,9 @@
 # token that can delete every backup is the costliest single risk. R2 has no put-only permission, so the
 # guarantee is built from three parts that all live here and nowhere on the host:
 #   1. lock rules: no object under <environment>/daily/ (30 days) or <environment>/monthly/ (365 days) can be
-#      deleted or overwritten before its time with the host's token; only someone who can lift the lock can
-#      (an account administrator or the Terraform token, see below);
+#      deleted or overwritten before its time with the host's token; only someone with R2 bucket admin rights,
+#      who can lift the lock, can (an account administrator, the Terraform token, or any other token granted
+#      that; see below);
 #   2. lifecycle rules: the bucket, not the host, removes objects a day after their lock ends, so backup.sh runs
 #      with BACKUP_RETENTION_ON_HOST=false and deletes nothing;
 #   3. the host token: object read and write on this one bucket only (it cannot change the lock or lifecycle

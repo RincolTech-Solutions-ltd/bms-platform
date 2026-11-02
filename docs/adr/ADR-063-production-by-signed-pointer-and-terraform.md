@@ -96,7 +96,8 @@ lock, so an erasure request that must reach backups waits up to a year (ADR-058;
 token reaches the whole company zone (accepted risk, decision 4).
 
 To watch: the Hetzner backups switch, which has no default because those images hold the whole disk unencrypted outside the
-locked backups; the owner's answer on the Hetzner server's unencrypted disk (decision 1, runbook item 11); whether Cloudflare enforces the token address condition on R2's S3 requests (the runbook checks it and records the answer
-here; the lock holds either way); the IPv6 address a Hetzner host uses for outgoing requests, which must fall in the token's allowed network; the
+locked backups; the owner's answer on the Hetzner server's unencrypted disk (decision 1, runbook item 11); whether
+Cloudflare enforces the token address condition on R2's S3 requests (the runbook checks it and records the answer here; the
+lock holds either way); the IPv6 address a Hetzner host uses for outgoing requests, which must fall in the token's allowed network; the
 puller's downgrade guard against a deliberate rollback; the cutover rehearsal (apply, deploy a release, back up, run the restore
 drill, test the lock) before any tenant's real data moves.
