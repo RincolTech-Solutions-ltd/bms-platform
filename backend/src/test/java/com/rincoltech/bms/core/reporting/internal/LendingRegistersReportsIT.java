@@ -39,7 +39,10 @@ class LendingRegistersReportsIT extends LendingBookSupport {
 
     static final String REGISTER = "lending.collateral_register";
     static final String SUMMARY = "lending.regulatory_summary";
-    static final String MEMBERS = "lending.reports.members,lending.members.read";
+    static final String MEMBERS = "lending.reports.members,lending.members.read,lending.insights.all_officers";
+    /** The register without member access: no owner details, every officer's items. */
+    static final String NO_MEMBERS = "lending.reports.members,lending.insights.all_officers";
+
     static final String COMPLIANCE = "lending.reports.compliance,lending.insights.read,lending.insights.all_officers";
     static final Map<String, Object> PERIOD = Map.of("from", "2026-10-01", "to", "2026-10-08");
 
@@ -140,7 +143,7 @@ class LendingRegistersReportsIT extends LendingBookSupport {
     void aBranchLimitedCallerGetsTheirBranchAndWithoutMemberAccessNoNames() throws Exception {
         Book b = registerBook();
         UUID user = UUID.randomUUID();
-        var h = headers(b.t(), user, "lending.reports.members");
+        var h = headers(b.t(), user, NO_MEMBERS);
         h.set("X-Dev-Branch-Ids", b.t().secondBranch().toString());
         var posted = http.exchange(
                 "/api/v1/report-runs",
@@ -149,17 +152,30 @@ class LendingRegistersReportsIT extends LendingBookSupport {
                 JsonNode.class);
         assertThat(posted.getStatusCode().value()).as("%s", posted.getBody()).isEqualTo(202);
         drain();
-        JsonNode run = run(
-                b.t(),
-                user,
-                "lending.reports.members",
-                posted.getBody().get("id").asString());
+        JsonNode run = run(b.t(), user, NO_MEMBERS, posted.getBody().get("id").asString());
         assertThat(run.get("status").asString()).as("%s", run).isEqualTo("ready");
-        JsonNode file = mapper.readTree(download(
-                b.t(), user, "lending.reports.members", run.get("document_id").asString()));
+        var url = http.exchange(
+                "/api/v1/documents/" + run.get("document_id").asString() + "/download-url",
+                HttpMethod.POST,
+                new HttpEntity<>(h),
+                JsonNode.class);
+        assertThat(url.getStatusCode().value()).as("%s", url.getBody()).isEqualTo(200);
+        var plain = new org.springframework.http.HttpHeaders();
+        plain.add("X-Tenant", b.t().slug());
+        JsonNode file = mapper.readTree(http.exchange(
+                        java.net.URI.create(
+                                http.getRootUri() + url.getBody().get("url").asString()),
+                        HttpMethod.GET,
+                        new HttpEntity<>(plain),
+                        String.class)
+                .getBody());
         JsonNode items = table(file, "items");
         assertThat(items.get("columns").toString()).doesNotContain("member_name");
-        assertThat(rows(items)).hasSize(2).allMatch(r -> r.startsWith("[\"Test Branch Two\""));
+        assertThat(rows(items)).hasSize(2).allMatch(r -> r.startsWith("[\"Test Branch Two\",null,"));
+        // Who owns the item stays hidden: no member number, and no reference (here a national ID number).
+        assertThat(rows(items).get(0))
+                .startsWith("[\"Test Branch Two\",null,\"National ID\",\"National ID card\",null,")
+                .doesNotContain("CMTEST");
         assertThat(rows(table(file, "flags"))).contains("[\"Items in the register\",2]");
     }
 
@@ -196,8 +212,10 @@ class LendingRegistersReportsIT extends LendingBookSupport {
                 .getBody());
         List<String> items = rows(table(file, "items"));
         assertThat(items.get(0)).startsWith("[\"Head Office\",\"MLN0001\",\"Test Borrower LN0001\"");
-        assertThat(items.get(3)).startsWith("[\"Test Branch Two\",\"MLN0004\",null,");
-        assertThat(items.get(4)).startsWith("[\"Test Branch Two\",\"MLN0005\",null,");
+        // Test Branch Two's members: no number, no name, no reference.
+        assertThat(items.get(3))
+                .startsWith("[\"Test Branch Two\",null,null,\"National ID\",\"National ID card\",null,");
+        assertThat(items.get(4)).startsWith("[\"Test Branch Two\",null,null,\"Household item\"");
 
         // Member access gone: the file made with names is refused.
         assertThat(http.exchange(
@@ -208,6 +226,70 @@ class LendingRegistersReportsIT extends LendingBookSupport {
                         .getStatusCode()
                         .value())
                 .isEqualTo(404);
+    }
+
+    // JUSTIFICATION-A3: review round 1 of #754 asked for the officer limit and the summary's snapshot path to be
+    // proven.
+
+    @Test
+    void aLoanOfficerGetsOnlyTheItemsSecuringTheirOwnLoansAndAnotherOfficerCannotFetchTheFile() throws Exception {
+        Book b = registerBook();
+        String perms = "lending.reports.members,lending.members.read";
+        // Officer B's loans: LN0004 to LN0006. Of the five items only the fridge secures one of them (LN0005).
+        JsonNode run = runReport(b, b.officerB(), perms, REGISTER, Map.of(), "json");
+        JsonNode file = file(b, b.officerB(), perms, run);
+        assertThat(rows(table(file, "items"))).hasSize(1).first().asString().contains("\"Fabricated fridge\"");
+        assertThat(rows(table(file, "flags"))).contains("[\"Items in the register\",1]");
+        assertThat(http.exchange(
+                                "/api/v1/documents/" + run.get("document_id").asString() + "/download-url",
+                                HttpMethod.POST,
+                                new HttpEntity<>(headers(b.t(), b.officerA(), perms)),
+                                JsonNode.class)
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(404);
+    }
+
+    @Test
+    void onAPastPeriodEndTheSummaryReadsTheSnapshotAndItsParIsThatOfTheParReport() throws Exception {
+        Book b = summaryBook();
+        tenantJobs.callAs(
+                b.t().tenantId(),
+                () -> new org.springframework.transaction.support.TransactionTemplate(transactions)
+                        .execute(x -> snapshots.backfill(LocalDate.of(2026, 10, 7), LocalDate.of(2026, 10, 7))));
+        UUID user = UUID.randomUUID();
+        String perms = COMPLIANCE + "," + PORTFOLIO;
+        Map<String, Object> period = Map.of("from", "2026-10-01", "to", "2026-10-07");
+        JsonNode file = file(b, user, perms, runReport(b, user, perms, SUMMARY, period, "json"));
+        // On 7 Oct the golden loans are each a day less late: LN0003 29 days, LN0005 30, LN0006 90. Only LN0006 is over
+        // 30 (300,000 of 10,000,000: 3.0 percent) and none is over 90.
+        assertThat(rows(table(file, "risk")))
+                .containsExactly(
+                        "[\"Portfolio at risk over 30 days (PAR 30)\",300]",
+                        "[\"Portfolio at risk over 90 days (PAR 90)\",0]");
+        assertThat(file.get("notes").toString()).contains("nightly snapshot of 7 Oct 2026");
+        JsonNode par = file(b, user, perms, par(b, user, perms, Map.of("as_at", "2026-10-07"), "json"));
+        JsonNode parTotal = table(par, "par").get("rows").get(0);
+        assertThat(table(file, "risk").get("rows").get(0).get(1).asLong())
+                .isEqualTo(parTotal.get(5).asLong());
+        assertThat(table(file, "risk").get("rows").get(1).get(1).asLong())
+                .isEqualTo(parTotal.get(7).asLong());
+        assertThat(rows(table(file, "loans")))
+                .first()
+                .asString()
+                .isEqualTo("[\"Active loans and principal outstanding\",6,10000000]");
+        assertThat(rows(table(file, "purposes")))
+                .containsExactly("[\"Business\",5,8000000]", "[\"Agriculture\",1,2000000]", "[\"Total\",6,10000000]");
+    }
+
+    @Test
+    void aPastPeriodEndWithoutASnapshotIsRefusedNotGuessed() throws Exception {
+        Book b = summaryBook();
+        UUID user = UUID.randomUUID();
+        JsonNode run =
+                runReport(b, user, COMPLIANCE, SUMMARY, Map.of("from", "2026-10-01", "to", "2026-10-07"), "json");
+        assertThat(run.get("status").asString()).as("%s", run).isEqualTo("failed");
+        assertThat(run.get("error").asString()).isEqualTo("snapshot_unavailable");
     }
 
     @Test
@@ -300,27 +382,28 @@ class LendingRegistersReportsIT extends LendingBookSupport {
         assertThat(file.get("notes").get(0).asString()).isEqualTo("Data summary. Not a filed return.");
         assertThat(file.get("as_of").asString()).isEqualTo("2026-10-08");
         // Figure, number, amount, rate.
-        assertThat(rows(table(file, "summary")))
+        // No figure cell is empty: a table per kind of figure.
+        assertThat(rows(table(file, "loans")))
                 .containsExactly(
-                        "[\"Active borrowers at the end of the period\",6,null,null]",
-                        "[\"Active loans and principal outstanding\",6,10000000,null]",
-                        "[\"Portfolio at risk over 30 days (PAR 30)\",null,null,800]",
-                        "[\"Portfolio at risk over 90 days (PAR 90)\",null,null,300]",
-                        "[\"Loans disbursed in the period\",1,4000000,null]",
-                        "[\"Loans written off in the period\",1,200000,null]",
-                        "[\"Savings held from members (accounts, balance)\",0,0,null]",
-                        "[\"Investments held from members (open, principal)\",0,0,null]",
-                        "[\"Branches\",2,null,null]",
-                        "[\"Staff\",1,null,null]");
+                        "[\"Active loans and principal outstanding\",6,10000000]",
+                        "[\"Loans disbursed in the period\",1,4000000]",
+                        "[\"Loans written off in the period\",1,200000]",
+                        "[\"Savings held from members (accounts, balance)\",0,0]",
+                        "[\"Investments held from members (open, principal)\",0,0]");
+        assertThat(rows(table(file, "risk")))
+                .containsExactly(
+                        "[\"Portfolio at risk over 30 days (PAR 30)\",800]",
+                        "[\"Portfolio at risk over 90 days (PAR 90)\",300]");
+        assertThat(rows(table(file, "people")))
+                .containsExactly(
+                        "[\"Active borrowers at the end of the period\",6]", "[\"Branches\",2]", "[\"Staff\",1]");
         assertThat(rows(table(file, "borrowers")))
                 .containsExactly(
                         "[\"Women\",3]", "[\"Men\",2]", "[\"Other\",0]", "[\"Not recorded\",1]", "[\"Total\",6]");
         // 4,000,000 at 10.0, 2,200,000 at 15.0, 1,000,000 at 12.0 and 2,800,000 at 10.0: 11,300,000,000 over 10,000,000
         // is 11.3 percent, 1130 basis points.
         assertThat(rows(table(file, "products")))
-                .containsExactly(
-                        "[\"Test Product\",\"per term\",6,10000000,1000,1500,1130]",
-                        "[\"Total\",null,6,10000000,null,null,null]");
+                .containsExactly("[\"Test Product\",\"per term\",6,10000000,1000,1500,1130]");
         assertThat(rows(table(file, "purposes")))
                 .containsExactly("[\"Business\",5,8000000]", "[\"Agriculture\",1,2000000]", "[\"Total\",6,10000000]");
     }
@@ -333,13 +416,18 @@ class LendingRegistersReportsIT extends LendingBookSupport {
         JsonNode summary = file(b, user, perms, runReport(b, user, perms, SUMMARY, PERIOD, "json"));
         JsonNode par = file(b, user, perms, par(b, user, perms, Map.of(), "json"));
         JsonNode parTotal = table(par, "par").get("rows").get(0);
-        JsonNode s = table(summary, "summary").get("rows");
-        assertThat(s.get(2).get(3).asLong()).isEqualTo(parTotal.get(5).asLong()).isEqualTo(800);
-        assertThat(s.get(3).get(3).asLong()).isEqualTo(parTotal.get(7).asLong()).isEqualTo(300);
-        assertThat(s.get(1).get(2).asLong()).isEqualTo(parTotal.get(2).asLong());
+        JsonNode risk = table(summary, "risk").get("rows");
+        JsonNode loans = table(summary, "loans").get("rows");
+        assertThat(risk.get(0).get(1).asLong())
+                .isEqualTo(parTotal.get(5).asLong())
+                .isEqualTo(800);
+        assertThat(risk.get(1).get(1).asLong())
+                .isEqualTo(parTotal.get(7).asLong())
+                .isEqualTo(300);
+        assertThat(loans.get(0).get(2).asLong()).isEqualTo(parTotal.get(2).asLong());
         JsonNode page = insightsPortfolio(b, user, perms, null, "");
-        assertThat(s.get(2).get(3).asLong()).isEqualTo(metric(page, "portfolio.par30"));
-        assertThat(s.get(3).get(3).asLong()).isEqualTo(metric(page, "portfolio.par90"));
+        assertThat(risk.get(0).get(1).asLong()).isEqualTo(metric(page, "portfolio.par30"));
+        assertThat(risk.get(1).get(1).asLong()).isEqualTo(metric(page, "portfolio.par90"));
     }
 
     @Test
@@ -354,18 +442,21 @@ class LendingRegistersReportsIT extends LendingBookSupport {
         assertThat(new PdfProbe(pdf).text())
                 .contains("REGULATOR DATA SUMMARY")
                 .contains("Data summary. Not a filed return.")
-                .contains("Portfolio at risk over 30 days (PAR 30) - - 8.0%")
-                .contains("Portfolio at risk over 90 days (PAR 90) - - 3.0%")
-                .contains("Active loans and principal outstanding 6 10,000,000 -")
-                .contains("Women 3 Men 2 Other 0 Not recorded 1 Total 6")
+                .contains("Portfolio at risk over 30 days (PAR 30) 8.0%")
+                .contains("Portfolio at risk over 90 days (PAR 90) 3.0%")
+                .contains("Active loans and principal outstanding 6 10,000,000")
+                .doesNotContain(" - ")
+                // The gender table may run onto a second page, where its heading repeats.
+                .contains("Women 3")
+                .contains("Men 2 Other 0 Not recorded 1 Total 6")
                 .contains("Test Product per term 6 10,000,000 10.0% 15.0% 11.3%");
         JsonNode xlsxRun = runReport(b, user, COMPLIANCE, SUMMARY, PERIOD, "xlsx");
         byte[] x = downloadBytes(
                 b.t(), user, COMPLIANCE, xlsxRun.get("document_id").asString());
         ReportFormatsIT.sample("regulatory-summary.xlsx", x);
-        Sheet sh = XlsxReader.read(x).sheet("Summary");
-        assertThat(sh.text("A3")).isEqualTo("Active loans and principal outstanding");
-        assertThat(sh.text("C3")).isEqualTo("10000000");
+        Sheet sh = XlsxReader.read(x).sheet("Loans, savings and investments");
+        assertThat(sh.text("A2")).isEqualTo("Active loans and principal outstanding");
+        assertThat(sh.text("C2")).isEqualTo("10000000");
     }
 
     @Test

@@ -30,8 +30,10 @@ import org.springframework.stereotype.Component;
  * </ul>
  *
  * The branches are those of {@code lending.reports.members} for the caller, resolved at request time and frozen with the
- * run; the member's name is printed only in the branches where the requester holds {@code lending.members.read}, frozen
- * the same way. A download by someone whose access to either has narrowed since is refused. The PDF cuts a long register at the row cap with a pointer to the Excel file; the
+ * run; who owns an item (the member's number and name, and the item's reference) is printed only in the branches where
+ * the requester holds {@code lending.members.read}, by the member's branch; and a requester without
+ * {@code lending.insights.all_officers} gets only the items that secure their own loans. All of it is frozen the same way,
+ * and a download by someone whose access to any of it has narrowed since is refused. The PDF cuts a long register at the row cap with a pointer to the Excel file; the
  * summary table comes first so it is always printed whole.
  */
 @Component
@@ -123,12 +125,26 @@ class CollateralRegisterReport implements ReportDefinition {
         Map<String, Object> frozen = new LinkedHashMap<>();
         frozen.put(BRANCHES, ids(scope));
         frozen.put(NAME_BRANCHES, ids(principal.branchFilter(MEMBERS_READ, scope)));
+        // A loan officer sees only their own loans (chapter 7): without every officer's loans, the items securing
+        // theirs.
+        frozen.put(
+                OFFICER,
+                principal.hasPermission(ALL_OFFICERS)
+                        ? null
+                        : principal.userId().toString());
         // The register is the items as they stand now; the business date of the request is printed as its date.
         return new Prepared(normalised, frozen, figures.today());
     }
 
     static final String BRANCHES = "branch_ids";
     static final String NAME_BRANCHES = "name_branch_ids";
+    static final String OFFICER = "officer_id";
+    static final String ALL_OFFICERS = "lending.insights.all_officers";
+
+    private static UUID officer(Prepared run) {
+        Object value = run.scope().get(OFFICER);
+        return value == null ? null : UUID.fromString(String.valueOf(value));
+    }
 
     private static List<String> ids(List<UUID> branches) {
         return branches == null ? null : branches.stream().map(UUID::toString).toList();
@@ -154,7 +170,11 @@ class CollateralRegisterReport implements ReportDefinition {
     @Override
     public boolean stillAllowed(Prepared run) {
         Principal principal = CurrentPrincipal.require();
-        return stillCovers(principal, PERMISSION, branches(run))
+        // A file of every officer's items is not for someone who now sees only their own loans.
+        boolean officers =
+                officer(run) != null ? officer(run).equals(principal.userId()) : principal.hasPermission(ALL_OFFICERS);
+        return officers
+                && stillCovers(principal, PERMISSION, branches(run))
                 && stillCovers(principal, MEMBERS_READ, branches(run, NAME_BRANCHES));
     }
 
@@ -170,9 +190,10 @@ class CollateralRegisterReport implements ReportDefinition {
     @Override
     public String describeScope(Prepared run) {
         List<UUID> b = branches(run);
-        return b == null
+        String branches = b == null
                 ? "All branches in your access"
                 : b.isEmpty() ? "No branches" : b.size() == 1 ? "1 branch selected" : b.size() + " branches selected";
+        return officer(run) == null ? branches : branches + ", the items of your own loans only";
     }
 
     @Override
@@ -181,12 +202,18 @@ class CollateralRegisterReport implements ReportDefinition {
         boolean names = nameBranches == null || !nameBranches.isEmpty();
         out.note(
                 "The items as they stand when the report is made; custody and values are not read back to a past date.");
-        out.note(RELEASE_OVERDUE + ": still pledged or in our custody, and every loan it secures is closed.");
+        out.note(
+                RELEASE_OVERDUE + ": still pledged or in our custody, and every loan it secures is closed, cancelled or"
+                        + " rejected.");
+        out.note(
+                "Who owns an item (the member, their name and the item's reference) is shown only in the branches where"
+                        + " you may see members.");
         out.note(UNVERIFIED + ": brought in by an import and not valued, moved or noted since.");
         out.note(NO_VALUATION + ": no valuation recorded; the estimated value is the one given at registration.");
 
         // The counts are written first, from a first pass over the items, so the PDF prints them whole however long
-        // the register is.
+        // the register is. Both passes read inside the run's one REPEATABLE READ snapshot transaction (RunExecutor),
+        // so the counts and the items are of the same instant.
         long[] counts = new long[4];
         CollateralFilter filter = filter(prepared, nameBranches);
         figures.collateral(filter, out::checkpoint, l -> {
@@ -257,6 +284,7 @@ class CollateralRegisterReport implements ReportDefinition {
                 branches(prepared),
                 (String) prepared.params().get("collateral_type"),
                 (String) prepared.params().get("custody_status"),
-                nameBranches);
+                nameBranches,
+                officer(prepared));
     }
 }

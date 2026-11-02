@@ -26,15 +26,20 @@ import tools.jackson.databind.ObjectMapper;
  * the month of {@code to} when absent), {@code to} (today when absent) and {@code branch_id}; the scope is the insights
  * page's, resolved and frozen as for the other lending reports, so it also needs {@code lending.insights.read}.
  *
- * <p>Four tables: {@code summary} (the key figures, each with its count, amount or rate), {@code borrowers} (active
- * borrowers by gender), {@code products} (the book by product with the rate range and the weighted average rate) and
- * {@code purposes} (the book by loan purpose).
+ * <p>Six tables, none with an empty figure cell: {@code loans} (the book, disbursements, write-offs, savings and
+ * investments, each a number and an amount), {@code risk} (PAR 30 and PAR 90), {@code people} (borrowers, branches,
+ * staff), {@code borrowers} (active borrowers by gender), {@code products} (the book by product with the rate range and
+ * the weighted average rate) and {@code purposes} (the book by loan purpose, its rows adding up to the total).
  */
 @Component
 class RegulatorySummaryReport extends PortfolioReport {
 
     static final String KEY = "lending.regulatory_summary";
     static final String COVER = "Data summary. Not a filed return.";
+
+    /** A date in a note as the report prints dates: {@code 7 Oct 2026}. */
+    static final java.time.format.DateTimeFormatter DATE =
+            java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.ENGLISH);
 
     private final RegisterFigures registers;
 
@@ -98,7 +103,7 @@ class RegulatorySummaryReport extends PortfolioReport {
         RegulatorySummary s = registers.regulatory(scope(prepared), out::checkpoint);
         out.note(COVER);
         out.note("The loan book is read from the "
-                + (s.source().equals("live") ? "loan tables" : "nightly snapshot of " + s.to())
+                + (s.source().equals("live") ? "loan tables" : "nightly snapshot of " + DATE.format(s.to()))
                 + " at the end of the period; its PAR 30 and PAR 90 are those of the portfolio at risk report.");
         out.note("Only active loans are in the book; loans written off are not.");
         if (s.savingsMinor() == null) {
@@ -108,24 +113,36 @@ class RegulatorySummaryReport extends PortfolioReport {
         }
         out.note("Open investments, branches and staff are counted as they are now.");
 
-        ReportOutput.Table summary = out.table(
-                "summary",
-                "Summary",
+        // Three short tables rather than one with a column per kind, so no cell of a figure is left empty.
+        ReportOutput.Table loans = out.table(
+                "loans",
+                "Loans, savings and investments",
                 List.of(
                         new Column("figure", "Figure", Kind.TEXT),
                         new Column("count", "Number", Kind.COUNT),
-                        new Column("amount", "Amount", Kind.MONEY),
-                        new Column("rate_bp", "Rate", Kind.BASIS_POINTS)));
-        summary.row("Active borrowers at the end of the period", s.borrowers(), null, null);
-        summary.row("Active loans and principal outstanding", s.activeLoans(), s.principalOutstandingMinor(), null);
-        summary.row("Portfolio at risk over 30 days (PAR 30)", null, null, s.par30Bp());
-        summary.row("Portfolio at risk over 90 days (PAR 90)", null, null, s.par90Bp());
-        summary.row("Loans disbursed in the period", s.disbursedLoans(), s.disbursedMinor(), null);
-        summary.row("Loans written off in the period", s.writtenOffLoans(), s.writtenOffMinor(), null);
-        summary.row("Savings held from members (accounts, balance)", s.savingsAccounts(), s.savingsMinor(), null);
-        summary.row("Investments held from members (open, principal)", s.investments(), s.investmentsMinor(), null);
-        summary.row("Branches", s.branches(), null, null);
-        summary.row("Staff", s.staff(), null, null);
+                        new Column("amount", "Amount", Kind.MONEY)));
+        loans.row("Active loans and principal outstanding", s.activeLoans(), s.principalOutstandingMinor());
+        loans.row("Loans disbursed in the period", s.disbursedLoans(), s.disbursedMinor());
+        loans.row("Loans written off in the period", s.writtenOffLoans(), s.writtenOffMinor());
+        if (s.savingsMinor() != null) {
+            loans.row("Savings held from members (accounts, balance)", s.savingsAccounts(), s.savingsMinor());
+            loans.row("Investments held from members (open, principal)", s.investments(), s.investmentsMinor());
+        }
+
+        ReportOutput.Table risk = out.table(
+                "risk",
+                "Portfolio at risk",
+                List.of(new Column("figure", "Figure", Kind.TEXT), new Column("rate_bp", "Rate", Kind.BASIS_POINTS)));
+        risk.row("Portfolio at risk over 30 days (PAR 30)", s.par30Bp());
+        risk.row("Portfolio at risk over 90 days (PAR 90)", s.par90Bp());
+
+        ReportOutput.Table people = out.table(
+                "people",
+                "Borrowers, branches and staff",
+                List.of(new Column("figure", "Figure", Kind.TEXT), new Column("count", "Number", Kind.COUNT)));
+        people.row("Active borrowers at the end of the period", s.borrowers());
+        people.row("Branches", s.branches());
+        people.row("Staff", s.staff());
 
         ReportOutput.Table borrowers = out.table(
                 "borrowers",
@@ -157,7 +174,6 @@ class RegulatorySummaryReport extends PortfolioReport {
                     r.maxRateBp(),
                     r.weightedRateBp());
         }
-        products.total("Total", null, s.activeLoans(), s.principalOutstandingMinor(), null, null, null);
 
         ReportOutput.Table purposes = out.table(
                 "purposes",

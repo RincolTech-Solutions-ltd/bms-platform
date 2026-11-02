@@ -85,6 +85,9 @@ class RegisterFiguresService implements RegisterFigures {
             "per_month", "per month",
             "per_year", "per year");
 
+    /** The note an import registers an item with (chapter 13 section 13.6.8), lower case. */
+    static final String IMPORT_NOTE = "imported; verify custody and value";
+
     /** The loan statuses after which an item's pledge no longer secures anything. */
     private static final String FINISHED = "('closed', 'cancelled', 'rejected')";
 
@@ -151,9 +154,17 @@ class RegisterFiguresService implements RegisterFigures {
             where.append(" AND ci.custody_status = :custody");
             p.put("custody", filter.custodyStatus());
         }
+        if (filter.officerId() != null) {
+            // A loan officer's register: the items that secure one of their loans (chapter 7, own loans only).
+            where.append(
+                    " AND EXISTS (SELECT 1 FROM lending_loan_collateral lc JOIN lending_loans l ON l.id = lc.loan_id"
+                            + " WHERE lc.collateral_id = ci.id AND l.officer_user_id = :officer)");
+            p.put("officer", filter.officerId());
+        }
+        p.put("import_note", IMPORT_NOTE);
         String sql = """
-                SELECT ci.branch_id, b.name AS branch, m.member_no, m.full_name, ci.collateral_type, ci.description,
-                       ci.reference_no,
+                SELECT m.branch_id AS member_branch_id, b.name AS branch, m.member_no, m.full_name, ci.collateral_type,
+                       ci.description, ci.reference_no,
                        ci.estimated_value_minor, v.market_value_minor, v.valued_on, ci.custody_status, ci.storage_location,
                        (SELECT string_agg(l.loan_no || ':' || l.status, ',' ORDER BY l.loan_no)
                           FROM lending_loan_collateral lc JOIN lending_loans l ON l.id = lc.loan_id
@@ -166,7 +177,7 @@ class RegisterFiguresService implements RegisterFigures {
                        (v.valued_on IS NULL
                         AND EXISTS (SELECT 1 FROM lending_collateral_events e
                                      WHERE e.collateral_id = ci.id AND e.event_type = 'registered'
-                                       AND lower(coalesce(e.note, '')) LIKE 'imported%')
+                                       AND lower(trim(coalesce(e.note, ''))) = :import_note)
                         AND NOT EXISTS (SELECT 1 FROM lending_collateral_events e
                                          WHERE e.collateral_id = ci.id AND e.event_type <> 'registered')) AS unverified
                   FROM lending_collateral_items ci
@@ -180,25 +191,28 @@ class RegisterFiguresService implements RegisterFigures {
         try (java.util.stream.Stream<CollateralLine> rows = streaming
                 .sql(sql)
                 .params(p)
-                .query((rs, n) -> new CollateralLine(
-                        rs.getString("branch"),
-                        rs.getString("member_no"),
-                        filter.nameBranchIds() == null
-                                        || filter.nameBranchIds().contains(rs.getObject("branch_id", UUID.class))
-                                ? rs.getString("full_name")
-                                : null,
-                        TYPES.getOrDefault(rs.getString("collateral_type"), rs.getString("collateral_type")),
-                        rs.getString("description"),
-                        rs.getString("reference_no"),
-                        rs.getObject("estimated_value_minor", Long.class),
-                        rs.getObject("market_value_minor", Long.class),
-                        rs.getObject("valued_on", LocalDate.class),
-                        CUSTODY.getOrDefault(rs.getString("custody_status"), rs.getString("custody_status")),
-                        rs.getString("storage_location"),
-                        loansInWords(rs.getString("loans")),
-                        rs.getBoolean("release_overdue"),
-                        rs.getBoolean("unverified"),
-                        rs.getObject("valued_on") == null))
+                .query((rs, n) -> {
+                    // Who owns an item (the member's number and name, and the reference, which can be an ID number, a
+                    // plate or a title number) is shown only in the branches of member access, by the member's branch.
+                    boolean owner = filter.nameBranchIds() == null
+                            || filter.nameBranchIds().contains(rs.getObject("member_branch_id", UUID.class));
+                    return new CollateralLine(
+                            rs.getString("branch"),
+                            owner ? rs.getString("member_no") : null,
+                            owner ? rs.getString("full_name") : null,
+                            TYPES.getOrDefault(rs.getString("collateral_type"), rs.getString("collateral_type")),
+                            rs.getString("description"),
+                            owner ? rs.getString("reference_no") : null,
+                            rs.getObject("estimated_value_minor", Long.class),
+                            rs.getObject("market_value_minor", Long.class),
+                            rs.getObject("valued_on", LocalDate.class),
+                            CUSTODY.getOrDefault(rs.getString("custody_status"), rs.getString("custody_status")),
+                            rs.getString("storage_location"),
+                            loansInWords(rs.getString("loans")),
+                            rs.getBoolean("release_overdue"),
+                            rs.getBoolean("unverified"),
+                            rs.getObject("valued_on") == null);
+                })
                 .stream()) {
             rows.forEach(l -> {
                 if ((++seen[0] % InsightsFiguresService.CHECKPOINT_EVERY) == 0) {
@@ -245,9 +259,15 @@ class RegisterFiguresService implements RegisterFigures {
                 "coalesce(mb.gender, 'unspecified') AS g, count(DISTINCT x.member_id) AS n",
                 "1",
                 (rs, n) -> gender.put(rs.getString("g"), rs.getLong("n")));
+        // A value the list does not know is counted as not recorded, so the rows always add up to the borrowers.
+        long unknownGender = gender.entrySet().stream()
+                .filter(e -> !GENDERS.contains(e.getKey()))
+                .mapToLong(Map.Entry::getValue)
+                .sum();
         List<Count> byGender = new ArrayList<>();
         for (String g : GENDERS) {
-            byGender.add(new Count(GENDER_LABELS.get(g), gender.getOrDefault(g, 0L)));
+            long n = gender.getOrDefault(g, 0L) + (g.equals("unspecified") ? unknownGender : 0);
+            byGender.add(new Count(GENDER_LABELS.get(g), n));
         }
         long borrowers = positions.borrowers(s, p.to(), live, null).total();
         checkpoint.run();
@@ -266,6 +286,17 @@ class RegisterFiguresService implements RegisterFigures {
             if (v != null) {
                 byPurpose.add(new Book(e.getValue(), v[0], v[1]));
             }
+        }
+        // A purpose the list does not know, or none, is one row, so the rows always add up to the book's total.
+        long[] unknownPurpose = new long[2];
+        purpose.forEach((k, v) -> {
+            if (k == null || !PURPOSES.containsKey(k)) {
+                unknownPurpose[0] += v[0];
+                unknownPurpose[1] += v[1];
+            }
+        });
+        if (unknownPurpose[0] > 0) {
+            byPurpose.add(new Book("Not recorded", unknownPurpose[0], unknownPurpose[1]));
         }
 
         List<Rates> rates = positions.overLoans(
@@ -391,12 +422,14 @@ class RegisterFiguresService implements RegisterFigures {
         if (branchIds != null) {
             return branchIds.isEmpty()
                     ? 0
-                    : jdbc.sql("SELECT count(*) FROM branches WHERE id IN (:ids)")
+                    : jdbc.sql("SELECT count(*) FROM branches WHERE id IN (:ids) AND status = 'active'")
                             .param("ids", branchIds)
                             .query(Long.class)
                             .single();
         }
-        return jdbc.sql("SELECT count(*) FROM branches").query(Long.class).single();
+        return jdbc.sql("SELECT count(*) FROM branches WHERE status = 'active'")
+                .query(Long.class)
+                .single();
     }
 
     /** Active staff with a role that is not revoked, in one of the branches or in every branch. */

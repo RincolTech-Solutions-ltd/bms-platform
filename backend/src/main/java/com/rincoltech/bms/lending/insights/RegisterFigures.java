@@ -42,9 +42,13 @@ public interface RegisterFigures {
      * @param branchIds the branches, null for every branch, empty for none
      * @param type one of {@link #COLLATERAL_TYPES}, or null for all
      * @param custodyStatus one of {@link #CUSTODY_STATUSES}, or null for all
-     * @param nameBranchIds the branches whose items print the member's name, null for every branch, empty for none
+     * @param nameBranchIds the branches whose members' items print who owns them (the member's number and name and the
+     *     item's reference, which can be an ID number, a plate or a title number), by the member's branch; null for
+     *     every branch, empty for none
+     * @param officerId when not null, only items that secure a loan this officer is responsible for
      */
-    record CollateralFilter(List<UUID> branchIds, String type, String custodyStatus, List<UUID> nameBranchIds) {
+    record CollateralFilter(
+            List<UUID> branchIds, String type, String custodyStatus, List<UUID> nameBranchIds, UUID officerId) {
 
         public CollateralFilter {
             branchIds = branchIds == null ? null : List.copyOf(branchIds);
@@ -53,11 +57,13 @@ public interface RegisterFigures {
     }
 
     /**
-     * One item. {@code latestValuationMinor} and {@code valuedOn} are the latest valuation's market value and date, null
+     * One item. {@code memberNo}, {@code memberName} and {@code reference} are null outside the name branches.
+     * {@code latestValuationMinor} and {@code valuedOn} are the latest valuation's market value and date, null
      * without one; {@code loans} the linked loans with their status in words. The flags (chapter 14 section 14.5):
      * {@code releaseOverdue} for an item still held (pledged or in custody) whose linked loans are all closed, cancelled
-     * or rejected; {@code unverified} for an item registered by an import ("imported; verify custody and value", chapter
-     * 13 section 13.6.8) that nobody has valued, moved or noted since; {@code noValuation} for an item never valued.
+     * or rejected; {@code unverified} for an item registered by an import with exactly the note "imported; verify custody
+     * and value" (chapter 13 section 13.6.8) that nobody has valued, moved or noted since; {@code noValuation} for an item
+     * never valued.
      */
     record CollateralLine(
             String branch,
@@ -89,6 +95,7 @@ public interface RegisterFigures {
      * @param savingsAccounts the savings accounts open at the end of the period, null as {@code savingsMinor}
      * @param investmentsMinor investments held from members at the end of the period, null as {@code savingsMinor}
      * @param investments the open investments now, null as {@code savingsMinor}
+     * @param branches the active branches of the scope, now
      * @param staff active staff with a role in the branches of the scope (or every branch), now
      */
     record RegulatorySummary(

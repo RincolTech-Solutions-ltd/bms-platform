@@ -238,7 +238,7 @@ on a small host without running `ReportMemoryIT` first.
 
 ## Amendment (issue #225, slice D4: the collateral register and the regulator data summary)
 
-Building `lending.collateral_register` and `lending.regulatory_summary` settled four things. None reverses a decision; no migration and no
+Building `lending.collateral_register` and `lending.regulatory_summary` settled six things. None reverses a decision; no migration and no
 permission were needed.
 
 1. **A second public port, `RegisterFigures`, beside `InsightsFigures`.** The page computes neither figure, so they have their own
@@ -248,9 +248,17 @@ permission were needed.
    investment figures are those of the panels' `SavingsMetrics` and `InvestmentMetrics`, looked up when a summary is made.
 2. **The register is the items as they stand, not as at a date.** Custody, location and value are not kept by date, so a past `as_at`
    would be a guess; the register takes no date parameter, prints the business date it was made on, and says so.
-3. **Flags are counted in a first pass and printed first.** The register reads its items twice in the one snapshot: once to count the
-   flags, once to write the items. The short table of counts comes first, so the PDF prints it whole even when the items are cut at the
-   row cap, and the Excel file holds every item.
+3. **Flags are counted in a first pass and printed first.** The register reads its items twice, both inside the run's one
+   `REPEATABLE READ` snapshot transaction (the query phase of decision 2; the port's `@Transactional` joins it), so an item registered
+   between the passes is in neither: once to count the flags, once to write the items. The short table of counts comes first, so the
+   PDF prints it whole even when the items are cut at the row cap, and the Excel file holds every item.
 4. **"Imported, not verified" reads the import's note.** Chapter 13 section 13.6.8 has the import register an item with the note
-   "imported; verify custody and value"; the flag is an item registered with that note and not valued, moved or noted since. No column
-   was added (the migration queue is busy, and none is needed), and nothing writes the note until the import commit (issue #133).
+   "imported; verify custody and value"; the flag is an item registered with exactly that note and not valued, moved or noted since. No
+   column was added (the migration queue is busy, and none is needed), and nothing writes the note until the import commit (issue #133).
+5. **Who owns an item is personal data, gated like a name.** The member number, the name and the item's reference (an ID number, a plate,
+   a title number) are printed only where the requester holds `lending.members.read` in the member's branch; and a requester without
+   `lending.insights.all_officers` gets only the items securing their own loans. Both are frozen with the run and checked at download,
+   as the arrears list of #222 does for names and phones.
+6. **No empty figure cells in the summary.** The PDF prints a missing figure as a dash for every report (decision on the renderer, slice
+   D2). Rather than change that rule here, the summary has a table per kind of figure (numbers and amounts, rates, counts), so none of
+   its figure cells is empty.
