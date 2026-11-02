@@ -7,11 +7,12 @@ import type { MenuGroup, MenuLink, MenuSection } from '../../components/side-men
 import { useOptionalStaff } from './context';
 import { homeParts, homeSummaryQuery } from './home-cards';
 import { canConfigureAdvisor, showInsights } from './insights/permissions';
+import { canConfigureRetailAdvisor } from './retail/advisor-card';
 import { showInvestments } from './lending/investment-state';
 import { showCollateral, showMembers } from './lending/member-permissions';
 import { showLending } from './lending/permissions';
 import { showSavings } from './lending/savings-permissions';
-import { showReceivePayments, showUnallocated } from './payments/state';
+import { showReceivePayments, showReconciliation, showUnallocated } from './payments/state';
 import { showReports } from './reports/permissions';
 import { CATALOGUE_LINKS, SCREENS, UNITS, canUse, capabilityOn, showRetail, type RetailScreen } from './retail/permissions';
 import { showSms } from './sms/state';
@@ -145,8 +146,9 @@ export function staffMenu(me: Me, { sells, counts = {}, ask = false }: { sells: 
         showUsers(me) && { to: '/staff/users', label: 'Staff', icon: icons.user, tour: 'nav-users' },
         showReceivePayments(me) && { to: '/staff/payments', label: 'Receive payments', icon: icons.receivePayments, exact: true },
         showUnallocated(me) && { to: '/staff/payments/unallocated', label: 'Unallocated payments', icon: icons.unallocatedPayments },
+        showReconciliation(me) && { to: '/staff/payments/reconciliation', label: 'Payment reconciliation', icon: icons.paymentReconciliation },
         showSms(me) && { to: '/staff/sms', label: 'SMS', icon: icons.phone },
-        canConfigureAdvisor(me) && { to: '/staff/assistant', label: 'AI assistant', icon: icons.assistant },
+        (canConfigureAdvisor(me) || canConfigureRetailAdvisor(me)) && { to: '/staff/assistant', label: 'AI assistant', icon: icons.assistant },
         permissions.includes('core.settings.manage') && { to: '/staff/setup', label: 'Business set-up', icon: icons.settings },
       ],
     },

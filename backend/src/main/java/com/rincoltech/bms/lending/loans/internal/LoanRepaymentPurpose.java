@@ -100,8 +100,19 @@ class LoanRepaymentPurpose implements PurposeHandler {
     }
 
     @Override
+    public java.util.Optional<UUID> memberOf(UUID subjectId) {
+        return loans.find(subjectId).map(Loan::memberId);
+    }
+
+    @Override
     public java.util.Optional<Integer> subjectVersionOfTransaction(UUID transactionId) {
         return repo.txn(transactionId).flatMap(t -> loans.find(t.loanId())).map(Loan::version);
+    }
+
+    @Override
+    public java.util.List<ManualReceipt> manualReceiptsWithReference(
+            java.util.Collection<String> references, java.util.Collection<UUID> excluding) {
+        return repo.manualWithReference(references, excluding);
     }
 
     @Override
