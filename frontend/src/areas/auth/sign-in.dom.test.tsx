@@ -124,7 +124,44 @@ describe('a sign-in that fails (#122)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     const words = 'Enter the 6 digit code from your app, or one recovery code.';
     expect((await screen.findByRole('alert')).textContent).toBe(words);
-    expect(container.querySelector('.toast.toast-error')?.textContent).toContain(words);
+    const toast = container.querySelector('.toast.toast-error');
+    expect(toast?.textContent).toContain(words);
+    expect(toast?.getAttribute('aria-hidden')).toBe('true');
     expect(fetchImpl.seen).toHaveLength(1);
+  });
+
+  // JUSTIFICATION-A3: the review of #739 asks for these cases (no stale toast, one toast, no button); they are tests, not mechanism.
+  it('drops the error toast when the next try works, so the two-step step shows no old error', async () => {
+    fetchImpl.seen = [];
+    const twoStep = answer(200, { status: 'mfa_required', mfa_token: 'fabricated-mfa-token' });
+    const answers = [answer(401, { code: 'invalid_credentials', status: 401 }), twoStep];
+    fetchImpl.next = () => (answers.shift() ?? twoStep)();
+    const { container } = shell();
+    typeAndSubmit();
+    await screen.findByRole('alert');
+    expect(container.querySelector('.toast-error')).not.toBeNull();
+    typeAndSubmit();
+    await screen.findByLabelText('Code');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(container.querySelector('.toast-error')).toBeNull();
+  });
+
+  it('keeps one error toast, with no button in it, after two refusals; a lockout is said the same way', async () => {
+    fetchImpl.seen = [];
+    const lockedOut = answer(423, { code: 'account_locked', status: 423 });
+    const answers = [answer(401, { code: 'invalid_credentials', status: 401 }), lockedOut];
+    fetchImpl.next = () => (answers.shift() ?? lockedOut)();
+    const { container } = shell();
+    typeAndSubmit();
+    await screen.findByText('That email, phone or password is not right. Check them and try again.', { selector: '[role="alert"]' });
+    typeAndSubmit();
+    const locked = 'Too many tries. Your account is locked for 15 minutes. Try again later.';
+    await screen.findByText(locked, { selector: '[role="alert"]' });
+    const toasts = container.querySelectorAll('.toast');
+    expect(toasts).toHaveLength(1);
+    // The one dark neutral pill of rule 15 (.toast); the error kind only colours its icon (.toast-error .toast-icon).
+    expect(toasts[0]?.className).toBe('toast toast-error');
+    expect(toasts[0]?.textContent).toContain(locked);
+    expect(toasts[0]?.querySelectorAll('button, a, input, [tabindex]')).toHaveLength(0);
   });
 });

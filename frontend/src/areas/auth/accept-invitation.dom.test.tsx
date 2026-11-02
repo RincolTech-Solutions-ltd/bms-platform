@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // Issue #122: the invitation page says an error in an error toast as well as in the error line, which stays on the page and
@@ -70,7 +70,43 @@ describe('an invitation that fails (#122)', () => {
     choose(PASSWORD, `${PASSWORD}x`);
     const words = 'Check the password rules below the boxes.';
     expect((await screen.findByRole('alert')).textContent).toBe(words);
-    expect(container.querySelector('.toast.toast-error')?.textContent).toContain(words);
+    const toast = container.querySelector('.toast.toast-error');
+    expect(toast?.textContent).toContain(words);
+    expect(toast?.getAttribute('aria-hidden')).toBe('true');
+    expect(toast?.querySelectorAll('button, a, input, [tabindex]')).toHaveLength(0);
     expect(fetchImpl.seen).toHaveLength(0);
+  });
+
+  // JUSTIFICATION-A3: the review of #739 asks for these cases (no stale toast, one toast); they are tests, not mechanism.
+  const refused = () => Promise.resolve(new Response(JSON.stringify({ status: 500 }), { status: 500, headers: { 'content-type': 'application/problem+json' } }));
+  const saved = () =>
+    Promise.resolve(new Response(JSON.stringify({ status: 'signed_in', access_token: 'fabricated-access-token' }), { status: 200, headers: { 'content-type': 'application/json' } }));
+  const save = () => fireEvent.click(screen.getByRole('button', { name: 'Save and continue' }));
+
+  it('drops the error toast when the next try works, so the two-step offer shows no old error', async () => {
+    fetchImpl.seen = [];
+    const answers = [refused, saved];
+    fetchImpl.next = () => (answers.shift() ?? saved)();
+    const { container } = page();
+    choose(PASSWORD, PASSWORD);
+    await screen.findByRole('alert');
+    expect(container.querySelector('.toast-error')).not.toBeNull();
+    save();
+    await screen.findByRole('heading', { name: 'Protect your account' });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(container.querySelector('.toast-error')).toBeNull();
+  });
+
+  it('keeps one error toast after two refusals', async () => {
+    fetchImpl.seen = [];
+    fetchImpl.next = refused;
+    const { container } = page();
+    choose(PASSWORD, PASSWORD);
+    await screen.findByRole('alert');
+    save();
+    await waitFor(() => expect(fetchImpl.seen).toHaveLength(2));
+    await screen.findByRole('alert');
+    expect(container.querySelectorAll('.toast')).toHaveLength(1);
+    expect(container.querySelector('.toast')?.className).toBe('toast toast-error');
   });
 });

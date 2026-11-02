@@ -37,7 +37,9 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
   const [code, setCode] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   // Issue #122: an error is said in a toast as well as in the error line, which stays on the page. The line already reads it
-  // out as an alert, so the toast is silent.
+  // out as an alert, so the toast is silent, and it never carries a button. The toast shows only while the error line does:
+  // each attempt clears the line first, so a new try, and the next step after it, never keep an old error. A second failure
+  // replaces the toast (one toast at a time).
   const { show, toast } = useToast(TOAST_MS, true);
   const fail = (words: string) => {
     setMessage(words);
@@ -207,7 +209,7 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
           <InstallPrompt />
         </>
       )}
-      {toast}
+      {message && toast}
     </main>
   );
 }
