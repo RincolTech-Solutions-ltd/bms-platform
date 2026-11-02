@@ -193,6 +193,8 @@ bms:
       resend-api-key: ${BMS_RESEND_API_KEY:}
       resend-url: ${BMS_RESEND_API_URL:}
       allowlist: ${BMS_MAIL_ALLOWLIST:}
+      # The signing secret (whsec_...) of the Resend webhook for bounces and complaints; unset turns the route off.
+      resend-webhook-secret: ${BMS_RESEND_WEBHOOK_SECRET:}
     telegram:
       bot-token: ${BMS_TELEGRAM_BOT_TOKEN:}
       operator-chat-id: ${BMS_TELEGRAM_OPERATOR_CHAT_ID:}

@@ -66,24 +66,31 @@ types, which can be a real person's.
    `identity.password_reset_issued`, `identity.password_changed`) are already plain, carry no dashes, say why the reader
    got them and what to do if it was not them; the short link sentence is fixed by ADR-108. With the business's name now
    the from-name, the "Rincol Tech" sign-off stays: the platform sends on the business's behalf.
-8. **Bounces and complaints are not written to the outbox yet.** The application role cannot update
-   `notification_outbox` (row-level security is forced and every write goes through a `SECURITY DEFINER` function), and
-   `notification_outbox_record_result` only touches rows still `pending`. Recording a bounce or a complaint on a sent row
-   therefore needs one new function, which is a Flyway migration. It needs no new column: the function can mark the row
-   `failed` with `last_error` `bounced` or `complained` on the columns that exist; a column of its own would be a choice,
-   not a need. The owner's instruction for issue #333's first change was that it adds no migration, so the webhook
-   (Resend signs it; the endpoint checks the signature) and that function are left to a change of their own, under #333,
-   which stays open. Until then the Resend dashboard shows bounces and complaints, found by the `outbox_id` tag.
+8. **Bounces and complaints are recorded in the platform audit log, not on the outbox row.** Resend calls
+   `POST /api/v1/platform/webhooks/resend` (public, hidden from the OpenAPI document) for each event. The body must carry
+   a Svix signature made with `BMS_RESEND_WEBHOOK_SECRET` over the message id, its timestamp and the exact body, and the
+   timestamp must be within five minutes of now; anything else gets 401 and writes nothing, and with the secret unset the
+   route answers 404. `email.bounced` and `email.complained` become one `platform_audit_log` row each
+   (`platform.email.bounced`, `platform.email.complained`), holding the outbox row id and the business from the tags the
+   sender puts on every email (`outbox_id`, `tenant_id`, `template`), the recipient's domain only (never the address), the
+   bounce type and the message id. A repeated message id writes nothing more. Other event types are acknowledged and
+   ignored. The operator's "Messages not sent" page lists the latest 100 (`GET /platform/outbox`, `bounces`).
+   **No migration and no new column:** the application role already inserts and reads that log. Writing the bounce on
+   the outbox row itself would need one new `SECURITY DEFINER` function (the application role cannot update
+   `notification_outbox`, and `notification_outbox_record_result` only touches rows still `pending`), which is a Flyway
+   migration. The rule against a migration in this change came from the lead's brief for issue #333, not from this ADR.
 
 ## Consequences
 
-**Better:** staging and production can send without SMTP, through the verified `rincoltech.com` sender. A retry after a
-lost answer cannot send a second copy. Readers see which business wrote. Staging can no longer email a real person by
-accident.
+**Better:** staging and production can send without SMTP, through the verified `rincoltech.com` sender. An automatic
+retry after a lost answer cannot send a second copy. Readers see which business wrote. Staging can no longer email a real
+person by accident. The operator sees which emails bounced or were marked as unwanted, by domain, without a migration.
 
 **Worse:** two senders to keep working instead of one. On staging, a tester whose address is not on the list gets nothing,
-and the operator has to add it. Bounces live in the Resend dashboard, not in the operator portal, until the follow-up.
+and the operator has to add it. A bounce is beside its outbox row, not on it: the row still reads `sent`, and the operator
+matches the two by the row id.
 
 **Watch for:** setting `BMS_MAIL_ALLOWLIST` on staging before this release reaches it (an empty list sends nothing, the
-rows show as failed with `not_on_staging_allowlist`); a business name a mail client shows oddly; Resend's limits on
-attachment size for the weekly workbook (ADR-074); the follow-up migration for bounce and complaint events.
+rows show as failed with `not_on_staging_allowlist`); setting `BMS_RESEND_WEBHOOK_SECRET` and adding the webhook in
+Resend on each host; a business name a mail client shows oddly; Resend's limits on attachment size for the weekly
+workbook (ADR-074); whether the owner later wants the bounce on the outbox row itself (one new function, a migration).

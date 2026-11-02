@@ -286,6 +286,10 @@ class ResendEmailChannel implements OutboxChannel {
         if (context.outboxId() != null) {
             tags.add(Map.of("name", "outbox_id", "value", context.outboxId().toString()));
         }
+        if (context.tenantId() != null) {
+            // So a bounce or complaint that comes back names the business (ResendWebhookController).
+            tags.add(Map.of("name", "tenant_id", "value", context.tenantId().toString()));
+        }
         if (context.templateKey() != null) {
             // A tag value takes letters, digits, underscores and dashes only.
             tags.add(Map.of("name", "template", "value", context.templateKey().replaceAll("[^A-Za-z0-9_-]", "_")));

@@ -1328,8 +1328,9 @@ Accepted (this list is the ADR index):
   (`ResendEmailChannel`, `BMS_RESEND_API_KEY` on the host only, Resend's idempotency key
   `bms:<environment>:<outbox row id>:<row key>`); a business's email carries its name as the from-name from
   `no-reply@rincoltech.com`; on staging, or wherever `BMS_MAIL_ALLOWLIST` is set, only the list gets mail; bounces and
-  complaints wait for a migration of their own, one new outbox function and no new column (#333 stays open; #766; no
-  migration)
+  complaints come in on the Svix-signed `POST /api/v1/platform/webhooks/resend` (`BMS_RESEND_WEBHOOK_SECRET`) and are
+  recorded in the platform audit log with the outbox row id and the recipient's domain only, listed on the operator's
+  "Messages not sent" page (#333; no migration, no new column)
 
 Pending (cite only as "pending ADR-NNN"):
 

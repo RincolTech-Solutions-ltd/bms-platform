@@ -131,9 +131,16 @@ The `BMS_SMTP_*` values can stay on the host; they are not used while the provid
   "Send again", which within 24 hours ends the same way. It is rare: it needs a lost answer and a change within minutes.
 - **`BMS_RESEND_API_URL`** stays unset on every host. It must be an `https` address; the only exception is a test's
   `http://127.0.0.1` or `http://localhost` stand-in, and production refuses even that at start.
-- **Bounces and complaints.** Not in the portal yet (ADR-115 decision 8). Look in Resend under Emails: each message
-  carries the tag `outbox_id`, the row id the API log line `outbox email accepted by resend` names. An address that
-  bounces hard or complains is suppressed by Resend; fix it in BMS (the user's email) before sending again.
+- **Bounces and complaints (ADR-115 decision 8).** Set it up once per host: in Resend, Webhooks, add the endpoint
+  `https://<BMS_PLATFORM_HOST>/api/v1/platform/webhooks/resend` with the events `email.bounced` and `email.complained`,
+  copy its Signing secret (`whsec_...`) into `/opt/bms/.env` as `BMS_RESEND_WEBHOOK_SECRET`, then
+  `docker compose up -d api`. The platform host must be reachable from the internet on that path (no access gate in
+  front of it). Resend's "Send test event" must show 204; a 401 means the secret differs, a 404 that it is unset.
+  Each bounce and complaint then shows on "Messages not sent" under **Bounced and complained**, with the message, the
+  recipient's domain only and the time; the full address is never stored. Match it to its outbox row by the row id
+  (in the platform audit log, action `platform.email.bounced` or `platform.email.complained`), or in Resend under
+  Emails by the tag `outbox_id`. An address that bounces hard or complains is suppressed by Resend; fix it in BMS (the
+  user's email) before sending again.
 - **Rotating the key.** Make the new key, put it in `.env`, `docker compose up -d api`, send yourself a password reset,
   then delete the old key in Resend.
 

@@ -11227,6 +11227,28 @@ export interface components {
             /** Format: uuid */
             product_id: string;
         };
+        /** @description The latest 100 bounces and complaints Resend reported (issue #333, ADR-115) */
+        OutboxBounce: {
+            /** @description Resend's bounce type, for example Permanent or Transient; null for a complaint */
+            bounce_type?: string;
+            /** @description bounced or complained */
+            kind?: string;
+            /** Format: date-time */
+            occurred_at?: string;
+            /**
+             * Format: uuid
+             * @description The outbox row the email was, when Resend gave it back
+             */
+            outbox_id?: string;
+            /** @description The recipient's domain only, never the address */
+            recipient_domain?: string;
+            template_key?: string;
+            /**
+             * Format: uuid
+             * @description The business whose email it was, or null for a platform email
+             */
+            tenant_id?: string;
+        };
         OutboxFailure: {
             /** Format: int32 */
             attempts?: number;
@@ -11251,6 +11273,8 @@ export interface components {
             tenant_id?: string;
         };
         OutboxStatus: {
+            /** @description The latest 100 bounces and complaints Resend reported (issue #333, ADR-115) */
+            bounces?: components["schemas"]["OutboxBounce"][];
             /** @description Rows per status: pending, sent, failed */
             counts?: {
                 [key: string]: number;

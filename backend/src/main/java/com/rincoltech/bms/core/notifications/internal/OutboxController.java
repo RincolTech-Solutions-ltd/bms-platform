@@ -73,6 +73,26 @@ class OutboxController {
             @Schema(description = "transactional, reminder or arrears")
             String category) {}
 
+    @Schema(name = "OutboxBounce")
+    record Bounce(
+            Instant occurredAt,
+
+            @Schema(description = "bounced or complained") String kind,
+
+            @Schema(description = "The outbox row the email was, when Resend gave it back")
+            UUID outboxId,
+
+            @Schema(description = "The business whose email it was, or null for a platform email")
+            UUID tenantId,
+
+            String templateKey,
+
+            @Schema(description = "The recipient's domain only, never the address")
+            String recipientDomain,
+
+            @Schema(description = "Resend's bounce type, for example Permanent or Transient; null for a complaint")
+            String bounceType) {}
+
     @Schema(name = "OutboxStatus")
     record Status(
             @Schema(description = "Channels whose sender is configured; rows of the others stay pending")
@@ -81,7 +101,10 @@ class OutboxController {
             @Schema(description = "Rows per status: pending, sent, failed")
             Map<String, Long> counts,
 
-            List<Failure> failures) {}
+            List<Failure> failures,
+
+            @Schema(description = "The latest 100 bounces and complaints Resend reported (issue #333, ADR-115)")
+            List<Bounce> bounces) {}
 
     @GetMapping
     @RequiresPermission("platform.tenants.read")
@@ -105,7 +128,19 @@ class OutboxController {
                         rs.getObject("tenant_id", UUID.class),
                         rs.getString("category")))
                 .list();
-        return new Status(dispatcher.enabledChannels(), counts, failures);
+        List<Bounce> bounces = audit.recent(ResendWebhookController.ACTIONS, 100).stream()
+                .map(e -> new Bounce(
+                        e.occurredAt(),
+                        e.action().equals(ResendWebhookController.BOUNCED) ? "bounced" : "complained",
+                        e.data().get("outbox_id") == null
+                                ? null
+                                : UUID.fromString(e.data().get("outbox_id")),
+                        e.tenantId(),
+                        e.data().get("template"),
+                        e.data().get("recipient_domain"),
+                        e.data().get("bounce_type")))
+                .toList();
+        return new Status(dispatcher.enabledChannels(), counts, failures, bounces);
     }
 
     @PostMapping("/{outbox_id}/retry")

@@ -165,7 +165,8 @@ class ResendEmailChannelTest {
         assertThat(body.path("text").asString()).startsWith("Hello,");
         assertThat(body.path("html").asString()).contains("<html");
         assertThat(body.path("tags").get(0).path("value").asString()).isEqualTo("00000000-0000-4000-8000-0000000000e1");
-        assertThat(body.path("tags").get(1).path("value").asString()).isEqualTo("identity_password_changed");
+        assertThat(body.path("tags").get(1).path("name").asString()).isEqualTo("tenant_id");
+        assertThat(body.path("tags").get(2).path("value").asString()).isEqualTo("identity_password_changed");
     }
 
     @Test

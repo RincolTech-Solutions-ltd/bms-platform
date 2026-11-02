@@ -64,6 +64,34 @@ export function OutboxView({ status, busyId, onRetry }: { status: OutboxStatus; 
         </table>
         </div>
       )}
+      {/* JUSTIFICATION-A3: the bounces and complaints list the #759 lead asked for on this page (issue #333). */}
+      <h2>Bounced and complained</h2>
+      {(status.bounces ?? []).length === 0 ? (
+        <p>No email has bounced or been marked as unwanted.</p>
+      ) : (
+        <div className="table-wrap">
+        <table aria-label="Bounced and complained emails">
+          <thead>
+            <tr>
+              <th scope="col">What happened</th>
+              <th scope="col">Message</th>
+              <th scope="col">To domain</th>
+              <th scope="col">When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(status.bounces ?? []).map((b, i) => (
+              <tr key={`${b.outbox_id ?? 'none'}-${b.occurred_at ?? i}-${b.kind}`}>
+                <td>{b.kind === 'complained' ? 'Marked as unwanted' : b.bounce_type === 'Permanent' ? 'Bounced, address does not work' : 'Bounced'}</td>
+                <td>{TEMPLATE_LABEL[(b.template_key ?? '').replace(/_/g, '.')] ?? b.template_key ?? 'Email'}</td>
+                <td>{b.recipient_domain}</td>
+                <td>{b.occurred_at?.slice(0, 16).replace('T', ' ')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        </div>
+      )}
     </>
   );
 }

@@ -169,6 +169,8 @@ services:
       # BMS_MAIL_ALLOWLIST get mail (addresses or @domain, comma separated); an empty list sends nothing.
       BMS_MAIL_PROVIDER: ${BMS_MAIL_PROVIDER:-smtp}
       BMS_RESEND_API_KEY: ${BMS_RESEND_API_KEY:-}
+      # The signing secret of the Resend webhook for bounces and complaints; unset turns the route off.
+      BMS_RESEND_WEBHOOK_SECRET: ${BMS_RESEND_WEBHOOK_SECRET:-}
       BMS_MAIL_ALLOWLIST: ${BMS_MAIL_ALLOWLIST:-}
       # The support line in the footer of every email (issue #396, ADR-054); empty leaves it out.
       BMS_SUPPORT_CONTACT: ${BMS_SUPPORT_CONTACT:-}

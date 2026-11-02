@@ -16,4 +16,13 @@ public interface PlatformAuditLog {
      * @param data details; identifiers under the keys of FR-AUD-05 are masked
      */
     void record(String action, UUID platformUserId, UUID tenantId, Map<String, Object> data);
+
+    /** One row as {@link #recent} reads it: the data's text values only. */
+    record Entry(java.time.Instant occurredAt, String action, UUID tenantId, Map<String, String> data) {}
+
+    /** The latest rows of these actions, newest first, at most {@code limit} (issue #333: the email bounces). */
+    java.util.List<Entry> recent(java.util.Set<String> actions, int limit);
+
+    /** True when a row of one of these actions carries {@code value} under {@code key} in its data (a repeat delivery). */
+    boolean recorded(java.util.Set<String> actions, String key, String value);
 }
