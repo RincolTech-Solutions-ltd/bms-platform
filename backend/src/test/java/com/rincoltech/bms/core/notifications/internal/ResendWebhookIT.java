@@ -268,6 +268,24 @@ class ResendWebhookIT extends IntegrationTest {
                 .isTrue();
     }
 
+    // JUSTIFICATION-A3: the fourth #759 review's must-fix: email sent by SMTP is not tracked or suppressed.
+    @Test
+    void aHardBounceOfAnEmailSentBySmtpCarriesNoTagsAndIsNeitherRecordedNorSuppressed() throws Exception {
+        // ADR-117 decision 8: an email sent over SMTP has no tags at all, so its event arrives with none.
+        String to = address();
+        String id = "msg_" + UUID.randomUUID().toString().replace("-", "");
+        long now = Instant.now().getEpochSecond();
+        String body = """
+                {"type":"email.bounced","created_at":"2026-11-02T10:00:00.000Z","data":{"email_id":"5af0b528-13fa-4e4a-be86-0722f1adc44d",
+                "from":"Test Shop <no-reply@example.test>","to":["%s"],"subject":"Your BMS password was changed",
+                "bounce":{"type":"Permanent","subType":"General","message":"The address does not exist"}}}
+                """.formatted(to);
+        assertThat(post(id, now, sign(KEY, id, now, body), body).getStatusCode().value())
+                .isEqualTo(200);
+        assertThat(rows(id)).isZero();
+        assertThat(suppressions.suppressed(to)).isFalse();
+    }
+
     @Test
     void aComplaintSuppressesTheAddress() throws Exception {
         String to = address();

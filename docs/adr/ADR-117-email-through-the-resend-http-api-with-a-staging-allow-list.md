@@ -88,7 +88,8 @@ types, which can be a real person's.
    because the address is on its suppression list) become one `platform_audit_log` row each (`platform.email.bounced`,
    `platform.email.complained`, `platform.email.suppressed`), holding the outbox row id and the business from the tags the
    sender puts on every email (`outbox_id`, `tenant_id`, `template`), the recipient's domain only (never the address), the
-   bounce type and the message id. Every email also carries an `env` tag (the environment, as in the idempotency key):
+   bounce type and the message id. Every email sent through the Resend API also carries an `env` tag (the environment,
+   as in the idempotency key):
    staging and production share the Resend account and Resend sends every event to every endpoint, so an event whose
    `env` is another environment's, or missing, is answered 200, logged at debug and not recorded. A repeated message id writes nothing
    more: the check takes a transaction advisory lock on the id and searches only the last seven days. Other event types
@@ -99,6 +100,16 @@ types, which can be a real person's.
    migration. The rule against a migration in this change came from the lead's brief for issue #333, not from this ADR.
    That function, marking the bounced row itself `failed` with `last_error` `bounced` or `complained`, is issue #767; it
    reuses this route and its signature check. Stopping later sends needs no migration and is decision 9.
+   **Email that goes by SMTP is not tracked or suppressed.** Resend's SMTP documentation names the headers it reads
+   (`Resend-Idempotency-Key`, and custom headers such as `X-Entity-Ref-ID` and `List-Unsubscribe`) and no header that
+   carries tags, so BMS does not invent one. An email sent over SMTP (the `smtp` provider, also when its host is
+   Resend's SMTP endpoint, and the fallback of decision 1) therefore has no `env`, `outbox_id` or `tenant_id` tag. Its
+   bounce, complaint or suppressed event arrives untagged and is dropped as another environment's is: nothing is
+   recorded, no `recipient_hash` is written, so BMS does not suppress the address, and a later email to it can read
+   `sent` while Resend's own suppression list drops it. The check of decision 9 still runs before every SMTP send, so an
+   address already suppressed after an email sent through the API is refused over SMTP too. `EmailLayoutTest` pins
+   that an SMTP message carries no tag header, and `ResendWebhookIT` that an untagged hard bounce records nothing and
+   suppresses nothing. A host that needs bounces tracked chooses `resend`.
 9. **BMS stops sending to an address that hard-bounced, complained or that Resend suppressed, and an operator can lift
    it.** Without this, Resend's account-level suppression list drops every later email to such an address while the
    outbox row reads `sent`, so a staff member whose address bounced once never gets a reset and nobody sees why. The
@@ -129,7 +140,8 @@ silent `sent`.
 **Worse:** two senders to keep working instead of one. On staging, a tester whose address is not on the list gets nothing,
 and the operator has to add it. The bounced email itself is beside its outbox row, not on it: that row still reads
 `sent`, and the operator matches the two by the row id (#767). A fixed mailbox needs the operator's clear before BMS sends
-to it again, and Resend's own suppression list needs clearing in Resend too.
+to it again, and Resend's own suppression list needs clearing in Resend too. Email sent by SMTP, including every
+fallback, is neither tracked nor suppressed (decision 8).
 
 **Watch for:** setting `BMS_MAIL_ALLOWLIST` on staging before this release reaches it (an empty list sends nothing, the
 rows show as failed with `not_on_staging_allowlist`); setting `BMS_RESEND_WEBHOOK_SECRET` and adding the webhook in

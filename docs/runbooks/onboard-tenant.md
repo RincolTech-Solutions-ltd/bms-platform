@@ -158,6 +158,13 @@ The `BMS_SMTP_*` values can stay on the host; they are not used while the provid
   recipient's domain only and the time; the full address is never stored. Match it to its outbox row by the row id
   (in the platform audit log, action `platform.email.bounced`, `platform.email.complained` or
   `platform.email.suppressed`), or in Resend under Emails by the tag `outbox_id`.
+- **Email that goes by SMTP is not tracked or suppressed (ADR-117 decision 8).** Only email sent through the Resend API
+  carries the tags (`env`, `outbox_id`); Resend's SMTP documentation names no header for tags. So with
+  `BMS_MAIL_PROVIDER=smtp` (even when the SMTP host is Resend's), and for every email sent by the fallback (`via=smtp`),
+  a bounce or complaint is not recorded, does not show under **Bounced and complained**, and does not stop later sends:
+  such a row can read `sent` while Resend drops it. If a user says an email never came and the row reads `sent`, look
+  the address up in Resend (Emails, or Suppressions) before anything else. BMS still refuses an address it suppressed
+  earlier, over SMTP too. Choose `resend` on a host where bounces must be tracked.
 - **`recipient_suppressed` on "Messages not sent" (ADR-117 decision 9).** An address that bounced hard, complained, or
   that Resend reported as suppressed is not sent to again by BMS, over Resend or SMTP: each later email to it is refused
   and shows here as failed with `recipient_suppressed`, instead of reading `sent` while Resend drops it. BMS keeps only a
