@@ -242,11 +242,14 @@ class ResendWebhookIT extends IntegrationTest {
                 .query(String.class)
                 .single();
         assertThat(data).doesNotContainIgnoringCase(address.substring(0, address.indexOf('@')));
-        return TestDatabase.owner()
-                .sql("SELECT data ->> 'recipient_hash' FROM platform_audit_log WHERE data ->> 'svix_id' = ?")
+        // coalesce: a row with no hash reads as null here, since single() refuses a null value.
+        String hash = TestDatabase.owner()
+                .sql(
+                        "SELECT coalesce(data ->> 'recipient_hash', '') FROM platform_audit_log WHERE data ->> 'svix_id' = ?")
                 .param(svixId)
                 .query(String.class)
                 .single();
+        return hash.isEmpty() ? null : hash;
     }
 
     @Test
