@@ -42090,6 +42090,16 @@
               }
             },
             "description" : "This receipt link has expired: a plain page"
+          },
+          "429" : {
+            "content" : {
+              "text/html" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "Too many opens of this link or from this address: a plain page"
           }
         },
         "summary" : "The receipt PDF a receipt link opens, with no sign-in; a wrong or expired link is a plain page (issue #760)",

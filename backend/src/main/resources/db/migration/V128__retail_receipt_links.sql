@@ -16,8 +16,9 @@ CREATE TABLE retail_receipt_links (
     id          uuid         NOT NULL PRIMARY KEY,
     tenant_id   uuid         NOT NULL REFERENCES tenants (id),
     sale_id     uuid         NOT NULL,
-    -- The hex SHA-256 of the token in the link.
-    token_hash  char(64)     NOT NULL UNIQUE,
+    -- The hex SHA-256 of the token in the link. text, as the lookups bind it, so the unique index serves them (a char(n)
+    -- column compared with text is cast and can miss its index; review of #762).
+    token_hash  text         NOT NULL UNIQUE CHECK (token_hash ~ '^[0-9a-f]{64}$'),
     -- Who made the link, whom the receipt it opens names as issuing it; like retail_sales.created_by, no foreign key.
     created_by  uuid         NOT NULL,
     created_at  timestamptz  NOT NULL,
@@ -32,6 +33,8 @@ SELECT bms_grant_app('retail_receipt_links', 'SELECT, INSERT');
 
 -- Where a receipt link goes, read on the platform host where no business is bound: the slug of the active business whose
 -- live link has this token hash, or nothing (a wrong or expired link). Says nothing else about the sale or the business.
+-- It reads every business's rows with the forced row level security of the table, so it relies on its owner bms_owner
+-- having BYPASSRLS (deploy/postgres/initdb/01-roles.sh), as help_ask_platform_spend (V108) does.
 CREATE FUNCTION retail_receipt_link_shop(p_token_hash text, p_now timestamptz)
 RETURNS text
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$

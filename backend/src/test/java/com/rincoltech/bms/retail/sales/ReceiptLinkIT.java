@@ -236,4 +236,58 @@ class ReceiptLinkIT extends IntegrationTest {
         gonePage(open(t, token));
         assertThat(makeLink(seller, sale, SALES).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     }
+
+    // JUSTIFICATION-A3: a new test case for review item 7 of #762; no existing case opens one link many times.
+    /** One link opened too often in ten minutes is turned away with a plain page, before anything is read or drawn. */
+    @Test
+    void oneLinkOpenedTooOftenIsTurnedAway() {
+        String token = UUID.randomUUID()
+                .toString()
+                .replaceAll("[^a-z2-7]", "")
+                .concat("abcdefghijklmnopqrstuvwxyz")
+                .substring(0, 26);
+        HttpHeaders h = new HttpHeaders();
+        h.add("X-Tenant", t.slug());
+        h.add("X-Forwarded-For", "198.51.100." + (1 + Math.floorMod(token.hashCode(), 250)));
+        for (int i = 0; i < 20; i++) {
+            gonePage(http.exchange(
+                    RetailTestSupport.BASE + "/receipt-links/" + token,
+                    HttpMethod.GET,
+                    new HttpEntity<>(h),
+                    byte[].class));
+        }
+        ResponseEntity<byte[]> turnedAway = http.exchange(
+                RetailTestSupport.BASE + "/receipt-links/" + token, HttpMethod.GET, new HttpEntity<>(h), byte[].class);
+        assertThat(turnedAway.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        assertThat(new String(turnedAway.getBody(), StandardCharsets.UTF_8)).contains("Too many tries");
+    }
+
+    // JUSTIFICATION-A3: a new test case for review item 5 of #762; no existing case reads the lookup's plan.
+    /**
+     * The public lookup reads one row through the unique index on the hash, bound as the app binds it (a JDBC string), so
+     * a stream of wrong links never scans the table, which keeps every business's expired links.
+     */
+    @Test
+    void theTokenLookupUsesTheUniqueIndex() throws Exception {
+        try (java.sql.Connection c = TestDatabase.ownerDataSource().getConnection()) {
+            c.setAutoCommit(false);
+            try (java.sql.Statement s = c.createStatement()) {
+                s.execute("SET LOCAL enable_seqscan = off");
+            }
+            try (java.sql.PreparedStatement ps = c.prepareStatement(
+                    "EXPLAIN SELECT t.slug FROM retail_receipt_links l JOIN tenants t ON t.id = l.tenant_id"
+                            + " WHERE l.token_hash = ? AND l.expires_at > ? AND t.status = 'active'")) {
+                ps.setString(1, "0".repeat(64));
+                ps.setTimestamp(2, java.sql.Timestamp.from(Instant.now()));
+                StringBuilder plan = new StringBuilder();
+                try (java.sql.ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        plan.append(rs.getString(1)).append('\n');
+                    }
+                }
+                assertThat(plan.toString()).contains("retail_receipt_links_token_hash_key");
+            }
+            c.rollback();
+        }
+    }
 }

@@ -10,7 +10,9 @@ import java.security.SecureRandom;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -77,6 +79,42 @@ class ReceiptLinks implements ShortLinkTarget {
 
     /** A live link of the bound business: the sale and who made the link. */
     record Live(UUID saleId, UUID createdBy) {}
+
+    // JUSTIFICATION-A3: review of #762, item 7: the public route renders a PDF, so its opens are limited.
+    /** Opens of one link, and from one address, in a ten minute window; more is 429 with {@link #BUSY_PAGE}. */
+    static final int OPENS_PER_LINK = 20;
+
+    static final int OPENS_PER_ADDRESS = 30;
+    static final int MAX_KEYS = 20_000;
+
+    static final String BUSY_PAGE = GONE_PAGE
+            .replace("<title>Receipt link expired</title>", "<title>Too many tries</title>")
+            .replace("<h1>This receipt link has expired</h1>", "<h1>Too many tries</h1>")
+            .replace("Ask the shop to send you the receipt again.", "Wait a few minutes and open the link again.");
+
+    private final Map<String, Integer> opens = new HashMap<>();
+    private long window = Long.MIN_VALUE;
+
+    /**
+     * Counts an open of the public route and says whether it may go on: at most {@link #OPENS_PER_LINK} of one link and
+     * {@link #OPENS_PER_ADDRESS} from one address in ten minutes, so one leaked link cannot fill the render places the
+     * sellers' own receipts share. In memory and per instance, behind the edge's own limits; a flood from more addresses
+     * than the table holds is limited as a whole, as {@code CallbackLimiter} does.
+     */
+    synchronized boolean mayOpen(String address, String token) {
+        long now = clock.now().getEpochSecond() / 600;
+        if (now != window) {
+            window = now;
+            opens.clear();
+        }
+        if (opens.size() >= MAX_KEYS) {
+            return false;
+        }
+        String link = token != null && TOKEN.matcher(token).matches() ? token : "malformed";
+        int byLink = opens.merge("link:" + link, 1, Integer::sum);
+        int byAddress = opens.merge("address:" + (address == null ? "unknown" : address), 1, Integer::sum);
+        return byLink <= OPENS_PER_LINK && byAddress <= OPENS_PER_ADDRESS;
+    }
 
     /** Makes a link to the sale's receipt, in the caller's write transaction, with the business bound. */
     Minted mint(UUID saleId, UUID by) {

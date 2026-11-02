@@ -23,13 +23,16 @@ typed so the receipt shows it instead of Cash customer.
 2. **WhatsApp customer adds a short link to that sale's receipt.** `POST /retail/sales/{sale_id}/receipt/link` makes a
    link under the receipt's own check (ADR-061: who may share it, and 422 for a voided, written-off or wholly returned
    sale). The link is `rincoltech.com/<token>`, the short link host of ADR-108, so it is short and goes through the same
-   Cloudflare rule with no change to it. The message reads "See your receipt: <link>". The screen makes the link once a
-   number is there, so the tap opens WhatsApp at once; when the link cannot be made the message goes without it and the
-   screen says so.
+   Cloudflare rule with no change to it. The message reads "See your receipt: <link>". The link is made only when
+   WhatsApp customer is tapped, never by viewing the screen, so no link exists that nobody sent (review of #762). The
+   chat's window is opened inside the tap, so a phone does not block it as a pop-up while the link is made, and is sent
+   to WhatsApp when the link is back; when the link cannot be made the message goes without it and the screen says so.
+   A second tap on the same sale reuses the link.
 3. **The token is unguessable, stored only as a hash, and lives 90 days.** 26 random characters of lower case base32 (130
    bits), longer than any new short name (ADR-108 decision 1) so the two never meet, and lower case because the rule's
    endpoint reads names in lower case. Only its SHA-256 is stored (`retail_receipt_links`), so the table cannot be turned
-   back into links. Each tap makes a new link; links are never changed and simply expire.
+   back into links. The hash is a `text` column checked to 64 hex digits, so the lookups, bound as text, use its unique
+   index and a stream of wrong links never scans the table. Links are never changed and simply expire.
 4. **The platform forwards, the shop's host renders.** The short link endpoint asks the shops first, then each module's
    `ShortLinkTarget` (a hook in `core.tenancy`, so the core names no vertical). Retail answers a token-shaped name: a live
    link is a 302 to `<shop host>/api/v1/retail/receipt-links/<token>`, found with the definer function
@@ -38,7 +41,14 @@ typed so the receipt shows it instead of Cash customer.
    seller shares it, issued by whoever made the link. No sign-in and nothing else of the business is reachable from it.
 5. **A wrong or expired link is a plain page.** A token that is not found, has expired, belongs to another business, or
    whose sale no longer has a receipt answers 404 with a small HTML page, "This receipt link has expired", that names
-   neither the business nor the sale, on both hosts.
+   neither the business nor the sale, on both hosts. A name of the token's shape that is no link gets this page too, not
+   ADR-108's "No shop uses this link"; no new short name is that long.
+6. **The public routes are limited.** On the platform host a name no shop has (a receipt link or a mistyped name) counts
+   against 60 a client address may ask in ten minutes (429 beyond). On the shop's host one link may be opened 20 times
+   and one address may open 30 in ten minutes; beyond that the answer is 429 with a plain "Too many tries" page, before
+   anything is read or drawn, so one leaked link cannot fill the render places the sellers' own receipts share. Both are in
+   memory per instance, behind the edge's own limits. The definer function relies on its owner `bms_owner` having
+   BYPASSRLS (`deploy/postgres/initdb/01-roles.sh`), as `help_ask_platform_spend` (V108) does.
 
 ## Consequences
 
@@ -46,8 +56,9 @@ typed so the receipt shows it instead of Cash customer.
 links reuse the short link host and its one rule; a leaked table gives no working link.
 
 **Worse:** anyone holding the link sees that receipt for 90 days, as with a forwarded PDF. The receipt is rendered on each
-open, so a link opened after a payment shows the receipt as it stands then, not as it was sent. Rows are kept after
-expiry; the removal of a closed business deletes them with its other rows.
+open, so a link opened after a payment shows the receipt as it stands then, while the message text keeps the amounts it
+was sent with. Rows are kept after expiry; the removal of a closed business deletes them with its other rows (the purge
+finds every table with a `tenant_id` and retries one a foreign key holds; `BusinessClosureIT` seeds a link).
 
 **Watch for:** the receipt links share the short link space with the shops, so a website page needs its path on ADR-108's
 reserved list in any case, or the rule takes it. A burst of opens of live links takes receipt render places like the

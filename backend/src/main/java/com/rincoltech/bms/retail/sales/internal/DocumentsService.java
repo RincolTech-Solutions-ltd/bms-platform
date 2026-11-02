@@ -877,6 +877,11 @@ class DocumentsService {
         });
     }
 
+    /** Whether this open of the public route may go on (review of #762): limited per link and per client address. */
+    boolean mayOpenLink(String token) {
+        return links.mayOpen(com.rincoltech.bms.kernel.RequestContext.clientIp(), token);
+    }
+
     /**
      * The receipt PDF a live link opens, with nobody signed in (issue #760): the receipt the seller shares, as it stands
      * now, issued by whoever made the link. Empty when the link is wrong or expired, or its sale has no receipt any more.

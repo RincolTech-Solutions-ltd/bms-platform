@@ -305,9 +305,20 @@ class DocumentsController {
         @ApiResponse(
                 responseCode = "404",
                 description = "This receipt link has expired: a plain page",
+                content = @Content(mediaType = "text/html", schema = @Schema(type = "string"))),
+        @ApiResponse(
+                responseCode = "429",
+                description = "Too many opens of this link or from this address: a plain page",
                 content = @Content(mediaType = "text/html", schema = @Schema(type = "string")))
     })
     ResponseEntity<byte[]> openReceiptLink(@PathVariable("token") String token) {
+        if (!service.mayOpenLink(token)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .contentType(new MediaType(MediaType.TEXT_HTML, java.nio.charset.StandardCharsets.UTF_8))
+                    .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                    .header(HttpHeaders.RETRY_AFTER, "600")
+                    .body(ReceiptLinks.BUSY_PAGE.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
         return service.linkedReceiptPdf(token)
                 .map(pdf -> ResponseEntity.ok()
                         .contentType(MediaType.APPLICATION_PDF)

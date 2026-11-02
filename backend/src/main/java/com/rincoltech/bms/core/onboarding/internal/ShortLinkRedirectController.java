@@ -4,6 +4,7 @@ import com.rincoltech.bms.core.tenancy.PlatformHost;
 import com.rincoltech.bms.core.tenancy.ShortLinkTarget;
 import com.rincoltech.bms.core.tenancy.ShortNames;
 import com.rincoltech.bms.kernel.PublicEndpoint;
+import com.rincoltech.bms.kernel.RequestContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -35,10 +36,14 @@ class ShortLinkRedirectController {
     private final PlatformHost hosts;
     private final List<ShortLinkTarget> targets;
 
-    ShortLinkRedirectController(ShortNames names, PlatformHost hosts, List<ShortLinkTarget> targets) {
+    private final SignUpRateLimiter limiter;
+
+    ShortLinkRedirectController(
+            ShortNames names, PlatformHost hosts, List<ShortLinkTarget> targets, SignUpRateLimiter limiter) {
         this.names = names;
         this.hosts = hosts;
         this.targets = targets;
+        this.limiter = limiter;
     }
 
     @Schema(name = "ShortLinkRule")
@@ -75,6 +80,12 @@ class ShortLinkRedirectController {
     ResponseEntity<String> follow(@PathVariable("name") String name) {
         // JUSTIFICATION-A3: after the shops, the modules' own links, such as a receipt link (issue #760, ADR-116).
         String shop = names.target(name).orElse(null);
+        if (shop == null) {
+            // A name no shop has may be a module's link, looked up in every business's rows: limited per address
+            // (review
+            // of #762). A shop's own short link never is.
+            limiter.acquire(SignUpRateLimiter.MODULE_LINK_PER_IP, RequestContext.clientIp());
+        }
         ShortLinkTarget.Answer other = shop != null
                 ? null
                 : targets.stream()
