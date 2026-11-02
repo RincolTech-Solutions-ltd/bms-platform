@@ -95,12 +95,13 @@ Done: record a sale, credit sales with payments, all sales, void a sale and cust
 branches, category filter, low stock with a per-item minimum, out of stock), stock-take, usage and its history (Past usage and
 damage), restock and its history (Past purchases), move stock, stock value with expected profit, daily profit (with the stock-take
 difference), the catalogue screens for items, prices, categories, units, suppliers and credit buyers, with the
-item import, the analytics screens (sales analysis, margins, stock health, credit control, business evaluation and the owner dashboard), and the cash book screens (savings, banking and its report, withdrawals, expenses and its report and
-lists, advances, cash summary).
+item import, the analytics screens (sales analysis, margins, stock health, credit control and the owner dashboard), and the cash
+book screens (savings, banking and its report, withdrawals, expenses and its report and lists, advances, cash summary).
 
 Partly: the business evaluation, until the owner gives the exact AppSheet formula (issue #149 item 7).
 
-Missing: nothing in the AppSheet app's views.
+Missing: no AppSheet view is without a screen. Two extras beyond the AppSheet app are not built: the loss as a share of stock,
+and a cash view per shop per day (out of scope, the cash book).
 
 Out of scope: location capture, user and shop
 administration.

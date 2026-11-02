@@ -847,8 +847,10 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `code`, `description` and `unit`. The page `/staff/retail/usage-history` (`usage-history.tsx`, `retail.stock.read`), linked
   from Usage and damage, lists used and damaged stock newest first by date range, the Branch box and item, with the reason, and
   the value at buying price only with `retail.profit.read`; tour `page-usage-history` v1, `page-usage` v3. The parity table
-  (`docs/specs/retail-ui-parity.md`) is refreshed. Tests: `RetailPaymentsAndUsageIT`, `usage-history.dom.test.tsx`,
-  `tours-retail-reports.test.tsx`.
+  (`docs/specs/retail-ui-parity.md`) is refreshed. Each line is dated on the business clock, the day the server's from and to
+  filter by; an empty list offers Record usage or damage (or Show the last year without the usage permission). The known kinds
+  are `JdbcStockLedger.KINDS`, pinned to the table's check by `RetailPaymentsAndUsageIT`. Tests: `RetailPaymentsAndUsageIT`,
+  `usage-history.dom.test.tsx`, `tours-retail-reports.test.tsx`, `layout/usage-history.layout.test.ts`.
 
 ## Reading order
 

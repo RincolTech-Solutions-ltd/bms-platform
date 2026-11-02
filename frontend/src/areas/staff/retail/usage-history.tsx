@@ -6,6 +6,9 @@ import { PeriodPicker } from '../../../app/ui/PeriodPicker';
 import { SearchBox } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { Hint } from '../../../app/ui/Hint';
+import { EmptyState } from '../../../app/ui/EmptyState';
+import { useStaff } from '../context';
+import { canUse } from './permissions';
 import { lineTotalMinor, milliOf, showDate, showQty } from './maths';
 import { Gate, Money, Problem, useBranchName, useBranchView } from './ui';
 
@@ -17,6 +20,12 @@ import { Gate, Money, Problem, useBranchName, useBranchView } from './ui';
 export function takenOut(m: StockMovement): string {
   const qty = showQty((m.qty ?? '0').replace(/^-/, ''));
   return m.unit ? `${qty} ${m.unit}` : qty;
+}
+
+/** The business day of a movement, yyyy-mm-dd on the business's clock, the day the server's from and to filter by. */
+export function dayOf(m: StockMovement): string {
+  const at = new Date(m.at ?? '');
+  return Number.isNaN(at.getTime()) ? '' : businessToday(at);
 }
 
 /** The cost of what was taken out, when the server sent the unit cost (retail.profit.read); null otherwise. */
@@ -34,7 +43,7 @@ function UsageRow({ m, branch }: { m: StockMovement; branch?: string }) {
         <span className={m.kind === 'damage' ? 'badge badge-warning' : 'badge badge-info'}>{m.kind === 'damage' ? 'Damaged' : 'Used'}</span>
       </p>
       <p>
-        <span className="num">{takenOut(m)}</span> taken out on {showDate((m.at ?? '').slice(0, 10))}{branch ? ` at ${branch}` : ''}.
+        <span className="num">{takenOut(m)}</span> taken out on {showDate(dayOf(m))}{branch ? ` at ${branch}` : ''}.
         {cost !== null && <> Worth <Money minor={cost} /> at buying price.</>}
       </p>
       {m.note && <p className="hint">Reason: {m.note}</p>}
@@ -46,6 +55,7 @@ export function UsageHistoryPage() {
   const today = businessToday();
   const [from, setFrom] = useState(daysBefore(today, 30));
   const [to, setTo] = useState(today);
+  const { me } = useStaff();
   const { all, branchId } = useBranchView();
   const nameOf = useBranchName();
   const itemBox = useLiveSearch();
@@ -80,9 +90,15 @@ export function UsageHistoryPage() {
           </>
         )}
       </div>
+      {from > to && <p className="hint" role="status">The first day is after the last day. Choose the days again.</p>}
       {ready && page.isPending && <p className="loading">Loading</p>}
       <Problem error={page.error} />
-      {page.data && items.length === 0 && <p className="empty-state">Nothing was used or damaged in these dates.</p>}
+      {page.data && items.length === 0 && (
+        <EmptyState
+          text="Nothing was used or damaged in these dates."
+          action={canUse(me, 'usage') ? { label: 'Record usage or damage', to: '/staff/retail/usage' } : { label: 'Show the last year', onClick: () => { setFrom(daysBefore(today, 365)); setTo(today); } }}
+        />
+      )}
       <ul style={{ listStyle: 'none', padding: 0 }} data-tour="usage-history-list">
         {items.map((m) => <UsageRow key={m.id} m={m} branch={all ? nameOf(m.branch_id) : undefined} />)}
       </ul>

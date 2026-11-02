@@ -1286,7 +1286,8 @@ export function createMockRetail(): RetailApi {
     usageHistory: ({ from, to, branchId, productId }) =>
       run(() => ({
         items: stockLog
-          .filter((m) => (m.kind === 'usage' || m.kind === 'damage') && (m.at ?? '').slice(0, 10) >= from && (m.at ?? '').slice(0, 10) <= to
+          // The business day, as the server's from and to (StockService.movements, the tenant's time zone), never the UTC day.
+          .filter((m) => (m.kind === 'usage' || m.kind === 'damage') && businessToday(new Date(m.at ?? '')) >= from && businessToday(new Date(m.at ?? '')) <= to
             && (!branchId || m.branch_id === branchId) && (!productId || m.product_id === productId))
           .reverse(),
       })),

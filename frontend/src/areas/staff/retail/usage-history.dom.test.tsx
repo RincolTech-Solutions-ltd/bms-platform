@@ -25,7 +25,8 @@ vi.mock('../../../api/retail', async (original) => {
   return { ...real, retail: { ...real.retail, usageHistory: (...a: unknown[]) => usageHistory(...a), listProducts: () => Promise.resolve([]) } };
 });
 
-const { UsageHistoryPage, costOf, takenOut } = await import('./usage-history');
+const { UsageHistoryPage, costOf, dayOf, takenOut } = await import('./usage-history');
+const { setBusinessZone } = await import('../../../api/retail');
 
 afterEach(() => {
   cleanup();
@@ -69,9 +70,17 @@ describe('Past usage and damage', () => {
     expect(second?.textContent).toContain('at buying price');
   });
 
-  it('says plainly when nothing was used or damaged', async () => {
+  it('says plainly when nothing was used or damaged, with one action that records it', async () => {
     usageHistory.mockResolvedValue({ items: [] });
     wrap(<UsageHistoryPage />);
     expect(await screen.findByText('Nothing was used or damaged in these dates.')).toBeTruthy();
+    expect(screen.getByText('Record usage or damage').getAttribute('href')).toBe('/staff/retail/usage');
+  });
+
+  it('dates a line on the business clock, the day the from and to filter by, not the UTC day', () => {
+    setBusinessZone('Africa/Kampala');
+    // 22:30 UTC on 20 Oct is 01:30 on 21 Oct in Kampala (UTC+3).
+    expect(dayOf({ ...damaged, at: '2026-10-20T22:30:00Z' })).toBe('2026-10-21');
+    expect(dayOf({ ...damaged, at: '' })).toBe('');
   });
 });

@@ -575,21 +575,12 @@ class StockService {
         };
     }
 
-    /** The kind filter (#145), null for every kind; a kind the movements table cannot hold is refused. */
+    /**
+     * The kind filter (#145), null for every kind (a blank {@code kind=} binds to none); a kind the movements table cannot
+     * hold is refused with 422, and a null element (a binder that keeps one) is refused the same way, never a 500.
+     */
     static List<String> kindsOf(List<String> kinds) {
-        Set<String> known = Set.of(
-                "opening",
-                "purchase",
-                "sale",
-                "usage",
-                "damage",
-                "adjustment",
-                "return",
-                "legacy_balance",
-                "transfer_out",
-                "transfer_in",
-                "return_to_supplier");
-        if (kinds != null && !known.containsAll(kinds)) {
+        if (kinds != null && kinds.stream().anyMatch(k -> k == null || !JdbcStockLedger.KINDS.contains(k))) {
             throw ApiException.validation(List.of(new FieldProblem("kind", "invalid", "kind is not a movement kind.")));
         }
         return kinds == null || kinds.isEmpty() ? null : kinds;
