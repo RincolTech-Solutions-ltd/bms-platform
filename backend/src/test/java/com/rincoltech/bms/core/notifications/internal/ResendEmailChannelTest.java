@@ -144,7 +144,7 @@ class ResendEmailChannelTest {
 
     @Test
     void sendsOneRequestWithTheKeyInTheHeaderAnEnvironmentKeyAndTheBusinessNameAsFromName() throws Exception {
-        ResendEmailChannel channel = channel("production", "");
+        ResendEmailChannel channel = channel("live", "");
         assertThat(channel.enabled()).isTrue();
 
         OutboxChannel.Result result = channel.send(delivery("staff01@example.test", UUID.randomUUID()));
@@ -154,7 +154,7 @@ class ResendEmailChannelTest {
         Map<String, Object> sent = requests.getFirst();
         assertThat(sent.get("path")).isEqualTo("/emails");
         assertThat(sent.get("authorization")).isEqualTo("Bearer " + KEY);
-        assertThat(sent.get("idempotency")).isEqualTo("bms:production:" + ROW + ":identity.password_changed:k1");
+        assertThat(sent.get("idempotency")).isEqualTo("bms:live:" + ROW + ":identity.password_changed:k1");
         JsonNode body = body(0);
         assertThat(body.toString()).doesNotContain(KEY);
         // The quotes of the name are dropped, so no provider has a reason to refuse it.
@@ -171,22 +171,21 @@ class ResendEmailChannelTest {
     @Test
     void stagingAndProductionNeverShareAnIdempotencyKey() throws Exception {
         channel("staging", "@example.test").send(delivery("staff01@example.test", null));
-        channel("production", "").send(delivery("staff01@example.test", null));
+        channel("live", "").send(delivery("staff01@example.test", null));
         assertThat(requests.get(0).get("idempotency"))
                 .isEqualTo("bms:staging:" + ROW + ":identity.password_changed:k1");
-        assertThat(requests.get(1).get("idempotency"))
-                .isEqualTo("bms:production:" + ROW + ":identity.password_changed:k1");
+        assertThat(requests.get(1).get("idempotency")).isEqualTo("bms:live:" + ROW + ":identity.password_changed:k1");
     }
 
     @Test
     void aPlatformRowKeepsTheConfiguredFrom() throws Exception {
-        channel("production", "").send(delivery("operator01@example.test", null));
+        channel("live", "").send(delivery("operator01@example.test", null));
         assertThat(body(0).path("from").asString()).isEqualTo(FROM);
     }
 
     @Test
     void eachAnswerComesToSentRefusedDeferredUnknownOrARetry() throws Exception {
-        ResendEmailChannel channel = channel("production", "");
+        ResendEmailChannel channel = channel("live", "");
         assertThat(ResendEmailChannel.read(channel.answer(200, "{\"id\":\"x\"}", null), CLOCK))
                 .isInstanceOf(OutboxChannel.Result.Sent.class);
         for (int code : new int[] {400, 422}) {
@@ -223,16 +222,15 @@ class ResendEmailChannelTest {
     @Test
     void aRefusedBusinessFromNameIsSentOnceMoreWithThePlatformsFromUnderItsOwnKey() throws Exception {
         replies.add(new Reply(422, "{\"name\":\"validation_error\",\"message\":\"Invalid `from` field.\"}", null));
-        OutboxChannel.Result result =
-                channel("production", "").send(delivery("staff01@example.test", UUID.randomUUID()));
+        OutboxChannel.Result result = channel("live", "").send(delivery("staff01@example.test", UUID.randomUUID()));
         assertThat(result).isInstanceOf(OutboxChannel.Result.Sent.class);
         assertThat(requests).hasSize(2);
         assertThat(body(1).path("from").asString()).isEqualTo(FROM);
         assertThat(requests.get(1).get("idempotency"))
-                .isEqualTo("bms:production:" + ROW + ":identity.password_changed:k1:platform-from");
+                .isEqualTo("bms:live:" + ROW + ":identity.password_changed:k1:platform-from");
         // A 422 about something else, or on a platform row, is refused at once.
         replies.add(new Reply(422, "{\"message\":\"Invalid `to` field.\"}", null));
-        assertThat(channel("production", "").send(delivery("staff01@example.test", UUID.randomUUID())))
+        assertThat(channel("live", "").send(delivery("staff01@example.test", UUID.randomUUID())))
                 .isEqualTo(OutboxChannel.Result.refused("resend_rejected"));
         assertThat(requests).hasSize(3);
     }
@@ -249,11 +247,133 @@ class ResendEmailChannelTest {
         assertThat(channel.send(delivery("x@evilteam.example.test", UUID.randomUUID())))
                 .isEqualTo(OutboxChannel.Result.refused("not_on_staging_allowlist"));
         assertThat(requests).hasSize(2);
-        // An empty list on staging sends nothing; production ignores the list.
+        // An empty list on staging sends nothing. A list holds even when BMS_ENVIRONMENT is unset or misspelled; only a
+        // host with no list that is not staging sends to anyone.
         assertThat(channel("staging", "").send(delivery("tester01@example.test", UUID.randomUUID())))
                 .isEqualTo(OutboxChannel.Result.refused("not_on_staging_allowlist"));
-        assertThat(channel("production", "").send(delivery("customer01@example.test", UUID.randomUUID())))
+        assertThat(channel("", "tester01@example.test").send(delivery("customer01@example.test", UUID.randomUUID())))
+                .isEqualTo(OutboxChannel.Result.refused("not_on_staging_allowlist"));
+        assertThat(channel("stagign", "tester01@example.test")
+                        .send(delivery("customer01@example.test", UUID.randomUUID())))
+                .isEqualTo(OutboxChannel.Result.refused("not_on_staging_allowlist"));
+        assertThat(channel("live", "").send(delivery("customer01@example.test", UUID.randomUUID())))
                 .isInstanceOf(OutboxChannel.Result.Sent.class);
+    }
+
+    @Test
+    void aServerThatNeverAnswersIsATimeoutAndARefusedPortIsUnreachable() throws Exception {
+        // JUSTIFICATION-A3: the timeout labels the second #759 review asked to prove, with short timeouts.
+        NotificationProperties properties = new NotificationProperties(
+                new NotificationProperties.Smtp(null, null, null, null, FROM),
+                null,
+                "",
+                new NotificationProperties.Mail("resend", KEY, base, null));
+        java.util.concurrent.CountDownLatch hold = new java.util.concurrent.CountDownLatch(1);
+        server.removeContext("/");
+        server.createContext("/", exchange -> {
+            try {
+                hold.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.close();
+        });
+        ResendEmailChannel silent = new ResendEmailChannel(
+                smtpChannel(properties, "live"),
+                properties,
+                mapper,
+                CLOCK,
+                "live",
+                java.time.Duration.ofSeconds(2),
+                java.time.Duration.ofMillis(300));
+        try {
+            assertThatThrownBy(() -> silent.send(delivery("staff01@example.test", null)))
+                    .isInstanceOf(OutboxChannel.SendFailure.class)
+                    .hasMessage("resend_timeout");
+        } finally {
+            hold.countDown();
+        }
+
+        int closed;
+        try (java.net.ServerSocket probe = new java.net.ServerSocket(0)) {
+            closed = probe.getLocalPort();
+        }
+        NotificationProperties nowhere = new NotificationProperties(
+                new NotificationProperties.Smtp(null, null, null, null, FROM),
+                null,
+                "",
+                new NotificationProperties.Mail("resend", KEY, "http://127.0.0.1:" + closed, null));
+        ResendEmailChannel refused = new ResendEmailChannel(
+                smtpChannel(nowhere, "live"),
+                nowhere,
+                mapper,
+                CLOCK,
+                "live",
+                java.time.Duration.ofSeconds(2),
+                java.time.Duration.ofMillis(300));
+        assertThatThrownBy(() -> refused.send(delivery("staff01@example.test", null)))
+                .isInstanceOf(OutboxChannel.SendFailure.class)
+                .hasMessage("resend_unreachable");
+    }
+
+    @Test
+    void anAttachmentOverResendsLimitIsRefusedBeforeAnyUploadAndATimeoutGrowsWithTheBody() throws Exception {
+        NotificationProperties properties = new NotificationProperties(
+                new NotificationProperties.Smtp(null, null, null, null, FROM),
+                null,
+                "",
+                new NotificationProperties.Mail("resend", KEY, base, null));
+        byte[] big = new byte[(int) (ResendEmailChannel.MAX_ENCODED_BYTES / 4 * 3) + 3];
+        com.rincoltech.bms.core.notifications.EmailAttachments workbook =
+                new com.rincoltech.bms.core.notifications.EmailAttachments() {
+                    @Override
+                    public String kind() {
+                        return "workbook";
+                    }
+
+                    @Override
+                    public Optional<Attachment> read(UUID tenantId, String id) {
+                        return Optional.of(new Attachment("data.xlsx", "application/octet-stream", big));
+                    }
+                };
+        @SuppressWarnings("unchecked")
+        org.springframework.beans.factory.ObjectProvider<com.rincoltech.bms.core.notifications.EmailAttachments> files =
+                mock(org.springframework.beans.factory.ObjectProvider.class);
+        when(files.orderedStream()).thenAnswer(i -> java.util.stream.Stream.of(workbook));
+        TenantJobs jobs = mock(TenantJobs.class);
+        when(jobs.callForTenant(any(), any())).thenAnswer(i -> ((Supplier<?>) i.getArgument(1)).get());
+        Letterheads letterheads = mock(Letterheads.class);
+        when(letterheads.logoPath()).thenReturn(Optional.empty());
+        CurrentTenant tenant = () ->
+                new CurrentTenant.Profile(UUID.randomUUID(), "shop", "Test Shop", "UGX", ZoneId.of("Africa/Kampala"));
+        SmtpEmailChannel email = new SmtpEmailChannel(
+                properties, new OutboxTemplates(), EmailLayoutTest.HOSTS, jobs, tenant, letterheads, files, "live");
+        ResendEmailChannel channel = new ResendEmailChannel(email, properties, mapper, CLOCK, "live");
+        OutboxChannel.RowContext row = new OutboxChannel.RowContext(
+                UUID.fromString(ROW),
+                UUID.randomUUID(),
+                "transactional",
+                null,
+                null,
+                "identity.password_changed",
+                Map.of(
+                        "tenant_name",
+                        "Test Shop",
+                        "when",
+                        "2 Nov 2026",
+                        com.rincoltech.bms.core.notifications.EmailAttachments.PARAM,
+                        "workbook:1"),
+                1,
+                null,
+                null);
+        assertThat(channel.send(new OutboxChannel.Delivery(
+                        "staff01@example.test", "Your data", "Hello,\n", "data.weekly:k1", row)))
+                .isEqualTo(OutboxChannel.Result.refused("resend_too_large"));
+        assertThat(requests).isEmpty();
+
+        assertThat(channel.timeoutFor(1000)).isEqualTo(ResendEmailChannel.TOTAL_TIMEOUT);
+        assertThat(channel.timeoutFor(10 * 1024 * 1024)).isEqualTo(ResendEmailChannel.TOTAL_TIMEOUT.plusSeconds(40));
+        assertThat(channel.timeoutFor(Integer.MAX_VALUE)).isEqualTo(ResendEmailChannel.MAX_TIMEOUT);
     }
 
     @Test
@@ -353,5 +473,52 @@ class ResendEmailChannelTest {
                 new NotificationProperties.Mail("resend", KEY, null, null));
         assertThatCode(() -> ready.requireEmailInProduction("production")).doesNotThrowAnyException();
         assertThatCode(() -> none.requireEmailInProduction("staging")).doesNotThrowAnyException();
+        // The loopback exception for tests never holds in production.
+        NotificationProperties loopback = new NotificationProperties(
+                new NotificationProperties.Smtp(null, null, null, null, FROM),
+                null,
+                "",
+                new NotificationProperties.Mail("resend", KEY, "http://127.0.0.1:8080", null));
+        assertThatThrownBy(() -> loopback.requireEmailInProduction("production"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("BMS_RESEND_API_URL must be an https address (BMS_ENVIRONMENT=production)");
+    }
+
+    @Test
+    void onlyAnErrorNamingTheFromFieldCountsAsAboutTheFromAndARowWithoutAnIdIsRefused() throws Exception {
+        // JUSTIFICATION-A3: items 8 and 9 of the second #759 review; one test, one small helper below.
+        ResendEmailChannel channel = channel("live", "");
+        assertThat(channel.answer(422, "{\"message\":\"Invalid `from` field.\"}", null)
+                        .namesFrom())
+                .isTrue();
+        assertThat(channel.answer(422, "{\"message\":\"The 'from' address is not allowed.\"}", null)
+                        .namesFrom())
+                .isTrue();
+        assertThat(channel.answer(422, "{\"message\":\"The value is different from the expected one.\"}", null)
+                        .namesFrom())
+                .isFalse();
+        OutboxChannel.Delivery noRow = new OutboxChannel.Delivery(
+                "staff01@example.test",
+                "Subject",
+                "Hello,\n",
+                "identity.password_changed:k1",
+                OutboxChannel.RowContext.NONE);
+        assertThatThrownBy(() -> channel.send(noRow))
+                .isInstanceOf(OutboxChannel.SendFailure.class)
+                .hasMessage("resend_no_row_id");
+        // A long environment is cut, so the row id always stays in the key.
+        String key = new ResendEmailChannel(null, properties(), mapper, CLOCK, "x".repeat(200))
+                .idempotencyKey(
+                        delivery("staff01@example.test", null),
+                        delivery("staff01@example.test", null).context());
+        assertThat(key).startsWith("bms:" + "x".repeat(20) + ":" + ROW + ":");
+    }
+
+    NotificationProperties properties() {
+        return new NotificationProperties(
+                new NotificationProperties.Smtp(null, null, null, null, FROM),
+                null,
+                "",
+                new NotificationProperties.Mail("resend", KEY, base, null));
     }
 }

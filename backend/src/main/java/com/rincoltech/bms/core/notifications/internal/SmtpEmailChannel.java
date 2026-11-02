@@ -147,12 +147,13 @@ class SmtpEmailChannel implements OutboxChannel {
 
     // JUSTIFICATION-A3: the staging allow-list and business from-name are new (#333), shared by both senders.
     /**
-     * On staging, the reason a recipient is not sent to ({@code not_on_staging_allowlist}) unless {@code BMS_MAIL_ALLOWLIST}
-     * names the address or its domain (issue #333, ADR-115); null when it may be sent. Elsewhere always null. The row is
-     * refused, never sent elsewhere, and nothing about the address is logged.
+     * On staging, or on any host where {@code BMS_MAIL_ALLOWLIST} is set, the reason a recipient is not sent to
+     * ({@code not_on_staging_allowlist}) unless the list names the address or its domain (issue #333, ADR-115); null when
+     * it may be sent. The row is refused, never sent elsewhere, and nothing about the address is logged.
      */
     String stagingRefusal(String recipient) {
-        return staging && !mail.allows(recipient) ? "not_on_staging_allowlist" : null;
+        // Also wherever a list is set: an unset or misspelled BMS_ENVIRONMENT never lifts it.
+        return (staging || mail.hasAllowlist()) && !mail.allows(recipient) ? "not_on_staging_allowlist" : null;
     }
 
     /**

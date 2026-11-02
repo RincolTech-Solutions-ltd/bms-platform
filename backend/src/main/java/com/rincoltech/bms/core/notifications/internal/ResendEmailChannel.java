@@ -4,6 +4,7 @@ import com.rincoltech.bms.core.notifications.EmailAttachments;
 import com.rincoltech.bms.kernel.BusinessClock;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
@@ -49,7 +50,14 @@ class ResendEmailChannel implements OutboxChannel {
     private static final Logger log = LoggerFactory.getLogger(ResendEmailChannel.class);
 
     static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    /** The time for a request with no attachment; a larger body gets one more second per 256 KB, up to the cap. */
     static final Duration TOTAL_TIMEOUT = Duration.ofSeconds(20);
+    /** Below the dispatcher's two minute lease, so a slow upload never overlaps a second claim of the same row. */
+    static final Duration MAX_TIMEOUT = Duration.ofSeconds(90);
+    /** Resend's limit on a whole email with its attachments once encoded; a larger one is refused before it is sent. */
+    static final long MAX_ENCODED_BYTES = 40L * 1024 * 1024;
+    /** The {@code from} field named in an error message, in backticks or quotes. */
+    static final java.util.regex.Pattern FROM_FIELD = java.util.regex.Pattern.compile("[`'\"]from[`'\"]");
     /** How long a {@code 429} waits when Resend does not say: its default limit is a few requests a second. */
     static final Duration RATE_LIMIT_WAIT = Duration.ofSeconds(30);
 
@@ -59,24 +67,40 @@ class ResendEmailChannel implements OutboxChannel {
     private final ObjectMapper mapper;
     private final BusinessClock clock;
     private final String keyPrefix;
-    private final HttpClient http =
-            HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
+    private final Duration baseTimeout;
+    private final HttpClient http;
 
+    @org.springframework.beans.factory.annotation.Autowired
     ResendEmailChannel(
             SmtpEmailChannel email,
             NotificationProperties properties,
             ObjectMapper mapper,
             BusinessClock clock,
             @Value("${bms.environment:}") String environment) {
+        this(email, properties, mapper, clock, environment, CONNECT_TIMEOUT, TOTAL_TIMEOUT);
+    }
+
+    /** As above with other timeouts, for a test that must not wait twenty seconds. */
+    ResendEmailChannel(
+            SmtpEmailChannel email,
+            NotificationProperties properties,
+            ObjectMapper mapper,
+            BusinessClock clock,
+            String environment,
+            Duration connectTimeout,
+            Duration baseTimeout) {
         this.email = email;
         this.smtp = properties.smtp();
         this.mail = properties.mail();
         this.mapper = mapper;
         this.clock = clock;
+        // At most 20 characters of the environment, so a long value can never push the row id out of the key.
         String env = environment == null || environment.isBlank()
                 ? "local"
                 : environment.strip().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9-]", "-");
-        this.keyPrefix = "bms:" + env + ":";
+        this.keyPrefix = "bms:" + (env.length() > 20 ? env.substring(0, 20) : env) + ":";
+        this.baseTimeout = baseTimeout;
+        this.http = HttpClient.newBuilder().connectTimeout(connectTimeout).build();
     }
 
     @Override
@@ -98,6 +122,10 @@ class ResendEmailChannel implements OutboxChannel {
         RowContext context = delivery.context() == null ? RowContext.NONE : delivery.context();
         SmtpEmailChannel.Body body = email.body(delivery, email.brand(context));
         EmailAttachments.Attachment attachment = email.attachment(context);
+        if (attachment != null && (attachment.bytes().length + 2L) / 3 * 4 > MAX_ENCODED_BYTES) {
+            // Over Resend's limit once encoded: refused here, never uploaded to be refused or to time out.
+            return Result.refused("resend_too_large");
+        }
         String from = email.sender(context);
         String key = idempotencyKey(delivery, context);
         Answer answer = post(from, delivery, body, attachment, context, key);
@@ -118,12 +146,22 @@ class ResendEmailChannel implements OutboxChannel {
 
     /**
      * Resend's idempotency key: {@code bms:<environment>:<outbox row id>:<row key>}, the same on every try of one row and
-     * never the same for two rows or two environments; cut to Resend's 256 characters.
+     * never the same for two rows or two environments. Cut to 240 characters, so with the {@code :platform-from} suffix it
+     * stays inside Resend's 256; the environment (at most 20) and the row id come first, so the cut only ever shortens the
+     * row key. A delivery without a row id is refused: every row the dispatcher sends has one.
      */
-    String idempotencyKey(Delivery delivery, RowContext context) {
-        String key =
-                keyPrefix + (context.outboxId() == null ? "" : context.outboxId() + ":") + delivery.idempotencyKey();
+    String idempotencyKey(Delivery delivery, RowContext context) throws SendFailure {
+        if (context.outboxId() == null) {
+            throw new SendFailure("resend_no_row_id");
+        }
+        String key = keyPrefix + context.outboxId() + ":" + delivery.idempotencyKey();
         return key.length() <= 240 ? key : key.substring(0, 240);
+    }
+
+    /** The whole time for one request: the base, one more second per 256 KB of body, at most {@link #MAX_TIMEOUT}. */
+    Duration timeoutFor(int bodyChars) {
+        Duration scaled = baseTimeout.plusSeconds(bodyChars / (256L * 1024));
+        return scaled.compareTo(MAX_TIMEOUT) > 0 ? MAX_TIMEOUT : scaled;
     }
 
     /** What Resend answered: the status, its error name, whether the error is about the From, the email's id. */
@@ -138,8 +176,9 @@ class ResendEmailChannel implements OutboxChannel {
             String idempotencyKey)
             throws SendFailure {
         String json = mapper.writeValueAsString(request(from, delivery, body, attachment, context));
+        Duration timeout = timeoutFor(json.length());
         HttpRequest request = HttpRequest.newBuilder(URI.create(stripSlash(mail.resendUrl()) + "/emails"))
-                .timeout(TOTAL_TIMEOUT)
+                .timeout(timeout)
                 .header("Authorization", "Bearer " + mail.resendApiKey())
                 .header("Idempotency-Key", idempotencyKey)
                 .header("Content-Type", "application/json")
@@ -149,7 +188,8 @@ class ResendEmailChannel implements OutboxChannel {
         CompletableFuture<HttpResponse<String>> call = http.sendAsync(request, HttpResponse.BodyHandlers.ofString());
         HttpResponse<String> response;
         try {
-            response = call.get(TOTAL_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            // One clock for the answer: the request's own timeout; this outer wait is only a backstop a second later.
+            response = call.get(timeout.plusSeconds(1).toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             call.cancel(true);
             throw new SendFailure("resend_timeout");
@@ -158,8 +198,13 @@ class ResendEmailChannel implements OutboxChannel {
             Thread.currentThread().interrupt();
             throw new SendFailure("resend_interrupted");
         } catch (ExecutionException e) {
+            // A connection never made (refused, no route, DNS, connect timeout) is unreachable; a request sent and not
+            // answered in time is a timeout.
             throw new SendFailure(
-                    e.getCause() instanceof HttpTimeoutException ? "resend_timeout" : "resend_unreachable");
+                    e.getCause() instanceof HttpTimeoutException
+                                    && !(e.getCause() instanceof HttpConnectTimeoutException)
+                            ? "resend_timeout"
+                            : "resend_unreachable");
         }
         return answer(
                 response.statusCode(),
@@ -175,8 +220,8 @@ class ResendEmailChannel implements OutboxChannel {
         try {
             var tree = mapper.readTree(body == null || body.isBlank() ? "{}" : body);
             name = tree.path("name").asString("");
-            namesFrom =
-                    tree.path("message").asString("").toLowerCase(Locale.ROOT).contains("from");
+            // Only the field itself, quoted as Resend quotes field names ("Invalid `from` field"), never the word.
+            namesFrom = FROM_FIELD.matcher(tree.path("message").asString("")).find();
             String given = tree.path("id").asString("");
             id = given.matches("^[A-Za-z0-9-]{1,64}$") ? given : "unknown";
         } catch (RuntimeException e) {

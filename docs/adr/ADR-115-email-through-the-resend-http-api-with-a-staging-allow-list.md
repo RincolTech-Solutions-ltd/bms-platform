@@ -36,7 +36,9 @@ types, which can be a real person's.
 3. **The outbox key, under the environment, is Resend's idempotency key.** `Idempotency-Key` is
    `bms:<BMS_ENVIRONMENT>:<outbox row id>:<row key>`: staging and production share the Resend account, so they never
    share a key, and no two rows do. Resend
-   keeps a key for 24 hours, far longer than the outbox's three tries, so a retry is never a second email. The answers:
+   keeps a key for 24 hours, far longer than the outbox's three automatic tries, so those tries are never a second email.
+   An operator's "Send again" after 24 hours (it is allowed up to 7 days) is a new request to Resend: if an earlier try
+   was in fact delivered without an answer, the reader gets it twice. The answers:
    2xx sent; `400` and `422` refused (`resend_rejected`); `413` refused (`resend_too_large`, the weekly workbook over
    Resend's attachment limit); `429` gives the attempt back and waits as long as `Retry-After` says (half a minute when
    it says nothing); a `409` naming `invalid_idempotent_request` (the same key with another body: an earlier try reached
@@ -51,10 +53,11 @@ types, which can be a real person's.
    `BMS_MAIL_FROM`, and if Resend still refuses the From of a business (`422` about `from`) the email is sent once more
    with `BMS_MAIL_FROM` under a key of its own, so no business loses its reset emails over its name. The address is always
    Rincol's verified sender, so SPF, DKIM and DMARC pass for every business. Over SMTP the name is RFC 2047 encoded.
-5. **Staging sends only to the allow-list.** With `BMS_ENVIRONMENT=staging`, both senders send only to recipients on
-   `BMS_MAIL_ALLOWLIST`: comma separated, each an address or `@domain` for every address at that domain, letter case
+5. **Staging sends only to the allow-list.** With `BMS_ENVIRONMENT=staging`, or on any host where `BMS_MAIL_ALLOWLIST` is
+   set whatever `BMS_ENVIRONMENT` says (so an unset or misspelled environment never lifts it), both senders send only to
+   recipients on the list: comma separated, each an address or `@domain` for every address at that domain, letter case
    ignored. Any other row is refused with `not_on_staging_allowlist` and never sent anywhere. An empty list on staging
-   sends nothing. Production and a laptop do not read the list.
+   sends nothing. A host that is not staging and has no list sends to anyone; production leaves the list unset.
 6. **Production needs the chosen sender.** The ADR-059 startup guard follows the provider: with `resend` it needs
    `BMS_RESEND_API_KEY` and `BMS_MAIL_FROM` (an address), naming only the unset variables.
 7. **The wording of the invitation, activation and reset emails was reviewed and kept.** Staff invitations are not
@@ -63,10 +66,14 @@ types, which can be a real person's.
    `identity.password_reset_issued`, `identity.password_changed`) are already plain, carry no dashes, say why the reader
    got them and what to do if it was not them; the short link sentence is fixed by ADR-108. With the business's name now
    the from-name, the "Rincol Tech" sign-off stays: the platform sends on the business's behalf.
-8. **Bounces and complaints are not written to the outbox yet.** A sent row can only be changed through the outbox's
-   `SECURITY DEFINER` functions, and none of them touches a row that is no longer `pending`. Recording a bounce or a
-   complaint on the row needs a new function (and a status or column for it), so a migration; that is left to its own
-   change. Until then the Resend dashboard shows them, found by the `outbox_id` tag.
+8. **Bounces and complaints are not written to the outbox yet.** The application role cannot update
+   `notification_outbox` (row-level security is forced and every write goes through a `SECURITY DEFINER` function), and
+   `notification_outbox_record_result` only touches rows still `pending`. Recording a bounce or a complaint on a sent row
+   therefore needs one new function, which is a Flyway migration. It needs no new column: the function can mark the row
+   `failed` with `last_error` `bounced` or `complained` on the columns that exist; a column of its own would be a choice,
+   not a need. The owner's instruction for issue #333's first change was that it adds no migration, so the webhook
+   (Resend signs it; the endpoint checks the signature) and that function are left to a change of their own, under #333,
+   which stays open. Until then the Resend dashboard shows bounces and complaints, found by the `outbox_id` tag.
 
 ## Consequences
 

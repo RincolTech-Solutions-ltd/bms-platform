@@ -1325,9 +1325,11 @@ Accepted (this list is the ADR index):
   about sizes, `POST /retail/product-families` takes `packs` made on every size in its transaction, and `GET
   /retail/product-families/options` offers the sizes and colours a shop used before (#697, D81, D98; no migration)
 - ADR-115 Email through the Resend HTTP API: `BMS_MAIL_PROVIDER` chooses `smtp` (default) or `resend`
-  (`ResendEmailChannel`, `BMS_RESEND_API_KEY` on the host only, the outbox key as Resend's idempotency key); a business's
-  email carries its name as the from-name from `no-reply@rincoltech.com`; on staging only `BMS_MAIL_ALLOWLIST` gets mail;
-  bounces and complaints wait for a migration of their own (#333; no migration)
+  (`ResendEmailChannel`, `BMS_RESEND_API_KEY` on the host only, Resend's idempotency key
+  `bms:<environment>:<outbox row id>:<row key>`); a business's email carries its name as the from-name from
+  `no-reply@rincoltech.com`; on staging, or wherever `BMS_MAIL_ALLOWLIST` is set, only the list gets mail; bounces and
+  complaints wait for a migration of their own, one new outbox function and no new column (#333 stays open; #766; no
+  migration)
 
 Pending (cite only as "pending ADR-NNN"):
 

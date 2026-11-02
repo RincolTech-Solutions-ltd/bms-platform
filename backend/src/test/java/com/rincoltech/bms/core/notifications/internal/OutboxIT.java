@@ -161,7 +161,6 @@ class OutboxIT extends IntegrationTest {
                 .isZero();
     }
 
-    /** FR-NTF-09: a sent row is marked sent and its parameters (which may hold a link) cleared. */
     /**
      * Issue #333 (ADR-115): with the provider {@code resend} the SMTP sender is off and the dispatcher sends an email row
      * through Resend, whichever of the two {@code email} senders is listed first.
@@ -247,6 +246,85 @@ class OutboxIT extends IntegrationTest {
         }
     }
 
+    /**
+     * Issue #333 (ADR-115): a 429 from Resend gives the attempt back. The row waits for Retry-After, and the next run sends
+     * it, so a burst of rate limits never uses up a reset email's three tries.
+     */
+    @Test
+    void aRateLimitFromResendGivesTheAttemptBackAndTheRowIsSentLater() throws Exception {
+        // JUSTIFICATION-A3: the dispatcher-level proof the second #759 review asked for.
+        String key = key();
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        com.sun.net.httpserver.HttpServer server =
+                com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/emails", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            // Only this row is rate limited, once; other tests' rows that the run claims are accepted.
+            boolean ours = String.valueOf(exchange.getRequestHeaders().getFirst("Idempotency-Key"))
+                    .endsWith(":" + key);
+            boolean first = ours && calls.getAndIncrement() == 0;
+            byte[] out = (first
+                            ? "{\"name\":\"rate_limit_exceeded\"}"
+                            : "{\"id\":\"4ef9a417-02e9-4d39-ad75-9611e0fcc33c\"}")
+                    .getBytes();
+            if (first) {
+                exchange.getResponseHeaders().add("Retry-After", "60");
+            }
+            exchange.sendResponseHeaders(first ? 429 : 200, out.length);
+            exchange.getResponseBody().write(out);
+            exchange.close();
+        });
+        server.start();
+        try {
+            NotificationProperties properties = new NotificationProperties(
+                    new NotificationProperties.Smtp(null, null, null, null, "no-reply@example.test"),
+                    null,
+                    "",
+                    new NotificationProperties.Mail(
+                            "resend",
+                            "re_fabricated_test_key_0003",
+                            "http://127.0.0.1:" + server.getAddress().getPort(),
+                            null));
+            SmtpEmailChannel smtp = new SmtpEmailChannel(
+                    properties, new OutboxTemplates(), EmailLayoutTest.HOSTS, null, null, null, null, "");
+            ResendEmailChannel resend = new ResendEmailChannel(
+                    smtp,
+                    properties,
+                    new tools.jackson.databind.ObjectMapper(),
+                    new com.rincoltech.bms.kernel.BusinessClock(java.time.Clock.systemUTC()),
+                    "");
+            enqueue("email", "test-op@example.test", key);
+            // Other tests' email rows may be claimed first: run until this row has had its 429.
+            for (int i = 0; i < 20 && calls.get() == 0; i++) {
+                dispatcher.dispatch(List.of(resend), 1);
+            }
+            Map<String, Object> waiting = row(key);
+            assertThat(waiting.get("status")).isEqualTo("pending");
+            assertThat(waiting.get("attempts")).isEqualTo(0);
+            Boolean later = TestDatabase.owner()
+                    .sql(
+                            "SELECT next_attempt_at > now() + interval '30 seconds' FROM notification_outbox WHERE idempotency_key = ?")
+                    .param(key)
+                    .query(Boolean.class)
+                    .single();
+            assertThat(later).isTrue();
+
+            TestDatabase.owner()
+                    .sql(
+                            "UPDATE notification_outbox SET next_attempt_at = now() - interval '1 second' WHERE idempotency_key = ?")
+                    .param(key)
+                    .update();
+            dispatcher.dispatch(List.of(resend), 1000);
+
+            Map<String, Object> sent = row(key);
+            assertThat(sent.get("status")).isEqualTo("sent");
+            assertThat(sent.get("attempts")).isEqualTo(1);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /** FR-NTF-09: a sent row is marked sent and its parameters (which may hold a link) cleared. */
     @Test
     void aSentRowIsMarkedAndItsParametersCleared() {
         String key = key();

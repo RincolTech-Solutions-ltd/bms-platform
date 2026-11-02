@@ -62,6 +62,10 @@ record NotificationProperties(Smtp smtp, Telegram telegram, String supportContac
             throw new IllegalStateException(
                     "BMS_ENVIRONMENT=production needs email: set " + String.join(", ", missing));
         }
+        if (!mail.resendUrl().startsWith("https://")) {
+            // The loopback exception is for tests only.
+            throw new IllegalStateException("BMS_RESEND_API_URL must be an https address (BMS_ENVIRONMENT=production)");
+        }
         smtp.requireValidFrom();
     }
 
@@ -98,6 +102,11 @@ record NotificationProperties(Smtp smtp, Telegram telegram, String supportContac
 
         boolean resendConfigured(Smtp smtp) {
             return resend() && present(resendApiKey) && present(smtp.from());
+        }
+
+        /** True when the list names at least one entry. */
+        boolean hasAllowlist() {
+            return !allowlist.isBlank() && Arrays.stream(allowlist.split(",")).anyMatch(e -> !e.isBlank());
         }
 
         /** True when {@code address} is on the allow-list: the address itself or {@code @} and its domain. */
