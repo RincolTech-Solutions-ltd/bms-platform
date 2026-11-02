@@ -313,6 +313,35 @@ class AccountGuardTest {
     }
 
     @Test
+    void anUnreadableBoxHasItsOwnReasonAndItsWarningIsLoggedOnceAnHourPerTenant() {
+        // JUSTIFICATION-A3: one new test for the two #311 behaviours (reason and hourly warning); no helper added.
+        BusinessClock clock = mock(BusinessClock.class);
+        Instant t0 = Instant.parse("2026-10-18T10:00:00Z");
+        when(clock.now()).thenReturn(t0, t0.plusSeconds(60), t0.plus(VerifiedAccounts.WARN_SPACING));
+        VerifiedAccounts accounts =
+                new VerifiedAccounts(mock(AccountStore.class), new FakeKeys("k3"), settingsWithPlatformPair(), clock);
+        AccountStore.Account unreadable = row(new FakeKeys("k1"), "verified", "lender-key-000001", "lender-secret-1");
+        var logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(VerifiedAccounts.class);
+        var logs = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
+        logs.start();
+        logger.addAppender(logs);
+        try {
+            assertThat(accounts.refusal(unreadable)).contains("account_unreadable");
+            assertThat(accounts.refusal(unreadable)).contains("account_unreadable");
+            assertThat(logs.list).hasSize(1);
+            assertThat(accounts.refusal(unreadable)).contains("account_unreadable");
+            assertThat(logs.list).hasSize(2);
+        } finally {
+            logger.detachAppender(logs);
+        }
+        FakeKeys k3 = new FakeKeys("k3");
+        assertThat(accounts.refusal(row(k3, "verified", "invented-platform-key", "s-000001")))
+                .contains("account_not_allowed");
+        assertThat(accounts.refusal(row(k3, "verified", "lender-key-000002", "s-000002")))
+                .isEmpty();
+    }
+
+    @Test
     void theBlindIndexesCoverTheCurrentAndEveryRetiredKeySoARowSealedBeforeARotationStillClashes() {
         FakeKeys rotated = new FakeKeys("k2", "k1");
         List<String> all = rotated.blindIndexes("p", "key-0001");

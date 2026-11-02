@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -112,6 +113,11 @@ class AccountKeyRotation {
     private Integer piece(UUID tenantId, String what, java.util.function.Supplier<Integer> work) {
         try {
             return tenantJobs.callAs(tenantId, work);
+        } catch (DuplicateKeyException e) {
+            // Issue #311: the new digest of this tenant's key is already held by another business's account, so
+            // the same merchant account is connected twice. Left for the operator (runbook payments.md section 4c).
+            log.error("{} of tenant {} could not be re-sealed: duplicate account found", what, tenantId);
+            return null;
         } catch (RuntimeException e) {
             log.error(
                     "{} of tenant {} could not be re-sealed: {}",
