@@ -1303,16 +1303,15 @@ Accepted (this list is the ADR index):
 - ADR-111 Sizes, colours and types in Add an item, picked from ready lists shipped with the app: the same one form asks
   about sizes, `POST /retail/product-families` takes `packs` made on every size in its transaction, and `GET
   /retail/product-families/options` offers the sizes and colours a shop used before (#697, D81, D98; no migration)
-- ADR-114 Custom Home cards (Proposed, plan only, #684): stable card keys pinned between the PWA and the server, a
-  `home_layouts` table of ordered keys shown or hidden per person with one business default (`core.settings.manage`),
-  permissions still deciding what is drawn, an Arrange home mode with Move up and Move down buttons and Reset; plan and build
-  order in `docs/specs/home-cards-plan.md`
 
 Pending (cite only as "pending ADR-NNN"):
 
 - ADR-012 Credit scoring model beyond the rules-based default
 - ADR-013 USSD aggregator (the SMS half is settled by ADR-036)
 - ADR-022 The cash book: expenses, banking and advances, likely partly core (ADR-020)
+- ADR-114 Custom Home cards (written as Proposed, plan only, #684; not settled until the owner accepts it): stable card keys,
+  a `home_layouts` table per person with one business default, and Arrange home with buttons; plan in
+  `docs/specs/home-cards-plan.md`
 
 ## Team
 

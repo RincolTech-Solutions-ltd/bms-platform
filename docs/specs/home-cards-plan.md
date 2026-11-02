@@ -36,22 +36,37 @@ Each step is one pull request. Sizes: S up to a day, M a few days, L a week or m
 | Step | What | Size | Migration | Depends on |
 |---|---|---|---|---|
 | 1 | Card keys: `HOME_CARDS` in the PWA, the same list on the server, the pinning test; `HomeCards` draws from an ordered list (the app's order), with Members moved in. Nothing a person sees changes | S | no | none |
-| 2 | `home_layouts` table with row level security; `GET`, `PUT` and `DELETE /api/v1/home-layout` and `/home-layout/default`; body checks; audit of the default | M | yes (one) | step 1 |
-| 3 | Arrange home: Move up, Move down, Show or Hide, Done, Cancel, Reset, Arrange for everyone; Home drawn from the layout that applies; the last layout kept for offline; the page tour step; layout suite at 360 and 412 pixels | M | no | step 2, and the shop words keys for the card names |
+| 2 | `home_layouts` table with row level security; `GET`, `PUT` and `DELETE /api/v1/home-layout` and `/home-layout/default`, with `If-None-Match: *` for the first save and `If-Match` after; `user_id` from the session; unknown keys dropped, never refused; audit of the default | M | yes (one) | step 1 |
+| 3 | Arrange home: Move up, Move down, Show or Hide, Done, Cancel, Reset, Arrange for everyone, every control at least 48 by 48; saving keeps the entries of cards not visible now in place; Home drawn from the layout that applies; the last layout kept for offline under the tenant and the user; the page tour step; layout suite at 360 and 412 pixels | M | no | step 2, and the shop words keys for the card names |
 
 Total: M to L, about one to two weeks for one builder. Only step 2 adds a migration, at the next free number when it merges
 (`AGENTS.md`); it is the one migration of its wave.
 
 ## 4. Tests the build adds
 
-- Unit: resolving a layout (own, then the business default, then the app's order); a card the person may not see is never
-  drawn even when stored as shown; a card visible now but missing from the stored list is drawn last, shown; unknown and retired
-  keys are ignored.
-- IT: the body checks (unknown key, a key twice, too many keys) refused in plain words; `If-Match`; the default needs
-  `core.settings.manage`; the default is audited and a person's own layout is not; tenant isolation of `home_layouts`.
-- DOM: Move up and Move down change the order; Hide takes a card away and Show brings it back; Reset returns to the business
-  default; Cancel keeps the old order; Arrange for everyone shows only to an owner.
-- Layout suite: Arrange mode's rows and their 48 pixel buttons fit at 360 pixels.
+- Unit:
+  - resolving a layout (own, then the business default, then the app's order);
+  - a card the person may not see is never drawn even when stored as shown;
+  - a card visible now but missing from the stored list is drawn last, shown;
+  - unknown and retired keys are ignored;
+  - saving from Arrange mode keeps the entries of cards not visible now in place: a stored list with Takings hidden, rearranged
+    at a branch where Takings is not drawn, still has Takings hidden and between the same neighbours.
+- IT:
+  - a key twice and too many entries refused in plain words;
+  - version skew: a stored retired key is never returned by `GET`; a `PUT` with an unknown key (a newer PWA) is saved without
+    it and answers the layout as stored; a `PUT` of exactly what `GET` returned always passes;
+  - first save with `If-None-Match: *` (412 when a row exists), change and Reset with `If-Match` (412 when stale), 428 without the
+    header;
+  - `user_id` comes from the session: a body or path naming another user changes nothing of theirs;
+  - the default needs `core.settings.manage`; the default is audited and a person's own layout is not; tenant isolation of
+    `home_layouts`.
+- DOM:
+  - Move up and Move down change the order; Hide takes a card away and Show brings it back; Reset returns to the business
+    default; Cancel keeps the old order; Arrange for everyone shows only to an owner;
+  - the offline copy is stored under the tenant and the user: a second person signing in on the same phone offline sees the
+    app's order, not the first person's.
+- Layout suite: at 360 and 412 pixels, every control of Arrange mode (Move up, Move down, Show or Hide, Done, Cancel, Reset,
+  Arrange for everyone) is at least 48 by 48 CSS pixels and nothing overflows.
 
 ## 5. Open points for the owner
 
