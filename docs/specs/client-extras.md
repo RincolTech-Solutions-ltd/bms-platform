@@ -699,7 +699,9 @@ Built in slice #231 (no migration). Where the build sharpens the text above:
   takes the earlier of its own expiry and its usual hour.
 - **Polite refusals, nothing written.** `collections_disabled`, `sms_off` (either switch off, or a cap of 0),
   `member_opted_out` (an opt-out of all SMS; a reminders-only opt-out does not block a link), and 429 `too_many_link_texts`
-  above 3 link texts per member in an hour, counted from the audit rows under a lock per member.
+  above 3 link texts per member in an hour, counted from the audit rows under a lock per member. A text the channel
+  would not queue (a switch turned off in between, a cap reached) is refused `link_text_not_queued`: `already_sent` is
+  answered only when this intent's audit row exists, which is written in the same transaction as the outbox row.
 - **Audited** `core.payments.intent.link_texted` with the member id, never the number.
 - **The wording.** `{tenant_name}: Pay {currency} {amount} for {reference} at {link}`, where `reference` is `loan <loan_no>` or
   `savings account <account_no>`. No name, no balance. The hosted address is about 113 characters, so the text is two GSM-7

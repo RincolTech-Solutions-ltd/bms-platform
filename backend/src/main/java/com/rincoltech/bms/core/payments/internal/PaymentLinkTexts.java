@@ -38,6 +38,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  *   <li>A member who asked for no SMS at all is not texted ({@code member_opted_out}).
  *   <li>At most {@value #PER_MEMBER_PER_HOUR} link texts per member in an hour ({@code too_many_link_texts}), counted
  *       under a lock per member so two requests together cannot both pass.
+ *   <li>A text the channel would not queue (a switch turned off in between, a cap reached) is refused
+ *       ({@code link_text_not_queued}), never reported as sent.
  *   <li>Each text sent is audited ({@code core.payments.intent.link_texted}) with the member and never the number.
  * </ul>
  */
@@ -120,6 +122,8 @@ class PaymentLinkTexts {
         if (alreadyTexted(intentId)) {
             return new LinkText(intentId, true, intent.expiresAt());
         }
+        // Read again under the intent's row lock: a payment confirmed since the first read is not texted.
+        intent = store.lock(intentId).orElseThrow(ApiException::notFound);
         Instant now = clock.now();
         if (!"pending".equals(intent.status())
                 || intent.redirectUrl() == null
@@ -161,10 +165,14 @@ class PaymentLinkTexts {
                 intent.expiresAt()));
         switch (result) {
             case QUEUED -> {}
-            // The key is per intent and member: the row exists (or SMS went off this instant). Nothing new is written.
-            case NOT_QUEUED -> {
-                return new LinkText(intentId, true, intent.expiresAt());
-            }
+            // Not "already sent": the outbox row and the audit row are written in one transaction and the audit row was
+            // looked for above, under the member's lock, so no row exists for this intent. The channel refused it (a
+            // switch turned off this instant, a cap reached): say so, so staff never think a text went that did not.
+            case NOT_QUEUED ->
+                throw ApiException.rule(
+                        "link_text_not_queued",
+                        "The text message was not sent: text messages are off for this business or its limit for today"
+                                + " is reached. Copy the link or show the QR code instead.");
             case NO_PHONE ->
                 throw ApiException.rule(
                         "payer_phone_not_textable", "The payer's number on this payment cannot take a text message.");
@@ -195,7 +203,7 @@ class PaymentLinkTexts {
     private long textedInLastHour(UUID member) {
         return jdbc.sql("""
                         SELECT count(*) FROM audit_log
-                        WHERE action = ? AND created_at > now() - interval '1 hour'
+                        WHERE created_at > now() - interval '1 hour' AND entity_type = 'payment_intent' AND action = ?
                           AND data -> 'after' ->> 'member_id' = ?
                         """).params(ACTION, member.toString()).query(Long.class).single();
     }

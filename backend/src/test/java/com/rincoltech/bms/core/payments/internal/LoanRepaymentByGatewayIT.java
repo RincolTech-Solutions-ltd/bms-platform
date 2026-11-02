@@ -960,4 +960,106 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
         assertThat(limited.getBody().get("code").asString()).isEqualTo("too_many_link_texts");
         assertThat(linkTexts(fourth)).isEmpty();
     }
+
+    // JUSTIFICATION-A3: the review of #231 asked for these tests; they reuse this suite's loan and gateway setup.
+    ResponseEntity<JsonNode> textLinkAs(JsonNode intent, String permissions, String branches) {
+        return http.exchange(
+                "/api/v1/payments/intents/" + intent.get("id").asString() + "/sms",
+                HttpMethod.POST,
+                new HttpEntity<>(null, as(staff, permissions, branches, null)),
+                JsonNode.class);
+    }
+
+    UUID borrowerOf(String loan) {
+        return TestDatabase.owner()
+                .sql("SELECT member_id FROM lending_loans WHERE id = ?")
+                .param(UUID.fromString(loan))
+                .query(UUID.class)
+                .single();
+    }
+
+    void optOut(UUID member, String scope) {
+        TestDatabase.owner()
+                .sql("UPDATE sms_opt_outs SET removed_at = now() WHERE member_id = ? AND removed_at IS NULL")
+                .param(member)
+                .update();
+        TestDatabase.owner()
+                .sql("INSERT INTO sms_opt_outs (id, tenant_id, member_id, scope, source) VALUES (?, ?, ?, ?, 'staff')")
+                .params(UUID.randomUUID(), t.tenantId(), member, scope)
+                .update();
+    }
+
+    @Test
+    void theLinkIsTextedOnlyByAHolderOfCollectInTheIntentsBranchAndNothingIsWrittenOtherwise() {
+        SmsTenants.operator(t.tenantId(), true, 1000);
+        SmsTenants.enable(t.tenantId());
+        String loan = activeLoan();
+        JsonNode intent = intentFor(loan, 520_000);
+        // No collect permission at all: refused at the route.
+        assertThat(textLinkAs(intent, "lending.loans.read", "*").getStatusCode().value())
+                .isEqualTo(403);
+        // Collect, but only in another branch: told the payment does not exist.
+        ResponseEntity<JsonNode> elsewhere = textLinkAs(
+                intent,
+                "core.payments.collect,lending.loans.read",
+                t.secondBranch().toString());
+        assertThat(elsewhere.getStatusCode().value())
+                .as("%s", elsewhere.getBody())
+                .isEqualTo(404);
+        assertThat(linkTexts(intent)).isEmpty();
+        assertThat(linkAudits(intent)).isEmpty();
+        // Collect in the loan's branch: sent.
+        ResponseEntity<JsonNode> here = textLinkAs(
+                intent,
+                "core.payments.collect,lending.loans.read",
+                t.headOffice().toString());
+        assertThat(here.getStatusCode().value()).as("%s", here.getBody()).isEqualTo(200);
+        assertThat(linkTexts(intent)).hasSize(1);
+    }
+
+    @Test
+    void aMemberOptedOutOfAllTextsIsNotTextedButARemindersOnlyOptOutDoesNotBlockTheLink() {
+        SmsTenants.operator(t.tenantId(), true, 1000);
+        SmsTenants.enable(t.tenantId());
+        String loan = activeLoan();
+        UUID borrower = borrowerOf(loan);
+
+        optOut(borrower, "all");
+        JsonNode blocked = intentFor(loan, 100_000);
+        ResponseEntity<JsonNode> refused = textLink(blocked);
+        assertThat(refused.getStatusCode().value()).as("%s", refused.getBody()).isEqualTo(422);
+        assertThat(refused.getBody().get("code").asString()).isEqualTo("member_opted_out");
+        assertThat(linkTexts(blocked)).isEmpty();
+        assertThat(linkAudits(blocked)).isEmpty();
+
+        optOut(borrower, "reminders");
+        JsonNode allowed = intentFor(loan, 100_000);
+        ResponseEntity<JsonNode> sent = textLink(allowed);
+        assertThat(sent.getStatusCode().value()).as("%s", sent.getBody()).isEqualTo(200);
+        assertThat(linkTexts(allowed)).hasSize(1);
+    }
+
+    @Test
+    void aTextTheChannelWouldNotQueueIsRefusedAndNeverReportedAsAlreadySent() {
+        SmsTenants.operator(t.tenantId(), true, 1000);
+        SmsTenants.enable(t.tenantId());
+        String loan = activeLoan();
+        JsonNode intent = intentFor(loan, 520_000);
+        // A row already holds this intent's key but no link text was ever recorded for it, as when the outbox refuses
+        // the message: the answer must not be "already sent".
+        TestDatabase.owner()
+                .sql(
+                        "INSERT INTO notification_outbox (id, channel, recipient, template_key, idempotency_key, tenant_id,"
+                                + " status) VALUES (?, 'sms', '+256700000216', 'payment.link', ?, ?, 'failed')")
+                .params(
+                        UUID.randomUUID(),
+                        "sms:payment.link:" + t.tenantId() + ":"
+                                + intent.get("id").asString() + ":" + borrowerOf(loan),
+                        t.tenantId())
+                .update();
+        ResponseEntity<JsonNode> r = textLink(intent);
+        assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(422);
+        assertThat(r.getBody().get("code").asString()).isEqualTo("link_text_not_queued");
+        assertThat(linkAudits(intent)).isEmpty();
+    }
 }
