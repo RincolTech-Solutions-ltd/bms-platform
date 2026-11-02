@@ -131,7 +131,8 @@ export const FINDING_WORDS: Record<string, { title: string; help: string }> = {
   reversed_awaiting_review: { title: 'Reversed by the provider, waiting for a decision', help: 'A second person decides in the approvals inbox.' },
   reversal_handed_over: { title: 'Reversed by the provider, nobody is waiting on it', help: 'It was rejected or could not be finished. Ask for it to be decided again, or leave it.' },
   reversal_blocked: { title: 'Reversal refused by the books', help: 'The reversal cannot be done (for example the deposit was already withdrawn). Record the loss by manual journal and reject the request.' },
-  reversed_after_refund: { title: 'Reversed after it was already sent back', help: 'You sent this money back and the provider then reversed it too. Record the loss by manual journal.' },  manual_receipt_duplicate: { title: 'Entered by hand and also paid online', help: 'A cashier entered this payment as well as the online payment being recorded. Reverse the one entered by hand.' },
+  reversed_after_refund: { title: 'Reversed after it was already sent back', help: 'You sent this money back and the provider then reversed it too. Record the loss by manual journal.' },
+  manual_receipt_duplicate: { title: 'Entered by hand and also paid online', help: 'A cashier entered this payment as well as the online payment being recorded. Reverse the one entered by hand.' },
   in_provider_not_in_bms: { title: 'On the statement, not recorded here', help: 'The statement has a payment this system does not hold as paid. It may be money for something outside this system.' },
   in_bms_not_in_provider: { title: 'Recorded here, not on the statement', help: 'Booked on a day the statement covers but missing from it. Check the statement is complete.' },
   amount_mismatch: { title: 'The amount differs from the statement', help: 'The statement and this system disagree about how much was paid.' },
@@ -152,6 +153,7 @@ export const MATCH_WORDS: Record<string, string> = {
 
 export const FEE_WORDS: Record<string, string> = {
   posted: 'Fee recorded',
+  reversed: 'Fee recorded, then reversed with the payment',
   already_posted: 'Fee already recorded',
   none: 'No fee',
   held: 'Fee not recorded',

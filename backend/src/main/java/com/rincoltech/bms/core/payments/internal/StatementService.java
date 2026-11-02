@@ -332,11 +332,13 @@ class StatementService {
      */
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
     void reverseFeeOf(UUID intentId, String merchantReference) {
-        Optional<UUID> fee = jdbc.sql(
-                        "SELECT fee_entry_id FROM payment_statement_rows WHERE intent_id = ? AND fee_entry_id IS NOT NULL")
-                .param(intentId)
-                .query(UUID.class)
-                .optional();
+        // A fee entry an accountant already reversed by hand (a wrong statement, runbook 4f) is left alone: the ledger
+        // refuses a second reversal, and the money it took is back already.
+        Optional<UUID> fee = jdbc.sql("""
+                        SELECT r.fee_entry_id FROM payment_statement_rows r
+                         WHERE r.intent_id = ? AND r.fee_entry_id IS NOT NULL
+                           AND NOT EXISTS (SELECT 1 FROM journal_entries j WHERE j.reverses_entry_id = r.fee_entry_id)
+                        """).param(intentId).query(UUID.class).optional();
         if (fee.isEmpty()) {
             return;
         }
@@ -693,6 +695,7 @@ class StatementService {
                                payment_method, match_status, intent_id, fee_entry_id,
                                EXISTS (SELECT 1 FROM payment_statement_rows o
                                         WHERE o.intent_id = r.intent_id AND o.fee_entry_id IS NOT NULL) AS fee_elsewhere,
+                               EXISTS (SELECT 1 FROM journal_entries j WHERE j.reverses_entry_id = r.fee_entry_id) AS fee_reversed,
                                EXISTS (SELECT 1 FROM payment_statement_reviews v WHERE v.row_id = r.id) AS reviewed,
                                EXISTS (SELECT 1 FROM approval_requests q
                                         WHERE q.action_type = ? AND q.subject_id = r.id AND q.status = 'pending'
@@ -714,7 +717,7 @@ class StatementService {
                     boolean posted = rs.getObject("fee_entry_id") != null;
                     String feeApproval = rs.getString("fee_approval");
                     String feeStatus = posted
-                            ? "posted"
+                            ? (rs.getBoolean("fee_reversed") ? "reversed" : "posted")
                             : fee == 0
                                     ? "none"
                                     : feeApproval != null

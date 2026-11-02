@@ -79,11 +79,20 @@ final class StatementApi {
 
             @Schema(
                     description =
-                            "posted: the fee was posted from this line; already_posted: an earlier statement did; none: no fee on the"
-                                    + " line; held: the line did not match cleanly, so no fee was posted; awaiting_approval: the fee"
-                                    + " is above the automatic rate and waits for a second person; not_approved: that request was"
-                                    + " rejected, cancelled or expired, so nothing was posted",
-                    allowableValues = {"posted", "already_posted", "none", "held", "awaiting_approval", "not_approved"})
+                            "posted: the fee was posted from this line; reversed: it was, and has been reversed since (with the"
+                                    + " payment, or by hand); already_posted: an earlier statement did; none: no fee on the"
+                                    + " line; held: the line did not match cleanly, or its order was not booked, so no fee was posted;"
+                                    + " awaiting_approval: the fee is above the automatic rate and waits for a second person;"
+                                    + " not_approved: that request was rejected, cancelled or expired, so nothing was posted",
+                    allowableValues = {
+                        "posted",
+                        "reversed",
+                        "already_posted",
+                        "none",
+                        "held",
+                        "awaiting_approval",
+                        "not_approved"
+                    })
             String feeStatus) {}
 
     @Schema(name = "PaymentStatementDetail")

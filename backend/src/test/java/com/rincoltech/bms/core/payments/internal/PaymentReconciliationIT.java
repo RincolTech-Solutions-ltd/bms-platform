@@ -2041,6 +2041,48 @@ class PaymentReconciliationIT extends LoanFixtures {
                 .as("clearing never below nothing")
                 .isEqualTo(clearing);
         assertThat(balanceOf("gateway_charges")).as("the fee is taken back").isEqualTo(charges);
+        JsonNode statement = send(
+                        HttpMethod.GET,
+                        STATEMENTS + "/"
+                                + r.getBody().get("statement").get("id").asString(),
+                        as(accountant, accountantPerms(), "*", null),
+                        null)
+                .getBody();
+        assertThat(statement.get("rows").get(0).get("fee_status").asString()).isEqualTo("reversed");
+    }
+
+    @Autowired
+    com.rincoltech.bms.core.ledger.LedgerPosting ledger;
+
+    /**
+     * The fee entry was already reversed by hand (a wrong statement, runbook 4f) when the provider reverses the payment: the
+     * approval still completes, leaves the fee alone, and clearing ends where it started (review of ef0eafa).
+     * JUSTIFICATION-A3: a new test case for the review's must-fix; no case reverses the fee by hand first.
+     */
+    @Test
+    void aReversalApprovedAfterTheFeeWasReversedByHandStillCompletes() {
+        long clearing = balanceOf("gateway_clearing");
+        JsonNode booked = bookedRepayment(activeLoan(), 520_000, "CONF-224-1172");
+        ResponseEntity<JsonNode> r =
+                uploadAsAccountant(csv(line(booked, "CONF-224-1172", 520_000, 5_000, "2026-10-16")));
+        assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(201);
+        UUID fee = TestDatabase.owner()
+                .sql("SELECT fee_entry_id FROM payment_statement_rows WHERE intent_id = ? AND fee_entry_id IS NOT NULL")
+                .param(UUID.fromString(booked.get("id").asString()))
+                .query(UUID.class)
+                .single();
+        tenantJobs.callForTenant(
+                t.tenantId(),
+                () -> ledger.reverse(new com.rincoltech.bms.core.ledger.LedgerPosting.ReversalRequest(
+                        fee, TODAY, "SF-HAND", "Wrong statement", "test.hand-reversal:" + fee)));
+        reportReversed(booked);
+        ResponseEntity<JsonNode> approved =
+                decide(reversalRequests(booked).getFirst().get("id").toString(), "approve");
+        assertThat(approved.getStatusCode().value())
+                .as("%s", approved.getBody())
+                .isEqualTo(200);
+        assertThat(row(booked).get("status")).isEqualTo("reversed");
+        assertThat(balanceOf("gateway_clearing")).isEqualTo(clearing);
     }
 
     /**
