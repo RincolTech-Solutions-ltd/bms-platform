@@ -1303,6 +1303,10 @@ Accepted (this list is the ADR index):
 - ADR-111 Sizes, colours and types in Add an item, picked from ready lists shipped with the app: the same one form asks
   about sizes, `POST /retail/product-families` takes `packs` made on every size in its transaction, and `GET
   /retail/product-families/options` offers the sizes and colours a shop used before (#697, D81, D98; no migration)
+- ADR-113 Shop words (Proposed, plan only, #683): one list of keys in `frontend/src/words/labels.json`, one label function for
+  menus, tabs, titles, crumbs and headers, a `tenant_words` table of the changes only, a Words page in Business set-up under
+  `core.settings.manage`, limits checked by the server, help and Ask BMS in the shop's words, report footers and a Words sheet in
+  Download my data, and the same keys for Luganda and Swahili later; plan and build order in `docs/specs/shop-words-plan.md`
 
 Pending (cite only as "pending ADR-NNN"):
 
