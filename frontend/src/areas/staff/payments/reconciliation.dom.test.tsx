@@ -128,6 +128,7 @@ describe('the statement upload', () => {
         rows: [
           { row_no: 1, confirmation_code: 'CONF-TEST-1', amount_minor: 520000, fee_minor: 5200, match_status: 'matched', fee_status: 'posted' },
           { row_no: 2, confirmation_code: 'CONF-TEST-9', amount_minor: 70000, fee_minor: 0, match_status: 'unmatched', fee_status: 'none' },
+          { row_no: 3, confirmation_code: 'CONF-TEST-3', amount_minor: 90000, fee_minor: 900, match_status: 'matched', fee_status: 'reversed_elsewhere' },
         ],
         rows_truncated: false,
       },
@@ -138,8 +139,9 @@ describe('the statement upload', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Upload' }));
     await waitFor(() => expect(statements.upload).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/Fee recorded/)).toBeTruthy();
+    expect(screen.getByText(/reversed by hand, so nothing was recorded from this line\. Correct the fee with a manual journal entry/)).toBeTruthy();
     expect(screen.getByText('No payment of ours')).toBeTruthy();
-    expect(screen.getByText('Matches')).toBeTruthy();
+    expect(screen.getAllByText('Matches')).toHaveLength(2);
   });
 
   it('refuses a file that is not a CSV or is too large before sending anything', async () => {

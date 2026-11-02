@@ -80,7 +80,9 @@ final class StatementApi {
             @Schema(
                     description =
                             "posted: the fee was posted from this line; reversed: it was, and has been reversed since (with the"
-                                    + " payment, or by hand); already_posted: an earlier statement did; none: no fee on the"
+                                    + " payment, or by hand); already_posted: an earlier statement did; reversed_elsewhere: an"
+                                    + " earlier statement did and that fee was reversed by hand, so this line posts nothing (one"
+                                    + " fee per order: a wrong fee is corrected by a manual journal entry); none: no fee on the"
                                     + " line; held: the line did not match cleanly, or its order was not booked, so no fee was posted;"
                                     + " awaiting_approval: the fee is above the automatic rate and waits for a second person;"
                                     + " not_approved: that request was rejected, cancelled or expired, so nothing was posted",
@@ -88,6 +90,7 @@ final class StatementApi {
                         "posted",
                         "reversed",
                         "already_posted",
+                        "reversed_elsewhere",
                         "none",
                         "held",
                         "awaiting_approval",

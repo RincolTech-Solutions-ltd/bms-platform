@@ -2062,19 +2062,13 @@ class PaymentReconciliationIT extends LoanFixtures {
     @Test
     void aReversalApprovedAfterTheFeeWasReversedByHandStillCompletes() {
         long clearing = balanceOf("gateway_clearing");
+        long charges = chargesBalance();
         JsonNode booked = bookedRepayment(activeLoan(), 520_000, "CONF-224-1172");
         ResponseEntity<JsonNode> r =
                 uploadAsAccountant(csv(line(booked, "CONF-224-1172", 520_000, 5_000, "2026-10-16")));
         assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(201);
-        UUID fee = TestDatabase.owner()
-                .sql("SELECT fee_entry_id FROM payment_statement_rows WHERE intent_id = ? AND fee_entry_id IS NOT NULL")
-                .param(UUID.fromString(booked.get("id").asString()))
-                .query(UUID.class)
-                .single();
-        tenantJobs.callForTenant(
-                t.tenantId(),
-                () -> ledger.reverse(new com.rincoltech.bms.core.ledger.LedgerPosting.ReversalRequest(
-                        fee, TODAY, "SF-HAND", "Wrong statement", "test.hand-reversal:" + fee)));
+        UUID fee = feeEntryOf(booked);
+        reverseByHand(fee);
         reportReversed(booked);
         ResponseEntity<JsonNode> approved =
                 decide(reversalRequests(booked).getFirst().get("id").toString(), "approve");
@@ -2083,6 +2077,187 @@ class PaymentReconciliationIT extends LoanFixtures {
                 .isEqualTo(200);
         assertThat(row(booked).get("status")).isEqualTo("reversed");
         assertThat(balanceOf("gateway_clearing")).isEqualTo(clearing);
+        assertThat(chargesBalance()).as("the fee is out of charges once").isEqualTo(charges);
+        assertThat(reversalsOf(fee)).as("the hand reversal alone").isEqualTo(1);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM journal_entries WHERE idempotency_key = ?")
+                        .param("payments.statement.fee.reversed:"
+                                + booked.get("id").asString())
+                        .query(Long.class)
+                        .single())
+                .as("the approval posted no fee reversal of its own")
+                .isZero();
+        assertThat(statementRows(r).get(0).get("fee_status").asString()).isEqualTo("reversed");
+    }
+
+    /**
+     * A fee reversed by hand, then a corrected export of the same order: one fee per order, so nothing posts, and the line says
+     * the fee was reversed elsewhere (not that it is already posted); runbook 4f sends the accountant to a manual journal entry
+     * (review of 1469631, must-fix 1, option b).
+     * JUSTIFICATION-A3: a new test case for the review's must-fix; no case uploads a corrected export after a hand reversal.
+     */
+    @Test
+    void aCorrectedExportAfterTheFeeWasReversedByHandPostsNothingAndSaysTheFeeWasReversedElsewhere() {
+        JsonNode booked = bookedRepayment(activeLoan(), 520_000, "CONF-224-1173");
+        ResponseEntity<JsonNode> wrong =
+                uploadAsAccountant(csv(line(booked, "CONF-224-1173", 520_000, 15_000, "2026-10-16")));
+        assertThat(wrong.getStatusCode().value()).as("%s", wrong.getBody()).isEqualTo(201);
+        reverseByHand(feeEntryOf(booked));
+        long charges = chargesBalance();
+        long fees = feeEntries();
+        ResponseEntity<JsonNode> corrected =
+                uploadAsAccountant(csv(line(booked, "CONF-224-1173", 520_000, 5_000, "2026-10-16")));
+        assertThat(corrected.getStatusCode().value())
+                .as("%s", corrected.getBody())
+                .isEqualTo(201);
+        assertThat(corrected.getBody().get("rows").get(0).get("fee_status").asString())
+                .isEqualTo("reversed_elsewhere");
+        assertThat(statementRows(corrected).get(0).get("fee_status").asString()).isEqualTo("reversed_elsewhere");
+        assertThat(chargesBalance()).as("no second fee").isEqualTo(charges);
+        assertThat(feeEntries()).isEqualTo(fees);
+        assertThat(statementRows(wrong).get(0).get("fee_status").asString()).isEqualTo("reversed");
+    }
+
+    /**
+     * An accountant's hand reversal of the fee is in flight while the payment reversal is approved: the approval's own reversal
+     * of the fee meets the ledger's one-reversal key, is undone to a savepoint, sees the fee reversed, and completes (review of
+     * 1469631, item 3).
+     * JUSTIFICATION-A3: a new test case for the race the review names; no case reverses the fee by hand during an approval.
+     */
+    @Test
+    void aHandReversalOfTheFeeCommittingDuringTheApprovalLetsTheApprovalComplete() throws Exception {
+        long clearing = balanceOf("gateway_clearing");
+        long charges = chargesBalance();
+        JsonNode booked = bookedRepayment(activeLoan(), 520_000, "CONF-224-1174");
+        ResponseEntity<JsonNode> r =
+                uploadAsAccountant(csv(line(booked, "CONF-224-1174", 520_000, 5_000, "2026-10-16")));
+        assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(201);
+        UUID fee = feeEntryOf(booked);
+        reportReversed(booked);
+        String request = reversalRequests(booked).getFirst().get("id").toString();
+        java.util.concurrent.CountDownLatch held = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            java.util.concurrent.Future<Object> hand = pool.submit(() -> tenantJobs.callForTenant(t.tenantId(), () -> {
+                reverseFee(fee);
+                held.countDown();
+                try {
+                    release.await(60, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return null;
+            }));
+            assertThat(held.await(30, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            java.util.concurrent.Future<ResponseEntity<JsonNode>> approval =
+                    pool.submit(() -> decide(request, "approve"));
+            Thread.sleep(1500);
+            assertThat(approval.isDone())
+                    .as("the approval waits on the hand reversal")
+                    .isFalse();
+            release.countDown();
+            hand.get(60, java.util.concurrent.TimeUnit.SECONDS);
+            ResponseEntity<JsonNode> approved = approval.get(60, java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(approved.getStatusCode().value())
+                    .as("%s", approved.getBody())
+                    .isEqualTo(200);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+        assertThat(row(booked).get("status")).isEqualTo("reversed");
+        assertThat(reversalsOf(fee)).isEqualTo(1);
+        assertThat(balanceOf("gateway_clearing")).isEqualTo(clearing);
+        assertThat(chargesBalance()).isEqualTo(charges);
+    }
+
+    /**
+     * The fee's hand reversal was itself reversed, so the fee is in force again: the approved payment reversal takes it back
+     * with an entry of its own (the ledger reverses an entry once), and clearing ends where it started (review of 1469631,
+     * item 4).
+     * JUSTIFICATION-A3: a new test case; no case reverses the hand reversal of a fee.
+     */
+    @Test
+    void aFeeWhoseHandReversalWasItselfReversedIsInForceAndTheApprovedReversalTakesItBack() {
+        long clearing = balanceOf("gateway_clearing");
+        long charges = chargesBalance();
+        JsonNode booked = bookedRepayment(activeLoan(), 520_000, "CONF-224-1175");
+        ResponseEntity<JsonNode> r =
+                uploadAsAccountant(csv(line(booked, "CONF-224-1175", 520_000, 5_000, "2026-10-16")));
+        assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(201);
+        UUID fee = feeEntryOf(booked);
+        reverseByHand(fee);
+        UUID hand = TestDatabase.owner()
+                .sql("SELECT id FROM journal_entries WHERE reverses_entry_id = ?")
+                .param(fee)
+                .query(UUID.class)
+                .single();
+        // The ledger refuses to reverse a reversal (FR-GL-04), so the undoing entry is written directly, as an
+        // older entry or a data repair might have left it: the hand reversal's lines turned round, pointing at it.
+        TestDatabase.owner().sql("""
+                        WITH e AS (
+                            INSERT INTO journal_entries (id, tenant_id, branch_id, entry_no, entry_date, period_id, reference,
+                                                         memo, source_module, source_type, source_id, reverses_entry_id)
+                            SELECT gen_random_uuid(), tenant_id, branch_id, 'JE-TEST-RR1', entry_date, period_id, 'SF-UNDO',
+                                   'Hand reversal undone', source_module, source_type, source_id, id
+                              FROM journal_entries WHERE id = ?
+                            RETURNING id, tenant_id)
+                        INSERT INTO journal_lines (id, tenant_id, entry_id, line_no, account_id, debit, credit, currency)
+                        SELECT gen_random_uuid(), e.tenant_id, e.id, l.line_no, l.account_id, l.credit, l.debit, l.currency
+                          FROM journal_lines l, e WHERE l.entry_id = ?
+                        """).params(hand, hand).update();
+        assertThat(chargesBalance() - charges).as("the fee is back in force").isEqualTo(5_000);
+        assertThat(statementRows(r).get(0).get("fee_status").asString()).isEqualTo("posted");
+        reportReversed(booked);
+        ResponseEntity<JsonNode> approved =
+                decide(reversalRequests(booked).getFirst().get("id").toString(), "approve");
+        assertThat(approved.getStatusCode().value())
+                .as("%s", approved.getBody())
+                .isEqualTo(200);
+        assertThat(row(booked).get("status")).isEqualTo("reversed");
+        assertThat(balanceOf("gateway_clearing"))
+                .as("clearing never below nothing")
+                .isEqualTo(clearing);
+        assertThat(chargesBalance()).isEqualTo(charges);
+        assertThat(statementRows(r).get(0).get("fee_status").asString()).isEqualTo("reversed");
+    }
+
+    UUID feeEntryOf(JsonNode intent) {
+        return TestDatabase.owner()
+                .sql("SELECT fee_entry_id FROM payment_statement_rows WHERE intent_id = ? AND fee_entry_id IS NOT NULL")
+                .param(UUID.fromString(intent.get("id").asString()))
+                .query(UUID.class)
+                .single();
+    }
+
+    /** An accountant reverses the fee entry by hand, as runbook 4f allows after a wrong statement. */
+    void reverseByHand(UUID fee) {
+        tenantJobs.callForTenant(t.tenantId(), () -> reverseFee(fee));
+    }
+
+    Object reverseFee(UUID fee) {
+        return ledger.reverse(new com.rincoltech.bms.core.ledger.LedgerPosting.ReversalRequest(
+                fee, TODAY, "SF-HAND", "Wrong statement", "test.hand-reversal:" + fee));
+    }
+
+    long reversalsOf(UUID entry) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM journal_entries WHERE reverses_entry_id = ?")
+                .param(entry)
+                .query(Long.class)
+                .single();
+    }
+
+    JsonNode statementRows(ResponseEntity<JsonNode> uploaded) {
+        return send(
+                        HttpMethod.GET,
+                        STATEMENTS + "/"
+                                + uploaded.getBody().get("statement").get("id").asString(),
+                        as(accountant, accountantPerms(), "*", null),
+                        null)
+                .getBody()
+                .get("rows");
     }
 
     /**

@@ -36,7 +36,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * The merchant statement upload (spec 3.9, FR-PAY-06 and FR-PAY-11): the operator's CSV is read whole or not at all, every line
@@ -87,6 +90,7 @@ class StatementService {
     private final Approvals approvals;
     private final int feeAutoMaxBps;
     private final java.time.Duration lockWait;
+    private final TransactionTemplate savepoint;
 
     StatementService(
             JdbcClient jdbc,
@@ -99,10 +103,13 @@ class StatementService {
             BusinessClock clock,
             Approvals approvals,
             @Value("${bms.payments.statement-fee-auto-max-bps:500}") int feeAutoMaxBps,
-            @Value("${bms.payments.reconcile-lock-wait:30s}") java.time.Duration lockWait) {
+            @Value("${bms.payments.reconcile-lock-wait:30s}") java.time.Duration lockWait,
+            PlatformTransactionManager transactions) {
         if (feeAutoMaxBps < 0 || feeAutoMaxBps > 10_000) {
             throw new IllegalArgumentException("bms.payments.statement-fee-auto-max-bps must be 0 to 10000");
         }
+        this.savepoint = new TransactionTemplate(transactions);
+        this.savepoint.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
         this.approvals = approvals;
         this.feeAutoMaxBps = feeAutoMaxBps;
         this.lockWait = lockWait;
@@ -334,11 +341,7 @@ class StatementService {
     void reverseFeeOf(UUID intentId, String merchantReference) {
         // A fee entry an accountant already reversed by hand (a wrong statement, runbook 4f) is left alone: the ledger
         // refuses a second reversal, and the money it took is back already.
-        Optional<UUID> fee = jdbc.sql("""
-                        SELECT r.fee_entry_id FROM payment_statement_rows r
-                         WHERE r.intent_id = ? AND r.fee_entry_id IS NOT NULL
-                           AND NOT EXISTS (SELECT 1 FROM journal_entries j WHERE j.reverses_entry_id = r.fee_entry_id)
-                        """).param(intentId).query(UUID.class).optional();
+        Optional<UUID> fee = feeInForce(intentId);
         if (fee.isEmpty()) {
             return;
         }
@@ -346,13 +349,81 @@ class StatementService {
         if (!ledger.periodOpen(today)) {
             throw ApiException.rule("period_closed", "Today's accounting period is closed.");
         }
-        ledger.reverse(new LedgerPosting.ReversalRequest(
-                fee.get(),
-                today,
-                "SF-" + merchantReference,
-                "Payment provider fee reversed with the payment",
-                "payments.statement.fee.reversed:" + intentId));
+        String memo = "Payment provider fee reversed with the payment";
+        String key = FEE_REVERSED_KEY + intentId;
+        if (jdbc.sql("SELECT count(*) FROM journal_entries WHERE reverses_entry_id = ?")
+                        .param(fee.get())
+                        .query(Long.class)
+                        .single()
+                > 0) {
+            // JUSTIFICATION-A3: review item 4 of 1469631; a fee whose hand reversal was itself reversed is in
+            // force again, and the ledger reverses an entry once, so the fee is taken back by an entry of its
+            // own with the fee's lines turned round.
+            List<Line> back = jdbc.sql("""
+                            SELECT account_id, credit, debit, currency, subledger_type, subledger_id
+                              FROM journal_lines WHERE entry_id = ? ORDER BY line_no
+                            """)
+                    .param(fee.get())
+                    .query((rs, n) -> new Line(
+                            rs.getObject(1, UUID.class),
+                            rs.getLong(2),
+                            rs.getLong(3),
+                            rs.getString(4).trim(),
+                            rs.getString(5),
+                            rs.getObject(6, UUID.class)))
+                    .list();
+            UUID branch = jdbc.sql("SELECT branch_id FROM journal_entries WHERE id = ?")
+                    .param(fee.get())
+                    .query(UUID.class)
+                    .single();
+            ledger.post(new EntryRequest(
+                    branch,
+                    today,
+                    "SF-" + merchantReference,
+                    memo,
+                    UnallocatedReceipts.SOURCE_MODULE,
+                    "statement_fee",
+                    intentId,
+                    key,
+                    back));
+            return;
+        }
+        // A hand reversal committed between the read above and this posting is refused by the ledger's unique
+        // key, which aborts the statement: the savepoint undoes it, and a fee no longer in force ends the step.
+        try {
+            savepoint.executeWithoutResult(s -> ledger.reverse(
+                    new LedgerPosting.ReversalRequest(fee.get(), today, "SF-" + merchantReference, memo, key)));
+        } catch (ApiException refused) {
+            if (feeInForce(intentId).isPresent()) {
+                throw refused;
+            }
+        }
     }
+
+    /**
+     * The order's fee entry while it stands in the books: posted, and not reversed, or reversed by an entry that was itself
+     * reversed (the fee is back in force). One fee per order (the V124 unique index), so at most one row.
+     */
+    private Optional<UUID> feeInForce(UUID intentId) {
+        return jdbc.sql("SELECT r.fee_entry_id FROM payment_statement_rows r WHERE r.intent_id = ?"
+                        + " AND r.fee_entry_id IS NOT NULL AND NOT " + feeUndone("r.fee_entry_id", "r.intent_id"))
+                .param(intentId)
+                .query(UUID.class)
+                .optional();
+    }
+
+    /**
+     * SQL: the fee entry is taken back, by a reversal that is not itself reversed, or by the entry an approved payment reversal
+     * posts when the fee was back in force (its idempotency key names the order).
+     */
+    private static String feeUndone(String entry, String intent) {
+        return "(EXISTS (SELECT 1 FROM journal_entries j WHERE j.reverses_entry_id = " + entry
+                + " AND NOT EXISTS (SELECT 1 FROM journal_entries k WHERE k.reverses_entry_id = j.id))"
+                + " OR EXISTS (SELECT 1 FROM journal_entries p WHERE p.idempotency_key = '" + FEE_REVERSED_KEY + "' || "
+                + intent + "))";
+    }
+
+    private static final String FEE_REVERSED_KEY = "payments.statement.fee.reversed:";
 
     private UUID postFee(
             UUID branchId, String merchantReference, UUID intentId, LocalDate paidOn, long feeMinor, String currency) {
@@ -695,7 +766,14 @@ class StatementService {
                                payment_method, match_status, intent_id, fee_entry_id,
                                EXISTS (SELECT 1 FROM payment_statement_rows o
                                         WHERE o.intent_id = r.intent_id AND o.fee_entry_id IS NOT NULL) AS fee_elsewhere,
-                               EXISTS (SELECT 1 FROM journal_entries j WHERE j.reverses_entry_id = r.fee_entry_id) AS fee_reversed,
+                               EXISTS (SELECT 1 FROM payment_statement_rows o
+                                         JOIN journal_entries j ON j.reverses_entry_id = o.fee_entry_id
+                                        WHERE o.intent_id = r.intent_id
+                                          AND j.idempotency_key IS DISTINCT FROM 'payments.statement.fee.reversed:' || o.intent_id
+                                          AND NOT EXISTS (SELECT 1 FROM journal_entries k WHERE k.reverses_entry_id = j.id))
+                                   AS fee_reversed_by_hand,
+                               """ + feeUndone("r.fee_entry_id", "r.intent_id") + """
+                                AS fee_reversed,
                                EXISTS (SELECT 1 FROM payment_statement_reviews v WHERE v.row_id = r.id) AS reviewed,
                                EXISTS (SELECT 1 FROM approval_requests q
                                         WHERE q.action_type = ? AND q.subject_id = r.id AND q.status = 'pending'
@@ -722,10 +800,14 @@ class StatementService {
                                     ? "none"
                                     : feeApproval != null
                                             ? ("pending".equals(feeApproval) ? "awaiting_approval" : "not_approved")
-                                            // A clean line whose fee is not posted: posted from another line, or the
-                                            // order was not booked when the file came (held).
+                                            // A clean line whose fee is not posted: posted from another line (and
+                                            // perhaps reversed there by hand since, which only a manual journal
+                                            // entry corrects: one fee per order), or the order was not booked when
+                                            // the file came (held).
                                             : "matched".equals(match) && rs.getBoolean("fee_elsewhere")
-                                                    ? "already_posted"
+                                                    ? (rs.getBoolean("fee_reversed_by_hand")
+                                                            ? "reversed_elsewhere"
+                                                            : "already_posted")
                                                     : "held";
                     return new RowView(
                             rs.getInt("row_no"),

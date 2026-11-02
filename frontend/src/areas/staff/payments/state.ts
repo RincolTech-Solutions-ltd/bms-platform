@@ -153,8 +153,10 @@ export const MATCH_WORDS: Record<string, string> = {
 
 export const FEE_WORDS: Record<string, string> = {
   posted: 'Fee recorded',
-  reversed: 'Fee recorded, then reversed with the payment',
+  reversed: 'Fee recorded, then reversed (with the payment, or by hand)',
   already_posted: 'Fee already recorded',
+  reversed_elsewhere:
+    "This order's fee came from an earlier statement and was reversed by hand, so nothing was recorded from this line. Correct the fee with a manual journal entry.",
   none: 'No fee',
   held: 'Fee not recorded',
   awaiting_approval: 'Fee above the automatic rate: waiting for a second person to approve',
