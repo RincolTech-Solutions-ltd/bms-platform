@@ -7,8 +7,10 @@
 -- show. The link now keeps working until its own 7 day expiry: the page and Confirm show the activated application
 -- and change nothing (by_link writes only for submitted, needs_info and verified rows). Expire still clears the link.
 --
--- Expand only: the same signature, owner and grants; the V23 body otherwise unchanged. Applications activated before
--- this migration keep the cleared link.
+-- Expand only: the same signature, owner and grants. V23 is the only migration (SQL or Java) that ever defined this
+-- function, so its body is the one on main after V121; this body is it without the two link assignments, nothing else.
+-- It runs in the caller's transaction, which is already tenant-bound by TenantProvisioning, as before. Applications
+-- activated before this migration keep the cleared link: the hash is gone, so their page cannot be brought back.
 
 CREATE OR REPLACE FUNCTION onboarding_application_activated(
     p_id uuid, p_tenant_id uuid, p_platform_user_id uuid, p_way text, p_term text, p_note text, p_now timestamptz)
