@@ -256,8 +256,13 @@ class ReceiptLinkIT extends IntegrationTest {
                     new HttpEntity<>(h),
                     byte[].class));
         }
-        ResponseEntity<byte[]> turnedAway = http.exchange(
-                RetailTestSupport.BASE + "/receipt-links/" + token, HttpMethod.GET, new HttpEntity<>(h), byte[].class);
+        // The shared client waits out a 429's Retry-After and asks again; this one reads the 429 itself.
+        ResponseEntity<byte[]> turnedAway = Api.withoutRetries(http)
+                .exchange(
+                        RetailTestSupport.BASE + "/receipt-links/" + token,
+                        HttpMethod.GET,
+                        new HttpEntity<>(h),
+                        byte[].class);
         assertThat(turnedAway.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
         assertThat(new String(turnedAway.getBody(), StandardCharsets.UTF_8)).contains("Too many tries");
     }

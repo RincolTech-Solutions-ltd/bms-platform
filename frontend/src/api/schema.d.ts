@@ -31661,6 +31661,15 @@ export interface operations {
                     "text/html": string;
                 };
             };
+            /** @description Too many opens of this link or from this address: a plain page */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
         };
     };
     getRetailBusinessEvaluation: {
