@@ -36,7 +36,7 @@ afterEach(() => {
 const admin = mockMe('admin');
 const branch = admin.branches?.[0]?.id ?? '';
 
-const used: StockMovement = { id: 'm1', at: '2026-10-20T08:00:00Z', branch_id: branch, product_id: 'p1', code: 'BU-01', description: 'Test bulb', unit: 'piece', kind: 'usage', qty: '-2.000', note: 'Shop lights', unit_cost_minor: 1500 };
+const used: StockMovement = { id: 'm1', at: '2026-10-20T08:00:00Z', branch_id: branch, product_id: 'p1', code: 'BU-01', description: 'Test bulb', unit: 'piece', kind: 'usage', qty: '-2.000', note: 'Shop lights', unit_cost_minor: 1500, line_cost_minor: 3000 };
 const damaged: StockMovement = { id: 'm2', at: '2026-10-21T08:00:00Z', branch_id: branch, product_id: 'p2', code: 'PA-05', description: 'Test paint', unit: 'litre', kind: 'damage', qty: '-0.500', note: 'Tin fell' };
 
 function wrap(ui: ReactElement) {

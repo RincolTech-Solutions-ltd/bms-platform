@@ -9,7 +9,7 @@ import { Hint } from '../../../app/ui/Hint';
 import { EmptyState } from '../../../app/ui/EmptyState';
 import { useStaff } from '../context';
 import { canUse } from './permissions';
-import { lineTotalMinor, milliOf, showDate, showQty } from './maths';
+import { showDate, showQty } from './maths';
 import { Gate, Money, Problem, useBranchName, useBranchView } from './ui';
 
 // Past usage and damage (issue #145, AppSheet "Damaged or used stock not sold"): every item taken out of stock as used in the
@@ -28,10 +28,9 @@ export function dayOf(m: StockMovement): string {
   return Number.isNaN(at.getTime()) ? '' : businessToday(at);
 }
 
-/** The cost of what was taken out, when the server sent the unit cost (retail.profit.read); null otherwise. */
+/** The cost of what was taken out, as the server sent it (retail.profit.read), never recomputed here; null otherwise. */
 export function costOf(m: StockMovement): number | null {
-  if (m.unit_cost_minor === undefined) return null;
-  return lineTotalMinor(m.unit_cost_minor, Math.abs(milliOf(m.qty ?? '0')));
+  return m.line_cost_minor ?? null;
 }
 
 function UsageRow({ m, branch }: { m: StockMovement; branch?: string }) {

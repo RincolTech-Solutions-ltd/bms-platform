@@ -294,6 +294,7 @@ class StockService {
                                         m.kind(),
                                         m.qty(),
                                         null,
+                                        null,
                                         m.sourceType(),
                                         m.sourceId(),
                                         m.reversesMovementId(),
@@ -576,14 +577,15 @@ class StockService {
     }
 
     /**
-     * The kind filter (#145), null for every kind (a blank {@code kind=} binds to none); a kind the movements table cannot
-     * hold is refused with 422, and a null element (a binder that keeps one) is refused the same way, never a 500.
+     * The kind filter (#145): no {@code kind} parameter is every kind. A blank {@code kind=} (bound as an empty list), a null
+     * element or a kind the movements table cannot hold is refused with 422, never a 500 and never read as every kind.
      */
     static List<String> kindsOf(List<String> kinds) {
-        if (kinds != null && kinds.stream().anyMatch(k -> k == null || !JdbcStockLedger.KINDS.contains(k))) {
+        if (kinds != null
+                && (kinds.isEmpty() || kinds.stream().anyMatch(k -> k == null || !JdbcStockLedger.KINDS.contains(k)))) {
             throw ApiException.validation(List.of(new FieldProblem("kind", "invalid", "kind is not a movement kind.")));
         }
-        return kinds == null || kinds.isEmpty() ? null : kinds;
+        return kinds;
     }
 
     static boolean mayReadCost(UUID branchId) {

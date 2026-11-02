@@ -419,6 +419,7 @@ class StockRepository {
                         rs.getString("kind"),
                         Quantities.format(rs.getBigDecimal("qty")),
                         rs.getLong("unit_cost_minor"),
+                        Quantities.value(rs.getBigDecimal("qty").abs(), rs.getLong("unit_cost_minor")),
                         rs.getString("source_type"),
                         rs.getObject("source_id", UUID.class),
                         rs.getObject("reverses_movement_id", UUID.class),

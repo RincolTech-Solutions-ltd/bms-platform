@@ -23,8 +23,8 @@ const branch = me.branches?.[0]?.id ?? '';
 const today = businessToday();
 const at = `${today}T09:00:00Z`;
 const rows: StockMovement[] = query.get('empty') === '1' ? [] : [
-  { id: 'm1', at, branch_id: branch, product_id: 'p1', code: 'EXT-CABLE-4WAY-10M-HEAVY', description: 'Test extension cable four way ten metre heavy duty with surge guard', unit: 'piece', kind: 'damage', qty: '-12.000', note: 'Dropped from the top shelf while moving the boxes to the back store before the delivery came in', unit_cost_minor: 125000000 },
-  { id: 'm2', at, branch_id: branch, product_id: 'p2', code: 'PA-05', description: 'Test paint', unit: 'litre', kind: 'usage', qty: '-0.500', note: 'Shop door', unit_cost_minor: 1500 },
+  { id: 'm1', at, branch_id: branch, product_id: 'p1', code: 'EXT-CABLE-4WAY-10M-HEAVY', description: 'Test extension cable four way ten metre heavy duty with surge guard', unit: 'piece', kind: 'damage', qty: '-12.000', note: 'Dropped from the top shelf while moving the boxes to the back store before the delivery came in', unit_cost_minor: 125000000, line_cost_minor: 1500000000 },
+  { id: 'm2', at, branch_id: branch, product_id: 'p2', code: 'PA-05', description: 'Test paint', unit: 'litre', kind: 'usage', qty: '-0.500', note: 'Shop door', unit_cost_minor: 1500, line_cost_minor: 750 },
 ];
 const products: Product[] = [
   { id: 'p1', code: 'EXT-CABLE-4WAY-10M-HEAVY', description: 'Test extension cable four way ten metre heavy duty with surge guard' } as Product,

@@ -241,7 +241,7 @@ class RetailPaymentsAndUsageIT extends IntegrationTest {
     // JUSTIFICATION-A3: the scoping and permission proofs the #751 review asked for, as one test of their own.
     /**
      * #145: the usage history rows name their item; a stock reader without retail.profit.read gets no cost; a caller scoped
-     * to another branch sees none of them with kind and no branch_id; a blank kind filters nothing; and every kind the table's
+     * to another branch sees none of them with kind and no branch_id; a blank kind is a 422; the line cost is the one the report posted; and every kind the table's
      * check allows is a kind the filter takes, so the two cannot drift.
      */
     @Test
@@ -270,10 +270,18 @@ class RetailPaymentsAndUsageIT extends IntegrationTest {
         assertThat(admin.get(0).get("description").asString()).isEqualTo("Test Product WIRE-1MM");
         assertThat(admin.get(0).get("unit").asString()).isNotBlank();
         assertThat(admin.get(0).has("unit_cost_minor")).isTrue();
+        // The server sends the line cost, equal to what the usage report posted, so the screen never recomputes it.
+        assertThat(admin.get(0).get("line_cost_minor").asLong())
+                .isEqualTo(used.getBody()
+                        .get("lines")
+                        .get(0)
+                        .get("line_cost_minor")
+                        .asLong());
 
         JsonNode seller = api.get(path, SALES).getBody().get("items");
         assertThat(seller).hasSize(1);
         assertThat(seller.get(0).has("unit_cost_minor")).isFalse();
+        assertThat(seller.get(0).has("line_cost_minor")).isFalse();
 
         JsonNode elsewhere = api.call(
                         HttpMethod.GET, path, null, ADMIN, t.secondBranch().toString(), Map.of())
@@ -281,8 +289,9 @@ class RetailPaymentsAndUsageIT extends IntegrationTest {
                 .get("items");
         assertThat(elsewhere).isEmpty();
 
-        // A blank kind binds to no kind at all, so it filters nothing: an answer, never a 500.
-        assertThat(api.get("/stock/movements?kind=", ADMIN).getStatusCode()).isEqualTo(HttpStatus.OK);
+        // A blank kind is refused like an unknown one: a 422, never a 500 and never read as every kind.
+        assertThat(api.get("/stock/movements?kind=", ADMIN).getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
 
         String check = TestDatabase.owner()
                 .sql(

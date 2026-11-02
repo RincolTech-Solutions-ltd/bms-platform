@@ -17622,6 +17622,11 @@ export interface components {
             /** Format: uuid */
             id?: string;
             kind?: string;
+            /**
+             * Format: int64
+             * @description The quantity, without its sign, at the unit cost, rounded half up as the posting is (#145); present only with retail.profit.read
+             */
+            line_cost_minor?: number;
             note?: string;
             /** Format: uuid */
             product_id?: string;

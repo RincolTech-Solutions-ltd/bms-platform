@@ -174,6 +174,12 @@ final class StockApi {
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = COST_ONLY)
             Long unitCostMinor,
 
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description = "The quantity, without its sign, at the unit cost, rounded half up as the posting is"
+                            + " (#145); present only with retail.profit.read")
+            Long lineCostMinor,
+
             String sourceType,
             UUID sourceId,
             UUID reversesMovementId,

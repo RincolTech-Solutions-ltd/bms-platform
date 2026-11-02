@@ -19689,6 +19689,11 @@
           "kind" : {
             "type" : "string"
           },
+          "line_cost_minor" : {
+            "description" : "The quantity, without its sign, at the unit cost, rounded half up as the posting is (#145); present only with retail.profit.read",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "note" : {
             "type" : "string"
           },
