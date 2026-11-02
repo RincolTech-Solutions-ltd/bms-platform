@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { QueryClient } from '@tanstack/react-query';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../api/client';
@@ -123,6 +124,33 @@ describe('a shared phone', () => {
     expect(await store.catalogue(scope)).toBeNull();
     expect(await store.lastPerson(HOST)).toBeNull();
     expect(await store.outbox(scope)).toHaveLength(1);
+  });
+
+  // JUSTIFICATION-A3: a new test case for issue #763 (scope isolation and sign-out of the kept figures) beside the sign-out test it extends.
+  it('brings back only this person on this business their kept figures, and forgets them at sign-out (issue #763)', async () => {
+    const store = memoryStore();
+    const me: Me = { ...mockMe('sales'), user_id: 'u1' };
+    const kept = (title: string) => ({
+      savedAt: 1,
+      entries: [{ queryKey: ['retail', 'home', 'all'], queryHash: '["retail","home","all"]', state: { data: { title }, dataUpdatedAt: Date.now() - 60_000, status: 'success' } }],
+    }) as never;
+    // The same phone also holds another business (another host) and another person of this business.
+    await store.putReadCache(scopeOf(HOST, 'u1'), kept('Test figures of this business'));
+    await store.putReadCache(scopeOf('other-shop.example', 'u1'), kept('Test figures of another business'));
+    await store.putReadCache(scopeOf(HOST, 'u2'), kept('Test figures of another person'));
+    const client = new QueryClient();
+    const { result } = renderHook(() => useOfflineSupport(me, false, services(store, async () => {}), client));
+    await waitFor(() => expect(client.getQueryData(['retail', 'home', 'all'])).toEqual({ title: 'Test figures of this business' }));
+
+    await act(() => result.current!.forget());
+    expect(await store.readCache(scopeOf(HOST, 'u1'))).toBeNull();
+    // Nothing loaded after sign-out is written back.
+    client.setQueryData(['retail', 'home', 'all'], { title: 'Test figures after sign-out' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(await store.readCache(scopeOf(HOST, 'u1'))).toBeNull();
+    // The other business and the other person keep theirs.
+    expect(JSON.stringify(await store.readCache(scopeOf('other-shop.example', 'u1')))).toContain('another business');
+    expect(JSON.stringify(await store.readCache(scopeOf(HOST, 'u2')))).toContain('another person');
   });
 
   it('picks only the other people of this business, and only what still waits', () => {

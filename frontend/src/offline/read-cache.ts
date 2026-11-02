@@ -6,8 +6,8 @@ import type { OfflineStore } from './store';
 // Reading offline (issue #763, ADR-116, building on ADR-067): the figures last loaded on the screens a shop reads every day
 // are kept in the device store beside the catalogue copy, per business host and person, so the app opened with no network
 // still shows them, read only, with the time they are from. Kept: the Home and Retail summaries, sales of the last 30 days
-// (and older credit sales still owing), stock, customers and what they owe, past usage and damage, and the list of reports
-// already made. Never kept: lending, the profile, tokens or anything of sign-in, and any read not named below. The copy is
+// (and older credit sales still owing), stock, customers and what they owe, past usage and damage, and the reports already
+// made (Download my data, and the report runs other than lending ones). Never kept: lending, the profile, tokens or anything of sign-in, and any read not named below. The copy is
 // capped in size, newest reads first, and goes at sign-out with the catalogue copy.
 
 /** One kept read, as React Query dehydrates it (its key, hash, kind and state with the data). */
@@ -48,8 +48,11 @@ const RETAIL_READS = new Set([
 /** Whether a read is kept for offline reading. Lending, the profile and every other read never are. */
 export function keptForReading(key: QueryKey): boolean {
   const [area, part, third] = key;
-  if (area === 'retail') return typeof part === 'string' && (RETAIL_READS.has(part) || (part === 'orders' && third === 'board'));
-  return area === 'reports' && (part === 'runs' || part === 'catalogue');
+  if (area === 'retail') {
+    return typeof part === 'string' && (RETAIL_READS.has(part) || (part === 'orders' && third === 'board') || (part === 'catalogue' && third === 'buyers'));
+  }
+  // The reports already made: Download my data (every business), and the report runs of the Reports page.
+  return area === 'data-export' || (area === 'reports' && (part === 'runs' || part === 'catalogue'));
 }
 
 const lendingReport = (r: unknown) => {
@@ -68,7 +71,8 @@ export function trimmed(key: QueryKey, data: unknown, now: number): unknown {
   const pages = (data as { pages?: unknown } | null)?.pages;
   if (area === 'retail' && part === 'sales' && Array.isArray(pages)) {
     const from = daysBefore(businessToday(new Date(now)), KEEP_DAYS);
-    const recent = (s: { sale_date?: string; balance_minor?: number }) => (s.sale_date ?? '') >= from || (s.balance_minor ?? 0) > 0;
+    // Only sales carry a sale date; the groups of the sales chain (their totals) are kept whole.
+    const recent = (s: { sale_date?: string; balance_minor?: number }) => s.sale_date === undefined || s.sale_date >= from || (s.balance_minor ?? 0) > 0;
     return { ...(data as object), pages: (pages as SalePageLike[]).map((p) => ({ ...p, items: (p.items ?? []).filter(recent) })) };
   }
   return data;
@@ -122,7 +126,7 @@ export interface ReadKeeper {
 }
 
 /** Writes the kept reads to the device store a moment after any of them loads, merged with what was kept before. */
-export function keepReads(client: QueryClient, store: OfflineStore, scope: string, now: () => number = () => Date.now()): ReadKeeper {
+export function keepReads(client: QueryClient, store: OfflineStore, scope: string, now: () => number = () => Date.now(), delayMs = SAVE_AFTER_MS): ReadKeeper {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let writing: Promise<void> = Promise.resolve();
@@ -140,7 +144,7 @@ export function keepReads(client: QueryClient, store: OfflineStore, scope: strin
   };
   const off = client.getQueryCache().subscribe((event) => {
     if (stopped || event.type !== 'updated' || event.action.type !== 'success' || !keptForReading(event.query.queryKey)) return;
-    timer ??= setTimeout(save, SAVE_AFTER_MS);
+    timer ??= setTimeout(save, delayMs);
   });
   const stop = () => {
     stopped = true;
