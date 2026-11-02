@@ -60,8 +60,9 @@ word and nothing that tells help, Ask BMS, reports or exports which words a busi
    answer in the old words is never served. Search matches both the default and the shop's word. The existing articles are
    given marked references in the build step that brings this in.
 7. **Reports and exports say which words were used.** A PDF report or document drawn with changed words carries one footer line
-   listing every word the business changed (not only those on the page), "Words used: Store for My stock, Price to customer for
-   Selling price", and nothing when none changed. Download my data (ADR-074) keeps its column headers in the default words, so a
+   listing only the changed keys drawn in that document, "Words used: Store for My stock, Price to customer for Selling price",
+   at most five, then "and N more, see Words in Business set-up", so a business with many renames never gets a footer that
+   overflows an invoice; nothing when none of its words changed. Download my data (ADR-074) keeps its column headers in the default words, so a
    file stays readable by the import and by anyone the business sends it to, and gains a Words sheet listing every changed key,
    its default and the business's label. Every label written to a sheet is written as a text cell and, as a second guard behind
    decision 5, a label starting with `=`, `+`, `-`, `@`, tab or carriage return is prefixed with an apostrophe, so no export can

@@ -29,7 +29,7 @@ since a crumb and its page title share one and headers such as Item, Quantity, B
 |---|---|---|---|---|
 | Menu entries and sections | `areas/staff/menu.tsx` (the grouped menu of ADR-086: Shop, Lending and their entries such as Loans, Members, Savings) | 28 | 28 | Shared by phone and laptop, so one key each |
 | Retail screen list | `areas/staff/retail/permissions.ts` (`label` and `hint` of each retail screen: Record a sale, Credit sales, All sales and the rest) | 102 (51 labels, 51 hints) | 102 | The hints are words too (area "word") |
-| Tabs | `areas/staff/tabs.tsx` (Sell, My stock, Buy, Money, More) | 7 | 7 | Tightest limit: 12 characters, set by the layout suite (ADR-113 decision 5) |
+| Tabs | `areas/staff/tabs.tsx`: the five tabs Sell, My stock, Buy, Money and More, and the two lending entries of the Money list (Member savings, Receive payments) | 7 (5 tabs, 2 entries) | 7 | Tightest limit: 12 characters, set by the layout suite (ADR-113 decision 5) |
 | Breadcrumbs | `app/router.tsx`: `retailScreen(path, crumb)` and `staticData: { crumb }` | about 140 (105 retail, 37 other) | about 140 | 7 already read `WORDS` |
 | Page titles | `<Gate title=...>` and page headings across `areas/staff` | about 230 | about 40 | Most equal a crumb and reuse its key |
 | Table headers | `<th>` in 42 screen files under `areas/staff` | about 290 | about 60 | Most repeat |
@@ -73,7 +73,8 @@ keys whose areas have moved, so it can ship before 1b ends.
     when stale), 428 without the header;
   - the audit row, the tenant isolation of `tenant_words`, the revision changing on every save.
 - Export: the Words sheet writes labels as text cells and prefixes an apostrophe to a label starting with a formula character
-  (a row put straight into the table, past the API, proves the second guard).
+  (a row put straight into the table, past the API, proves the second guard). A PDF footer lists only the changed keys drawn in
+  that document, at most five and then "and N more".
 - DOM tests: a renamed tab, menu entry, crumb and header show the shop's word; a reset shows the default again; the Words page
   refuses an empty or too long label in plain words.
 - Help: a marked reference `{{word:tabs.more}}` shows the shop's word; the same word in free prose ("for more detail") is left as
