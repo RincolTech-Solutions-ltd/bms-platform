@@ -110,10 +110,17 @@ The `BMS_SMTP_*` values can stay on the host; they are not used while the provid
 - **Staging allow-list.** With `BMS_ENVIRONMENT=staging` a message to anyone not on `BMS_MAIL_ALLOWLIST` is not sent and
   shows on "Messages not sent" as `not_on_staging_allowlist`. Set the list **before** this release reaches staging, or
   every email there stops. To let a tester in, add the address, `docker compose up -d api`, then "Send again".
-- **What a failure means.** `resend_rejected`: Resend refused the message as invalid (often the From); it is not retried.
-  `resend_unauthorized`: the key is wrong, revoked or not allowed for the domain; make a new one. `resend_rate_limited`,
-  `resend_unavailable`, `resend_timeout`, `resend_unreachable`: retried twice on their own; a retry never sends a second
-  copy, because the outbox key is sent as Resend's idempotency key.
+- **What a failure means.** `resend_rejected`: Resend refused the message as invalid; it is not retried (a refused
+  business from-name is already retried once with `BMS_MAIL_FROM`). `resend_too_large`: the message, usually the weekly
+  workbook, is over Resend's attachment limit (about 40 MB once encoded); it is not retried, so ask the business to use
+  Download my data instead. `resend_unauthorized`: the key is wrong, revoked or not allowed for the domain; make a new one.
+  `resend_unavailable`, `resend_timeout`, `resend_unreachable`, `resend_idempotency_conflict`: retried twice on their own; a
+  retry never sends a second copy, because the row's key (with the environment in front) is Resend's idempotency key.
+  A rate limit from Resend is not a failure: the row waits and is sent later. `unknown_outcome`: Resend had already taken
+  an earlier try of this row with another body (for example the business was renamed between tries), so it may have been
+  delivered; look it up in Resend by its `outbox_id` tag before pressing "Send again", which within 24 hours ends the same
+  way.
+- **`BMS_RESEND_API_URL`** stays unset on every host. Anything but an `https` address stops the start.
 - **Bounces and complaints.** Not in the portal yet (ADR-115 decision 8). Look in Resend under Emails: each message
   carries the tag `outbox_id`, the row id the API log line `outbox email accepted by resend` names. An address that
   bounces hard or complains is suppressed by Resend; fix it in BMS (the user's email) before sending again.

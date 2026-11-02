@@ -177,16 +177,24 @@ class SmtpEmailChannel implements OutboxChannel {
         }
     }
 
-    /** The address of {@code from} with {@code name} on one line, cut to {@link #FROM_NAME_MAX}, as a header value. */
+    /**
+     * The address of {@code from} with {@code name} as a header value: on one line, without quotes, backslashes, control or
+     * format characters (so no provider has a reason to refuse it), cut to {@link #FROM_NAME_MAX} characters by code point
+     * (never inside an emoji). A name with nothing left keeps {@code from}.
+     */
     static String fromWithName(String from, String name) throws AddressException, UnsupportedEncodingException {
         String address = new InternetAddress(from, true).getAddress();
-        String oneLine = oneLine(name);
-        if (oneLine.isEmpty()) {
+        StringBuilder clean = new StringBuilder();
+        oneLine(name)
+                .codePoints()
+                .filter(c -> c != '"' && c != '\\')
+                .filter(c -> Character.getType(c) != Character.CONTROL && Character.getType(c) != Character.FORMAT)
+                .limit(FROM_NAME_MAX)
+                .forEach(clean::appendCodePoint);
+        String cut = clean.toString().strip();
+        if (cut.isEmpty()) {
             return from;
         }
-        String cut = oneLine.length() > FROM_NAME_MAX
-                ? oneLine.substring(0, FROM_NAME_MAX).strip()
-                : oneLine;
         return new InternetAddress(address, cut, StandardCharsets.UTF_8.name()).toUnicodeString();
     }
 
@@ -254,7 +262,17 @@ class SmtpEmailChannel implements OutboxChannel {
             Session session, String from, Delivery delivery, Body body, EmailAttachments.Attachment attachment)
             throws MessagingException {
         MimeMessage message = new IdMessage(session, messageId(delivery.idempotencyKey()));
-        message.setFrom(new InternetAddress(from, true));
+        // Built again from its parts so a business's name is RFC 2047 encoded in the header (ADR-115), not sent as raw
+        // UTF-8, which parsing the string alone would keep.
+        InternetAddress sender = new InternetAddress(from, true);
+        if (sender.getPersonal() != null) {
+            try {
+                sender = new InternetAddress(sender.getAddress(), sender.getPersonal(), StandardCharsets.UTF_8.name());
+            } catch (UnsupportedEncodingException e) {
+                throw new MessagingException("from-name could not be encoded");
+            }
+        }
+        message.setFrom(sender);
         message.setRecipient(Message.RecipientType.TO, new InternetAddress(delivery.recipient(), true));
         message.setSubject(oneLine(delivery.subject()), StandardCharsets.UTF_8.name());
         MimeBodyPart plain = new MimeBodyPart();

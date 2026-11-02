@@ -84,6 +84,11 @@ record NotificationProperties(Smtp smtp, Telegram telegram, String supportContac
                 throw new IllegalStateException("BMS_MAIL_PROVIDER must be smtp or resend");
             }
             resendUrl = resendUrl == null || resendUrl.isBlank() ? "https://api.resend.com" : resendUrl.strip();
+            // The key travels in a header: never over plain http, except to this machine (a test's stand-in).
+            if (!resendUrl.startsWith("https://")
+                    && !resendUrl.matches("^http://(127\\.0\\.0\\.1|localhost)(:\\d+)?(/.*)?$")) {
+                throw new IllegalStateException("BMS_RESEND_API_URL must be an https address");
+            }
             allowlist = allowlist == null ? "" : allowlist;
         }
 

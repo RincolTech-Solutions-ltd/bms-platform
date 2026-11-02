@@ -162,6 +162,58 @@ class OutboxIT extends IntegrationTest {
     }
 
     /** FR-NTF-09: a sent row is marked sent and its parameters (which may hold a link) cleared. */
+    /**
+     * Issue #333 (ADR-115): with the provider {@code resend} the SMTP sender is off and the dispatcher sends an email row
+     * through Resend, whichever of the two {@code email} senders is listed first.
+     */
+    @Test
+    void withResendChosenAnEmailRowReachesResendThroughTheDispatcher() throws Exception {
+        // JUSTIFICATION-A3: the routing test the #759 review asked for, through the real dispatcher.
+        List<String> keys = Collections.synchronizedList(new ArrayList<>());
+        com.sun.net.httpserver.HttpServer server =
+                com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/emails", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            keys.add(exchange.getRequestHeaders().getFirst("Idempotency-Key"));
+            byte[] out = "{\"id\":\"4ef9a417-02e9-4d39-ad75-9611e0fcc33c\"}".getBytes();
+            exchange.sendResponseHeaders(200, out.length);
+            exchange.getResponseBody().write(out);
+            exchange.close();
+        });
+        server.start();
+        try {
+            NotificationProperties properties = new NotificationProperties(
+                    new NotificationProperties.Smtp(
+                            "smtp.example.test", null, "u", "fabricated-01", "no-reply@example.test"),
+                    null,
+                    "",
+                    new NotificationProperties.Mail(
+                            "resend",
+                            "re_fabricated_test_key_0002",
+                            "http://127.0.0.1:" + server.getAddress().getPort(),
+                            null));
+            SmtpEmailChannel smtp = new SmtpEmailChannel(
+                    properties, new OutboxTemplates(), EmailLayoutTest.HOSTS, null, null, null, null, "");
+            ResendEmailChannel resend = new ResendEmailChannel(
+                    smtp,
+                    properties,
+                    new tools.jackson.databind.ObjectMapper(),
+                    new com.rincoltech.bms.kernel.BusinessClock(java.time.Clock.systemUTC()),
+                    "");
+            assertThat(smtp.enabled()).isFalse();
+            assertThat(resend.enabled()).isTrue();
+            String key = key();
+            enqueue("email", "test-op@example.test", key);
+
+            dispatcher.dispatch(List.of(smtp, resend), 1000);
+
+            assertThat(keys).contains("bms:local:" + key);
+            assertThat(row(key).get("status")).isEqualTo("sent");
+        } finally {
+            server.stop(0);
+        }
+    }
+
     @Test
     void aSentRowIsMarkedAndItsParametersCleared() {
         String key = key();

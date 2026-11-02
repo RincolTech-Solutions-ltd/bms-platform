@@ -59,6 +59,9 @@ class LogRedactionTest {
         assertThat(LogRedaction.redact("client_secret=fabricated-secret-01&grant=x"))
                 .isEqualTo("client_secret=[redacted]&grant=x");
         assertThat(LogRedaction.redact("BMS_SMTP_PASSWORD=fabricated-01")).isEqualTo("BMS_SMTP_PASSWORD=[redacted]");
+        // ADR-115: the Resend key, by its variable name.
+        assertThat(LogRedaction.redact("BMS_RESEND_API_KEY=re_fabricated_01"))
+                .isEqualTo("BMS_RESEND_API_KEY=[redacted]");
         assertThat(LogRedaction.redact("resetToken=AbCdEf012345")).isEqualTo("resetToken=[redacted]");
         assertThat(LogRedaction.redact("invitation_token=AbCdEf012345 sent"))
                 .isEqualTo("invitation_token=[redacted] sent");

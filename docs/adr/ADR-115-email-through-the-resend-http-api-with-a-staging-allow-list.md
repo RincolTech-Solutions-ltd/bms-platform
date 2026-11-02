@@ -24,24 +24,32 @@ types, which can be a real person's.
 
 1. **Two senders behind one channel, chosen on the host.** `BMS_MAIL_PROVIDER` is `smtp` (the default when unset) or
    `resend`. Any other value stops the start, so a typo never leaves email quietly off. Both implement the outbox channel
-   `email`; only the chosen one is ever on, so the dispatcher sees one email sender. SMTP is unchanged and stays a full
-   choice.
+   `email`; only the chosen one is ever on. The dispatcher keeps the senders that are on before it picks one by channel
+   name, so the order of the two beans never decides where a row goes (`OutboxIT` sends a row through the dispatcher
+   with SMTP listed first and off). SMTP is unchanged and stays a full choice.
 2. **Resend over HTTP.** `ResendEmailChannel` sends one `POST /emails` to `BMS_RESEND_API_URL` (default
-   `https://api.resend.com`) with `Authorization: Bearer <BMS_RESEND_API_KEY>`. The message is the one the SMTP sender
-   builds: the same plain and HTML parts (ADR-054), the same attachment (ADR-074), the same From. The key is read from the
-   host env only, put there by the operator, never committed and never logged (`toString` hides it; the log redaction
-   also masks `api_key=` values).
-3. **The outbox key is Resend's idempotency key.** `Idempotency-Key` is the row's idempotency key, which Resend keeps for
-   24 hours, far longer than the outbox's three tries. So every failure to get an answer (timeout, lost connection,
-   `5xx`, `429`, `409`, `401`, `403`) is a clean failure the dispatcher retries, and a retry is never a second email. A
-   request Resend refuses as invalid (`400`, `422`) is refused (`resend_rejected`) and not retried. The row id and the
-   template key are sent as tags (`outbox_id`, `template`); the id Resend gives the email is logged with the row id. No
-   recipient, text or answer body is logged or stored.
+   `https://api.resend.com`; anything but `https`, apart from the loopback a test uses, stops the start, so the key never
+   travels in clear) with `Authorization: Bearer <BMS_RESEND_API_KEY>`. The message is the one the SMTP sender builds:
+   the same plain and HTML parts (ADR-054), the same attachment (ADR-074), the same From. The key is read from the host
+   env only, put there by the operator, never committed and never logged (`toString` hides it, and `LogRedaction` masks
+   a `BMS_RESEND_API_KEY=` value as it masks any `api_key=`, proven in `LogRedactionTest`).
+3. **The outbox key, under the environment, is Resend's idempotency key.** `Idempotency-Key` is
+   `bms:<BMS_ENVIRONMENT>:<row key>`: staging and production share the Resend account, so they never share a key. Resend
+   keeps a key for 24 hours, far longer than the outbox's three tries, so a retry is never a second email. The answers:
+   2xx sent; `400` and `422` refused (`resend_rejected`); `413` refused (`resend_too_large`, the weekly workbook over
+   Resend's attachment limit); `429` gives the attempt back and waits as long as `Retry-After` says (half a minute when
+   it says nothing); a `409` naming `invalid_idempotent_request` (the same key with another body: an earlier try reached
+   Resend, then the business's name changed) is an unknown outcome, never retried, since the first may have been
+   delivered; a timeout (`resend_timeout`), a lost connection, `401`, `403`, a `409` of two requests at once and `5xx` are
+   retried. The row id and the template key are sent as tags (`outbox_id`, `template`); the id Resend gives the email is
+   logged with the row id. No recipient, text or answer body is logged or stored.
 4. **Each business's name is the from-name.** A row of a business is sent from the address of `BMS_MAIL_FROM` with that
-   business's name as the display name (one line, at most 70 characters, quoted as the standard asks). A platform row
-   (the operator's alerts, an applicant's confirmation) keeps `BMS_MAIL_FROM` as set. A name that cannot be read (a
-   suspended business) falls back to `BMS_MAIL_FROM`. The address is always Rincol's verified sender, so SPF, DKIM and
-   DMARC pass for every business.
+   business's name as the display name: one line, without quotes, backslashes, control or format characters, at most 70
+   characters counted by code point (an emoji is never cut in half). A platform row (the operator's alerts, an
+   applicant's confirmation) keeps `BMS_MAIL_FROM` as set. A name that cannot be read (a suspended business) falls back to
+   `BMS_MAIL_FROM`, and if Resend still refuses the From of a business (`422` about `from`) the email is sent once more
+   with `BMS_MAIL_FROM` under a key of its own, so no business loses its reset emails over its name. The address is always
+   Rincol's verified sender, so SPF, DKIM and DMARC pass for every business. Over SMTP the name is RFC 2047 encoded.
 5. **Staging sends only to the allow-list.** With `BMS_ENVIRONMENT=staging`, both senders send only to recipients on
    `BMS_MAIL_ALLOWLIST`: comma separated, each an address or `@domain` for every address at that domain, letter case
    ignored. Any other row is refused with `not_on_staging_allowlist` and never sent anywhere. An empty list on staging
