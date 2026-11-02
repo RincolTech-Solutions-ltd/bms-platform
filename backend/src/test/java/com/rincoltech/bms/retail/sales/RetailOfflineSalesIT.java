@@ -171,8 +171,8 @@ class RetailOfflineSalesIT extends IntegrationTest {
     }
 
     /**
-     * Issue #769: the body the online sale screen sends, with its client sale id and occurred_at, which the outbox sends
-     * again unchanged under the same key when no answer came in time.
+     * Issue #769: an online request with its client sale id and occurred_at, which a client may send again unchanged
+     * under the same key when no answer came in time.
      */
     Map<String, Object> onlineSale(Instant occurredAt, long priceMinor) {
         Map<String, Object> online = new LinkedHashMap<>();
@@ -182,6 +182,56 @@ class RetailOfflineSalesIT extends IntegrationTest {
         online.put("client_sale_id", UUID.randomUUID());
         online.put("occurred_at", occurredAt.toString());
         return online;
+    }
+
+    /**
+     * Issue #769: the sale screen's online request (no delivery fields) with no answer in time goes to the outbox under
+     * the same key with occurred_at, recorded_offline and prices_as_of added, so the first request and the outbox's send
+     * are one sale: found by the client sale id, or, while the first still held the key, answered from the key, whose
+     * hash leaves the delivery fields out.
+     */
+    // JUSTIFICATION-A3: a new test the issue asks for (#769), not a mechanism.
+    @Test
+    void theOutboxSendRecordedOfflineUnderTheOnlineKeyIsOneSale() throws Exception {
+        api.stockUp(t.headOffice(), product, "5");
+        Instant at = Instant.now().truncatedTo(ChronoUnit.MILLIS).minus(Duration.ofMinutes(1));
+        Map<String, Object> fromOutbox = offlineSale(UUID.randomUUID(), at, "1", 2_000);
+        Map<String, Object> online = new LinkedHashMap<>(fromOutbox);
+        online.remove("occurred_at");
+        online.remove("recorded_offline");
+        online.remove("prices_as_of");
+        String key = UUID.randomUUID().toString();
+        ResponseEntity<JsonNode> first = send(online, key);
+        assertThat(first.getStatusCode()).as("%s", first.getBody()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> again = send(fromOutbox, key);
+        assertThat(again.getStatusCode()).as("%s", again.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(again.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
+        assertThat(again.getBody().get("id")).isEqualTo(first.getBody().get("id"));
+
+        // The overlap: the outbox's send looked for the client sale id before the first request committed, found
+        // nothing and waited on the key. Hiding the id from the lookup leaves only the key to answer, as then; the id
+        // never
+        // changes in use, so it is hidden by hand as the superuser with the guard trigger off.
+        try (java.sql.Connection c = new org.springframework.jdbc.datasource.DriverManagerDataSource(
+                        TestDatabase.url(), "postgres", "test-superuser-password")
+                .getConnection()) {
+            c.setAutoCommit(false);
+            try (java.sql.Statement st = c.createStatement()) {
+                st.execute("SET LOCAL session_replication_role = replica");
+            }
+            try (java.sql.PreparedStatement ps = c.prepareStatement(
+                    "UPDATE retail_sales SET client_sale_id = NULL, request_hash = NULL WHERE tenant_id = ?")) {
+                ps.setObject(1, t.tenantId());
+                assertThat(ps.executeUpdate()).isEqualTo(1);
+            }
+            c.commit();
+        }
+        ResponseEntity<JsonNode> byKey = send(fromOutbox, key);
+        assertThat(byKey.getStatusCode()).as("%s", byKey.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(byKey.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
+        assertThat(byKey.getBody().get("id")).isEqualTo(first.getBody().get("id"));
+        assertThat(sales()).isEqualTo(1);
+        assertThat(balance()).isEqualTo("4.000");
     }
 
     /**
@@ -210,6 +260,27 @@ class RetailOfflineSalesIT extends IntegrationTest {
         assertThat(newKey.getBody().get("id")).isEqualTo(first.getBody().get("id"));
         assertThat(sales()).isEqualTo(1);
         assertThat(balance()).isEqualTo("4.000");
+    }
+
+    /**
+     * Issue #769: when the first online request never arrived, the outbox's send hours later is a sale recorded offline:
+     * dated when it was taken, and a short stock is a clash, not a refusal of cash already in hand.
+     */
+    @Test
+    void anOnlineSaleWhoseFirstRequestNeverArrivedIsRecordedOfflineWhenItGoes() {
+        api.stockUp(t.headOffice(), product, "1");
+        Instant at = Instant.now().truncatedTo(ChronoUnit.MILLIS).minus(Duration.ofHours(3));
+        ResponseEntity<JsonNode> late = send(
+                offlineSale(UUID.randomUUID(), at, "2", 2_000),
+                UUID.randomUUID().toString());
+        assertThat(late.getStatusCode()).as("%s", late.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode device = late.getBody().get("device");
+        assertThat(device.get("recorded_offline").asBoolean()).isTrue();
+        assertThat(Instant.parse(device.get("occurred_at").asString())).isEqualTo(at);
+        assertThat(device.get("clashes")).isNotEmpty();
+        assertThat(late.getBody().get("sale_date").asString())
+                .isEqualTo(dayIn(at).toString());
+        assertThat(sales()).isEqualTo(1);
     }
 
     /**
