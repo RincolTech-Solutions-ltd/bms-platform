@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -56,8 +57,13 @@ class OnboardingIT extends IntegrationTest {
         String email = Api.email("operator");
         operatorId = Api.platformUser(email);
         operator = platform.signIn(operatorId, email, Api.PASSWORD, null);
+        ip = freshAddress();
+    }
+
+    /** A client address no other test used, so the per-address limits start empty. */
+    static String freshAddress() {
         int n = ADDRESS.getAndIncrement();
-        ip = "198.51." + (n / 250) + "." + (n % 250 + 1);
+        return "198.51." + (n / 250) + "." + (n % 250 + 1);
     }
 
     // ---- Helpers ----------------------------------------------------------------------------
@@ -1081,13 +1087,18 @@ class OnboardingIT extends IntegrationTest {
     // JUSTIFICATION-A3: review of #713 round 4 asks for an IT that runs the confirmation and Activate at once.
     /**
      * ADR-108, review of #713 round 4: Activate takes the name's lock before the application's row, as the confirmation
-     * does, so the applicant pressing Confirm again while the operator activates never deadlocks either.
+     * does, so the applicant pressing Confirm again while the operator activates never deadlocks either. Issue #746:
+     * whichever commits first, the confirmation answers 200 with the status it saw (verified, or activated once
+     * Activate committed first), Activate answers 200 and the application is activated exactly once.
      */
     @Test
     void activateAndAConfirmationAtOnceBothAnswer() throws Exception {
-        for (int round = 0; round < 3; round++) {
+        for (int round = 0; round < 10; round++) {
+            // Each round applies once; a fresh address keeps the 5 an hour limit (FR-ONB-03) out of the way.
+            ip = freshAddress();
             String email = Api.email("race-confirm");
-            UUID id = verified(email, "Test Race Shop " + email);
+            String business = "Test Race Shop " + email;
+            UUID id = verified(email, business);
             String chosen = owner().sql("SELECT short_name FROM onboarding_applications WHERE id = ?")
                     .param(id)
                     .query(String.class)
@@ -1095,13 +1106,70 @@ class OnboardingIT extends IntegrationTest {
             String token =
                     tokenOf(outboxParams("onboarding.verify_email", email).get("link"));
             AtomicInteger turn = new AtomicInteger();
-            var statuses = Api.race(
-                    2,
-                    () -> turn.getAndIncrement() == 0
-                            ? publicPost("/api/v1/platform/sign-up/verify", Map.of("token", token))
-                            : activate(id, activation(chosen, "trial", null)));
-            assertThat(statuses).as("round %d", round).allMatch(s -> s.value() == 200);
+            Map<String, ResponseEntity<JsonNode>> answers = new ConcurrentHashMap<>();
+            Api.race(2, () -> {
+                boolean confirm = turn.getAndIncrement() == 0;
+                ResponseEntity<JsonNode> answer = confirm
+                        ? publicPost("/api/v1/platform/sign-up/verify", Map.of("token", token))
+                        : activate(id, activation(chosen, "trial", null));
+                answers.put(confirm ? "confirm" : "activate", answer);
+                return answer;
+            });
+            ResponseEntity<JsonNode> confirmed = answers.get("confirm");
+            ResponseEntity<JsonNode> activated = answers.get("activate");
+            assertThat(confirmed.getStatusCode())
+                    .as("round %d confirm: %s", round, confirmed.getBody())
+                    .isEqualTo(HttpStatus.OK);
+            assertThat(confirmed.getBody().get("status").asString())
+                    .as("round %d", round)
+                    .isIn("verified", "activated");
+            assertThat(activated.getStatusCode())
+                    .as("round %d activate: %s", round, activated.getBody())
+                    .isEqualTo(HttpStatus.OK);
+            assertThat(activated.getBody().get("activated_now").asBoolean()).isTrue();
+            assertThat(owner().sql("SELECT status FROM onboarding_applications WHERE id = ?")
+                            .param(id)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("activated");
+            assertThat(owner().sql("SELECT count(*) FROM tenants WHERE name = ?")
+                            .param(business)
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(1);
+            assertThat(platformAudits("platform.application.activated", id)).isEqualTo(1);
+            assertThat(platformAudits("platform.application.email_verified", id))
+                    .isEqualTo(1);
         }
+    }
+
+    /**
+     * Issue #746, FR-ONB-04: the applicant link outlives Activate, so Confirm pressed again afterwards (or still in
+     * flight when the operator activates) answers 200 with the activated status, changes nothing, and the page shows
+     * "Your account is ready" instead of a broken link.
+     */
+    @Test
+    void theApplicantLinkShowsTheActivatedApplication() {
+        String email = Api.email("link-after");
+        String business = "Test Linked Shop " + email;
+        UUID id = verified(email, business);
+        String token = tokenOf(outboxParams("onboarding.verify_email", email).get("link"));
+        ResponseEntity<JsonNode> done = activate(id, activation(slug(), "trial", null));
+        assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
+
+        ResponseEntity<JsonNode> again = publicPost("/api/v1/platform/sign-up/verify", Map.of("token", token));
+        assertThat(again.getStatusCode()).as("%s", again.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(again.getBody().get("status").asString()).isEqualTo("activated");
+        ResponseEntity<JsonNode> page = publicPost("/api/v1/platform/sign-up/status", Map.of("token", token));
+        assertThat(page.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(page.getBody().get("status").asString()).isEqualTo("activated");
+        assertThat(platformAudits("platform.application.email_verified", id)).isEqualTo(1);
+        assertThat(platformAudits("platform.application.activated", id)).isEqualTo(1);
+        assertThat(owner().sql("SELECT count(*) FROM tenants WHERE name = ?")
+                        .param(business)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
     }
 
     // ---- Permissions, host rules and the database ----------------------------------------------
