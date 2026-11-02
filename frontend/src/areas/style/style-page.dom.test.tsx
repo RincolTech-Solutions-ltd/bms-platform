@@ -40,11 +40,8 @@ describe('the Rincol Tech logo in both themes (#115)', () => {
     ]);
   });
 
-  it('hides the version that does not suit the theme, and puts no plate behind the light lettering', () => {
-    const css = readFileSync(join(__dirname, '../../app/theme.css'), 'utf8');
-    expect(css).toContain(":root:not([data-theme='dark']) .logo-on-dark,\n:root[data-theme='dark'] .logo-on-light {\n  display: none;");
-    expect(css).toMatch(/\.brand-bar img\.logo-on-dark,\n\.app-footer img\.logo-on-dark \{\n {2}background: none;/);
-  });
+  // Which version shows in each theme, and that the light one has no plate, is proved on the computed style in Chromium:
+  // layout/logo.layout.test.ts.
 
   it('ships the light-text logo beside the black one', () => {
     const png = readFileSync(join(__dirname, '../../../public', RINCOLTECH_LOGO_ON_DARK));
