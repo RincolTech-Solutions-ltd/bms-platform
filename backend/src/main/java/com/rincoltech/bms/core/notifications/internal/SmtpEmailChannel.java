@@ -9,6 +9,7 @@ import jakarta.mail.Message;
 import jakarta.mail.MessagingException;
 import jakarta.mail.Session;
 import jakarta.mail.Transport;
+import jakarta.mail.internet.AddressException;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeBodyPart;
 import jakarta.mail.internet.MimeMessage;
@@ -17,6 +18,7 @@ import jakarta.mail.util.ByteArrayDataSource;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Optional;
@@ -55,7 +57,12 @@ class SmtpEmailChannel implements OutboxChannel {
 
     static final int LOGO_MAX_HEIGHT = 64;
 
+    /** The longest business name used as the from-name; a longer one is cut. */
+    static final int FROM_NAME_MAX = 70;
+
     private final NotificationProperties.Smtp smtp;
+    private final NotificationProperties.Mail mail;
+    private final boolean staging;
     private final String supportContact;
     private final OutboxTemplates templates;
     private final PlatformHost hosts;
@@ -73,8 +80,10 @@ class SmtpEmailChannel implements OutboxChannel {
             Letterheads letterheads,
             ObjectProvider<EmailAttachments> attachments,
             @Value("${bms.environment:}") String environment) {
-        properties.smtp().requireInProduction(environment);
+        properties.requireEmailInProduction(environment);
         this.smtp = properties.smtp();
+        this.mail = properties.mail();
+        this.staging = NotificationProperties.isStaging(environment);
         this.supportContact = properties.supportContact();
         this.templates = templates;
         this.hosts = hosts;
@@ -102,13 +111,18 @@ class SmtpEmailChannel implements OutboxChannel {
         return "email";
     }
 
+    /** On while SMTP is the chosen sender and configured; {@link ResendEmailChannel} carries email when Resend is chosen. */
     @Override
     public boolean enabled() {
-        return smtp.configured();
+        return !mail.resend() && smtp.configured();
     }
 
     @Override
     public Result send(Delivery delivery) throws Exception {
+        String refused = stagingRefusal(delivery.recipient());
+        if (refused != null) {
+            return Result.refused(refused);
+        }
         Properties props = new Properties();
         props.put("mail.transport.protocol", "smtps");
         props.put("mail.smtps.host", smtp.host());
@@ -121,13 +135,59 @@ class SmtpEmailChannel implements OutboxChannel {
         props.put("mail.smtps.writetimeout", "20000");
         Session session = Session.getInstance(props);
         Body body = body(delivery, brand(delivery.context()));
-        MimeMessage message = compose(session, smtp.from(), delivery, body, attachment(delivery.context()));
+        MimeMessage message =
+                compose(session, sender(delivery.context()), delivery, body, attachment(delivery.context()));
         try (Transport transport = session.getTransport("smtps")) {
             transport.connect(smtp.host(), smtp.port(), smtp.user(), smtp.password());
             message.saveChanges();
             transport.sendMessage(message, message.getAllRecipients());
         }
         return Result.SENT;
+    }
+
+    // JUSTIFICATION-A3: the staging allow-list and business from-name are new (#333), shared by both senders.
+    /**
+     * On staging, the reason a recipient is not sent to ({@code not_on_staging_allowlist}) unless {@code BMS_MAIL_ALLOWLIST}
+     * names the address or its domain (issue #333, ADR-115); null when it may be sent. Elsewhere always null. The row is
+     * refused, never sent elsewhere, and nothing about the address is logged.
+     */
+    String stagingRefusal(String recipient) {
+        return staging && !mail.allows(recipient) ? "not_on_staging_allowlist" : null;
+    }
+
+    /**
+     * The From of a row (issue #333, ADR-115): the address of {@code BMS_MAIL_FROM} with the business's name as the
+     * from-name for a row of a tenant, so a reader sees who wrote; {@code BMS_MAIL_FROM} as set for a platform row. A name
+     * that cannot be read (a suspended tenant) falls back to the platform's From, like {@link #brand}.
+     */
+    String sender(RowContext context) {
+        if (context == null || context.tenantId() == null) {
+            return smtp.from();
+        }
+        try {
+            String name = tenantJobs.callForTenant(
+                    context.tenantId(), () -> tenant.profile().name());
+            return fromWithName(smtp.from(), name);
+        } catch (RuntimeException | UnsupportedEncodingException | AddressException e) {
+            log.warn(
+                    "email from-name of outbox row {} falls back to the platform's: {}",
+                    context.outboxId(),
+                    e.getClass().getSimpleName());
+            return smtp.from();
+        }
+    }
+
+    /** The address of {@code from} with {@code name} on one line, cut to {@link #FROM_NAME_MAX}, as a header value. */
+    static String fromWithName(String from, String name) throws AddressException, UnsupportedEncodingException {
+        String address = new InternetAddress(from, true).getAddress();
+        String oneLine = oneLine(name);
+        if (oneLine.isEmpty()) {
+            return from;
+        }
+        String cut = oneLine.length() > FROM_NAME_MAX
+                ? oneLine.substring(0, FROM_NAME_MAX).strip()
+                : oneLine;
+        return new InternetAddress(address, cut, StandardCharsets.UTF_8.name()).toUnicodeString();
     }
 
     /** The two parts of one email: the plain text and the HTML, from the same template and values. */
