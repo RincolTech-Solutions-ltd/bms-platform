@@ -207,8 +207,41 @@ class OutboxIT extends IntegrationTest {
 
             dispatcher.dispatch(List.of(smtp, resend), 1000);
 
-            assertThat(keys).contains("bms:local:" + key);
+            assertThat(keys).anyMatch(k -> k.startsWith("bms:local:") && k.endsWith(":" + key));
             assertThat(row(key).get("status")).isEqualTo("sent");
+
+            // JUSTIFICATION-A3: the second provider of the routing test, as the #759 lead asked.
+            // With smtp chosen, Resend is off and the row goes to the SMTP sender, whichever is listed first. Port 1 on
+            // this machine refuses at once, so the try fails as SMTP's (a mail class), never as Resend's.
+            NotificationProperties smtpChosen = new NotificationProperties(
+                    new NotificationProperties.Smtp("127.0.0.1", 1, "u", "fabricated-01", "no-reply@example.test"),
+                    null,
+                    "",
+                    new NotificationProperties.Mail(
+                            "smtp",
+                            "re_fabricated_test_key_0002",
+                            "http://127.0.0.1:" + server.getAddress().getPort(),
+                            null));
+            SmtpEmailChannel smtpOn = new SmtpEmailChannel(
+                    smtpChosen, new OutboxTemplates(), EmailLayoutTest.HOSTS, null, null, null, null, "");
+            ResendEmailChannel resendOff = new ResendEmailChannel(
+                    smtpOn,
+                    smtpChosen,
+                    new tools.jackson.databind.ObjectMapper(),
+                    new com.rincoltech.bms.kernel.BusinessClock(java.time.Clock.systemUTC()),
+                    "");
+            assertThat(smtpOn.enabled()).isTrue();
+            assertThat(resendOff.enabled()).isFalse();
+            String viaSmtp = key();
+            enqueue("email", "test-op@example.test", viaSmtp);
+            int before = keys.size();
+
+            dispatcher.dispatch(List.of(resendOff, smtpOn), 1000);
+
+            assertThat(keys).hasSize(before);
+            Map<String, Object> tried = row(viaSmtp);
+            assertThat(tried.get("attempts")).isEqualTo(1);
+            assertThat(String.valueOf(tried.get("last_error"))).doesNotContain("resend");
         } finally {
             server.stop(0);
         }

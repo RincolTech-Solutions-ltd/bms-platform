@@ -49,6 +49,7 @@ class ResendEmailChannelTest {
     static final String FROM = "BMS by Rincol Tech <no-reply@example.test>";
     static final Instant NOW = Instant.parse("2026-11-02T10:00:00Z");
     static final BusinessClock CLOCK = new BusinessClock(Clock.fixed(NOW, ZoneOffset.UTC));
+    static final String ROW = "00000000-0000-4000-8000-0000000000e1";
 
     /** One answer of the stand-in: status, body and an optional Retry-After. */
     record Reply(int status, String body, String retryAfter) {
@@ -115,7 +116,7 @@ class ResendEmailChannelTest {
 
     static OutboxChannel.Delivery delivery(String to, UUID tenantId) {
         OutboxChannel.RowContext row = new OutboxChannel.RowContext(
-                UUID.fromString("00000000-0000-4000-8000-0000000000e1"),
+                UUID.fromString(ROW),
                 tenantId,
                 "transactional",
                 null,
@@ -153,7 +154,7 @@ class ResendEmailChannelTest {
         Map<String, Object> sent = requests.getFirst();
         assertThat(sent.get("path")).isEqualTo("/emails");
         assertThat(sent.get("authorization")).isEqualTo("Bearer " + KEY);
-        assertThat(sent.get("idempotency")).isEqualTo("bms:production:identity.password_changed:k1");
+        assertThat(sent.get("idempotency")).isEqualTo("bms:production:" + ROW + ":identity.password_changed:k1");
         JsonNode body = body(0);
         assertThat(body.toString()).doesNotContain(KEY);
         // The quotes of the name are dropped, so no provider has a reason to refuse it.
@@ -171,8 +172,10 @@ class ResendEmailChannelTest {
     void stagingAndProductionNeverShareAnIdempotencyKey() throws Exception {
         channel("staging", "@example.test").send(delivery("staff01@example.test", null));
         channel("production", "").send(delivery("staff01@example.test", null));
-        assertThat(requests.get(0).get("idempotency")).isEqualTo("bms:staging:identity.password_changed:k1");
-        assertThat(requests.get(1).get("idempotency")).isEqualTo("bms:production:identity.password_changed:k1");
+        assertThat(requests.get(0).get("idempotency"))
+                .isEqualTo("bms:staging:" + ROW + ":identity.password_changed:k1");
+        assertThat(requests.get(1).get("idempotency"))
+                .isEqualTo("bms:production:" + ROW + ":identity.password_changed:k1");
     }
 
     @Test
@@ -200,7 +203,7 @@ class ResendEmailChannelTest {
         // The same key with another body: an earlier try reached Resend, so it may have been delivered; never retried.
         assertThat(ResendEmailChannel.read(
                         channel.answer(409, "{\"name\":\"invalid_idempotent_request\"}", null), CLOCK))
-                .isEqualTo(OutboxChannel.Result.unknown());
+                .isEqualTo(OutboxChannel.Result.refused("resend_payload_changed"));
         assertThatThrownBy(() -> ResendEmailChannel.read(
                         channel.answer(409, "{\"name\":\"concurrent_idempotent_requests\"}", null), CLOCK))
                 .isInstanceOf(OutboxChannel.SendFailure.class)
@@ -226,7 +229,7 @@ class ResendEmailChannelTest {
         assertThat(requests).hasSize(2);
         assertThat(body(1).path("from").asString()).isEqualTo(FROM);
         assertThat(requests.get(1).get("idempotency"))
-                .isEqualTo("bms:production:identity.password_changed:k1:platform-from");
+                .isEqualTo("bms:production:" + ROW + ":identity.password_changed:k1:platform-from");
         // A 422 about something else, or on a platform row, is refused at once.
         replies.add(new Reply(422, "{\"message\":\"Invalid `to` field.\"}", null));
         assertThat(channel("production", "").send(delivery("staff01@example.test", UUID.randomUUID())))

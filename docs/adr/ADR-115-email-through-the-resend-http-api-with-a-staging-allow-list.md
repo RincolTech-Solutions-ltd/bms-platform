@@ -34,13 +34,14 @@ types, which can be a real person's.
    env only, put there by the operator, never committed and never logged (`toString` hides it, and `LogRedaction` masks
    a `BMS_RESEND_API_KEY=` value as it masks any `api_key=`, proven in `LogRedactionTest`).
 3. **The outbox key, under the environment, is Resend's idempotency key.** `Idempotency-Key` is
-   `bms:<BMS_ENVIRONMENT>:<row key>`: staging and production share the Resend account, so they never share a key. Resend
+   `bms:<BMS_ENVIRONMENT>:<outbox row id>:<row key>`: staging and production share the Resend account, so they never
+   share a key, and no two rows do. Resend
    keeps a key for 24 hours, far longer than the outbox's three tries, so a retry is never a second email. The answers:
    2xx sent; `400` and `422` refused (`resend_rejected`); `413` refused (`resend_too_large`, the weekly workbook over
    Resend's attachment limit); `429` gives the attempt back and waits as long as `Retry-After` says (half a minute when
    it says nothing); a `409` naming `invalid_idempotent_request` (the same key with another body: an earlier try reached
-   Resend, then the business's name changed) is an unknown outcome, never retried, since the first may have been
-   delivered; a timeout (`resend_timeout`), a lost connection, `401`, `403`, a `409` of two requests at once and `5xx` are
+   Resend, then the business's name changed) is refused (`resend_payload_changed`), never retried, since the first may
+   have been delivered; a timeout (`resend_timeout`), a lost connection, `401`, `403`, a `409` of two requests at once and `5xx` are
    retried. The row id and the template key are sent as tags (`outbox_id`, `template`); the id Resend gives the email is
    logged with the row id. No recipient, text or answer body is logged or stored.
 4. **Each business's name is the from-name.** A row of a business is sent from the address of `BMS_MAIL_FROM` with that

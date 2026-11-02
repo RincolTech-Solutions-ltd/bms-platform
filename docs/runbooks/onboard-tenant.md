@@ -115,8 +115,8 @@ The `BMS_SMTP_*` values can stay on the host; they are not used while the provid
   workbook, is over Resend's attachment limit (about 40 MB once encoded); it is not retried, so ask the business to use
   Download my data instead. `resend_unauthorized`: the key is wrong, revoked or not allowed for the domain; make a new one.
   `resend_unavailable`, `resend_timeout`, `resend_unreachable`, `resend_idempotency_conflict`: retried twice on their own; a
-  retry never sends a second copy, because the row's key (with the environment in front) is Resend's idempotency key.
-  A rate limit from Resend is not a failure: the row waits and is sent later. `unknown_outcome`: Resend had already taken
+  retry never sends a second copy, because the row's key (with the environment and the row id in front) is Resend's
+  idempotency key. A rate limit from Resend is not a failure: the row waits and is sent later. `resend_payload_changed`: Resend had already taken
   an earlier try of this row with another body (for example the business was renamed between tries), so it may have been
   delivered; look it up in Resend by its `outbox_id` tag before pressing "Send again", which within 24 hours ends the same
   way.

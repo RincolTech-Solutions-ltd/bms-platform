@@ -33,14 +33,14 @@ import tools.jackson.databind.ObjectMapper;
  * same plain and HTML parts, the same attachment, the business's name as the from-name, the same staging allow-list),
  * sent as one {@code POST /emails}.
  *
- * <p>Resend's {@code Idempotency-Key} is the environment and the outbox idempotency key ({@code bms:<environment>:<key>}),
- * so staging and production, which share the Resend account, never share a key, and a retry after a lost answer is never a
+ * <p>Resend's {@code Idempotency-Key} is the environment, the outbox row id and the row's key
+ * ({@code bms:<environment>:<row id>:<key>}), so staging and production, which share the Resend account, never share a key, and a retry after a lost answer is never a
  * second email (Resend keeps a key for 24 hours). Every failure to get an answer is a clean failure the dispatcher retries.
  * A {@code 429} gives the attempt back and waits; a request Resend refuses as invalid ({@code 400}, {@code 422}) or too
  * large ({@code 413}) is refused and not retried, except that a {@code 422} naming the From of a business is sent once more
  * with the platform's From; a {@code 409} for the same key with another body (an earlier try reached Resend, then the
- * business's name changed) is an unknown outcome, never retried, since the first one may have been delivered. The row id is
- * the tag {@code outbox_id}. The API key travels only in the {@code Authorization} header and is never logged; no
+ * business's name changed) is refused ({@code resend_payload_changed}), never retried, since the first one may have been
+ * delivered. The row id is also the tag {@code outbox_id}. The API key travels only in the {@code Authorization} header and is never logged; no
  * recipient, text or answer body is logged or stored.
  */
 @Component
@@ -99,26 +99,31 @@ class ResendEmailChannel implements OutboxChannel {
         SmtpEmailChannel.Body body = email.body(delivery, email.brand(context));
         EmailAttachments.Attachment attachment = email.attachment(context);
         String from = email.sender(context);
-        Answer answer = post(from, delivery, body, attachment, context, keyPrefix + delivery.idempotencyKey());
+        String key = idempotencyKey(delivery, context);
+        Answer answer = post(from, delivery, body, attachment, context, key);
         if (answer.status() == 422 && !from.equals(smtp.from()) && answer.namesFrom()) {
             // The business's name as the from-name was refused: send once more with the platform's From, under a key of
             // its own (the body differs, so the first key would answer 409).
             log.warn(
                     "outbox row {}: resend refused the business from-name; sent with the platform's",
                     context.outboxId());
-            answer = post(
-                    smtp.from(),
-                    delivery,
-                    body,
-                    attachment,
-                    context,
-                    keyPrefix + delivery.idempotencyKey() + ":platform-from");
+            answer = post(smtp.from(), delivery, body, attachment, context, key + ":platform-from");
         }
         Result result = read(answer, clock);
         if (result instanceof Result.Sent) {
             log.info("outbox email accepted by resend: outbox={} id={}", context.outboxId(), answer.id());
         }
         return result;
+    }
+
+    /**
+     * Resend's idempotency key: {@code bms:<environment>:<outbox row id>:<row key>}, the same on every try of one row and
+     * never the same for two rows or two environments; cut to Resend's 256 characters.
+     */
+    String idempotencyKey(Delivery delivery, RowContext context) {
+        String key =
+                keyPrefix + (context.outboxId() == null ? "" : context.outboxId() + ":") + delivery.idempotencyKey();
+        return key.length() <= 240 ? key : key.substring(0, 240);
     }
 
     /** What Resend answered: the status, its error name, whether the error is about the From, the email's id. */
@@ -186,7 +191,7 @@ class ResendEmailChannel implements OutboxChannel {
 
     /**
      * What an answer comes to: 2xx sent; 400, 413 or 422 refused (the request is invalid or too large and will be again);
-     * 429 deferred, the attempt given back; 409 for the same key with another body an unknown outcome; 401, 403, a 409 of
+     * 429 deferred, the attempt given back; 409 for the same key with another body refused; 401, 403, a 409 of
      * two requests at once and anything else retried.
      */
     static Result read(Answer answer, BusinessClock clock) throws SendFailure {
@@ -200,7 +205,7 @@ class ResendEmailChannel implements OutboxChannel {
             case 429 -> Result.deferred(clock.now().plus(answer.retryAfter()));
             case 409 ->
                 "invalid_idempotent_request".equals(answer.errorName())
-                        ? Result.unknown()
+                        ? Result.refused("resend_payload_changed")
                         : fail("resend_idempotency_conflict");
             case 401, 403 -> fail("resend_unauthorized");
             default -> fail("resend_unavailable");
