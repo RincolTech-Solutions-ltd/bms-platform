@@ -60,6 +60,19 @@ class StatementService {
     /** The order statuses whose money stands booked in the clearing account, the only ones a fee is taken from. */
     static final java.util.Set<String> FEE_BOOKED = java.util.Set.of("booked", "booked_unallocated");
 
+    /**
+     * Whether the order is booked, read under a share lock on its row held to the commit: an approved reversal locks the row
+     * for update, so it and a fee posting go one after the other and the fee sees the status the reversal left.
+     */
+    private boolean bookedUnderLock(UUID intentId) {
+        return jdbc.sql("SELECT status FROM payment_intents WHERE id = ? FOR SHARE")
+                .param(intentId)
+                .query(String.class)
+                .optional()
+                .filter(FEE_BOOKED::contains)
+                .isPresent();
+    }
+
     /** The result of an upload: the statement and whether it was already there. */
     record Uploaded(StatementDetail detail, boolean replayed) {}
 
@@ -206,7 +219,7 @@ class StatementService {
             // is paid but not booked, held for attention or reversed, so the clearing balance cannot go below nothing.
             if (r.feeMinor() > 0
                     && "matched".equals(m.status())
-                    && FEE_BOOKED.contains(m.intent().status())
+                    && bookedUnderLock(m.intent().id())
                     && !feeAlreadyPosted(m.intent().id())
                     && !feeAwaitingApproval(m.intent().id())
                     && posted.add(m.intent().id())) {
@@ -402,7 +415,7 @@ class StatementService {
     void postHeldFee(ApprovalAction.Execution execution) {
         Map<String, Object> line = jdbc.sql("""
                         SELECT r.id, r.intent_id, r.fee_minor, r.currency, r.paid_on, r.fee_entry_id, r.fee_approval_id,
-                               i.branch_id, i.merchant_reference, i.status AS intent_status
+                               i.branch_id, i.merchant_reference
                           FROM payment_statement_rows r JOIN payment_intents i ON i.id = r.intent_id
                          WHERE r.id = ? FOR UPDATE OF r
                         """).param(execution.subjectId()).query().listOfRows().stream()
@@ -417,12 +430,12 @@ class StatementService {
             throw ApiException.rule("fee_changed", "The fee on the line is not the one asked about.");
         }
         BusinessLock.take(jdbc, "payments:statement:" + tenant.profile().id(), lockWait);
-        if (!FEE_BOOKED.contains(String.valueOf(line.get("intent_status")))) {
+        if (!bookedUnderLock(intentId)) {
             throw new RequestSupersededException(
                     "payment_not_booked",
                     "Payment not booked",
-                    "The payment is no longer booked (it is " + line.get("intent_status")
-                            + "), so its fee is not taken out of the clearing account. This request was closed.",
+                    "The payment is no longer booked, so its fee is not taken out of the clearing account. This request was"
+                            + " closed.",
                     Map.of());
         }
         if (feeAlreadyPosted(intentId)) {

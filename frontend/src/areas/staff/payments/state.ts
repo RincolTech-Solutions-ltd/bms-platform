@@ -120,7 +120,8 @@ export const PAYMENTS_MANAGE = 'core.payments.manage';
 
 /** Reading the report; uploading and running are for the holders of manage. */
 export const showReconciliation = (me: Pick<Me, 'permissions'>): boolean => held(me).includes(PAYMENTS_READ);
-export const canManageStatements = (me: Pick<Me, 'permissions'>): boolean => held(me).includes(PAYMENTS_MANAGE);
+/** Upload, run and "Not ours" need the permission in every branch, as the server does (a branch-scoped holder gets 403). */
+export const canManageStatements = (me: Pick<Me, 'permissions' | 'all_branches'>): boolean => held(me).includes(PAYMENTS_MANAGE) && Boolean(me.all_branches);
 
 /** What each difference means for the person reading it, in plain words. */
 export const FINDING_WORDS: Record<string, { title: string; help: string }> = {

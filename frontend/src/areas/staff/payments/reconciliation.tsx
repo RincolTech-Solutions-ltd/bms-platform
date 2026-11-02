@@ -205,7 +205,8 @@ export function ReconciliationPage() {
       </main>
     );
   }
-  const data = run.data ?? report.data;
+  // The run writes its report into the query, so a later refetch (after an upload or a mark) is always what is shown.
+  const data = report.data;
   const findings = data?.findings ?? [];
   return (
     <main className="rt ln stack">
@@ -268,6 +269,7 @@ export function ReconciliationPage() {
                   {f.bms_amount_minor !== undefined && f.bms_amount_minor !== null && <> | here {money(f.bms_amount_minor, f.currency)}</>}
                   {f.provider_amount_minor !== undefined && f.provider_amount_minor !== null && <> | provider {money(f.provider_amount_minor, f.currency)}</>}
                 </p>
+                {f.other_transaction_id && <p className="hint">Receipt entered by hand: {f.other_transaction_id}</p>}
               </li>
             );
           })}

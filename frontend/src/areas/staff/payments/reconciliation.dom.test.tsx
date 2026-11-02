@@ -32,8 +32,8 @@ const report = {
   findings_truncated: false,
 };
 
-function shell(permissions: string[]) {
-  const me = { ...mockMe('admin'), permissions };
+function shell(permissions: string[], allBranches = true) {
+  const me = { ...mockMe('admin'), permissions, all_branches: allBranches };
   const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/payments/reconciliation'] }) });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return render(
@@ -69,6 +69,17 @@ describe('the report', () => {
     expect(screen.getAllByTestId('finding')).toHaveLength(2);
     // The counts of every kind are shown, so a difference beyond the first 500 rows is never out of sight.
     expect(screen.getByRole('list', { name: 'How many of each' }).textContent).toContain('Paid but not recorded: 1');
+  });
+
+  it('names the receipt entered by hand to reverse, and offers no upload or run to a manager of some branches only', async () => {
+    reconciliation.latest.mockResolvedValue({
+      ...report,
+      findings: [{ id: 'f3', kind: 'manual_receipt_duplicate', other_transaction_id: 'txn-test-0001', bms_amount_minor: 310000, currency: 'UGX' }],
+    });
+    shell(MANAGER, false);
+    expect(await screen.findByText(/Receipt entered by hand: txn-test-0001/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Run it now' })).toBeNull();
+    expect(screen.queryByLabelText('Statement file (CSV)')).toBeNull();
   });
 
   it('says when a run could not read everything and shows no business-wide counts to a branch reader', async () => {
