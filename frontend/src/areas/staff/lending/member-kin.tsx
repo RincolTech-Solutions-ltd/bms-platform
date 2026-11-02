@@ -5,9 +5,11 @@ import { useMembersApi } from '../../../api/lending-context';
 import type { NextOfKin } from '../../../api/members';
 import { Problem } from '../retail/ui';
 import { Group, SaveBar, SelectField, TextField, useFormErrors } from './form-fields';
+import { FieldsNeededNote } from '../../../app/ui/Field';
 import { blankKin, kinBody, kinProblems, RELATIONSHIPS, relationshipWords, type KinDraft } from './member-state';
 import { normaliseUganda, showPhone } from './member-state';
 import { SaveGuardNotice, useSaveGuard } from './save-guard';
+import { BusyButton } from '../../../app/ui/BusyButton';
 
 // Next of kin on a member's page (FR-MEM-06, FR-MEM-07): add, change, remove, and say yes or no to a suggested link to
 // another member. A change or a removal carries the person's version as If-Match, so two officers cannot overwrite each other.
@@ -42,6 +44,7 @@ function KinForm({ kin, memberId, onDone }: { kin?: NextOfKin; memberId: string;
       // No other save of a new next of kin until a look at the list has worked: the answer may have been lost.
       if (!kin && unknownOutcome(e)) void guard.check(lookUp);
     },
+    meta: { success: kin ? 'Next of kin saved' : 'Next of kin added' },
   });
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -51,6 +54,7 @@ function KinForm({ kin, memberId, onDone }: { kin?: NextOfKin; memberId: string;
   };
   return (
     <form onSubmit={submit} noValidate aria-label={kin ? 'Change next of kin' : 'Add a next of kin'} className="mf" data-tour="kin-form">
+      <FieldsNeededNote />
       <Group title={kin ? 'Change next of kin' : 'Add a next of kin'}>
         <TextField name="full_name" label="Full name" form={form} required value={draft.fullName} onChange={(v) => setDraft((d) => ({ ...d, fullName: v }))} maxLength={200} />
         <SelectField name="relationship" label="Who they are to the member" form={form} value={draft.relationship} onChange={(v) => setDraft((d) => ({ ...d, relationship: v }))} options={RELATIONSHIPS} />
@@ -63,7 +67,7 @@ function KinForm({ kin, memberId, onDone }: { kin?: NextOfKin; memberId: string;
       </Group>
       <SaveGuardNotice guard={guard} what="next of kin" found={() => <button type="button" className="btn-sm" onClick={onDone}>Close</button>} />
       <Problem error={failure ? new Error(failure) : null} />
-      <SaveBar label="Save" busyLabel="Saving" busy={save.isPending} blocked={guard.blocked ? 'Wait for the check above before saving again.' : undefined} cancel={<button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button>} />
+      <SaveBar label="Save" busy={save.isPending} blocked={guard.blocked ? 'Wait for the check above before saving again.' : undefined} cancel={<button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button>} />
     </form>
   );
 }
@@ -75,8 +79,13 @@ function KinRow({ kin, memberId, canChange, onEdit }: { kin: NextOfKin; memberId
   const [asking, setAsking] = useState(false);
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ['members', 'kin', memberId] });
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : 'Something went wrong. Try again.');
-  const remove = useMutation({ mutationFn: () => api.removeKin(kin.id ?? '', kin.version ?? 0), onSuccess: () => { setAsking(false); refresh(); }, onError: fail });
-  const decide = useMutation({ mutationFn: (d: 'confirm' | 'reject') => api.decideKinLink(kin.id ?? '', kin.version ?? 0, d), onSuccess: refresh, onError: fail });
+  const remove = useMutation({ mutationFn: () => api.removeKin(kin.id ?? '', kin.version ?? 0), onSuccess: () => { setAsking(false); refresh(); }, onError: fail, meta: { success: 'Next of kin removed' } });
+  const decide = useMutation({
+    mutationFn: (d: 'confirm' | 'reject') => api.decideKinLink(kin.id ?? '', kin.version ?? 0, d),
+    onSuccess: refresh,
+    onError: fail,
+    meta: { success: (_r: unknown, d: 'confirm' | 'reject') => (d === 'confirm' ? 'Link confirmed' : 'Link refused') },
+  });
   return (
     <li className="rt-card stack">
       <p className="ln-item-head">
@@ -92,8 +101,8 @@ function KinRow({ kin, memberId, canChange, onEdit }: { kin: NextOfKin; memberId
           <p>A member has this phone number. Is this person the same as that member?</p>
           {canChange && (
             <p className="cluster">
-              <button type="button" className="btn-sm" disabled={decide.isPending} onClick={() => decide.mutate('confirm')}>Yes, the same person</button>
-              <button type="button" className="btn-sm btn-ghost" disabled={decide.isPending} onClick={() => decide.mutate('reject')}>No</button>
+              <BusyButton busy={decide.isPending && decide.variables === 'confirm'} type="button" className="btn-sm" disabled={decide.isPending} onClick={() => decide.mutate('confirm')}>Yes, the same person</BusyButton>
+              <BusyButton busy={decide.isPending && decide.variables === 'reject'} type="button" className="btn-sm btn-ghost" disabled={decide.isPending} onClick={() => decide.mutate('reject')}>No</BusyButton>
             </p>
           )}
         </div>
@@ -108,7 +117,7 @@ function KinRow({ kin, memberId, canChange, onEdit }: { kin: NextOfKin; memberId
       {asking && (
         <div role="group" aria-label="Remove next of kin" className="cluster">
           <span>Remove {kin.full_name}?</span>
-          <button type="button" className="btn-sm" disabled={remove.isPending} onClick={() => remove.mutate()}>{remove.isPending ? 'Removing' : 'Yes, remove'}</button>
+          <BusyButton busy={remove.isPending} type="button" className="btn-sm" onClick={() => remove.mutate()}>Yes, remove</BusyButton>
           <button type="button" className="btn-sm btn-ghost" onClick={() => setAsking(false)}>Keep</button>
         </div>
       )}

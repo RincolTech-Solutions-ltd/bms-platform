@@ -5,11 +5,13 @@ import { Highlight, NoResults, SearchBox, SearchResults } from '../../../app/ui/
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { investments, type InvestmentProduct, type MemberListItem } from '../../../api/investments';
 import { Problem } from '../retail/ui';
-import { INVESTMENTS_OPEN, instructionWords, may, payoutWords, percent } from './investment-state';
+import { INVESTMENTS_OPEN, PRODUCTS_MANAGE, instructionWords, may, payoutWords, percent } from './investment-state';
 import { InvestmentsGate } from './investments';
 import { money, parseAmount } from './loan-state';
 import { useStaff } from '../context';
 import { MemberLink } from './member-ui';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { EmptyChoice } from '../../../app/ui/EmptyChoice';
 
 // The subscribe form (FR-INV-02): choose the member, the product, the amount and the term, see the
 // return schedule the server works out for them (R-INV-1 to R-INV-4), record the member's maturity
@@ -59,6 +61,7 @@ function MemberPicker({ onPick }: { onPick: (m: MemberListItem) => void }) {
 
 export function SubscribeForm({ member, products }: { member: { id: string; label: string }; products: InvestmentProduct[] }) {
   const navigate = useNavigate();
+  const { me } = useStaff();
   const active = products.filter((p) => p.status === 'active');
   const [productId, setProductId] = useState(active[0]?.id ?? '');
   const product = active.find((p) => p.id === productId);
@@ -83,8 +86,14 @@ export function SubscribeForm({ member, products }: { member: { id: string; labe
         maturity_instruction: instruction || undefined,
       }),
     onSuccess: (inv) => void navigate({ to: '/staff/lending/investments/$investmentId', params: { investmentId: inv.id ?? '' } }),
+    meta: { success: 'Investment opened' },
   });
-  if (active.length === 0) return <p className="empty-state">No investment product is set up yet.</p>;
+  if (active.length === 0) {
+    return (
+      <EmptyChoice id="iv-product" label="Product" text="No investment products yet." ask="Ask the owner to add an investment product first."
+        add={may(me, PRODUCTS_MANAGE) ? { label: 'Add an investment product', to: '/staff/lending/investments/products' } : null} />
+    );
+  }
   const p = preview.data;
   return (
     <form aria-label="New investment" onSubmit={(e) => { e.preventDefault(); if (amountMinor !== null && termOk && !save.isPending) save.mutate(); }}>
@@ -136,9 +145,9 @@ export function SubscribeForm({ member, products }: { member: { id: string; labe
         </dl>
       )}
       <Problem error={save.error} />
-      <button type="submit" className="rt-primary btn-block" data-tour="investment-open" disabled={amountMinor === null || !termOk || save.isPending}>
-        {save.isPending ? 'Opening' : 'Open the investment'}
-      </button>
+      <BusyButton busy={save.isPending} type="submit" className="rt-primary btn-block" data-tour="investment-open" notReady={amountMinor === null || !termOk}>
+        Open the investment
+      </BusyButton>
       <p className="field-hint">It opens pending funding; record the money received on the next screen.</p>
     </form>
   );

@@ -5,7 +5,9 @@
 Accepted (2026-09-29). Implements chapter 7 section 7.4 and chapter 8 section 8.2 for tenant staff
 and platform operators in MVP increment 1 (issue #7). Takes in review items 1 and 2 of
 `docs/meetings/2026-09-29/spec-review-recommendations.md`, accepted on PR #8. Member sign-in (phone
-and PIN, FR-IAM-09) is phase 2 and will reuse the session design below.
+and PIN, FR-IAM-09) is phase 2 and will reuse the session design below. Amended 2026-10-28 (issue #644): the
+staff idle limit is 7 days. Amended again 2026-10-28 (issue #647): staff idle 30 days, absolute 90 days, and sign out
+everywhere for oneself and for one staff member.
 
 ## Context
 
@@ -45,7 +47,8 @@ Options considered for each part:
   `auth_sessions` row per token. Rotation marks the row rotated and inserts the next row of the
   family; presenting a rotated token revokes the whole family. The authentication filter checks
   the session row and the user's status on every request, so sign-out, deactivation and an MFA
-  reset take effect on the next request. Staff: idle 12 hours, absolute 7 days. Platform
+  reset take effect on the next request. Staff: idle 30 days, absolute 90 days (idle 12 hours and
+  absolute 7 days until the amendments of 2026-10-28, issues #644 and #647). Platform
   operators: idle 2 hours, absolute 12 hours (`platform_sessions`).
 - **TOTP** is RFC 6238 with the defaults every authenticator app supports (HMAC-SHA1, 6 digits,
   30 seconds, 160 bit secret), implemented in place and tested against the RFC vectors. One step
@@ -103,3 +106,68 @@ Options considered for each part:
 - Rotating the signing key needs two keys valid during the change; today one key is configured.
 - When the email provider is chosen, the invitation keeps showing the link to the admin unless
   chapter 3 is changed again.
+
+## Amendment of 2026-10-28 (issue #644): staff stay signed in for a week
+
+A tester on a phone was sent back to Staff sign-in every day: a shop owner who opens the app each morning has been idle
+for more than 12 hours overnight, so every morning began with the password. The owner asked on 28 October 2026 that the
+app remember the device for about a week.
+
+1. **The staff idle limit is 7 days**, the same as the absolute limit (`StaffAccounts.idleTtl`). A staff session now
+   lasts 7 days from sign-in however rarely it is used; a refresh still rotates the token, and the rotated session keeps
+   the family's absolute expiry, so using the app never extends the week. The refresh cookie's `Max-Age` was already the
+   absolute 7 days and is unchanged. No migration: `auth_sessions.idle_expires_at` is written by the application, and a
+   session open at release keeps its 12 hour idle expiry until its next refresh.
+2. **Platform operators are unchanged**: idle 2 hours, absolute 12 hours.
+3. **What ends a session at once is unchanged**: sign-out (the family), deactivation, a password reset, an
+   administrator's or operator's MFA reset and the step-up lock (every session of the user), and a reused refresh token
+   (the family). The authentication filter still checks the session row and the user on every request.
+4. **The trade-off.** An unlocked phone left with someone else, or a copied refresh cookie, now stays usable for up to
+   7 days instead of 12 idle hours. The mitigations are those of point 3: anyone can sign out, an administrator can
+   deactivate a person or reset their sign-in, and a password reset ends every session. The phone's own screen lock is
+   the first line, and the sign-in help says so.
+5. **Tests**: `SessionLimitsTest` pins both principals' limits; `StaffAuthIT` shows that a session used again after 13
+   hours still refreshes without moving the week on, and that one past its 7 days absolute is refused with
+   `session_expired`.
+
+## Amendment of 2026-10-28 (issue #647): stay signed in while used, and sign out everywhere
+
+The week of issue #644 still sent a shop owner back to the password every seven days, however often the phone was used. The
+owner decided on 28 October 2026 (D71) that a phone in use stays signed in, with a way to sign a lost one out.
+
+1. **Staff: idle 30 days, absolute 90 days** (`StaffAccounts.idleTtl`, `absoluteTtl`). Every refresh rotates the token and
+   gives the new row another 30 idle days, so a phone that opens BMS at least once a month stays signed in; the family keeps
+   the absolute expiry of its sign-in, so after 90 days the person types the password again, however often they used it. The
+   refresh cookie's `Max-Age` follows the absolute limit and is now 90 days. This replaces point 1 of the amendment of issue
+   #644. No migration: both expiries are written by the application, and a session open at release keeps its 7 day absolute
+   expiry.
+2. **Platform operators are unchanged**: idle 2 hours, absolute 12 hours.
+3. **Sign out everywhere, for oneself.** `POST /auth/logout-everywhere` (any signed-in staff user) revokes every session of
+   the caller, this one included, with `revoked_reason = sign_out`, clears the refresh cookie and is audited
+   `core.auth.signed_out_everywhere` with `sessions_ended`. The person menu offers it as Sign out everywhere, after a question;
+   with no answer from the server nothing is signed out on the phone either, since only the server can end the other devices.
+   It is allowed for a suspended business, like sign-out.
+4. **Sign out one staff member's devices.** `POST /users/{user_id}/sign-out` (`core.users.manage`) revokes every session of
+   another staff user with `revoked_reason = admin` and is audited `core.user.signed_out_everywhere` with `sessions_ended`,
+   by the acting administrator. The person stays active and signs in again with the password; it is for a lost or stolen
+   phone. Another administrator's devices only by the Owner (403 `owner_only`, `owner_protected` on the Owner), as every
+   other change to an administrator (ADR-062); oneself is refused (422 `cannot_sign_out_self_here`), since the person menu
+   does that. An unknown id, another business's user and a person outside the caller's branches are 404 before anything is
+   revoked (the branch rule of the reset of a sign-in, ADR-017); someone invited or deactivated is 409, having no session. Not a maker-checker action: like the MFA reset it must work with one administrator.
+5. **Both act at once**: the authentication filter checks the session row on every request, so a still-valid access token
+   of a signed-out device is refused (`session_revoked`) on its next request, and its refresh cookie too. A refresh now locks
+   the user's row before its session row, the order in which every revocation of all of a user's sessions locks (sign out
+   everywhere, deactivation, a password or MFA reset), so a refresh running at the same moment either finishes first and its
+   new session is revoked, or waits and finds its session revoked; before, a refresh could add a session the revocation did
+   not see.
+6. **What ends every session is unchanged**: a password reset, deactivation, an MFA reset and the step-up lock.
+7. **The trade-off.** An unlocked phone, or a copied refresh cookie, stays usable for up to 30 idle days and 90 in all, not 7.
+   The controls are the phone's screen lock, Sign out everywhere from any other device, an administrator's Sign out their
+   devices, deactivation and a new password. The help article "My phone was lost. How do I sign it out?" says so.
+8. **Tests**: `SessionLimitsTest` pins both principals' limits; `StaffAuthIT` shows a session used again after 29 days still
+   refreshing with its 90 days unmoved and a 90 day cookie, one idle for 30 days refused, one past 90 days refused however
+   recently used, Sign out everywhere ending every device (a refreshed session too) and its audit row, and the per-staff
+   sign-out with and without the permission, outside the caller's branches, for another business's user and for someone not
+   active, and its audit row; `SuspendedTenantInterceptorTest` lets both sign-outs through for a suspended business;
+   `TenantOwnerIT` holds the Owner rule; the deactivation, MFA reset and password reset tests
+   still show every session ending.

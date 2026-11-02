@@ -1,8 +1,10 @@
 import type {
-  Advance, AdvanceParty, Banking, BankingDay, CashDailyRow, CashParty, CashQuery, Expense, ExpenseCategory, ExpenseGroup, RetailApi, Savings, Withdrawal,
+  Advance, AdvanceParty, ApprovalWaiting, Banking, BankingDay, CashDailyRow, CashParty, CashQuery, Expense, ExpenseCategory, ExpenseGroup, RetailApi, Savings, Withdrawal,
 } from './retail';
 import { RetailError, daysBefore } from './retail';
 import { retailMessage } from './retail-errors';
+import { formatMinor } from '../components/money';
+import { showDate } from '../areas/staff/retail/maths';
 
 // The cash book half of the fabricated retail mock (ADR-022): savings, banking, withdrawals, expenses,
 // parties, advances and the reports, with the real snake_case shapes and the real refusals. Every
@@ -21,6 +23,8 @@ export interface CashbookEnv {
   run: <T>(fn: () => T) => Promise<T>;
   once: <T>(key: string, request: unknown, make: () => T) => T;
   nextId: (prefix: string) => string;
+  /** Issue #343: the 202 of an action the mock is told to keep waiting for an administrator, or null. */
+  waiting: (actionType: string, amountMinor: number) => ApprovalWaiting | null;
 }
 
 type Keys = 'savingsSuggestion' | 'createSavings' | 'listSavings' | 'voidSavings' | 'bankingExpected' | 'createBanking' | 'listBankings' | 'voidBanking'
@@ -102,8 +106,10 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
   const suggestion = (branch: string, date: string) => {
     const f = figures(branch, date);
     const profit = f.sold.total - f.sold.cost;
-    const suggested = Math.max(0, Math.round(profit / 2));
-    return { total: f.sold.total, profit, suggested, token: `tok-${branch.slice(-2)}-${date}-${suggested}` };
+    // ADR-080: the day may save at most its profit less its expenses, never below 0; the suggestion is half that.
+    const available = Math.max(0, profit - f.expensesMinor);
+    const suggested = Math.round(available / 2);
+    return { total: f.sold.total, profit, expenses: f.expensesMinor, available, suggested, token: `tok-${branch.slice(-2)}-${date}-${suggested}` };
   };
 
   const savingsRow = (r: (typeof savings)[number]): Savings => ({
@@ -166,8 +172,8 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
         const s = suggestion(branchId, date);
         const existing = savings.find((r) => !r.voided && r.branch_id === branchId && r.business_date === date);
         return {
-          branch_id: branchId, business_date: date, total_sold_minor: s.total, suggestion_token: s.token, ...(existing ? { existing_id: existing.id } : {}),
-          ...(env.profit() ? { suggested_minor: s.suggested, daily_profit_minor: s.profit } : {}),
+          branch_id: branchId, business_date: date, total_sold_minor: s.total, suggestion_token: s.token, ...(existing ? { existing_id: existing.id, ...(env.profit() ? { existing_amount_minor: existing.amount } : {}) } : {}),
+          ...(env.profit() ? { suggested_minor: s.suggested, daily_profit_minor: s.profit, day_expenses_minor: s.expenses, available_minor: s.available } : {}),
         };
       }),
 
@@ -180,13 +186,17 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
         if (body.suggestion_token !== s.token) refuse(409, 'suggestion_changed', 'The suggestion changed.', { suggestion_token: s.token, ...(env.profit() ? { suggested_minor: s.suggested } : {}) });
         if (savings.some((x) => !x.voided && x.branch_id === r.branch_id && x.business_date === r.business_date)) refuse(409, 'savings_exists', 'Savings exist for that day.');
         const amount = body.amount_minor ?? s.suggested;
+        if (amount > s.available) {
+          const detail = `You can save at most ${formatMinor(s.available, 'UGX')} ${r.business_date === env.today() ? 'today' : `for ${showDate(r.business_date)}`} (profit ${formatMinor(s.profit, 'UGX')} minus expenses ${formatMinor(s.expenses, 'UGX')}).`;
+          refuse(422, 'savings_above_available', detail, { available_minor: s.available, daily_profit_minor: s.profit, day_expenses_minor: s.expenses });
+        }
         const overwritten = amount !== s.suggested;
-        if (overwritten && (body.overwrite_reason ?? '').trim().length < 5) refuse(422, 'reason_required', 'A reason is required.');
-        const row = { ...r, amount, total_sold: s.total, suggested: s.suggested, overwritten, ...(overwritten ? { reason: body.overwrite_reason } : {}) };
+        const reason = (body.overwrite_reason ?? '').trim();
+        const row = { ...r, amount, total_sold: s.total, suggested: s.suggested, overwritten, ...(overwritten && reason !== '' ? { reason } : {}) };
         savings.push(row);
-        // The writer sees the amount only when the writer typed it; a default taken without profit access is not echoed.
-        const { amount_minor: _hidden, ...rest } = savingsRow(row);
-        return body.amount_minor !== undefined ? savingsRow(row) : rest;
+        // savingsRow shows the amount only with profit access, as the server's view does, so a default taken without it
+        // is not echoed and a profit reader sees what was saved.
+        return savingsRow(row);
       })),
 
     listSavings: (q) => delay(newestFirst(savings.filter((r) => inWindow(r, q))).map(savingsRow)),
@@ -278,13 +288,15 @@ export function createCashbookMock(env: CashbookEnv): Pick<RetailApi, Keys> {
       }),
 
     createExpense: (body, key) =>
-      run(() => once(`expense|${key}`, body, (): Expense => {
+      run(() => once(`expense|${key}`, body, (): Expense | ApprovalWaiting => {
         const r = base(body.branch_id, body.business_date, 'x');
         const category = categories.find((c) => c.id === body.category_id);
         const item = category?.items?.find((i) => i.id === body.item_id);
         if (!category || !item) refuse(422, 'item_not_in_category', 'The item is not in the category.');
         if (!category?.active) refuse(422, 'category_inactive', 'Inactive.');
         if (item?.requires_explanation && (body.explanation ?? '').trim().length < 3) refuse(422, 'explanation_required', 'Explanation required.');
+        const waits = env.waiting('retail_expense', body.amount_minor);
+        if (waits) return waits;
         const row = { ...r, amount: body.amount_minor, category_id: body.category_id, item_id: body.item_id, ...(body.party_id ? { party_id: body.party_id } : {}), ...(body.explanation ? { explanation: body.explanation } : {}) };
         expenses.push(row);
         return expenseRow(row);

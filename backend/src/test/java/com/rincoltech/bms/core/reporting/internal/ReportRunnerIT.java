@@ -256,6 +256,27 @@ class ReportRunnerIT extends ReportsItSupport {
                 .isGreaterThanOrEqualTo(1);
     }
 
+    // JUSTIFICATION-A3: the regression case of issue #621, a run of a removed business left queued by another test.
+    @Test
+    void aRunOfARemovedBusinessIsNeverClaimedAndDoesNotHoldUpTheQueue() throws Exception {
+        TestDatabase.Fixture removed = tenant(true);
+        UUID left = insertRun(removed, UUID.randomUUID(), "queued");
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET status = 'closed' WHERE id = ?")
+                .param(removed.tenantId())
+                .update();
+
+        TestDatabase.Fixture t = tenant(true);
+        assertReady(runToTheEnd(t, UUID.randomUUID(), "test.rows", Map.of("n", 1), "json"), "the run after it");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT status FROM report_runs WHERE id = ?")
+                        .param(left)
+                        .query(String.class)
+                        .single())
+                .as("the runner does not serve a removed business")
+                .isEqualTo("queued");
+    }
+
     // ---- guards before a run starts ---------------------------------------------------------------
 
     @Test
@@ -734,6 +755,37 @@ class ReportRunnerIT extends ReportsItSupport {
                         .query(Integer.class)
                         .single())
                 .isEqualTo(n);
+    }
+
+    // ---- a business whose subscription ended (ADR-073) ---------------------------------------------
+
+    // JUSTIFICATION-A3: a new test case for review fix 2 of #474; it needs its own fixture steps.
+    /**
+     * After the Owner's cancellation took effect the exports still work: a run asked for then, and one queued just before,
+     * are taken by the runner and finish.
+     */
+    @Test
+    void theRunsOfABusinessWhoseSubscriptionEndedStillFinish() throws Exception {
+        TestDatabase.Fixture t = tenant(true);
+        UUID user = UUID.randomUUID();
+        ResponseEntity<JsonNode> before = post(t, user, PORTFOLIO, "test.rows", Map.of("n", 3), "json");
+        assertThat(before.getStatusCode().value()).as("%s", before.getBody()).isEqualTo(202);
+        TestDatabase.owner().sql("""
+                        INSERT INTO subscriptions (id, tenant_id, plan_id, status, ended_on)
+                        SELECT ?, t.id, t.plan_id, 'cancelled', current_date FROM tenants t WHERE t.id = ?
+                        ON CONFLICT (tenant_id) DO UPDATE SET status = 'cancelled', ended_on = current_date
+                        """).params(UUID.randomUUID(), t.tenantId()).update();
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET status = 'suspended' WHERE id = ?")
+                .param(t.tenantId())
+                .update();
+
+        ResponseEntity<JsonNode> after = post(t, user, PORTFOLIO, "test.rows", Map.of("n", 2), "json");
+        assertThat(after.getStatusCode().value()).as("%s", after.getBody()).isEqualTo(202);
+        drain();
+
+        assertReady(run(t, user, PORTFOLIO, before.getBody().get("id").asString()), "queued before the end");
+        assertReady(run(t, user, PORTFOLIO, after.getBody().get("id").asString()), "asked for after the end");
     }
 
     // ---- helpers --------------------------------------------------------------------------------

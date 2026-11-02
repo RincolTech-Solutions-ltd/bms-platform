@@ -11,7 +11,10 @@ import { PAYABLE_MANAGE, canUse, holdsAt } from './permissions';
 import { methodWords } from './payables-state';
 import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys, useCursorList } from './purchasing-ui';
 import { showDate } from './transfers';
-import { Gate, Problem, Success, money, useBranchName, useToast } from './ui';
+import { WORDS } from '../../../app/glossary';
+import { Gate, Problem, Money, useBranchName, useToast } from './ui';
+import { NoAccess } from '../../../app/ui/EmptyState';
+import { Hint } from '../../../app/ui/Hint';
 
 // Supplier payments (the purchasing capability, ADR-033, issue #198): the money paid to suppliers, newest first, and one payment with
 // what it cleared. A payment pays supplier invoices and credit restocks (stock bought on credit in Restock), oldest first or as
@@ -25,7 +28,7 @@ export function PaymentRow({ row, branchName }: { row: SupplierPayment; branchNa
       <p>
         <strong>{row.payment_no}</strong> <StatusBadge words={PAYMENT_STATUS[row.status ?? ''] ?? (row.status ?? '')} warn={row.status === 'reversed'} />
         <br />
-        {row.supplier_name}, {showDate(row.paid_on)}, <strong>{money(row.amount_minor ?? 0)}</strong>
+        {row.supplier_name}, {showDate(row.paid_on)}, <strong><Money minor={row.amount_minor ?? 0} /></strong>
       </p>
       <p className="hint">
         By {methodWords(row.method).toLowerCase()}{row.reference ? `, reference ${row.reference}` : ''}{branchName ? `, from ${branchName}` : ''}.
@@ -45,9 +48,9 @@ export function SupplierPaymentsPage() {
   const list = useCursorList(['retail', 'supplier-payments', query, status], (cursor, signal) => retail.listSupplierPayments({ query, status, cursor, signal }));
   return (
     <Gate screen="supplierPayments" title="Supplier payments">
-      <p className="hint" data-tour="payments-help">
-        Money paid to suppliers. A payment clears the oldest supplier invoices and credit restocks first, unless you choose what it pays.
-      </p>
+      <Hint tour="payments-help">
+        Money paid to suppliers. A payment clears the oldest supplier invoices and stock bought on credit first, unless you choose what it pays.
+      </Hint>
       <p className="cluster">
         <Link className="btn rt-primary" to="/staff/retail/supplier-payments/new" data-tour="payments-new">Pay a supplier</Link>
         <Link className="btn-sm" to="/staff/retail/supplier-payables">What you owe suppliers</Link>
@@ -85,8 +88,8 @@ export function SupplierPaymentView({ payment, nameOf, payable }: { payment: Sup
         rows={[
           ['Supplier', <SupplierOwed key="s" id={payment.supplier_id} name={payment.supplier_name} payable={payable} />],
           ['Paid on', showDate(payment.paid_on)],
-          ['Amount', money(payment.amount_minor ?? 0)],
-          ['Paid by', methodWords(payment.method)],
+          ['Amount', <Money key="a" minor={payment.amount_minor ?? 0} />],
+          [WORDS.paidHow, methodWords(payment.method)],
           ['From the till or bank of', nameOf(payment.branch_id)],
           ['What it paid', payment.allocation === 'manual' ? 'What was chosen' : 'The oldest first'],
           ...(payment.reference ? [['Reference', payment.reference] as [string, string]] : []),
@@ -106,11 +109,11 @@ export function SupplierPaymentView({ payment, nameOf, payable }: { payment: Sup
                   {a.bill_id ? (
                     <Link to="/staff/retail/supplier-bills/$billId" params={{ billId: a.bill_id }}>{a.bill_no}</Link>
                   ) : (
-                    <>Credit restock {a.purchase_no}</>
+                    <>Stock bought on credit {a.purchase_no}</>
                   )}
                 </td>
                 <td>{a.supplier_ref ?? ''}</td>
-                <td className="num">{money(a.amount_minor ?? 0)}</td>
+                <td className="num"><Money minor={a.amount_minor ?? 0} /></td>
               </tr>
             ))}
           </tbody>
@@ -129,7 +132,6 @@ export function SupplierPaymentPage() {
   const { show, toast } = useToast();
   const nameOf = useBranchName();
   const keys = useActionKeys();
-  const [message, setMessage] = useState<string | null>(null);
   const allowed = canUse(me, 'supplierPayments');
   const payment = useQuery({ queryKey: ['retail', 'supplier-payment', paymentId], queryFn: () => retail.getSupplierPayment(paymentId), enabled: allowed });
   useCrumbLabel(payment.data?.payment_no);
@@ -137,9 +139,7 @@ export function SupplierPaymentPage() {
     mutationFn: (reason: string) => retail.reverseSupplierPayment(paymentId, reason, keys.keyFor(paymentId, reason)),
     onSuccess: (p) => {
       keys.done(paymentId);
-      const text = `Reversed ${p.payment_no ?? 'the payment'}. What it paid is owed again.`;
-      setMessage(text);
-      show(text);
+      show(`Reversed ${p.payment_no ?? 'the payment'}. What it paid is owed again.`, 'success');
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
   });
@@ -147,7 +147,7 @@ export function SupplierPaymentPage() {
     return (
       <main className="rt">
         <h1>Supplier payment</h1>
-        <p className="empty-state">You do not have access to this page.</p>
+        <NoAccess />
       </main>
     );
   }
@@ -155,10 +155,8 @@ export function SupplierPaymentPage() {
   return (
     <main className="rt rt-wide">
       <h1>{p?.payment_no ?? 'Supplier payment'}</h1>
-      <p><Link to="/staff/retail/supplier-payments">Back to supplier payments</Link></p>
       {payment.isPending && <SkeletonList label="Loading the payment" />}
       <Problem error={payment.error} />
-      {message && <Success>{message}</Success>}
       {p && <SupplierPaymentView payment={p} nameOf={nameOf} payable />}
       {p && p.status === 'posted' && holdsAt(me, PAYABLE_MANAGE, p.branch_id) && (
         <div data-tour="payment-reverse">

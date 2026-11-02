@@ -25,7 +25,7 @@ button,
   text-decoration: none;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
-  transition: background var(--transition), border-color var(--transition), box-shadow var(--transition), transform var(--transition);
+  transition: transform var(--transition), opacity var(--transition);
   -webkit-tap-highlight-color: transparent;
   user-select: none;
 }
@@ -43,12 +43,15 @@ button:focus-visible,
   box-shadow: var(--focus-ring);
 }
 
-/* Pressed (#106): the button sinks a little and darkens, so a tap on a phone is felt at once. */
+/*
+ * Pressed (#106, #682): the button sinks a little and dims, so a tap on a phone is felt at once. Only transform and opacity
+ * change, in --motion-fast on the ease-out curve; under reduced motion it no longer shrinks and only dims, at once. A hover
+ * fill changes at once too, so nothing but the press moves.
+ */
 button:active:not(:disabled, [aria-disabled='true']),
 .btn:active:not([aria-disabled='true']) {
   transform: scale(var(--press-scale));
-  background: var(--color-neutral-tint);
-  box-shadow: none;
+  opacity: var(--press-opacity);
 }
 
 /* Disabled: a flat grey control with muted text, never only a fade, so it reads as off. */
@@ -77,12 +80,6 @@ button[aria-disabled='true'],
   background: var(--color-primary-hover);
 }
 
-.btn-primary:active:not(:disabled),
-.btn-brand:active:not(:disabled),
-.rt-primary:active:not(:disabled) {
-  background: var(--color-primary-active);
-}
-
 .btn-danger {
   background: var(--color-danger-fill);
   color: var(--rt-white);
@@ -91,10 +88,6 @@ button[aria-disabled='true'],
 
 .btn-danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-danger-fill) 86%, var(--rt-black));
-}
-
-.btn-danger:active:not(:disabled) {
-  background: color-mix(in srgb, var(--color-danger-fill) 76%, var(--rt-black));
 }
 
 .btn-ghost {
@@ -106,10 +99,6 @@ button[aria-disabled='true'],
 
 .btn-ghost:hover:not(:disabled) {
   background: var(--color-accent-tint);
-}
-
-.btn-ghost:active:not(:disabled) {
-  background: color-mix(in srgb, var(--color-accent) 18%, var(--color-surface));
 }
 
 .btn-lg {
@@ -132,4 +121,87 @@ button[aria-disabled='true'],
   width: 20px;
   height: 20px;
   flex: none;
+}
+
+/*
+ * Busy (#456, BusyButton in src/app/ui): while its request runs a button that writes keeps its label,
+ * is aria-busy and aria-disabled (so it keeps focus and reads as off, hover and press included), and
+ * shows a small spinner placed absolutely in its end padding, so the button never changes width and the
+ * spinner does not depend on the gap. Under reduced motion it is a dot that pulses instead of turning.
+ */
+.busy-button {
+  position: relative;
+}
+
+/*
+ * The spinner takes the last 0.85em of the end padding (0.25em in, 0.6em wide), so a busy button keeps at
+ * least 1.1em there and the label never runs under it. --busy-pad-end is the size's own end padding, so a
+ * size whose padding already holds the spinner keeps its width. A small busy button (.btn-sm) has the same
+ * end padding when idle, so it keeps its width too. A class that sets its own padding sets its own --busy-pad-end too, or it takes 18px.
+ */
+.busy-button {
+  --busy-pad-end: 18px;
+}
+
+.btn-lg.busy-button {
+  --busy-pad-end: 24px;
+}
+
+.btn-sm.busy-button {
+  --busy-pad-end: 12px;
+}
+
+.btn-sm.busy-button,
+.busy-button[aria-busy='true'] {
+  padding-inline-end: max(1.1em, var(--busy-pad-end));
+}
+
+.busy-button[aria-busy='true'],
+.busy-button[aria-busy='true']:is(:hover, :active) {
+  cursor: progress;
+  background: var(--color-neutral-tint);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+  box-shadow: none;
+  transform: none;
+}
+
+.busy-spinner {
+  position: absolute;
+  inset-inline-end: 0.25em;
+  top: 50%;
+  width: 0.6em;
+  height: 0.6em;
+  margin-top: -0.3em;
+  border: 2px solid var(--color-border-strong);
+  border-top-color: var(--color-focus);
+  border-radius: 50%;
+  animation: rt-spin 0.8s linear infinite;
+}
+
+@keyframes rt-busy-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .busy-spinner {
+    border: 0;
+    background: var(--color-focus);
+    animation: rt-busy-pulse 1.6s var(--ease-out) infinite !important;
+  }
+}
+
+/* The line under a primary button pressed while its form is not ready and no field could be pointed at (issue #526). */
+.busy-nudge {
+  display: block;
+  margin-top: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* Empty until a press needs it: still in the page (never display: none), so the live region is there when the words come. */
+.busy-nudge-empty {
+  margin: 0;
 }

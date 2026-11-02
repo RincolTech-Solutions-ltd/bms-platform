@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
+import { businessZone } from '../../../api/retail';
 import { SmsError, sms, type SmsSettings, type SmsSettingsChange } from '../../../api/sms';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { useStaff } from '../context';
 import {
   capProblem,
@@ -15,6 +17,8 @@ import {
   problemsOf,
   type Draft,
 } from './state';
+import { NoAccess } from '../../../app/ui/EmptyState';
+import { Hint } from '../../../app/ui/Hint';
 
 // Tenant SMS settings (extras slice B3, issue #218; ADR-036): the switch with its acknowledgement of what SMS costs, the
 // sender id (chosen from the ones the platform approved, never typed), the sending window, the daily and monthly caps (which
@@ -35,7 +39,7 @@ export function Field({ id, label, hint, error, children }: { id: string; label:
 function When({ iso }: { iso: string | null }) {
   if (!iso) return null;
   const d = new Date(iso);
-  return <>{Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</>;
+  return <>{Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: businessZone() })}</>;
 }
 
 /** The message under a failed save: the server's words, with the field messages next to their boxes. */
@@ -72,9 +76,9 @@ export function SwitchPanel({ saved, canManage, busy, error, onChange }: {
       {error && <p role="alert" className="alert alert-danger">{error}</p>}
       {canManage && saved.enabled && (
         <p>
-          <button type="button" className="btn-ghost" disabled={busy} onClick={() => onChange({ enabled: false })}>
+          <BusyButton type="button" className="btn-ghost" busy={busy} onClick={() => onChange({ enabled: false })}>
             Switch SMS off
-          </button>
+          </BusyButton>
         </p>
       )}
       {canManage && !saved.enabled && !opening && (
@@ -98,10 +102,10 @@ export function SwitchPanel({ saved, canManage, busy, error, onChange }: {
             <input type="checkbox" checked={ticked} onChange={(e) => setTicked(e.target.checked)} /> I have read this and accept it for my business
           </label>
           <p className="cluster">
-            <button type="submit" className="rt-primary" disabled={!ticked || busy}>
-              {busy ? 'Switching on' : 'Switch SMS on'}
-            </button>
-            <button type="button" className="btn-ghost" disabled={busy} onClick={() => { setOpening(false); setTicked(false); }}>
+            <BusyButton type="submit" className="rt-primary" busy={busy} disabled={!ticked}>
+              Switch SMS on
+            </BusyButton>
+            <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={busy} onClick={() => { setOpening(false); setTicked(false); }}>
               Not now
             </button>
           </p>
@@ -122,15 +126,22 @@ function Editor({ saved, canManage, notice, setNotice }: { saved: SmsSettings; c
 
   const save = useMutation({
     mutationFn: (c: SmsSettingsChange) => sms.changeSettings(saved.version, c),
-    onSuccess: (next, c) => {
+    onSuccess: (next) => {
       queryClient.setQueryData(['sms', 'settings'], next);
       void queryClient.invalidateQueries({ queryKey: ['sms', 'templates'] });
-      setNotice({ kind: 'success', text: c.enabled === true ? 'SMS is on.' : c.enabled === false ? 'SMS is off.' : 'Saved.' });
+      setNotice(null);
     },
     // Someone else's change (or a rule the screen could not see): read it again so the next try carries the right version.
     onError: (error) => {
       if (error instanceof SmsError && error.code === 'version_conflict') setNotice({ kind: 'warning', text: error.message });
       void queryClient.invalidateQueries({ queryKey: ['sms', 'settings'] });
+    },
+    meta: {
+      success: (_: unknown, c: SmsSettingsChange) => (c.enabled === true ? 'SMS turned on' : c.enabled === false ? 'SMS turned off' : 'Settings saved'),
+      // Turning SMS on can be taken back from the toast (#682), on the version the change made. Turning it off cannot: on again
+      // needs the notice read and acknowledged on this screen, so the toast offers no Undo for it.
+      undo: (next: { version?: number }, c: SmsSettingsChange) =>
+        c.enabled === true && typeof next.version === 'number' ? () => sms.changeSettings(next.version ?? 0, { enabled: false }) : null,
     },
   });
   const failure = failureOf(save.error);
@@ -163,7 +174,7 @@ function Editor({ saved, canManage, notice, setNotice }: { saved: SmsSettings; c
         }}
       >
         <h2>Settings</h2>
-        {!canManage && <p className="hint">You can look at these settings. Only a business administrator can change them.</p>}
+        {!canManage && <Hint full>You can look at these settings. Only a business administrator can change them.</Hint>}
 
         <Field
           id="sms-sender"
@@ -171,6 +182,7 @@ function Editor({ saved, canManage, notice, setNotice }: { saved: SmsSettings; c
           hint="The name members see. It must be one the platform approved for your business. Without one, messages come from the provider's shared sender. To get a name approved, ask the platform."
           error={fieldError('sender_id')}
         >
+          {/* empty: The shared sender is always there; the hint says how to get a name approved. */}
           <select id="sms-sender" data-tour="sms-sender" value={draft.senderId} disabled={!canManage} onChange={(e) => set('senderId', e.target.value)}>
             <option value="">The shared sender (default)</option>
             {saved.approved_sender_ids.map((id) => (
@@ -244,11 +256,11 @@ function Editor({ saved, canManage, notice, setNotice }: { saved: SmsSettings; c
 
         {canManage && (
           <p className="cluster">
-            <button type="submit" className="rt-primary" disabled={!submitted || save.isPending}>
-              {save.isPending ? 'Saving' : 'Save changes'}
-            </button>
+            <BusyButton type="submit" className="rt-primary" busy={save.isPending} disabled={!submitted}>
+              Save changes
+            </BusyButton>
             {isChange(change) && (
-              <button type="button" className="btn-ghost" disabled={save.isPending} onClick={() => { save.reset(); setDraft(draftOf(saved)); }}>
+              <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={save.isPending} onClick={() => { save.reset(); setDraft(draftOf(saved)); }}>
                 Undo
               </button>
             )}
@@ -264,7 +276,7 @@ export function SmsSettingsScreen() {
   const settings = useQuery({ queryKey: ['sms', 'settings'], queryFn: sms.settings, enabled: mayReadSettings(me), retry: false });
   // Held here, not in the editor, which starts afresh from every new version (a save is one).
   const [notice, setNotice] = useState<Notice | null>(null);
-  if (!mayReadSettings(me)) return <p className="empty-state">You do not have access to the SMS settings.</p>;
+  if (!mayReadSettings(me)) return <NoAccess what="the SMS settings" />;
   if (settings.isPending) return <p className="loading">Loading the SMS settings</p>;
   if (settings.isError || !settings.data) {
     return <p role="alert" className="alert alert-danger">{settings.error instanceof Error ? settings.error.message : 'Could not load the SMS settings.'}</p>;

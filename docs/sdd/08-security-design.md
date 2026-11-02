@@ -23,10 +23,25 @@ Summarised from chapter 7 section 7.4 and chapter 3 section 3.7.
 
 | Principal | Factor(s) | Lockout | Session |
 |---|---|---|---|
-| Platform super admin | Email plus password plus TOTP (mandatory) | 5 failures, 15 minutes | Access 15 minutes, refresh idle 2 hours |
-| Tenant admin | Email or phone plus password plus TOTP (mandatory) | 5 failures, 15 minutes | Access 15 minutes, refresh idle 12 hours |
-| Other staff | Email or phone plus password; TOTP optional or tenant-mandated | 5 failures, 15 minutes | Access 15 minutes, refresh idle 12 hours |
+| Platform super admin | Email plus password plus TOTP (mandatory) | 5 failures, 15 minutes | Access 15 minutes, refresh idle 2 hours, absolute 12 hours |
+| Tenant admin | Email or phone plus password plus TOTP (mandatory) | 5 failures, 15 minutes | Access 15 minutes, refresh idle 30 days, absolute 90 days |
+| Other staff | Email or phone plus password; TOTP optional or tenant-mandated | 5 failures, 15 minutes | Access 15 minutes, refresh idle 30 days, absolute 90 days |
 | Member | Phone plus 5 digit PIN, set after an SMS one-time code | 5 failures, 30 minutes | Access 15 minutes, refresh idle 30 days |
+
+A staff phone stays signed in while it opens BMS at least once every 30 days, and signs in again with the password 90 days
+after sign-in however often it is used (ADR-014 amendments of 2026-10-28, issues #644 and #647: the idle limit was 12
+hours, so a shop owner signed in every morning, and then a week). Each refresh gives another 30 idle days; none moves the 90.
+Sign-out, deactivation, a password reset, an MFA reset and the step-up lock still end sessions on the next request.
+
+**Lost or stolen device (issue #647).** Any staff user signs out of every device from the person menu (Sign out
+everywhere, `POST /auth/logout-everywhere`, audited `core.auth.signed_out_everywhere`), and whoever holds
+`core.users.manage` signs one staff member out of every device from their card on the Staff page (Sign out their devices,
+`POST /users/{user_id}/sign-out`, audited `core.user.signed_out_everywhere` by the administrator, with the number of
+sessions ended); another administrator's devices only by the Owner. Both revoke the session rows, so the next request of
+any of those devices is refused, its access token and refresh cookie alike. The person stays active and signs in again with
+the password. The cost of the longer limits is that an unlocked phone, or a copied refresh cookie, stays usable for up to
+30 idle days and 90 in all; the phone's screen lock, the two sign-outs above, a new password and deactivation are the
+controls.
 
 - Passwords and PINs are hashed with argon2id (memory 64 MiB, iterations 3,
   parallelism 1, tuned so one hash takes about 100 ms on the production host). Passwords are
@@ -158,9 +173,10 @@ Summarised from chapter 7 section 7.4 and chapter 3 section 3.7.
 | A stale or stolen session surviving a reset | Every session and refresh token of the user ends in the transaction that sets the password |
 | A reset for an account that should not get back in | Only active users; a deactivated user's open links are revoked and refused; an invited user keeps the invitation path |
 | One tenant's link or admin reaching another's user | The table has forced row-level security with the tenant policy; the lookup runs inside the tenant of the host, so a link of tenant A used on tenant B's host is not found, and an admin of B cannot issue a link for A's user (`PasswordResetIT`, `RlsIsolationIT`) |
-| An admin resetting users outside their branches | The route needs `core.users.manage`; an admin whose scope is not every branch reaches only users whose every role is inside it |
+| An admin resetting users outside their branches | The route needs `core.users.manage`; an admin whose scope is not every branch reaches only users whose every role is inside it. The same holds for signing a person out of their devices (`POST /users/{user_id}/sign-out`, issue #647) |
 | A hijacked tenant admin session chaining the MFA reset and the sign-in reset to take an account over | The tenant route refuses oneself and any tenant admin (a locked-out admin is recovered by the platform operator), checks the target first, then asks the acting admin to prove they are still themselves: a fresh authenticator code when they have one enrolled, otherwise their own current password (two-step sign-in is optional only where the `tenant_admin` role's `mfa_required` was hand-edited off, which is staging alone; the V2 seed requires it, so elsewhere an admin with no factor never gets a session and the password branch is not reached; whoever reads a no-factor tenant admin's mailbox can take the account over on staging until #348 lands, a consequence of the optional setting listed for Hillary's explicit acceptance); a stolen session or token has neither. A wrong password counts on the sign-in lock like one at sign-in, and the fifth wrong password a session sends here ends that session (and only it), so a thief with a stolen token cannot keep guessing. The user is emailed when a link is issued (ADR-042 decision 9) |
 | A stolen platform operator token resetting an admin's second factor and then issuing a link for the same admin, on any tenant | Both platform reset routes need the operator's own fresh, single-use authenticator code and fail closed without one; five wrong codes lock the step-up and end the operator's sessions; both audit logs record the act; the admin is emailed when a link is issued, before it is used, which is the detective control (ADR-042 decision 9(b2)) |
+| A stolen platform operator token moving a business's referral to another referrer, or changing a commission rule, so later commissions go elsewhere | `PUT /platform/tenants/{id}/referrer`, `PUT /platform/referrals/default-rule` and `PUT /platform/referrals/{id}/rule` need the operator's own fresh, single-use authenticator code (`totp_code`) checked before the change; every change is audited with the reason, before and after (ADR-069 decision 6) |
 | A link in the admin's hand used by the admin | Possible by design for an ordinary user (an admin who can reset a sign-in could also deactivate and invite): the issue and the reveal are audited with the admin's identity, the user is emailed when it is issued and again when the password changes |
 
 ### 8.2b Threat model of push notifications (ADR-050)
@@ -220,9 +236,9 @@ checked in `core.identity` (`Owners`) on top of `core.users.manage`:
 
 | Act on the Users routes | Owner | Other tenant admin |
 |---|---|---|
-| Invite, change roles, deactivate, send a new link, reset two-step sign-in, unlock: a staff member who is not an administrator | Y | Y |
+| Invite, change roles, deactivate, send a new link, reset two-step sign-in, sign out their devices, unlock: a staff member who is not an administrator | Y | Y |
 | Invite an administrator, make someone an administrator | Y | 403 `owner_only` |
-| Change another administrator's roles or contact, deactivate them, reset their two-step sign-in, send them a new link | Y | 403 `owner_only` |
+| Change another administrator's roles or contact, deactivate them, reset their two-step sign-in, sign out their devices, send them a new link | Y | 403 `owner_only` |
 | Any of those on the Owner | own contact only; not their own administrator role (422 `owner_must_transfer_first`) | 403 `owner_protected` |
 | Change one's own email or phone | Y, with the step-up (authenticator code, else own password); the old address is told | Y |
 | Transfer ownership to another active administrator (step-up: authenticator code, else own password; not within 24 hours of the Owner's email, phone or password change) | Y | 403 `owner_only` |
@@ -239,6 +255,38 @@ owner rule (ADR-062 decision 9). A business with no Owner yet (one with no activ
 rules of before until the operator assigns one. Two-step sign-in is not forced on the Owner; the
 Users screen prompts the Owner to turn it on.
 
+**The rest of the Owner's powers (ADR-090, issue #571, migration `V102`).** Three more acts ride on `core.settings.manage` and
+are the Owner's alone (403 `owner_only` for every other administrator, and for everyone while a business has no Owner):
+naming or removing the **billing contact** (FR-SUB-13; no step-up, audited; it is never a sign-in contact, so it cannot be used to
+receive a reset link or a code), **asking to close the business** (FR-TEN-09; the owner step-up, the authenticator code else the
+password, as for the transfer) and **cancelling** that request. From the request the business is read only (423
+`business_closing`, the exports, sign-in and the cancel allowed). **Removal** is the platform operator's, after the cooling-off
+period (30 days), with the operator's own authenticator code and a reason: the Owner's request and the operator's confirmation are
+the two people. The removal begins in `platform_begin_tenant_removal`, which refuses a transaction bound to a business, computes the
+business's date itself and authenticates the operator in the database (an active account with two-step sign-in, a live platform
+session of theirs and an authenticator code used in the last two minutes); only a request so begun (`removing`) can be erased.
+Every BEFORE UPDATE or DELETE row trigger of the business's tables lets a change through only when `bms_erasing` holds: the
+statement runs as `bms_owner` inside one of V102's definer functions, the transaction was marked for this business and its
+request is `removing` (or `purging`, the daily purge of the kept records after `keep_until`, owner decision D46); the application
+role can neither move a request past `requested` (the `tenant_closures_guard` trigger) nor mark or erase a request the operator
+did not begin (`app_mark_tenant_removal`, `bms_removing_tenant`). Because `bms_owner` bypasses row-level security, every
+statement of the erasers and the purge names the business. While a request is open the business is also left out of the
+scheduled jobs and the outbox's SMS and push, as a suspended one is. The operator lists the businesses with no Owner (`GET
+/platform/tenants/without-owner`) and sets onewith the existing `make-owner` route.
+
+Outside the Users routes the Owner alone asks for a module, stops one, cancels the subscription
+(read only after the last day paid for, data kept) and undoes a change still to come (ADR-073,
+403 `owner_only` for any other administrator, who reads the Plan and billing page only;
+`SelfServePlanIT`), and moves the go-live date (ADR-071;
+`ExistingLoansIT.frExl03_theGoLiveDateGuardsAgainstBackdatingNewLending`, which refuses a
+non-Owner administrator with 403 `owner_only`). Subscription reminders
+and receipts go to the Owner's own email (`BillingAutomationIT` asserts the recipient), and by SMS to
+the Owner's phone where the platform's billing SMS is on (ADR-075); there is no
+separate billing contact and no request to close the business: both not yet built
+(#571). A staff account is never deleted, the Owner's included: it is deactivated, and the
+application role holds neither `DELETE` nor `TRUNCATE` on `users`
+(`TenantOwnerIT.staffAccountsAreNeverDeleted`).
+
 ### 8.3.2 Permission matrix
 
 `Y` = granted. Blank = not granted. TA tenant admin, BM branch manager, LO loan officer,
@@ -251,6 +299,8 @@ platform API and holds no tenant permissions.
 | `core.settings.read` | Y | Y | | | Y | Y | | | | | | |
 | `core.settings.manage` | Y | | | | | | | | | | | |
 | `core.payment_account.manage` | Y | | | | | | | | | | | |
+| `core.billing.read` | Y | | | | | | | | | | | |
+| `core.referrals.read` | Y | | | | | | | | | | | |
 | `core.branches.read` | Y | Y | Y | Y | Y | Y | | | | | | |
 | `core.branches.manage` | Y | | | | | | | | | | | |
 | `core.users.read` | Y | Y | | | | Y | | | | | | |
@@ -275,6 +325,7 @@ platform API and holds no tenant permissions.
 | `core.payments.allocate_approve` | Y | Y | | | Y | | | | | | | |
 | `core.reports.financial` | Y | Y | | | Y | Y | | | | | | |
 | `core.reports.audit` | Y | | | | | Y | | | | | | |
+| `core.data_export.run` | Y | | | | | | | | | | | |
 | `lending.members.read` | Y | Y | Y | Y | Y | Y | | | | | | |
 | `lending.members.create` | Y | Y | Y | | | | | | | | | |
 | `lending.members.update` | Y | Y | Y | | | | | | | | | |
@@ -288,6 +339,7 @@ platform API and holds no tenant permissions.
 | `lending.loans.appraise` | Y | Y | Y | | | | | | | | | |
 | `lending.loans.approve` | Y | Y | | | | | | | | | | |
 | `lending.loans.cancel` | Y | Y | Y | | | | | | | | | |
+| `lending.loans.bring_in` | Y | Y | | | | | | | | | | |
 | `lending.disbursements.request` | Y | Y | | Y | | | | | | | | |
 | `lending.disbursements.authorise` | Y | Y | | | Y | | | | | | | |
 | `lending.repayments.create` | Y | Y | | Y | | | | | | | | |
@@ -296,6 +348,7 @@ platform API and holds no tenant permissions.
 | `lending.credits.refund_approve` | Y | Y | | | Y | | | | | | | |
 | `lending.charges.waive_request` | Y | Y | | | Y | | | | | | | |
 | `lending.charges.waive_approve` | Y | Y | | | Y | | | | | | | |
+| `lending.charges.waive_fee_interest` | Y | | | | Y | | | | | | | |
 | `lending.loans.write_off_request` | Y | | | | Y | | | | | | | |
 | `lending.loans.write_off_approve` | Y | | | | | | | | | | | |
 | `lending.loans.restructure_request` | Y | Y | | | | | | | | | | |
@@ -321,6 +374,8 @@ platform API and holds no tenant permissions.
 | `lending.collections.read` | Y | Y | Y | Y | Y | Y | | | | | | |
 | `lending.collections.log_action` | Y | Y | Y | Y | | | | | | | | |
 | `lending.collections.assign` | Y | Y | | | | | | | | | | |
+| `lending.collections.all_officers` | Y | Y | | Y | Y | Y | | | | | | |
+| `lending.members.contact` | Y | Y | Y | | | | | | | | | |
 | `lending.reports.portfolio` | Y | Y | | | Y | Y | | | | | | |
 | `lending.reports.collections` | Y | Y | Y | Y | Y | Y | | | | | | |
 | `lending.reports.members` | Y | Y | | | | Y | | | | | | |
@@ -341,6 +396,7 @@ platform API and holds no tenant permissions.
 | `retail.sale.read` | Y | | | | | | | Y | | | | Y |
 | `retail.sale.void` | Y | | | | | | | | | | | |
 | `retail.sale.all_sellers` | Y | | | | | | | | | | | Y |
+| `retail.offline.resolve` | Y | | | | | | | | | | | Y |
 | `retail.till.close` | Y | | | | | | | | | | Y | |
 | `retail.stock.read` | Y | | | | | | | Y | Y | Y | | Y |
 | `retail.stock.transfer` | Y | | | | | | | | Y | | | |
@@ -376,9 +432,24 @@ The staff member and collateral screens (issue #280) offer an action only when t
 
 Notes:
 
+- Existing loans (issue #466, ADR-071, migration `V89`): `lending.loans.bring_in` records a loan from a paper register with
+  its real disbursement date and past repayments, by the form or the CSV import, checks one without saving (`dry_run`),
+  withdraws one still waiting and asks for its approval again. Administrators and branch managers hold it, in the
+  member's branch. The checker of `loan_bring_in` holds `lending.disbursements.authorise`, as for a disbursement, and is
+  never the maker (the approval CHECK, and the loan's own approver CHECK of V8, since the maker is stored as the
+  submitter). The existing loans are read with `lending.loans.read`. The go-live date that bounds them is set by the
+  Owner of the business alone (`PATCH /settings`, 403 `owner_only` for another administrator; ADR-062) or by the
+  platform operator with a reason (`platform.tenants.manage`), both audited. The date can only move earlier, otherwise
+  operator only: once a date is stored the Owner's later date is refused (422 `go_live_locked`), and only the operator
+  moves it later (`PUT /platform/tenants/{tenant_id}/go-live`), since a later date reopens the window for bringing loans in. An approved bring-in is reversed only
+  through `loan_bring_in_reversal`, with the same maker and checker permissions, never decided by its maker, and only
+  while the loan has no transaction in the app and no penalty charge (ADR-071 decision 9).
 - A loan officer running `lending.reports.collections` sees only loans where they are
   the responsible officer; branch managers and above see their branch scope.
 - Insights (#153, ADR-030): `lending.insights.read` opens the page in the user's branch scope.
+  Without `lending.collections.all_officers` (the loan officer) the due, arrears and promise lists cover only the
+  caller's own portfolio, and a borrower's phone on them is whole only with `lending.members.contact` (administrators,
+  branch managers, loan officers), masked for the cashier, the accountant and the auditor (ADR-064).
   Without `lending.insights.all_officers` (the loan officer) every figure, chart and table covers
   only loans the user is the responsible officer for, and members they are the officer of; the
   server enforces it whatever the request asks. `lending.insights.export` downloads a drill-down
@@ -398,7 +469,7 @@ Notes:
   permission: the operator's `PUT /platform/tenants/{tenant_id}/sms` and `.../sms/sender-ids/{sender_id}` use
   `platform.tenants.manage` and their reads `platform.tenants.read`, and the database refuses these changes from any transaction
   bound to a tenant). A tenant can lower its caps under the operator's and choose only a sender id the operator approved for it;
-  a test message goes only to the sink or the environment's allow-list, never to a number a user typed in a live environment; the assistant can be switched on only for tenants in `BMS_AI_ENABLED_TENANTS`; collections can be
+  a test message goes only to the sink or the environment's allow-list, never to a number a user typed in a live environment; the assistant can be switched on only for tenants in `BMS_AI_ENABLED_TENANTS`; Ask BMS answers only for tenants in `BMS_HELP_ASK_TENANTS`, sends a provider nothing but the question scrubbed of phones, IDs, emails, long figures and names and the help articles the asker may read, stores only the question's hash, and never uses Claude (ADR-096); the setup helper sends a business's list (typed, the text of a file, or a photo drawn again without its metadata) and its category, unit and item names to the same providers only for tenants in `BMS_SETUP_AI_TENANTS`, never the member list (a borrower is matched by phone on the server), keeps nothing of the list but a row of counts, and saves nothing until the owner taps in the import's own check (ADR-102); collections can be
   switched on only while the tenant's own payment account is verified (`merchant_account_not_verified`); saving, testing and removing that account need `core.payment_account.manage` (migration V57; the tenant admin only, because it redirects where every repayment is paid; saving and removing also ask for a current authenticator code, and the other holders are emailed), reading its status `core.settings.read` (the key's last four characters only go to a holder of the account permission), the platform console reads its status through `platform.tenants.read` and may release an account with `platform.tenants.manage` (audited); a member's SMS opt-out is added with `lending.members.update`, but narrowing it (`all` to `reminders`) or lifting it needs `core.settings.manage` and a reason that goes into the audit row (stopping less is the administrator's; the screens ask for a confirmation first); a test message that would really go out obeys the operator's switch, the tenant's switch, the opt-out list and the caps, checked and reserved under one lock per business so concurrent tests cannot pass a cap together. Running a report run needs
   the report's own permission (a pack needs all seven); loan officers still see only their own loans.
   Built (extras slice D1, issue #214): report runs add no permission and no seeded row (the matrix and the seeds are unchanged;
@@ -411,6 +482,18 @@ Notes:
   it (no signed-in user) can neither widen nor lose it; `lending.par` takes it from the insights module, the same code as the
   insights endpoints, and needs `lending.insights.read` as well. Report runs are off until a tenant administrator sets
   `reports_enabled` in the tenant settings (`core.settings.manage`).
+  Built (issue #334 step 1, ADR-074, migration V91): `core.data_export.run`, the tenant admin's alone (the Owner is one,
+  ADR-062), asks for "Download my data", the whole business as one workbook across every branch, and sees the weekly email switch;
+  only the Owner (`users.is_owner`) turns it on or off (audited, `core.data_export.settings_changed`; anyone else 403
+  `owner_only`). It is offered whatever `reports_enabled` says; the file
+  is fetched by the person it was made for while they hold the permission, every refusal 404. A business ended by its Owner's
+  cancellation (ADR-073) may still ask for it and fetch the signed address of its file, the two reads that are a `POST`; it may
+  sign the download address only of the data export's own report documents (a report document whose run is `core.data_export`,
+  decided by `DocumentAccess.downloadableWhenEnded` in the documents layer), and a KYC upload, a receipt or any other document
+  answers 423 `subscription_ended`, as does every other write. A business the operator suspended (FR-TEN-06) is refused both, 423 `tenant_suspended`.
+  The weekly copy emailed to the Owner leaves out the columns of personal data (members' phones, ID numbers, dates of birth
+  and villages, the arrears phone, customers' and suppliers' contacts); they are only in the full workbook downloaded after
+  sign-in (ADR-074 decision 6).
   Built (extras slice D2, issue #217): the PDF and Excel renderers and `lending.portfolio_outstanding` add no permission and no seeded
   row either (both lending reports run under `lending.reports.portfolio`); `PermissionMatrixIT` still passes and this matrix equals the
   seeds. A spreadsheet cell is never a formula: text is written as a string cell and text that begins with `=`, `+`, `-`, `@`, a tab or a
@@ -497,14 +580,29 @@ Notes:
   Supervisor's branches; every range figure follows the same branch filter; profit needs `retail.profit.read` in every branch
   covered, and so does the top salesperson (a ranking of colleagues, the rule of the summary's salesperson level); a seller's own
   card reads the summary, which is their own sales. Tests: `RetailDashboardRangeIT`, `RetailSellerFiguresIT`, `RetailOwnerDecisionsIT`.
-  The receipt to share (issue #439, ADR-061) adds no permission: `GET /retail/sales/{sale_id}/receipt/pdf` and its facts
-  `GET /retail/sales/{sale_id}/receipt` need `retail.sale.read` and, without `retail.sale.all_sellers` at the sale's branch, a
+  The receipt to share (issue #439, ADR-061) adds no permission: `GET /retail/sales/{sale_id}/receipt/pdf`, its facts
+  `GET /retail/sales/{sale_id}/receipt` and the screen's printed receipt `GET /retail/sales/{sale_id}/receipt/printed` (issue #500) need `retail.sale.read` and, without `retail.sale.all_sellers` at the sale's branch, a
   sale the caller made (a caller with no user never counts as its maker), with no exception for a debt still owed (404 otherwise), so a storekeeper (no `retail.sale.read`, 403) and a colleague get none. It writes nothing and is not audited; the
   receipt leaves from the seller's own phone and no server sends it. The number typed for WhatsApp is never logged and is stored only
   when the person ticks the save and holds `retail.customer.manage`. A deliberate, narrow exception to ADR-055 (ADR-061 decision 3):
   the printed receipt is signed "Issued by" the seller who made the sale, read as stored, though ADR-055 hides the maker from a
   caller without `retail.profit.read`. The name appears only in that printed signature of a receipt the caller may already fetch,
   never in any API field; the owner may reverse it. Tests: `SaleReceiptPdfIT`.
+- Retail sales offline (issue #458, ADR-067, migration `V86`): `retail.offline.resolve` (administrators and the Supervisor, scoped
+  by branch) lists and resolves the clashes of sales recorded offline and lists, resends or discards the sales the server refused
+  (`/retail/sale-clashes`, `/retail/offline-failures`); a discard needs a reason and is audited (`retail.offline_sale.discarded`). Nobody decides a refused
+  sale they made themselves (403 `own_offline_sale`), except that a `tenant_admin` may discard their own with a second written
+  reason, audited `retail.offline_sale.self_discard` (ADR-067 decision 11 d).
+  Recording a sale offline adds no permission: it is `retail.sale.create`, and the device reports its own refused sales under it
+  (`/retail/offline-failures/mine` shows only the caller's). A sale sent with `recorded_offline` is not refused for short stock, an
+  item switched off, a saved price that changed since, or a price not above cost (no `retail.price.below_cost` check): each is
+  recorded as a clash. The price rules are those of an online sale (ADR-067 decision 11): a price other than the one saved on
+  the phone stands without a clash only for a holder of `retail.price.override` at the branch with a reason; any other is
+  recorded as charged with a `price_typed` clash and told to the holders of `retail.offline.resolve` at the branch, which is the control on a
+  seller who sets the flag by hand. A clash's words never carry a cost. A phone
+  tells the server, under `retail.sale.create`, which sales other people left queued on it (`/retail/offline-waiting`: ids,
+  branch, total, time and seller only, never posted), which only holders of `retail.offline.resolve` read. The device keeps the
+  catalogue and the outbox per business host and per person in IndexedDB and clears the catalogue on sign-out; lending data is never cached. Tests: `RetailOfflineSalesIT`.
 - Retail cash book (ADR-022, FR-RET-32, migration V34): the ten `retail.cashbook.*`,
   `retail.savings.*`, `retail.banking.record`, `retail.expense.*`, `retail.withdrawal.record` and
   `retail.advance.*` permissions are rows of the matrix above, seeded by the cash book migration.
@@ -575,6 +673,18 @@ Notes:
   `retail.catalogue.manage` (add, change), a pack sale uses `retail.sale.create` and a pack restock `retail.purchase.create`, each with the
   branch scope it had. A pack line is judged against `retail.price.below_cost` on its line total. A restock line's pack cost and the
   purchase response's `unit_cost_minor` are as sensitive as the existing `cost_minor` and are shown to the same callers.
+- Barcodes (issue #345, ADR-070, FR-RET-68, migration V87) add no permission, so the matrix is unchanged. Scanning and the lookup
+  `GET /retail/products/by-barcode/{code}` need `retail.stock.read` (sellers, storekeepers, administrators, in their branch scope for
+  `branch_id`). Adding and removing a barcode, making label codes and the Barcode labels page need `retail.catalogue.manage`
+  (administrators): a barcode decides which item a scan sells, so it is a catalogue change like a code or a pack. A seller who scans an
+  unknown code sees the message without "Add this barcode to a product". The label shows the selling price, which an administrator may
+  see. The camera stays under `Permissions-Policy: camera=(self)`; no CSP change (the fallback decoder is pure JavaScript, no WebAssembly).
+- Quick add (issue #632, ADR-101, FR-RET-79) adds no permission, so the matrix is unchanged. `POST /retail/quick-add` needs
+  `retail.catalogue.manage` (making an item is a catalogue change) and, for the stock it adds, `retail.stocktake.commit` at the chosen
+  branch, checked before anything is made; without a quantity the catalogue permission alone adds the item with no stock. A repeated name
+  is refused as on Items, and adding it anyway still needs `core.settings.manage` and a reason. Paying for the goods from the branch's cash
+  or mobile money (`paid_from`, issue #646) also needs `retail.purchase.create` at that branch, Buy stock's own permission, checked before
+  anything is made (403 `permission_denied`).
 - Corrections of entry mistakes (issues #351 and #352, ADR-044, FR-RET-44 to FR-RET-46) add no permission, so the matrix is unchanged. Voiding a
   restock (`POST /retail/purchases/{id}/void`) and reading one restock need `retail.purchase.create`; the void needs it at **every** branch the
   restock added stock to (403 `permission_denied` when one is outside the caller's scope), because it takes stock out of all of them. Correcting a
@@ -582,9 +692,23 @@ Notes:
   issue called it `retail.stock.manage`, which does not exist. Adding a product whose name another product of the same unit has needs
   `core.settings.manage` (administrators) and a reason, kept on the product and in the audit entry; `GET /retail/products/similar` needs
   `retail.catalogue.manage`. All three of those permissions are administrator-only today. No maker-checker action is registered for the void or
-  the correction (ADR-044 decision 5): a tenant approval threshold for them is a follow-up, so section 8.4 is unchanged. The audit entries
+  the correction (ADR-044 decision 5); ADR-091 (issue #343) later lets a business switch an approval on for the correction (section
+  8.4), and the void of a purchase stays without one. The audit entries
   `retail.purchase.voided`, `retail.stock.corrected` and `retail.product.updated` (with the old and new category) carry the reason.
-- `retail.controls.read` (issue #357, ADR-047, migration V66) opens the read-only Controls page: voids, returns, changed prices,
+- Discarding a draft stock count (`POST /retail/stocktakes/{id}/discard`, issue #656) adds no permission: it needs `retail.stocktake.commit`, and
+  the count is the caller's own or at a branch where they hold that permission (404 otherwise). The audit entry is `retail.stocktake.discarded`.
+- Listing a branch's unfinished counts (`GET /retail/stocktakes/unfinished`, issue #728) adds no permission: it needs
+  `retail.stocktake.commit` at that branch, the permission that saves or throws away a count there, so the screens offer Finish it and
+  Throw it away only to someone who may do both. My stock and the item's page name another shop holding an item ("0 here. 456 at Test
+  Store") only from the all-branches stock list, which the server cuts to the branches the caller may read with `retail.stock.read`;
+  the screen offers only shops in the caller's own branch list.
+- The entry warnings (issue #353, ADR-093, FR-RET-74 and FR-RET-75) add no permission, so the matrix is unchanged. `GET
+  /retail/products/{id}/entry-norms` and `POST /retail/entry-warnings/confirmations` need `retail.stock.read`, which every retail role
+  that enters stock or sales holds; the last selling price is in the norms only for a caller who sees prices (ADR-055), so a storekeeper
+  reads quantities only, and a seller who sees only their own figures gets the last price of their own sales. `GET /retail/products/name-hints` needs `retail.catalogue.manage`, the permission that adds items. A confirmation
+  only writes an audit row on an item of the caller's business, with the warning's kind and its numbers and no text from the
+  client; its branch is kept only when the caller works there.
+- `retail.controls.read` (issue #357, ADR-047, migration V66) opens the read-only Controls page: voids, returns, credit write-offs (ADR-087, valued at the amount owed, never the loss), changed prices,
   discounts, sales below cost and sales cancelled at once, by shop, by named person, by day and by reason. It names staff and compares
   them by a rate (a cancelled sale is credited to the person whose sale it was, the approver is shown apart and never ranked), so it is the tenant administrator's alone by default and a business gives it to an owner's or an auditor's custom
   role. It is a read (not money-moving), scoped by branch like every retail permission: a holder sees only the shops of its scope,
@@ -648,14 +772,29 @@ body, and compared digest to digest in constant time after the indexed lookup.
 
 `core.branches.manage` covers every branch change: create, rename, close, reopen and the stocking switch (FR-BR-01, FR-BR-07, FR-BR-08, issue #329, ADR-041). No permission was added for closing: only the tenant admin closes a branch, and the call is scoped to the caller's branches like the other branch routes (a branch outside the scope is 404). The retail refusals `branch_not_stocking` and `branch_does_not_sell` (a Store, FR-RET-50, ADR-048, issue #366) are not permissions: they apply to every caller, administrators included. Making a branch a Store is the same `core.branches.manage` call; no permission was added.
 
+`core.billing.read` (migration V92, issue #480, ADR-075) is the business's Plan and billing page and the receipts of its subscription payments, read only: the administrators hold it, the Owner among them (ADR-062); payments are recorded only by the platform operator. The overdue banner (`GET /billing/notice`) is open to every signed-in member of staff, since the whole business keeps working through the grace period. The operator's grace period, words on how to pay and list of businesses due for suspension are read with `platform.tenants.read` and changed with `platform.tenants.manage`, on the platform host only; nothing suspends a business but the operator's own suspend.
+
 `core.settings.manage` also covers the tenant's two-step sign-in policy (`require_mfa_all_staff`, `require_mfa_roles`, `mfa_grace_days` in `PATCH /settings`, FR-IAM-16, issue #348, ADR-046). No permission was added: the people who may change the settings may change who must use a second factor, and `core.settings.read` (the tenant admin, branch manager, accountant and auditor) may read it. A user's own set-up of two-step sign-in (`/auth/staff/mfa/enrol` and `/mfa/confirm`) is open to every signed-in staff user.
+
+In-app feedback (issue #447, ADR-065) adds no permission, so the matrix is unchanged: sending feedback and reading one's own (`/feedback`) is
+open to every signed-in member of staff, like `/me`, and an administrator does not read a colleague's; the operator's list and screenshot
+read need `platform.tenants.read` and a status change or a linked issue `platform.tenants.manage`, on the platform host only. A screenshot's
+`DocumentAccess` lets only its sender and an operator read it (a refusal is a 404). The operator reads across businesses only through
+the definer functions of `V80`, which refuse a tenant-bound transaction.
+
+The Owner's own plan (issue #472, ADR-073) adds no permission, so the matrix is unchanged: the Plan and modules card (`GET /plan`)
+needs `core.settings.manage`, so administrators see it, and asking for a module, stopping one, cancelling and undoing need it too and
+are then refused to anyone but the Owner (403 `owner_only`, ADR-062); stopping and cancelling also ask for the owner step-up. The end
+date (`GET /plan/status`) is open to every signed-in member of staff. The operator's lists need `platform.tenants.read`, an approval or
+a decline `platform.tenants.manage` (an approval also the operator's own authenticator code), on the platform host only. After a
+cancellation's end date the business is read only with `subscription_ended`, as a suspended one is with `tenant_suspended`.
 
 ### 8.3.3 Enforcement
 
 - Every route declares exactly one permission (`@RequiresPermission`), or is explicitly marked
   public (`@PublicEndpoint`), or open to any signed-in principal of one kind
-  (`@AuthenticatedEndpoint`, for `/me`, the caller's own guided tour progress, sign-out and the
-  caller's own recovery codes). A route
+  (`@AuthenticatedEndpoint`, for `/me`, the caller's own guided tour progress, sign-out, the
+  caller's own recovery codes and the caller's own feedback, `/feedback`, ADR-065). A route
   test enumerates all routes and fails on any undeclared route, and `PermissionMatrixIT` proves
   that for every route a principal holding every permission except the route's own gets 403
   (FR-IAM-03).
@@ -688,8 +827,10 @@ CHECK constraint as well as the service.
 | Action type | Maker permission | Checker permission | Threshold applies |
 |---|---|---|---|
 | `loan_disbursement` | `lending.disbursements.request` | `lending.disbursements.authorise` | Yes |
+| `loan_bring_in` | `lending.loans.bring_in` | `lending.disbursements.authorise` | No (always checked) |
+| `loan_bring_in_reversal` | `lending.loans.bring_in` | `lending.disbursements.authorise` | No (always checked) |
 | `repayment_reversal` | `lending.repayments.reverse_request` | `lending.repayments.reverse_approve` | No (always checked) |
-| `charge_waiver` | `lending.charges.waive_request` | `lending.charges.waive_approve` | Yes |
+| `charge_waiver` | `lending.charges.waive_request` | `lending.charges.waive_approve`; for a fee or interest waiver also `lending.charges.waive_fee_interest` (the accountant's, issue #265) | Yes, on everything waived on the loan with the request; a fee or interest waiver asked by someone without `lending.charges.waive_fee_interest` always waits |
 | `loan_write_off` | `lending.loans.write_off_request` | `lending.loans.write_off_approve` | No |
 | `loan_restructure` | `lending.loans.restructure_request` | `lending.loans.restructure_approve` | No |
 | `manual_journal` | `core.journals.create` | `core.journals.approve` | No |
@@ -710,8 +851,11 @@ CHECK constraint as well as the service.
 | `retail_sale_return_void` | `retail.sale.return` | `retail.sale.return` | Reads the threshold of `retail_sale_return`: needed for a return that was approved or is worth it alone; none while no threshold is set |
 | `retail_purchase_order` | `retail.purchase.create` | `retail.purchase.approve` | Yes, on the order's total, and no checker at all while no threshold is set; it is the send of a draft order |
 | `retail_sale_write_off` | `retail.credit.write_off` | `retail.credit.write_off` | Yes, on the unpaid amount written off; with no positive threshold every write-off needs a second administrator when the tenant has two or more administrators who count (active, locked, or removed or deactivated within 30 days), and one alone may write off alone; any write-off done without a second person, even below a raised threshold, is flagged in the audit row (`only_one_active_administrator` or `below_threshold`) with the number told, and the administrators who count other than the maker are emailed (for a sole administrator a notice to themselves; accepted risk, ADR-043); default rule awaiting confirmation (issue #340) |
+| `retail_sale_void` | `retail.sale.void` | `core.settings.manage` | Yes, on the sale's total, only while the approval rules switch it on (off by default, ADR-091) |
+| `retail_stock_correction` | `retail.stocktake.commit` | `core.settings.manage` | Yes, on the value of the difference at the branch's average cost, only while the approval rules switch it on (off by default, ADR-091) |
+| `retail_expense` | `retail.expense.record` | `core.settings.manage` | Yes, on the amount, only while the approval rules switch it on (off by default, ADR-091) |
 
-Registered so far: `unallocated_allocation`, `unallocated_refund` and `gateway_payment_reversal` (#224, `core.payments`, ADR-035 amendment of slice A5; migration `V84` adds the checker permission `core.payments.allocate_approve` for the tenant admin, branch manager and accountant, and the `system` user kind that makes the platform's own reversal requests); `collateral_release` (#13); `retail_sale_write_off` (#340, `retail.sales`, ADR-043: writing off the unpaid part of a credit sale, with the same open default as returns); `retail_purchase_order` (#198, `retail.purchasing`, ADR-033: sending a purchase order, with the same open default as returns); `retail_sale_return` and `retail_sale_return_void` (#201, `retail.sales`, ADR-033: unlike the lending actions an unset threshold means no checker, so the
+Registered so far: `unallocated_allocation`, `unallocated_refund` and `gateway_payment_reversal` (#224, `core.payments`, ADR-035 amendment of slice A5; migration `V122` adds the checker permission `core.payments.allocate_approve` for the tenant admin, branch manager and accountant, and the `system` user kind that makes the platform's own reversal requests); `collateral_release` (#13); `retail_sale_write_off` (#340, `retail.sales`, ADR-043: writing off the unpaid part of a credit sale, with the same open default as returns); `retail_purchase_order` (#198, `retail.purchasing`, ADR-033: sending a purchase order, with the same open default as returns); `retail_sale_return` and `retail_sale_return_void` (#201, `retail.sales`, ADR-033: unlike the lending actions an unset threshold means no checker, so the
 action pends only at or above a threshold the tenant sets); `loan_disbursement`, `repayment_reversal` and
 `loan_write_off` (#108, `lending.loans`, ADR-026); `investment_funding`, `investment_early_withdrawal`
 and `investment_reversal` (#152, `lending.investments`, ADR-031). Increment 10 adds two checker
@@ -730,6 +874,17 @@ table above. It needed no new permission: freeze, unfreeze and reactivation of a
 actions with a reason that need `lending.savings.withdraw_approve`, the checker permission of
 `savings_withdrawal`; the two savings reports need `lending.reports.members`. A withdrawal's checks
 run again when the checker approves, on the account as it is then.
+
+The approval rules (issue #343, ADR-091, `GET` and `PUT /settings/approvals`, `core.settings.manage` to change them with the
+administrator's own code or password, audited as `core.settings.approval_rules_changed`) list the actions of the modules a business
+uses. Every lending action always asks; only its amount changes. Each retail action is a switch: customer returns and purchase
+orders ask while their amount is above 0 unless switched, a credit write-off asks by ADR-043's rule unless switched off (it is still
+flagged and told), and sale voids, stock corrections and expenses ask only when switched on. Switched on, 0 means every one asks, except a credit write-off, whose 0 keeps ADR-043's rule (a second administrator only while two or more count).
+`Approvals.rule` is the one reading of a rule; a module that read it passes it to `Approvals.request`, so the rule is read once and
+a switch saved in between never runs a request the module answers as waiting, and a caller that read none has the rule read there,
+where a switched-off action runs at once (audited as `core.approval.executed_switched_off`). The checker of the three new retail actions is an administrator, so one seller never
+approves another's void or expense. A price below cost is not an approval: only a holder of `retail.price.below_cost` may sell at
+or below cost.
 
 Action types are contributed by the modules that own them (ADR-015): each is a registered
 `ApprovalAction` whose maker and checker permissions must equal its row above. Every
@@ -854,6 +1009,11 @@ GitHub Actions deploy secrets live in the `staging` and `production` environment
   the documents module offers a separate `publicAssetMeta` and `publicAssetBytes` that return a
   document only when its subject type is `core.tenant` and its subject is the current tenant, and an
   architecture test allows only `core.tenancy` to call them.
+- A shop's own logo (FR-BR-09, ADR-068) is set and removed with `core.branches.manage` (the owner and the administrators, in
+  their branch scope) and stored like the business logo, as a `core.tenant` document of the tenant, so the public route reads it
+  through the same `publicAssetMeta` and `publicAssetBytes`. `GET /branches/{branch_id}/logo` is public for the reason the business
+  logo is (an image tag sends no token) and answers with exactly the headers of `GET /branding/logo` below; the branch is read under
+  row-level security for the tenant of the host, so a branch of another business is a 404.
 - Public endpoints for branding (`GET /branding`, `GET /branding/logo`) serve data that is public
   by design, resolved from the host only (never a parameter or a header in production; an unknown
   host is 404 `unknown_tenant`, so no tenant is revealed or confused). The logo route never

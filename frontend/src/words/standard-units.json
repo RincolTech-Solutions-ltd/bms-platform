@@ -1,0 +1,7 @@
+{
+  "about": "Issue #709, ADR-110: the standard units every shop gets, in the order the pickers show them, the packages of a fixed count, and the package words: a unit named by one is a package, never a new item's single unit. The server reads this very file (StandardUnits, RetailCatalogue.PACKAGE_WORDS) and the PWA imports it (the Units page, the retail mock). Roll is a standard package that may also be a single unit (tape, tissue and wire are sold by the roll), so it is not a package word.",
+  "single_units": ["Piece", "Pair", "Set", "Metre", "Kg", "Gram", "Litre", "Ml"],
+  "packages": ["Dozen", "Box", "Carton", "Packet", "Bag", "Roll", "Bale", "Crate", "Bundle"],
+  "fixed_counts": { "dozen": 12 },
+  "package_words": "((box|carton|dozen|pack|packet|bag|sack|crate|case|tray|bundle|bale)(e?s)?|(ctn|pkt)s?|bx|doz|dz)( of \\d+.*)?|sets? of \\d+.*"
+}

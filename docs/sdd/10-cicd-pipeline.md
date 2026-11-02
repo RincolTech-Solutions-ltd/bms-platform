@@ -57,6 +57,8 @@ that blocks the LAN and overlay network. Tools the host lacks run as containers
 (`rhysd/actionlint`, `koalaman/shellcheck`); JSON handling uses `python3`. One job runs at a time
 across both repositories, so a job may queue.
 
+`deploy.yml` can also be run by hand from `main` (`gh workflow run Deploy --ref main`, issue #476): it builds and points staging exactly as a push does, and a manual run from any other branch does nothing. It exists because on 22 Oct 2026 two pushes to main (#460, #469) fired no workflow at all.
+
 `deploy.yml` runs on a separate runner, `bms-deploy-laptop` (ADR-040 and its amendment of 2026-10-18, which supersede the
 hosted-runner rule of ADR-018 finding H1 for these jobs): a runner on Jerome's laptop (WSL Ubuntu) under its own user
 `bmsdeploy` (uid 1006), beside the other runner users of that machine and none of them, in the organisation runner group `bms-deploy`, which is visible to
@@ -71,7 +73,17 @@ internet; it is memory- and CPU-capped so the other users of that machine are no
 elsewhere (below). `deploy-production` is the one job that stays on `ubuntu-latest`, because it holds the
 production SSH key and only runs for a release tag after the production VM exists.
 
-Runs on every pull request and every push to `main`.
+Runs on every pull request and every push to `main`. The workflow has no `paths-ignore` (issue #549): branch
+protection requires the Backend, Frontend and Delivery checks, and a workflow skipped by a path filter never reports
+them, so a pull request that changed only prose stayed blocked for ever. Instead each of the three jobs checks out with
+`fetch-depth: 2` and first runs `.github/scripts/prose_only.py` (its unit test runs in the Delivery job): when the pull
+request's merge commit changes only `docs/specs/`, `docs/runbooks/`, `docs/ui/` or `CONTEXT.md`, every later step is
+skipped and the job reports success in seconds on the same runner; any other file, a push to `main` or a manual run
+does the full job. `docs/sdd`, `docs/api`, `docs/adr` and `AGENTS.md` always run the jobs, because tests read them.
+
+The integration tests start no db-scheduler (issue #530): the test profile sets `db-scheduler.enabled=false`, so no
+recurring task ticks on the wall clock across other tests' tenants, and `RecurringJobsOffIT` fails if a scheduler
+starts in the shared test context. A test that needs one turns it on with `db-scheduler.enabled=true`.
 
 | Job | Steps | Proves |
 |---|---|---|
@@ -213,15 +225,20 @@ Actions run shows the pointer move; staging's own result is in `state/history.lo
 | 3 | Refuse a release built before `state/current_created` unless `state/allow_downgrade` exists (ADR-018 finding L1) | Exit 1, `refused-downgrade` recorded; nothing changed |
 | 4 | Start PostgreSQL if needed; wait until healthy | Exit non-zero; nothing changed |
 | 5 | `docker compose run --rm migrate` (Flyway as `bms_owner`) | Exit 1; old containers still serving; `failed-migration` recorded |
-| 6 | `docker compose up --no-deps` only the named application services (`api`, `web`, `proxy`, plus `cloudflared` on staging via `BMS_EDGE_SERVICES`): `postgres` is never in this list, so it is never recreated by an application deploy, whatever else changed in `.env` (ADR-018 finding M4) | |
+| 6 | First run the outgoing `web` image (its local ID, `pull_policy: never`, 60 s at most) once as `keep-assets`, which prunes the `web_assets` volume of files that left the live build more than 14 days ago and copies its hashed files in (ADR-078); then switch only the named application services (`api`, `web`, `proxy`, plus `cloudflared` on staging via `BMS_EDGE_SERVICES`): `postgres` is never in this list, so it is never recreated by an application deploy, whatever else changed in `.env` (ADR-018 finding M4). `api` and `web` switch without a gap (ADR-083): before web, the incoming web image also runs `keep-assets` so the old container can serve the new build's hashed files during the overlap (if it fails, web restarts in place); a new container starts beside the old one (`up --no-deps --no-recreate --scale <service>=2`), and once its health check passes the old one gets its graceful stop and is removed; a service whose container already runs the image asked for goes to Compose's own `up`, a no-op unless `.env` changed it. A second api starts only while its own memory limit plus 64 MB is free on the host and below `bms.slice`'s `MemoryHigh` (or `BMS_ROLL_MIN_FREE_MB`, a measured start-up peak); otherwise the api restarts in place. The proxy keeps its image when its caddy binary and Caddyfiles are unchanged (Compose's `up` still applies a settings change); the others take `docker compose up --no-deps` | A failed `keep-assets` is a warning only; the switch goes on. A new `api` or `web` that is not healthy within `READY_TIMEOUT` is removed and the old one keeps serving; go to 8 |
 | 7 | Wait up to `READY_TIMEOUT` (240 s) for the API health check (`/readyz`: database and migrations at head), and for `web` and `api` to answer through the proxy container | Go to 8 |
-| 8 | Switch back to the previous tag's already-verified digests, wait for it to be ready, record `failed-health` and `rolled-back-to`, exit 1 | Record `rollback-unhealthy`, exit 1; follow `docs/runbooks/rollback.md` |
+| 8 | Keep the failed build's hashed web files as in 6 (20 s at most), then switch back to the previous tag's already-verified digests the same way (no gap; a service whose new container was refused in 6 is already on them), wait for it to be ready, record `failed-health` and `rolled-back-to`, exit 1 | Record `rollback-unhealthy`, exit 1; follow `docs/runbooks/rollback.md` |
 | 9 | Write the tag and its build time to `state/current_tag` and `state/current_created` (temp file, `sync`, rename, so a power loss never leaves a truncated file, ADR-018 finding L7); append `deployed` to `state/history.log` | |
 
 Migrations are never reversed on rollback, so they are expand and contract (chapter 6 section
 6.9). Re-running the script with the live tag is a no-op that passes the gate. A deploy
-recreates the API container, so there is a short outage while the JVM starts (NFR-AVL-03
-allows 30 seconds; measured locally at under 10).
+no longer stops the API or the PWA (ADR-083): the old container serves until the new one is
+healthy, the proxy finds both through Docker's DNS and moves a refused connection to the other,
+and `deploy/tests/no-gap-test.sh` proves in CI that requests keep getting 200 within 3 seconds
+through a switch, a refused release and a rollback. A gap is left only when the api restarts in
+place for lack of memory or the proxy itself changes; Caddy then holds a request for up to 30
+seconds, and the PWA says the app is updating and retries a keyed write once (NFR-AVL-03 allows
+30 seconds).
 
 ## 10.8 Security of the pipeline
 

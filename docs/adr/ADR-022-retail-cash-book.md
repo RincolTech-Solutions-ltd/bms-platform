@@ -7,7 +7,8 @@ It becomes Accepted on merge of the pull request that carries it, and the accoun
 decisions 3 to 7 stays provisional until the Owner confirms it (open questions 1, 2 and 4 at the end are the build gate; the rest have a stated default).
 Decisions 4, 5, 6 and 13 name their open questions where they depend on one.
 Completes the cash book that ADR-020 left out of the first release ("pending ADR-022"). Amends
-nothing in ADR-020.
+nothing in ADR-020. Decision 11 is amended by ADR-080 (issue #538): the suggestion is worked out from the day's profit less its
+expenses, a savings amount may not exceed that, and the overwrite reason is optional.
 
 ## Context
 
@@ -42,7 +43,7 @@ only retail has this need.
 1. **The cash book is a sub-domain of the retail module**: the package `retail.cashbook`, tables
    prefixed `retail_`, copying the shape of `lending.members` and of `retail.sales`. It uses core
    modules only and never touches lending packages. Its declared `allowedDependencies` (Spring
-   Modulith, `ModularityTest`) are exactly: `kernel`, `core.tenancy`, `core.audit`, `core.ledger`,
+   Modulith, `ModularityTest`) are exactly: `kernel`, `core.tenancy`, `core.approvals` (the expense approval, added by #343, ADR-091), `core.audit`, `core.ledger`,
    `core.documents`, `core.operations` (the shared Idempotency, added by #177), `retail.sales` (the day's cash sales and payments), `retail.purchasing` (cash
    restocks), `retail.reports` (the daily profit, read only for callers with `retail.profit.read`) and
    `retail.stock` (the posting helpers; the idempotency helper moved to `core.operations` in #177); it must not depend on `lending.*`, and

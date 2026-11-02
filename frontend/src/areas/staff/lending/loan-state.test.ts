@@ -1,5 +1,40 @@
 import { describe, expect, it } from 'vitest';
-import { allocationSummary, localDate, money, parseAmount, statusBadge, txnWords, words } from './loan-state';
+import { allocationSummary, draftsFirst, loanStatusWords, money, onToday, parseAmount, statusBadge, txnWords, words } from './loan-state';
+
+// Issue #704: on a member's Loans list a draft says it was not sent, and the newest draft is first.
+describe('a member\'s drafts', () => {
+  it('says a draft is not sent yet and puts drafts first, newest first', () => {
+    expect(loanStatusWords('draft')).toBe('Draft, not sent yet');
+    expect(loanStatusWords('written_off')).toBe('Written off');
+    const items = [
+      { id: 'a', status: 'active', created_at: '2026-10-01T08:00:00Z' },
+      { id: 'b', status: 'draft', created_at: '2026-10-29T17:48:00Z' },
+      { id: 'c', status: 'draft', created_at: '2026-10-29T17:58:00Z' },
+    ];
+    expect(draftsFirst(items).map((l) => l.id)).toEqual(['c', 'b', 'a']);
+  });
+});
+
+// Issue #670: a money form's draft read back on a later day does not keep that day's date.
+describe('a restored draft date', () => {
+  const draft = { amount: '50000', valueDate: '2026-10-28', startedOn: '2026-10-28' };
+
+  it('keeps a draft started today, with a date it chose on or before today', () => {
+    expect(onToday(draft, 'valueDate', '2026-10-28')).toBe(draft);
+    expect(onToday({ ...draft, valueDate: '2026-10-20' }, 'valueDate', '2026-10-28').valueDate).toBe('2026-10-20');
+  });
+
+  it('starts the date again from today for a draft from an earlier day, keeping the rest', () => {
+    expect(onToday(draft, 'valueDate', '2026-10-29')).toEqual({ amount: '50000', valueDate: '2026-10-29', startedOn: '2026-10-29' });
+    expect(onToday({ ...draft, valueDate: '2026-10-20' }, 'valueDate', '2026-10-29').valueDate).toBe('2026-10-29');
+  });
+
+  it('treats a draft kept without startedOn as from an earlier day, and clamps a date after today', () => {
+    const old: { amount: string; valueDate: string; startedOn?: string } = { amount: '1', valueDate: '2026-10-01' };
+    expect(onToday(old, 'valueDate', '2026-10-29')).toEqual({ amount: '1', valueDate: '2026-10-29', startedOn: '2026-10-29' });
+    expect(onToday({ ...draft, valueDate: '2026-10-29' }, 'valueDate', '2026-10-28').valueDate).toBe('2026-10-28');
+  });
+});
 
 describe('amounts', () => {
   it('parses what a person typed into integer minor units above zero', () => {
@@ -55,10 +90,5 @@ describe('words and dates', () => {
     expect(txnWords('restructure_in')).toBe('Restructure in');
     expect(statusBadge('written_off')).toContain('badge-danger');
     expect(statusBadge('draft')).toBe('badge');
-  });
-
-  it('gives the local calendar date', () => {
-    expect(localDate(new Date(2026, 9, 6, 23, 30))).toBe('2026-10-06');
-    expect(localDate(new Date(2026, 0, 2, 0, 5))).toBe('2026-01-02');
   });
 });

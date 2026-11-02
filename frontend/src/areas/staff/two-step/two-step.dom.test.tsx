@@ -7,6 +7,10 @@ import type { Me, TenantSettings } from '../../../api/client';
 import { mockMe } from '../../../api/retail-mock';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
+import { DoneToast } from '../retail/toast';
+
+/** A button that may be pressed: not disabled, and not a primary button whose form is still not ready (issue #526). */
+const ready = (b: unknown) => !(b as HTMLButtonElement).disabled && (b as HTMLElement).getAttribute('data-not-ready') !== 'true';
 
 // The Two-step sign-in screens in a browser (issue #348; ADR-046) with the API replaced: the saved choice is the starting point, a
 // choice is read back in plain words before anything is sent, one tap sends one request, roles need at least one tick, someone who may
@@ -49,6 +53,7 @@ function shell(permissions: string[] = ['core.settings.manage', 'core.settings.r
         <StaffContext.Provider value={{ me, branch: null }}>
           <TwoStepPolicyScreen />
         </StaffContext.Provider>
+        <DoneToast />
       </QueryClientProvider>
     </RouterContextProvider>,
   );
@@ -101,7 +106,7 @@ describe('the policy screen', () => {
     expect(twoStepApi.save.mock.calls[0]?.[0]).toBe(4);
     expect(twoStepApi.save.mock.calls[0]?.[1]).toEqual({ policy: 'everyone', roles: [], graceDays: 14 });
     expect(twoStepApi.save.mock.calls[0]?.[2]).toEqual({ policy: 'off', roles: [], graceDays: 14 });
-    expect(await screen.findByText('Saved. People who have not set it up have until the end of 3 Nov 2026.')).toBeTruthy();
+    expect(await screen.findByText('Saved, due by 3 Nov 2026')).toBeTruthy();
   });
 
   it('lets the grace period be none, and says so', async () => {
@@ -115,7 +120,7 @@ describe('the policy screen', () => {
     fireEvent.click(button('Yes, save this'));
     await waitFor(() => expect(twoStepApi.save).toHaveBeenCalledTimes(1));
     expect(twoStepApi.save.mock.calls[0]?.[1]).toMatchObject({ graceDays: 0 });
-    expect(await screen.findByText('Saved. People who have not set it up are asked at their next sign-in.')).toBeTruthy();
+    expect(await screen.findByText('Saved, asked at sign in')).toBeTruthy();
   });
 
   it('needs at least one role when roles are chosen, and sends the ones ticked', async () => {
@@ -126,7 +131,7 @@ describe('the policy screen', () => {
     expect(await screen.findByText('Tick at least one role.')).toBeTruthy();
     expect(button('Review and save').disabled).toBe(true);
     fireEvent.click(screen.getByLabelText('Cashier'));
-    expect(button('Review and save').disabled).toBe(false);
+    expect(ready(button('Review and save'))).toBe(true);
     fireEvent.click(button('Review and save'));
     expect(screen.getByText('People with the role Cashier will be asked to use it.')).toBeTruthy();
     expect(screen.queryByText('You are covered too, so you will be asked as well.')).toBeNull();
@@ -158,14 +163,14 @@ describe('the policy screen', () => {
     expect(screen.getByText(/Nobody will be required to use it/)).toBeTruthy();
     // Relaxing the rule needs the administrator's own proof: nothing is sent until it is typed.
     const yes = button('Yes, make it optional');
-    expect(yes.disabled).toBe(true);
+    expect(yes.getAttribute('data-not-ready')).toBe('true');
     fireEvent.change(screen.getByLabelText('Your own password'), { target: { value: 'Test-Password-1' } });
-    expect(yes.disabled).toBe(false);
+    expect(yes.getAttribute('data-not-ready')).toBeNull();
     fireEvent.click(yes);
     await waitFor(() => expect(twoStepApi.save).toHaveBeenCalledTimes(1));
     expect(twoStepApi.save.mock.calls[0]?.[1]).toMatchObject({ policy: 'off' });
     expect(twoStepApi.save.mock.calls[0]?.[3]).toEqual({ password: 'Test-Password-1' });
-    expect(await screen.findByText('Saved. Two-step sign-in is optional again.')).toBeTruthy();
+    expect(await screen.findByText('Saved, now optional')).toBeTruthy();
   });
 
   it('narrowing keeps the deadline: the review says the date does not change, and no grace period is sent', async () => {
@@ -196,12 +201,45 @@ describe('the policy screen', () => {
     fireEvent.click(button('Yes, save this'));
     expect(await screen.findByRole('alert')).toBeTruthy();
     expect(screen.getByText(/Someone else changed the settings/)).toBeTruthy();
-    expect(button('Yes, save this').disabled).toBe(false);
+    expect(ready(button('Yes, save this'))).toBe(true);
+  });
+
+  // Issue #377: the server's locked recheck found a relaxation the screen did not (the settings changed meanwhile).
+  it('asks for the proof when the server says it is needed after all, and sends it on the next save', async () => {
+    twoStepApi.save
+      .mockRejectedValueOnce(new TwoStepError('The settings changed while you were looking. Confirm that it is you below, then save again.', 422, 'proof_required'))
+      .mockResolvedValueOnce({ ...OFF, version: 6, require_mfa_all_staff: true });
+    shell();
+    await waitFor(() => expect(radio(/Optional/).checked).toBe(true));
+    fireEvent.click(radio(/Required for everyone/));
+    fireEvent.click(button('Review and save'));
+    expect(screen.queryByLabelText('Your own password')).toBeNull();
+    fireEvent.click(button('Yes, save this'));
+    expect(await screen.findByText(/Confirm that it is you below/)).toBeTruthy();
+    expect(twoStepApi.settings.mock.calls.length).toBeGreaterThan(1);
+    const yes = button('Yes, save this');
+    expect(yes.getAttribute('data-not-ready')).toBe('true');
+    fireEvent.change(screen.getByLabelText('Your own password'), { target: { value: 'Test-Password-1' } });
+    fireEvent.click(yes);
+    await waitFor(() => expect(twoStepApi.save).toHaveBeenCalledTimes(2));
+    expect(twoStepApi.save.mock.calls[0]?.[3]).toEqual({});
+    expect(twoStepApi.save.mock.calls[1]?.[3]).toEqual({ password: 'Test-Password-1' });
+  });
+
+  it('does not ask for the proof after a refusal that is not about it', async () => {
+    twoStepApi.save.mockRejectedValue(new TwoStepError('Someone else changed the settings.', 409, 'version_conflict'));
+    shell();
+    await waitFor(() => expect(radio(/Optional/).checked).toBe(true));
+    fireEvent.click(radio(/Required for everyone/));
+    fireEvent.click(button('Review and save'));
+    fireEvent.click(button('Yes, save this'));
+    expect(await screen.findByText(/Someone else changed the settings/)).toBeTruthy();
+    expect(screen.queryByLabelText('Your own password')).toBeNull();
   });
 
   it('shows no choices to someone who may not change the settings', () => {
     shell(['core.settings.read']);
-    expect(screen.getByText('You do not have access to this page.')).toBeTruthy();
+    expect(screen.getByText(/^You do not have access to this page\. The owner or an administrator/)).toBeTruthy();
     expect(screen.queryByRole('radio')).toBeNull();
     expect(twoStepApi.settings).not.toHaveBeenCalled();
   });
@@ -277,12 +315,12 @@ describe('your own set-up', () => {
     own({ mfa_due_by: '2026-11-03T21:00:00Z' });
     expect(screen.getByText(/Your business asks you to set it up by 3 Nov 2026/)).toBeTruthy();
     // Starting asks for the person's own password first: nothing is sent without it.
-    expect(button('Turn on two-step sign-in').disabled).toBe(true);
+    expect(button('Turn on two-step sign-in').getAttribute('data-not-ready')).toBe('true');
     fireEvent.change(screen.getByLabelText('Your password, to confirm it is you'), { target: { value: 'Test-Password-1' } });
     fireEvent.click(button('Turn on two-step sign-in'));
     await waitFor(() => expect(twoStepApi.start).toHaveBeenCalledWith('Test-Password-1'));
     const code = (await screen.findByLabelText('6 digit code from the app')) as HTMLInputElement;
-    expect(button('Turn on two-step sign-in').disabled).toBe(true);
+    expect(button('Turn on two-step sign-in').getAttribute('data-not-ready')).toBe('true');
     fireEvent.change(code, { target: { value: '12a3456' } });
     expect(code.value).toBe('123456');
     fireEvent.click(button('Turn on two-step sign-in'));
@@ -291,7 +329,7 @@ describe('your own set-up', () => {
     expect(screen.getByText('AAAA-1111')).toBeTruthy();
     expect((button('Done') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByLabelText(/I have saved these codes/));
-    expect((button('Done') as HTMLButtonElement).disabled).toBe(false);
+    expect(ready((button('Done') as HTMLButtonElement))).toBe(true);
   });
 
   it('shows a wrong code in plain words and lets the person try again', async () => {
@@ -303,7 +341,7 @@ describe('your own set-up', () => {
     fireEvent.change(await screen.findByLabelText('6 digit code from the app'), { target: { value: '000000' } });
     fireEvent.click(button('Turn on two-step sign-in'));
     expect(await screen.findByText(/That code is not right/)).toBeTruthy();
-    expect(button('Turn on two-step sign-in').disabled).toBe(false);
+    expect(button('Turn on two-step sign-in').getAttribute('data-not-ready')).toBeNull();
   });
 
   it('blocks a person who must set it up now: no way out, and the reason is in plain words', () => {

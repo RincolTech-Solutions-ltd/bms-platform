@@ -6,6 +6,7 @@ import com.rincoltech.bms.core.operations.Idempotency;
 import com.rincoltech.bms.core.operations.Idempotency.Outcome;
 import com.rincoltech.bms.core.tenancy.Branches;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
+import com.rincoltech.bms.core.tenancy.ModuleSettingsChangeGuard;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.BusinessClock;
@@ -72,7 +73,7 @@ import org.springframework.transaction.annotation.Transactional;
  * source cancels it (the stock goes back at the original cost and the source entry is reversed).
  */
 @Service
-class TransferService {
+class TransferService implements ModuleSettingsChangeGuard {
 
     static final String TRANSFER = "retail.transfer";
     static final String TRANSFER_VOID = "retail.transfer_void";
@@ -132,7 +133,9 @@ class TransferService {
     }
 
     private Transfer record(TransferRequest r) {
-        boolean dispatchOnly = capabilities.enabled(RetailCapabilities.TRANSFER_RECEIPT);
+        // Read under a shared lock on the settings row (issue #239): the capability cannot be switched off until this
+        // transfer, in transit or not, has committed, and the switch-off check then sees it.
+        boolean dispatchOnly = capabilities.enabledHeld(RetailCapabilities.TRANSFER_RECEIPT);
         // A branch that keeps no goods may still be the source, so stock stranded there can leave (ADR-041).
         UUID from = branchContext.resolve(PERMISSION, r.fromBranchId(), "from_branch_id");
         LocalDate today = clock.today(tenant.profile().timezone());
@@ -145,7 +148,11 @@ class TransferService {
         } else {
             to = branches.findActive(r.toBranchId()).orElse(null);
             if (to == null) {
-                problems.add(new FieldProblem("to_branch_id", "unknown_branch", "No such active branch."));
+                // Any open branch of the business may receive, in or out of the caller's scope (issue #257).
+                problems.add(new FieldProblem(
+                        "to_branch_id",
+                        "unknown_branch",
+                        "Choose an open branch of this business to move the stock to."));
             } else {
                 branchContext.requireStocks(to.id(), "to_branch_id");
             }
@@ -153,6 +160,21 @@ class TransferService {
         if (on.isAfter(today)) {
             problems.add(new FieldProblem("transfer_date", "invalid", "A transfer cannot be dated in the future."));
         }
+        // ADR-079: the balance rows of both branches are locked in branch and product order, the order the movements
+        // take them, before the source's average is read, so a delivery committing meanwhile cannot leave the transfer
+        // at the average it replaced, and two opposite transfers still cannot deadlock.
+        List<UUID> known = r.lines().stream()
+                .map(TransferLineRequest::productId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .sorted()
+                .filter(id -> catalogue.find(id).isPresent())
+                .toList();
+        UUID toId = to == null ? null : to.id();
+        java.util.stream.Stream.of(from, toId)
+                .filter(java.util.Objects::nonNull)
+                .sorted()
+                .forEach(branch -> known.forEach(product -> stock.lock(branch, product)));
         Set<UUID> seen = new HashSet<>();
         List<NewLine> lines = new ArrayList<>();
         for (int i = 0; i < r.lines().size(); i++) {
@@ -179,13 +201,9 @@ class TransferService {
                 problems.add(new FieldProblem("lines[" + i + "].qty", "invalid", "At most three decimal places."));
                 continue;
             }
-            lines.add(new NewLine(
-                    UUID.randomUUID(),
-                    i + 1,
-                    p.id(),
-                    l.qty(),
-                    p.costMinor(),
-                    Quantities.value(l.qty(), p.costMinor())));
+            // ADR-079: stock leaves at the source's average and that cost re-averages the destination when it arrives.
+            long cost = stock.averageCost(from, p.id());
+            lines.add(new NewLine(UUID.randomUUID(), i + 1, p.id(), l.qty(), cost, Quantities.value(l.qty(), cost)));
         }
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);
@@ -645,17 +663,17 @@ class TransferService {
     }
 
     /**
-     * Refuses switching the {@code transfer_receipt} capability off while any transfer is on its
-     * way, so no dispatched stock is left with a destination that can no longer receive it. Called
-     * before a capability change is saved: {@code proposed} is the partial change, in group keys.
+     * Refuses switching the {@code transfer_receipt} capability off, by the flag or by a kind of
+     * business without it, while any transfer is on its way, so no dispatched stock is left with a
+     * destination that can no longer receive it. Runs inside the capability change, under the
+     * settings row lock that {@link #record} holds shared, so a dispatch either committed before
+     * this reads the transfers or starts after the change and sees the capability off (issue #239).
      */
-    @Transactional(readOnly = true)
-    void guardSwitchOff(Map<String, Object> proposed) {
-        if (!capabilities.enabled(RetailCapabilities.TRANSFER_RECEIPT)) {
-            return;
-        }
-        Object flag = proposed.get(RetailCapabilities.TRANSFER_RECEIPT);
-        boolean off = Boolean.FALSE.equals(flag) || ("shop".equals(proposed.get("profile")) && flag == null);
+    @Override
+    public void check(String moduleKey, Map<String, Object> before, Map<String, Object> after) {
+        boolean off = RetailCapabilities.MODULE.equals(moduleKey)
+                && Boolean.TRUE.equals(before.get(RetailCapabilities.TRANSFER_RECEIPT))
+                && !Boolean.TRUE.equals(after.get(RetailCapabilities.TRANSFER_RECEIPT));
         if (off && repo.anyInTransit()) {
             throw ApiException.rule(
                     "transfers_in_transit",

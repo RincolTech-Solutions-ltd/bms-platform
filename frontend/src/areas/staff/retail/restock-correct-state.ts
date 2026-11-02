@@ -1,5 +1,6 @@
 import { RetailError, type Product, type Purchase, type PurchasePayment } from '../../../api/retail';
 import { showQty } from './maths';
+import { unitWords } from './units-state';
 import type { RestockDraft, RestockLine } from './restock';
 
 // Correcting a mistaken restock (issue #351, ADR-044): void it, then enter it again with the right quantity. The rules are the
@@ -17,7 +18,7 @@ export function voidReasonOf(text: string): string | null {
 /** "Entered in metres but this item is kept in rolls?" for a line entered in a unit that is not the item's usual one. */
 export function unitHint(line: { unit?: string; base_unit?: string }): string | null {
   if (!line.unit || !line.base_unit || line.unit === line.base_unit) return null;
-  return `Entered in ${line.unit} but this item is kept in ${line.base_unit}? If that is wrong, correct this restock and enter it again in the right unit.`;
+  return `Entered in ${unitWords(line.unit)} but this item is kept in ${unitWords(line.base_unit)}? If that is wrong, correct this purchase and enter it again in the right unit.`;
 }
 
 /** The same hint on the restock form, where the unit is the one chosen for the line. */
@@ -41,12 +42,12 @@ export function redraftOf(purchase: Purchase, products: Product[], today: string
       cost: String(inPack ? (l.unit_cost_minor ?? l.cost_minor ?? 0) : (l.cost_minor ?? 0)),
       sell: String(l.sell_minor ?? product.sell_minor ?? 0),
       qtyByBranch: Object.fromEntries((l.qty_by_branch ?? []).map((b) => [b.branch_id ?? '', showQty((inPack ? b.unit_qty : undefined) ?? b.qty ?? '0')])),
-      ...(inPack ? { unitId: l.unit_id } : {}),
+      // D23 (#554): the size each pack held in that delivery, as the line kept it.
+      ...(inPack ? { unitId: l.unit_id, ...(l.unit_factor ? { packSize: showQty(l.unit_factor) } : {}) } : {}),
     });
   }
   return {
     supplierId: purchase.supplier_id ?? '',
-    newSupplier: '',
     // Today, not the old date: the old day may be banked in the cash book already (ADR-044).
     purchasedOn: today,
     method: (purchase.payment_method ?? 'cash') as PurchasePayment,

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { RoleAssignmentRequest, StaffBranch, StaffUser } from '../../../api/users';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { RolePick } from './role-pick';
 import { TENANT_ADMIN, assignmentsFor, branchUnavailable, needsBranches, roleRows, type RoleChoice, type RoleRow } from './state';
 
@@ -36,6 +37,7 @@ export function RoleEditor({ user, self = false, roles, branches, onSave, onCanc
       return;
     }
     saving.current = true;
+    // toast-exempt: the Staff users screen says the roles are saved through onSave
     setBusy(true);
     setError(null);
     const failure = await onSave(rows.flatMap((r) => assignmentsFor(r.roleKey, r.branchIds)));
@@ -71,7 +73,7 @@ export function RoleEditor({ user, self = false, roles, branches, onSave, onCanc
             onChange={(next) => { setConfirming(false); setRows((all) => all.map((r, j) => (j === i ? next : r))); }}
           />
           {rows.length > 1 && (
-            <button type="button" className="btn-ghost btn-sm" disabled={busy} onClick={() => setRows((all) => all.filter((_, j) => j !== i))}>
+            <button type="button" /* busy-exempt: only changes the form */ className="btn-ghost btn-sm" disabled={busy} onClick={() => setRows((all) => all.filter((_, j) => j !== i))}>
               Remove this role
             </button>
           )}
@@ -79,7 +81,7 @@ export function RoleEditor({ user, self = false, roles, branches, onSave, onCanc
       ))}
       {!rows.some((r) => r.roleKey === TENANT_ADMIN) && (
         <p>
-          <button type="button" className="btn-ghost btn-sm" disabled={busy} onClick={() => setRows((all) => [...all, { roleKey: '', branchIds: [] }])}>
+          <button type="button" /* busy-exempt: only changes the form */ className="btn-ghost btn-sm" disabled={busy} onClick={() => setRows((all) => [...all, { roleKey: '', branchIds: [] }])}>
             Add another role
           </button>
         </p>
@@ -92,10 +94,10 @@ export function RoleEditor({ user, self = false, roles, branches, onSave, onCanc
         </p>
       )}
       <p className="cluster">
-        <button type="submit" className={confirming ? 'btn-danger' : 'rt-primary'} disabled={!ready || busy}>
-          {busy ? 'Saving' : confirming ? 'Yes, remove my administrator role' : 'Save the roles'}
-        </button>
-        <button type="button" className="btn-ghost" disabled={busy} onClick={onCancel}>Cancel</button>
+        <BusyButton type="submit" className={confirming ? 'btn-danger' : 'rt-primary'} busy={busy} notReady={!ready}>
+          {confirming ? 'Yes, remove my administrator role' : 'Save the roles'}
+        </BusyButton>
+        <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={busy} onClick={onCancel}>Cancel</button>
       </p>
     </form>
   );

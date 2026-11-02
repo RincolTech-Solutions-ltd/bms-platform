@@ -33,7 +33,7 @@
   display: block;
   color: inherit;
   text-decoration: none;
-  transition: box-shadow var(--transition), border-color var(--transition), transform var(--transition);
+  transition: border-color var(--transition), transform var(--transition), opacity var(--transition);
 }
 
 .card-interactive:hover {
@@ -43,6 +43,7 @@
 
 .card-interactive:active {
   transform: scale(var(--press-scale));
+  opacity: var(--press-opacity);
 }
 
 /* A modal or bottom sheet, for the native <dialog> element. A sheet on phones, centred above. */
@@ -111,4 +112,77 @@ dialog h2 {
     transform: none;
     opacity: 1;
   }
+}
+
+/* Home's card per module (issue #471): side by side where they fit, one above the other on a phone. */
+.home-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.home-card .card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.home-card .card-title svg {
+  width: 20px;
+  height: 20px;
+  color: var(--color-text-muted);
+}
+
+.home-figures {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+}
+
+.home-figure dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.home-figure dd {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.home-figure dd .hint {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+}
+
+/* The shop's summary cards on Home (issue #485): a short list of names with a figure at the end of each line. */
+.home-summary-body {
+  margin-bottom: var(--space-4);
+}
+
+.home-summary .cluster {
+  margin-bottom: var(--space-3);
+}
+
+.home-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  overflow-wrap: anywhere;
+}
+
+.home-list li > span:last-child {
+  font-weight: var(--weight-semibold);
+  text-align: end;
+  white-space: nowrap;
 }

@@ -1,18 +1,24 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { renderToString as render } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Category, Customer, PriceChange, Product } from '../../../api/retail';
 import { createMockRetail, mockMe, setMockProfitAccess } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 import { catalogueLinksFor } from './catalogue';
-import { ImportReport, NOT_UTF8, readCsvText } from './catalogue-import';
+import { ImportPage, ImportReport, NOT_UTF8, readCsvText } from './catalogue-import';
 import { NamedRow, usedText } from './catalogue-lists';
 import { PersonRow } from './catalogue-people';
 import { countableStock } from './stocktake';
 import { PriceForm, PriceHistory, ProductCard, ProductForm, belowCostHint, inactiveWarning, showWhen } from './catalogue-products';
 import { CATALOGUE_LINKS, canUse, screensFor } from './permissions';
 import { Gate } from './ui';
+
+// The item form links to its help (issue #630); these tests draw it without a router.
+vi.mock('@tanstack/react-router', async (original) => {
+  const real = await original<typeof import('@tanstack/react-router')>();
+  return { ...real, Link: ({ children, to, className }: { children: unknown; to: string; className?: string }) => <a href={to} className={className}>{children as never}</a> };
+});
 
 const renderToString = (node: ReactElement) => render(node).replaceAll('<!-- -->', '');
 const branch = mockMe('admin').branches?.[0]?.id ?? '';
@@ -38,7 +44,7 @@ describe('catalogue permission gating', () => {
     const open = CATALOGUE_LINKS.filter((l) => canUse(sales, l.screen)).map((l) => l.screen);
     expect(open).toEqual(['buyers']);
     expect(CATALOGUE_LINKS.every((l) => canUse(mockMe('admin'), l.screen))).toBe(true);
-    expect(catalogueLinksFor(sales).map((l) => l.label)).toEqual(['Credit buyers']);
+    expect(catalogueLinksFor(sales).map((l) => l.label)).toEqual(['Customers who owe']);
   });
 
   it('refuses the item screens to a user without retail.catalogue.manage', () => {
@@ -52,7 +58,7 @@ describe('catalogue permission gating', () => {
   it('lists a catalogue manager without the purchase permission no Suppliers link', () => {
     const permissions = ['retail.catalogue.manage', 'retail.stock.read'];
     const labels = catalogueLinksFor({ permissions }).map((l) => l.label);
-    expect(labels).toEqual(['Items', 'Categories', 'Units']);
+    expect(labels).toEqual(['Quick add', 'Items', 'Categories', 'Units', 'Barcode labels']);
   });
 });
 
@@ -85,24 +91,30 @@ describe('suppliers and credit buyers', () => {
 describe('items and prices', () => {
   it('shows cost on an item card only when asked to', () => {
     const withCost = renderToString(<ul><ProductCard product={bulb} showCost canPrice onEdit={() => undefined} onPrice={() => undefined} /></ul>);
-    expect(withCost).toContain('cost UGX 3,500');
+    // ADR-079: the item's own buying price is the last one paid; profit uses each shop's average.
+    expect(withCost).toContain('last paid UGX 3,500');
     expect(withCost).toContain('Change price');
     const without = renderToString(<ul><ProductCard product={{ ...bulb, cost_minor: undefined }} showCost={false} canPrice={false} onEdit={() => undefined} onPrice={() => undefined} /></ul>);
-    expect(without).not.toMatch(/cost/i);
+    expect(without).not.toMatch(/cost|bought at|last paid/i);
     expect(without).not.toContain('Change price');
   });
 
   it('asks for cost on a new item only with retail.profit.read', () => {
-    expect(page('admin', <ProductForm onSaved={() => undefined} onCancel={() => undefined} />)).toContain('Cost price');
+    expect(page('admin', <ProductForm onSaved={() => undefined} onCancel={() => undefined} />)).toContain('Buying price');
+    // Hillary, 23 Oct 2026: what you pay comes before what you sell for, and is called the buying price.
+    const form = page('admin', <ProductForm onSaved={() => undefined} onCancel={() => undefined} />);
+    expect(form.indexOf('Buying price')).toBeLessThan(form.indexOf('Selling price'));
     const sales = ['retail.catalogue.manage', 'retail.stock.read'];
     const html = page('admin', <ProductForm onSaved={() => undefined} onCancel={() => undefined} />, sales);
-    expect(html).not.toContain('Cost price');
-    expect(html).toContain('The cost is set when you record a restock.');
+    expect(html).not.toContain('Buying price');
+    expect(html).toContain('The buying price is set when you buy stock.');
   });
 
   it('edits the item fields but sends the user to the price form for prices', () => {
     const html = page('admin', <ProductForm product={bulb} onSaved={() => undefined} onCancel={() => undefined} />);
-    expect(html).toContain('value="P003"');
+    // Issue #562: the code is shown, never an input.
+    expect(html).toContain('Item code: <strong>P003</strong>. It never changes.');
+    expect(html).not.toMatch(/<input[^>]*id="item-code"/);
     expect(html).toContain('Change price');
     expect(html).not.toContain('for="item-sell"');
   });
@@ -112,21 +124,25 @@ describe('items and prices', () => {
     const noCost = ['retail.catalogue.manage', 'retail.stock.read', 'retail.price.edit'];
     const html = page('admin', <PriceForm product={{ ...bulb, cost_minor: undefined }} onSaved={() => undefined} onCancel={() => undefined} />, noCost);
     expect(html).toContain('New selling price');
-    expect(html).not.toContain('New cost price');
-    expect(html).not.toMatch(/cost/i);
+    expect(html).not.toContain('Last paid');
+    expect(html).not.toMatch(/cost|buying price|bought at|last paid/i);
     // The real server sends null where there is no earlier price (the first price) and no reason.
     const first = { id: 'h0', at: '2026-10-01T05:00:00Z', source: 'initial', old_sell_minor: null, new_sell_minor: 5000, old_cost_minor: null, new_cost_minor: 3500, reason: null } as unknown as PriceChange;
-    expect(renderToString(<PriceHistory changes={[first]} />)).toContain('Selling price UGX 5,000, cost UGX 3,500');
+    expect(renderToString(<PriceHistory changes={[first]} />)).toContain('Selling price UGX 5,000, buying price UGX 3,500');
     const list = renderToString(<PriceHistory changes={history} />);
     expect(list).toContain('Selling price UGX 5,000 to UGX 6,000');
     expect(list).toContain('Changed by hand');
     expect(list).toContain('Reason: Test supplier increase');
-    expect(list).not.toMatch(/cost/i);
-    expect(page('admin', <PriceForm product={bulb} onSaved={() => undefined} onCancel={() => undefined} />)).toContain('New cost price');
+    expect(list).not.toMatch(/cost|buying price|bought at/i);
+    expect(page('admin', <PriceForm product={bulb} onSaved={() => undefined} onCancel={() => undefined} />)).toContain('Last paid');
+    expect(html).not.toContain('last paid');
+    const priced = page('admin', <PriceForm product={bulb} onSaved={() => undefined} onCancel={() => undefined} />);
+    expect(priced.indexOf('Last paid')).toBeLessThan(priced.indexOf('New selling price'));
+    expect(priced).toContain('average buying price of the stock in each shop');
   });
 
   it('hints, without blocking, when the price is not above a known cost', () => {
-    expect(belowCostHint(3500, 3500)).toContain('not above the cost, UGX 3,500');
+    expect(belowCostHint(3500, 3500)).toContain('not above the buying price, UGX 3,500');
     expect(belowCostHint(3501, 3500)).toBeNull();
     expect(belowCostHint(100, null)).toBeNull();
     expect(belowCostHint(100, 0)).toBeNull();
@@ -139,15 +155,17 @@ describe('items and prices', () => {
 });
 
 describe('the mock catalogue (the server rules the screens rely on)', () => {
-  it('refuses a duplicate code ignoring case, and a stale version', async () => {
+  it('refuses a typed code on an add or an edit, as the server does, and a stale version', async () => {
     setMockProfitAccess(true);
     const api = createMockRetail();
     const cats = await api.listCategories();
     const units = await api.listUnits();
-    const body = { code: 'p003 ', description: 'Test copy', category_id: cats[0]?.id ?? '', unit_id: units[0]?.id ?? '', sell_minor: 10, cost_minor: 1 };
-    await expect(api.createProduct(body)).rejects.toMatchObject({ status: 409, code: 'duplicate_product_code' });
-    const made = await api.createProduct({ ...body, code: 'NEW-1' });
+    const body = { code: 'NEW-1', description: 'Test copy', category_id: cats[0]?.id ?? '', unit_id: units[0]?.id ?? '', sell_minor: 10, cost_minor: 1 };
+    await expect(api.createProduct(body)).rejects.toMatchObject({ status: 400, code: 'item_code_made_by_app' });
+    const made = await api.createProduct({ ...body, code: undefined });
+    expect(made.code).toMatch(/^[A-Z]{2,4}-\d{4}$/);
     expect(made.version).toBe(1);
+    await expect(api.updateProduct(made.id ?? '', 1, { code: 'MY-OWN' })).rejects.toMatchObject({ status: 400, code: 'item_code_made_by_app' });
     const edited = await api.updateProduct(made.id ?? '', 1, { description: 'Test renamed' });
     expect(edited.version).toBe(2);
     await expect(api.updateProduct(made.id ?? '', 1, { description: 'Again' })).rejects.toMatchObject({ status: 412 });
@@ -256,7 +274,7 @@ describe('importing items from a file', () => {
     expect(html).toContain('What would happen');
     expect(html).toContain('<strong>1</strong> to add');
     expect(html).toContain('An item with this code exists already.');
-    expect(html).toContain('The sell price must be a whole number');
+    expect(html).toContain('The selling price must be a whole number');
     expect((await api.listCatalogue({ query: 'IMP-1' })).items).toHaveLength(0);
   });
 
@@ -271,6 +289,19 @@ describe('importing items from a file', () => {
     expect([again.added, again.skipped]).toEqual([0, 3]);
     expect((await api.listCatalogue({ query: 'IMP-' })).items).toHaveLength(2);
     expect(renderToString(<ImportReport result={first} />)).toContain('What was done');
+  });
+
+  it('keeps the file\'s codes by default, and makes every code with Let the app make the codes (owner decision D45)', async () => {
+    setMockProfitAccess(true);
+    const clean = csv.replace('abc', '900');
+    const kept = await createMockRetail().importProducts(clean, false);
+    expect(kept.rows?.filter((r) => r.outcome === 'added').map((r) => r.code)).toEqual(['IMP-1', 'IMP-2']);
+    const made = await createMockRetail().importProducts(clean, true, true);
+    expect(made.added).toBe(3);
+    expect(made.rows?.[1]?.message).toContain('The code P003 in the file is not used.');
+    const html = page('admin', <ImportPage />, [...(mockMe('admin').permissions ?? []), 'core.settings.manage']);
+    expect(html).toMatch(/<input id="import-make-codes" type="checkbox"(?![^>]*checked)[^>]*\/> Let the app make the codes/);
+    expect(html).toContain('Without the tick, a code in your file is kept.');
   });
 
   it('strips a byte order mark, accepts CRLF and warns when the file is not UTF-8', async () => {

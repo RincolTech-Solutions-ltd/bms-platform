@@ -1,4 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { OfflineProvider } from '../offline/offline-context';
+import { testOffline } from '../offline/test-kit';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 import type { ReactElement } from 'react';
 import { renderToString } from 'react-dom/server';
@@ -28,7 +30,7 @@ import { LandedCostsPage } from '../areas/staff/retail/landed-costs';
 import { CataloguePage } from '../areas/staff/retail/catalogue';
 import { ControlsPage } from '../areas/staff/retail/controls';
 import { RetailHome } from '../areas/staff/retail/home';
-import { RetailNav } from '../areas/staff/retail/nav';
+import { canUse, showRetail } from '../areas/staff/retail/permissions';
 import { RecordSale } from '../areas/staff/retail/sale';
 import { InTransitPage } from '../areas/staff/retail/in-transit';
 import { RetailSettings } from '../areas/staff/retail/settings';
@@ -38,21 +40,26 @@ import { StockPage } from '../areas/staff/retail/stock';
 import { AllSales, CreditSales } from '../areas/staff/retail/sales';
 import { StockByLocationPage } from '../areas/staff/retail/stock-by-location';
 import { StocktakePage } from '../areas/staff/retail/stocktake';
-import { RefreshButton } from '../app/refresh-button';
-import { StaffBar } from '../areas/staff/route';
+import { StaffBar, StaffSideNav } from '../areas/staff/route';
+import { MoneyPage, MorePage } from '../areas/staff/tab-pages';
+import { TabBar, staffTabs } from '../areas/staff/tabs';
 import { AssistantSettingsPage } from '../areas/staff/assistant/page';
 import { Setup } from '../areas/staff/setup';
 import { BranchesScreen } from '../areas/staff/branches/page';
 import { NotificationsPage } from '../areas/staff/notifications/page';
+import { FeedbackPage } from '../areas/staff/feedback/page';
+import { ArticleView, HowDoIPage } from '../areas/staff/help/page';
+import { ReferralsPage } from '../areas/staff/referrals/page';
 import { BusinessNotificationsScreen } from '../areas/staff/notifications/business';
+import { BillingScreen } from '../areas/staff/billing/page';
+import { CloseScreen } from '../areas/staff/close/page';
 import { TwoStepPolicyScreen } from '../areas/staff/two-step/page';
+import { ApprovalRulesScreen } from '../areas/staff/approval-rules/page';
 import { UsersScreen } from '../areas/staff/users/page';
 import { FEATURES, type Tour, stepsFor } from './model';
-import { PLATFORM_BRAND } from '../app/branding';
-import { BrandBar } from '../app/shell';
-import { CORE_TOURS, TOURS } from './tours';
+import { CORE_TOURS, TOURS, tabNamesFor } from './tours';
 
-// One test per tour: render the screen each step points at (under the shell's brand bar and the staff bar, as the staff
+// One test per tour: render the screen each step points at (under the shell's brand bar, the sidebar and the staff bar, as the staff
 // layout draws them), as the user the tour is for, and prove its data-tour target is there. Renaming a screen or dropping an anchor fails here, not on
 // a customer's phone. Steps behind a feature flag have no screen yet and are checked separately.
 
@@ -92,17 +99,30 @@ function screen(path: string | undefined): ReactElement {
       return <BranchesScreen />;
     case '/staff/notifications':
       return <NotificationsPage />;
+    case '/staff/feedback':
+      return <FeedbackPage />;
+    case '/staff/help':
+      return <HowDoIPage />;
+    case '/staff/help/$articleId':
+      return <ArticleView articleId="switch-branch" />;
+    case '/staff/money':
+      return <MoneyPage />;
+    case '/staff/more':
+      return <MorePage />;
+    case '/staff/setup/referrals':
+      return <ReferralsPage />;
     case '/staff/setup/two-step':
       return <TwoStepPolicyScreen />;
+    case '/staff/setup/approvals':
+      return <ApprovalRulesScreen />;
     case '/staff/setup/notifications':
       return <BusinessNotificationsScreen />;
+    case '/staff/setup/billing':
+      return <BillingScreen />;
+    case '/staff/setup/close':
+      return <CloseScreen />;
     case '/staff/retail':
-      return (
-        <>
-          <RetailHome />
-          <RetailNavForTest />
-        </>
-      );
+      return <RetailHome />;
     case '/staff/retail/sale':
       return <RecordSale />;
     case '/staff/retail/stock':
@@ -175,8 +195,8 @@ let current: Me;
 function StaffBarForTest() {
   return <StaffBar me={current} branch={current.default_branch_id ?? null} onBranch={() => undefined} onSignOut={() => undefined} />;
 }
-function RetailNavForTest() {
-  return <RetailNav me={current} />;
+function StaffSideNavForTest() {
+  return <StaffSideNav me={current} />;
 }
 
 function render(me: Me, path: string | undefined): string {
@@ -192,17 +212,34 @@ function render(me: Me, path: string | undefined): string {
     daily_summary_time: '20:00', timezone: 'Africa/Kampala', push_available: true, version: 1,
   });
   client.setQueryData(['staff-branches'], []);
+  // What Plan and billing reads (issue #480): a paid business with one payment, fabricated.
+  client.setQueryData(['billing'], {
+    plan_code: 'test', plan_name: 'Test Plan', currency: 'UGX', monthly_minor: 10000, annual_months: 11, annual_minor: 110000,
+    state: 'active', paid_until: '2026-11-30', grace_days: 7, how_to_pay: 'Test: pay to the test account',
+    payments: [{ id: 'p1', amount_minor: 10000, currency: 'UGX', method: 'mtn_momo', paid_on: '2026-11-01', months: 1, period_start: '2026-11-01', period_end: '2026-11-30', receipt_no: 'RT-2026-000001' }],
+  });
+  // What the approval rules read (issue #343): one rule, so the page and its save button are in the static markup.
+  client.setQueryData(['approval-rules'], {
+    currency: 'UGX', version: 1,
+    rules: [{ action_type: 'retail_sale_void', module: 'retail', label: 'Sale voids', has_amount: true, switchable: true, on: false, threshold_minor: 0 }],
+  });
+  // What Close the business reads (issue #571): no request yet, seen by the owner.
+  client.setQueryData(['closure'], { status: 'none', cooling_off_days: 30, can_change: true });
   // What the retail settings screens read, so their targets are in the static markup.
-  client.setQueryData(['retail', 'capabilities'], { capabilities: { profile: 'shop' }, version: 1 });
+  client.setQueryData(['retail', 'capabilities'], { capabilities: { profile: 'shops' }, version: 1 });
   client.setQueryData(['retail', 'branch-roles'], (me.branches ?? []).map((b) => ({ branch_id: b.id, code: b.code, name: b.name, role: 'both', can_sell: true })));
   const branch = path === undefined ? (me.default_branch_id ?? null) : (me.branches?.[0]?.id ?? null);
   return renderToString(
     <RouterContextProvider router={router}>
       <QueryClientProvider client={client}>
-        <StaffContext.Provider value={{ me, branch }}>
-          <BrandBar brand={PLATFORM_BRAND} actions={<RefreshButton />} />
-          <StaffBarForTest />
-          {screen(path)}
+        <StaffContext.Provider value={{ me, branch, signOut: () => undefined }}>
+          {/* Offline, so the Online dot (drawn only when it has news, issue #526) is on the page for its step. */}
+          <OfflineProvider value={testOffline(me, { online: false })}>
+            <StaffSideNavForTest />
+            <StaffBarForTest />
+            <TabBar me={me} />
+            {screen(path)}
+          </OfflineProvider>
         </StaffContext.Provider>
       </QueryClientProvider>
     </RouterContextProvider>,
@@ -278,13 +315,25 @@ const BUYER: Me = { ...ADMIN, full_name: 'Test Buyer 01', module_capabilities: {
 // An administrator of a business with lending, who may configure the AI assistant (extras slice C3, issue #226).
 const ASSISTANT: Me = { ...ADMIN, full_name: 'Test Assistant Admin 01', permissions: [...(ADMIN.permissions ?? []), 'lending.advisor.configure'], modules: ['retail', 'lending'] } as Me;
 
+// The owner or an administrator, who reads the business's referrals (issue #464, ADR-069).
+const REFERRER: Me = { ...ADMIN, full_name: 'Test Referrer 01', permissions: [...(ADMIN.permissions ?? []), 'core.referrals.read'] } as Me;
+
 const AUDIENCE: Record<string, Me[]> = {
+  'page-money': [ADMIN, SELLER],
+  'page-more': [ADMIN, SELLER, OFFICER],
   'page-assistant': [ASSISTANT],
   'page-users': [ADMIN],
   'page-branches': [ADMIN],
   'page-notifications': [ADMIN, CASHIER],
+  'page-feedback': [ADMIN, CASHIER],
+  'page-help': [ADMIN, CASHIER],
+  'page-help-article': [ADMIN, CASHIER],
+  'page-referrals': [REFERRER],
   'page-two-step': [ADMIN],
+  'page-approval-rules': [ADMIN],
   'page-business-notifications': [ADMIN],
+  'page-billing': [ADMIN],
+  'page-close': [ADMIN],
   'page-members': [CLERK, OFFICER],
   'page-member-new': [CLERK],
   'page-member': [CLERK, CHECKER],
@@ -311,6 +360,7 @@ const AUDIENCE: Record<string, Me[]> = {
   'capability-transfer-receipt': [TRADER],
   'capability-units': [ADMIN],
   'capability-price-lists': [PRICER],
+  'capability-wholesale': [PRICER],
   'page-price-lists': [PRICER],
   'capability-customer-accounts': [LENDER],
   'page-accounts': [LENDER],
@@ -365,3 +415,39 @@ describe('steps waiting for a feature', () => {
     }
   });
 });
+
+// Issue #544: the bottom tabs step names only the tabs the person has, so a lending-only session is not told of Sell or Buy.
+describe('the bottom tabs step', () => {
+  const lending = (permissions: string[]) => ({ user_id: 'u-1', full_name: 'Test Officer 02', kind: 'staff', permissions, modules: ['lending'], branches: [] }) as unknown as Me;
+  const people: [string, Me][] = [
+    ['an owner', mockMe('admin')],
+    ['a seller', mockMe('sales')],
+    ['a loan officer', lending(['lending.loans.read', 'lending.members.read'])],
+    ['a savings officer', lending(['lending.loans.read', 'lending.savings.read'])],
+    ['a storekeeper', { ...mockMe('admin'), permissions: ['retail.stock.read', 'retail.purchase.create'] } as Me],
+  ];
+
+  it.each(people)('names the same tabs the bar draws for %s', (_who, me) => {
+    const drawn = staffTabs(me, { sells: canSell(me) }).map((t) => t.label).filter((l) => l !== 'More');
+    expect(tabNamesFor(me)).toEqual(drawn);
+  });
+
+  const wordsOf = (tourId: string, me: Me) => stepsFor(TOURS.find((t) => t.id === tourId) as Tour, me).find((s) => s.id === 'tabs')?.body;
+
+  it('words the step for the tabs the person has', () => {
+    expect(wordsOf('admin-welcome', mockMe('admin'))).toBe('On a phone, the bar at the bottom holds Sell, My stock, Buy and Money. More has everything else, and Sign out.');
+    expect(wordsOf('retail-sales', mockMe('sales'))).toBe('On a phone, the bar at the bottom holds Sell, My stock and Money. More has everything else, and Sign out.');
+    expect(wordsOf('staff-welcome', lending(['lending.loans.read', 'lending.savings.read']))).toBe('On a phone, the bar at the bottom holds Money. More has everything else, and Sign out.');
+    expect(wordsOf('staff-welcome', lending(['lending.loans.read']))).toBe('On a phone, the bar at the bottom holds More: every page your role allows, and Sign out.');
+  });
+
+  it('on the Money page names the other tabs to go back to, and none a lending-only session lacks', () => {
+    expect(wordsOf('page-money', mockMe('admin'))).toBe('Money is one of the tabs at the bottom. Tap Sell, My stock or Buy to get back to the daily jobs.');
+    expect(wordsOf('page-money', lending(['lending.savings.read']))).toBe('Money is one of the tabs at the bottom. More has everything else.');
+  });
+});
+
+// useSells without branch roles: may the session sell at all.
+function canSell(me: Me) {
+  return showRetail(me) && canUse(me, 'sale');
+}

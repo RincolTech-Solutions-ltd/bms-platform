@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { RetailError, businessToday } from './retail';
-import { createMockRetail, mockMe, setMockProfitAccess } from './retail-mock';
+import { RetailError, businessToday, isWaiting } from './retail';
+import { createMockRetail, mockMe, setMockApprovals, setMockProfitAccess } from './retail-mock';
 
 const branch = mockMe('admin').branches?.[0]?.id ?? '';
 const cash = (productId: string, qty: string) => ({ branch_id: branch, payment_method: 'cash', lines: [{ product_id: productId, qty }] });
@@ -60,6 +60,19 @@ describe('retail mock adapter (real response shapes)', () => {
     expect((await api.listStock({ branchId: branch, negativeOnly: true })).every((r) => r.negative)).toBe(true);
   });
 
+  it('lists a restock for a shop and an item only when one line holds that item at that shop (#372)', async () => {
+    const api = createMockRetail();
+    const [p1, p2] = await api.listProducts({});
+    const other = '00000000-0000-4000-8000-0000000000a2';
+    const restock = await api.createPurchase({ purchased_on: '2026-10-06', payment_method: 'cash', lines: [
+      { product_id: p1?.id ?? '', cost_minor: 1, sell_minor: 2, qty_by_branch: [{ branch_id: branch, qty: '1.000' }] },
+      { product_id: p2?.id ?? '', cost_minor: 1, sell_minor: 2, qty_by_branch: [{ branch_id: other, qty: '1.000' }] },
+    ] }, 'restock-key-372');
+    const ids = async (q: { branchId: string; productId: string }) => (await api.listPurchases(q)).items?.map((r) => r.id);
+    expect(await ids({ branchId: branch, productId: p1?.id ?? '' })).toContain(restock.id);
+    expect(await ids({ branchId: other, productId: p1?.id ?? '' })).not.toContain(restock.id);
+  });
+
   it('works out a stock-take variance and commits it once', async () => {
     const api = createMockRetail();
     const [row] = await api.listStock({ branchId: branch });
@@ -68,6 +81,33 @@ describe('retail mock adapter (real response shapes)', () => {
     await api.commitStocktake(draft.id ?? '');
     await expect(api.commitStocktake(draft.id ?? '')).rejects.toMatchObject({ code: 'stocktake_committed' });
     expect((await api.listStock({ branchId: branch })).find((r) => r.product_id === row?.product_id)?.qty).toBe('10.000');
+  });
+
+  // Issue #636: as the server, a count to 0 or below half of what was held commits only when its line is acknowledged.
+  it('refuses a big drop that is not acknowledged and commits it once it is', async () => {
+    const api = createMockRetail();
+    const row = (await api.listStock({ branchId: branch })).find((r) => Number(r.qty) > 0);
+    const id = row?.product_id ?? '';
+    const draft = await api.createStocktake({ branch_id: branch, lines: [{ product_id: id, counted_qty: '0' }] });
+    await expect(api.commitStocktake(draft.id ?? '')).rejects.toMatchObject({ code: 'big_drop_not_acknowledged', status: 409 });
+    expect((await api.listStock({ branchId: branch })).find((r) => r.product_id === id)?.qty).toBe(row?.qty);
+    await api.commitStocktake(draft.id ?? '', [id]);
+    expect((await api.listStock({ branchId: branch })).find((r) => r.product_id === id)?.qty).toBe('0.000');
+  });
+
+  // Issue #656: as the server, a draft is discarded without moving stock, once; it never commits after, and a committed count stays.
+  it('discards a draft count without moving stock, and never a committed one', async () => {
+    const api = createMockRetail();
+    const row = (await api.listStock({ branchId: branch })).find((r) => Number(r.qty) > 0);
+    const id = row?.product_id ?? '';
+    const draft = await api.createStocktake({ branch_id: branch, lines: [{ product_id: id, counted_qty: '0' }] });
+    expect((await api.discardStocktake(draft.id ?? '')).status).toBe('discarded');
+    expect((await api.discardStocktake(draft.id ?? '')).status).toBe('discarded');
+    await expect(api.commitStocktake(draft.id ?? '', [id])).rejects.toMatchObject({ code: 'stocktake_discarded', status: 409 });
+    expect((await api.listStock({ branchId: branch })).find((r) => r.product_id === id)?.qty).toBe(row?.qty);
+    const done = await api.createStocktake({ branch_id: branch, lines: [{ product_id: id, counted_qty: row?.qty ?? '0' }] });
+    await api.commitStocktake(done.id ?? '');
+    await expect(api.discardStocktake(done.id ?? '')).rejects.toMatchObject({ code: 'stocktake_committed', status: 409 });
   });
 
   it('moves stock between branches at cost, refuses beyond the source balance, and voids once', async () => {
@@ -235,5 +275,45 @@ describe('retail mock adapter (real response shapes)', () => {
     expect(JSON.stringify(page)).not.toMatch(/cost|profit/i);
     expect(JSON.stringify(await api.getSale(page.items?.[0]?.id ?? ''))).not.toMatch(/cost|profit/i);
     setMockProfitAccess(true);
+  });
+});
+
+describe('the mock approval rules (issue #343)', () => {
+  it('refuses a correction that changes nothing before it answers waiting, as the server does', async () => {
+    setMockApprovals(['retail_stock_correction']);
+    try {
+      const api = createMockRetail();
+      const branch = mockMe('admin').branches?.[0]?.id ?? '';
+      const row = (await api.listStock({ branchId: branch }))[0];
+      const qty = row?.qty ?? '0';
+      const same = { branch_id: branch, product_id: row?.product_id ?? '', new_qty: qty, expected_qty: qty, reason_code: 'miscount' as const };
+      await expect(api.correctStock(same, 'k1')).rejects.toMatchObject({ code: 'quantity_unchanged' });
+      const changed = await api.correctStock({ ...same, new_qty: String(Number(qty) + 1) }, 'k2');
+      expect(isWaiting(changed)).toBe(true);
+    } finally {
+      setMockApprovals([]);
+    }
+  });
+});
+
+describe('the mock Quick add paid by a package (issue #724)', () => {
+  // JUSTIFICATION-A3: issue #724 asks for a test of the mock's paid levels; one new case, appended.
+  it('takes the carton price for whole cartons paid by Quick add, as the server does (issue #724)', async () => {
+    const api = createMockRetail();
+    const carton = (await api.listUnits()).find((u) => u.name === 'Carton')?.id ?? (await api.createUnit('Carton')).id ?? '';
+    const half = (await api.createUnit('Test Half Carton')).id ?? '';
+    const base = { sell_minor: 6_000, cost_minor: 4_167, branch_id: branch, paid_from: 'cash', paid_level_unit_id: carton, paid_level_cost_minor: 100_000 };
+    const packs = [{ unit_id: carton, factor: '24', purpose: 'both' }, { unit_id: half, factor: '12', purpose: 'sell' }];
+    // 1 carton and 5 pieces: 100,000 and 5 at 4,167, never 29 at 4,167 (120,843).
+    const a = await api.quickAdd({ ...base, description: 'Test Marker Pen', qty: '29', packs }, 'qa-carton-724-a');
+    expect(a).toMatchObject({ paid_from: 'cash', paid_minor: 100_000 + 5 * 4_167 });
+    const b = await api.quickAdd({ ...base, description: 'Test Marker Fine', qty: '24', packs }, 'qa-carton-724-b');
+    expect(b.paid_minor).toBe(100_000);
+    // A pack only for selling is no buying level.
+    await expect(api.quickAdd({ ...base, product_id: b.product_id, qty: '12', paid_level_unit_id: half, paid_level_cost_minor: 50_000 }, 'qa-carton-724-c'))
+      .rejects.toMatchObject({ status: 422, code: 'unknown_pack_unit' });
+    // Refused on a new item, nothing is kept, as the server's one transaction.
+    await expect(api.quickAdd({ ...base, description: 'Test Marker Thick', qty: '12', packs, paid_level_unit_id: half }, 'qa-carton-724-d')).rejects.toMatchObject({ code: 'unknown_pack_unit' });
+    expect((await api.listProducts({ branchId: branch })).some((p) => p.description === 'Test Marker Thick')).toBe(false);
   });
 });

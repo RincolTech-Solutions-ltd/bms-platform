@@ -8,8 +8,12 @@ import com.rincoltech.bms.core.platform.internal.PlatformController.CreateTenant
 import com.rincoltech.bms.core.platform.internal.PlatformController.CreatedTenantResponse;
 import com.rincoltech.bms.core.platform.internal.PlatformController.FirstAdminInvitation;
 import com.rincoltech.bms.core.platform.internal.PlatformController.TenantResponse;
+import com.rincoltech.bms.core.tenancy.GoLiveDate;
 import com.rincoltech.bms.core.tenancy.ModuleManifest;
+import com.rincoltech.bms.core.tenancy.ModuleSetUp;
+import com.rincoltech.bms.core.tenancy.ModuleSettingsGroup;
 import com.rincoltech.bms.core.tenancy.PlatformHost;
+import com.rincoltech.bms.core.tenancy.ShortNames;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
@@ -38,6 +42,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Tenant lifecycle for platform operators. Every change is written to {@code platform_audit_log};
@@ -63,6 +69,11 @@ class PlatformService implements TenantProvisioning {
     private final PlatformAuditLog platformAudit;
     private final TransactionTemplate transactions;
     private final Set<String> moduleKeys;
+    private final GoLiveDate goLive;
+    private final ShortNames shortNames;
+    private final Map<String, ModuleSettingsGroup> settingsGroups;
+    private final List<ModuleSetUp> setUps;
+    private final ObjectMapper mapper;
 
     PlatformService(
             JdbcClient jdbc,
@@ -71,7 +82,14 @@ class PlatformService implements TenantProvisioning {
             AuditLog audit,
             PlatformAuditLog platformAudit,
             PlatformTransactionManager transactionManager,
-            List<ModuleManifest> manifests) {
+            List<ModuleManifest> manifests,
+            List<ModuleSettingsGroup> settingsGroups,
+            List<ModuleSetUp> setUps,
+            ObjectMapper mapper,
+            GoLiveDate goLive,
+            ShortNames shortNames) {
+        this.goLive = goLive;
+        this.shortNames = shortNames;
         this.jdbc = jdbc;
         this.tenantAdmins = tenantAdmins;
         this.hosts = hosts;
@@ -79,6 +97,32 @@ class PlatformService implements TenantProvisioning {
         this.platformAudit = platformAudit;
         this.transactions = new TransactionTemplate(transactionManager);
         this.moduleKeys = manifests.stream().map(ModuleManifest::key).collect(Collectors.toUnmodifiableSet());
+        this.settingsGroups = settingsGroups.stream()
+                .collect(Collectors.toUnmodifiableMap(ModuleSettingsGroup::moduleKey, g -> g, (a, b) -> a));
+        this.setUps = setUps;
+        this.mapper = mapper;
+    }
+
+    /**
+     * The kind of business (issue #424, ADR-092): the profile of the first stored settings group, by module key, read through that
+     * module's own group, so a value an older server wrote reads as the kind it is. Null when no group stores a profile.
+     */
+    private String businessType(String profileGroups) {
+        if (profileGroups == null) {
+            return null;
+        }
+        Map<String, Object> stored = mapper.readValue(profileGroups, new TypeReference<Map<String, Object>>() {});
+        for (String key : new java.util.TreeSet<>(stored.keySet())) {
+            ModuleSettingsGroup group = settingsGroups.get(key);
+            if (group != null && stored.get(key) instanceof Map<?, ?> m) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> values = (Map<String, Object>) m;
+                if (group.normalise(values, Map.of()).get("profile") instanceof String kind) {
+                    return kind;
+                }
+            }
+        }
+        return null;
     }
 
     private static final List<String> STATUSES = List.of("trial", "active", "past_due", "suspended", "cancelled");
@@ -172,9 +216,13 @@ class PlatformService implements TenantProvisioning {
     public Optional<Created> create(NewTenant request, Steps steps) {
         UUID operator = CurrentPrincipal.require().userId();
         String slug = request.slug() == null ? "" : request.slug().trim();
-        if (!hosts.isValidSlug(slug)) {
+        // ADR-108: the slug is the shop's short link, so a new one follows the short name rules (shape and the reserved
+        // list), as at Activate.
+        if (!hosts.isValidSlug(slug) || ShortNames.refusal(slug).isPresent()) {
             throw ApiException.validation(List.of(new FieldProblem(
-                    "slug", "invalid_slug", "3 to 63 lower case letters, digits or hyphens; not a reserved name.")));
+                    "slug",
+                    "invalid_slug",
+                    "3 to 20 lower case letters and digits, a hyphen may join two words; not a reserved name.")));
         }
         String timezone = request.timezone() == null ? "Africa/Kampala" : request.timezone();
         try {
@@ -199,6 +247,19 @@ class PlatformService implements TenantProvisioning {
                 () -> transactions.execute(status -> {
                     if (!steps.before()) {
                         return null;
+                    }
+                    // ADR-108: claimed under the name's lock, which every claim of a short name takes, before the count
+                    // below; a name another confirmed application holds is not this tenant's, and a concurrent create
+                    // that still meets tenants_slug_key is the 409 further down.
+                    if (shortNames
+                            .takenBy(slug, steps.application(), true)
+                            .filter("applied"::equals)
+                            .isPresent()) {
+                        throw new ApiException(
+                                HttpStatus.CONFLICT,
+                                "duplicate_slug",
+                                "Slug taken",
+                                "An application whose email is confirmed chose this short name.");
                     }
                     boolean taken = jdbc.sql("SELECT count(*) FROM platform_list_tenants() WHERE slug = ?")
                                     .param(slug)
@@ -244,6 +305,7 @@ class PlatformService implements TenantProvisioning {
                         throw ApiException.rule(
                                 "invalid_tenant", "The plan, currency or modules are not valid for a new tenant.");
                     }
+                    setUp(tenantId, modules);
                     TenantAdmins.Invitation admin = tenantAdmins.inviteFirstAdmin(
                             request.adminFullName(), request.adminEmail(), request.adminPhone(), operator);
                     Map<String, Object> after = new LinkedHashMap<>();
@@ -273,45 +335,60 @@ class PlatformService implements TenantProvisioning {
     @Override
     @Transactional(readOnly = true)
     public boolean slugAvailable(String slug) {
+        // ADR-108: a suggestion is a short name, so its shape and the reserved list apply.
         return slug != null
                 && hosts.isValidSlug(slug)
+                && ShortNames.refusal(slug).isEmpty()
                 && jdbc.sql("SELECT count(*) FROM platform_list_tenants() WHERE slug = ?")
                                 .param(slug)
                                 .query(Long.class)
                                 .single()
-                        == 0;
+                        == 0
+                // ADR-108: nor chosen by a confirmed open application.
+                && shortNames.takenBy(slug, null, false).isEmpty();
     }
 
-    @Transactional
+    /** In a transaction bound to the tenant, so a module switched on sets itself up there (ADR-098). */
     TenantResponse setModules(UUID tenantId, List<String> requested, String reason) {
+        UUID operator = CurrentPrincipal.require().userId();
+        return TenantContext.callAs(
+                tenantId,
+                () -> transactions.execute(status -> {
+                    TenantResponse before = tenant(tenantId);
+                    List<String> modules = checkModules(requested);
+                    if (modules.equals(before.modules().stream().sorted().toList())) {
+                        return before;
+                    }
+                    switchModules(tenantId, modules, operator, reason);
+                    return tenant(tenantId);
+                }));
+    }
+
+    /**
+     * FR-TEN-03: switches the tenant's modules to exactly these through {@code platform_set_tenant_modules} (data kept), in
+     * the caller's transaction, which must be bound to that tenant, sets up each module switched on (ADR-098), and audits the
+     * change. {@code operator} is null when the Owner's own change or the nightly job switches them (ADR-073).
+     */
+    @Transactional
+    void switchModules(UUID tenantId, List<String> requested, UUID operator, String reason) {
         TenantResponse before = tenant(tenantId);
         List<String> modules = checkModules(requested);
-        if (modules.equals(before.modules().stream().sorted().toList())) {
-            return before;
-        }
         try {
             jdbc.sql("SELECT platform_set_tenant_modules(?, ?, ?)")
-                    .params(
-                            tenantId,
-                            modules.toArray(String[]::new),
-                            CurrentPrincipal.require().userId())
+                    .params(tenantId, modules.toArray(String[]::new), operator)
                     .query()
                     .singleRow();
         } catch (DataIntegrityViolationException e) {
-            if (String.valueOf(e.getMessage()).contains("payment_methods_remap_blocks_retail")) {
-                throw ApiException.rule(
-                        "payment_methods_remap_blocks_retail",
-                        "Retail posts cash and bank to the seeded accounts. Map cash and bank back to them"
-                                + " (clear the payment method mappings) before switching retail on.");
-            }
             throw ApiException.rule("module_not_allowed", "The tenant's plan does not allow these modules.");
         }
-        platformAudit.record(
-                "platform.tenant.modules_changed",
-                CurrentPrincipal.require().userId(),
+        setUp(
                 tenantId,
-                Map.of("before", before.modules(), "after", modules, "reason", reason.trim()));
-        return tenant(tenantId);
+                modules.stream().filter(m -> !before.modules().contains(m)).toList());
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("before", before.modules());
+        data.put("after", modules);
+        data.put("reason", reason.trim());
+        platformAudit.record("platform.tenant.modules_changed", operator, tenantId, data);
     }
 
     /**
@@ -406,6 +483,54 @@ class PlatformService implements TenantProvisioning {
                 }));
     }
 
+    /** ADR-071: the operator sets a business's go-live date, audited in the tenant's log and the platform's. */
+    void setGoLive(UUID tenantId, LocalDate date, String reason) {
+        UUID operator = CurrentPrincipal.require().userId();
+        transactions.execute(status -> tenant(tenantId));
+        TenantContext.callAs(
+                tenantId,
+                () -> transactions.execute(status -> {
+                    goLive.setByOperator(date, operator, reason);
+                    platformAudit.record(
+                            "platform.tenant.go_live_set",
+                            operator,
+                            tenantId,
+                            Map.of("go_live_date", date.toString(), "reason", reason));
+                    return null;
+                }));
+    }
+
+    /** The businesses with no Owner and their active administrators, in the order the definer function gives (ADR-090). */
+    List<PlatformController.TenantWithoutOwner> tenantsWithoutOwner() {
+        record Row(PlatformController.TenantWithoutOwner tenant, PlatformController.OwnerCandidate admin) {}
+        List<Row> rows = transactions.execute(status -> jdbc.sql("SELECT * FROM platform_tenants_without_owner()")
+                .query((rs, n) -> new Row(
+                        new PlatformController.TenantWithoutOwner(
+                                rs.getObject("tenant_id", UUID.class),
+                                rs.getString("tenant_slug"),
+                                rs.getString("tenant_name"),
+                                rs.getString("tenant_status"),
+                                rs.getTimestamp("created_at").toInstant(),
+                                new ArrayList<>()),
+                        rs.getObject("admin_id") == null
+                                ? null
+                                : new PlatformController.OwnerCandidate(
+                                        rs.getObject("admin_id", UUID.class),
+                                        rs.getString("admin_name"),
+                                        rs.getString("admin_email"),
+                                        instant(rs.getTimestamp("admin_last_login_at")))))
+                .list());
+        Map<UUID, PlatformController.TenantWithoutOwner> byTenant = new LinkedHashMap<>();
+        for (Row row : rows) {
+            PlatformController.TenantWithoutOwner tenant =
+                    byTenant.computeIfAbsent(row.tenant().tenantId(), id -> row.tenant());
+            if (row.admin() != null) {
+                tenant.admins().add(row.admin());
+            }
+        }
+        return List.copyOf(byTenant.values());
+    }
+
     /** Read-only: what {@link #transferOwnership} would refuse, checked before the operator's authenticator code is spent. */
     void requireOwnerCandidate(UUID tenantId, UUID userId) {
         transactions.execute(status -> tenant(tenantId));
@@ -493,6 +618,18 @@ class PlatformService implements TenantProvisioning {
                 }));
     }
 
+    /** ADR-098: each vertical's own set-up of the modules just switched on, in the transaction bound to the tenant. */
+    private void setUp(UUID tenantId, List<String> switchedOn) {
+        for (ModuleSetUp setUp : setUps) {
+            if (switchedOn.contains(setUp.moduleKey())) {
+                if (!tenantId.equals(TenantContext.current().orElse(null))) {
+                    throw new IllegalStateException("a module is set up only in a transaction bound to its tenant");
+                }
+                setUp.switchedOn();
+            }
+        }
+    }
+
     private List<String> checkModules(List<String> modules) {
         List<String> unique = modules.stream().distinct().sorted().toList();
         for (String module : unique) {
@@ -527,7 +664,8 @@ class PlatformService implements TenantProvisioning {
                 instant(rs.getTimestamp("last_sign_in_at")),
                 hosts.tenantOrigin(slug),
                 rs.getString("suspended_from"),
-                rs.getBoolean("is_pilot"));
+                rs.getBoolean("is_pilot"),
+                businessType(rs.getString("profile_groups")));
     }
 
     static Instant instant(Timestamp t) {

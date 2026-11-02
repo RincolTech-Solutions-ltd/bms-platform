@@ -174,12 +174,63 @@ class OpenAiCompatibleClientTest {
         assertThat(MAPPER.readTree(seen.get(1).body()).get("model").asString()).isEqualTo("model-two");
     }
 
+    /** Ask BMS's Gemini is sent a reasoning effort (#601); a client built without one sends none, as before. */
+    @Test
+    void aReasoningEffortIsSentOnlyWhenGiven() throws Exception {
+        script.add(new Reply(200, OK_BODY));
+        script.add(new Reply(200, OK_BODY));
+        LlmClient gemini = OpenAiCompatibleFactory.build(
+                        baseUrl(), KEY, "gemini-3.5-flash-lite", Duration.ofSeconds(30), " minimal ", true, MAPPER)
+                .orElseThrow();
+        gemini.complete(request());
+        client("m", Duration.ofSeconds(30)).complete(request());
+        JsonNode sent = MAPPER.readTree(seen.get(0).body());
+        assertThat(sent.get("reasoning_effort").asString()).isEqualTo("minimal");
+        assertThat(sent.get("model").asString()).isEqualTo("gemini-3.5-flash-lite");
+        assertThat(sent.has("extra_body")).isFalse();
+        assertThat(MAPPER.readTree(seen.get(1).body()).has("reasoning_effort")).isFalse();
+    }
+
     @Test
     void aPlainTextRequestOmitsTheResponseFormat() throws Exception {
         script.add(new Reply(200, OK_BODY));
         client("m", Duration.ofSeconds(30))
                 .complete(new LlmClient.Request(List.of(new LlmClient.Message("user", "Hello")), 50, false));
         assertThat(MAPPER.readTree(seen.get(0).body()).has("response_format")).isFalse();
+    }
+
+    /** A picture goes as the vision shape, the text then the data URL (ADR-102); a text message stays a string. */
+    @Test
+    void aPictureIsSentAsTextThenTheDataUrl() throws Exception {
+        script.add(new Reply(200, OK_BODY));
+        String picture = "data:image/jpeg;base64,AAAA";
+        client("m", Duration.ofSeconds(30))
+                .complete(new LlmClient.Request(
+                        List.of(
+                                new LlmClient.Message("system", "Read the list."),
+                                new LlmClient.Message("user", "The list is in this picture.", picture)),
+                        50,
+                        true));
+        JsonNode messages = MAPPER.readTree(seen.get(0).body()).get("messages");
+        assertThat(messages.get(0).get("content").asString()).isEqualTo("Read the list.");
+        JsonNode content = messages.get(1).get("content");
+        assertThat(content.get(0).get("type").asString()).isEqualTo("text");
+        assertThat(content.get(0).get("text").asString()).isEqualTo("The list is in this picture.");
+        assertThat(content.get(1).get("type").asString()).isEqualTo("image_url");
+        assertThat(content.get(1).get("image_url").get("url").asString()).isEqualTo(picture);
+    }
+
+    /** Only a data URL of a picture, on a user message: a provider is never asked to fetch a link. */
+    @Test
+    void aPictureIsNeverALink() {
+        for (String bad : List.of(
+                "https://example.test/list.jpg", "data:text/html;base64,AAAA", "data:image/svg+xml;base64,AA")) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> new LlmClient.Message("user", "x", bad))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> new LlmClient.Message("system", "x", "data:image/png;base64,AAAA"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

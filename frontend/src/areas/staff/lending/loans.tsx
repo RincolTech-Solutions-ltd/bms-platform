@@ -7,8 +7,10 @@ import { lending, type LoanListItem } from '../../../api/lending';
 import { branchFilter } from '../../../auth/branch';
 import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
-import { money, statusBadge, words } from './loan-state';
-import { showLending } from './permissions';
+import { loanStatusWords, money, statusBadge, words } from './loan-state';
+import { canBringIn } from './existing-loans-state';
+import { mayApply, showLending } from './permissions';
+import { NoAccess } from '../../../app/ui/EmptyState';
 
 // Loans (FR-DIS, FR-REP): find a loan by its number, the member's number, name or phone, filter by
 // status, and open it. The search runs as you type (useLiveSearch, #241). The list follows the branch
@@ -22,7 +24,7 @@ export function LendingGate({ title, children }: { title: string; children: Reac
   return (
     <main className="rt ln">
       <h1>{title}</h1>
-      {showLending(me) ? children : <p className="empty-state">You do not have access to this page.</p>}
+      {showLending(me) ? children : <NoAccess />}
     </main>
   );
 }
@@ -36,7 +38,7 @@ export function LoanRows({ items, term = '' }: { items: LoanListItem[]; term?: s
           <Link className="ln-item" to="/staff/lending/loans/$loanId" params={{ loanId: l.id ?? '' }}>
             <span className="ln-item-head">
               <strong><Highlight text={l.loan_no ?? ''} term={term} /></strong>
-              <span className={statusBadge(l.status)}>{words(l.status)}</span>
+              <span className={statusBadge(l.status)}>{loanStatusWords(l.status)}</span>
             </span>
             <span>
               <Highlight text={l.member_name ?? ''} term={term} /> (<Highlight text={l.member_no ?? ''} term={term} />)
@@ -54,7 +56,7 @@ export function LoanRows({ items, term = '' }: { items: LoanListItem[]; term?: s
 }
 
 export function Loans() {
-  const { branch } = useStaff();
+  const { branch, me } = useStaff();
   const search = useLiveSearch();
   const [status, setStatus] = useState('');
   const pages = useInfiniteQuery({
@@ -70,6 +72,12 @@ export function Loans() {
 
   return (
     <LendingGate title="Loans">
+      {mayApply(me) && (
+        <p><Link to="/staff/lending/applications/new" className="btn rt-primary" data-tour="loan-apply">New loan application</Link></p>
+      )}
+      {canBringIn(me) && (
+        <p><Link to="/staff/lending/existing-loans">Bring in existing loans from a paper register</Link></p>
+      )}
       <form role="search" className="ln-search" data-tour="loan-search" onSubmit={(e) => { e.preventDefault(); search.flush(); }}>
         <SearchBox id="loan-q" label="Loan number, member number, name or phone" search={search} fetching={fetching} count={pages.data ? items.length : undefined} more={pages.hasNextPage} />
         <label htmlFor="loan-status">Status</label>

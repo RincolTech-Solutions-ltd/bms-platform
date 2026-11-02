@@ -1,5 +1,6 @@
 import { createLazyRoute, Link } from '@tanstack/react-router';
 import { type FormEvent, useEffect, useState } from 'react';
+import { BusyButton } from '../../app/ui/BusyButton';
 import { applicantReply, applicantStatus, type ApplicantView, OnboardingError, statusLabel, verifyApplicant } from '../../api/onboarding';
 import { loadApplicantToken, MODULES, readLinkToken, saveApplicantToken } from './forms';
 
@@ -41,6 +42,8 @@ export function ApplicantPage({
   onReply,
   onConfirm,
 }: ApplicantPageProps) {
+  // ADR-108: Keep is the default answer to a pending short name; it changes nothing on the server.
+  const [kept, setKept] = useState(false);
   if (loading) {
     return (
       <main className="card auth-card">
@@ -82,14 +85,39 @@ export function ApplicantPage({
         </dd>
         <dt>Wanted</dt>
         <dd>{modules.join(', ')}</dd>
+        {view.short_name && (
+          <>
+            <dt>Short name</dt>
+            <dd>{view.short_name}</dd>
+          </>
+        )}
       </dl>
+      {/* JUSTIFICATION-A3: without this step a pending short name could never be applied from the page (review of #713). */}
+      {view.email_verified === true && view.pending_short_name && !kept && (
+        // ADR-108: a repeat sign-up asked for a new short name; it changes only when the applicant chooses it here.
+        <section aria-labelledby="rename-heading" className="form-stack">
+          <h2 id="rename-heading">Change your short name?</h2>
+          <p>
+            Your short name will change from <strong>{view.short_name ?? 'none'}</strong> to <strong>{view.pending_short_name}</strong>{' '}
+            only if you choose it. Someone using your email asked for this. If it was not you, keep your name.
+          </p>
+          <div className="cluster">
+            <button type="button" className="btn-brand" onClick={() => setKept(true)}>
+              Keep {view.short_name ?? 'my name'}
+            </button>
+            <BusyButton type="button" busy={confirming} onClick={onConfirm}>
+              Change to {view.pending_short_name}
+            </BusyButton>
+          </div>
+        </section>
+      )}
       {view.email_verified === false && (view.status === 'submitted' || view.status === 'needs_info') ? (
         <section aria-labelledby="confirm-heading" className="form-stack">
           <h2 id="confirm-heading">Confirm your email</h2>
           <p>Press the button to confirm this is your email address. We then look at your application.</p>
-          <button className="btn-brand" type="button" disabled={confirming} onClick={onConfirm}>
-            {confirming ? 'Confirming' : 'Confirm my email'}
-          </button>
+          <BusyButton className="btn-brand" type="button" busy={confirming} onClick={onConfirm}>
+            Confirm my email
+          </BusyButton>
         </section>
       ) : (
         <p role="status">{NEXT_STEP[view.status ?? ''] ?? ''}</p>
@@ -103,9 +131,9 @@ export function ApplicantPage({
               <label htmlFor="reply">Your answer</label>
               <textarea id="reply" value={reply} onChange={(e) => onReplyChange(e.target.value)} rows={4} maxLength={1000} required />
             </div>
-            <button className="btn-brand" type="submit" disabled={replying || reply.trim().length === 0}>
-              {replying ? 'Sending' : 'Send answer'}
-            </button>
+            <BusyButton className="btn-brand" type="submit" busy={replying} notReady={reply.trim().length === 0}>
+              Send answer
+            </BusyButton>
           </form>
         </section>
       )}

@@ -64,5 +64,13 @@ public interface TenantProvisioning {
 
         /** Runs after the tenant, its admin and the audit rows are written. */
         void after(Created created);
+
+        /**
+         * The onboarding application whose own short name the new tenant takes (Activate), or null: a name another
+         * confirmed application holds is refused (ADR-108).
+         */
+        default UUID application() {
+            return null;
+        }
     }
 }

@@ -253,7 +253,9 @@ key; MFA is mandatory and enrolled at first sign-in), `totp_last_step bigint`,
 ### `platform_sessions` and `platform_user_recovery_codes` (platform)
 
 `platform_sessions` has the columns of `auth_sessions` with `platform_user_id` in place of
-`tenant_id` and `user_id`. `platform_user_recovery_codes`: `id uuid PK`,
+`tenant_id` and `user_id`. Its `revoked_reason` takes `sign_out`, `rotation_reuse`, `user_deactivated`, `admin`, `mfa_reset`
+and, since `V106` (issue #377), `two_step_required`: an operator always needs a second factor, and the refresh of one who has
+none ends the session with that reason. It never takes `password_reset`: an operator has no password reset link. `platform_user_recovery_codes`: `id uuid PK`,
 `platform_user_id uuid NOT NULL` FK, `code_hash char(64) NOT NULL`, `used_at timestamptz`,
 `created_at`.
 
@@ -277,7 +279,9 @@ punctuation, without Ltd, Limited, Co, Company, SMC, Enterprise(s), The), `conta
 `onboarding_email_key`: lower case, a +tag dropped, Gmail dots dropped and googlemail.com read as
 gmail.com), `contact_phone_e164 varchar(20)`, `country char(2)`,
 `modules text[]`, `term` [`monthly`, `annual`], `way_in` [`trial`, `paid`], `agent_code` (recorded,
-unused until agents), `message varchar(1000)`, `link_token_hash char(64) UNIQUE` and
+unused until agents), `referral_code varchar(10)` and `referrer_tenant_id uuid` (FK `tenants`; the code the applicant
+brought and its business, resolved at the sign-up, made the referral at Activate; `V88`, ADR-069; the operator reads it through
+`onboarding_application_referrer`, which refuses a tenant-bound transaction), `message varchar(1000)`, `link_token_hash char(64) UNIQUE` and
 `link_token_expires_at` (the applicant link: SHA-256 of 256 random bits, 7 days; replaced by every
 email to the applicant), `email_verified_at` (in the operator queue once set), `operator_note`,
 `applicant_reply`, `reject_reason`, `decided_by` and `decided_at` (FK `platform_users`),
@@ -289,8 +293,51 @@ mailbox; indexes on status and date, phone and normalised name serve the queue a
 warning. Row-level security is enabled and forced with no policy (`bms_owner` has BYPASSRLS), and nothing
 is granted to `bms_app`: the definer functions owned by `bms_owner` are its only way in (create,
 relink, created since, read by link, reply, list, counts, duplicates, decide, lock, activated,
-expire, purge). Rejected and
-expired rows are deleted 90 days after `closed_at` (FR-ONB-09).
+expire, purge, and since `V88` set referrer and referrer). Rejected and
+expired rows are deleted 90 days after `closed_at` (FR-ONB-09). Since `V119` (issue #708, ADR-108): `short_name varchar(63)`,
+the short name the applicant chose (null on older rows, and cleared at the confirmation when someone else has it by then),
+unique over the open statuses whose email is confirmed (`onboarding_applications_one_open_per_short_name`), so the first to
+confirm keeps it and an unconfirmed application holds nothing; read through `onboarding_application_short_name`, replaced
+on a repeat sign-up with a new free name through `onboarding_application_set_short_name` while the email is not
+confirmed; on a confirmed application the new name goes into `pending_short_name varchar(63)` and is applied, if still
+free, only when the applicant presses the change button on the page that fresh link opens (the page reads both names
+through `onboarding_application_names_by_link`; Keep is the default answer); the trigger
+`onboarding_clear_pending_short_name` clears it whenever the application leaves the open statuses (activated, rejected,
+expired). `V119` adds
+`onboarding_application_create` with `p_short_name` as a 16 argument overload; V23's 15 argument one becomes a wrapper
+calling it with NULL, kept for the server still running during a deploy and dropped by a later migration. It replaces
+`onboarding_application_by_link` (defined only in V23 before it), which claims the name under its lock at the
+confirmation and applies a pending name when a link of a confirmed application is opened, taking the names' locks before
+the row's, the order a sign-up takes them. `short_name_taken` says who has
+a name (a business, or a confirmed open application; with `p_lock` it first takes the name's advisory lock, which every
+claim takes: the sign-up, the confirmation, Activate and the operator's tenant creation) and `short_link_target` where a
+short link goes (the active or suspended business with that slug).
+
+### `referral_commission_rules` and `referral_settings` (platform; no privilege for `bms_app`, definer functions only; `V88`, ADR-069)
+
+`referral_commission_rules`: a commission rule the platform operator typed, never changed (append-only; a change is a new rule).
+`id uuid PK`, `kind text NOT NULL` [`percent_of_payment`, `fixed_first_payment`, `fixed_per_month`], `percent_bp integer` (1 to
+10000 basis points), `amount_minor bigint` (1 to 50,000,000), `currency char(3)` (FK `currencies`), `months integer` (1 to 120, the
+first paid months of the referred business it applies to; null for no end), `cap_minor bigint` (1 to 1,000,000,000, a percent rule
+only, with its currency), `created_by_platform_user_id` (FK `platform_users`; null only on the default rule `V88` seeds), `created_at`; a CHECK holds the
+shape of each kind. `referral_settings`: one row (`id boolean PK CHECK (id)`) with `default_rule_id` (FK; null means no rule, so
+nothing is worked out), `updated_by_platform_user_id`, `updated_at`. Row-level security is enabled and forced with no policy on both, and nothing
+is granted to `bms_app`: the definer functions `platform_referral_add_rule`, `platform_referral_set_default_rule`,
+`platform_referral_set_rule` and `platform_referral_rule` are the only way in, each refusing a transaction bound to a tenant. `V88` seeds one
+rule, the default the product owner decided (ADR-069 decision 14: `percent_of_payment`, 1000 basis points, 12 months, no cap,
+fixed id `00000000-0000-4000-8000-000000000890`), and points the default at it only when none is set, with a
+`platform.referral.default_rule_changed` audit row.
+
+`referral_payment_outcomes` (same protection): what each payment of a referred business gave under its referral (for a payment
+made while no referral was current after the first one, `no_referral` under the referral that ended last),
+`payment_id uuid PK` (FK `subscription_payments`), `referral_id` (FK `tenant_referrals`), `outcome text` [`added`, `no_referral`, `no_rule`,
+`not_first_payment`, `months_used`, `currency_differs`, `cap_reached`, `zero`], `created_at`, `refunded_at timestamptz` and
+`refunded_by_line_id uuid` (FK `referral_commission_lines`, the reversal that said so) and `refunded_by_platform_user_id uuid` (FK
+`platform_users`); both are null until `refunded_at` is set. Inserted only by `platform_referral_commission_for_payment`;
+`platform_referral_reverse_line` with `p_refunded`, or `platform_referral_mark_payment_refunded` for a payment with no line to
+reverse (it refuses one whose `payment` line has no reversal), sets the refund columns. A trigger
+refuses a delete and any update except setting the refund columns once. A payment whose outcome was `currency_differs`, or that
+was recorded as refunded, never uses up a rule's first N months (ADR-069 decision 9).
 
 ### `notification_outbox` (platform; no privilege for `bms_app`, definer functions only, ADR-024)
 
@@ -387,7 +434,7 @@ last minute), then by due time, and locks the best twenty candidates in that ord
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` PK | |
-| `slug` | `varchar(63) UNIQUE NOT NULL` | `CHECK (slug ~ '^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])$')`; reserved labels refused by the service (FR-TEN-02). |
+| `slug` | `varchar(63) UNIQUE NOT NULL` | `CHECK (slug ~ '^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])$')`; reserved labels refused by the service (FR-TEN-02). The shop's short name (FR-TEN-12, ADR-108), kept for good. |
 | `name` | `text NOT NULL` | |
 | `status` | `text NOT NULL` | [`active`, `suspended`]. FR-TEN-06. |
 | `currency` | `char(3) NOT NULL` | FK `currencies`. Default `UGX`. |
@@ -423,9 +470,44 @@ month from the first session of a staff user, in the tenant's time zone (FR-SUB-
 transaction the platform console binds to it (`TenantContext.callAs`), in one transaction with
 the subscription move and the `Idempotency-Key` row. FR-SPM-01.
 
+### `subscription_receipts` (RLS; `bms_app` SELECT, INSERT; append-only; `V92`, ADR-075)
+
+(std, no `version`, no `updated_at`) `payment_id uuid NOT NULL` (composite FK `subscription_payments`, unique per tenant),
+`receipt_no varchar(20) NOT NULL UNIQUE` (`RT-<year>-<six digits or more>`, from the sequence `subscription_receipt_numbers`,
+across the platform; `bms_app` has USAGE on it), `business_name varchar(200) NOT NULL` and `plan_name varchar(200) NOT NULL` (as
+they were on the day, so the PDF never changes), `issued_on date NOT NULL`. Written in the payment's own transaction. The payments
+recorded before `V92` got theirs in the migration, numbered by `row_number()` over `(created_at, id)` across businesses, the
+sequence set after them. The backfill sets `row_security = off`, so a policy that still applied would fail the deploy rather than
+skip rows; an owner without BYPASSRLS lifts FORCE on the three tables for that transaction only. FR-SUB-11.
+
+### `subscription_reminders` (RLS; `bms_app` SELECT, INSERT; append-only; `V92`, ADR-075)
+
+(std, no `version`, no `updated_at`) `kind text NOT NULL` [`due_in_7`, `due_in_1`, `due_today`, `trial_in_7`, `trial_in_1`,
+`trial_today`], `due_on date NOT NULL` (the last day paid for, or of the free month), `amount_minor bigint` and `currency char(3)`
+(the plan's monthly price the day after, both or neither), `channels text[] NOT NULL` (what was queued: `email`, `sms`, or none
+when the business has no invited or active Owner). `UNIQUE (tenant_id, kind, due_on)`: a reminder is written with its outbox rows in one transaction,
+so it goes once. FR-SUB-08.
+
+### `platform_billing_settings` (platform, no RLS, `bms_app` SELECT only; `V92`, ADR-075)
+
+One row (`id = 1`): `grace_days integer NOT NULL DEFAULT 7` (0 to 60), `how_to_pay varchar(1000)` (the operator's words, empty at
+first), `updated_at`, `updated_by_platform_user_id`. Changed only through `platform_set_billing_settings`. FR-SUB-09.
+
+`platform_mark_subscription_overdue(tenant, due_on, today)` (`V92`, definer): moves a subscription in its free month or paid, not a
+pilot, of an active tenant, with no status change scheduled (`next_status_change_on` is null, and is left as it is) and no
+cancellation the Owner scheduled (`subscription_scheduled_changes`, kind `cancel`, status `scheduled`, checked under the
+subscription's row lock), whose last day is still `due_on` and before `today`, to `past_due`, and writes
+`platform.tenant.subscription_overdue` with no operator; anything else changes nothing. The only automatic status change; it never
+suspends. Since `V105` (issue #502) it is refused under a tenant binding (only the unbound platform job calls it, so no business's
+request can pass a later `today`) and changes nothing for a business that asked to close (`tenant_closures` requested or removing,
+ADR-090). FR-SUB-09. `platform_tenants_cancelling()` (`V92`, definer, refused under a tenant binding): the tenants with such a
+scheduled cancellation, which the billing run leaves out (ADR-075 decision 8).
+
 Reads for the operator across tenants (`V75`, definer functions owned by `bms_owner`):
 `platform_tenant_overview()` (every tenant with its plan, subscription dates, modules, the
-first tenant admin as the owner and the latest staff sign-in), `platform_tenant_admins(tenant)`
+first tenant admin as the owner and the latest staff sign-in; since `V103` also `profile_groups`, the `module_groups`
+entries of the modules the tenant has on that store a `profile`, which the server reads through each module's group to give
+the operator `business_type`, ADR-092), `platform_tenant_admins(tenant)`
 and `platform_tenant_outbox(tenant, limit)` (the outbox rows of one tenant, never their
 parameters).
 
@@ -454,7 +536,8 @@ write. Keys and defaults:
 | `sms_daily_cap` | not a tenant setting: the operator's cap and the on/off switch are in the platform table `platform_sms_controls`, set by the platform operator only; the tenant's own `daily_cap` in the group above can only lower it | 200 until set; off | ADR-036, FR-NTF-20 |
 | `payments.collections_enabled` | boolean | false; settable only while the tenant's own payment account is verified (`payment_gateway_accounts`, V56), else 409 `merchant_account_not_verified` | ADR-035 |
 | `module_groups.ai` (the settings group `ai`: `enabled`, `daily_token_cap`, `daily_cost_cap_micro`, `acknowledged_by`, `acknowledged_at`, `acknowledged_text_version`) | boolean, integer, integer, user, time, text | false, `BMS_AI_TENANT_DAILY_TOKENS` (20,000), `BMS_AI_TENANT_DAILY_COST_MICRO` (500,000), null; a cap is at most the platform ceiling; switching on needs the acknowledgement and a tenant named in `BMS_AI_ENABLED_TENANTS` (403 `advisor_not_available`), enforced in the group's validation (built in #220) | ADR-037 |
-| `approval_thresholds_minor` | map of action type to integer | every action 0 | FR-APR-04 |
+| `approval_thresholds_minor` | map of action type to integer | every action 0; changing one needs the admin's proof (ADR-091) | FR-APR-04 |
+| `approval_switches` | map of action type to boolean, only for the retail actions an admin saved on the approval rules (`PUT /settings/approvals`) | absent: lending actions always ask; `retail_sale_return` and `retail_purchase_order` ask while their amount is above 0; `retail_sale_write_off` asks (ADR-043's rule); `retail_sale_void`, `retail_stock_correction` and `retail_expense` do not | FR-APR-09, ADR-091 |
 | `approval_validity_days` | integer | 14 | FR-ORG-08 |
 | `allow_loans_before_kyc_verified` | boolean | false | FR-MEM-05 |
 | `max_active_loans_per_member` | integer or null | null | FR-ORG-07 |
@@ -464,6 +547,9 @@ write. Keys and defaults:
 | `require_mfa_roles` | string array of staff role keys (`member` is refused) | empty; the holders of these roles are required to use two-step sign-in | FR-IAM-16 |
 | `mfa_grace_days` | integer 0 to 90 or null | null (read as 0, at once); the grace period last chosen | FR-IAM-16 |
 | `mfa_enforce_from` | ISO instant or absent | absent (at once); written by the server only, to now plus the grace days when the policy is turned on or widened or a grace period is sent, and cleared when the policy is turned off or the grace is 0; until then a covered user without a factor signs in and is shown the date | FR-IAM-16 |
+| `go_live_date` | ISO date or absent | stored at the first sign-in of an administrator unless already set (`go_live_source` `first_admin_sign_in`; V89 backfills it for a business with an administrator sign-in or a loan): the earliest, in the business's time zone, of that sign-in, the first session of anyone ever an administrator, the earliest staff `last_login_at`, the tenant's `created_at` and the first `lending_loans` `created_at` or `disbursed_on`, so it never lands later than the real start; set only by the Owner (`PATCH /settings`, only earlier once a date is stored) or the platform operator (either way), today or earlier; existing loans come in only with a disbursement date before it (issue #466, ADR-071) | FR-EXL-03 |
+| `go_live_source` | `set` or `first_admin_sign_in`, with `go_live_date` | `set` when the Owner or the operator set the date; `first_admin_sign_in` when it was stored at that sign-in (issue #466, ADR-071) | FR-EXL-03 |
+| `financial_year_end_month` | 1 to 12, or absent | the month the business's financial year ends in; absent means June, the end of the Uganda tax year; set only by the Owner (`PATCH /settings`, 403 `owner_only` otherwise); the retention of a closed business's money records counts from the end of that financial year (issue #571, ADR-090, owner decision D46) | FR-TEN-09 |
 | `reports_enabled` | boolean | false; the tenant switch of the report runs (ADR-038, issue #214): off, nothing is queued, run or listed | FR-RPT-04 |
 
 `logo_document_id` is set only by the logo upload route, never by a settings patch: it names a
@@ -483,6 +569,9 @@ issue #329),
 `sells_goods boolean NOT NULL DEFAULT true` (false: a Store, a branch that holds stock but does not sell; retail refuses a sale, a payment taken and a
 refund paid there with `branch_does_not_sell`), `CHECK (sells_goods OR stocks_goods)` named `branches_store_stocks` (a Store must keep goods; migration
 V65, issue #366, ADR-048).
+`logo_document_id uuid` (the shop's own logo, null for none: the business logo shows; a `core.tenant` document of the tenant with the
+branch id on its row, foreign key `branches_logo_fk` on `(tenant_id, logo_document_id)` to `documents (tenant_id, id)`; migration V85,
+issue #461, ADR-068, FR-BR-09).
 `UNIQUE (tenant_id, code)`; partial unique index
 `ON branches (tenant_id) WHERE is_head_office` (exactly one head office). FR-BR-01.
 
@@ -497,7 +586,10 @@ V65, issue #366, ADR-048).
 an object). `preferences.tours` maps a guided tour id to `{status: completed | dismissed, version, at}`
 (FR-IAM-14); it holds only what the user chose for themselves, never anything a permission reads.
 Partial unique `(tenant_id, lower(email)) WHERE email IS NOT NULL AND kind = 'staff'`;
-partial unique `(tenant_id, phone_e164) WHERE kind = 'member'`.
+partial unique `(tenant_id, phone_e164) WHERE kind = 'member'`; partial unique `users_staff_phone (tenant_id, phone_e164)
+WHERE kind = 'staff' AND phone_e164 IS NOT NULL AND status IN ('invited', 'active')` (`V98`, issue #323, ADR-085: two
+invitations at once cannot make two staff users with one phone; V98 stops, changing nothing, when a business already has
+such a pair, `docs/runbooks/staff-duplicate-phones.md`).
 `CHECK (email IS NOT NULL OR phone_e164 IS NOT NULL)`.
 `is_owner boolean NOT NULL DEFAULT false` (`V79`, ADR-062, FR-IAM-18): the Owner of the business. `contact_changed_at
 timestamptz` (`V79`): when the email or phone last changed; `second_factor_changed_at timestamptz` (`V79`): when two-step
@@ -574,13 +666,215 @@ the endpoint is the device, so it is one row in the tenant, and a second person 
 they are never logged or audited, and they are not copied into the outbox. The same migration widens the CHECK on `notification_outbox.channel` to
 `email`, `telegram`, `sms` and `push`.
 
+### `feedback_items` (RLS)
+
+(std without `updated_at` and `version`; ADR-065; migration `V80`, issue #447) One row per idea, problem or question a member of staff
+sent from inside the app. `sender_user_id uuid NOT NULL` (FK `(tenant_id, sender_user_id)` to `users`), `kind text NOT NULL` (`idea`,
+`problem`, `question`), `message text NOT NULL` (1 to 2000 characters once trimmed), `page_path varchar(300)` (the path of the page the
+sender came from, starting with `/`; the service drops any query and fragment), `app_version varchar(100) NOT NULL` (the running version
+and git SHA, from the server's own build), `user_agent varchar(400)`, `screenshot_document_id uuid` (FK `(tenant_id,
+screenshot_document_id)` to `documents`; a core document of subject type `core.feedback`), `status text NOT NULL DEFAULT 'new'` (`new`,
+`seen`, `done`), `reply_note text` (1 to 2000 characters, the operator's reply the sender sees), `status_changed_at timestamptz`,
+`status_changed_by uuid` (FK to `platform_users`; the date and the operator change only when the status does, not for a
+reply alone), `linked_issue_number integer` (`CHECK (linked_issue_number > 0)`, the issue the operator opened for the item, null
+when none), `created_at timestamptz`. `UNIQUE (tenant_id, id)`. Indexes `(tenant_id,
+sender_user_id, created_at DESC)` (the sender's list and the hourly limit) and `(status, created_at DESC)` (the operator's list). Grants
+`SELECT, INSERT` only: the status and the reply change only through `platform_feedback_set_status`. Four SECURITY DEFINER functions,
+each refusing a transaction bound to a tenant (ADR-016): `platform_feedback_list(status, id, since, limit, offset)` (newest first across
+every business, only what was sent after `since` when it is given, at most 200 a page, with the business's slug and name, the sender's
+name and the linked issue), `platform_feedback_tenant(id)` (the business of
+one item, so the operator's screenshot read can bind it) and `platform_feedback_set_status(id, status, reply, platform_user_id, now)`
+(forward only; answers `not_found`, `backwards` or the tenant id; a null reply keeps the one there, an empty one or one of only spaces, tabs and line breaks clears it) and
+`platform_feedback_set_linked_issue(id, issue)` (sets the linked issue or clears it with a null; answers `not_found` or the tenant id).
+The status and the reply change only through `platform_feedback_set_status`, the linked issue only through
+`platform_feedback_set_linked_issue`.
+
+### `help_ask_questions` (RLS)
+
+(ADR-096; migration `V108`, issue #20) The Ask BMS question log: one row per question.
+`id uuid` PK, `tenant_id`, `user_id uuid NOT NULL` (FK `(tenant_id, user_id)` to `users`), `asked_at timestamptz NOT NULL`,
+`question_hash char(64)` (SHA-256 hex of the scrubbed, normalised question; **never the text**), `locale varchar(10)`, `outcome`
+(`model`, `cache`, `articles`, `other_role`, `no_match`), `fallback_reason` (`no_provider`, `all_failed`, `daily_cap`,
+`not_in_articles`; set exactly for `articles`), `provider` (`gemini`, `groq`, `deepseek`; the one that answered and billed, set for
+`model`, possible for `articles`, null otherwise: there is no other name, so no Anthropic one), `model varchar(100)`, `failures
+text[]` (the providers tried before, as `name:reason`), `counted boolean` (it went to the providers), `cited_article
+varchar(80)`, `input_tokens`, `output_tokens`, `cost_micro bigint` (estimated, from the operator's prices, every call of the
+question), `cost_currency char(3)`, `latency_ms`. Index `(tenant_id, asked_at)`. Grants `SELECT, INSERT` only. The limits count
+`help_ask_tickets` and the monthly cap sums `help_ask_spend`.
+
+### `help_ask_tickets` (RLS)
+
+(ADR-096; migration `V108`, issue #20) The Ask BMS limits, written before the work they count, under the business's
+transaction advisory lock: `kind` `ask` for every question (the per-person hourly limit) and `provider` for every question
+that goes on to the providers (the business's daily cap). `id`, `tenant_id`, `user_id` (FK `(tenant_id, user_id)` to `users`),
+`at`. Partial indexes `(tenant_id, user_id, at) WHERE kind = 'ask'` and `(tenant_id, at) WHERE kind = 'provider'`. Grants
+`SELECT, INSERT`.
+
+### `help_ask_spend` (RLS)
+
+(ADR-096; migration `V108`, issue #20) One row per provider call: `provider`, `model`, `reserved_at`, `settled_at` (null while
+the call is in flight: the row then holds its reservation, the most the call can cost), `input_tokens`, `output_tokens`,
+`cost_micro`, `cost_currency`. Written before the call (a paid provider's reservation under one platform-wide advisory lock,
+refused past the monthly cap) and settled after it with what the provider reported; a call that may have been billed but
+reported nothing keeps its reservation. Index `(provider, reserved_at)`. Grants `SELECT, INSERT, UPDATE` (the settlement). The
+`SECURITY DEFINER` function `help_ask_platform_spend(provider, currency, from)` sums it across every business in the cap's
+currency, one number and no row. An answer with no usage is settled at its reservation.
+The removal of a closed business (ADR-090) calls `help_erase_personal_data()` (SECURITY DEFINER, only inside a confirmed
+removal, through `bms_removing_tenant`), which deletes the business's `help_ask_answers`, `help_ask_tickets` and (since `V112`) `help_setup_drafts`; the question
+log and the spend rows go with the purge.
+
+### `help_ask_answers` (RLS)
+
+(ADR-096; migration `V108`, issue #20) The Ask BMS answer cache. PK `(tenant_id, cache_key)`; `cache_key char(64)` (SHA-256 hex of
+the prompt version, the provider and model chain, the corpus revision, the permission matrix version, the locale, the asker's
+roles, permission set and modules and the normalised question), `answer text` (1 to 2000 characters, phrased from the help
+articles only), `cited_article varchar(80)`, `provider`, `model`, `revision varchar(16)`, `created_at`, `expires_at` (after
+`created_at`; 30 days by default, a safety net, since any change is a new key). Grants `SELECT, INSERT, UPDATE`: the update
+replaces only a row past its expiry under the same key (`ON CONFLICT ... WHERE expires_at <= the new created_at`).
+
+### `help_setup_drafts` (RLS)
+
+(ADR-102; migration `V112`, issue #626) The setup helper's draft log: one row per draft, written before the providers are asked,
+under the business's advisory lock, so the person's hourly limit and the business's daily cap count rows already recorded.
+`id`, `tenant_id`, `user_id` (FK `(tenant_id, user_id)` to `users`), `asked_at`, `kind` (`retail` or `lending`), `source`
+(`text`, `photo` or `file`), `outcome` (`started` until it is finished, then `drafted`, `no_provider`, `all_failed`,
+`daily_cap` or `unreadable`), `provider` (`gemini`, `groq` or `deepseek`, set exactly when `drafted`), `model`, `failures
+text[]` (`name:reason`), `rows_drafted`, `input_tokens`, `output_tokens`, `cost_micro`, `cost_currency`, `latency_ms`. Never the
+list, the file, the picture or the draft. Indexes on `(tenant_id, user_id, asked_at)` and `(tenant_id, asked_at)`. Grants
+`SELECT, INSERT, UPDATE`: the update finishes a `started` row. Each provider call is a row of `help_ask_spend` too. The removal of
+a closed business (ADR-090) deletes the rows through `help_erase_personal_data` (replaced in `V112` with this table added); the
+generic purge after it would reach them too.
+### `subscription_module_requests` (RLS)
+
+(ADR-073; migration `V90`, issue #472) One row per module the Owner asked for. `module_key text NOT NULL` (`^[a-z]{2,30}$`),
+`status text NOT NULL DEFAULT 'pending'` (`pending`, `approved`, `declined`), `requested_by uuid NOT NULL` (FK `(tenant_id,
+requested_by)` to `users`), `created_at`, `decided_at` (null exactly while pending), `decided_by_platform_user_id` (FK to
+`platform_users`, null when the system approved it), `decided_automatically boolean` (the plan already included the module),
+`decision_reason varchar(300)` (required when declined; shown to the Owner), `plan_before`, `plan_after` (plan codes). `UNIQUE
+(tenant_id, id)`; a partial unique index allows one pending request per module. Grants `SELECT, INSERT, UPDATE`: the row is a
+record only; the module is switched on through `platform_set_tenant_modules`, which checks the plan, so a row written by hand
+grants nothing. The operator reads across businesses through `platform_module_requests(status)` and binds the business of one
+request through `platform_module_request_tenant(id)` (both refuse a tenant-bound transaction, ADR-016).
+
+### `subscription_scheduled_changes` (RLS)
+
+(ADR-073; migration `V90`, issue #472) A module stopped or the subscription cancelled by the Owner, in force from a day.
+`kind text NOT NULL` (`stop_module`, `cancel`), `module_key` (set exactly for `stop_module`), `effective_on date NOT NULL` (the
+day after `subscriptions.current_period_end`, or the day asked when nothing is paid ahead), `status text NOT NULL DEFAULT
+'scheduled'` (`scheduled`, `applied`, `undone`; `applied_at` and `undone_at` set exactly with their status), `requested_by`,
+`undone_by` (FKs to `users`), `created_at`. A partial unique index allows one scheduled row per module and one scheduled
+cancellation per business; a partial index on `effective_on` serves the job. Grants `SELECT, INSERT, UPDATE`. The operator lists
+the scheduled rows across businesses through `platform_scheduled_changes()`; the job lists the businesses with one due through
+`platform_tenants_with_due_changes(through)`. `subscriptions.ended_on date` (V90) is the day an Owner's cancellation took effect;
+`platform_end_subscription(tenant_id, on)` (bound to that tenant only) sets it with the status `cancelled` and the tenant
+`suspended`, but changes nothing and returns null for a business the operator suspended or cancelled (the suspension is kept and
+the cancellation stays scheduled until a resume; the job's list counts a due cancellation only for an active business);
+`platform_set_subscription_status` clears it when the subscription leaves `cancelled`; `app_resolve_tenant_status`
+answers `ended` for such a business, and for an active one whose scheduled cancellation's day has come in its own time zone
+before the job applied it, so its writes are refused with `subscription_ended` from that day. V90 also replaces V49's report runner lists
+(`app_count_running_report_runs`, `app_tenants_with_queued_report_runs`, `app_tenants_with_stale_report_runs`) so they take an
+ended business as well as an active one: its report runs still finish and a dead run is still failed. And it adds
+`app_tenant_takes_payments(tenant)` (active, or suspended with the subscription `cancelled` and `ended_on` set), which
+`TenantJobs.callForTenantTakingPayments` checks for the payment gateway's callback and the poller, and through which
+`app_tenants_with_due_payment_checks` (V54) now lists its businesses, so a payment made after the end still posts while a
+business the operator suspended stays left out.
+
+
+### `billing_contacts` (RLS; `bms_app` SELECT, INSERT, UPDATE, DELETE; `V102`, ADR-090)
+
+At most one row per business (`tenant_id` is the key): `full_name varchar(120) NOT NULL`, `email varchar(254) NOT NULL`,
+`phone_e164 varchar(16)` (optional, a mobile number for SMS reminders), `updated_by` (FK to `users`), `created_at`, `updated_at`.
+The person the reminders and receipts go to instead of the Owner; no row means the Owner. Never read by sign-in. FR-SUB-13.
+
+### `tenant_closures` (RLS; `bms_app` SELECT, INSERT, UPDATE under a guard; `V102`, ADR-090)
+
+The Owner's request to close the business. `status text NOT NULL DEFAULT 'requested'` (`requested`, `cancelled`, `removing`,
+`removed`, then `purging` and `purged` with `purged_at` once the kept records are deleted), `requested_by` (FK to `users`), `requested_at`, `remove_after date NOT NULL` (the first day of removal, the business's
+own date plus the cooling-off), `export_run_id uuid` (the full workbook queued for the Owner), `cancelled_by`, `cancelled_at` (set
+exactly when cancelled), `removed_by_platform_user_id`, `removal_reason varchar(300)`, `removed_at` and `keep_until date` (set
+exactly when removed: the day after which the kept money records may be deleted). A partial unique index allows one open request
+(`requested` or `removing`) per business. The trigger `tenant_closures_guard` lets the application insert only a `requested` row,
+set its export run once and cancel it; only the definer functions running as `bms_owner` move a request to `removing` or
+`removed`. `tenants.status` gains `closed` (V102): a removed business, which the resolver never serves. `app_resolve_tenant_status`
+answers `closing` while a request is open for an active business or one whose Owner's cancellation ended it, and
+`platform_tenants_cancelling()` lists such a business so billing leaves it out. The removal runs through
+`platform_begin_tenant_removal(closure, operator, session, reason)` (bound to no business, refused otherwise; the cooling-off
+checked against the business's own date computed from its time zone; the operator authenticated by an active account with
+two-step sign-in, a live platform session of theirs and an authenticator code used in the last two minutes, else
+`operator_not_verified`; the request moved to `removing`, or a `removing` request resumed), then, bound to the business,
+`app_mark_tenant_removal(closure)` (only a `removing` request; marks the transaction with `bms.erasing_tenant`), the erasers
+`app_erase_core_personal_data()` (also the free text of every note, memo, reason, explanation, purpose and message column of the
+business's tables, read from the catalogue, and the personal keys and values of its audit rows and its platform log rows through
+`bms_strip_personal(jsonb)`), `lending_erase_personal_data()` and `retail_erase_personal_data()` (each refuses to run outside a
+removal through `bms_removing_tenant()`; the retail one keeps the buyer's TIN in a document's snapshot), and
+`platform_finish_tenant_removal(closure, keep_until, summary)` (the business `closed`, the subscription ended, the sign-up
+application anonymised, `platform.tenant.removed` with the reason). Owner decision D46: the daily job lists the removed requests past `keep_until`
+(`platform_closures_due_for_purge()`, each business's date computed from its time zone) and `platform_purge_closed_tenant(closure)` deletes, unbound and in passes over
+every table with a `tenant_id` read from the catalogue, every row of the business except its `tenants` row, its `users` and its
+`tenant_closures` rows, then marks the request `purged` and writes `platform.tenant.purged`; every other guard that fires on
+DELETE on a business's table, read from the catalogue, returns the row for a change while `bms_erasing` holds, which it does for a
+request `removing` or `purging`. V102 also replaces `app_list_active_tenants`, `app_list_active_tenants_with_module` and
+`app_tenant_is_active` so a business with an open request is left out of the scheduled jobs and the outbox's SMS and push, as a
+suspended one is. The guard functions `reject_mutation`, `retail_sales_guard_update`,
+`retail_quotations_guard_update`, `retail_customer_orders_guard_update`, `payment_intents_guard`, `retail_cashbook_guard_update` and
+`lending_collection_actions_guard` let a change through when `bms_erasing(to_jsonb(OLD))` holds: the caller runs as `bms_owner`,
+the transaction is marked for the row's business and its request is `removing`. The operator reads the requests through
+`platform_closures()` and the business of one through `platform_closure_tenant(id)`, and the businesses with no Owner and their
+active administrators through `platform_tenants_without_owner()`; all three refuse a tenant-bound transaction. FR-TEN-09,
+FR-IAM-18.
+### `referral_codes` (RLS; `bms_app` SELECT only; append-only; `V88`, ADR-069)
+
+`tenant_id uuid PK` (FK `tenants`), `code varchar(10) UNIQUE` (`^[A-Z0-9]{4,10}$`, upper case), `created_at`. Written by the trigger
+`referral_code_on_new_tenant` (after insert on `tenants`) through `bms_assign_referral_code`, and backfilled by `V88` for every
+business that existed: up to five letters of the slug and two characters without 0, 1, I or O, four after ten taken tries, eight
+random after twenty. `referral_code_tenant(code)` (definer, no tenant needed) resolves a typed code, without case, for the public
+sign-up.
+
+### `tenant_referrals` (RLS on the referrer; `bms_app` SELECT only; `V88`, ADR-069)
+
+Who referred whom. `tenant_id` is the **referrer** (the business that owns and reads the row), `referred_tenant_id` (FK `tenants`)
+the business it brought, `code varchar(10)` (the code used), `source text` [`sign_up`, `operator`], `application_id uuid` (the
+sign-up application, for `sign_up`), `rule_id uuid` (FK `referral_commission_rules`; the operator's override, null follows the
+default), `started_at`, `ended_at` (set when the operator moves the business to another referrer), `created_by_platform_user_id`.
+`UNIQUE (tenant_id, id)`; `CHECK (tenant_id <> referred_tenant_id)` (a business never refers itself); a partial unique index on
+`referred_tenant_id` where `ended_at IS NULL` (one current referrer). A trigger refuses a delete and any update but `rule_id` and
+setting `ended_at` once. Written by `platform_referral_from_application` (Activate) and `platform_referral_set_referrer` (the
+operator: ends the current row and starts a new one, so lines stay with the referrer who earned them). The months a rule's
+first N count start at the business's earliest `started_at` over all its rows, so a new row earns only the months left
+(ADR-069 decision 9).
+
+### `referral_commission_lines` (RLS on the referrer; `bms_app` SELECT only; `V88`, ADR-069)
+
+What a referrer earned. `tenant_id` (the referrer), `referral_id` (FK `(tenant_id, referral_id)` to `tenant_referrals`), `kind text`
+[`payment`, `manual`, `reversal`], `payment_id uuid` (FK `subscription_payments`; one `payment` line per payment, a partial unique
+index), `reverses_line_id uuid UNIQUE` (FK `(tenant_id, reverses_line_id)`; a line is reversed once), `amount_minor bigint` (not
+zero, at most 1,000,000,000 either way; negative only for a reversal), `currency char(3)`, `months_counted integer`, `rule_snapshot
+jsonb` (the rule, the payment's months and the months already used; required for `payment`; never the payment's amount, which the
+referrer could read: `platform_referral_lines` adds it for the operator only), `referrer_inactive boolean NOT NULL DEFAULT false`
+(the referrer business was inactive, `bms_referrer_status` not `active`, when the line was worked out, ADR-069 decision 12; the reads return it as
+`inactive_when_worked_out` and work out `referrer_status` and `referrer_inactive` now with `bms_referrer_status`, and
+`platform_referral_mark_paid` refuses an unconfirmed paid mark while the referrer is suspended, cancelled, past due or out of
+an unpaid free month), `note varchar(500)` (the reason of a `manual` or
+`reversal` line), `paid_on date`, `paid_method text` [`mtn_momo`, `airtel_money`, `bank_transfer`, `cash`, `other`],
+`paid_reference varchar(100)`, `paid_note varchar(500)`, `paid_at`, `paid_by_platform_user_id`, `created_by_platform_user_id`,
+`created_at`. `UNIQUE (tenant_id, id)`. A trigger refuses a delete and any update except setting the paid columns once. Written only by
+the definer functions `platform_referral_commission_for_payment` (in the payment's transaction, bound to the paying business, which
+must own the payment), `platform_referral_add_manual_line`, `platform_referral_reverse_line` and `platform_referral_mark_paid` (each
+refusing a tenant-bound transaction; the typed line's Idempotency-Key row is written bound to the referrer and the line unbound,
+in one transaction); read
+across businesses by `platform_referrals_list` and `platform_referral_lines` (each refusing a tenant-bound transaction) and, for the
+bound business only, by `tenant_referrals_mine()`.
+
 ### `auth_sessions` (RLS)
 
 (std, no `version`) `user_id uuid NOT NULL`, `family_id uuid NOT NULL`,
 `refresh_token_hash char(64) NOT NULL UNIQUE`, `expires_at timestamptz NOT NULL`,
 `idle_expires_at timestamptz NOT NULL`, `rotated_at timestamptz`,
 `revoked_at timestamptz`, `revoked_reason text` [`sign_out`, `rotation_reuse`,
-`user_deactivated`, `admin`, `mfa_reset`, `password_reset` (added by the migration of #320)], `ip inet`, `user_agent text`.
+`user_deactivated`, `admin`, `mfa_reset`, `password_reset` (added by the migration of #320), `two_step_required` (added by
+`V67`: a session not renewed because its holder must have two-step sign-in and has none, ADR-046)], `ip inet`, `user_agent text`.
+Sign out everywhere writes `sign_out` on every session of the user and an administrator's sign-out of one staff member's
+devices writes `admin` (issue #647, no migration); the audit row tells them apart.
 One row per refresh token: a rotation marks the row `rotated_at` and inserts the next row of the
 same family; the access token's `sid` is the row id.
 Index `(tenant_id, user_id) WHERE revoked_at IS NULL`. FR-IAM-07, FR-IAM-08.
@@ -741,6 +1035,34 @@ the pack. Three read-only `SECURITY DEFINER` functions let the runner see across
 beat) is older than the cutoff. The migration sets `lock_timeout` to five seconds before it takes its brief locks on `tenants` and
 `documents`.
 
+Migration V91 (issue #334, ADR-074) leaves the three definer functions as V90 made them: active tenants and those ended by
+the Owner's cancellation (`subscriptions.status = 'cancelled'` with `ended_on`), so an ended business still gets the workbook it
+asks for and a business the operator suspended gets no run. It adds `app_tenants_with_expired_report_files(now)`, the tenants with a ready run whose file is past its expiry and not yet
+deleted, whatever the tenant's status: the nightly expiry walks it, so a suspended or ended business's files go on time too.
+
+### `data_export_settings` (RLS)
+
+Built (issue #334 step 1, migration V91; ADR-074). (std, no `version`) `weekly_email boolean NOT NULL DEFAULT true` (the Owner is
+emailed the workbook every week), `updated_by uuid NOT NULL` (composite foreign key to `users`). Unique `(tenant_id)`: one row
+per business, written on the first change; no row means on. `bms_app` holds SELECT, INSERT and UPDATE; every change is audited
+(`core.data_export.settings_changed`, before and after).
+
+### `data_export_weekly` (RLS)
+
+Built (issue #334 step 1, migration V91; ADR-074). (std, no `version`) `week_of date NOT NULL` (the Monday that starts the week,
+checked), `run_id uuid` (the week's `core.data_export` run, composite foreign key to `report_runs`), `recipient_user_id uuid` (the
+Owner it was made for, composite foreign key to `users`), `status text NOT NULL` [`preparing` (the run is being made),
+`queued` (the email is in the outbox), `emailed` (the outbox recorded it sent), `skipped`, `failed`],
+`attached boolean` (the workbook was attached rather than linked), `reason text` (a stable code: `no_owner_email`, `switched_off`
+(the email was switched off after the week was queued), `cancelled`, `email_failed` or the run's error code), `finished_at timestamptz`. Unique `(tenant_id, week_of)`: one row per business and week, so the job
+queues one workbook and one email however often it runs. Checks: every week but a `skipped` one has a run (a week skipped as `switched_off` keeps the run queued before the switch); only a
+`preparing` or `queued` week has no `finished_at`. Partial index on those open weeks. The definer function
+`app_data_export_weekly_email_status(week_id)` returns the outbox status of the week's own email for the bound tenant, so the
+week becomes `emailed` only when it was sent; `app_data_export_weekly_tenants(now)` lists the businesses the weekly job visits:
+the active ones and those ended by the Owner's cancellation less than 90 days ago by `ended_on`, never one the operator
+suspended (ADR-074 decision 7). `bms_app` holds SELECT and INSERT, and UPDATE of
+`status`, `attached`, `reason` and `finished_at` only.
+
 ### `payment_methods` (RLS)
 
 (std) `method_key text NOT NULL` [`cash`, `bank`, `mtn_momo`, `airtel_money`, `gateway`,
@@ -753,10 +1075,15 @@ posts to its seeded account (`cash` to `cash_on_hand`, `bank` to `bank`, `mtn_mo
 `is_active = false` switches the method off. `core.ledger`'s `PaymentMethods` is the one lookup;
 lending's loans, savings and investments post through it, at the branch of the loan, account or
 investment (request checks included). A correction credits the account its original entry debited.
-Retail postings and the cash book do not use it yet (#236), so while the retail module is on `cash`
-and `bank` can be mapped only to `cash_on_hand` and `bank` (`account_used_by_retail`, ADR-026), and
-`platform_set_tenant_modules` (replaced in V43) refuses to switch retail on while an active cash or
-bank mapping points elsewhere. `bms_app` holds SELECT, INSERT, UPDATE and DELETE on the table (a
+Retail uses it too since #236 (ADR-105, `V117`): a retail leg on `cash_on_hand` or `bank` posts to the
+account `cash` or `bank` is mapped to at the posting's branch, or to the seeded account while the method
+is unmapped or switched off (retail has no switch-off), and the cash book reads the seeded account with every account
+the method was ever mapped to for the branch or the tenant (this table and the audit of `core.payment_method.set`), so a
+remap moves no past day.
+Retail's `mobile_money` account has no method here and stays on its system key. The V43 restrictions
+(`account_used_by_retail`, and the check in `platform_set_tenant_modules` that refused to switch retail
+on while cash or bank was mapped elsewhere) are gone; `V117` replaces the function with its V10 body.
+`bms_app` holds SELECT, INSERT, UPDATE and DELETE on the table (a
 mapping is removed to return the method to its default).
 
 ### `payment_intents` (RLS)
@@ -785,7 +1112,7 @@ As built in slice #213 (migration `V54__payment_gateway_core.sql`; the status se
 `paid_amount_minor bigint`, `confirmation_code text`, `reported_method text`, `last_checked_at timestamptz`,
 `final_status text` [`booked`, `booked_unallocated`, `needs_attention`, `failed`, `expired`], `refusal_code text`,
 `creation_lease_until timestamptz`, `technical_failures integer`. `payment_callbacks` stores identifiers only and its `outcome` also takes `unknown_reference` and
-`throttled`. Migration `V84` replaces the guard function `payment_intents_guard()` (V54) with two moves added, `reversed_pending_review` to `booked` and to `booked_unallocated` (a payment reported reversed and then completed again goes back to what it was), and one narrowed: `needs_attention` to `reversed` is refused for an order that carries a booked transaction (an allocated receipt stores it too), so that only the approved reversal takes money out of a loan or account. A reversal handed to a person is not a status: the order stays `reversed_pending_review` and carries `refusal_code` `reversal_unresolved`, `reversal_rejected` or `completed_after_reversal`, with no `next_check_at`. The definer function `app_resolve_payment_intent(provider, provider_reference, merchant_reference)` returns the
+`throttled`. Migration `V122` replaces the guard function `payment_intents_guard()` (V54) with two moves added, `reversed_pending_review` to `booked` and to `booked_unallocated` (a payment reported reversed and then completed again goes back to what it was), and one narrowed: `needs_attention` to `reversed` is refused for an order that carries a booked transaction (an allocated receipt stores it too), so that only the approved reversal takes money out of a loan or account. A reversal handed to a person is not a status: the order stays `reversed_pending_review` and carries `refusal_code` `reversal_unresolved`, `reversal_rejected` or `completed_after_reversal`, with no `next_check_at`. The definer function `app_resolve_payment_intent(provider, provider_reference, merchant_reference)` returns the
 tenant and intent id or nothing (ADR-016).
 
 ### `payment_gateway_accounts` (RLS, built in slice #233, migration `V56`)
@@ -840,9 +1167,9 @@ allocation slice adds the update and its guard): `id`, `tenant_id`, `created_at`
 and a foreign key to `payment_intents`), `purpose`, `subject_type`, `subject_id` (what the payer meant to pay), `amount_minor bigint NOT NULL`, `currency`, `value_date date NOT NULL`,
 `confirmation_code varchar(100)`, `refusal_code varchar(60) NOT NULL` (why the purpose handler refused: a closed vocabulary of lower case words), `status text NOT NULL DEFAULT 'open'`
 [`open`, `allocated`, `refunded`], `journal_entry_id uuid NOT NULL` (debit `gateway_clearing`, credit `unallocated_receipts`, posted in the same transaction that ends the intent
-`booked_unallocated`). The payer's phone is not copied (it stays on the intent). The columns of allocation arrive in `V84` (slice #224, below).
+`booked_unallocated`). The payer's phone is not copied (it stays on the intent). The columns of allocation arrive in `V122` (slice #224, below).
 
-As built in slice #224 (migration `V84__unallocated_receipts_queue.sql`): the table stops being append-only. A receipt that is `open` ends exactly once as `allocated`, `refunded` or `reversed`.
+As built in slice #224 (migration `V122__unallocated_receipts_queue.sql`): the table stops being append-only. A receipt that is `open` ends exactly once as `allocated`, `refunded` or `reversed`.
 New columns: `version integer` (rises by one with the one change a receipt ever gets), `updated_at`, `requested_by` and `decided_by` (the maker and the checker; the two never equal), `approval_id` (the
 `approval_requests` row that decided it, foreign key), `decided_at`, `note` (the maker's reason, 300 characters), `allocated_purpose`, `allocated_subject_type`, `allocated_subject_id`,
 `allocated_txn_id` (the repayment or deposit the allocation created; unique per tenant where set), `cleared_entry_id` (the journal entry that cleared the liability: the reversal of the receipt's own
@@ -852,7 +1179,7 @@ an allocated one has the allocation and no refund, a refunded one the refund and
 status but the three endings, a version that does not rise by exactly one, and any change to what the payment was (amount, currency, order, journal entry, refusal). The application role has `UPDATE` on the settlement
 columns only and no `DELETE`.
 
-`users.kind` accepts `system` (V84): the tenant's payments system user, one per tenant (unique index on the lower-cased email where the kind is `system`), created on first use, with no credentials, role or session. Every staff
+`users.kind` accepts `system` (V122): the tenant's payments system user, one per tenant (unique index on the lower-cased email where the kind is `system`), created on first use, with no credentials, role or session. Every staff
 query filters on kind `staff`, so it is listed and usable nowhere; it is the maker of `gateway_payment_reversal` requests (ADR-035 decision 16). The same migration lets `lending_loan_transactions.payment_method_key` take `gateway`
 (the check is replaced by a superset, added `NOT VALID` and validated) and adds the partial unique index `lending_loan_transactions_gateway_reference` over
 (`tenant_id`, `payment_method_key`, `external_reference`) where the method is `gateway`, the reference is not null and the type is `repayment` or `recovery`, so one order tracking id books
@@ -1162,7 +1489,7 @@ creation and replaced by the approved terms at approval.
 | `member_id` | `uuid NOT NULL` | |
 | `product_version_id` | `uuid NOT NULL` | |
 | `officer_user_id` | `uuid NOT NULL` | Responsible officer (FR-CLN-01). |
-| `status` | `text NOT NULL` | [`draft`, `submitted`, `appraised`, `approved`, `rejected`, `cancelled`, `active`, `closed`, `written_off`, `restructured`] |
+| `status` | `text NOT NULL` | [`draft`, `submitted`, `appraised`, `approved`, `rejected`, `cancelled`, `active`, `closed`, `written_off`, `restructured`, `brought_in`]; `brought_in` (V89) is an existing loan recorded from a paper register and waiting for its checker; it counts nowhere until approved |
 | `channel` | `text NOT NULL` | [`staff`, `portal`, `import`] |
 | `purpose_category` | `text NOT NULL` | [`business`, `school_fees`, `medical`, `agriculture`, `household`, `construction`, `other`] |
 | `purpose_text` | `varchar(300)` | |
@@ -1194,6 +1521,15 @@ creation and replaced by the approved terms at approval.
 | `credit_balance_minor` | `bigint NOT NULL DEFAULT 0` | Excess held as member overpayment (R-ALLOC step 4). |
 | `import_row_id` | `uuid` | When `channel = import`. |
 | `created_by` | `uuid` | |
+| `go_live_on` | `date` | V89, ADR-071: the business's go-live date an existing loan was checked against; set only on a loan brought in, and the date of its opening entry. `CHECK (disbursed_on < go_live_on)` |
+| `brought_in_on` | `date` | V89: set on approval, the later of `go_live_on` and the approval's business date; no penalty period starting before it is charged (FR-EXL-07). `CHECK (brought_in_on >= go_live_on)` |
+| `register_ref` | `varchar(40)` | V89: the loan's number in the paper register; unique per tenant, ignoring case, among loans not cancelled or rejected (`lending_loans_register_ref`) |
+| `agreed_total_minor` | `bigint` | V89: the total the borrower agreed to repay, when the register gives it instead of the rate; `CHECK (> 0)` |
+| `opening_entry_id` | `uuid` | V89: the opening entry at go-live (debit `loans_receivable` with the loan as subledger, credit `opening_balance_equity`), null when no principal was owed. Composite foreign key to `journal_entries` |
+
+A `brought_in` loan holds its real disbursement date in `proposed_disbursement_date` until the approval writes
+`disbursed_on`; `submitted_by` is its maker and `approved_by` its checker, so the approver CHECK keeps the checker from
+being the maker; `lending_loans_brought_in_shape` requires `go_live_on`, the date and the maker while it waits.
 
 Indexes: `(tenant_id, member_id)`, `(tenant_id, branch_id, status)`,
 `(tenant_id, officer_user_id, status)`, `(tenant_id, status, next_due_date)`,
@@ -1319,6 +1655,44 @@ written-off, penalty and status columns move.
 `waived_minor bigint NOT NULL DEFAULT 0`.
 Partial unique `(tenant_id, schedule_item_id, period_no) WHERE charge_type = 'penalty'`
 (R-PEN idempotency).
+Built in V81 (#264): `charge_type` is `penalty` (one row per period, the unique key) or
+`penalty_recharge` (`recharge_of` the period's first charge: a reversal showed a cancelled amount was
+owed after all; fee charges and their `fee_id` come with the fee work), `period_no` is required,
+`waived_minor` and `cancelled_minor` together never exceed `amount_minor`, `created_at` is the clock
+time of the insert (or of the transaction that caused it), and a guard trigger refuses every delete and
+every update except raising `waived_minor` or `cancelled_minor`, for the owner too. `business_date` is
+the date the penalty is charged for, which the statement and receipts use (ADR-034).
+
+### `lending_charge_cancels` (append-only)
+
+`id`, `tenant_id`, `created_at`, `loan_id`, `charge_id`, `amount_minor` (`> 0`), `business_date`
+(the day of the cancel), `reason` (`paid_before_charged` or `base_reduced`), `cause_txn_id` (the
+repayment or reversal that caused it). Built in V81 (#264): one row per amount cancelled off a charge
+when a back-dated repayment shows a period was not owed, or owed less on a smaller base; the charge's
+`cancelled_minor` is the sum of its rows; the statement credits it on its day (ADR-034).
+
+### `lending_charge_waivers` (append-only)
+
+`id`, `tenant_id`, `created_at`, `loan_id uuid NOT NULL`, `charge_id uuid NOT NULL`,
+`amount_minor bigint NOT NULL` (`> 0`), `business_date date NOT NULL` (when the waiver took
+effect), `reason text NOT NULL`, `approval_request_id uuid`, `requested_by uuid NOT NULL`,
+`approved_by uuid`. One row per approved waiver of all or part of a charge (FR-ARR-04); the
+charge's `waived_minor` is the sum of its rows. The statement dates a waiver by its row (ADR-034)
+and a reversal's replay keeps it (ADR-026). Nothing is posted. Built in V82 (#265), with the maker and checker as composite foreign keys to `users`. A waiver nets against its own charge: a
+payment never sees a later charge's waiver, and a back-dated repayment still cancels the unwaived rest
+of a partly waived charge.
+
+### `lending_item_waivers` (append-only)
+
+`id`, `tenant_id`, `created_at`, `loan_id uuid NOT NULL`, `schedule_item_id uuid NOT NULL`,
+`component text NOT NULL` (`fee` or `interest`; principal is never waived), `amount_minor bigint NOT
+NULL` (`> 0`), `business_date date NOT NULL` (when the waiver took effect), `reason text NOT NULL`,
+`approval_request_id uuid`, `requested_by uuid NOT NULL`, `approved_by uuid`. One row per approved
+waiver of all or part of a schedule item's fees or interest (FR-ARR-04, #265); the item's
+`fees_waived_minor` or `interest_waived_minor` carries it (the interest column also holds the payoff
+rebate, which a replay recomputes, while it keeps these rows). The statement dates a waiver by its row
+(ADR-034) and a reversal's replay keeps it (ADR-026). Nothing is posted. Built in V107 (#265), with
+the item keyed by `(tenant_id, loan_id, schedule_item_id)` so it is always the loan's own, the maker and checker as composite foreign keys to `users`, forced RLS and the append-only trigger.
 
 ### `lending_loan_transactions` (append-only)
 
@@ -1393,6 +1767,11 @@ entry_date)`.
 [`call`, `visit`, `sms`, `letter`, `promise_to_pay`, `other`], `note text`,
 `promised_date date`, `promised_amount_minor bigint`, `promise_status text` [`pending`,
 `kept`, `broken`], `performed_by uuid NOT NULL`, `performed_at timestamptz NOT NULL`.
+Built in V83 (#266): a promise to pay carries its date, amount and status and no
+other action does; `promise_settled_on` is the business date of its latest settlement (null while
+pending); `performed_by` is a composite foreign key to `users`; a guard trigger (in place of
+`reject_mutation()`) refuses deletes and allows only a promise's status and settled date to change,
+so the nightly run can settle a promise again after a back-dated repayment or a reversal.
 
 ### `lending_savings_products`
 
@@ -1679,8 +2058,11 @@ reversal that reopens a closed loan can restore that loan's own pledges (section
 `V63__retail_catalogue_corrections.sql` (#351 and #352, ADR-044) is expand only:
 `bms_name_key`, the generated `retail_products.name_key` with its index, `retail_products.duplicate_reason`,
 `retail_purchase_voids` and `retail_stock_corrections` (section 6.11.2a). No column or check of the movement and balance tables
-changes. The next migration takes the number above the highest on `main` (`MigrationOrderIT`, chapter 15 section
-15.4.3).
+changes. `V88__referrals_and_commissions.sql` (#464, ADR-069) is expand only: `referral_codes` (with the trigger on `tenants` and
+the backfill), `tenant_referrals`, `referral_commission_lines`, `referral_commission_rules`, `referral_settings`, two columns on
+`onboarding_applications`, their definer functions and the permission `core.referrals.read`; `V85` is shop logos and `V86` and `V87`
+are the ordered claims before it (offline sales, barcodes); it is renamed at merge if that order changes. The next migration takes the number above the highest on `main`
+(`MigrationOrderIT`, chapter 15 section 15.4.3).
 
 ## 6.10 Open items
 
@@ -1732,6 +2114,13 @@ module on again adds nothing. `S` marks `is_system_controlled`.
 | `name` | varchar(100) for categories, varchar(30) for units | Unique per tenant ignoring case (FR-RET-01) |
 | `active`, `updated_at` | boolean default true, timestamptz | V28: a row in use is switched off, never deleted |
 | `version` | integer default 1 | V28: bumped by every update; the `If-Match` value. `retail_suppliers` and `retail_customers` carry it too |
+| `code_prefix` | varchar(4), categories only | V96 (issue #493, ADR-081): 2 to 4 capital letters (CHECK `retail_categories_code_prefix_letters`), unique per tenant (`retail_categories_code_prefix`); suggested from the name by `bms_category_prefix_base` and `bms_suggest_category_prefix`, backfilled oldest first, and filled by the trigger `retail_categories_prefix_default` when an insert leaves it out |
+| `code_next` | integer default 1, categories only | V96: the next number `bms_next_item_code(category_id)` tries; that function locks the row, steps over codes items already hold (ignoring case) and returns `PREFIX-0001`. Not part of `version` |
+| `pack_size`, `pack_of_unit_id`, `pack_purpose` | numeric(14,3), uuid, text; units only, nullable | V111 (issue #625, ADR-100): the usual size of a unit that is a pack, counted in another unit of the business (composite FK `retail_units_pack_of_fk`, added `NOT VALID` since every earlier row is null), and what it is for, `buy`, `sell` or `both`, the values of `retail_product_units.purpose` (#624, PR #627). All three or none, at least 1 and never the unit itself (CHECK `retail_units_pack_chk`). A starting number only: adding the pack to an item fills in its purpose, and its size when the item is counted in that smaller unit, and the item's own pack (`retail_product_units.factor`) is the one that counts. No price is kept here |
+
+Default units (issue #618, ADR-098): when retail is switched on for a business the application adds the units Piece, Pair, Set, Box, Pack, Kg, Litre and Metre with `created_by` null, skipping a name the business has; V109 added them to every retail business, not closed, that had no unit.
+
+Quick add (issue #632, ADR-101): an item added without a category goes under General and one without a unit is counted in the shop's piece unit (Piece, else pc or pcs); the application makes either with `INSERT ... ON CONFLICT DO NOTHING` on the name index when the business has none, so two adds at once make it once. Its stock is one `retail_stock_movements` row of kind `opening` (allowed since V11; the import's opening stock uses `legacy_balance`, so Quick add is its first writer) and source type `retail.quick_add`, at the branch's average, with a journal entry debiting inventory and crediting opening balance equity (3030), the same journal as the import's opening stock. No table or column changes.
 
 ### `retail_products` (RLS; `bms_app` SELECT, INSERT, UPDATE)
 
@@ -1743,7 +2132,7 @@ module on again adds nothing. `S` marks `is_system_controlled`.
 | `name_key` | text, generated stored | `bms_name_key(description)` (V63, issue #352): the description folded to lower case without accents (`bms_fold`, V40) with every run of spaces and punctuation collapsed to one space and the ends trimmed. Indexed on `(tenant_id, name_key)`; the application refuses a second product of the same unit with the same key (422 `duplicate_product_name`, ADR-044), it is not a unique index because an administrator may add one anyway |
 | `duplicate_reason` | varchar(300), null | Why an administrator added a product whose name another product of the same unit has (V63); null otherwise |
 | `category_id`, `unit_id` | uuid | Composite FKs to `retail_categories`, `retail_units` |
-| `cost_minor`, `sell_minor` | bigint >= 0 | The current prices. Changed only by the statement that also writes `retail_price_history` (ADR-020 decision 5) |
+| `cost_minor`, `sell_minor` | bigint >= 0 | The current prices; `cost_minor` is the last price paid per base unit (Last paid), used to set prices and as a branch's first average, never to value stock or cost a sale (ADR-079). Changed only by the statement that also writes `retail_price_history` (ADR-020 decision 5) |
 | `currency` | char(3) | The tenant currency at creation |
 | `active` | boolean | Inactive products stay in history and stock views |
 
@@ -1766,7 +2155,10 @@ every role (section 6.2.4).
 
 Every rule posts through `post_entry` in the transaction of its event, one entry per branch, with
 `source_module = 'retail'`. "PM" is the account of the payment method: `cash_on_hand` (cash),
-`mobile_money`, `bank`, or `trade_debtors` (credit, with the sale as subledger). Amounts are line
+`mobile_money`, `bank`, or `trade_debtors` (credit, with the sale as subledger). Every retail leg on
+`cash_on_hand` or `bank`, in these rules and in the cash book's (section 6.11.5), posts to the account the
+payment method `cash` or `bank` is mapped to at the entry's branch (`payment_methods`, FR-GL-08), and to the
+seeded account while it is unmapped or switched off (#236, ADR-105). Amounts are line
 values rounded half up once per line (R-ROUND); a leg of zero is left out and an entry whose legs
 are all zero is not posted.
 
@@ -1816,7 +2208,7 @@ Imported history (sales, purchases, adjustments, returns, usage, legacy balances
 | `branch_id`, `product_id` | uuid | Composite FKs |
 | `kind` | text | `opening`, `purchase`, `return`, `transfer_in` (positive); `sale`, `usage`, `damage`, `transfer_out` (negative); `adjustment`, `legacy_balance` (either sign). CHECK on the sign |
 | `qty` | numeric(14,3) | Signed, never zero |
-| `unit_cost_minor` | bigint | The product's cost at the time: the valuation snapshot |
+| `unit_cost_minor` | bigint | The cost per base unit the movement carries: the branch's average for stock leaving at the average, what it cost for stock coming in (ADR-079) |
 | `source_type`, `source_id`, `source_line_id` | | The document that wrote it: `retail.sale`, `retail.sale_void`, `retail.stocktake`, the R3 sources, `retail.transfer` and `retail.transfer_void` (source id the transfer, line id its line), `retail.purchase_void` (source id the restock voided, an `adjustment` per movement of the restock, V63, issue #351) and `retail.stock_correction` (source id the correction, one `adjustment`; the reports that count shrinkage read `retail.stocktake` only, ADR-044) |
 | `reverses_movement_id` | uuid | Set on a void's `return`, and on a transfer void's opposite movement; unique, so a movement is reversed at most once |
 | `transfer_id` | uuid | The transfer a `transfer_out` or `transfer_in` belongs to, and only on those kinds (CHECK `retail_stock_movements_transfer_link`, V22); composite FK to `retail_transfers`, checked at commit because the movements are written under their balance locks before the header |
@@ -1831,7 +2223,15 @@ instant range so this index applies (section 6.12); `(tenant_id, transfer_id)` p
 
 ### `retail_stock_balances` (RLS; `bms_app` SELECT, INSERT, UPDATE)
 
-Primary key `(tenant_id, branch_id, product_id)`, `qty numeric(14,3)`, `updated_at`. Written only by
+Primary key `(tenant_id, branch_id, product_id)`, `qty numeric(14,3)`, `updated_at`, and (V94, ADR-079, issue #523)
+`avg_cost_minor bigint` (0 to 10^13): the moving weighted average cost of one base unit at the branch. A new row starts at the
+product's `cost_minor`; a movement at another cost than the average re-averages it under the row's lock, a movement at the average
+leaves it, and the rounding remainder posts per branch to purchase rounding (source `retail.average_cost`). V94 set it to the
+product's cost on every row that existed; a row inserted without it starts at the product's `cost_minor` (trigger
+`retail_stock_balances_avg_default`, in place of a default). Every valuation reads a balance times its own row's
+average. The part of a landed cost or supplier price credit line that went into each branch's average is kept in
+`retail_cost_spreads` (`line_id`, `branch_id`, `product_id`, `inventory_minor > 0`; forced RLS, append-only, V94), so the void takes
+back exactly those parts. Written only by
 `StockLedger` in the transaction of each movement, under the row's lock (`SELECT ... FOR UPDATE`,
 taken in branch and product order). Product rows are locked only by restocks and price edits, with
 `FOR NO KEY UPDATE` (see purchases below). The nightly job `retail.stock-reconciliation` compares each row
@@ -1848,7 +2248,10 @@ trigger `retail_transfers_guard_update` lets an UPDATE make exactly four transit
 `in_transit` to `received` (sets `in_entry_id`, `shortage_entry_id`, `received_at`, `received_by`),
 `in_transit` to `cancelled` and `completed` or `received` to `voided` (both set the void columns).
 Every other change, including any change to the transfer itself, is refused; DELETE is rejected for
-every role (`reject_mutation`). V22 allowed the void only; V38 replaced the trigger function.
+every role (`reject_mutation`). V22 allowed the void only; V38 replaced the trigger function. Since
+V116 (issue #239) the receipt is also checked against its lines: every line must have
+`received_qty`, and `in_entry_id` may stay null only when the received quantities at the dispatch
+cost (rounded half up per line) sum to zero.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -1857,7 +2260,7 @@ every role (`reject_mutation`). V22 allowed the void only; V38 replaced the trig
 | `transfer_date` | date | The business date both entries and all four kinds of movement carry |
 | `note` | varchar(300) | Optional |
 | `currency`, `cost_total_minor` | | The lines at the source's cost (present in responses only with `retail.profit.read`) |
-| `out_entry_id`, `in_entry_id` | uuid | The source's and the destination's journal entries. `completed`: both or neither (neither only at zero cost). `in_transit`: the source's only (none at zero cost). `cancelled`: the source's only, now reversed. `received`: the source's, unless zero cost; the destination's is null only when nothing of value arrived. CHECK `retail_transfers_entries_chk` (V38) |
+| `out_entry_id`, `in_entry_id` | uuid | The source's and the destination's journal entries. `completed`: both or neither (neither only at zero cost). `in_transit`: the source's only (none at zero cost). `cancelled`: the source's only, now reversed. `received`: the source's, unless zero cost; the destination's is null only when nothing of value arrived. CHECK `retail_transfers_entries_chk` (V38); the destination rule needs the lines, so the update guard enforces it (V116) |
 | `shortage_entry_id` | uuid | V38. The destination's shrinkage entry for what did not arrive, valued at the source cost; null when everything arrived. Composite FK to `journal_entries` |
 | `status` | text | `completed` (one step), `in_transit`, `received`, `cancelled`, `voided`. CHECK `retail_transfers_status_chk` (V38, replaces the V22 check) |
 | `received_at`, `received_by` | | V38. Set together, once, by the receipt (CHECK `retail_transfers_received_chk`); kept when a received transfer is later voided |
@@ -1866,7 +2269,7 @@ every role (`reject_mutation`). V22 allowed the void only; V38 replaced the trig
 ### `retail_transfer_lines` (RLS; append-only except one column, `bms_app` SELECT, INSERT, UPDATE of `received_qty`)
 
 `transfer_id`, `line_no`, `product_id`, `qty numeric(14,3)` (positive), `unit_cost_minor` (the
-source's cost when moved, at most 10^13) and `line_cost_minor`. One line per product per transfer
+source branch's average cost when moved, ADR-079, at most 10^13) and `line_cost_minor`. One line per product per transfer
 (`UNIQUE (transfer_id, product_id)`). The quantities that moved are the movements themselves
 (`source_line_id` the line). `received_qty numeric(14,3)` (V38, null until a receipt, then at least
 zero and at most `qty`, CHECK `retail_transfer_lines_received_qty_chk`) is set once, by the receipt,
@@ -1882,7 +2285,10 @@ was recorded) and, after commit, `committed_variance_qty` (counted less `expecte
 under the balance lock, so movements recorded between count and commit stay in the balance; a
 commit that would leave a balance negative is refused with `stock_moved_since_count`) and the
 `unit_cost_minor` it was valued at. One line per product. Once committed, the stock-take and its
-lines are refused any UPDATE (trigger `retail_stocktake_guard_update`, V14, review F10).
+lines are refused any UPDATE (trigger `retail_stocktake_guard_update`, V14, review F10). Since `V113`
+(issue #656) a draft can also be `discarded` (with `discarded_by` and `discarded_at`, set together with that status):
+it never wrote stock, no longer blocks a correction or the closing of its branch, and is refused any UPDATE as a committed
+one is.
 
 ### `retail_customers` (RLS; `bms_app` SELECT, INSERT, UPDATE)
 
@@ -1903,6 +2309,28 @@ Credit buyers: `name varchar(200)`, `contact varchar(100)` kept as entered, `cre
 | `status` | text | `completed` or `voided`; `voided_at`, `voided_by`, `void_reason` |
 | `sale_entry_id`, `cost_entry_id` | uuid | The two journal entries |
 | `historical` | boolean | Imported history posts no journal (FR-RET-12) |
+| `client_sale_id` | uuid | ADR-067, V86: the id the device made for the sale; unique per tenant (`retail_sales_client_sale_id`, partial on not null), so a send after the key expired is the same sale |
+| `occurred_at` | timestamptz | ADR-067: when the sale happened on the device, as recorded (a clock more than five minutes ahead is recorded as the server's now) |
+| `recorded_offline` | boolean | ADR-067: the sale was taken with no network; needs `client_sale_id` and `occurred_at` (CHECK) |
+| `request_hash` | char(64) | ADR-067: the SHA-256 of a canonical text of the sale (branch, payment method, `customer_id`, and per line item, pack, quantity and price; never `occurred_at`, `recorded_offline` or `prices_as_of`), only with a `client_sale_id` (CHECK); a send under the same client sale id with another request is 422 `client_sale_conflict`. The four columns never change (trigger `retail_sales_offline_guard`) |
+
+Built: retail sales offline (issue #458, ADR-067, migration `V86`). Besides the four columns
+above, two tables, each with forced row-level security, composite foreign keys on the tenant and no delete grant.
+`retail_sale_clashes` holds what changed while an offline sale was away: `sale_id`, `branch_id`, `line_no` and `product_id`
+(null together for `clock_ahead` and `clock_behind`), `kind` (`stock_short`, `item_inactive`, `pack_inactive`, `price_changed`, `price_typed`, `below_cost`, `clock_ahead`, `clock_behind`),
+`words` (the plain sentence, never a cost), and `resolved_at`, `resolved_by`, `resolution_note` (at least five characters),
+set together once (the application role may update only those three; a guard trigger refuses a second resolve); indexes by
+sale and on the open ones by branch. `retail_offline_failures` is a sale the server refused, reported by the device of the
+person who made it: `client_sale_id` (unique per tenant), `branch_id`, `made_by`, `occurred_at`, `payment_method`,
+`total_minor`, `request` (the sale request as the device holds it, jsonb), `code`, `message`, `status` (`open`, `retry`,
+`discarded`, `recorded`; a guard trigger allows open to retry, discarded or recorded, and retry to open, discarded or
+recorded, and nothing from the last two), `decided_by`, `decided_at`, `discard_reason` (exactly when discarded) and `sale_id`
+(exactly when recorded). A sale recorded with a client sale id closes its open or retry report in the same transaction. `retail_offline_waiting` is a sale another person left queued on a phone, in short (`client_sale_id`
+unique per tenant, `branch_id`, `made_by`, `occurred_at`, `total_minor`, `reported_by`, `reported_at`), upserted by a signed-in
+phone and deleted when the sale is recorded or its refusal reported; nothing is posted from it. The
+permission `retail.offline.resolve` is seeded for `tenant_admin` and `retail_supervisor`. `ADD COLUMN` with a constant
+default takes an access exclusive lock on `retail_sales` to the commit (no rewrite); the unique index is partial and empty;
+`lock_timeout` is five seconds.
 
 The sales summary (issue #328, `GET /retail/sales/summary`) reads this table only, with no migration: one grouped query per
 level (`date_trunc` of `sale_date` to year, month or day, counts and sums by status and payment method, and the sale's
@@ -1930,10 +2358,16 @@ Indexes: `(tenant_id, branch_id, sale_date, created_at, id)` for a branch's list
 ### `retail_sale_lines` (RLS; append-only, `bms_app` SELECT, INSERT)
 
 `line_no`, `product_id`, `qty numeric(14,3) > 0`, and the snapshots `unit_price_minor` and
-`unit_cost_minor` with `line_total_minor` and `line_cost_minor` (each rounded half up once). Profit
+`unit_cost_minor` (the branch's average cost per base unit at the moment of sale, ADR-079) with `line_total_minor` and
+`line_cost_minor` (each rounded half up once). Profit
 is computed from these, never from the product's current prices (ADR-020 decision 5). Index
 `(tenant_id, sale_id) INCLUDE (line_total_minor, line_cost_minor)` (V26): a list page loads the lines
 of all its sales in one statement, and the daily profit sums them without reading the heap.
+`retail_sale_lines_product_recent` `(tenant_id, product_id, created_at DESC, id DESC)` (V104, issue #353, ADR-093) gives an
+item's newest lines for the entry warnings, as `retail_purchase_lines_product_recent` and `retail_transfer_lines_product_recent`
+do on `retail_purchase_lines` and `retail_transfer_lines`: each read is a Limit over 20 entries of one item, with no sort,
+instead of reading the tenant's line history or every move of the item. Indexes only, built in the migration's transaction
+under a SHARE lock with a five second `lock_timeout`, as V101.
 
 ### `retail_suppliers` (RLS; `bms_app` SELECT, INSERT, UPDATE)
 
@@ -1942,7 +2376,7 @@ of all its sales in one statement, and the daily profit sums them without readin
 ### `retail_purchases`, `retail_purchase_lines` (RLS; append-only, `bms_app` SELECT, INSERT)
 
 A purchase: `purchase_no` from the sequence `retail_purchase_no` (`RP00000001`), `supplier_id`
-(required for credit, CHECK), `purchased_on`, `payment_method` (`cash`, `bank`, `credit`),
+(required for credit, CHECK), `purchased_on`, `payment_method` (`cash`, `mobile_money` since V97 (issue #557, ADR-084), `bank`, `credit`),
 `currency`, `total_minor`, `note`, `historical`. A line: `product_id`, `cost_minor`, optional
 `sell_minor`, `qty_total` and `line_total_minor` (the sum of each branch's quantity at the cost,
 rounded per branch). The quantity per branch is the `purchase` movement itself (`source_line_id`
@@ -1960,14 +2394,17 @@ nothing was committed and the idempotency key rolled back, so the same request m
 ### `retail_usage_reports`, `retail_usage_lines` (RLS; append-only, `bms_app` SELECT, INSERT)
 
 A report: `branch_id`, `kind` (`used`, `damaged`), `reason`, `occurred_on`, `cost_total_minor`,
-`journal_entry_id`. A line: `product_id`, `qty > 0`, `unit_cost_minor` (the product's cost at the
-time) and `line_cost_minor`. Each line writes a `usage` or `damage` movement.
+`journal_entry_id`. A line: `product_id`, `qty > 0`, `unit_cost_minor` (the branch's average cost at the
+time, ADR-079) and `line_cost_minor`. Each line writes a `usage` or `damage` movement.
 
 ### `retail_sale_payments` (RLS; append-only, `bms_app` SELECT, INSERT)
 
 `sale_id`, `amount_minor > 0`, `currency`, `method` (`cash`, `mobile_money`, `bank`), `paid_on`,
 `journal_entry_id`. Each payment raises `retail_sales.paid_minor` under the sale's row lock; the
-CHECK `paid_minor <= total_minor` makes an overpayment impossible.
+CHECK `paid_minor <= total_minor` makes an overpayment impossible. Indexes: `(tenant_id, sale_id, paid_on)`
+for a sale's payments (V12), `(tenant_id, created_at)` for the payments entered in a range (V64), and
+`retail_sale_payments_by_day` `(tenant_id, paid_on)` for a day's payments, as the cash book and the shop
+Home takings choose them (V100, issue #488, ADR-076, bench query k17).
 
 Every retail unit amount a request can set (product and purchase cost and sell price, sale line
 price and cost snapshot, payment amount, movement, usage and stock-take unit cost, price history)
@@ -2003,7 +2440,7 @@ correction with its reason and the old and new quantity.
 A variant is a row of `retail_products`; every movement, balance and line keeps pointing at it, so no stock or ledger table changes.
 
 `retail_product_families`: the item with sizes and colours. `name` (varchar(200), trimmed, not blank: what every variant's description
-starts with), `base_code` (varchar(24): what generated variant codes start with), `category_id` and `unit_id` (composite FKs; every
+starts with), `base_code` (varchar(24): what generated variant codes start with; for a new item the category's next code, never typed, issue #562), `category_id` and `unit_id` (composite FKs; every
 variant has the same category and unit, kept equal by the service), `created_by`, `version` for If-Match. Forced row-level security;
 the application role may select, insert and update.
 
@@ -2035,22 +2472,42 @@ lines, never the sale header, review F10), less `retail_usage_reports.cost_total
 
 ### 6.11.3b Controls (FR-RET-48, issue #358, ADR-047)
 
-No table: `retail.reports` reads `retail_sales` (voids: `voided_at`, `voided_by`, `void_reason`; sales entered: `sale_date`, `created_by`, `historical`), `retail_sale_returns` (`returned_on`, `created_by`, `note`, `status`) and `retail_sale_lines` (`price_source`, `resolved_unit_price_minor`, `price_override_reason`, `line_total_minor`, `line_cost_minor`), and the `users` and `branches` names. Migration `V66` adds the permission `retail.controls.read`, granted to `tenant_admin` (a global role row, so every existing tenant has it). No index is added: the voids of a window are found by `retail_sales_voided (tenant_id, branch_id, voided_at) WHERE voided_at IS NOT NULL` (V34, section 6.11) and every other metric by the sale date (`retail_sales_by_date`). Expand only.
+No table: `retail.reports` reads `retail_sales` (voids: `voided_at`, `voided_by`, `void_reason`; sales entered: `sale_date`, `created_by`, `historical`), `retail_sale_returns` (`returned_on`, `created_by`, `note`, `status`), `retail_sale_writeoffs` (`written_off_on`, `unpaid_minor`, `reason`, `created_by`; ADR-087, served by `retail_sale_writeoffs_by_day (tenant_id, branch_id, written_off_on)` of V64) and `retail_sale_lines` (`price_source`, `resolved_unit_price_minor`, `price_override_reason`, `line_total_minor`, `line_cost_minor`), and the `users` and `branches` names. Migration `V66` adds the permission `retail.controls.read`, granted to `tenant_admin` (a global role row, so every existing tenant has it). No index is added by V66: the voids of a window are found by `retail_sales_voided (tenant_id, branch_id, voided_at) WHERE voided_at IS NOT NULL` (V34, section 6.11) and every other metric by the sale date (`retail_sales_by_date`). Expand only. `V101` (issue #357, ADR-087) adds two partial indexes for the sale line metrics, `retail_sale_lines_price_changed (tenant_id, sale_id) WHERE price_source = 'override'` and `retail_sale_lines_below_cost (tenant_id, sale_id) WHERE line_total_minor < line_cost_minor`, so changed prices, discounts and lines below cost no longer read the tenant's whole line history; indexes only, each built under a SHARE lock on `retail_sale_lines` in the migration's transaction with a five second `lock_timeout`. The plans on a tenant of a million sales are in `docs/specs/controls-query-plans-357.md`.
 
 ### 6.11.3a Trade capabilities (ADR-033)
 
 Built: `retail_branch_roles` (issue #191, migration V37). One row per branch at most:
-`tenant_id`, `branch_id` (composite foreign key to `branches`), `role` in (`store`, `shop`, `both`),
-`changed_by`, `changed_at`; primary key `(tenant_id, branch_id)`; forced RLS; the application role may
+`tenant_id`, `branch_id` (composite foreign key to `branches`), `role` in (`shop`, `both`) since `V115` (issue #371,
+ADR-104; `store` until then), `changed_by`, `changed_at`; primary key `(tenant_id, branch_id)`; forced RLS; the application role may
 SELECT, INSERT and UPDATE. A missing row means `both`. The migration backfills `both` for the branches
 of tenants that have the retail module, so a populated database changes in no way; correctness never
-depends on the backfill. The capability flags are not a table: they live in `tenant_settings.settings`
-under `module_groups.retail` (opaque to the core, validated by `retail.manifest`). Design only, no
+depends on the backfill. `V115` folds the role `store` into `branches.sells_goods` (ADR-048, ADR-104). A `store` row in
+force (the retail module on and `branch_roles` on), on a branch that keeps goods, makes the branch a Store
+(`sells_goods = false`), which takes no money at its till. No branch's state stops the migration; it retries its locks for about two minutes under live traffic before it gives up,
+changing nothing. A branch with a blocker named by
+`retail_store_fold_blockers` is skipped and keeps selling: an open branch that keeps no goods, a credit sale still owing (as
+`BranchTillCheck` counts it), or till money taken since the role was set. Every `store` row then becomes `both`; each changed branch and row gets a system audit row with the
+value before and the reason; nothing is deleted; the check then refuses `store`. A Store reads as `store` from the flag. The capability flags are not a table: they live in `tenant_settings.settings`
+under `module_groups.retail` (opaque to the core, validated by `retail.manifest`); its `profile` is the kind of business
+(`shops`, `stores_and_shops`, `wholesale`, `wholesale_and_shops`), renamed from `shop` and `trade` by `V103` without changing a
+flag (issue #424, ADR-092). Design only, no
 migration yet: everything else below, except the two-step transfer (issue #193, migration V38:
 `received_at`, `received_by` and `shortage_entry_id` on `retail_transfers`, `received_qty` on
 `retail_transfer_lines`, below).
 
 Built: units of measure (issue #194, migration V39). `retail_product_units` (`id`, `tenant_id`, `product_id`, `unit_id`, `factor numeric(14,3) >= 1`, `active`, `version`, audit columns; composite foreign keys to `retail_products` and `retail_units`; unique `(tenant_id, product_id, unit_id)`; forced RLS; the application role may SELECT, INSERT and UPDATE, never DELETE). The pack's unit differing from the product's base unit, and a base unit that cannot change while an active pack exists, are rules of the catalogue service because they span two tables. Four nullable columns on `retail_sale_lines` (`sale_unit_id`, `sale_qty`, `sale_unit_price_minor`, `unit_factor`) and four on `retail_purchase_lines` (`unit_id`, `unit_qty_total`, `unit_cost_minor`, `unit_factor`) record what was entered; all four of a group are null (entered in the base unit, every row that existed before) or all four are set (check `retail_sale_lines_unit_chk`, `retail_purchase_lines_unit_chk`; foreign keys to `retail_units`), each added `NOT VALID` and validated in the same migration (Flyway runs the file in one transaction, so the lock is held through the validation scan; the new columns are null on every existing row, so validation cannot fail), and also tie `qty` to `sale_qty x unit_factor` and `qty_total` to `unit_qty_total x unit_factor`. `qty`, `unit_price_minor`, `cost_minor` and `qty_total` keep their meaning (base units, per base unit), so every report is unchanged; `line_total_minor` is `sale_qty x sale_unit_price_minor` rounded half up once, and on a purchase line the amount paid or owed as entered. The chart gains account 5120 `purchase_rounding` (section 6.11.1), added to existing retail tenants by the migration. The covering index of V26 is untouched.
+
+Built: a buying pack's size per delivery (issue #554, ADR-082, no migration). `unit_factor` on `retail_purchase_lines` and `retail_goods_receipt_lines` is the size each pack held in that delivery, which may differ from the pack's usual `retail_product_units.factor`; the existing checks (`qty_total = unit_qty_total x unit_factor`, `qty = unit_qty x unit_factor`, `unit_factor >= 1`) hold it. "Use from now on" updates `retail_product_units.factor` (version raised, audited) under the product row lock. Every reading of a stored line converts with its own `unit_factor`.
+
+Built: selling packs with their own prices (issue #624, owner decision D23, ADR-099, migration V110). `retail_product_units` gains `purpose text NOT NULL DEFAULT 'both'` (`buy`, `sell` or `both`) and `sell_minor bigint` (null, or 0 to 10^13: the selling price of one pack for a walk-in sale; null is the piece price times the size, rounded half up once), with the check `retail_product_units_buy_unpriced_chk` (a pack only for buying has no selling price), and the partial index `retail_stock_balances_product_held` on `(tenant_id, product_id) WHERE qty > 0` for the item's average cost per piece that Edit item's Below cost reads. Every existing row reads `both` and null, so it sells and buys exactly as before. A sale line still keeps what it charged (`sale_unit_price_minor`, `line_total_minor`) and the average cost per piece (`unit_cost_minor`, ADR-079), so profit stays per piece. A new size of an item copies the packs' purpose, and their own prices only when it sells at the same piece price.
+
+Built: one unit for many spellings and one display style for names (issue #698, owner decision D86 = A, ADR-109, migration V120). No table, column, constraint, grant or policy changes. `V120` is the first Java migration (`backend/src/main/java/db/migration`), so it uses the application's own display rule (`CatalogueNames.display`). Category, item and item-with-sizes names take the display style where that changes only their case, each with `version` and `updated_at` moved (so delta sync reads them again) and audited with the name before and after and `source` `V120`; a name with extra spaces keeps them until it is next saved. Units are not touched: duplicates already stored ("pc" beside "Piece") are left for the owner to join (owner decision on pull request #715), and where two share a key the name lookups use the switched-on one, then the one named as the unit's word. Row security is dropped, when the owner cannot bypass it, only on the written tables that force it, and restored on exactly those. Nothing is deleted. The unique name indexes are unchanged: they already ignore case, and a key match across spellings is the catalogue service's check under a per-key advisory lock.
+
+Built: packages inside packages, any depth (issue #699, owner decision D88, ADR-107, migration V118). `retail_product_units` gains `holds_unit_id uuid` (the level one pack holds: the item's own unit or another pack's unit of the same item; no foreign key, since that rule is narrower than a key and the catalogue service checks it on every write, and every constraint of the table stays validated) and `holds_qty integer` (how many of it, at least 2, review of #710: one would be the size of the level below), both or neither and never the pack's own unit (CHECK `retail_product_units_holds_chk`), and `usual_buy boolean NOT NULL DEFAULT false`, the level Buy stock opens on (CHECK `retail_product_units_usual_buy_chk`: never on a pack only for selling; at most one per item, the partial unique index `retail_product_units_usual_buy` on `(tenant_id, product_id) WHERE usual_buy`). `factor` stays on every row and is still what stock, sales, purchases and counts read; the catalogue service keeps `factor = holds_qty x` the factor of the level held, any depth, because the rule spans rows. Every existing row reads null and false, so it holds its factor of the item's unit as before. The stock rows' `standard_pack.levels` read every active whole pack biggest first (`RetailCatalogue.packLevelsSql`); no stock table changes.
+
+Built: the standard units every shop gets (issue #709, owner decision D98, ADR-110, migration V121). No table, column or constraint changes. `V121` is a Java migration (`db.migration.V121__retail_standard_units`) so it matches a shop's own spellings with the application's key (`StandardUnits.key`): every retail business that is not closed gets a `retail_units` row for each standard single unit (Piece, Pair, Set, Metre, Kg, Gram, Litre, Ml) and package (Dozen, Box, Carton, Packet, Bag, Roll, Bale, Crate, Bundle) it lacks under any spelling, `created_by` null, `ON CONFLICT DO NOTHING` on the unique name index, each audited as `retail.unit.created` by `system` with `source` `V121`. No existing row is updated or renamed. The dozen's 12 and a unit's `standard` flag are read from its name, as `is_package` is.
+
+Built: barcodes on products (issue #345, ADR-070, migration V87, FR-RET-68). `retail_product_barcodes` (`id`, `tenant_id`, `created_at`, `created_by`, `product_id`, the nullable `unit_id` of one of the product's pack sizes (composite foreign key to `retail_product_units (tenant_id, product_id, unit_id)`; null is the product's own unit), `code` (1 to 48 printable ASCII characters, no space, slash or backslash, not only dots), `format` (`ean13`, `ean8`, `upca`, `code128`, with a check that the digit count fits the format), `generated` (a code the system made for labels from `tenant_sequences` key `retail_barcode`: since V93, issue #524, an `ean13` of `210`, nine digits and the GS1 check digit; before it a `code128` of `IN` and eight digits, which stay; the check `retail_product_barcodes_generated_chk` allows a made code only as `code128` or as an `ean13` starting with 2), and the generated column `lookup_key` (a code stored as `upca` gets a leading 0, so a UPC-A and the EAN-13 a scanner reports for it are one key; twelve digits stored as `code128` keep their own key); unique `(tenant_id, lookup_key)`, index `(tenant_id, product_id)`; forced RLS; the application role may SELECT, INSERT and DELETE, never UPDATE. Check digits are checked by the catalogue service. Unique among active items: a code held by a switched-off item is deleted (audited `retail.barcode.released`) when an active item takes it.
 
 Built: price lists (issue #195, migration V41). `retail_price_lists` (`id`, `tenant_id`, `name` unique ignoring case, `currency`, `strict`, `active`, `version`, audit columns; forced RLS; SELECT, INSERT and UPDATE for the application role). `retail_price_list_items` (`price_list_id`, `product_id`, `unit_id` (the product's base unit or one of its packs), `min_qty numeric(14,3) >= 0` (0 is from any quantity), `price_minor` (0 to 10^13, per `unit_id`), `valid_from`, `valid_to` (the last day, null is open ended, never before `valid_from`); composite foreign keys; a unique index on the open ended row of `(tenant_id, price_list_id, product_id, unit_id, min_qty)`; a lookup index `(tenant_id, price_list_id, product_id, valid_from DESC)`). It is append-only apart from `valid_to`: the application role holds SELECT, INSERT and UPDATE of `valid_to` only, a guard trigger (`retail_price_list_items_guard_update`) lets that one column change from null to a date once, and `reject_mutation` refuses every delete. Two items for the same list, product, unit and break may not overlap in time; the unique index covers the open ended row and `retail.catalogue` checks closed ranges under a `FOR UPDATE` lock on the list row, so concurrent edits of one list serialise (an exclusion constraint would need the `btree_gist` extension). `retail_customer_groups` (`name` unique ignoring case, `price_list_id` nullable, `active`, `version`). `retail_customers` gains nullable `customer_group_id` and `price_list_id`, `retail_sales` a nullable `price_list_id`, and `retail_sale_lines` the nullable `price_source` (`retail`, `list`, `override`), `price_list_id`, `price_break_min_qty`, `resolved_unit_price_minor` (what the system resolved per sale unit, before any override) and `price_override_reason`, all null or one of three shapes enforced by `retail_sale_lines_price_chk`. The foreign keys and the check are added `NOT VALID` and validated in the same migration. `ADD COLUMN` and `ADD CONSTRAINT ... CHECK` take an access exclusive lock and a foreign key takes share row exclusive; Flyway runs the file in one transaction, so every lock is held to the commit and sales, sale history and the daily profit report on `retail_sale_lines`, `retail_sales` and `retail_customers` wait for the migration (brief at the size of a small or medium business; a very large tenant would validate in a later migration). The validation scan is kept because it is one pass over rows whose new columns are all null, it blocks nothing the `ADD COLUMN` lock did not already block, and a constraint left `NOT VALID` stays unvalidated. Three permissions are seeded (chapter 8). No tenant is switched on: the `price_lists` capability is off until an administrator turns it on, and while it is off the sale ignores every list and writes null in every new column.
 
@@ -2064,6 +2521,19 @@ Built: optional documents (issue #197, migration V46, FR-RET-38). `retail_docume
 Built: optional purchasing (issue #198, migration V47). Eleven tables, all with `tenant_id`, forced RLS, composite foreign keys and money as integer minor units. `retail_purchasing_settings` (one row per tenant: `over_receipt_bp`, `bill_tolerance_bp`, each 0 to 10000, and `version`; read as zero when absent). `retail_purchase_orders` (`order_no` `PO`, the branch code, a dash and six digits, unique per tenant; `branch_seq` unique per `(tenant, branch)` from the tenant sequence `retail_purchase_order_no:<branch>`; `branch_id`, `supplier_id`, `ordered_on`, `expected_on`, `total_minor`, `status` `draft`, `sent`, `partly_received`, `received` or `cancelled`, the send columns `sent_at`, `sent_by`, `approval_id`, `approved_by`, the cancel columns, `version`; a guard trigger fixes the identity columns, lets only a draft's header change, allows only the moves draft to sent or cancelled, between sent, partly received and received, and sent or partly received to cancelled, and fixes who sent it) and `retail_purchase_order_lines` (base `qty` and `cost_minor`, and the unit it was entered in as `unit_id`, `unit_qty`, `unit_factor` and `unit_cost_minor`, all null for the base unit; `line_total_minor`; no UPDATE privilege, and a trigger lets a line be inserted or deleted only while its order is a draft; `updated_by` is the last editor of the draft, fixed once sent). `retail_goods_receipts` (`receipt_no` `GR`, the same shape; `branch_id` the branch or store the goods went into, `supplier_id`, `order_id` null for a blind receipt, `received_on`, `total_minor` the value as entered, `delivery_ref`, `journal_entry_id`, `status` `posted` or `voided` with the void columns; a trigger lets a receipt be inserted posted and updated only to void it, once) and `retail_goods_receipt_lines` (append-only: `order_line_id`, `qty` in base units, the unit as above, `entered_cost_minor`, `cost_minor` per base unit, `sell_minor`, `line_total_minor` as entered and `stocked_minor` the value the movements carry, so the difference is what purchase rounding took; a check ties `qty` to `unit_qty` times `unit_factor`). `retail_supplier_bills` (`bill_no` `SB`, the same shape, `branch_id` the branch of its first receipt; `supplier_ref` the supplier's own invoice number, unique per supplier among bills that stand (a partial unique index on `status = 'posted'`); `bill_date`, `due_date`, `kind` `goods` or `landed_cost`, `total_minor = cleared_minor + variance_minor`, `variance_reason`, `status` `posted` or `voided`) with `retail_supplier_bill_lines` (append-only: `receipt_line_id`, the quantity billed in base units and in the unit received, `unit_price_minor`, `line_total_minor`, `cleared_minor` the share of the receipt line's value cleared from goods received not invoiced, `variance_minor = line_total_minor - cleared_minor`; unique per bill and receipt line) and `retail_supplier_bill_entries` (append-only: the journal entry of each branch the bill posted in, so a void can reverse them). `retail_supplier_payments` (`payment_no` `SP`, the same shape, `branch_id` the paying branch, `paid_on`, `method` `cash`, `mobile_money` or `bank`, `amount_minor`, `allocation` `oldest_first` or `manual`, `reference`, `journal_entry_id`, `status` `posted` or `reversed` with the reversal columns; a trigger lets a payment be inserted posted and updated only to reverse it, once) and `retail_supplier_payment_allocations` (append-only: `line_no`, exactly one of `bill_id` and `purchase_id` (a credit restock), `branch_id` (the branch whose trade creditors the row settles: a restock's payment is split over the branches it credited, so an item has one row per branch), `amount_minor`) with `retail_supplier_payment_entries` (append-only: the entries a payment posted in branches other than the paying one). A bill's entry in its own branch credits trade creditors for the whole invoice and the entries of the other branches it clears credit inter-branch clearing for their part; a payment debits trade creditors in the branch of each invoice it pays (through inter-branch clearing when that is not the paying branch), so the creditor balance sits in the branch that owes it. What is paid on a bill or a restock, and what is billed on a receipt line, is derived from these rows and the status of their parent, never stored. The chart gains 2110 `goods_received_not_invoiced` (liability, credit normal) and 5130 `purchase_price_variance` (expense, debit normal) through `bms_seed_retail_chart`, and the permissions `retail.payable.manage` and `retail.purchase.approve` go to `tenant_admin`. No ALTER touches any existing table. Landed cost (issue #199) adds an allocation table keyed by receipt line.
 
 Built: landed cost and supplier credit notes (issue #199, migration V48, FR-RET-39). Eight tables, all with `tenant_id`, forced RLS, composite foreign keys and money as integer minor units, and one column. `retail_landed_costs` (`landed_no` `LC`, the branch code, a dash and six digits, unique per tenant; `branch_seq` from the tenant sequence `retail_landed_cost_no:<branch>`; `branch_id` of its first received line; `supplier_id` the payee; `bill_id` its invoice, a `retail_supplier_bills` row of kind `landed_cost` and unique per document; `goods_bill_id` optional; `method` `value`, `quantity`, `weight` or `manual`; `cost_date`; `total_minor`; `status` `posted` or `voided` with the void columns; a guard trigger lets only the void change a row, once, and a constraint trigger deferred to the commit refuses a document whose charges or allocated lines do not each add to `total_minor`). `retail_landed_cost_charges` (`kind` `freight`, `duty`, `clearing`, `insurance` or `other`, `description`, `amount_minor`; append-only). `retail_landed_cost_lines` (one row per received line: `receipt_line_id`, `branch_id`, `product_id`, the `basis` and `weight` the spread used, `allocated_minor`, `line_qty`, `on_hand_qty` (the units still on hand in every branch together by first in, first out when the charge was recorded), `to_inventory_minor` (debited to the inventory of the branches that hold the product, in proportion) and `to_cogs_minor` (to cost of goods sold in the receiving branch) which add to `allocated_minor`, `cost_before_minor`, `cost_after_minor`, `cost_applied` and `cost_note`; append-only; the landed unit cost of a receipt line is the sum of its standing rows). `retail_landed_cost_entries` (the entry per branch, so a void can reverse each; append-only). `retail_receipt_holds` (one row per receipt held as received and not costed: `held_by`, and the release columns `released_at`, `released_by`, `release_kind` `landed_cost` or `waived`, `release_reason`, `landed_cost_id`; a guard trigger allows only the release, once, and the undoing of a release by a landed cost when that landed cost is voided). `retail_supplier_credits` (`credit_no` `SC` + branch code + six digits from `retail_supplier_credit_no:<branch>`; `bill_id` the invoice credited; `supplier_ref` the supplier's credit note number, unique per supplier among those that stand; `credit_date`; `kind` `goods` or `price`; `total_minor`; `reason`; the same void columns and guard as a bill), `retail_supplier_credit_lines` (`bill_line_id`, `receipt_line_id`, `branch_id`, `product_id`; for goods `qty` in base units, `unit_qty` and `unit_credit_minor`; `line_total_minor` equal to `to_inventory_minor` plus `to_cogs_minor` plus `variance_minor`; for a price credit `on_hand_qty` and the cost before and after; append-only) and `retail_supplier_credit_entries`. `retail_purchasing_settings` gains `require_costing_before_sale` (boolean, default false). The stock movement kind `return_to_supplier` (negative) is admitted by replacing the two checks of `retail_stock_movements` with looser ones added `NOT VALID` (no scan; the file sets `lock_timeout` to five seconds and runs the statement last); validating them later cannot fail. No permission and no chart account is added. The landed unit cost of a receipt line is never stored on `retail_goods_receipt_lines`, which stay append-only: it is the sum of the line's standing allocation rows.
+
+Built: lending arrears (issue #264, migration V81, increment 6). `lending_loan_charges` and `lending_charge_cancels` as section 6.7 describes them, and `lending_arrears_runs` (one row per tenant and business date: `started_at`, the lease `lease_until`, `attempts`, `finished_at`, the finished run's counts and `failed_loan_ids`; its first date is where the business's penalties start, or a loan's own start in the system when later), both with `tenant_id`, forced RLS and composite foreign keys; no permission and no chart account is added. The waivers (`lending_charge_waivers`, V82, #265) and collection actions (`lending_collection_actions`, V83, #266) follow in their own migrations.
+
+Built: existing loans brought in from a paper register (issue #466, migration V89, ADR-071). The status `brought_in` and
+five columns on `lending_loans` (above), and `lending_brought_in_repayments` (`loan_id`, `line_no` from 1 and
+`UNIQUE (loan_id, line_no)`, `value_date`, `amount_minor` above 0, `payment_method_key` one of `cash`, `bank`,
+`mtn_momo`, `airtel_money`, `note` up to 100 characters), append-only, forced RLS, composite foreign key: the repayments
+as the maker entered them, for the checker. On approval each becomes a `lending_loan_transactions` row with
+`is_historic` true and no journal, receipt number or voucher number (the V29 check already allows a historic row
+without a journal), with its allocation rows; the disbursement likewise. The permission `lending.loans.bring_in`
+(tenant admin, branch manager) is seeded. The go-live date is the tenant setting `go_live_date` (no column).
+
+Built: the arrears notices' record (issue #227, migration V84, pull request #290). `lending_loan_notices` (`loan_id`, `schedule_item_id`, `template_key` one of `loan.overdue_1`, `_7`, `_30`, `business_date`), append-only, forced RLS, composite foreign keys: one row per arrears notice queued, so a loan is not sent another about a different instalment within seven days.
 
 Optional tables and columns for the trade capabilities (FR-RET-33 to FR-RET-40): `retail_branch_roles`,
 `retail_product_units`, `retail_price_lists`, `retail_price_list_items`, `retail_customer_groups`,
@@ -2199,7 +2669,7 @@ record refers to it is blocked, because records snapshot the names they were wri
 | `amount_minor`, `currency` | bigint, text | The amount set aside, `>= 0` |
 | `suggested_minor` | bigint | The server's suggestion when written (day's profit times `savings_rate_bp`, half up, zero for a loss). Readable only with `retail.profit.read` (as is `amount_minor`, a savings amount being half the profit, ADR-022 decision 13; the API omits both without it) |
 | `overwritten` | boolean | CHECK `(suggested_minor IS NULL AND NOT overwritten) OR (suggested_minor IS NOT NULL AND overwritten = (amount_minor <> suggested_minor))`: a historical row has no suggestion (the pilot never stored one) so it is never `overwritten`, and the reason rule below does not apply to it |
-| `overwrite_reason` | text | CHECK: not null and at least 5 characters when `overwritten` |
+| `overwrite_reason` | text | Optional (issue #538, ADR-080); CHECK `retail_daily_savings_overwrite_reason_chk`: on an overwritten record, not blank when present (`V95` replaced the `V34` check that required at least 5 characters when `overwritten`) |
 | `total_sold_minor` | bigint | Snapshot of the day's completed sales total, shown on the screen (a read-only column in the pilot) |
 | `occurred_at`, `recorded_by` | | Kernel clock instant, user |
 | `journal_entry_id` | uuid | Null when the amount is zero or the row is historical |

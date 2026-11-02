@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { Product, SaleLine } from '../../../api/retail';
+import { RetailError, type Pack, type Product, type SaleLine } from '../../../api/retail';
 import { buildPurchase, restockLineProblem, restockTotal, withUnit as restockWithUnit, type RestockLine } from './restock';
 import { buildSaleRequest, defaultPrice, draftTotal, lineHint, newLine, withUnit, type Draft } from './sale-state';
 import { factorProblem } from './catalogue-packs';
-import { baseCostMinor, baseQtyMilli, enteredPriceMinor, enteredQty, packPriceMinor } from './units-state';
+import { baseCostMinor, baseQtyMilli, enteredPriceMinor, enteredQty, packPriceMinor, packsAndPieces, packsAndPiecesMilli, packsAndPiecesProblem, quantityIn, samePack, spellingsOf, standardPack, listedWord, orExistingUnit, unitWord, unitWords } from './units-state';
 
 // Units of measure (ADR-033, issue #194): the forms convert with the same rules as the server
 // (Quantities.java) so a line is judged before it is sent. Names and amounts are fabricated.
@@ -138,5 +138,119 @@ describe('the restock form with a pack', () => {
     const odd: Product = { ...pen, packs: [{ id: 'k3', product_id: 'e1', unit_id: BOX, unit: 'box', factor: '1.500', active: true, version: 1 }] };
     expect(restockLineProblem({ product: odd, unitId: BOX, cost: '100', sell: '100', qtyByBranch: { b1: '0.001' } })).toContain('does not convert exactly');
     expect(restockLineProblem({ product: odd, unitId: BOX, cost: '100', sell: '100', qtyByBranch: { b1: '3' } })).toBeNull();
+  });
+
+  // Review of #687, round 5: Buy stock's words never show a short code a shop typed.
+  it('says a short code unit and pack in full words in its problems', () => {
+    const short: Product = { ...pen, unit: 'pc', packs: [{ id: 'k4', product_id: 'e1', unit_id: BOX, unit: 'ctn', factor: '2.500', active: true, version: 1 }] };
+    const odd = restockLineProblem({ product: short, unitId: BOX, cost: '100', sell: '100', qtyByBranch: { b1: '0.001' } }) ?? '';
+    const noSize = restockLineProblem({ product: short, unitId: BOX, cost: '100', sell: '100', qtyByBranch: { b1: '1' }, packSize: '' }) ?? '';
+    expect(odd).toContain('to pieces');
+    expect(noSize).toContain('pieces were in each carton');
+    expect(`${odd} ${noSize}`).not.toMatch(/\bpcs?\b|\bctn\b/);
+  });
+});
+
+describe('stock in packs and pieces (issue #650)', () => {
+  const carton = { unit: 'Carton', factor: '24.000' };
+  it('shows whole packs, the pieces left and the total', () => {
+    // Review of #710: one casing, the words of a sentence in lower case whatever the unit is named.
+    expect(packsAndPieces('127.000', 'Piece', carton)).toBe('5 cartons and 7 pieces (127 pieces)');
+    expect(packsAndPieces('24.000', 'Piece', carton)).toBe('1 carton (24 pieces)');
+    expect(packsAndPieces('25.000', 'Piece', carton)).toBe('1 carton and 1 piece (25 pieces)');
+    expect(packsAndPieces('48.500', 'Piece', carton)).toBe('2 cartons and 0.5 pieces (48.5 pieces)');
+  });
+  it('reads part of a pack and nothing in the base unit only', () => {
+    expect(packsAndPieces('7.000', 'Piece', carton)).toBe('7 pieces');
+    expect(packsAndPieces('1.000', 'Piece', carton)).toBe('1 piece');
+    expect(packsAndPieces('0.000', 'Piece', carton)).toBe('0 pieces');
+  });
+  it('says how far short a negative stock is', () => {
+    expect(packsAndPieces('-27.000', 'Piece', carton)).toBe('1 carton and 3 pieces short (27 pieces short)');
+    expect(packsAndPieces('-3.000', 'Piece', carton)).toBe('3 pieces short');
+  });
+  it('shows an item with no pack in its unit in full words with a correct plural (issue #680)', () => {
+    expect(packsAndPieces('127.000', 'Piece', undefined)).toBe('127 pieces');
+    expect(packsAndPieces('1.000', 'Piece', undefined)).toBe('1 piece');
+    expect(packsAndPieces('-1.000', 'Piece', undefined)).toBe('-1 piece');
+    expect(packsAndPieces('8.000', 'piece', undefined)).toBe('8 pieces');
+    expect(packsAndPieces('5.000', 'Piece', { unit: 'Pair', factor: '1.000' })).toBe('5 pieces');
+    expect(packsAndPieces('5.000', undefined, carton)).toBe('5');
+    expect(quantityIn('2.500', 'metre')).toBe('2.5 metres');
+    expect(quantityIn('3.000', 'box')).toBe('3 boxes');
+  });
+  it('says a short code a shop typed as its full word, singular for exactly one (issue #680)', () => {
+    expect(quantityIn('8.000', 'pc')).toBe('8 pieces');
+    expect(quantityIn('1.000', 'pc')).toBe('1 piece');
+    expect(quantityIn('12.000', 'PCS')).toBe('12 pieces');
+    expect(quantityIn('2.000', 'ltr')).toBe('2 litres');
+    expect(quantityIn('1.000', 'Kg')).toBe('1 kilogram');
+    expect(quantityIn('3.000', 'ctn')).toBe('3 cartons');
+    // The unit alone, as Sell, Buy stock and the packs page show it (review of #687).
+    expect(unitWord('pc')).toBe('piece');
+    expect(unitWord('ctn')).toBe('carton');
+    expect(unitWord('Bulb')).toBe('Bulb');
+    expect(unitWords('pc')).toBe('pieces');
+    // Issue #698: from the one list the server reads too; "pce" and "mtrs" are new there, "liter" names litre but is shown as typed.
+    expect(unitWord('PCE')).toBe('piece');
+    expect(unitWords('mtrs')).toBe('metres');
+    expect(unitWord('liter')).toBe('liter');
+    expect(listedWord(' Liters ')).toBe('litre');
+    expect(listedWord('Tray')).toBe('tray');
+    expect(spellingsOf('carton')).toEqual(['carton', 'cartons', 'ctn', 'ctns']);
+  });
+
+  it('chooses the unit a refusal names, and leaves one that names none an error (review of #715)', async () => {
+    const named = new RetailError('You already have Piece.', 409, 'unit_exists', { existing_id: 'u1', existing_name: 'Piece', existing_active: true });
+    await expect(orExistingUnit(Promise.reject(named))).resolves.toMatchObject({ id: 'u1', name: 'Piece', reused: true });
+    const unnamed = new RetailError('A unit with this name was added a moment ago. Reload the units.', 409, 'unit_exists', {});
+    await expect(orExistingUnit(Promise.reject(unnamed))).rejects.toBe(unnamed);
+    const off = new RetailError('You already have Piece.', 409, 'unit_exists', { existing_id: 'u1', existing_name: 'Piece', existing_active: false });
+    await expect(orExistingUnit(Promise.reject(off))).rejects.toThrow('You already have Piece, switched off. Switch it on in Units.');
+    expect(unitWords(undefined)).toBe('');
+  });
+  it('works with a pack of a decimal size', () => {
+    expect(packsAndPieces('26.000', 'Kilogram', { unit: 'Sack', factor: '12.500' })).toBe('2 sacks and 1 kilogram (26 kilograms)');
+    expect(packsAndPieces('26.000', 'kg', { unit: 'Sack', factor: '12.500' })).toBe('2 sacks and 1 kilogram (26 kilograms)');
+  });
+  it('reads packs and pieces as one quantity in pieces', () => {
+    expect(packsAndPiecesMilli('5', '7', carton)).toBe(127_000);
+    expect(packsAndPiecesMilli('5', '', carton)).toBe(120_000);
+    expect(packsAndPiecesMilli('', '127', carton)).toBe(127_000);
+    expect(packsAndPiecesMilli('0', '0', carton)).toBe(0);
+    expect(packsAndPiecesMilli('2', '0.5', carton)).toBe(48_500);
+    expect(packsAndPiecesMilli('', '', carton)).toBeNull();
+    expect(packsAndPiecesMilli('1.5', '', carton)).toBeNull();
+    expect(packsAndPiecesMilli('2', 'x', carton)).toBeNull();
+    expect(packsAndPiecesMilli('99999999999999', '', carton)).toBeNull();
+  });
+  it('says plainly what cannot be read', () => {
+    expect(packsAndPiecesProblem('1.5', '', 'Piece', 'Carton')).toBe('Type whole cartons, and the rest in pieces.');
+    expect(packsAndPiecesProblem('2', 'x', 'Piece', 'Carton')).toBe('Type pieces as a number, with at most three decimals.');
+    expect(packsAndPiecesProblem('2', '3', 'Piece', 'Carton')).toBeNull();
+  });
+  it('takes the pack the server marks standard, while it is active and holds more than one', () => {
+    const [carton, box] = (pen.packs ?? []) as [Pack, Pack];
+    expect(standardPack(pen)).toBeUndefined();
+    expect(standardPack({ ...pen, packs: [{ ...carton, standard: true }, box] })?.unit).toBe('carton');
+    expect(standardPack({ ...pen, packs: [carton, { ...box, standard: true }] })).toBeUndefined();
+    expect(standardPack({ ...pen, packs: [{ ...carton, factor: '1.000', standard: true }] })).toBeUndefined();
+    expect(standardPack({ ...pen, packs: undefined })).toBeUndefined();
+  });
+  it('only reads the flag the server sets, never ranking the packs itself (#660)', () => {
+    // The rule lives in the server's one subquery and RetailUnitsIT pins its cases; these are the two payloads that IT asserts.
+    // A client that ranked by size would take the carton in the second; a client that ranked by usual pack could not, since
+    // a pack carries no usual pack. So the PWA takes whichever pack is marked, even the smaller one.
+    const box: Pack = { id: 'k2', product_id: 'e1', unit_id: BOX, unit: 'box', factor: '10.000', active: true, version: 1, purpose: 'both' };
+    const carton: Pack = { id: 'k1', product_id: 'e1', unit_id: CARTON, unit: 'carton', factor: '24.000', active: true, version: 1, purpose: 'both' };
+    expect(standardPack({ ...pen, packs: [box, { ...carton, standard: true }] })?.unit).toBe('carton');
+    expect(standardPack({ ...pen, packs: [{ ...box, standard: true }, carton] })?.unit).toBe('box');
+    expect(standardPack({ ...pen, packs: [box, carton] })).toBeUndefined();
+  });
+  it('tells a pack changed in unit or size from the same one', () => {
+    expect(samePack({ unit: 'Carton', factor: '24' }, { unit: 'Carton', factor: '24.000' })).toBe(true);
+    expect(samePack({ unit: 'Carton', factor: '24.000' }, { unit: 'Carton', factor: '30.000' })).toBe(false);
+    expect(samePack({ unit: 'Carton', factor: '24.000' }, { unit: 'Dozen', factor: '24.000' })).toBe(false);
+    expect(samePack({ unit: 'Carton', factor: '24.000' }, undefined)).toBe(false);
   });
 });

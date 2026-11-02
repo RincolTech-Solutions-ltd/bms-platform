@@ -2,7 +2,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { type NotificationSettings, type NotificationSettingsChange, notificationSettingsApi } from '../../../api/notification-settings';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { useStaff } from '../context';
+import { Hint } from '../../../app/ui/Hint';
+import { sayDone } from '../retail/toast';
 
 // Business set-up > Notifications (issue #412, ADR-057): what the business sends by push, each everyday notice on or off, and when
 // the daily closing summary goes. Everyone still turns notifications on for their own device in Notifications and app; this page only
@@ -30,7 +33,6 @@ export function BusinessNotificationsScreen() {
   const canChange = (me.permissions ?? []).includes('core.settings.manage');
   const settings = useQuery({ queryKey: ['notification-settings'], queryFn: notificationSettingsApi.get });
   const [time, setTime] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // One save at a time: a second tap before the first answer must not send a second request.
@@ -49,7 +51,7 @@ export function BusinessNotificationsScreen() {
     try {
       const next = await notificationSettingsApi.update(current.version ?? 1, change);
       queryClient.setQueryData(['notification-settings'], next);
-      setNotice(words);
+      sayDone(words);
     } catch (e) {
       setError(messageOf(e));
       void queryClient.invalidateQueries({ queryKey: ['notification-settings'] });
@@ -72,7 +74,6 @@ export function BusinessNotificationsScreen() {
           Notifications are not switched on for this server yet, so nothing is sent whatever you choose here.
         </p>
       )}
-      {notice && <p role="status">{notice}</p>}
       {error && (
         <p role="alert" className="alert alert-danger">
           {error}
@@ -90,7 +91,7 @@ export function BusinessNotificationsScreen() {
                   role="switch"
                   checked={on}
                   disabled={!canChange || busy}
-                  onChange={(e) => void save({ [s.key]: e.target.checked }, `${s.title}: ${e.target.checked ? 'on' : 'off'}.`)}
+                  onChange={(e) => void save({ [s.key]: e.target.checked }, `${s.title} ${e.target.checked ? 'on' : 'off'}`)}
                 />{' '}
                 {s.title}
               </label>
@@ -105,17 +106,18 @@ export function BusinessNotificationsScreen() {
         <input id="summary-time" type="time" step={900} max="23:30" value={shownTime} disabled={!canChange || busy} onChange={(e) => setTime(e.target.value)} />
         {canChange && (
           <p>
-            <button
+            <BusyButton
               type="button"
               className="rt-primary"
-              disabled={busy || !QUARTER_HOUR.test(shownTime) || shownTime === current.daily_summary_time}
-              onClick={() => void save({ daily_summary_time: shownTime }, `The daily summary now goes at ${shownTime}.`)}
+              busy={busy}
+              disabled={!QUARTER_HOUR.test(shownTime) || shownTime === current.daily_summary_time}
+              onClick={() => void save({ daily_summary_time: shownTime }, `Summary now at ${shownTime}`)}
             >
               Save the time
-            </button>
+            </BusyButton>
           </p>
         )}
-        <p className="hint">A quarter hour, at the latest 23:30. If the server was down at that time, the summary comes the next morning as yesterday's.</p>
+        <Hint>A quarter hour, at the latest 23:30. If the server was down at that time, the summary comes the next morning as yesterday's.</Hint>
         {!canChange && <p className="hint">Only an administrator can change these.</p>}
       </section>
     </main>

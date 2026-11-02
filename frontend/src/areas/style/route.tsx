@@ -4,8 +4,11 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { classifyHost, loadHostConfig } from '../../app/hosts';
 import { landingCopy } from '../../app/landing';
 import { icons } from '../../components/icons';
+import { SideMenu } from '../../components/side-menu';
 import { illustrations, type IllustrationName } from '../../components/illustrations';
 import { BrandLoader, EmptyState, SkeletonList, StatusPanel } from '../../components/states';
+import { BusyButton } from '../../app/ui/BusyButton';
+import { Toast } from '../staff/retail/toast';
 
 // The living style page (#106, docs/ui/design-system.md): every shared component and illustration
 // on one page, drawn by the same classes the screens use, so a change to the design layer can be
@@ -119,6 +122,12 @@ function StylePage() {
             Disabled
           </button>
           <button className="btn-sm">Small</button>
+          <BusyButton type="button" className="btn-primary" busy>
+            Busy
+          </BusyButton>
+          <BusyButton type="button" className="btn-sm" busy>
+            Small busy
+          </BusyButton>
           <button className="btn-icon">
             {icons.arrow}
             With icon
@@ -241,10 +250,10 @@ function StylePage() {
 
       <Section title="Empty, success and error states">
         <div className="grid-auto">
-          <EmptyState art="noSales" title="No sales yet.">Sales appear here as they are recorded.</EmptyState>
-          <EmptyState art="noProducts" title="No products yet.">Add a product or restock to start.</EmptyState>
-          <EmptyState art="noApplications" title="No applications yet.">New applications appear here.</EmptyState>
-          <EmptyState art="nothingWaiting" title="Nothing waiting.">Requests for your approval appear here.</EmptyState>
+          <EmptyState title="No sales yet.">Sales appear here as they are recorded.</EmptyState>
+          <EmptyState title="No products yet.">Add a product or buy stock to start.</EmptyState>
+          <EmptyState title="No applications yet.">New applications appear here.</EmptyState>
+          <EmptyState title="Nothing waiting.">Requests for your approval appear here.</EmptyState>
           <StatusPanel tone="success" title="Saved.">The step is done.</StatusPanel>
           <StatusPanel tone="error" title="That did not work.">Say what went wrong and what to try.</StatusPanel>
         </div>
@@ -262,11 +271,7 @@ function StylePage() {
           <button onClick={() => dialog.current?.showModal()}>Open a dialog</button>
           <button onClick={() => sheet.current?.showModal()}>Open a sheet</button>
         </div>
-        {toast && (
-          <div className="toast toast-success" role="status">
-            {toast}
-          </div>
-        )}
+        {toast && <Toast message={toast} tone="success" />}
         <dialog ref={dialog} aria-labelledby="style-dialog-title">
           <h2 id="style-dialog-title">A dialog</h2>
           <p>Centred, with a backdrop. It rises in over 200 ms.</p>
@@ -282,6 +287,21 @@ function StylePage() {
             <button>Close</button>
           </form>
         </dialog>
+      </Section>
+
+      <Section title="Side menu on a phone">
+        <p className="hint">Below 720px the sidebar gives way to this menu button and drawer, with the same items.</p>
+        <div className="staff-bar-top">
+          <SideMenu
+            label="Example areas"
+            links={[
+              { to: '/style', label: 'Style page', icon: icons.settings },
+              { to: '/', label: 'Landing page', icon: icons.home, exact: true },
+            ]}
+            name="Test User 01"
+            onSignOut={() => undefined}
+          />
+        </div>
       </Section>
 
       <Section title="Icons">

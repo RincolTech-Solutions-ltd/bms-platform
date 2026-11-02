@@ -52,7 +52,7 @@ function mount(node: ReactElement, opts: { me?: Me; members?: MemberRecord[]; it
 }
 
 const type = (label: RegExp | string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
-const save = () => screen.getByRole('button', { name: /Register collateral|Save changes|Saving/ }) as HTMLButtonElement;
+const save = () => screen.getByRole('button', { name: /Register collateral|Save changes/ }) as HTMLButtonElement;
 
 describe('registering collateral', () => {
   it('needs the member, a description and, for a vehicle, the plate number, each named in plain words', async () => {
@@ -89,6 +89,18 @@ describe('registering collateral', () => {
     expect(document.getElementById('cf-reference-no')?.getAttribute('aria-invalid')).toBe('true');
   });
 
+  it('types the value in the business currency from /me, not in shillings (issue #289)', async () => {
+    const { collateral } = mount(<CollateralForm memberId={holder.id} />, { me: { ...officer(), tenant_currency: 'KES' } });
+    await screen.findByText('Test Holder 01');
+    // A currency with cents gets the keypad that has a decimal point.
+    expect(screen.getByLabelText(/^What it is worth \(KES, your estimate\)/).getAttribute('inputmode')).toBe('decimal');
+    type(/^Describe the item/, 'Test fridge');
+    type(/^What it is worth/, '1,500.25');
+    fireEvent.click(save());
+    await waitFor(() => expect(collateral.calls.create).toHaveLength(1));
+    expect(collateral.calls.create[0]?.body).toMatchObject({ estimated_value_minor: 150025 });
+  });
+
   it('asks where the item is kept when we hold it', () => {
     mount(<CollateralForm memberId={holder.id} />);
     type(/^Who keeps it/, 'in_custody');
@@ -96,6 +108,16 @@ describe('registering collateral', () => {
     type(/^Describe the item/, 'Test logbook');
     fireEvent.click(save());
     expect(document.getElementById('cf-storage-location-error')?.textContent).toMatch(/where the item is kept/i);
+  });
+});
+
+describe('valuing an item in its own currency (issue #289)', () => {
+  it('labels the values in the item\'s currency and gives a KES item the decimal keypad', () => {
+    const kes: CollateralItem = { id: 'c9', branch_id: BRANCH, member_id: holder.id, collateral_type: 'vehicle', description: 'Test van', reference_no: 'KXX 001X', custody_status: 'pledged', currency: 'KES', version: 1 };
+    mount(<CollateralView detail={{ item: kes, valuations: [], events: [] }} collateralId="c9" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add a valuation' }));
+    expect(screen.getByLabelText(/^Market value \(KES\)/).getAttribute('inputmode')).toBe('decimal');
+    expect(screen.getByLabelText(/^Value in a quick sale \(KES, if known\)/).getAttribute('inputmode')).toBe('decimal');
   });
 });
 
@@ -113,6 +135,20 @@ describe('the collateral item page', () => {
     expect(screen.getByRole('button', { name: 'Ask to give it back' })).toBeTruthy();
   });
 
+  it('shows "Fields marked * are needed." on Record a change only while a field is starred, for every kind of change', () => {
+    mount(<CollateralView detail={detail} collateralId="c1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Record a change' }));
+    const form = screen.getByRole('form', { name: 'Record a change' });
+    const kind = screen.getByLabelText(/^What happened/) as HTMLSelectElement;
+    const kinds = [...kind.options].map((o) => o.value);
+    expect(kinds.length).toBeGreaterThan(1);
+    for (const value of kinds) {
+      fireEvent.change(kind, { target: { value } });
+      const starred = form.querySelector('label .field-star') !== null;
+      expect(form.querySelector('.fields-needed') !== null, value).toBe(starred);
+    }
+  });
+
   it('checks the branch scope of the permission, not only the permission', () => {
     const scoped = officer([], { 'lending.collateral.manage': { all_branches: false, branch_ids: [OTHER] }, 'lending.collateral.read': { all_branches: true, branch_ids: [] } });
     mount(<CollateralView detail={detail} collateralId="c1" />, { me: scoped });
@@ -125,7 +161,7 @@ describe('the collateral item page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ask to give it back' }));
     type(/^Who is collecting it/, 'Test Owner 01');
     fireEvent.click(screen.getByRole('button', { name: 'Send the request' }));
-    expect((await screen.findByRole('status')).textContent).toMatch(/second person must agree in the approvals inbox/);
+    expect((await screen.findByText(/second person must agree in the approvals inbox/)).closest('[role="status"]')).not.toBeNull();
   });
 
   it('lists the loan cover value apart from the estimate', () => {
@@ -150,9 +186,19 @@ describe('lists', () => {
     expect(document.body.textContent).toContain('We hold it');
     expect(document.body.textContent).toContain('UGX 1,000,000');
   });
+
+  it('show an item that carries no currency in the business currency, not UGX (issue #289)', () => {
+    mount(<CollateralRows items={[{ id: 'c1', description: 'Test plot', collateral_type: 'land_title', custody_status: 'in_custody', estimated_value_minor: 1_000_000 }]} />, { me: { ...officer(), tenant_currency: 'KES' } });
+    expect(document.body.textContent).toContain('KES 10,000.00');
+    expect(document.body.textContent).not.toContain('UGX');
+  });
 });
 
 describe('the member page', () => {
+  it('shows the income of a member who carries no currency in the business currency (issue #289)', async () => {
+    mount(<MemberView member={{ ...holder, monthly_income_minor: 50_000 }} />, { me: { ...officer(), tenant_currency: 'KES' } });
+    expect(await screen.findByText('KES 500.00')).toBeTruthy();
+  });
   it('lists what is missing before the details can be checked, in words', async () => {
     mount(<MemberView member={{ ...holder, national_id: undefined, id_type: 'nin' }} />);
     expect(await screen.findByText(/Still needed: .*the ID number.*where the member lives/)).toBeTruthy();

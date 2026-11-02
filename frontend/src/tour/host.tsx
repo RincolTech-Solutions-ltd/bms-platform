@@ -1,5 +1,5 @@
-import { useNavigate, useRouterState } from '@tanstack/react-router';
-import { type KeyboardEvent, type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
+import { type KeyboardEvent, type ReactNode, createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api, type Me } from '../api/client';
 import {
@@ -50,16 +50,23 @@ interface TourApi {
   /** The tour of the page the user is on, for "Show me this page". */
   pageTour: Tour | undefined;
   start: (tour: Tour) => void;
+  /** True while a tour is on screen. */
+  running: boolean;
+  /** The data-tour id the current step lights up, so a closed phone menu can open for it (issue #455). */
+  target: string | undefined;
 }
 
-const TourContext = createContext<TourApi>({ mainTour: undefined, pageTour: undefined, start: () => undefined });
+const TourContext = createContext<TourApi>({ mainTour: undefined, pageTour: undefined, start: () => undefined, running: false, target: undefined });
 
 export function useTour(): TourApi {
   return useContext(TourContext);
 }
 
+// An element answers for its own data-tour id and for the ids in its data-tour-also list: on a phone the More tab stands for the
+// menu links it holds, since the drawer that drew them is gone (issue #539). The element's own id wins.
 function query(target: string): HTMLElement | null {
-  return document.querySelector<HTMLElement>(`[data-tour="${CSS.escape(target)}"]`);
+  const id = CSS.escape(target);
+  return document.querySelector<HTMLElement>(`[data-tour="${id}"]`) ?? document.querySelector<HTMLElement>(`[data-tour-also~="${id}"]`);
 }
 
 export function TourProvider({ me, saveProgress = true, children }: { me: Me; saveProgress?: boolean; children: ReactNode }) {
@@ -113,6 +120,7 @@ export function TourProvider({ me, saveProgress = true, children }: { me: Me; sa
       setProgress((p) => ({ ...p, [id]: { status, version } }));
       if (!saveProgress) return;
       // Progress is a convenience: a failed save only means the tour may show once more.
+      // busy-exempt: no button waits for this save, the tour closes at once
       void api
         .PUT('/api/v1/me/tours/{tour_id}', { params: { path: { tour_id: id } }, body: { status, version } })
         .catch(() => undefined);
@@ -252,7 +260,9 @@ export function TourProvider({ me, saveProgress = true, children }: { me: Me; sa
     if (action === 'back' && active && active.index > 0) go(-1);
   }
 
-  const value = useMemo(() => ({ mainTour, pageTour, start }), [mainTour, pageTour, start]);
+  const running = active !== null;
+  const wanted = step?.target;
+  const value = useMemo(() => ({ mainTour, pageTour, start, running, target: wanted }), [mainTour, pageTour, start, running, wanted]);
 
   return (
     <TourContext.Provider value={value}>
@@ -286,43 +296,65 @@ export function TourProvider({ me, saveProgress = true, children }: { me: Me; sa
 }
 
 /**
- * Help in the staff bar: replay the first-run tour, or a tour of this page, at any time. A native
- * dialog (a bottom sheet on a phone) sits in the top layer, so the staff bar's clipping cannot hide
- * it, and the browser keeps focus inside it and closes it on Escape.
+ * Help: replay the first-run tour, or a tour of this page, at any time, and in the staff area open How do I...? (issue #598). A native dialog (a bottom sheet on a phone) sits in
+ * the top layer, so no clipping can hide it, and the browser keeps focus inside it and closes it on Escape. useHelpSheet hands
+ * back the sheet and a way to open it, so the staff top bar's menu (issue #526) can offer Help as one of its items while the
+ * sheet itself stays mounted outside the menu, which hides its items when it closes.
  */
-export function HelpMenu() {
+export function useHelpSheet(feedback: boolean): { open: () => void; sheet: ReactNode } {
   const { mainTour, pageTour, start } = useTour();
   const dialog = useRef<HTMLDialogElement>(null);
+  // The top bar's menu and the side menu's footer each hold a sheet (issue #564), so each names its own heading.
+  const title = useId();
 
   function pick(tour: Tour) {
     dialog.current?.close();
     start(tour);
   }
 
+  const sheet = (
+    <dialog ref={dialog} className="sheet help-sheet" aria-labelledby={title}>
+      <h2 id={title}>Help</h2>
+      <div className="form-actions">
+        {mainTour && (
+          <button type="button" className="btn-primary" onClick={() => pick(mainTour)}>
+            Take the tour
+          </button>
+        )}
+        {pageTour && (
+          <button type="button" onClick={() => pick(pageTour)}>
+            Show me this page
+          </button>
+        )}
+        {!mainTour && !pageTour && <p className="muted">There is no tour for this page yet.</p>}
+        {feedback && (
+          <Link to="/staff/help" className="btn" data-tour="help-how-do-i" onClick={() => dialog.current?.close()}>
+            How do I...?
+          </Link>
+        )}
+        {feedback && (
+          <Link to="/staff/feedback" className="btn" onClick={() => dialog.current?.close()}>
+            Send feedback
+          </Link>
+        )}
+        <button type="button" className="btn-ghost" onClick={() => dialog.current?.close()}>
+          Close
+        </button>
+      </div>
+    </dialog>
+  );
+  return { open: () => dialog.current?.showModal(), sheet };
+}
+
+/** The Help sheet: the tours, and in the staff area (`feedback`) a way to send feedback, which a phone reaches from here. */
+export function HelpMenu({ feedback = false }: { feedback?: boolean } = {}) {
+  const help = useHelpSheet(feedback);
   return (
     <div className="help-menu" data-tour="help-menu">
-      <button type="button" className="btn-ghost btn-sm" aria-haspopup="dialog" onClick={() => dialog.current?.showModal()}>
+      <button type="button" className="btn-ghost btn-sm" aria-haspopup="dialog" onClick={help.open}>
         Help
       </button>
-      <dialog ref={dialog} className="sheet help-sheet" aria-labelledby="help-title">
-        <h2 id="help-title">Help</h2>
-        <div className="form-actions">
-          {mainTour && (
-            <button type="button" className="btn-primary" onClick={() => pick(mainTour)}>
-              Take the tour
-            </button>
-          )}
-          {pageTour && (
-            <button type="button" onClick={() => pick(pageTour)}>
-              Show me this page
-            </button>
-          )}
-          {!mainTour && !pageTour && <p className="muted">There is no tour for this page yet.</p>}
-          <button type="button" className="btn-ghost" onClick={() => dialog.current?.close()}>
-            Close
-          </button>
-        </div>
-      </dialog>
+      {help.sheet}
     </div>
   );
 }

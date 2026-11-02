@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, createLazyRoute, getRouteApi, useNavigate } from '@tanstack/react-router';
+import { createLazyRoute, getRouteApi, useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { retail, type Product } from '../../../api/retail';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
@@ -14,6 +14,8 @@ import {
 import { BranchField, SupplierField, useSuppliers, type SupplierOption } from './purchasing-ui';
 import { showQty } from './maths';
 import { Gate, Problem, ProductPicker, money } from './ui';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { Hint } from '../../../app/ui/Hint';
 
 // The purchase order form (the purchasing capability, ADR-033, issue #198): the supplier, the date it is expected, and the items
 // with how many and what one costs. Saving makes a DRAFT; nothing is ordered and no stock moves until the order is sent. The cost
@@ -28,6 +30,7 @@ export function OrderLineCard({ line, index, onChange, onRemove }: { line: Order
       {line.packs.length > 0 && (
         <>
           <label htmlFor={`unit-${index}`}>Ordered by</label>
+          {/* empty: drawn only when the item has packs; its own unit is always there. */}
           <select id={`unit-${index}`} value={line.unitId ?? ''} onChange={(e) => onChange(withOrderUnit(line, e.target.value))}>
             <option value="">{line.baseUnit}</option>
             {line.packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{k.unit} ({showQty(k.factor ?? '')} each)</option>)}
@@ -67,7 +70,7 @@ export function OrderFormView({ form, suppliers, branches, picker, busy, error, 
   const setLine = (i: number, line: OrderLineForm) => onChange({ ...form, lines: form.lines.map((l, n) => (n === i ? line : l)) });
   return (
     <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!problem && !busy) onSubmit(); }} data-tour="order-form">
-      <p className="hint">Saving makes a draft. Nothing is ordered, and no stock moves, until you send the order.</p>
+      <Hint full>Saving makes a draft. Nothing is ordered, and no stock moves, until you send the order.</Hint>
       <div className="stack" data-tour="order-supplier">
         <SupplierField id="order-supplier" value={form.supplierId} suppliers={suppliers} onChange={(supplierId) => onChange({ ...form, supplierId })} />
         {branches.length > 0 && <BranchField id="order-branch" label="Goods are expected at" value={form.branchId} branches={branches} onChange={(branchId) => onChange({ ...form, branchId })} />}
@@ -78,7 +81,7 @@ export function OrderFormView({ form, suppliers, branches, picker, busy, error, 
       <input id="order-note" value={form.note} maxLength={300} onChange={(e) => onChange({ ...form, note: e.target.value })} />
       <div data-tour="order-items">{picker}</div>
       <h2>Items</h2>
-      {form.lines.length === 0 && <p className="empty-state">No items yet.</p>}
+      {form.lines.length === 0 && <p className="empty-state">No items yet. Type an item above and tap it in the list.</p>}
       <ul style={{ listStyle: 'none', padding: 0 }} data-tour="order-lines">
         {form.lines.map((l, i) => (
           <OrderLineCard key={`${l.productId}-${i}`} line={l} index={i} onChange={(line) => setLine(i, line)} onRemove={() => onChange({ ...form, lines: form.lines.filter((_, n) => n !== i) })} />
@@ -87,7 +90,8 @@ export function OrderFormView({ form, suppliers, branches, picker, busy, error, 
       <p className="rt-total" aria-live="polite" data-testid="order-total">Order total {money(orderTotal(form.lines))}</p>
       {problem && form.lines.length > 0 && <p role="alert" className="rt-flag">{problem}</p>}
       <Problem error={error} />
-      <button type="submit" className="rt-primary" disabled={problem !== null || busy} data-tour="order-save">{busy ? 'Saving' : submitLabel}</button>
+      <BusyButton type="submit" className="rt-primary" busy={busy === true} notReady={problem !== null} data-tour="order-save">{submitLabel}</BusyButton>
+
     </form>
   );
 }
@@ -126,11 +130,11 @@ export function PurchaseOrderNewPage() {
       void queryClient.invalidateQueries({ queryKey: ['retail', 'purchase-orders'] });
       void navigate({ to: '/staff/retail/purchase-orders/$orderId', params: { orderId: order.id ?? '' } });
     },
+    meta: { success: 'Order saved' },
   });
   const picker = useItemPicker((line) => setDraft((d) => ({ ...d, lines: [...d.lines, line] })));
   return (
     <Gate screen="purchaseOrders" title="New purchase order">
-      <p><Link to="/staff/retail/purchase-orders">Back to purchase orders</Link></p>
       <OrderFormView form={draft} suppliers={suppliers} branches={branches} picker={picker} busy={save.isPending} error={save.error} onChange={(f) => setDraft(() => f)} onSubmit={() => save.mutate()} />
       {draft.lines.length > 0 && !save.isPending && <button type="button" className="btn-ghost" onClick={() => { discard(); save.reset(); }}>Clear this order</button>}
     </Gate>
@@ -181,11 +185,11 @@ export function PurchaseOrderEditPage() {
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       void navigate({ to: '/staff/retail/purchase-orders/$orderId', params: { orderId } });
     },
+    meta: { success: 'Changes saved' },
   });
   const picker = useItemPicker((line) => setForm((f) => (f ? { ...f, lines: [...f.lines, line] } : f)));
   return (
     <Gate screen="purchaseOrders" title={order.data?.order_no ? `Change ${order.data.order_no}` : 'Change purchase order'}>
-      <p><Link to="/staff/retail/purchase-orders/$orderId" params={{ orderId }}>Back to the order</Link></p>
       {order.isPending && <SkeletonList label="Loading the order" />}
       <Problem error={order.error} />
       {order.data && order.data.status !== 'draft' && <p className="empty-state">This order has been sent, so it can no longer be changed.</p>}

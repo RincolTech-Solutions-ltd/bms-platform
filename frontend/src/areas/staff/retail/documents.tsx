@@ -18,7 +18,7 @@ const TYPES: DocumentType[] = ['invoice', 'delivery_note', 'quotation'];
 
 export function DocumentsPage() {
   const { me } = useStaff();
-  const { all, branchId, branchName } = useBranchView();
+  const { all, branchId } = useBranchView();
   const nameOf = useBranchName();
   const queryClient = useQueryClient();
   const search = useLiveSearch();
@@ -37,10 +37,10 @@ export function DocumentsPage() {
   const save = useMutation({
     mutationFn: ({ kind, prefix }: { kind: DocumentType; prefix: string }) => retail.setDocumentPrefix(kind, prefix),
     onSuccess: (rows) => queryClient.setQueryData(['retail', 'document-series'], rows),
+    meta: { success: 'Prefix saved' },
   });
   return (
     <Gate screen="documents" title="Documents" wide>
-      <p className="branch-line">Branch: <strong>{all ? 'All branches' : branchName}</strong></p>
       <p className="hint" data-tour="documents-help">
         Open a sale to make its invoice or delivery note, or <Link to="/staff/retail/quotations">make a quotation</Link>. The till receipt stays the default: a sale never needs a document.
       </p>
@@ -65,7 +65,7 @@ export function DocumentsPage() {
         )}
       </div>
       <Problem error={series.error} />
-      {series.data && <SeriesPanel series={series.data} canEdit={holds(me, 'core.settings.manage')} saving={save.isPending} onSave={(kind, prefix) => save.mutate({ kind, prefix })} />}
+      {series.data && <SeriesPanel series={series.data} canEdit={holds(me, 'core.settings.manage')} busy={save.isPending} onSave={(kind, prefix) => save.mutate({ kind, prefix })} />}
       <Problem error={save.error} />
     </Gate>
   );

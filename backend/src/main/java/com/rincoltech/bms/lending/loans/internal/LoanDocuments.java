@@ -184,6 +184,15 @@ class LoanDocuments {
                     "No document",
                     "A " + txn.txnType() + " has no receipt or voucher; it shows on the loan statement.");
         }
+        if (txn.historic()) {
+            // ADR-071: brought in from the paper register, its receipt is the paper one.
+            throw new ApiException(
+                    HttpStatus.UNPROCESSABLE_CONTENT,
+                    "no_document",
+                    "No document",
+                    "A transaction brought in from the paper register has no receipt or voucher here; it shows on the"
+                            + " loan statement.");
+        }
         String docType = voucher ? "voucher" : "receipt";
         Optional<StoredDocument> stored = documents.findGenerated(SUBJECT, loanId, docType, txn.receiptNo());
         if (stored.isPresent()) {
@@ -328,7 +337,13 @@ class LoanDocuments {
                 .map(d -> deductions(loan, d))
                 .orElse(List.of());
         LoanLedger.Statement st = LoanLedger.statement(
-                txns, repo.scheduleRows(loanId), deductions, today, b.totalOutstandingMinor(), v -> money(v, cur));
+                txns,
+                repo.scheduleRows(loanId),
+                repo.penaltyEvents(loanId),
+                deductions,
+                today,
+                b.totalOutstandingMinor(),
+                v -> money(v, cur));
         long charged = 0;
         long credited = 0;
         List<Map<String, Object>> lines = new ArrayList<>();
@@ -370,7 +385,8 @@ class LoanDocuments {
     // ---- models ------------------------------------------------------------------------------
 
     private Map<String, Object> common(Loan loan, String title, String number, LocalDate on) {
-        Letterhead lh = letterheads.current();
+        // The branch's own logo when it has one, else the business logo (issue #461, ADR-068).
+        Letterhead lh = letterheads.forBranch(loan.branchId());
         Map<String, Object> letterhead = new LinkedHashMap<>();
         letterhead.put("name", lh.displayName());
         letterhead.put("colour", lh.brandColour());
@@ -464,7 +480,7 @@ class LoanDocuments {
             }
         }
         model.put("allocations", rows);
-        After now = LoanLedger.after(all, items, t.id());
+        After now = LoanLedger.after(all, items, repo.penaltyEvents(loan.id()), t.id());
         Map<String, Object> after = new LinkedHashMap<>();
         after.put(
                 "outstanding",

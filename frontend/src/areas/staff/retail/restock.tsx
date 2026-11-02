@@ -1,8 +1,6 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute, useRouterState } from '@tanstack/react-router';
-import { useState } from 'react';
-import { NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
-import { useLiveSearch } from '../../../app/ui/useLiveSearch';
+import { useRef, useState } from 'react';
 import { RETAIL_CURRENCY, businessToday, retail, type Product, type Supplier, type Purchase, type PurchasePayment, type PurchaseRequest } from '../../../api/retail';
 import { branchLabel } from '../../../auth/branch';
 import { parseMinor } from '../../../components/money';
@@ -10,9 +8,23 @@ import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
 import { lineTotalMinor, parseQty, qtyString, showDate, showQty } from './maths';
 import { chosenUnitHint, redraftOf } from './restock-correct-state';
-import { CategoryLabel, Gate, Note, Problem, money, useProfitAccess } from './ui';
-import { UNITS, capabilityOn } from './permissions';
-import { activePacks, baseCostMinor, baseQtyMilli, chosenPack, packPriceMinor } from './units-state';
+import { Gate, Money, Note, Problem, ProductPicker, money, useProfitAccess } from './ui';
+import { ScanBar } from './scan';
+import { PACK_UNUSABLE, plusOne, scanInto, touchedLine } from './barcode-state';
+import { ScreenToast, useItemAdded } from './toast';
+import { TRANSFER, UNITS, canUse, capabilityOn, holdsAt } from './permissions';
+import { NextSteps } from './next-steps';
+import { usualBuyingPack } from './ladder-state';
+import { OWN_PRICE_KEEPS_SIZE, baseCostMinor, baseQtyMilli, buyingPacks, chosenPack, deliveredFactor, mayKeepSize, packPriceMinor, quantityIn, sameFactor, unitWord, unitWords } from './units-state';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { Field, FieldsNeededNote } from '../../../app/ui/Field';
+import { WORDS, howManyInEach, useFromNowOn } from '../../../app/glossary';
+import { NewItemHere, type AddedItem } from './new-item-here';
+import { RowChevron } from '../../../app/ui/ListRow';
+import { entryWarnings, type EntryWarning } from './entry-checks-state';
+import { useEntryChecks, useEntryNorms } from './entry-checks';
+import { AddByName } from '../../../app/ui/EmptyChoice';
+import { PickerWithAdd } from '../../../app/ui/PickerWithAdd';
 
 // Restock (FR-RET-06): supplier, lines with cost, sell price and a quantity per branch. Saving sets
 // the product's cost and sell price in the same transaction and leaves a price history row.
@@ -24,13 +36,33 @@ export interface RestockLine {
   qtyByBranch: Record<string, string>;
   /** A pack unit of the product (ADR-033, units capability): cost and quantities are then in that unit. Absent means the base unit. */
   unitId?: string;
+  /** D23 (#554): how many base units each pack held in this delivery, typed; starts at the pack's usual size. */
+  packSize?: string;
+  /** D23 (#554): make packSize the pack's usual size from now on. */
+  fromNowOn?: boolean;
 }
 
-/** The line in another unit: the cost goes to that unit's equivalent of the current cost (a pack costs factor times a piece). */
+/**
+ * The line in another unit: the cost goes to that unit's equivalent of the current cost (a pack costs factor times a piece),
+ * and the size each pack held starts at the pack's usual size, which the person changes when this delivery's differs (D23).
+ */
 export function withUnit(line: RestockLine, unitId: string): RestockLine {
   const pack = chosenPack(line.product, unitId || undefined);
   const base = line.product.cost_minor;
-  return { ...line, unitId: pack ? unitId : undefined, cost: base === undefined ? '' : String(pack ? packPriceMinor(base, pack.factor) : base) };
+  const { packSize: _size, fromNowOn: _now, ...rest } = line;
+  return {
+    ...rest,
+    unitId: pack ? unitId : undefined,
+    ...(pack ? { packSize: showQty(pack.factor ?? '') } : {}),
+    cost: base === undefined ? '' : String(pack ? packPriceMinor(base, pack.factor) : base),
+  };
+}
+
+/** The base units in one pack of the line for this delivery: the typed size, else the usual; null when the typed size is wrong. */
+export function lineFactor(l: RestockLine): string | null | undefined {
+  const pack = chosenPack(l.product, l.unitId);
+  if (!pack) return undefined;
+  return l.packSize === undefined ? (pack.factor ?? null) : deliveredFactor(l.packSize);
 }
 
 /** The quantity entered for a branch, as thousandths; blank or zero counts as none, bad text as null. */
@@ -46,8 +78,10 @@ export function restockLineProblem(l: RestockLine): string | null {
   if (qtys.some((q) => q === null)) return 'Check the quantities.';
   if (!qtys.some((q) => q !== null && q > 0)) return 'Enter a quantity for at least one branch.';
   const pack = chosenPack(l.product, l.unitId);
-  if (pack && qtys.some((q) => q !== null && baseQtyMilli(q, pack.factor) === null)) {
-    return `A quantity does not convert exactly to ${l.product.unit ?? 'items'}. Change it.`;
+  const factor = lineFactor(l);
+  if (pack && factor === null) return `Enter how many ${unitWords(l.product.unit ?? 'item')} were in each ${unitWord(pack.unit)}: 1 or more.`;
+  if (pack && qtys.some((q) => q !== null && baseQtyMilli(q, factor ?? undefined) === null)) {
+    return `A quantity does not convert exactly to ${l.product.unit ? unitWords(l.product.unit) : 'items'}. Change it.`;
   }
   return null;
 }
@@ -66,7 +100,7 @@ export function buildPurchase(input: { supplierId: string; purchasedOn: string; 
     payment_method: input.method,
     lines: input.lines.map((l) => ({
       product_id: l.product.id ?? '',
-      ...(chosenPack(l.product, l.unitId) ? { unit_id: l.unitId } : {}),
+      ...(chosenPack(l.product, l.unitId) ? { unit_id: l.unitId, ...packSizeOf(l) } : {}),
       cost_minor: parseMinor(l.cost, RETAIL_CURRENCY) ?? 0,
       // ADR-055: no price is sent when none is known (someone who may not see prices); the item keeps its price.
       ...((parseMinor(l.sell, RETAIL_CURRENCY) ?? l.product.sell_minor) !== undefined ? { sell_minor: parseMinor(l.sell, RETAIL_CURRENCY) ?? l.product.sell_minor } : {}),
@@ -78,19 +112,43 @@ export function buildPurchase(input: { supplierId: string; purchasedOn: string; 
   };
 }
 
-const METHODS: { value: PurchasePayment; label: string }[] = [
+/** D23 (#554): the size each pack held in this delivery, and "use from now on" only when it differs from the usual size. */
+function packSizeOf(l: RestockLine): { pack_size?: string; use_from_now_on?: boolean } {
+  const factor = lineFactor(l);
+  if (!factor) return {};
+  const usual = chosenPack(l.product, l.unitId)?.factor;
+  return { pack_size: factor, ...(l.fromNowOn && !sameFactor(factor, usual) ? { use_from_now_on: true } : {}) };
+}
+
+/** Paid how (issue #557, D15): the money left the till, a mobile money account or the bank, or the supplier is owed it. */
+export const METHODS: { value: PurchasePayment; label: string }[] = [
   { value: 'cash', label: 'Cash' },
+  { value: 'mobile_money', label: 'Mobile money' },
   { value: 'bank', label: 'Bank' },
-  { value: 'credit', label: 'Credit (pay the supplier later)' },
+  { value: 'credit', label: `${WORDS.onCredit} (owed to the supplier)` },
 ];
+
+/** On credit is owed to someone, so it needs a supplier chosen in the list (+ Add a supplier adds one there, issue #688). */
+export function creditNeedsSupplier(method: PurchasePayment, supplierId: string): string | null {
+  return method === 'credit' && supplierId === '' ? 'On credit needs a supplier. Choose one above, or + Add a supplier.' : null;
+}
 
 /** What the restock form keeps with its key in this tab until saved or cleared (#77). */
 export interface RestockDraft {
   supplierId: string;
-  newSupplier: string;
   purchasedOn: string;
   method: PurchasePayment;
   lines: RestockLine[];
+}
+
+/**
+ * A draft kept before issue #688 may carry a typed `newSupplier`, which the form no longer shows: it is dropped when the draft is
+ * restored, so nothing is made that the form does not show. A draft without one is given back as it was.
+ */
+export function withoutTypedSupplier(draft: RestockDraft): RestockDraft {
+  if (!('newSupplier' in draft)) return draft;
+  const { newSupplier: _dropped, ...rest } = draft as RestockDraft & { newSupplier?: string };
+  return rest;
 }
 
 /** What the confirmation needs besides the server's answer: who supplied it and the prices before. */
@@ -110,45 +168,33 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
   // A new selling price applies in every shop, so only someone who may change prices sets it here (ADR-055); Purchasing given
   // to a seller keeps the item's price, which the form sends back unchanged.
   const canPrice = (me.permissions ?? []).includes('retail.price.edit');
+  // Changing how many usually come in a pack changes the item, so only someone who manages items is offered it (D23).
+  const canManageItems = (me.permissions ?? []).includes('retail.catalogue.manage');
+  const canChangePrices = (me.permissions ?? []).includes('retail.price.edit');
   const queryClient = useQueryClient();
   const branches = (me.branches ?? []).filter((b) => b.id && b.stocks_goods !== false);
   // A restock entered again after a void (issue #351) has a draft of its own, so a restock in progress is never overwritten.
-  const { key, draft, setDraft, finish, discard } = usePersistedDraft<RestockDraft>(draftName ?? `restock:${me.user_id ?? ''}`, initial ?? {
-    supplierId: '', newSupplier: '', purchasedOn: businessToday(), method: 'cash', lines: [],
-  });
-  const { supplierId, newSupplier, purchasedOn, method, lines } = draft;
+  const { key, draft, setDraft, finish, discard } = usePersistedDraft<RestockDraft>(draftName ?? `restock:${me.user_id ?? ''}`, initial ? withoutTypedSupplier(initial) : {
+    supplierId: '', purchasedOn: businessToday(), method: 'cash', lines: [],
+  }, withoutTypedSupplier);
+  const { supplierId, purchasedOn, method, lines } = draft;
   const field = <K extends keyof RestockDraft>(k: K) => (v: RestockDraft[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const setSupplierId = field('supplierId');
-  const setNewSupplier = field('newSupplier');
   const setPurchasedOn = field('purchasedOn');
   const setMethod = field('method');
   const setLines = (f: (ls: RestockLine[]) => RestockLine[]) => setDraft((d) => ({ ...d, lines: f(d.lines) }));
-  const search = useLiveSearch();
-
-  const products = useQuery({
-    queryKey: ['retail', 'products', 'all', search.term],
-    queryFn: ({ signal }) => retail.listProducts({ query: search.term, signal }),
-    placeholderData: keepPreviousData,
-  });
-  const finding = products.isPlaceholderData || products.isFetching;
   const suppliers = useQuery({ queryKey: ['retail', 'suppliers'], queryFn: () => retail.listSuppliers() });
 
+  // toast-exempt: success screen, the purchase saved screen that replaces the form
   const save = useMutation({
     mutationFn: async () => {
-      let id = supplierId;
-      let supplierName = (suppliers.data ?? []).find((x) => x.id === supplierId)?.name ?? '';
+      const supplierName = (suppliers.data ?? []).find((x) => x.id === supplierId)?.name ?? '';
       const before = Object.fromEntries(lines.map((l) => [l.product.id ?? '', { sell: l.product.sell_minor, cost: l.product.cost_minor }]));
-      if (!id && newSupplier.trim()) {
-        const created = await retail.createSupplier({ name: newSupplier.trim() });
-        id = created.id ?? '';
-        supplierName = created.name ?? newSupplier.trim();
-        // Kept in the draft, so a retry after a failed restock does not add the supplier twice.
-        setDraft((d) => ({ ...d, supplierId: id, newSupplier: '' }));
-      }
-      const saved = await retail.createPurchase(buildPurchase({ supplierId: id, purchasedOn, method, lines }), key);
+      const saved = await retail.createPurchase(buildPurchase({ supplierId, purchasedOn, method, lines }), key);
       return { saved, context: { supplierName, before } };
     },
     onSuccess: ({ saved, context }) => {
+      entry.saved();
       finish();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onSaved?.(saved, context);
@@ -156,95 +202,181 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
   });
 
   const unitsOn = capabilityOn(me, 'retail', UNITS);
-  const add = (p: Product) =>
-    setLines((ls) =>
-      ls.some((l) => l.product.id === p.id) && !(unitsOn && activePacks(p).length > 0)
-        ? ls
-        : [...ls, { product: p, cost: p.cost_minor !== undefined ? String(p.cost_minor) : '', sell: p.sell_minor !== undefined ? String(p.sell_minor) : '', qtyByBranch: { ...(branch && branches.some((b) => b.id === branch) ? { [branch]: '' } : {}) } }],
-    );
+  // A scan (issue #345): the item at 1 for this branch, or one more on its line in the pack the barcode is on.
+  const here = branch && branches.some((b) => b.id === branch) ? branch : undefined;
+  /** A new line of the item at its current prices, with the quantity at this branch. */
+  const lineOf = (p: Product, qty: string): RestockLine => ({ product: p, cost: p.cost_minor !== undefined ? String(p.cost_minor) : '', sell: p.sell_minor !== undefined ? String(p.sell_minor) : '', qtyByBranch: here ? { [here]: qty } : {} });
+  // Every add says so (issue #498): a short toast with the quantity at this branch, and the line flashes once.
+  const { added, already, flashOf, show, toast } = useItemAdded();
+  // The lines as of the last add, as on the sale: a scan answered after a render, or two before one, sees the latest.
+  const current = useRef(lines);
+  current.current = lines;
+  /** Puts the new lines on the draft and says which line changed and what it now holds here. */
+  const land = (p: Product, next: RestockLine[]) => {
+    const { index } = touchedLine(current.current, next);
+    current.current = next;
+    setLines(() => next);
+    if (index >= 0) added(String(index), p.description, here ? next[index]?.qtyByBranch[here] : undefined);
+  };
+  const add = (p: Product) => {
+    if (current.current.some((l) => l.product.id === p.id) && !(unitsOn && buyingPacks(p).length > 0)) {
+      already(`${p.description} is already on the purchase. Change its quantity below.`);
+      return;
+    }
+    // Issue #699 (ADR-107): the line opens on the level the shop usually buys the item in, with its price per that level.
+    const usual = unitsOn ? usualBuyingPack(p) : undefined;
+    land(p, [...current.current, usual?.unit_id ? withUnit(lineOf(p, ''), usual.unit_id) : lineOf(p, '')]);
+  };
+  const scanAdd = (p: Product, unitId?: string) => {
+    const unit = unitsOn && buyingPacks(p).some((k) => k.unit_id === unitId) ? unitId : undefined;
+    if (unitId && !unit) return PACK_UNUSABLE;
+    // Without a stocking branch chosen at the top, the scanned quantity would go nowhere.
+    if (!here) return 'Choose the branch at the top of the page first, so the scanned item is counted there.';
+    const fresh = lineOf(p, '1');
+    land(p, scanInto(current.current, p, unit, (l) => ({ ...l, qtyByBranch: { ...l.qtyByBranch, [here]: plusOne(l.qtyByBranch[here]) } }), () => (unit ? withUnit(fresh, unit) : fresh)));
+    return undefined;
+  };
+  // Issue #505: an item added here goes on the purchase with what was typed for it and its quantity at this branch. An item already
+  // on the purchase (one chosen from the name warning) keeps its line and prices, and the quantity is added to it, as a scan adds.
+  const addNew = ({ product, qty, cost, sell }: AddedItem) => {
+    const milli = qty ? parseQty(qty) : null;
+    const fresh = { ...lineOf(product, qty), ...(cost ? { cost } : {}), ...(sell !== undefined ? { sell } : {}) };
+    land(product, scanInto(current.current, product, undefined, (l) => (here && milli ? { ...l, qtyByBranch: { ...l.qtyByBranch, [here]: plusOne(l.qtyByBranch[here], milli) } } : l), () => fresh));
+  };
+  const hereBranch = branches.find((b) => b.id === here);
   const patch = (i: number, change: Partial<RestockLine>) => setLines((ls) => ls.map((l, n) => (n === i ? { ...l, ...change } : l)));
   const patchWhole = (i: number, line: RestockLine) => setLines((ls) => ls.map((l, n) => (n === i ? line : l)));
 
   const problems = lines.map(restockLineProblem);
-  const blocked = lines.length === 0 || problems.some((p) => p !== null);
+  const supplierProblem = creditNeedsSupplier(method, supplierId);
+  const blocked = lines.length === 0 || problems.some((p) => p !== null) || supplierProblem !== null;
+  // Issue #353: each line against the item's own purchases, said before saving, never blocking.
+  const norms = useEntryNorms(lines.map((l) => l.product.id));
+  const warnings = lines.flatMap((l, i): EntryWarning[] => {
+    const pack = unitsOn ? chosenPack(l.product, l.unitId) : undefined;
+    const total = Object.values(l.qtyByBranch).reduce((sum, q) => sum + (branchQty(q) ?? 0), 0);
+    const first = branches.find((b) => (branchQty(l.qtyByBranch[b.id ?? '']) ?? 0) > 0);
+    return entryWarnings(norms(l.product.id), {
+      screen: 'buy', product: l.product, lineKey: `${l.product.id}-${i}`, qtyMilli: total > 0 ? total : null, qtyFieldId: `q-${i}-${first?.id ?? ''}`,
+      unitChoosable: unitsOn && buyingPacks(l.product).length > 0, unitFieldId: `unit-${i}`,
+      ...(pack ? { unitId: pack.unit_id, unitName: pack.unit, factor: lineFactor(l) ?? undefined } : {}),
+    });
+  });
+  const entry = useEntryChecks('buy', here, warnings, () => save.mutate(), lines);
 
   return (
-    <form onSubmit={(e) => { e.preventDefault(); if (!blocked && !save.isPending) save.mutate(); }}>
-      <Note>Saving a restock changes the cost and sell price of every item below to the values you enter. The change is recorded in the price history.</Note>
+    <form onSubmit={(e) => { e.preventDefault(); if (!blocked && !save.isPending) entry.check(); }}>
+      <Note>Saving a purchase changes the buying and selling price of every item below to the values you enter. The change is recorded in the price history.</Note>
+      <FieldsNeededNote />
 
       <div data-tour="restock-supplier">
-      <label htmlFor="supplier">Supplier</label>
-      <select id="supplier" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-        <option value="">No supplier</option>
-        {supplierOptions(suppliers.data ?? [], supplierId).map((s) => (
-          <option key={s.id} value={s.id}>{s.active === false ? `${s.name} (switched off)` : s.name}</option>
-        ))}
-      </select>
+      {/* Issue #688: a supplier who is not in the list is added in a sheet over the form and chosen; the lines stay. */}
+      <PickerWithAdd
+        id="supplier"
+        label="Supplier"
+        thing="supplier"
+        placeholder="No supplier"
+        options={supplierOptions(suppliers.data ?? [], supplierId).map((s) => ({ value: s.id ?? '', label: s.active === false ? `${s.name ?? ''} (switched off)` : s.name ?? '' }))}
+        value={supplierId}
+        onChange={setSupplierId}
+        canAdd={canUse(me, 'suppliers')}
+        required={method === 'credit'}
+        loading={suppliers.data === undefined}
+        load={suppliers}
+        empty="No suppliers yet."
+        ask="Ask the owner to add a supplier first."
+        form={(done, cancel) => (
+          <AddByName
+            id="supplier-add"
+            onCancel={cancel}
+            add={{
+              label: 'Add a supplier',
+              name: 'Name of the new supplier',
+              send: 'Add supplier',
+              maxLength: 120,
+              create: (name) => retail.createSupplier({ name }),
+              onAdded: (s: Supplier) => {
+                queryClient.setQueryData<Supplier[]>(['retail', 'suppliers'], (was) => was && [...was.filter((x) => x.id !== s.id), s]);
+                void queryClient.invalidateQueries({ queryKey: ['retail', 'suppliers'] });
+                show(`Added the supplier ${s.name ?? ''}.`, 'success');
+                done({ value: s.id ?? '', label: s.name ?? '' });
+              },
+            }}
+          />
+        )}
+      />
       </div>
-      {supplierId === '' && (
-        <>
-          <label htmlFor="new-supplier">Or add a new supplier</label>
-          <input id="new-supplier" value={newSupplier} onChange={(e) => setNewSupplier(e.target.value)} />
-        </>
-      )}
       <label htmlFor="bought-on">Bought on</label>
-      <input id="bought-on" type="date" value={purchasedOn} onChange={(e) => setPurchasedOn(e.target.value)} />
+      <input id="bought-on" type="date" max={businessToday()} value={purchasedOn} onChange={(e) => setPurchasedOn(e.target.value)} />
       {again && purchasedOn < businessToday() && (
         <p role="note" className="alert alert-warning" data-testid="date-warning">
-          This restock is dated {showDate(purchasedOn)}. The cash book of that day may be banked already, and saving will change its figures. Use today's date unless the goods really arrived then.
+          This purchase is dated {showDate(purchasedOn)}. The cash book of that day may be banked already, and saving will change its figures. Use today's date unless the goods really arrived then.
         </p>
       )}
 
       <div data-tour="restock-search">
-      <SearchBox id="restock-search" label="Find an item by name, code or category" search={search} fetching={finding} count={products.data ? Math.min(products.data.length, 20) : undefined} more={(products.data?.length ?? 0) > 20} />
+      <ProductPicker id="restock-search" showStock={false} onAdd={add} />
       </div>
-      {products.data && products.data.length === 0 && search.term && <NoResults term={search.term} onClear={search.clear} noun="items" />}
-      <SearchResults fetching={finding}>
-      <ul style={{ listStyle: 'none', padding: 0, maxHeight: 180, overflowY: 'auto' }}>
-        {(products.data ?? []).slice(0, 20).map((p) => (
-          <li key={p.id} className="rt-card rt-row">
-            <span><strong>{p.description}</strong> ({p.code})<br /><CategoryLabel category={p.category} /></span>
-            <button type="button" onClick={() => add(p)} aria-label={`Add ${p.description}`}>Add</button>
-          </li>
-        ))}
-      </ul>
-      </SearchResults>
+      <ScreenToast.Provider value={show}>
+        <NewItemHere id="restock-new" askCost qtyLabel={hereBranch ? `Quantity bought (${branchLabel(hereBranch)})` : undefined} onAdded={addNew} />
+      </ScreenToast.Provider>
+      <ScanBar id="restock-scan" onFound={scanAdd} autoFocus toasts />
 
       <h2>Items</h2>
-      {lines.length === 0 && <p className="empty-state">No items yet.</p>}
+      {lines.length === 0 && <p className="empty-state">No items yet. Type an item above and tap it in the list, or scan it.</p>}
       {lines.map((l, i) => {
         const newSell = parseMinor(l.sell, RETAIL_CURRENCY);
         const enteredCost = parseMinor(l.cost, RETAIL_CURRENCY);
-        const packs = unitsOn ? activePacks(l.product) : [];
+        const packs = unitsOn ? buyingPacks(l.product) : [];
         const pack = unitsOn ? chosenPack(l.product, l.unitId) : undefined;
-        // The product's cost is per base unit: a pack cost is divided by the factor, rounded half up, as the server does.
-        const newCost = enteredCost !== null && pack ? baseCostMinor(enteredCost, pack.factor) : enteredCost;
+        // The product's cost is per base unit: a pack cost is divided by this delivery's size, rounded half up, as the server does.
+        const factor = lineFactor(l);
+        const newCost = enteredCost !== null && pack ? (factor ? baseCostMinor(enteredCost, factor) : null) : enteredCost;
+        const sizeDiffers = pack !== undefined && factor !== null && factor !== undefined && !sameFactor(factor, pack.factor);
         return (
-          <div key={`${l.product.id}-${i}`} className="rt-card">
+          <div key={`${l.product.id}-${i}`} className="rt-card line-card">
+            {flashOf(String(i))}
             <strong>{l.product.description}</strong>
             {packs.length > 0 && (
               <div>
                 <label htmlFor={`unit-${i}`}>Bought by</label>
+                {/* empty: drawn only when the item has packs; its own unit is always there. */}
                 <select id={`unit-${i}`} value={pack?.unit_id ?? ''} onChange={(e) => patchWhole(i, withUnit(l, e.target.value))}>
-                  <option value="">{l.product.unit}</option>
-                  {packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{k.unit} ({showQty(k.factor ?? '')} {l.product.unit})</option>)}
+                  <option value="">{unitWord(l.product.unit)}</option>
+                  {packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{unitWord(k.unit)} ({quantityIn(k.factor ?? '', l.product.unit ?? '')})</option>)}
                 </select>
               </div>
             )}
             {pack && chosenUnitHint(pack.unit, l.product.unit) && <p className="hint" data-testid="unit-hint">{chosenUnitHint(pack.unit, l.product.unit)}</p>}
+            {pack && (
+              <div data-testid={`pack-size-${i}`}>
+                <Field id={`size-${i}`} required inputMode="decimal" label={howManyInEach(unitWord(l.product.unit) || 'item', unitWord(pack.unit) || 'pack')}
+                  hint={`Usually ${showQty(pack.factor ?? '')}. Change it when this delivery's ${unitWord(pack.unit)} held a different number.`}
+                  error={factor === null ? 'Enter 1 or more, with at most three decimals.' : null}
+                  value={l.packSize ?? showQty(pack.factor ?? '')} onChange={(e) => patch(i, { packSize: e.target.value })} />
+                {sizeDiffers && canManageItems && !mayKeepSize(pack, canManageItems, canChangePrices) && <p className="hint">{OWN_PRICE_KEEPS_SIZE}</p>}
+                {sizeDiffers && mayKeepSize(pack, canManageItems, canChangePrices) && (
+                  <label>
+                    <input type="checkbox" checked={l.fromNowOn === true} onChange={(e) => patch(i, { fromNowOn: e.target.checked })} />
+                    <span>{useFromNowOn(showQty(factor ?? ''))}</span>
+                  </label>
+                )}
+                {sizeDiffers && (
+                  <p className="hint" data-testid={`pack-size-note-${i}`}>
+                    {l.fromNowOn && mayKeepSize(pack, canManageItems, canChangePrices)
+                      ? `Every ${unitWord(pack.unit)} bought or sold after this one counts as ${showQty(factor ?? '')}.`
+                      : `Only this delivery counts as ${showQty(factor ?? '')} in each ${unitWord(pack.unit)}. A ${unitWord(pack.unit)} sold is still ${showQty(pack.factor ?? '')}.`}
+                  </p>
+                )}
+              </div>
+            )}
             <div className="rt-row">
-              <div>
-                <label htmlFor={`cost-${i}`}>Cost each{pack ? ` (per ${pack.unit})` : ''}</label>
-                <input id={`cost-${i}`} inputMode="numeric" value={l.cost} onChange={(e) => patch(i, { cost: e.target.value })} />
-              </div>
-              <div>
-                <label htmlFor={`sell-${i}`}>Sell price each{pack ? ` (per ${l.product.unit})` : ''}</label>
-                <input id={`sell-${i}`} inputMode="numeric" value={l.sell} disabled={!canPrice} onChange={(e) => patch(i, { sell: e.target.value })} />
-                {!canPrice && <p className="hint">Only the owner changes selling prices.</p>}
-              </div>
+              <Field id={`cost-${i}`} required inputMode="numeric" label={`${WORDS.buyingPrice} each${pack ? ` (per ${unitWord(pack.unit)})` : ''}`} value={l.cost} onChange={(e) => patch(i, { cost: e.target.value })} />
+              <Field id={`sell-${i}`} required={canPrice} inputMode="numeric" label={`${WORDS.sellingPrice} each${pack ? ` (per ${unitWord(l.product.unit)})` : ''}`} value={l.sell} disabled={!canPrice}
+                hint={canPrice ? undefined : 'Only the owner changes selling prices.'} onChange={(e) => patch(i, { sell: e.target.value })} />
             </div>
             <fieldset>
-              <legend>Quantity bought per branch ({pack?.unit ?? l.product.unit})</legend>
+              <legend>Quantity bought per branch ({unitWords(pack?.unit ?? l.product.unit)})</legend>
               {branches.map((b) => (
                 <div key={b.id}>
                   <label htmlFor={`q-${i}-${b.id}`}>{branchLabel(b)}</label>
@@ -253,9 +385,10 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
                 </div>
               ))}
             </fieldset>
+            {entry.notes(`${l.product.id}-${i}`)}
             <p>
               {newSell !== null && newSell !== l.product.sell_minor ? `Sell price will change from ${money(l.product.sell_minor ?? 0)} to ${money(newSell)}.` : 'Sell price stays the same.'}
-              {canProfit && newCost !== null && l.product.cost_minor !== undefined && newCost !== l.product.cost_minor ? ` Cost will change from ${money(l.product.cost_minor)} to ${money(newCost)}.` : ''}
+              {canProfit && newCost !== null && l.product.cost_minor !== undefined && newCost !== l.product.cost_minor ? ` Last paid will change from ${money(l.product.cost_minor)} to ${money(newCost)}.` : ''}
             </p>
             {problems[i] && <p className="rt-flag">{problems[i]}</p>}
             <button type="button" className="btn-ghost" onClick={() => setLines((ls) => ls.filter((_, n) => n !== i))} aria-label={`Remove ${l.product.description}`}>Remove</button>
@@ -264,21 +397,25 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
       })}
 
       <fieldset data-tour="restock-paid">
-        <legend>How is it paid?</legend>
+        <legend>{WORDS.paidHow}<span className="field-star" aria-hidden="true"> *</span></legend>
         {METHODS.map((m) => (
           <label key={m.value} style={{ fontWeight: 400 }}>
             <input type="radio" name="purchase-method" style={{ width: 'auto', minHeight: 24, marginRight: 8 }} checked={method === m.value} onChange={() => setMethod(m.value)} />
             {m.label}
           </label>
         ))}
+        {method === 'credit' && <p className="hint">The supplier is owed this. Pay them later from Money, {WORDS.whatIOweSuppliers}.</p>}
       </fieldset>
+      {supplierProblem && <p role="alert" className="rt-flag" data-testid="credit-needs-supplier">{supplierProblem}</p>}
 
-      <p className="rt-total" aria-live="polite">Total cost {money(restockTotal(lines))}</p>
+      <p className="rt-total" aria-live="polite" data-testid="restock-total">Total cost <Money minor={restockTotal(lines)} /></p>
       <Problem error={save.error} />
-      <button type="submit" className="rt-primary" data-tour="restock-save" disabled={blocked || save.isPending}>{save.isPending ? 'Saving' : 'Save restock'}</button>
+      <BusyButton type="submit" className="rt-primary" data-tour="restock-save" busy={save.isPending} notReady={blocked}>Save the purchase</BusyButton>
+
       {lines.length > 0 && !save.isPending && (
-        <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this restock</button>
+        <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this purchase</button>
       )}
+      {toast}
     </form>
   );
 }
@@ -292,7 +429,7 @@ export function priceChanges(p: Purchase, before: RestockContext['before'], show
       out.push(`${l.description}: sell price changed from ${money(was.sell)} to ${money(l.sell_minor)}.`);
     }
     if (showCost && l.cost_minor !== undefined && was.cost !== undefined && l.cost_minor !== was.cost) {
-      out.push(`${l.description}: cost changed from ${money(was.cost)} to ${money(l.cost_minor)}.`);
+      out.push(`${l.description}: last paid changed from ${money(was.cost)} to ${money(l.cost_minor)}.`);
     }
     return out;
   });
@@ -301,13 +438,20 @@ export function priceChanges(p: Purchase, before: RestockContext['before'], show
 export function RestockSaved({ purchase, context, onNew }: { purchase: Purchase; context: RestockContext; onNew?: () => void }) {
   const changes = priceChanges(purchase, context.before, useProfitAccess());
   const count = (purchase.lines ?? []).length;
+  const { me, chooseBranch } = useStaff();
+  // The first store (keeps goods, sells none) this purchase put stock into.
+  const into = new Set((purchase.lines ?? []).flatMap((l) => (l.qty_by_branch ?? []).map((q) => q.branch_id)));
+  const store = (me.branches ?? []).find((b) => b.id && into.has(b.id) && b.stocks_goods !== false && b.sells_goods === false);
   return (
-    <section aria-label="Restock saved">
-      <h2>Restock saved{purchase.purchase_no ? ` (${purchase.purchase_no})` : ''}</h2>
+    <section aria-label="Purchase saved">
+      <h2>Purchase saved{purchase.purchase_no ? ` (${purchase.purchase_no})` : ''}</h2>
       <p>
-        From {context.supplierName || 'no supplier'}, bought on {purchase.purchased_on}: {count} {count === 1 ? 'item' : 'items'}, total cost{' '}
+        From {context.supplierName || 'no supplier'}, bought on {showDate(purchase.purchased_on)}: {count} {count === 1 ? 'item' : 'items'}, total cost{' '}
         {money(purchase.total_minor ?? 0)}.
       </p>
+      {(purchase.lines ?? []).filter((l) => l.size_kept && l.size_kept_note).map((l) => (
+        <Note key={`kept-${l.id}`}>{`${l.description}: ${l.size_kept_note}`}</Note>
+      ))}
       {(purchase.lines ?? []).some((l) => l.unit) && (
         <ul>
           {(purchase.lines ?? []).filter((l) => l.unit).map((l) => (
@@ -320,7 +464,13 @@ export function RestockSaved({ purchase, context, onNew }: { purchase: Purchase;
       ) : (
         <p>No price changed.</p>
       )}
-      {onNew && <button type="button" className="rt-primary" onClick={onNew}>New restock</button>}
+      {/* Issue #700: the next jobs. Goods bought into a store are moved to a shop from that store, so the store is chosen first. */}
+      {/* Buy more stock stays the primary: a clear form here, or Buy stock where the purchase is only shown. */}
+      <NextSteps at="buyDone" lead steps={[
+        onNew ? { label: 'Buy more stock', onClick: onNew } : { label: 'Buy more stock', screen: 'restock', to: '/staff/retail/restock' },
+        { label: 'Move to the shop', screen: 'transfer', to: '/staff/retail/transfer', onClick: () => chooseBranch?.(store?.id ?? ''), show: store !== undefined && chooseBranch !== undefined && holdsAt(me, TRANSFER, store.id) },
+        { label: 'My stock', screen: 'stock', to: '/staff/retail/stock' },
+      ]} />
     </section>
   );
 }
@@ -345,7 +495,7 @@ function Again({ purchaseId, onSaved }: { purchaseId: string; onSaved: (p: Purch
   return (
     <>
       <Note>
-        You are entering restock {loaded.data.purchase.purchase_no} again{loaded.data.purchase.status === 'voided' ? ', which you voided' : ''}. Check each quantity, unit and price, then save.
+        You are entering purchase {loaded.data.purchase.purchase_no} again{loaded.data.purchase.status === 'voided' ? ', which you voided' : ''}. Check each quantity, unit and price, then save.
       </Note>
       <RestockForm draftName={`restock-again:${me.user_id ?? ''}:${purchaseId}`} initial={loaded.data.draft} onSaved={onSaved} again />
     </>
@@ -357,8 +507,8 @@ export function RestockPage() {
   const [round, setRound] = useState(0);
   const again = (useRouterState({ select: (state) => state.location.search }) as { again?: string }).again;
   return (
-    <Gate screen="restock" title="Restock">
-      <p data-tour="restock-past"><Link to="/staff/retail/restocks">Past restocks, to correct a mistake</Link></p>
+    <Gate screen="restock" title={WORDS.buyStock}>
+      <Link className="link-row" data-tour="restock-past" to="/staff/retail/restocks">Past purchases, to correct a mistake<RowChevron /></Link>
       {done ? (
         <RestockSaved purchase={done.purchase} context={done.context} onNew={() => { setDone(null); setRound((n) => n + 1); }} />
       ) : typeof again === 'string' && again !== '' ? (

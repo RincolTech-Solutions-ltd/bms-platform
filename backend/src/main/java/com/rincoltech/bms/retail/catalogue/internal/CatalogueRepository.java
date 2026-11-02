@@ -1,11 +1,16 @@
 package com.rincoltech.bms.retail.catalogue.internal;
 
 import com.rincoltech.bms.kernel.Search;
+import com.rincoltech.bms.retail.catalogue.CatalogueNames;
+import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
+import com.rincoltech.bms.retail.catalogue.StandardUnits;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Category;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Pack;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceChange;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Product;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Unit;
+import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UsualPack;
+import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UsualPackRequest;
 import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -45,30 +50,63 @@ class CatalogueRepository {
 
     List<Category> categories() {
         return jdbc.sql("""
-                        SELECT c.id, c.name, c.active, c.version, (SELECT count(*) FROM retail_products p WHERE p.category_id = c.id) AS used
+                        SELECT c.id, c.name, c.active, c.version, c.code_prefix,
+                               (SELECT count(*) FROM retail_products p WHERE p.category_id = c.id) AS used,
+                               (SELECT c.code_prefix || '-' || CASE WHEN n < 10000 THEN lpad(n::text, 4, '0') ELSE n::text END
+                                  FROM generate_series(c.code_next, c.code_next + 10000) n
+                                 WHERE NOT EXISTS (SELECT 1 FROM retail_products p
+                                                    WHERE p.tenant_id = c.tenant_id
+                                                      AND lower(p.code) = lower(c.code_prefix || '-'
+                                                          || CASE WHEN n < 10000 THEN lpad(n::text, 4, '0') ELSE n::text END))
+                                 ORDER BY n LIMIT 1) AS next_code
                           FROM retail_categories c ORDER BY lower(c.name), c.id
                         """)
                 .query((rs, n) -> new Category(
                         rs.getObject("id", UUID.class),
                         rs.getString("name"),
                         rs.getBoolean("active"),
+                        rs.getString("code_prefix"),
+                        rs.getString("next_code"),
                         rs.getInt("used"),
                         rs.getInt("version")))
                 .list();
     }
 
     List<Unit> units() {
-        return jdbc.sql("""
-                        SELECT u.id, u.name, u.active, u.version, (SELECT count(*) FROM retail_products p WHERE p.unit_id = u.id) AS used
-                          FROM retail_units u ORDER BY lower(u.name), u.id
+        return jdbc
+                .sql("""
+                        SELECT u.id, u.name, u.active, u.version, (SELECT count(*) FROM retail_products p WHERE p.unit_id = u.id) AS used,
+                               u.pack_size, u.pack_of_unit_id, o.name AS pack_of, u.pack_purpose
+                          FROM retail_units u
+                          LEFT JOIN retail_units o ON o.id = u.pack_of_unit_id
+                         ORDER BY lower(u.name), u.id
                         """)
                 .query((rs, n) -> new Unit(
                         rs.getObject("id", UUID.class),
                         rs.getString("name"),
                         rs.getBoolean("active"),
                         rs.getInt("used"),
-                        rs.getInt("version")))
-                .list();
+                        rs.getInt("version"),
+                        rs.getBigDecimal("pack_size") == null
+                                ? null
+                                : new UsualPack(
+                                        rs.getBigDecimal("pack_size")
+                                                .setScale(3)
+                                                .toPlainString(),
+                                        rs.getObject("pack_of_unit_id", UUID.class),
+                                        rs.getString("pack_of"),
+                                        rs.getString("pack_purpose")),
+                        RetailCatalogue.isPackageWord(rs.getString("name")),
+                        StandardUnits.rank(rs.getString("name")) >= 0,
+                        StandardUnits.fixedCount(rs.getString("name"))))
+                .list()
+                .stream()
+                // Issue #709 (ADR-110): the standard units first, in their order, then the shop's own by name.
+                .sorted(java.util.Comparator.comparingInt((Unit u) -> {
+                    int rank = StandardUnits.rank(u.name());
+                    return rank < 0 ? Integer.MAX_VALUE : rank;
+                }))
+                .toList();
     }
 
     Optional<Category> category(UUID id) {
@@ -80,10 +118,64 @@ class CatalogueRepository {
     }
 
     /** Rows changed: 0 when the version moved since it was read (the predicate is the optimistic lock). */
-    int updateCategory(UUID id, String name, boolean active, int expectedVersion) {
+    int updateCategory(UUID id, String name, boolean active, String codePrefix, int expectedVersion) {
         return jdbc.sql(
-                        "UPDATE retail_categories SET name = ?, active = ?, updated_at = now(), version = version + 1 WHERE id = ? AND version = ?")
-                .params(name, active, id, expectedVersion)
+                        "UPDATE retail_categories SET name = ?, active = ?, code_prefix = ?, updated_at = now(), version = version + 1 WHERE id = ? AND version = ?")
+                .params(name, active, codePrefix, id, expectedVersion)
+                .update();
+    }
+
+    /** Issue #493: the prefix a new category of this name would get, free in the business (V96). */
+    String suggestPrefix(String name, UUID self) {
+        return jdbc.sql("SELECT bms_suggest_category_prefix(current_setting('app.tenant_id')::uuid, ?, ?)")
+                .params(name, self)
+                .query(String.class)
+                .single();
+    }
+
+    /**
+     * Issue #493: the category row, locked to the commit, before the import makes codes in it; the lock of {@link
+     * #nextItemCode}, which leaves the foreign key checks of item inserts free.
+     */
+    void lockCategory(UUID categoryId) {
+        jdbc.sql("SELECT id FROM retail_categories WHERE id = ? FOR NO KEY UPDATE")
+                .param(categoryId)
+                .query(UUID.class)
+                .optional();
+    }
+
+    /**
+     * Issue #493, ADR-081: the category's next item code, such as BLB-0001, under the category row's lock to the commit, so a
+     * second add in the same category waits and takes the next number (V96).
+     */
+    String nextItemCode(UUID categoryId) {
+        return jdbc.sql("SELECT bms_next_item_code(?)")
+                .param(categoryId)
+                .query(String.class)
+                .single();
+    }
+
+    /**
+     * Review of #710 (ADR-107): one change of a usual pack at a time in the business, held to the end of the transaction, so
+     * two changes cannot each pass the loop check and store a loop between them.
+     */
+    void lockUsualPacks() {
+        jdbc.sql(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(current_setting('app.tenant_id') || ':retail.usual_pack', 0))")
+                .query(rs -> {});
+    }
+
+    /**
+     * Issue #625, ADR-100: the usual size of a pack and what it is for; the V111 check keeps all three or none. A null
+     * {@code pack} clears it (issue #637).
+     */
+    void setUsualPack(UUID id, UsualPackRequest pack) {
+        jdbc.sql("UPDATE retail_units SET pack_size = ?, pack_of_unit_id = ?, pack_purpose = ? WHERE id = ?")
+                .params(
+                        pack == null ? null : pack.size(),
+                        pack == null ? null : pack.ofUnitId(),
+                        pack == null ? null : pack.purpose(),
+                        id)
                 .update();
     }
 
@@ -110,11 +202,14 @@ class CatalogueRepository {
                 > 0;
     }
 
-    void insertCategory(UUID id, String name, UUID createdBy) {
+    /** A null prefix is filled from the name by the V96 trigger. */
+    void insertCategory(UUID id, String name, String codePrefix, UUID createdBy) {
         jdbc.sql("""
-                        INSERT INTO retail_categories (id, tenant_id, name, created_by)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?)
-                        """).params(id, name, createdBy).update();
+                        INSERT INTO retail_categories (id, tenant_id, name, code_prefix, created_by)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?)
+                        """)
+                .params(id, CatalogueNames.display(name), codePrefix, createdBy)
+                .update();
     }
 
     void insertUnit(UUID id, String name, UUID createdBy) {
@@ -124,28 +219,83 @@ class CatalogueRepository {
                         """).params(id, name, createdBy).update();
     }
 
-    /** Lower-cased name to id, for the import's lookups. */
+    /**
+     * Issue #632: adds the category or unit unless the business has one of that name in any case (the unique name index), so
+     * two quick adds at once make it once. True when this call made it.
+     */
+    boolean insertIfMissing(String table, UUID id, String name, UUID createdBy) {
+        return jdbc.sql("INSERT INTO " + table + " (id, tenant_id, name, created_by)"
+                                + " VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?) ON CONFLICT DO NOTHING")
+                        .params(id, name, createdBy)
+                        .update()
+                == 1;
+    }
+
+    /** Name key ({@code CatalogueNames.nameKey}) to id, for the import's lookups. */
     Map<String, UUID> categoryIdsByName() {
         return namesToIds("retail_categories");
     }
 
+    // JUSTIFICATION-A3: the unit lookups by key replace lower(name) in one place, so every caller finds Piece.
+    /**
+     * Issue #698 (ADR-109): the units by their key ({@code CatalogueNames.unitKey}), so "pcs" finds Piece; where two units
+     * share a key (stored before issue #698, left for the owner to join), the one {@link #sameUnit} would answer.
+     */
     Map<String, UUID> unitIdsByName() {
-        return namesToIds("retail_units");
+        Map<String, UUID> ids = new java.util.HashMap<>();
+        unitsByPreference().forEach(u -> ids.putIfAbsent(CatalogueNames.unitKey(u.name()), u.id()));
+        return ids;
     }
 
-    /** Lower-cased names of switched-off categories, which an import must not add items to. */
+    /**
+     * Issue #698: the unit another name already stands for, other than {@code self}: of the units with its key, the switched
+     * on one first, then the one named as the unit's word ("Piece" before "Pcs"), then by name.
+     */
+    Optional<Unit> sameUnit(String name, UUID self) {
+        String key = CatalogueNames.unitKey(name);
+        return unitsByPreference()
+                .filter(u ->
+                        !u.id().equals(self) && CatalogueNames.unitKey(u.name()).equals(key))
+                .findFirst();
+    }
+
+    private java.util.stream.Stream<Unit> unitsByPreference() {
+        return units().stream()
+                .sorted(java.util.Comparator.comparing((Unit u) -> !u.active())
+                        .thenComparing(u -> !CatalogueNames.unitKey(u.name())
+                                .equalsIgnoreCase(u.name().trim())));
+    }
+
+    /** Issue #698: the tenant's lock for one unit key, so two people adding "pc" and "pcs" at once make one unit. */
+    void lockUnitKey(String name) {
+        jdbc.sql(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(current_setting('app.tenant_id') || ':unit:' || :k, 0))")
+                .param("k", CatalogueNames.unitKey(name))
+                .query(rs -> {});
+    }
+
+    /** Name keys of switched-off categories, which an import must not add items to. */
     Set<String> inactiveCategoryNames() {
         return inactiveNames("retail_categories");
     }
 
+    /** Issue #698: the unit keys whose unit ({@link #unitIdsByName}) is switched off. */
     Set<String> inactiveUnitNames() {
-        return inactiveNames("retail_units");
+        Set<String> off = new java.util.HashSet<>();
+        Set<String> seen = new java.util.HashSet<>();
+        unitsByPreference().forEach(u -> {
+            if (seen.add(CatalogueNames.unitKey(u.name())) && !u.active()) {
+                off.add(CatalogueNames.unitKey(u.name()));
+            }
+        });
+        return off;
     }
 
     private Set<String> inactiveNames(String table) {
-        return new java.util.HashSet<>(jdbc.sql("SELECT lower(name) FROM " + table + " WHERE NOT active")
-                .query(String.class)
-                .list());
+        return new java.util.HashSet<>(
+                jdbc.sql("SELECT name FROM " + table + " WHERE NOT active").query(String.class).list().stream()
+                        .map(CatalogueNames::nameKey)
+                        .toList());
     }
 
     /** Decimal places of a currency (UGX 0, KES 2), from the currencies table. */
@@ -158,9 +308,10 @@ class CatalogueRepository {
 
     private Map<String, UUID> namesToIds(String table) {
         Map<String, UUID> ids = new java.util.HashMap<>();
-        jdbc.sql("SELECT id, lower(name) AS n FROM " + table)
+        // Issue #698: keyed as names are compared, spaces inside counted once, so "Test  Cables" finds "Test Cables".
+        jdbc.sql("SELECT id, name FROM " + table + " ORDER BY created_at, id")
                 .query((rs, n) -> {
-                    ids.put(rs.getString("n"), rs.getObject("id", UUID.class));
+                    ids.putIfAbsent(CatalogueNames.nameKey(rs.getString("name")), rs.getObject("id", UUID.class));
                     return 0;
                 })
                 .list();
@@ -172,6 +323,19 @@ class CatalogueRepository {
         return new java.util.HashSet<>(jdbc.sql("SELECT lower(code) FROM retail_products")
                 .query(String.class)
                 .list());
+    }
+
+    /**
+     * Issue #697: the sizes ({@code variant_size}) or colours ({@code variant_colour}) the business's items have, each once
+     * ignoring case, the most used first.
+     */
+    List<String> variantOptions(boolean sizes) {
+        String column = sizes ? "variant_size" : "variant_colour";
+        // Issue #726: byte order, so the spelling kept and the order of a tie are those of the mock.
+        String first = "min(" + column + " COLLATE \"C\")";
+        String sql = "SELECT " + first + " FROM retail_products WHERE btrim(coalesce(" + column + ", '')) <> ''"
+                + " GROUP BY lower(btrim(" + column + ")) ORDER BY count(*) DESC, " + first + " COLLATE \"C\" LIMIT 60";
+        return jdbc.sql(sql).query(String.class).list();
     }
 
     // ---- Names (issue #352) ---------------------------------------------------------------
@@ -250,13 +414,28 @@ class CatalogueRepository {
     Map<String, String> productNames() {
         Map<String, String> out = new java.util.HashMap<>();
         jdbc.sql(
-                        "SELECT p.name_key, lower(btrim(u.name)) AS unit, p.code FROM retail_products p JOIN retail_units u ON u.id = p.unit_id ORDER BY p.code")
+                        "SELECT p.name_key, u.name AS unit, p.code FROM retail_products p JOIN retail_units u ON u.id = p.unit_id ORDER BY p.code")
                 .query((rs, n) -> {
-                    out.putIfAbsent(rs.getString("name_key") + NAME_SEP + rs.getString("unit"), rs.getString("code"));
+                    // Issue #698: the unit by its key, as the import keys a row's unit.
+                    out.putIfAbsent(
+                            rs.getString("name_key") + NAME_SEP + CatalogueNames.unitKey(rs.getString("unit")),
+                            rs.getString("code"));
                     return 0;
                 })
                 .list();
         return out;
+    }
+
+    /**
+     * Up to {@code limit} items as "name (unit)", newest first: what the setup helper tells the model the shop has already
+     * (ADR-102), so it does not draft them again.
+     */
+    List<String> productLabels(int limit) {
+        return jdbc.sql("""
+                        SELECT p.description || ' (' || u.name || ')' FROM retail_products p
+                          JOIN retail_units u ON u.id = p.unit_id
+                         WHERE p.active ORDER BY p.created_at DESC, p.id LIMIT ?
+                        """).param(limit).query(String.class).list();
     }
 
     /** Products whose name has the same key as the description, other than {@code excludeId}. */
@@ -293,6 +472,20 @@ class CatalogueRepository {
         return jdbc.sql(SELECT_PRODUCT + " WHERE p.id = ?")
                 .param(id)
                 .query(CatalogueRepository::product)
+                .optional();
+    }
+
+    /** A product with the balance of a branch, as a search row has it (issue #345, the barcode lookup). */
+    Optional<Product> findAt(UUID id, UUID branchId) {
+        if (branchId == null) {
+            return find(id);
+        }
+        return jdbc.sql(
+                        SELECT_PRODUCT.replace(
+                                        " FROM retail_products p", ", b.qty, b.reserved_qty FROM retail_products p")
+                                + " LEFT JOIN retail_stock_balances b ON b.product_id = p.id AND b.branch_id = ? WHERE p.id = ?")
+                .params(branchId, id)
+                .query(CatalogueRepository::productWithQty)
                 .optional();
     }
 
@@ -412,7 +605,8 @@ class CatalogueRepository {
                 .param("active", p.active())
                 .param("id", p.id())
                 .param("code", p.code())
-                .param("description", p.description())
+                // Issue #698 (D86 = A): every item name is stored in the one display style, whichever way it was added.
+                .param("description", CatalogueNames.display(p.description()))
                 .param("categoryId", p.categoryId())
                 .param("unitId", p.unitId())
                 .param("costMinor", p.costMinor())
@@ -433,7 +627,8 @@ class CatalogueRepository {
                 .param("nameChanged", nameChanged)
                 .param("id", p.id())
                 .param("code", p.code())
-                .param("description", p.description())
+                // A name is restyled only when it is changed: an edit of a price never moves it unaudited.
+                .param("description", nameChanged ? CatalogueNames.display(p.description()) : p.description())
                 .param("categoryId", p.categoryId())
                 .param("unitId", p.unitId())
                 .param("active", p.active())
@@ -498,9 +693,26 @@ class CatalogueRepository {
 
     // ---- Pack sizes (ADR-033, issue #194) ------------------------------------------------------
 
+    /*
+     * Issue #624: the suggested price is the piece price times the size, rounded half up once (Quantities.packPrice). A
+     * selling pack is below cost when its price (its own, else the suggested one) is not above the size times the item's
+     * average cost per piece: the branches' averages weighted by what each holds (ADR-079 decision 1), or the last paid
+     * cost while no branch holds any. The service drops both for a caller who may not read them.
+     */
     private static final String SELECT_PACK = """
-            SELECT k.id, k.product_id, k.unit_id, u.name AS unit, k.factor, k.active, k.version
+            SELECT k.id, k.product_id, k.unit_id, u.name AS unit, k.factor, k.active, k.version, k.purpose, k.sell_minor,
+                   round(k.factor * p.sell_minor)::bigint AS suggested_sell_minor,
+                   coalesce(k.sell_minor, round(k.factor * p.sell_minor)) <= round(k.factor * coalesce(
+                       (SELECT sum(b.qty * coalesce(b.avg_cost_minor, p.cost_minor)) / sum(b.qty)
+                          FROM retail_stock_balances b
+                         WHERE b.tenant_id = k.tenant_id AND b.product_id = k.product_id AND b.qty > 0),
+                       p.cost_minor)) AS below_cost,
+                   k.id IS NOT DISTINCT FROM (SELECT pack_id FROM (""" + RetailCatalogue.standardPackSql("p") + """
+                   ) sp) AS standard,
+                   k.holds_unit_id, hu.name AS holds_unit, k.holds_qty, k.usual_buy
               FROM retail_product_units k JOIN retail_units u ON u.id = k.unit_id
+              JOIN retail_products p ON p.id = k.product_id
+              LEFT JOIN retail_units hu ON hu.id = k.holds_unit_id
             """;
 
     private static Pack pack(ResultSet rs, int n) throws SQLException {
@@ -511,7 +723,17 @@ class CatalogueRepository {
                 rs.getString("unit"),
                 rs.getBigDecimal("factor").setScale(3).toPlainString(),
                 rs.getBoolean("active"),
-                rs.getInt("version"));
+                rs.getInt("version"),
+                rs.getString("purpose"),
+                rs.getObject("sell_minor", Long.class),
+                rs.getObject("suggested_sell_minor", Long.class),
+                rs.getObject("below_cost", Boolean.class),
+                rs.getObject("sell_minor") != null,
+                rs.getBoolean("standard"),
+                rs.getObject("holds_unit_id", UUID.class),
+                rs.getString("holds_unit"),
+                rs.getObject("holds_qty", Integer.class),
+                rs.getBoolean("usual_buy"));
     }
 
     List<Pack> packs(UUID productId) {
@@ -543,20 +765,103 @@ class CatalogueRepository {
                 .query(CatalogueRepository::pack)
                 .optional();
     }
-
-    void insertPack(UUID id, UUID productId, UUID unitId, java.math.BigDecimal factor, UUID by) {
-        jdbc.sql("""
-                        INSERT INTO retail_product_units (id, tenant_id, product_id, unit_id, factor, created_by)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?)
-                        """).params(id, productId, unitId, factor, by).update();
+    /** The sell price in force at {@code at} (see {@link com.rincoltech.bms.retail.catalogue.RetailCatalogue#sellMinorAt}). */
+    long sellMinorAt(UUID productId, java.time.Instant at) {
+        return jdbc.sql("""
+                        SELECT coalesce(
+                            (SELECT h.new_sell_minor FROM retail_price_history h
+                              WHERE h.product_id = :p AND h.created_at <= :at ORDER BY h.created_at DESC, h.id DESC LIMIT 1),
+                            (SELECT coalesce(h.old_sell_minor, h.new_sell_minor) FROM retail_price_history h
+                              WHERE h.product_id = :p AND h.created_at > :at ORDER BY h.created_at, h.id LIMIT 1),
+                            (SELECT p.sell_minor FROM retail_products p WHERE p.id = :p))
+                        """)
+                .param("p", productId)
+                .param("at", java.sql.Timestamp.from(at))
+                .query(Long.class)
+                .single();
     }
 
-    /** Rows changed: 0 when the version moved since it was read. */
-    int updatePack(UUID id, java.math.BigDecimal factor, boolean active, int expectedVersion) {
-        return jdbc.sql(
-                        "UPDATE retail_product_units SET factor = ?, active = ?, updated_at = now(), version = version + 1 WHERE id = ? AND version = ?")
-                .params(factor, active, id, expectedVersion)
+    void insertPack(
+            UUID id,
+            UUID productId,
+            UUID unitId,
+            java.math.BigDecimal factor,
+            String purpose,
+            Long sellMinor,
+            UUID holdsUnitId,
+            Integer holdsQty,
+            UUID by) {
+        jdbc.sql("""
+                        INSERT INTO retail_product_units
+                            (id, tenant_id, product_id, unit_id, factor, purpose, sell_minor, holds_unit_id, holds_qty,
+                             created_by)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """)
+                .params(id, productId, unitId, factor, purpose, sellMinor, holdsUnitId, holdsQty, by)
                 .update();
+    }
+
+    /**
+     * Issue #624: the whole pack at once, with its purpose and own selling price, and (issue #699) what it holds; 0 when the
+     * version moved. A pack made only for selling, or switched off, is no longer the usual buying level.
+     */
+    int updatePack(
+            UUID id,
+            java.math.BigDecimal factor,
+            boolean active,
+            String purpose,
+            Long sellMinor,
+            UUID holdsUnitId,
+            Integer holdsQty,
+            int expectedVersion) {
+        return jdbc.sql("""
+                        UPDATE retail_product_units SET factor = ?, active = ?, purpose = ?, sell_minor = ?,
+                               holds_unit_id = ?, holds_qty = ?,
+                               usual_buy = usual_buy AND ? AND ? <> 'sell',
+                               updated_at = now(), version = version + 1
+                         WHERE id = ? AND version = ?
+                        """)
+                .params(factor, active, purpose, sellMinor, holdsUnitId, holdsQty, active, purpose, id, expectedVersion)
+                .update();
+    }
+
+    /**
+     * Issue #699 (ADR-107): a level's size and what it holds, for a level worked out again because one it holds changed or a
+     * delivery's size was made usual. The caller holds the product's row lock, so no version is compared; it is still moved.
+     * JUSTIFICATION-A3: the two writes the ladder needs, beside the pack's other writes.
+     */
+    void resizePack(UUID id, java.math.BigDecimal factor, UUID holdsUnitId, Integer holdsQty) {
+        jdbc.sql("""
+                        UPDATE retail_product_units SET factor = ?, holds_unit_id = ?, holds_qty = ?,
+                               updated_at = now(), version = version + 1
+                         WHERE id = ?
+                        """).params(factor, holdsUnitId, holdsQty, id).update();
+    }
+
+    /**
+     * Issue #699: the level Buy stock opens on. Making a pack usual clears every other pack of the item first (one per item,
+     * V118) and returns them, so each is audited (review of #710); clearing a pack touches that pack only (round 4 of the
+     * review: false on a box never clears the carton) and returns none.
+     */
+    List<UUID> setUsualBuy(UUID productId, UUID packId, boolean usual) {
+        if (!usual) {
+            jdbc.sql("""
+                            UPDATE retail_product_units SET usual_buy = false, updated_at = now(), version = version + 1
+                             WHERE id = ? AND usual_buy
+                            """).param(packId).update();
+            return List.of();
+        }
+        List<UUID> cleared =
+                jdbc.sql("""
+                        UPDATE retail_product_units SET usual_buy = false, updated_at = now(), version = version + 1
+                         WHERE product_id = ? AND usual_buy AND id <> ?
+                        RETURNING id
+                        """).params(productId, packId).query(UUID.class).list();
+        jdbc.sql("""
+                        UPDATE retail_product_units SET usual_buy = true, updated_at = now(), version = version + 1
+                         WHERE id = ? AND NOT usual_buy
+                        """).param(packId).update();
+        return cleared;
     }
 
     /** Active packs only: a pack that was switched off no longer ties the product's unit or the pack's unit down. */
@@ -591,6 +896,17 @@ class CatalogueRepository {
                         SELECT EXISTS (SELECT 1 FROM retail_stock_movements WHERE product_id = ?)
                             OR EXISTS (SELECT 1 FROM retail_stock_balances WHERE product_id = ? AND qty <> 0)
                         """).params(productId, productId).query(Boolean.class).single();
+    }
+
+    /**
+     * Review of #722 (ADR-110): a pack of the unit, on any item and switched on or off, holding another number than
+     * {@code count} of what it holds (its factor when it names no level).
+     */
+    boolean unitHasPackNotHolding(UUID unitId, int count) {
+        return jdbc.sql("""
+                        SELECT EXISTS (SELECT 1 FROM retail_product_units
+                                        WHERE unit_id = ? AND COALESCE(holds_qty::numeric, factor) <> ?)
+                        """).params(unitId, count).query(Boolean.class).single();
     }
 
     boolean unitHasPacks(UUID unitId) {
@@ -739,7 +1055,7 @@ class CatalogueRepository {
                         VALUES (:id, current_setting('app.tenant_id')::uuid, :name, :base, :category, :unit, :by, :reason)
                         """)
                 .param("id", id)
-                .param("name", name)
+                .param("name", CatalogueNames.display(name))
                 .param("base", baseCode)
                 .param("category", categoryId)
                 .param("unit", unitId)
@@ -757,7 +1073,7 @@ class CatalogueRepository {
                                duplicate_reason = CASE WHEN :renamed THEN :reason ELSE duplicate_reason END
                          WHERE id = :id AND version = :version
                         """)
-                .param("name", name)
+                .param("name", CatalogueNames.display(name))
                 .param("category", categoryId)
                 .param("renamed", renamed)
                 .param("reason", duplicateReason, java.sql.Types.VARCHAR)
@@ -811,7 +1127,7 @@ class CatalogueRepository {
                 .param("size", size, java.sql.Types.VARCHAR)
                 .param("colour", colour, java.sql.Types.VARCHAR)
                 .param("position", position)
-                .param("description", description)
+                .param("description", CatalogueNames.display(description))
                 .param("id", productId)
                 .update();
     }
@@ -825,15 +1141,21 @@ class CatalogueRepository {
                 .orElse(null);
     }
 
-    /** The active pack sizes of a product copied to another (a new size of the same item); rows copied. */
-    int copyPacks(UUID fromProductId, UUID toProductId, UUID by) {
+    /**
+     * The active pack sizes of a product copied to another (a new size of the same item), with their purpose, and their own
+     * selling prices only when {@code withPrices}; rows copied.
+     */
+    int copyPacks(UUID fromProductId, UUID toProductId, boolean withPrices, UUID by) {
         return jdbc.sql("""
-                        INSERT INTO retail_product_units (id, tenant_id, product_id, unit_id, factor, created_by)
-                        SELECT gen_random_uuid(), tenant_id, :to, unit_id, factor, :by
+                        INSERT INTO retail_product_units
+                            (id, tenant_id, product_id, unit_id, factor, purpose, sell_minor, created_by)
+                        SELECT gen_random_uuid(), tenant_id, :to, unit_id, factor, purpose,
+                               CASE WHEN :prices THEN sell_minor END, :by
                           FROM retail_product_units WHERE product_id = :from AND active
                         """)
                 .param("from", fromProductId)
                 .param("to", toProductId)
+                .param("prices", withPrices)
                 .param("by", by)
                 .update();
     }
@@ -901,7 +1223,7 @@ class CatalogueRepository {
                 .param("bump", bump)
                 .param("size", size, java.sql.Types.VARCHAR)
                 .param("colour", colour, java.sql.Types.VARCHAR)
-                .param("description", description)
+                .param("description", CatalogueNames.display(description))
                 .param("id", productId)
                 .update();
     }

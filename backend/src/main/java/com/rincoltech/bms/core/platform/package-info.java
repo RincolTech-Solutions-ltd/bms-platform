@@ -4,16 +4,41 @@
  * (FR-TEN-03), subscription status and suspension (FR-TEN-05, FR-TEN-06), and the MFA reset of a
  * tenant's only admin (FR-IAM-12), and, for the operator screens of issue #407 (ADR-056), the price book (plans with their
  * prices over time), the plan and the subscription dates of a tenant, the payments the operator records (behind the
- * {@code Idempotency-Key} protocol of {@code core.operations}) and the Business page overview. Only platform operators reach it. It changes tenants through
+ * {@code Idempotency-Key} protocol of {@code core.operations}) and the Business page overview, and the feedback every business sent
+ * (issue #447, ADR-065, through the public port of {@code core.feedback}), the referrals and their commissions (issue #464,
+ * ADR-069, through the public port of {@code core.referrals}; a payment recorded for a referred business adds its commission line),
+ * and, on a business's own host, the Owner's own plan
+ * (issue #472, ADR-073: ask for a module, stop one, cancel, undo) with the operator's decisions and the nightly apply; the
+ * Owner and the operators are told through the outbox of {@code core.notifications}. Only platform operators reach it. It changes tenants through
  * the SECURITY DEFINER platform functions of migration V2 (ADR-016), and acts inside one tenant
  * only through {@code TenantContext.callAs}, so the transaction manager still binds that tenant.
+ * Subscription billing (issue #480, ADR-075): the reminders to the Owner and the overdue move of a nightly job, the operator's
+ * grace period and list of businesses due for suspension (nothing is suspended automatically), the receipt of every payment,
+ * mailed through the outbox of {@code core.notifications} and rendered by {@code core.documents}, and the Owner's Plan and
+ * billing page on the business's own host ({@code /api/v1/billing}).
+ * The rest of the Owner's powers (issue #571, ADR-090): a billing contact the reminders and receipts go to instead of the Owner,
+ * the Owner's request to close the business (read only at once, a full data export through the public port of
+ * {@code core.reporting}, cancellable) and the operator's removal after the cooling-off, which calls every module's
+ * {@link com.rincoltech.bms.kernel.PersonalDataEraser}; and the operator's list of businesses with no Owner.
  * Public API: {@link com.rincoltech.bms.core.platform.TenantProvisioning}, the one tenant creation
  * path, which onboarding's Activate uses (ADR-024).
  */
 @ApplicationModule(
         id = "core.platform",
         displayName = "Core: Platform Console",
-        allowedDependencies = {"kernel", "core.tenancy", "core.identity", "core.audit", "core.operations"})
+        allowedDependencies = {
+            "kernel",
+            "core.tenancy",
+            "core.identity",
+            "core.audit",
+            "core.operations",
+            "core.feedback",
+            "core.notifications",
+            "core.documents",
+            "core.jobs",
+            "core.referrals",
+            "core.reporting"
+        })
 package com.rincoltech.bms.core.platform;
 
 import org.springframework.modulith.ApplicationModule;

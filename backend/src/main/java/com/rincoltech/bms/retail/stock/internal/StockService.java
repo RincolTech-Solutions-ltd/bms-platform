@@ -12,12 +12,12 @@ import com.rincoltech.bms.kernel.Cursor;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.Search;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
-import com.rincoltech.bms.retail.catalogue.RetailCatalogue.ProductSnapshot;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.RetailBooks;
 import com.rincoltech.bms.retail.stock.RetailBooks.Leg;
 import com.rincoltech.bms.retail.stock.RetailBooks.Posting;
 import com.rincoltech.bms.retail.stock.RetailBranchContext;
+import com.rincoltech.bms.retail.stock.RetailCapabilities;
 import com.rincoltech.bms.retail.stock.StockLedger;
 import com.rincoltech.bms.retail.stock.StockLedger.Movement;
 import com.rincoltech.bms.retail.stock.internal.StockApi.AllBranchesPage;
@@ -25,6 +25,7 @@ import com.rincoltech.bms.retail.stock.internal.StockApi.AllBranchesRow;
 import com.rincoltech.bms.retail.stock.internal.StockApi.BranchBalance;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementPage;
 import com.rincoltech.bms.retail.stock.internal.StockApi.MovementRow;
+import com.rincoltech.bms.retail.stock.internal.StockApi.OpenStocktake;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockBranch;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockPage;
 import com.rincoltech.bms.retail.stock.internal.StockApi.StockRow;
@@ -76,6 +77,7 @@ class StockService {
     private final CurrentTenant tenant;
     private final BusinessClock clock;
     private final AuditLog audit;
+    private final RetailCapabilities capabilities;
 
     StockService(
             StockRepository repo,
@@ -85,7 +87,8 @@ class StockService {
             RetailBranchContext branches,
             CurrentTenant tenant,
             BusinessClock clock,
-            AuditLog audit) {
+            AuditLog audit,
+            RetailCapabilities capabilities) {
         this.repo = repo;
         this.ledger = ledger;
         this.catalogue = catalogue;
@@ -94,6 +97,7 @@ class StockService {
         this.tenant = tenant;
         this.clock = clock;
         this.audit = audit;
+        this.capabilities = capabilities;
     }
 
     /**
@@ -111,7 +115,7 @@ class StockService {
             boolean includeInactive,
             Integer limit,
             String cursor) {
-        Long atMost = atMostOf(level);
+        String stockLevel = levelOf(level);
         Principal principal = CurrentPrincipal.require();
         // A closed branch that still holds stock is a column only when asked for (issue #329, ADR-041); the default
         // list
@@ -137,7 +141,7 @@ class StockService {
                 negativeOnly,
                 includeInactive,
                 false,
-                atMost,
+                stockLevel,
                 position.rank(),
                 after == null ? null : after.sortKey(),
                 after == null ? null : after.id(),
@@ -148,6 +152,7 @@ class StockService {
         Map<UUID, Map<UUID, BigDecimal>> held =
                 repo.balances(page.stream().map(ProductTotal::id).toList(), ids);
         boolean cost = ids.stream().allMatch(b -> principal.may(PROFIT_READ, b));
+        boolean packs = capabilities.enabled(RetailCapabilities.UNITS);
         List<AllBranchesRow> items = page.stream()
                 .map(p -> new AllBranchesRow(
                         p.id(),
@@ -166,7 +171,8 @@ class StockService {
                                             held.getOrDefault(p.id(), Map.of()).getOrDefault(b, BigDecimal.ZERO);
                                     return new BranchBalance(b, Quantities.format(q), q.signum() < 0);
                                 })
-                                .toList()))
+                                .toList(),
+                        packs ? p.standardPack() : null))
                 .toList();
         String next = more
                 ? Search.wrap(
@@ -189,7 +195,7 @@ class StockService {
             boolean includeInactive,
             Integer limit,
             String cursor) {
-        Long atMost = atMostOf(level);
+        String stockLevel = levelOf(level);
         UUID branch = branches.resolve("retail.stock.read", branchId);
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
         Search.Query search = Search.parse(query);
@@ -201,7 +207,7 @@ class StockService {
                 categoryId,
                 negativeOnly,
                 includeInactive,
-                atMost,
+                stockLevel,
                 position.rank(),
                 after == null ? null : after.sortKey(),
                 after == null ? null : after.id(),
@@ -219,10 +225,11 @@ class StockService {
         boolean cost = mayReadCost(branch);
         // ADR-055: a storekeeper sees no selling price.
         boolean price = RetailCatalogue.maySeePrices(CurrentPrincipal.require());
+        boolean packs = capabilities.enabled(RetailCapabilities.UNITS);
         return new StockPage(
                 branch,
                 items.stream()
-                        .map(r -> cost && price
+                        .map(r -> cost && price && packs
                                 ? r
                                 : new StockRow(
                                         r.productId(),
@@ -235,7 +242,8 @@ class StockService {
                                         r.negative(),
                                         price ? r.sellMinor() : null,
                                         cost ? r.costMinor() : null,
-                                        r.reservedQty()))
+                                        r.reservedQty(),
+                                        packs ? r.standardPack() : null))
                         .toList(),
                 Quantities.format(lowStock()),
                 next);
@@ -328,6 +336,15 @@ class StockService {
         return visible(repo.stocktake(id, false).orElseThrow());
     }
 
+    /**
+     * Issue #728: the counts started at a branch and neither saved nor thrown away, newest first, for someone who may count
+     * there, so My stock and Count stock can offer to finish or throw away each one.
+     */
+    @Transactional(readOnly = true)
+    List<OpenStocktake> openStocktakes(UUID branchId) {
+        return repo.openStocktakes(branches.resolve("retail.stocktake.commit", branchId));
+    }
+
     @Transactional(readOnly = true)
     Stocktake stocktake(UUID id) {
         Principal principal = CurrentPrincipal.require();
@@ -344,23 +361,51 @@ class StockService {
      * in the balance. The net value posts to stock shrinkage against inventory in one entry for the
      * branch. When later movements mean the adjustment would take a balance below zero, the count no
      * longer describes the shelf: the commit is refused with 409 {@code stock_moved_since_count}.
+     *
+     * <p>Issue #636: a line that takes an item holding stock to 0, or to less than half of it, is the likely slip of a tap.
+     * Review the difference asks a tick for each; the commit names the ticked ones in {@code acknowledged}, and is refused
+     * with 409 {@code big_drop_not_acknowledged} while one is missing, so a stale draft from another tab or the API never
+     * writes such a drop unasked.
      */
     @Transactional
-    Stocktake commit(UUID id) {
+    Stocktake commit(UUID id, List<UUID> acknowledged) {
         Principal principal = CurrentPrincipal.require();
         Stocktake s = repo.stocktake(id, true)
                 .filter(x -> principal.may("retail.stocktake.commit", x.branchId()))
                 .orElseThrow(ApiException::notFound);
+        if (s.status().equals("discarded")) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "stocktake_discarded",
+                    "Stock count cancelled",
+                    "This stock count was cancelled, so it cannot be committed. Count the items again.");
+        }
         if (!s.status().equals("draft")) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
                     "stocktake_committed",
-                    "Stock-take committed",
-                    "This stock-take has been committed already.");
+                    "Stock count committed",
+                    "This stock count has been committed already.");
         }
         // A draft made before the branch was closed or marked as not stocking must not write stock there (issue #329,
         // ADR-041).
         branches.requireStocks(s.branchId(), "branch_id");
+        Set<UUID> ticked = new HashSet<>(acknowledged);
+        // Issue #656: sorted by item code, so a refusal capped at five names the same five every time.
+        List<String> unticked = s.lines().stream()
+                .filter(l -> bigDrop(l) && !ticked.contains(l.productId()))
+                .sorted(Comparator.comparing(StocktakeLine::code, Comparator.nullsLast(Comparator.naturalOrder())))
+                .map(l -> l.description() == null ? l.code() : l.description())
+                .toList();
+        if (!unticked.isEmpty()) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "big_drop_not_acknowledged",
+                    "Tick the lines marked before you save",
+                    "The count of " + firstNames(unticked)
+                            + " removes more than half of what was there. Review the difference again and tick each line marked"
+                            + " before you save the count.");
+        }
         List<StocktakeLine> lines = new ArrayList<>(s.lines());
         lines.sort(Comparator.comparing(StocktakeLine::productId));
         List<Movement> movements = new ArrayList<>();
@@ -374,10 +419,8 @@ class StockService {
                 recount.add(line.code());
                 continue;
             }
-            long cost = catalogue
-                    .find(line.productId())
-                    .map(ProductSnapshot::costMinor)
-                    .orElseThrow();
+            // ADR-079: a count's difference is valued at the branch's average, read under the balance lock just taken.
+            long cost = ledger.averageCost(s.branchId(), line.productId());
             repo.commitLine(id, line.productId(), variance, cost);
             if (variance.signum() == 0) {
                 continue;
@@ -398,7 +441,7 @@ class StockService {
                     "Stock moved since the count",
                     "Stock of " + String.join(", ", recount)
                             + " has moved since it was counted, so the count no longer matches the shelf."
-                            + " Please recount these lines in a new stock-take.");
+                            + " Please recount these lines in a new stock count.");
         }
         LocalDate today = clock.today(tenant.profile().timezone());
         ledger.record(today, movements);
@@ -422,6 +465,56 @@ class StockService {
         audit.record(new AuditLog.Entry(
                 "retail.stocktake.committed", STOCKTAKE, id, s.branchId(), Map.of("status", "draft"), after));
         return visible(repo.stocktake(id, false).orElseThrow());
+    }
+
+    /**
+     * Issue #656: ends a draft count without writing stock, so it no longer blocks a correction of its items or the closing of
+     * its branch. The person who made it, or anyone who may count at its branch, may discard it. Discarding a discarded count
+     * again returns it unchanged; a committed count is refused with 409 {@code stocktake_committed}.
+     */
+    @Transactional
+    Stocktake discard(UUID id) {
+        Principal principal = CurrentPrincipal.require();
+        Stocktake s = repo.stocktake(id, true)
+                .filter(x -> principal.userId().equals(x.createdBy())
+                        || principal.may("retail.stocktake.commit", x.branchId()))
+                .orElseThrow(ApiException::notFound);
+        if (s.status().equals("committed")) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "stocktake_committed",
+                    "Stock count committed",
+                    "This stock count has been committed already, so it cannot be discarded.");
+        }
+        if (s.status().equals("draft")) {
+            repo.markDiscarded(id, principal.userId());
+            audit.record(new AuditLog.Entry(
+                    "retail.stocktake.discarded",
+                    STOCKTAKE,
+                    id,
+                    s.branchId(),
+                    Map.of("status", "draft"),
+                    Map.of("status", "discarded")));
+        }
+        return visible(repo.stocktake(id, false).orElseThrow());
+    }
+
+    /** Issue #656: the most items a refusal names; the rest are counted, so a long count's refusal stays short. */
+    static final int NAMED_AT_MOST = 5;
+
+    /** Issue #656: the first {@link #NAMED_AT_MOST} names, then "and N more" for the rest. */
+    static String firstNames(List<String> names) {
+        if (names.size() <= NAMED_AT_MOST) {
+            return String.join(", ", names);
+        }
+        return String.join(", ", names.subList(0, NAMED_AT_MOST)) + " and " + (names.size() - NAMED_AT_MOST) + " more";
+    }
+
+    /** Issue #629, #636: the count takes an item holding stock to 0, or to less than half of what it held. */
+    static boolean bigDrop(StocktakeLine l) {
+        BigDecimal expected = new BigDecimal(l.expectedQty());
+        return expected.signum() > 0
+                && new BigDecimal(l.countedQty()).multiply(BigDecimal.TWO).compareTo(expected) < 0;
     }
 
     private Stocktake visible(Stocktake s) {
@@ -456,18 +549,21 @@ class StockService {
      * Cost on a branch-bound row needs {@code retail.profit.read} in that row's branch, not in any
      * branch (ADR-017; review F5).
      */
-    private static BigDecimal lowStock() {
+    static BigDecimal lowStock() {
         return BigDecimal.valueOf(LOW_STOCK_MILLI, 3);
     }
 
-    /** The quantity a level filter keeps at or below, in thousandths; null for no level (#145). */
-    static Long atMostOf(String level) {
+    /**
+     * The level filter, {@code out} or {@code low}; null for none (#145). Either keeps only the items a branch has
+     * held, low at or below the branch's minimum, else the fixed threshold (issue #490, {@link
+     * com.rincoltech.bms.retail.stock.LowStockRule#atBranchSql}).
+     */
+    static String levelOf(String level) {
         if (level == null || level.isBlank()) {
             return null;
         }
         return switch (level) {
-            case LEVEL_OUT -> 0L;
-            case LEVEL_LOW -> LOW_STOCK_MILLI;
+            case LEVEL_OUT, LEVEL_LOW -> level;
             default ->
                 throw ApiException.validation(
                         List.of(new FieldProblem("stock_level", "invalid", "stock_level is out or low.")));

@@ -1,37 +1,75 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
-import { type Approval, api, listPendingApprovals, problemOf } from '../../api/client';
+import { businessZone } from '../../api/retail';
+import { type Approval, api, getApproval, listPendingApprovals, problemOf } from '../../api/client';
 import { branchFilter } from '../../auth/branch';
 import { formatMinor } from '../../components/money';
 import { EmptyState, SkeletonList } from '../../components/states';
-import { useStaff } from './context';
-import { useCollateralApi } from '../../api/lending-context';
+import { useOptionalStaff, useStaff } from './context';
+import { BusyButton } from '../../app/ui/BusyButton';
+import { useCollateralApi, useMembersApi } from '../../api/lending-context';
 import { custodyWords, typeWords } from './lending/collateral-state';
 import { money as lendingMoney } from './lending/loan-state';
+import { Hint } from '../../app/ui/Hint';
 
 // The approvals inbox (FR-APR-05, FR-APR-06): pending requests the user may decide or made, in
 // the active branch. Approve executes the action at once; reject needs a note. The maker sees
 // their own requests and may cancel them, but never decide them (FR-APR-02).
 
+/** Each action in words, as the checker decides it (issue #343): the action type stays only for one this screen does not know. */
+export const ACTION_WORDS: Record<string, string> = {
+  retail_sale_void: 'Void a sale',
+  retail_stock_correction: 'Correct a stock quantity',
+  retail_expense: 'Record an expense',
+  retail_sale_return: 'Take goods back from a customer',
+  retail_sale_return_void: 'Void a customer return',
+  retail_sale_write_off: 'Write off what a buyer owes',
+  retail_purchase_order: 'Send a purchase order',
+  loan_disbursement: 'Pay out a loan',
+  loan_write_off: 'Write off a loan',
+  loan_bring_in: 'Bring in a loan from the paper register',
+  loan_bring_in_reversal: 'Undo a loan brought in',
+  repayment_reversal: 'Reverse a repayment',
+  charge_waiver: 'Waive a penalty, fee or interest',
+  savings_withdrawal: 'Pay out savings',
+  savings_reversal: 'Reverse a savings entry',
+  investment_funding: 'Take in an investment',
+  investment_early_withdrawal: 'Pay out an investment early',
+  investment_reversal: 'Reverse an investment entry',
+};
+
 /**
  * What a request is, in words a checker can decide on. A collateral release names the item, what it is worth and where it is now, read
- * from the item itself (the list carries no payload, so who collects it is not shown here); other types keep their identifier until their screen gives them words.
+ * from the item itself, and the member and who collects it (issue #289): the list carries no payload, so the row reads the request and
+ * the member too, and leaves out what it may not read. Other types keep their identifier until their screen gives them words.
  */
 export function What({ item }: { item: Approval }) {
   const api = useCollateralApi();
+  const members = useMembersApi();
+  const tenantCurrency = useOptionalStaff()?.me.tenant_currency;
   const release = item.action_type === 'collateral_release';
   const detail = useQuery({ queryKey: ['collateral', 'one', item.subject_id], queryFn: () => api.get(item.subject_id ?? ''), enabled: release && !!item.subject_id, retry: false });
-  if (!release) return <>{item.action_type}</>;
+  const request = useQuery({ queryKey: ['approvals', 'one', item.id], queryFn: () => getApproval(item.id ?? ''), enabled: release && !!item.id, retry: false });
+  const memberId = detail.data?.item?.member_id;
+  const member = useQuery({ queryKey: ['members', 'one', memberId], queryFn: () => members.get(memberId ?? ''), enabled: release && !!memberId, retry: false });
+  if (!release) return <>{ACTION_WORDS[item.action_type ?? ''] ?? item.action_type}</>;
   const c = detail.data?.item;
+  const payload: Record<string, unknown> = request.data?.payload ?? {};
+  const collectedBy = typeof payload.collected_by === 'string' ? payload.collected_by : undefined;
+  const note = typeof payload.note === 'string' ? payload.note : undefined;
   return (
     <>
       <strong>Give collateral back</strong>
       {c ? (
         <span className="hint">
-          {' '}{typeWords(c.collateral_type)}: {c.description}. Worth about {lendingMoney(c.collateral_value_minor ?? c.estimated_value_minor, c.currency)}. Now: {custodyWords(c.custody_status)}.
+          {' '}{typeWords(c.collateral_type)}: {c.description}. Worth about {lendingMoney(c.collateral_value_minor ?? c.estimated_value_minor, c.currency ?? tenantCurrency)}. Now: {custodyWords(c.custody_status)}.
         </span>
       ) : detail.isError ? <span className="hint"> The item could not be loaded here. Open the collateral register to see it before you decide.</span> : null}
+      {member.data?.full_name && <span className="hint"> Member: {member.data.full_name}.</span>}
+      {collectedBy && <span className="hint"> Collected by {collectedBy}.</span>}
+      {request.isError && <span className="hint"> Who collects it could not be loaded. Open the request before you decide.</span>}
+      {note && <span className="hint"> Note: {note}</span>}
     </>
   );
 }
@@ -58,6 +96,10 @@ function Row({ item, id }: { item: Approval; id: string }) {
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['approvals'] }),
     onError: (error) => setMessage(problemOf(error).detail ?? 'The decision failed.'),
+    meta: {
+      success: (_: unknown, kind: 'approve' | 'reject' | 'cancel') =>
+        kind === 'approve' ? 'Request approved' : kind === 'reject' ? 'Request rejected' : 'Request cancelled',
+    },
   });
 
   return (
@@ -65,6 +107,17 @@ function Row({ item, id }: { item: Approval; id: string }) {
       <td data-label="Action">
         <What item={item} />
         {item.checker_notice && <p className="hint" role="note"><strong>{item.checker_notice}</strong></p>}
+        {['loan_bring_in', 'loan_bring_in_reversal', 'charge_waiver'].includes(item.action_type ?? '') && item.subject_id && (
+          <>
+            {' '}
+            <Link to="/staff/lending/loans/$loanId" params={{ loanId: item.subject_id }}>Open the loan</Link>
+          </>
+        )}
+        {item.action_type === 'loan_bring_in' && (
+          <Hint full>
+            Approving puts this loan from the paper register in the books. No arrears SMS goes to the borrower in the 7 days after it comes in, so the business can speak to them first.
+          </Hint>
+        )}
         {item.action_type === 'collateral_release' && item.subject_id && (
           <>
             {' '}
@@ -74,24 +127,24 @@ function Row({ item, id }: { item: Approval; id: string }) {
       </td>
       <td data-label="Amount" className="num">{item.amount_minor != null && item.currency ? formatMinor(item.amount_minor, item.currency) : ''}</td>
       <td data-label="Requested by">{item.requested_by_name ?? item.requested_by}</td>
-      <td data-label="Requested at">{item.requested_at ? new Date(item.requested_at).toLocaleString() : ''}</td>
+      <td data-label="Requested at">{item.requested_at ? new Date(item.requested_at).toLocaleString(undefined, { timeZone: businessZone() }) : ''}</td>
       <td data-label="Decision" className="cell-stack">
         <div className="decision">
           {item.can_decide && (
             <>
               <input placeholder="Note (required to reject)" aria-label="Note" value={note} onChange={(e) => setNote(e.target.value)} />{' '}
-              <button className="btn-primary" disabled={decide.isPending} onClick={() => decide.mutate('approve')}>
+              <BusyButton className="btn-primary" busy={decide.isPending && decide.variables === 'approve'} disabled={decide.isPending} onClick={() => decide.mutate('approve')}>
                 Approve
-              </button>{' '}
-              <button className="btn-danger" disabled={decide.isPending || note.trim() === ''} onClick={() => decide.mutate('reject')}>
+              </BusyButton>{' '}
+              <BusyButton className="btn-danger" busy={decide.isPending && decide.variables === 'reject'} disabled={decide.isPending || note.trim() === ''} onClick={() => decide.mutate('reject')}>
                 Reject
-              </button>
+              </BusyButton>
             </>
           )}
           {item.can_cancel && (
-            <button disabled={decide.isPending} onClick={() => decide.mutate('cancel')}>
+            <BusyButton busy={decide.isPending && decide.variables === 'cancel'} disabled={decide.isPending} onClick={() => decide.mutate('cancel')}>
               Cancel my request
-            </button>
+            </BusyButton>
           )}
           {item.execution_error && <p role="alert" className="alert alert-danger">Last attempt failed: {item.execution_error}</p>}
           {message && <p role="alert" className="alert alert-danger">{message}</p>}
@@ -116,7 +169,7 @@ export function Approvals() {
       <div data-tour="approvals-list">
       {pending.isPending && <SkeletonList label="Loading approvals" />}
       {pending.isError && <p role="alert" className="alert alert-danger">Could not load approvals.</p>}
-      {pending.data && items.length === 0 && <EmptyState art="nothingWaiting" title="Nothing waiting.">Requests for your approval appear here.</EmptyState>}
+      {pending.data && items.length === 0 && <EmptyState title="Nothing waiting.">Requests for your approval appear here.</EmptyState>}
       {items.length > 0 && (
         <div className="table-wrap table-cards" tabIndex={0}>
           <table>

@@ -1,12 +1,24 @@
 import type { LoanAllocation } from '../../../api/lending';
-import { formatMinor, parseMinor } from '../../../components/money';
+import { exponentOf, formatMinor, parseMinor } from '../../../components/money';
 
-// Pure helpers of the loan screens: money in the loan's currency, today's date, words for codes,
+// Pure helpers of the loan screens: money in the loan's currency, words for codes,
 // and the allocation of a repayment summed by component. Amounts stay integer minor units
 // (ADR-004); the server computes every figure, these only present it.
 
 /** The currency of a loan, UGX when the server sent none (the pilot lends in shillings). */
 export const currencyOf = (c: string | undefined): string => c || 'UGX';
+
+/** The business's currency from /me (issue #289): what a form types money in before its record carries a currency. */
+export const tenantCurrency = (me: { tenant_currency?: string }): string => currencyOf(me.tenant_currency);
+
+/** Minor units as a person would type them back: "1,500,000" for UGX, "1,500.00" for KES, no currency code. */
+export const amountText = (minor: number, currency: string | undefined): string => formatMinor(minor, currencyOf(currency)).replace(/^\S+ /, '');
+
+/** How an amount is typed in `currency`, for a message under the input: "in shillings, with no letters or decimals". */
+export function amountRule(currency: string | undefined): string {
+  const c = currencyOf(currency);
+  return c === 'UGX' ? 'in shillings, with no letters or decimals' : `in ${c}, with no letters and at most ${exponentOf(c) ?? 2} digits after the point`;
+}
 
 /** Minor units as money, or a dash-free placeholder when the server sent no figure. */
 export function money(minor: number | undefined, currency: string | undefined): string {
@@ -29,13 +41,17 @@ export function parseAmount(text: string, currency: string | undefined): number 
   return minor !== null && minor > 0 ? minor : null;
 }
 
-/** The local calendar date as YYYY-MM-DD (not UTC, so late evening is still today). */
-export function localDate(now: Date = new Date()): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
-
 export const isIsoDate = (s: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+/**
+ * A money form's draft read back from the tab (#670). Its date was that day's today, so a draft started on an earlier business
+ * day, or kept from before #670 without `startedOn`, starts its date again from today; a date after today becomes today.
+ */
+export function onToday<T extends { startedOn?: string }>(draft: T, field: keyof T, today: string): T {
+  const date = draft[field];
+  if (draft.startedOn === today && !(typeof date === 'string' && date > today)) return draft;
+  return { ...draft, [field]: today, startedOn: today };
+}
 
 /** "written_off" becomes "Written off". */
 export function words(code: string | undefined): string {
@@ -77,6 +93,16 @@ export function statusBadge(status: string | undefined): string {
     default:
       return 'badge';
   }
+}
+
+/** A loan status in plain words; a draft says it has not gone anywhere yet (issue #704). */
+export const loanStatusWords = (status: string | undefined): string => (status === 'draft' ? 'Draft, not sent yet' : words(status));
+
+/** A member's loans with the drafts on top, newest first, and the rest in the server's order (issue #704). */
+export function draftsFirst<T extends { status?: string; created_at?: string }>(items: T[]): T[] {
+  const at = (l: T) => Date.parse(l.created_at ?? '') || 0;
+  const drafts = items.filter((l) => l.status === 'draft').sort((a, b) => at(b) - at(a));
+  return [...drafts, ...items.filter((l) => l.status !== 'draft')];
 }
 
 export type Component = 'penalty' | 'fee' | 'interest' | 'principal' | 'overpayment';

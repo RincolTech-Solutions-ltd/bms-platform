@@ -56,11 +56,62 @@ body {
   border-radius: var(--radius-sm);
 }
 
-/* The theme selector, at the right of the header (issue #429); the focus ring comes from forms.css. */
-.brand-bar .theme-select {
-  margin: 0;
-  width: auto;
+/*
+ * The theme button, at the right of the header (issue #452), and its menu. The menu hangs from the button's right edge, so it
+ * stays on a 360px screen, and sits above the page; the header clips nothing.
+ */
+.theme-menu {
+  position: relative;
   flex: none;
+}
+
+.theme-icon,
+.theme-tick {
+  display: inline-flex;
+}
+
+.theme-menu-list {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: var(--z-overlay);
+  min-width: 13rem;
+  max-width: calc(100vw - 2 * var(--space-4));
+  padding: var(--space-1);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+}
+
+.theme-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.theme-menu-item:hover,
+.theme-menu-item:focus-visible {
+  background: var(--color-accent-tint);
+}
+
+.theme-menu-text {
+  flex: 1;
+}
+
+.theme-tick {
+  width: 24px;
+  color: var(--color-primary);
 }
 
 .btn-brand,
@@ -151,9 +202,15 @@ body {
   --color-scrim: rgba(16, 24, 40, 0.62); /* dims the page behind a guided tour step */
   /* Roles added for the theme selector (#429): each has a light and a dark value (docs/ui/design-system.md). */
   --color-neutral-tint: var(--rt-grey-100); /* disabled and pressed controls, skeletons, hairlines inside tables */
-  --color-danger-fill: var(--color-danger); /* the destructive button; text on it is always white */
+  --color-danger-fill: var(--color-danger); /* the destructive button and the tab badge */
+  --color-on-danger: #ffffff; /* text on --color-danger-fill, in both themes */
   --color-inverse: var(--rt-grey-900); /* toasts and chart read-outs, drawn the other way round */
   --color-on-inverse: #ffffff;
+  /* The toast (docs/ui-rules.md rule 15) stays a dark neutral pill in both themes; its icon takes a status colour lifted to read on it. */
+  --color-toast: var(--rt-grey-900);
+  --color-on-toast: #ffffff;
+  --color-toast-success: #47cd89;
+  --color-toast-error: #f97066;
   --color-logo-plate: transparent; /* a logo may be dark on transparent; the dark theme sets it light */
   --color-hover: var(--rt-grey-50);
   --viz-1-value: var(--rt-blue-strong);
@@ -197,23 +254,37 @@ body {
   --shadow-lg: 0 12px 32px -8px rgba(16, 24, 40, 0.18), 0 4px 8px -4px rgba(16, 24, 40, 0.06);
 
   /* Layers */
+  --z-dropdown: 50; /* the item picker's list (#534): over the page, under the menu, the tour and toasts */
   --z-nav: 100;
   --z-overlay: 200;
   --z-modal: 300;
   --z-toast: 400;
 
   /* Interaction */
-  --tap: 44px;
+  --tap: 48px; /* docs/ui-rules.md rule 12 */
+  /* The phone's bottom tabs (issue #539, navigation.css), all from the target and the spacing steps. */
+  --tab-height: calc(var(--tap) + var(--space-4)); /* 64px: the 48px target and room for the label */
+  --tab-pill-width: calc(var(--tap) + var(--space-2)); /* 56px: the current tab's pill behind the icon */
+  --tab-pill-height: var(--space-6); /* 32px */
+  --tab-gap: calc(var(--space-1) / 2); /* 2px: between icon and label, and at the tab's sides */
+  --tab-badge-text: min(var(--text-xs), var(--space-4)); /* 12px, growing with the phone's font size up to 16px so it never covers the icon */
+  --tab-badge: calc(var(--tab-badge-text) * 1.5); /* 18px at the default size */
   --focus-ring: 0 0 0 4px color-mix(in srgb, var(--color-accent) 30%, transparent);
   --content-width: 1120px;
   --transition: var(--motion-fast) var(--ease-out);
 
-  /* Motion (#106): short and calm, 150 to 250 ms; base.css stops it under prefers-reduced-motion. */
-  --motion-fast: 150ms;
+  /* Motion (#106, docs/ui-rules.md rule 13): 120 ms for a press, 200 ms for something arriving, 250 ms at most, always easing
+     out on the one curve, never easing in and never overshooting. base.css stops it under prefers-reduced-motion. */
+  --motion-fast: 120ms;
   --motion: 200ms;
   --motion-slow: 250ms;
-  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
   --press-scale: 0.98;
+  --press-opacity: 0.8; /* a pressed button, tile, card or row dims as it sinks (#682) */
+
+  /* The display size (docs/ui-rules.md rule 8): the one key amount of a screen, such as a sale's total, 40px on a phone to 56px. */
+  --text-display: clamp(2.5rem, 2rem + 2.5vw, 3.5rem);
+  --weight-display: var(--weight-semibold);
 }
 
 /*
@@ -252,6 +323,7 @@ body {
   --color-danger: #f97066;
   --color-danger-tint: #3b1614;
   --color-danger-fill: #d92d20;
+  --color-on-danger: #ffffff;
   --color-success: #47cd89;
   --color-success-tint: #0f2c1e;
   --color-warning: #fdb022;
@@ -260,6 +332,7 @@ body {
   --color-neutral-tint: #222c39;
   --color-inverse: #e8edf3;
   --color-on-inverse: #0e141b;
+  --color-toast: #2a3442;
   --color-logo-plate: #ffffff;
   --color-hover: #1b2430;
   --viz-1-value: var(--rt-viz-blue-dark);

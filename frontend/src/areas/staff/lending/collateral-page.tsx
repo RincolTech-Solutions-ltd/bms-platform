@@ -7,30 +7,35 @@ import { useCollateralApi } from '../../../api/lending-context';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
+import { sayDone } from '../retail/toast';
 import {
   blankValuation, canRequestRelease, custodyBadge, custodyWords, eventBody, eventProblems, EVENT_WORDS, eventsFrom, ownerWords, typeWords,
   valuationBody, valuationProblems, type EventType,
 } from './collateral-state';
 import { Group, SaveBar, SelectField, TextField, useFormErrors } from './form-fields';
-import { localDate, money } from './loan-state';
+import { FieldsNeededNote } from '../../../app/ui/Field';
+import { businessToday } from '../../../api/retail';
+import { currencyOf, money } from './loan-state';
+import { exponentOf } from '../../../components/money';
 import { mayManageCollateral, mayReleaseCollateral } from './member-permissions';
 import { CollateralGate } from './member-ui';
 import { PhotoQueueControl, usePhotoQueue, type Sender } from './photo-queue';
 import { SaveGuardNotice, useSaveGuard } from './save-guard';
+import { BusyButton } from '../../../app/ui/BusyButton';
 
 // One collateral item (FR-COL-01 to FR-COL-04): the facts, the photos and scans, valuations over time, the custody history
 // with the changes that are allowed from where the item is now, and the request to give it back. Giving an item back is not
 // done on this screen: this screen sends the request, and a second person agrees or refuses it in the approvals inbox
 // (the maker-checker action collateral_release, FR-COL-04). Nothing here is final until they do.
 
-function Facts({ c }: { c: CollateralItem }) {
+function Facts({ c, currency }: { c: CollateralItem; currency?: string }) {
   return (
     <dl className="ln-facts">
       <dt>Kind</dt><dd>{typeWords(c.collateral_type)}</dd>
       {c.reference_no && (<><dt>Reference</dt><dd>{c.reference_no}</dd></>)}
       <dt>Owner</dt><dd>{c.owner_name ?? ownerWords(c.owner_relationship)}{c.owner_name ? ` (${ownerWords(c.owner_relationship).toLowerCase()})` : ''}</dd>
-      <dt>Your estimate</dt><dd>{c.estimated_value_minor != null ? money(c.estimated_value_minor, c.currency) : 'None'}</dd>
-      <dt>Value used for loan cover</dt><dd className="ln-strong">{c.collateral_value_minor != null ? money(c.collateral_value_minor, c.currency) : 'None yet'}</dd>
+      <dt>Your estimate</dt><dd>{c.estimated_value_minor != null ? money(c.estimated_value_minor, currency) : 'None'}</dd>
+      <dt>Value used for loan cover</dt><dd className="ln-strong">{c.collateral_value_minor != null ? money(c.collateral_value_minor, currency) : 'None yet'}</dd>
       {c.storage_location && (<><dt>Kept at</dt><dd>{c.storage_location}</dd></>)}
     </dl>
   );
@@ -47,17 +52,21 @@ function Photos({ id, canAdd }: { id: string; canAdd: boolean }) {
   const docs = useQuery({ queryKey: ['collateral', 'documents', id], queryFn: () => api.listDocuments(id) });
   const queue = usePhotoQueue();
   const [error, setError] = useState<string | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
   const sender: Sender<unknown> = async (p, o) => {
     const out = await api.uploadDocument(id, p.blob, p.fileName, o);
     void queryClient.invalidateQueries({ queryKey: ['collateral', 'documents', id] });
     return out;
   };
   const open = async (documentId: string) => {
+    setOpening(documentId);
     setError(null);
     try {
       await openInNewTab(() => api.documentUrl(documentId));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The file could not be opened.');
+    } finally {
+      setOpening(null);
     }
   };
   const items = docs.data ?? [];
@@ -73,7 +82,7 @@ function Photos({ id, canAdd }: { id: string; canAdd: boolean }) {
           <li key={d.document_id} className="rt-card cluster">
             <span>Photo or scan {i + 1}</span>
             <span className="hint">{d.created_at ? d.created_at.slice(0, 10) : ''}</span>
-            <button type="button" className="btn-sm" aria-label={`Open photo or scan ${i + 1}`} onClick={() => void open(d.document_id ?? '')}>Open</button>
+            <BusyButton busy={opening === (d.document_id ?? '')} type="button" className="btn-sm" aria-label={`Open photo or scan ${i + 1}`} onClick={() => void open(d.document_id ?? '')}>Open</BusyButton>
           </li>
         ))}
       </ul>
@@ -85,16 +94,17 @@ function Photos({ id, canAdd }: { id: string; canAdd: boolean }) {
 function Valuations({ id, currency, valuations, canAdd }: { id: string; currency?: string; valuations: { id?: string; valued_on?: string; valuer_name?: string; market_value_minor?: number; forced_sale_value_minor?: number; note?: string }[]; canAdd: boolean }) {
   const api = useCollateralApi();
   const queryClient = useQueryClient();
-  const today = localDate();
+  const today = businessToday();
   const [open, setOpen] = useState(false);
   const [d, setD] = useState(blankValuation(today));
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const form = useFormErrors(valuationProblems(d, today), 'cv');
+  const unit = currencyOf(currency);
+  const form = useFormErrors(valuationProblems(d, today, unit), 'cv');
   const guard = useSaveGuard<unknown>();
   /** A valuation of the same day and market value already on the item. Rejects when the look itself fails. */
   const lookUp = async (): Promise<unknown | null> => {
-    const body = valuationBody(d);
+    const body = valuationBody(d, unit);
     return (await api.get(id)).valuations?.find((v) => v.valued_on === body.valued_on && v.market_value_minor === body.market_value_minor) ?? null;
   };
   const ORDER = ['valued_on', 'market_value_minor', 'forced_sale_value_minor'];
@@ -104,7 +114,8 @@ function Valuations({ id, currency, valuations, canAdd }: { id: string; currency
     setBusy(true);
     setFailure(null);
     try {
-      await api.addValuation(id, valuationBody(d));
+      await api.addValuation(id, valuationBody(d, unit));
+      sayDone('Valuation saved');
       void queryClient.invalidateQueries({ queryKey: ['collateral'] });
       setOpen(false);
       setD(blankValuation(today));
@@ -133,17 +144,18 @@ function Valuations({ id, currency, valuations, canAdd }: { id: string; currency
       {canAdd && !open && <button type="button" className="btn-block" onClick={() => setOpen(true)}>Add a valuation</button>}
       {open && (
         <form onSubmit={(e) => void submit(e)} noValidate aria-label="Add a valuation" className="mf">
+          <FieldsNeededNote />
           <Group title="Add a valuation">
             <TextField name="valued_on" label="Date of the valuation" form={form} required type="date" value={d.valuedOn} onChange={(v) => setD((x) => ({ ...x, valuedOn: v }))} max={today} />
             <TextField name="valuer" label="Who valued it" form={form} value={d.valuer} onChange={(v) => setD((x) => ({ ...x, valuer: v }))} maxLength={200} />
-            <TextField name="market_value_minor" label="Market value (UGX)" form={form} required inputMode="numeric" value={d.market} onChange={(v) => setD((x) => ({ ...x, market: v }))} />
-            <TextField name="forced_sale_value_minor" label="Value in a quick sale (UGX, if known)" form={form} inputMode="numeric" value={d.forcedSale} onChange={(v) => setD((x) => ({ ...x, forcedSale: v }))}
+            <TextField name="market_value_minor" label={`Market value (${unit})`} form={form} required inputMode={exponentOf(unit) ? 'decimal' : 'numeric'} value={d.market} onChange={(v) => setD((x) => ({ ...x, market: v }))} />
+            <TextField name="forced_sale_value_minor" label={`Value in a quick sale (${unit}, if known)`} form={form} inputMode={exponentOf(unit) ? 'decimal' : 'numeric'} value={d.forcedSale} onChange={(v) => setD((x) => ({ ...x, forcedSale: v }))}
               hint="When given, this is the value used for loan cover." />
             <TextField name="note" label="Note" form={form} type="textarea" value={d.note} onChange={(v) => setD((x) => ({ ...x, note: v }))} maxLength={1000} />
           </Group>
           <SaveGuardNotice guard={guard} what="valuation" found={() => <button type="button" className="btn-sm" onClick={() => { setOpen(false); void queryClient.invalidateQueries({ queryKey: ['collateral'] }); guard.release(); }}>Close</button>} />
           <Problem error={failure ? new Error(failure) : null} />
-          <SaveBar label="Save valuation" busyLabel="Saving" busy={busy} blocked={guard.blocked ? 'Wait for the check above before saving again.' : undefined} cancel={<button type="button" className="btn btn-ghost" onClick={() => setOpen(false)}>Cancel</button>} />
+          <SaveBar label="Save valuation" busy={busy} blocked={guard.blocked ? 'Wait for the check above before saving again.' : undefined} cancel={<button type="button" className="btn btn-ghost" onClick={() => setOpen(false)}>Cancel</button>} />
         </form>
       )}
     </section>
@@ -169,6 +181,7 @@ function CustodyChange({ id, version, custody, onDone }: { id: string; version: 
     setFailure(null);
     try {
       await api.recordEvent(id, version, eventBody(type, location, counterparty, note));
+      sayDone('Change recorded');
       void queryClient.invalidateQueries({ queryKey: ['collateral'] });
       onDone();
     } catch (raw) {
@@ -181,14 +194,15 @@ function CustodyChange({ id, version, custody, onDone }: { id: string; version: 
   }
   return (
     <form onSubmit={(e) => void submit(e)} noValidate aria-label="Record a change" className="mf">
+      {(type === 'received_into_custody' || type === 'moved' || type === 'note') && <FieldsNeededNote />}
       <Group title="Record a change">
-        <SelectField name="event_type" label="What happened" form={form} value={type} onChange={(v) => setType(v as EventType)} options={options.map((o) => ({ value: o, label: EVENT_WORDS[o] }))} />
+        <SelectField /* empty: eventsFrom always offers a note at least. */ name="event_type" label="What happened" form={form} value={type} onChange={(v) => setType(v as EventType)} options={options.map((o) => ({ value: o, label: EVENT_WORDS[o] }))} />
         {(type === 'received_into_custody' || type === 'moved') && <TextField name="location" label="Where it is kept now" form={form} required value={location} onChange={setLocation} maxLength={200} />}
         {(type === 'seized' || type === 'disposed') && <TextField name="counterparty" label="Who took it or bought it (if any)" form={form} value={counterparty} onChange={setCounterparty} maxLength={200} />}
         <TextField name="note" label="Note" form={form} required={type === 'note'} type="textarea" value={note} onChange={setNote} maxLength={1000} />
       </Group>
       <Problem error={failure ? new Error(failure) : null} />
-      <SaveBar label="Save" busyLabel="Saving" busy={busy} cancel={<button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button>} />
+      <SaveBar label="Save" busy={busy} cancel={<button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button>} />
     </form>
   );
 }
@@ -204,6 +218,7 @@ function ReleaseRequest({ id, version, onDone }: { id: string; version: number; 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (busy || by.trim() === '') return;
+    // toast-exempt: success screen, the request sent screen replaces the form
     setBusy(true);
     setFailure(null);
     try {
@@ -234,7 +249,7 @@ function ReleaseRequest({ id, version, onDone }: { id: string; version: number; 
         <p className="field-hint">A loan that this item secures must be closed first. A second person agrees in the approvals inbox.</p>
       </Group>
       <Problem error={failure ? new Error(failure) : null} />
-      <SaveBar label="Send the request" busyLabel="Sending" busy={busy} blocked={by.trim() === '' ? 'Say who is collecting it.' : undefined}
+      <SaveBar label="Send the request" busy={busy} blocked={by.trim() === '' ? 'Say who is collecting it.' : undefined}
         cancel={<button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button>} />
     </form>
   );
@@ -244,13 +259,15 @@ export function CollateralView({ detail, collateralId }: { detail: CollateralDet
   const { me } = useStaff();
   const [panel, setPanel] = useState<'change' | 'release' | null>(null);
   const c: CollateralItem = detail.item ?? {};
+  // The item's own currency, else the business's (issue #289), never UGX by default.
+  const currency = c.currency ?? me.tenant_currency;
   const manage = mayManageCollateral(me, c.branch_id);
   const release = mayReleaseCollateral(me, c.branch_id) && canRequestRelease(c.custody_status);
   return (
     <>
       <section className="rt-card ln-head" aria-label="Item" data-tour="collateral-header">
         <p className="ln-item-head"><strong>{typeWords(c.collateral_type)}</strong><span className={custodyBadge(c.custody_status)}>{custodyWords(c.custody_status)}</span></p>
-        <Facts c={c} />
+        <Facts c={c} currency={currency} />
         <p className="cluster" data-tour="collateral-actions">
           {c.member_id && <Link to="/staff/lending/members/$memberId" params={{ memberId: c.member_id }} className="btn btn-ghost">Open the member</Link>}
           {manage && <Link to="/staff/lending/collateral/$collateralId/edit" params={{ collateralId }} className="btn rt-primary">Change details</Link>}
@@ -261,7 +278,7 @@ export function CollateralView({ detail, collateralId }: { detail: CollateralDet
         {panel === 'release' && <ReleaseRequest id={collateralId} version={c.version ?? 0} onDone={() => setPanel(null)} />}
       </section>
       <Photos id={collateralId} canAdd={manage} />
-      <Valuations id={collateralId} currency={c.currency} valuations={detail.valuations ?? []} canAdd={manage && c.custody_status !== 'disposed'} />
+      <Valuations id={collateralId} currency={currency} valuations={detail.valuations ?? []} canAdd={manage && c.custody_status !== 'disposed'} />
       <section className="rt-card stack" aria-labelledby="col-hist" data-tour="collateral-history">
         <h2 id="col-hist">History</h2>
         {(detail.events ?? []).length === 0 && <p className="empty-state">No changes recorded yet.</p>}

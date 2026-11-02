@@ -1,5 +1,7 @@
 import type { Business, Plan, PlanPrice, SavePlanRequest, SubscriptionStatus } from '../../api/operator';
+import { RETAIL_ZONE, businessToday } from '../../api/retail';
 import { formatMinor, parseMinor } from '../../components/money';
+import { PROFILE_NAMES, profileName, type Profile } from '../staff/retail/capabilities-state';
 
 // The rules and the plain words of the operator screens (issue #407), kept apart from the screens so they are tested without a
 // browser: what each status means, what the subscription line says, what an action will do before the operator confirms it, the
@@ -54,6 +56,17 @@ export function moduleLabel(key: string): string {
   return MODULES.find((m) => m.key === key)?.label ?? key;
 }
 
+/**
+ * The kind of business its administrator chose in Retail settings (issue #424, ADR-092), in the words the business reads; one that
+ * never chose is Shops only, the default. Null for a business without the shop module, which has no kind.
+ */
+export function businessTypeLabel(b: { modules?: string[]; business_type?: string | null }): string | null {
+  if (!(b.modules ?? []).includes('retail')) return null;
+  // The server sends the kind already read through the retail group; a value it does not know is shown as it is, never guessed.
+  if (!b.business_type) return `${profileName(null)} (not chosen yet)`;
+  return PROFILE_NAMES[b.business_type as Profile] ?? b.business_type;
+}
+
 // ---- dates ------------------------------------------------------------------------------------------
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -65,7 +78,7 @@ function parts(day: string): [number, number, number] {
 
 function iso(y: number, m: number, d: number): string {
   const date = new Date(Date.UTC(y, m - 1, d));
-  return date.toISOString().slice(0, 10);
+  return date.toISOString().slice(0, 10); // business-day-ok: a calendar sum on a UTC midnight
 }
 
 /** 21 Oct 2026. */
@@ -90,9 +103,9 @@ export function formatMoment(at: string | null | undefined): string {
   return local.replace(',', '');
 }
 
-/** Today in Kampala, as YYYY-MM-DD. */
+/** Today in Kampala, as YYYY-MM-DD: the one business date helper (issue #667). */
 export function todayInKampala(now: Date = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Kampala', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  return businessToday(now, RETAIL_ZONE);
 }
 
 export function addDays(day: string, days: number): string {
@@ -394,6 +407,9 @@ export function actionSentence(action: Action, b: Business, value?: string, plan
       return `Change the modules of ${name} to ${value || 'none'}? A module switched off is hidden from its staff; its data is kept and comes back when it is switched on.`;
   }
 }
+
+/** What a confirm says when the operator's own code is missing or not 6 digits. */
+export const CODE_PROBLEM = 'Type the 6 digit code from your own authenticator app.';
 
 export function reasonProblem(reason: string): string | undefined {
   const t = reason.trim();

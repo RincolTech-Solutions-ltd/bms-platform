@@ -1,4 +1,5 @@
 import type { ActivateRequest, ApplicationDetail, SignUpRequest } from '../../api/onboarding';
+import { shortNameProblem } from './short-name';
 
 // Form state and checks for the sign-up page and the Activate form (spec sections 4 and 10). The
 // server checks everything again; these give plain-words feedback before a request is sent.
@@ -12,7 +13,7 @@ export const COUNTRIES = [
 
 /** The module keys the API knows (the vertical manifests), with plain descriptions. */
 export const MODULES = [
-  { key: 'retail', label: 'Shop: sales, stock and restocking' },
+  { key: 'retail', label: 'Shop: sales, stock and buying stock' },
   { key: 'lending', label: 'Lending: members, loans and savings' },
 ] as const;
 
@@ -28,6 +29,10 @@ export const WAYS_IN = [
 
 export interface SignUpForm {
   business_name: string;
+  /** The shop's town or area, for short name suggestions (ADR-108). */
+  town: string;
+  /** The short name of the shop's link, rincoltech.com/<short name>, which is also its address (ADR-108). */
+  short_name: string;
   contact_name: string;
   contact_email: string;
   contact_phone: string;
@@ -36,6 +41,8 @@ export interface SignUpForm {
   term: string;
   way_in: string;
   agent_code: string;
+  /** The code of the business that referred the applicant, from the link's ?ref= or typed (ADR-069). */
+  referral_code: string;
   message: string;
   /** The hidden field: people never see it, so it stays empty. */
   website: string;
@@ -43,6 +50,8 @@ export interface SignUpForm {
 
 export const EMPTY_SIGN_UP: SignUpForm = {
   business_name: '',
+  town: '',
+  short_name: '',
   contact_name: '',
   contact_email: '',
   contact_phone: '',
@@ -51,6 +60,7 @@ export const EMPTY_SIGN_UP: SignUpForm = {
   term: 'monthly',
   way_in: 'trial',
   agent_code: '',
+  referral_code: '',
   message: '',
   website: '',
 };
@@ -61,11 +71,15 @@ export type Problems = Partial<Record<string, string>>;
 const EMAIL = /^[\x21-\x3F\x41-\x7E]+@[\x21-\x3F\x41-\x7E]+\.[\x21-\x3F\x41-\x7E]+$/;
 const PHONE = /^\+?[0-9 ()-]{9,20}$/;
 const AGENT = /^[A-Za-z0-9-]*$/;
+const REFERRAL = /^[A-Za-z0-9]{4,10}$/;
 
 export function signUpProblems(form: SignUpForm): Problems {
   const problems: Problems = {};
   if (form.business_name.trim().length < 2) problems.business_name = 'Enter the name of the business.';
   if (form.business_name.length > 200) problems.business_name = 'Use at most 200 characters.';
+  const shortName = shortNameProblem(form.short_name);
+  if (shortName) problems.short_name = shortName;
+  if (form.town.length > 100) problems.town = 'Use at most 100 characters.';
   if (form.contact_name.trim().length < 2) problems.contact_name = 'Enter your name.';
   if (form.contact_name.length > 200) problems.contact_name = 'Use at most 200 characters.';
   if (!EMAIL.test(form.contact_email.trim()) || form.contact_email.length > 254) {
@@ -76,6 +90,9 @@ export function signUpProblems(form: SignUpForm): Problems {
   if (!AGENT.test(form.agent_code) || form.agent_code.length > 40) {
     problems.agent_code = 'Letters, digits and hyphens only.';
   }
+  if (form.referral_code.trim() !== '' && !REFERRAL.test(form.referral_code.trim())) {
+    problems.referral_code = 'A referral code is 4 to 10 letters and digits, for example TDUKA7K. Check it, or leave it empty.';
+  }
   if (form.message.length > 1000) problems.message = 'Use at most 1000 characters.';
   return problems;
 }
@@ -83,6 +100,8 @@ export function signUpProblems(form: SignUpForm): Problems {
 export function toSignUpRequest(form: SignUpForm): SignUpRequest {
   return {
     business_name: form.business_name.trim(),
+    short_name: form.short_name.trim().toLowerCase(),
+    town: form.town.trim() || undefined,
     contact_name: form.contact_name.trim(),
     contact_email: form.contact_email.trim(),
     contact_phone: form.contact_phone.trim(),
@@ -91,9 +110,19 @@ export function toSignUpRequest(form: SignUpForm): SignUpRequest {
     term: form.term,
     way_in: form.way_in,
     agent_code: form.agent_code.trim() || undefined,
+    referral_code: form.referral_code.trim().toUpperCase() || undefined,
     message: form.message.trim() || undefined,
     website: form.website || undefined,
   };
+}
+
+/**
+ * The code in a referral link, `/sign-up?ref=TDUKA7K` (ADR-069): letters and digits only, in upper case, or empty for none or a
+ * malformed one (the applicant can still type it).
+ */
+export function referralCodeFrom(search: string): string {
+  const code = (new URLSearchParams(search).get('ref') ?? '').trim().toUpperCase();
+  return REFERRAL.test(code) ? code : '';
 }
 
 /** The token of an emailed link: in the fragment (#token=...), which never reaches a server log. */

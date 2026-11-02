@@ -2,28 +2,34 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { type StockMinimum, type StockMinimumBranch, parseLevel, showLevel, stockMinimumApi } from '../../../api/stock-minimum';
 import { Problem } from './ui';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { HelpTip } from '../../../app/ui/HelpTip';
 
 // "Warn me when stock is below" on an item's page (issue #412, ADR-057). One level for every shop and store, and a different one for a
 // chosen shop or store. With no level an item is still watched by the pace it sells at (lead days of cover), so nothing goes silent;
 // the low-stock notification and the Stock health page use both rules, whichever trips first. Each size or colour of an item is its
 // own product and has its own level. Not a nested form: the item form around it saves separately.
 
+/** The toast of a level saved or taken off (issue #682): the level when one is set. */
+export function levelWords(_next: unknown, qty: string | null): string {
+  return qty === null ? 'Level removed' : `Level set to ${showLevel(qty)}`;
+}
+
 export function StockMinimumEditor({ productId, unit }: { productId: string; unit?: string }) {
   const queryClient = useQueryClient();
   const key = ['retail', 'stock-minimum', productId];
   const level = useQuery({ queryKey: key, queryFn: () => stockMinimumApi.get(productId) });
   const [every, setEvery] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const done = (next: StockMinimum, words: string) => {
+  const done = (next: StockMinimum) => {
     queryClient.setQueryData(key, next);
-    setMessage(words);
   };
   const saveEvery = useMutation({
     mutationFn: (qty: string | null) => stockMinimumApi.setEveryBranch(productId, qty),
-    onSuccess: (next, qty) => {
+    onSuccess: (next) => {
       setEvery(null);
-      done(next, qty === null ? 'No level for every branch now.' : `Every shop and store warns below ${showLevel(qty)}.`);
+      done(next);
     },
+    meta: { success: levelWords },
   });
   if (level.isPending) return <p className="loading">Loading</p>;
   if (!level.data) return <Problem error={level.error} />;
@@ -32,8 +38,8 @@ export function StockMinimumEditor({ productId, unit }: { productId: string; uni
   const parsed = parseLevel(typed);
   const per = unit ? ` ${unit}` : '';
   return (
-    <fieldset className="stack" data-tour="stock-minimum">
-      <legend>Warn me when stock is below</legend>
+    <fieldset className="stack" data-tour="stock-minimum" aria-labelledby={`min-legend-${productId}`}>
+      <legend><span id={`min-legend-${productId}`}>Warn me when stock is below</span> <HelpTip tip="lowStockLevel" /></legend>
       <p className="hint">
         You are told when this item falls below the level at a shop or store. Without a level, you are still told when it would run out within{' '}
         {data.lead_days ?? 14} days at the pace it sells.
@@ -49,13 +55,13 @@ export function StockMinimumEditor({ productId, unit }: { productId: string; uni
             aria-invalid={typed.trim() !== '' && parsed === null}
             autoComplete="off"
           />
-          <button type="button" className="btn-sm" disabled={saveEvery.isPending || parsed === null || parsed === showLevel(data.min_qty)} onClick={() => saveEvery.mutate(parsed)}>
+          <BusyButton type="button" className="btn-sm" busy={saveEvery.isPending && saveEvery.variables !== null} disabled={saveEvery.isPending || parsed === null || parsed === showLevel(data.min_qty)} onClick={() => saveEvery.mutate(parsed)}>
             Save
-          </button>
+          </BusyButton>
           {data.min_qty && (
-            <button type="button" className="btn-ghost btn-sm" disabled={saveEvery.isPending} onClick={() => saveEvery.mutate(null)}>
+            <BusyButton type="button" className="btn-ghost btn-sm" busy={saveEvery.isPending && saveEvery.variables === null} disabled={saveEvery.isPending} onClick={() => saveEvery.mutate(null)}>
               Remove
-            </button>
+            </BusyButton>
           )}
         </div>
       ) : (
@@ -69,22 +75,22 @@ export function StockMinimumEditor({ productId, unit }: { productId: string; uni
           ))}
         </ul>
       )}
-      {message && <p role="status">{message}</p>}
     </fieldset>
   );
 }
 
-function BranchLevel({ productId, branch, per, onSaved }: { productId: string; branch: StockMinimumBranch; per: string; onSaved: (next: StockMinimum, words: string) => void }) {
+function BranchLevel({ productId, branch, per, onSaved }: { productId: string; branch: StockMinimumBranch; per: string; onSaved: (next: StockMinimum) => void }) {
   const [typed, setTyped] = useState<string | null>(null);
   const shown = typed ?? showLevel(branch.min_qty);
   const parsed = parseLevel(shown);
   const name = `${branch.branch_name ?? ''}${branch.store ? ' (store)' : ''}`;
   const save = useMutation({
     mutationFn: (qty: string | null) => stockMinimumApi.setBranch(productId, branch.branch_id ?? '', qty),
-    onSuccess: (next, qty) => {
+    onSuccess: (next) => {
       setTyped(null);
-      onSaved(next, qty === null ? `${name} follows the level for every branch now.` : `${name} warns below ${showLevel(qty)}.`);
+      onSaved(next);
     },
+    meta: { success: levelWords },
   });
   const applies = branch.applies_qty ? `warns below ${showLevel(branch.applies_qty)}${per}` : 'no level, watched by its pace';
   return (
@@ -104,13 +110,14 @@ function BranchLevel({ productId, branch, per, onSaved }: { productId: string; b
             aria-invalid={shown.trim() !== '' && parsed === null}
             autoComplete="off"
           />
-          <button type="button" className="btn-sm" disabled={save.isPending || parsed === null || parsed === showLevel(branch.min_qty)} onClick={() => save.mutate(parsed)}>
+          <BusyButton type="button" className="btn-sm" busy={save.isPending && save.variables !== null} disabled={save.isPending || parsed === null || parsed === showLevel(branch.min_qty)} onClick={() => save.mutate(parsed)}>
             Save
-          </button>
+          </BusyButton>
           {branch.min_qty && (
-            <button type="button" className="btn-ghost btn-sm" disabled={save.isPending} onClick={() => save.mutate(null)}>
+            <BusyButton type="button" className="btn-ghost btn-sm" busy={save.isPending && save.variables === null} disabled={save.isPending} onClick={() => save.mutate(null)}>
               Use the level for every branch
-            </button>
+            </BusyButton>
+
           )}
         </div>
       )}

@@ -34,10 +34,21 @@ export function milliOf(text: string): number {
   return negative ? -magnitude : magnitude;
 }
 
-/** unit price times quantity in integer minor units, rounded half up, exact via BigInt. */
+/**
+ * Issue #629: a count that takes an item holding stock to 0, or to less than half of what it held, is the likely slip of a
+ * tap (a 0 meant for the next line). It asks before it is committed; a count that keeps half or more stays as it is. The one
+ * rule of the screen and the mock; the server's StockService.bigDrop is pinned to it by the cases of maths.test.ts (#636).
+ */
+export function bigDrop(l: { expected_qty?: string; counted_qty?: string }): boolean {
+  const expected = milliOf(l.expected_qty ?? '0');
+  return expected > 0 && milliOf(l.counted_qty ?? '0') * 2 < expected;
+}
+
+/** unit price times quantity in integer minor units, rounded half up (away from zero, as the server's HALF_UP), exact via BigInt. */
 export function lineTotalMinor(unitPriceMinor: number, qtyMilli: number): number {
   const product = BigInt(unitPriceMinor) * BigInt(qtyMilli);
-  return Number((product + 500n) / 1000n);
+  // BigInt division truncates toward zero, so a negative quantity (stock below zero) rounds with the half taken off.
+  return Number((product + (product < 0n ? -500n : 500n)) / 1000n);
 }
 
 /** Basis points as a percentage for people: 4872 is "48.72%", 5000 is "50%"; "n/a" when there is none. */
@@ -49,10 +60,5 @@ export function showPercent(bp: number | null | undefined): string {
   return `${bp < 0 ? '-' : ''}${whole}${frac ? `.${frac}` : ''}%`;
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-/** "6 Oct 2026" from "2026-10-06": no hyphen for a narrow row to break at, and no timezone shift. */
-export function showDate(iso: string | undefined): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso ?? '');
-  return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1] ?? m[2]} ${m[1]}` : (iso ?? '');
-}
+// The one date formatter lives with the period picker of the kit (issue #526); the retail screens import it from here as before.
+export { showDate } from '../../../app/ui/PeriodPicker';

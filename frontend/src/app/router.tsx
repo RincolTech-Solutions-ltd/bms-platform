@@ -3,6 +3,8 @@ import { useShellBrand } from './branding';
 import { Landing } from './landing';
 import { RefreshButton } from './refresh-button';
 import { Shell } from './shell';
+import { RouteError } from './stale-app';
+import { WORDS } from './glossary';
 
 // Route-level split (ADR-009): /staff and /member are separate lazily loaded route trees, so a
 // member never downloads staff code; sign-in and invitation acceptance are small chunks of their
@@ -11,18 +13,31 @@ import { Shell } from './shell';
 
 // The root layout is the shared shell (brand bar, theme colour, Powered-by footer): every route
 // below it inherits it, so no area draws its own.
-// The header controls show where there is data to refresh: the staff, member and operator areas, not the public pages.
+// The header controls show where there is data to refresh: the member and operator areas, not the public pages.
 // The operator sign-in and first-run setup sit under /platform but are plain forms with no data, so they get no button.
 const DATA_AREA = /^\/(staff|member|platform)(\/|$)/;
 const NO_DATA = /^\/platform\/(sign-in|setup)\/?$/;
 
-/** Whether the header shows the refresh button on `pathname`. */
-export const showsRefresh = (pathname: string) => DATA_AREA.test(pathname) && !NO_DATA.test(pathname);
+// The staff area draws its own one top bar, which holds Refresh beside Search (issue #631); the Powered-by footer shows there only
+// on More and the settings pages, so a working screen ends at its content.
+const STAFF = /^\/staff(\/|$)/;
+const STAFF_FOOTER = /^\/staff\/(more|setup|retail\/settings)\/?$/;
+
+/** Whether the shell's brand bar shows the refresh button on `pathname`. */
+export const showsRefresh = (pathname: string) => DATA_AREA.test(pathname) && !NO_DATA.test(pathname) && !STAFF.test(pathname);
+
+/** Whether the shell draws the Powered-by footer on `pathname`. */
+export const showsFooter = (pathname: string) => !STAFF.test(pathname) || STAFF_FOOTER.test(pathname);
 
 function RootLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   return (
-    <Shell brand={useShellBrand()} actions={showsRefresh(pathname) ? <RefreshButton key={pathname} /> : undefined}>
+    <Shell
+      brand={useShellBrand()}
+      actions={showsRefresh(pathname) ? <RefreshButton key={pathname} /> : undefined}
+      bar={!STAFF.test(pathname)}
+      footer={showsFooter(pathname)}
+    >
       <Outlet />
     </Shell>
   );
@@ -73,9 +88,37 @@ const staffBranchesRoute = createRoute({ getParentRoute: () => staffRoute, path:
 const staffTwoStepPolicyRoute = createRoute({ getParentRoute: () => staffRoute, path: '/setup/two-step', staticData: { crumb: 'Two-step sign-in' } }).lazy(() =>
   import('../areas/staff/two-step/page').then((m) => m.Route),
 );
+// Approval rules (issue #343, ADR-091): which actions need an administrator first, and from what amount. Under Business set-up.
+const staffApprovalRulesRoute = createRoute({ getParentRoute: () => staffRoute, path: '/setup/approvals', staticData: { crumb: 'Approval rules' } }).lazy(() =>
+  import('../areas/staff/approval-rules/page').then((m) => m.Route),
+);
 // What the business sends by push and when the daily summary goes (issue #412). Under Business set-up in the trail.
 const staffBusinessNotificationsRoute = createRoute({ getParentRoute: () => staffRoute, path: '/setup/notifications', staticData: { crumb: 'Notifications for the business' } }).lazy(() =>
   import('../areas/staff/notifications/business').then((m) => m.Route),
+);
+// Plan and billing (issue #480, ADR-075): the plan, what is paid, how to pay and the receipts. Under Business set-up in the trail.
+const staffBillingRoute = createRoute({ getParentRoute: () => staffRoute, path: '/setup/billing', staticData: { crumb: 'Plan and billing' } }).lazy(() =>
+  import('../areas/staff/billing/page').then((m) => m.Route),
+);
+// Close the business (issue #571, ADR-090): the Owner's request, its review step and its cancel. Under Business set-up in the trail.
+const staffCloseRoute = createRoute({ getParentRoute: () => staffRoute, path: '/setup/close', staticData: { crumb: 'Close the business' } }).lazy(() =>
+  import('../areas/staff/close/page').then((m) => m.Route),
+);
+// Referrals (issue #464, ADR-069): the business's own link to the sign-up and the businesses it referred. Under Business set-up.
+const staffReferralsRoute = createRoute({ getParentRoute: () => staffRoute, path: '/setup/referrals', staticData: { crumb: 'Referrals' } }).lazy(() =>
+  import('../areas/staff/referrals/page').then((m) => m.Route),
+);
+// The Money and More pages of the phone's bottom tabs (issue #539).
+const staffMoneyRoute = createRoute({ getParentRoute: () => staffRoute, path: '/money', staticData: { crumb: 'Money' } }).lazy(() =>
+  import('../areas/staff/tab-pages').then((m) => m.MoneyRoute),
+);
+const staffMoreRoute = createRoute({ getParentRoute: () => staffRoute, path: '/more', staticData: { crumb: 'More' } }).lazy(() =>
+  import('../areas/staff/tab-pages').then((m) => m.MoreRoute),
+);
+
+// The component kit (#520): administrators only, not in the menu.
+const staffKitRoute = createRoute({ getParentRoute: () => staffRoute, path: '/kit', staticData: { crumb: 'Component kit' } }).lazy(() =>
+  import('../areas/staff/kit/page').then((m) => m.Route),
 );
 const staffOwnTwoStepRoute = createRoute({ getParentRoute: () => staffRoute, path: '/two-step', staticData: { crumb: 'Your two-step sign-in' } }).lazy(() =>
   import('../areas/staff/two-step/own').then((m) => m.Route),
@@ -83,20 +126,29 @@ const staffOwnTwoStepRoute = createRoute({ getParentRoute: () => staffRoute, pat
 
 const staffRetailRoute = createRoute({ getParentRoute: () => staffRoute, path: '/retail', component: Outlet, staticData: { crumb: 'Retail' } });
 
-const retailScreen = <P extends string>(path: P, crumb?: string) => createRoute({ getParentRoute: () => staffRetailRoute, path, staticData: { crumb } });
+// `search` reads the address's query for a screen that takes one (Quick add's name and Sell's item, issue #632).
+const retailScreen = <P extends string>(path: P, crumb?: string, search?: (s: Record<string, unknown>) => Record<string, string | undefined>) =>
+  createRoute({ getParentRoute: () => staffRetailRoute, path, staticData: { crumb }, ...(search ? { validateSearch: search } : {}) });
+/** The text parameters of the address that a screen reads, each one or nothing. */
+const textParams = (...names: string[]) => (s: Record<string, unknown>) =>
+  Object.fromEntries(names.map((n) => [n, typeof s[n] === 'string' ? s[n] : undefined])) as Record<string, string | undefined>;
 const retailHomeRoute = retailScreen('/').lazy(() => import('../areas/staff/retail/home').then((m) => m.Route));
-const retailSaleRoute = retailScreen('/sale', 'Record a sale').lazy(() => import('../areas/staff/retail/sale').then((m) => m.Route));
+// `item` is the item Quick add just made (issue #632, Sell it) and `branch` where its stock was added: the sale starts with it on there.
+const retailSaleRoute = retailScreen('/sale', 'Record a sale', textParams('item', 'branch')).lazy(() => import('../areas/staff/retail/sale').then((m) => m.Route));
 const retailCreditSalesRoute = retailScreen('/credit-sales', 'Credit sales').lazy(() => import('../areas/staff/retail/sales').then((m) => m.CreditRoute));
 const retailSalesRoute = retailScreen('/sales', 'All sales').lazy(() => import('../areas/staff/retail/sales').then((m) => m.Route));
 // Customer orders with delivery (issue #385): the list by step, one order with its history, and the fees and cancellations report.
 const retailOrdersRoute = retailScreen('/orders', 'Orders').lazy(() => import('../areas/staff/retail/orders').then((m) => m.Route));
 const retailOrderRoute = retailScreen('/orders/$orderId', 'Order').lazy(() => import('../areas/staff/retail/order').then((m) => m.Route));
 const retailOrdersReportRoute = retailScreen('/orders-report', 'Delivery fees and cancellations').lazy(() => import('../areas/staff/retail/orders-report').then((m) => m.Route));
-const retailRestockRoute = retailScreen('/restock', 'Restock').lazy(() => import('../areas/staff/retail/restock').then((m) => m.Route));
-const retailRestocksRoute = retailScreen('/restocks', 'Past restocks').lazy(() => import('../areas/staff/retail/restocks').then((m) => m.Route));
+const retailRestockRoute = retailScreen('/restock', WORDS.buyStock).lazy(() => import('../areas/staff/retail/restock').then((m) => m.Route));
+const retailRestocksRoute = retailScreen('/restocks', WORDS.pastPurchases).lazy(() => import('../areas/staff/retail/restocks').then((m) => m.Route));
 const retailUsageRoute = retailScreen('/usage', 'Usage and damage').lazy(() => import('../areas/staff/retail/usage').then((m) => m.Route));
 const retailStockRoute = retailScreen('/stock', 'Stock').lazy(() => import('../areas/staff/retail/stock').then((m) => m.Route));
-const retailStocktakeRoute = retailScreen('/stocktake', 'Stock-take').lazy(() => import('../areas/staff/retail/stocktake').then((m) => m.Route));
+// Quick add (issue #632): `name` is what Sell's search typed before it found nothing, so the form starts with it.
+const retailQuickAddRoute = retailScreen('/quick-add', 'Quick add', textParams('name')).lazy(() => import('../areas/staff/retail/quick-add').then((m) => m.Route));
+// Count it now (issue #700): `item` is the item just added, put on the sheet ready to type, and `from` the screen it came from.
+const retailStocktakeRoute = retailScreen('/stocktake', WORDS.countStock, textParams('item', 'from', 'finish')).lazy(() => import('../areas/staff/retail/stocktake').then((m) => m.Route));
 const retailTransferRoute = retailScreen('/transfer', 'Move stock').lazy(() => import('../areas/staff/retail/transfer').then((m) => m.Route));
 const retailTransfersRoute = retailScreen('/transfers', 'Stock moves').lazy(() => import('../areas/staff/retail/transfers').then((m) => m.Route));
 const retailStockByLocationRoute = retailScreen('/stock-by-location', 'Stores and shops').lazy(() => import('../areas/staff/retail/stock-by-location').then((m) => m.Route));
@@ -113,13 +165,19 @@ const retailCatalogueRoute = retailScreen('/catalogue', 'Catalogue').lazy(() => 
 const retailProductsRoute = retailScreen('/catalogue/products', 'Items').lazy(() => import('../areas/staff/retail/catalogue-products').then((m) => m.ProductsRoute));
 // Items with sizes and colours (issue #384): under Items, so the trail reads Catalogue, Items, then the item.
 const retailSizesNewRoute = retailScreen('/catalogue/products/sizes/new', 'Add an item with sizes and colours').lazy(() => import('../areas/staff/retail/catalogue-variants').then((m) => m.NewFamilyRoute));
-const retailSizesJoinRoute = retailScreen('/catalogue/products/sizes/join', 'Join items as sizes').lazy(() => import('../areas/staff/retail/catalogue-variants').then((m) => m.JoinRoute));
+const retailSizesJoinRoute = retailScreen('/catalogue/products/sizes/join', 'Put items together as sizes').lazy(() => import('../areas/staff/retail/catalogue-variants').then((m) => m.JoinRoute));
 const retailSizesRoute = retailScreen('/catalogue/products/sizes/$familyId', 'Sizes and colours').lazy(() => import('../areas/staff/retail/catalogue-family').then((m) => m.FamilyRoute));
 const retailCategoriesRoute = retailScreen('/catalogue/categories', 'Categories').lazy(() => import('../areas/staff/retail/catalogue-lists').then((m) => m.CategoriesRoute));
+// One category with its items and Add an item there (issue #493): under Categories, so the trail reads Catalogue, Categories, then the category.
+const retailCategoryRoute = retailScreen('/catalogue/categories/$categoryId', 'Category').lazy(() => import('../areas/staff/retail/catalogue-category').then((m) => m.CategoryRoute));
 const retailUnitsRoute = retailScreen('/catalogue/units', 'Units').lazy(() => import('../areas/staff/retail/catalogue-lists').then((m) => m.UnitsRoute));
 const retailSuppliersRoute = retailScreen('/catalogue/suppliers', 'Suppliers').lazy(() => import('../areas/staff/retail/catalogue-people').then((m) => m.SuppliersRoute));
+// Set up your shop (issue #625): the starting categories, units and packs of a kind of shop, under Catalogue.
+const retailShopSetupRoute = retailScreen('/catalogue/set-up', 'Set up your shop').lazy(() => import('../areas/staff/retail/shop-setup').then((m) => m.ShopSetupRoute));
 const retailImportRoute = retailScreen('/catalogue/import', 'Import items').lazy(() => import('../areas/staff/retail/catalogue-import').then((m) => m.ImportRoute));
-const retailBuyersRoute = retailScreen('/catalogue/buyers', 'Credit buyers').lazy(() => import('../areas/staff/retail/catalogue-people').then((m) => m.BuyersRoute));
+// Barcode labels (issue #345): an A4 sheet of labels with the name, the price and the barcode.
+const retailLabelsRoute = retailScreen('/catalogue/labels', 'Barcode labels').lazy(() => import('../areas/staff/retail/labels').then((m) => m.LabelsRoute));
+const retailBuyersRoute = retailScreen('/catalogue/buyers', WORDS.customersWhoOwe).lazy(() => import('../areas/staff/retail/catalogue-people').then((m) => m.BuyersRoute));
 const retailBankingRoute = retailScreen('/banking', 'Banking').lazy(() => import('../areas/staff/retail/banking').then((m) => m.Route));
 const retailBankingReportRoute = retailScreen('/banking-report', 'Banking report').lazy(() => import('../areas/staff/retail/banking').then((m) => m.ReportRoute));
 const retailExpensesRoute = retailScreen('/expenses', 'Expenses').lazy(() => import('../areas/staff/retail/expenses').then((m) => m.Route));
@@ -154,9 +212,10 @@ const retailSupplierBillsRoute = retailScreen('/supplier-bills', 'Supplier invoi
 const retailSupplierBillNewRoute = retailScreen('/supplier-bills/new', 'New supplier invoice').lazy(() => import('../areas/staff/retail/supplier-bill-new').then((m) => m.Route));
 const retailSupplierBillRoute = retailScreen('/supplier-bills/$billId', 'Supplier invoice').lazy(() => import('../areas/staff/retail/supplier-bills').then((m) => m.DetailRoute));
 const retailSupplierPaymentsRoute = retailScreen('/supplier-payments', 'Supplier payments').lazy(() => import('../areas/staff/retail/supplier-payments').then((m) => m.Route));
-const retailSupplierPaymentNewRoute = retailScreen('/supplier-payments/new', 'Pay a supplier').lazy(() => import('../areas/staff/retail/supplier-payment-new').then((m) => m.Route));
+const retailSupplierPaymentNewRoute = retailScreen('/supplier-payments/new', WORDS.payASupplier).lazy(() => import('../areas/staff/retail/supplier-payment-new').then((m) => m.Route));
 const retailSupplierPaymentRoute = retailScreen('/supplier-payments/$paymentId', 'Supplier payment').lazy(() => import('../areas/staff/retail/supplier-payments').then((m) => m.DetailRoute));
-const retailSupplierPayablesRoute = retailScreen('/supplier-payables', 'What you owe suppliers').lazy(() => import('../areas/staff/retail/supplier-payables').then((m) => m.Route));
+const retailSupplierPayablesRoute = retailScreen('/supplier-payables', WORDS.whatIOweSuppliers).lazy(() => import('../areas/staff/retail/supplier-payables').then((m) => m.Route));
+const retailSupplierStatementRoute = retailScreen('/suppliers/$supplierId/statement', WORDS.supplierStatement).lazy(() => import('../areas/staff/retail/supplier-statement').then((m) => m.Route));
 // Landed costs and supplier credit notes (issue #199), also shown only while the purchasing capability is on.
 const retailLandedCostsRoute = retailScreen('/landed-costs', 'Landed costs').lazy(() => import('../areas/staff/retail/landed-costs').then((m) => m.Route));
 const retailLandedCostNewRoute = retailScreen('/landed-costs/new', 'New landed cost').lazy(() => import('../areas/staff/retail/landed-cost-new').then((m) => m.Route));
@@ -195,6 +254,21 @@ const staffUnallocatedRoute = createRoute({ getParentRoute: () => staffRoute, pa
 const staffNotificationsRoute = createRoute({ getParentRoute: () => staffRoute, path: '/notifications', staticData: { crumb: 'Notifications and app' } }).lazy(() =>
   import('../areas/staff/notifications/page').then((m) => m.Route),
 );
+// Feedback (issue #447, ADR-065): any member of staff sends an idea, a problem or a question to the BMS team.
+// `ask` is what a person searched for on How do I...? before tapping Ask us (issue #598): the form starts as a question with it typed.
+const staffFeedbackRoute = createRoute({
+  getParentRoute: () => staffRoute,
+  path: '/feedback',
+  staticData: { crumb: 'Feedback' },
+  validateSearch: (s: Record<string, unknown>): { ask?: string } => ({ ask: typeof s.ask === 'string' ? s.ask : undefined }),
+}).lazy(() => import('../areas/staff/feedback/page').then((m) => m.Route));
+// How do I...? (issue #598, ADR-095): the help articles, grouped by job and searchable, and one article with its pictures.
+const staffHelpRoute = createRoute({ getParentRoute: () => staffRoute, path: '/help', staticData: { crumb: 'How do I...?' } }).lazy(() =>
+  import('../areas/staff/help/page').then((m) => m.Route),
+);
+const staffHelpArticleRoute = createRoute({ getParentRoute: () => staffRoute, path: '/help/$articleId', staticData: { crumb: 'Answer' } }).lazy(() =>
+  import('../areas/staff/help/page').then((m) => m.ArticleRoute),
+);
 
 // Staff users: who works in the business, invite and roles (issue #319).
 const staffUsersRoute = createRoute({ getParentRoute: () => staffRoute, path: '/users', staticData: { crumb: 'Staff users' } }).lazy(() =>
@@ -223,6 +297,16 @@ const lendingLoanRoute = createRoute({ getParentRoute: () => staffLendingRoute, 
   import('../areas/staff/lending/loan').then((m) => m.Route),
 );
 const lendingScreen = <P extends string>(path: P, crumb: string) => createRoute({ getParentRoute: () => staffLendingRoute, path, staticData: { crumb } });
+const applicationNewRoute = createRoute({
+  getParentRoute: () => staffLendingRoute,
+  path: '/applications/new',
+  staticData: { crumb: 'New application' },
+  // The member to start from, as an id (never a phone or an ID number).
+  validateSearch: (s: Record<string, unknown>): { memberId?: string } => ({ memberId: typeof s.memberId === 'string' ? s.memberId : undefined }),
+}).lazy(() => import('../areas/staff/lending/application-form').then((m) => m.NewRoute));
+const applicationEditRoute = lendingScreen('/loans/$loanId/edit', 'Change application').lazy(() => import('../areas/staff/lending/application-form').then((m) => m.EditRoute));
+const appraiseRoute = lendingScreen('/loans/$loanId/appraise', 'Appraise').lazy(() => import('../areas/staff/lending/appraise').then((m) => m.Route));
+const decideRoute = lendingScreen('/loans/$loanId/decide', 'Decision').lazy(() => import('../areas/staff/lending/decide').then((m) => m.Route));
 const savingsRoute = lendingScreen('/savings', 'Savings').lazy(() => import('../areas/staff/lending/savings').then((m) => m.Route));
 const savingsProductsRoute = lendingScreen('/savings/products', 'Savings products').lazy(() => import('../areas/staff/lending/savings-products').then((m) => m.Route));
 const savingsAccountRoute = lendingScreen('/savings/accounts/$accountId', 'Account').lazy(() => import('../areas/staff/lending/savings-account').then((m) => m.Route));
@@ -231,6 +315,10 @@ const savingsStatementRoute = lendingScreen('/savings/accounts/$accountId/statem
 );
 const memberSavingsRoute = lendingScreen('/members/$memberId/savings', 'Member savings').lazy(() => import('../areas/staff/lending/member-savings').then((m) => m.Route));
 // Members, next of kin, KYC documents and the collateral register (issue #280).
+const existingLoansRoute = lendingScreen('/existing-loans', 'Existing loans').lazy(() => import('../areas/staff/lending/existing-loans').then((m) => m.Route));
+const existingLoansImportRoute = lendingScreen('/existing-loans/import', 'Import').lazy(() =>
+  import('../areas/staff/lending/existing-loans-import').then((m) => m.Route),
+);
 const membersRoute = lendingScreen('/members', 'Members').lazy(() => import('../areas/staff/lending/members').then((m) => m.Route));
 const memberNewRoute = lendingScreen('/members/new', 'New member').lazy(() => import('../areas/staff/lending/member-form').then((m) => m.NewRoute));
 const lendingMemberRoute = lendingScreen('/members/$memberId', 'Member').lazy(() => import('../areas/staff/lending/member-page').then((m) => m.Route));
@@ -262,6 +350,10 @@ const signUpRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sign-
 // Staff of a business find their own sign-in page from the platform home (issue #383).
 const findSignInRoute = createRoute({ getParentRoute: () => rootRoute, path: '/find-sign-in' }).lazy(() =>
   import('../areas/onboarding/find-sign-in').then((m) => m.Route),
+);
+// Where a short link lands when no shop uses it (issue #708, ADR-108).
+const linkNotFoundRoute = createRoute({ getParentRoute: () => rootRoute, path: '/link-not-found' }).lazy(() =>
+  import('../areas/onboarding/link-not-found').then((m) => m.Route),
 );
 const signUpVerifyRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sign-up/verify' }).lazy(() =>
   import('../areas/onboarding/applicant').then((m) => m.VerifyRoute),
@@ -299,6 +391,22 @@ const platformBusinessRoute = createRoute({ getParentRoute: () => platformRoute,
 const platformPlansRoute = createRoute({ getParentRoute: () => platformRoute, path: '/plans' }).lazy(() =>
   import('../areas/platform/plans').then((m) => m.Route),
 );
+// Businesses due for suspension and the grace period (issue #480, ADR-075).
+const platformBillingRoute = createRoute({ getParentRoute: () => platformRoute, path: '/billing' }).lazy(() =>
+  import('../areas/platform/billing').then((m) => m.Route),
+);
+// Businesses closing (issue #571, ADR-090): the Owners' requests and the removal after the cooling-off.
+const platformClosuresRoute = createRoute({ getParentRoute: () => platformRoute, path: '/closures' }).lazy(() =>
+  import('../areas/platform/closures').then((m) => m.Route),
+);
+// Businesses with no owner (issue #571, ADR-062): Set the owner.
+const platformNoOwnerRoute = createRoute({ getParentRoute: () => platformRoute, path: '/no-owner' }).lazy(() =>
+  import('../areas/platform/no-owner').then((m) => m.Route),
+);
+// Feedback from every business (issue #447, ADR-065).
+const platformFeedbackRoute = createRoute({ getParentRoute: () => platformRoute, path: '/feedback' }).lazy(() =>
+  import('../areas/platform/feedback').then((m) => m.Route),
+);
 
 const memberRoute = createRoute({ getParentRoute: () => rootRoute, path: '/member' }).lazy(() =>
   import('../areas/member/route').then((m) => m.Route),
@@ -311,7 +419,7 @@ export const router = createRouter({
     forgotPasswordRoute,
     resetPasswordRoute,
     acceptInvitationRoute,
-    staffRoute.addChildren([staffHomeRoute, staffApprovalsRoute, staffSetupRoute, staffBranchesRoute, staffTwoStepPolicyRoute, staffBusinessNotificationsRoute, staffOwnTwoStepRoute, staffRetailRoute.addChildren([
+    staffRoute.addChildren([staffHomeRoute, staffMoneyRoute, staffMoreRoute, staffKitRoute, staffApprovalsRoute, staffSetupRoute, staffBranchesRoute, staffTwoStepPolicyRoute, staffApprovalRulesRoute, staffBusinessNotificationsRoute, staffBillingRoute, staffCloseRoute, staffReferralsRoute, staffOwnTwoStepRoute, staffRetailRoute.addChildren([
         retailHomeRoute,
         retailSaleRoute,
         retailCreditSalesRoute,
@@ -324,6 +432,7 @@ export const router = createRouter({
         retailUsageRoute,
         retailStockRoute,
         retailStocktakeRoute,
+        retailQuickAddRoute,
         retailTransferRoute,
         retailTransfersRoute,
         retailStockByLocationRoute,
@@ -342,10 +451,13 @@ export const router = createRouter({
         retailSizesJoinRoute,
         retailSizesRoute,
         retailCategoriesRoute,
+        retailCategoryRoute,
         retailUnitsRoute,
         retailSuppliersRoute,
         retailBuyersRoute,
         retailImportRoute,
+        retailShopSetupRoute,
+        retailLabelsRoute,
         retailSavingsRoute,
         retailCashSummaryRoute,
         retailAdvancesRoute,
@@ -380,6 +492,7 @@ export const router = createRouter({
         retailSupplierPaymentNewRoute,
         retailSupplierPaymentRoute,
         retailSupplierPayablesRoute,
+        retailSupplierStatementRoute,
         retailLandedCostsRoute,
         retailLandedCostNewRoute,
         retailLandedCostRoute,
@@ -391,10 +504,16 @@ export const router = createRouter({
       ]), staffLendingRoute.addChildren([
         lendingLoansRoute,
         lendingLoanRoute,
+        applicationNewRoute,
+        applicationEditRoute,
+        appraiseRoute,
+        decideRoute,
         savingsRoute,
         savingsProductsRoute,
         savingsAccountRoute,
         savingsStatementRoute,
+        existingLoansRoute,
+        existingLoansImportRoute,
         membersRoute,
         memberNewRoute,
         lendingMemberRoute,
@@ -412,11 +531,12 @@ export const router = createRouter({
         memberInvestmentNewRoute,
         investmentRoute,
         investmentCertificateRoute,
-      ]), staffInsightsRoute, staffAssistantRoute, staffPaymentsRoute, staffUnallocatedRoute, staffUsersRoute, staffUserInviteRoute, staffNotificationsRoute, staffReportsRoute, staffSmsRoute.addChildren([smsSettingsRoute, smsWordingRoute, smsOptOutsRoute])]),
+      ]), staffInsightsRoute, staffAssistantRoute, staffPaymentsRoute, staffUnallocatedRoute, staffUsersRoute, staffUserInviteRoute, staffNotificationsRoute, staffFeedbackRoute, staffHelpRoute, staffHelpArticleRoute, staffReportsRoute, staffSmsRoute.addChildren([smsSettingsRoute, smsWordingRoute, smsOptOutsRoute])]),
     memberRoute,
     styleRoute,
     signUpRoute,
     findSignInRoute,
+    linkNotFoundRoute,
     signUpVerifyRoute,
     applicationStatusRoute,
     operatorSignInRoute,
@@ -428,8 +548,14 @@ export const router = createRouter({
       platformBusinessesRoute,
       platformBusinessRoute,
       platformPlansRoute,
+      platformBillingRoute,
+      platformClosuresRoute,
+      platformNoOwnerRoute,
+      platformFeedbackRoute,
     ]),
   ]),
+  // A phone on the app from before a deploy reloads itself instead of showing the raw error.
+  defaultErrorComponent: RouteError,
 });
 
 declare module '@tanstack/react-router' {

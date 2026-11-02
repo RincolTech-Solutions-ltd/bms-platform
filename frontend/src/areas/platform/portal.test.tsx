@@ -79,7 +79,7 @@ describe('operator sign-in (chapter 8 section 8.2)', () => {
   it('shows errors and disables the button while busy', () => {
     const html = renderToStaticMarkup(<OperatorSignInView {...props} busy message="The email or password is wrong." />);
     expect(html).toContain('role="alert"');
-    expect(html).toMatch(/disabled="">Signing in/);
+    expect(html).toMatch(/aria-disabled="true" aria-busy="true">Sign in<span class="busy-spinner"/);
   });
 
   it('sets the first password with the setup token', () => {
@@ -102,7 +102,7 @@ describe('the applications queue (FR-ONB-05)', () => {
     const html = await inRouter(<ApplicationsTable items={[application]} counts={counts} filter="open" onFilter={noop} />);
     expect(html).toContain('Open (4)');
     expect(html).toContain('Activated (3)');
-    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain('aria-checked="true"');
     expect(html).toContain('href="/platform/applications/00000000-0000-4000-8000-0000000000a1"');
     expect(html).toContain('Test Hardware Shop');
     expect(html).toContain('<th scope="col">Status</th>');
@@ -154,7 +154,7 @@ describe('one application (FR-ONB-05 to FR-ONB-07)', () => {
     for (const id of ['activate-term', 'activate-note', 'activate-slug']) expect(html).toContain(`for="${id}"`);
     expect(html).toContain('value="test-hardware-shop"');
     expect(html).toContain('Note the payment received.');
-    expect(html).toMatch(/disabled="">Activating/);
+    expect(html).toMatch(/aria-disabled="true" aria-busy="true">Activate and send the link<span class="busy-spinner"/);
   });
 
   it('shows the result, and says when a repeat did nothing', () => {
@@ -196,7 +196,7 @@ describe('messages not sent (FR-NTF-09)', () => {
   });
 
   it('disables every retry while one is sending', () => {
-    expect(renderToStaticMarkup(<OutboxView status={status} busyId="f1" onRetry={noop} />)).toMatch(/disabled="">Sending/);
+    expect(renderToStaticMarkup(<OutboxView status={status} busyId="f1" onRetry={noop} />)).toMatch(/aria-disabled="true" aria-busy="true">Send again<span class="busy-spinner"/);
   });
 });
 

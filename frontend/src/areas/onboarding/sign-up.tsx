@@ -1,11 +1,14 @@
 import { createLazyRoute } from '@tanstack/react-router';
-import { type FormEvent, useState } from 'react';
-import { applyForAccount, OnboardingError } from '../../api/onboarding';
+import { type FormEvent, useEffect, useState } from 'react';
+import { applyForAccount, checkShortName, OnboardingError, shortLinkHost } from '../../api/onboarding';
+import { type ShortNameCheck, ShortNameField, shortNameFrom } from './short-name';
+import { BusyButton } from '../../app/ui/BusyButton';
 import {
   COUNTRIES,
   EMPTY_SIGN_UP,
   MODULES,
   type Problems,
+  referralCodeFrom,
   type SignUpForm,
   signUpProblems,
   TERMS,
@@ -16,7 +19,7 @@ import {
 
 // The public sign-up page on the platform host (FR-ONB-01, spec section 10): phone first, plain
 // wording, the Rincoltech brand and the footer from the shared shell. No sign-in. The answer is the
-// same whether or not the email is known: "check your email".
+// same whether or not the email is known: "check your email". A referral link fills in Referred by.
 
 export interface SignUpViewProps {
   form: SignUpForm;
@@ -26,6 +29,12 @@ export interface SignUpViewProps {
   done: boolean;
   onChange: (form: SignUpForm) => void;
   onSubmit: (e: FormEvent) => void;
+  /** Checks the short name as it is typed (ADR-108). */
+  checkName: (name: string) => Promise<ShortNameCheck>;
+  /** Free short names from a refused application. */
+  suggestions?: string[];
+  /** The short link host from the server; empty until it has loaded. */
+  host?: string;
 }
 
 function Field({ id, label, problem, children }: { id: string; label: string; problem?: string; children: React.ReactNode }) {
@@ -42,7 +51,7 @@ function Field({ id, label, problem, children }: { id: string; label: string; pr
   );
 }
 
-export function SignUpView({ form, problems, busy, error, done, onChange, onSubmit }: SignUpViewProps) {
+export function SignUpView({ form, problems, busy, error, done, onChange, onSubmit, checkName, suggestions, host = '' }: SignUpViewProps) {
   if (done) {
     return (
       <main className="card auth-card">
@@ -71,7 +80,13 @@ export function SignUpView({ form, problems, busy, error, done, onChange, onSubm
           <input
             id="business_name"
             value={form.business_name}
-            onChange={(e) => set({ business_name: e.target.value })}
+            onChange={(e) =>
+              // The short name follows the business name until the applicant changes it (ADR-108).
+              set({
+                business_name: e.target.value,
+                short_name: form.short_name === shortNameFrom(form.business_name) ? shortNameFrom(e.target.value) : form.short_name,
+              })
+            }
             maxLength={200}
             autoComplete="organization"
             required
@@ -79,6 +94,26 @@ export function SignUpView({ form, problems, busy, error, done, onChange, onSubm
             aria-describedby={describedBy('business_name')}
           />
         </Field>
+        <Field id="town" label="Town or area (optional)" problem={problems.town}>
+          <input
+            id="town"
+            value={form.town}
+            onChange={(e) => set({ town: e.target.value })}
+            maxLength={100}
+            autoComplete="address-level2"
+            placeholder="Kampala"
+          />
+        </Field>
+        <ShortNameField
+          id="short_name"
+          label="Short name for your link"
+          value={form.short_name}
+          onChange={(short_name) => set({ short_name })}
+          check={checkName}
+          host={host}
+          problem={problems.short_name}
+          suggestions={suggestions}
+        />
         <Field id="contact_name" label="Your name" problem={problems.contact_name}>
           <input
             id="contact_name"
@@ -167,7 +202,23 @@ export function SignUpView({ form, problems, busy, error, done, onChange, onSubm
             </label>
           ))}
         </fieldset>
-        <Field id="agent_code" label="Agent code (if someone referred you)" problem={problems.agent_code}>
+        <Field id="referral_code" label="Referred by (optional)" problem={problems.referral_code}>
+          <input
+            id="referral_code"
+            value={form.referral_code}
+            onChange={(e) => set({ referral_code: e.target.value })}
+            maxLength={10}
+            autoCapitalize="characters"
+            autoComplete="off"
+            spellCheck={false}
+            aria-invalid={Boolean(problems.referral_code)}
+            aria-describedby={problems.referral_code ? 'referral_code-problem' : 'referral_code-hint'}
+          />
+          <span id="referral_code-hint" className="hint">
+            The code of the business that told you about BMS, if one did.
+          </span>
+        </Field>
+        <Field id="agent_code" label="Agent code (optional)" problem={problems.agent_code}>
           <input
             id="agent_code"
             value={form.agent_code}
@@ -185,20 +236,29 @@ export function SignUpView({ form, problems, busy, error, done, onChange, onSubm
           <label htmlFor="website">Website</label>
           <input id="website" name="website" tabIndex={-1} autoComplete="off" value={form.website} onChange={(e) => set({ website: e.target.value })} />
         </div>
-        <button className="btn-brand" type="submit" disabled={busy}>
-          {busy ? 'Sending' : 'Send application'}
-        </button>
+        <BusyButton className="btn-brand" type="submit" busy={busy}>
+          Send application
+        </BusyButton>
       </form>
     </main>
   );
 }
 
-function SignUp() {
-  const [form, setForm] = useState<SignUpForm>(EMPTY_SIGN_UP);
+export function SignUp() {
+  // A referral link (`?ref=`) fills in the Referred by box; the applicant can change or clear it (ADR-069).
+  const [form, setForm] = useState<SignUpForm>(() => ({ ...EMPTY_SIGN_UP, referral_code: referralCodeFrom(window.location.search) }));
   const [problems, setProblems] = useState<Problems>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [host, setHost] = useState('');
+  useEffect(() => {
+    shortLinkHost()
+      .then(setHost)
+      .catch(() => undefined);
+  }, []);
+  const checkName = (name: string) => checkShortName(name, form.business_name.trim(), form.town.trim());
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -218,6 +278,7 @@ function SignUp() {
           const server: Problems = {};
           err.fields.forEach((f) => (server[f.field] = f.message));
           setProblems(server);
+          setSuggestions(err.suggestions);
           setError(err.message);
         } else {
           setError('We could not send your application. Check your connection and try again.');
@@ -226,7 +287,20 @@ function SignUp() {
       .finally(() => setBusy(false));
   }
 
-  return <SignUpView form={form} problems={problems} busy={busy} error={error} done={done} onChange={setForm} onSubmit={submit} />;
+  return (
+    <SignUpView
+      form={form}
+      problems={problems}
+      busy={busy}
+      error={error}
+      done={done}
+      onChange={setForm}
+      onSubmit={submit}
+      checkName={checkName}
+      suggestions={suggestions}
+      host={host}
+    />
+  );
 }
 
 export const Route = createLazyRoute('/sign-up')({ component: SignUp });

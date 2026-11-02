@@ -2,8 +2,12 @@ package com.rincoltech.bms.core.tenancy.internal;
 
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.documents.Documents;
+import com.rincoltech.bms.core.tenancy.ApprovalAmountsChanged;
+import com.rincoltech.bms.core.tenancy.ApprovalRuleStore;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
+import com.rincoltech.bms.core.tenancy.GoLiveDate;
 import com.rincoltech.bms.core.tenancy.ModuleSettings;
+import com.rincoltech.bms.core.tenancy.ModuleSettingsChangeGuard;
 import com.rincoltech.bms.core.tenancy.ModuleSettingsGroup;
 import com.rincoltech.bms.core.tenancy.PolicyChangeGuard;
 import com.rincoltech.bms.core.tenancy.TenantModules;
@@ -19,6 +23,7 @@ import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.PushNotice;
 import com.rincoltech.bms.kernel.Versions;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -27,10 +32,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -45,11 +52,12 @@ import tools.jackson.databind.ObjectMapper;
  * is validated and audited with the before and after values of the keys that changed.
  */
 @Service
-class SettingsService implements TenantSettings, ModuleSettings {
+class SettingsService implements TenantSettings, ModuleSettings, GoLiveDate, ApprovalRuleStore {
 
     static final Map<String, Integer> DEFAULT_APPRAISAL_WEIGHTS =
             Map.of("repayment_history", 40, "affordability", 30, "collateral_cover", 20, "exposure", 10);
     private static final String MODULE_GROUPS = "module_groups";
+    private static final String APPROVAL_SWITCHES = "approval_switches";
     private static final Pattern ACTION_TYPE = Pattern.compile("^[a-z][a-z0-9_]{2,62}$");
     private static final TypeReference<Map<String, Object>> MAP = new TypeReference<>() {};
 
@@ -63,6 +71,7 @@ class SettingsService implements TenantSettings, ModuleSettings {
     private final BusinessClock clock;
     private final PolicyChangeGuard guard;
     private final ApplicationEventPublisher events;
+    private final ObjectProvider<ModuleSettingsChangeGuard> changeGuards;
 
     SettingsService(
             JdbcClient jdbc,
@@ -74,8 +83,10 @@ class SettingsService implements TenantSettings, ModuleSettings {
             TenantModules modules,
             BusinessClock clock,
             @Lazy PolicyChangeGuard guard,
-            ApplicationEventPublisher events) {
+            ApplicationEventPublisher events,
+            ObjectProvider<ModuleSettingsChangeGuard> changeGuards) {
         this.events = events;
+        this.changeGuards = changeGuards;
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.tenant = tenant;
@@ -97,25 +108,38 @@ class SettingsService implements TenantSettings, ModuleSettings {
 
     /**
      * @param proved the administrator's proof was checked before this transaction (it is needed when the change relaxes the
-     *     two-step rule); the row is read again under its lock, and a change that relaxes it without that proof is refused
+     *     two-step rule or changes an approval amount, ADR-091); the row is read again under its lock, and a change that relaxes it without that proof is refused
      */
     @Transactional
     SettingsResponse update(String ifMatch, UpdateSettingsRequest request, boolean proved) {
         int expected = Versions.fromIfMatch(ifMatch);
+        if (request.goLiveDate() != null) {
+            // ADR-071: the go-live date bounds what may be brought in with a past date, so only the Owner moves it; the
+            // owner lock comes first in the transaction (ADR-062).
+            guard.requireOwner("set the go-live date");
+        }
+        if (request.financialYearEndMonth() != null) {
+            // ADR-090: the retention of a closed business's money records counts from the end of its financial year.
+            guard.requireOwner("set the end of the financial year");
+        }
         Stored stored = lock();
         if (stored.version() != expected) {
             throw Versions.conflict(stored.version());
         }
         validate(request);
+        if (request.goLiveDate() != null) {
+            requireEarlier(stored, request.goLiveDate());
+        }
         Map<String, Object> changes = plan(stored, request);
         boolean relaxes = relaxes(stored.values(), changes);
-        if (relaxes && !proved) {
+        boolean amounts = changesThresholds(resolve(stored.values(), stored.version()), request);
+        if ((relaxes || amounts) && !proved) {
             throw ApiException.rule("proof_required", "Confirm that it is you, then save again.");
         }
         SettingsResponse after = write(stored, changes);
         if (relaxes) {
-            // In this transaction: the change and the warning to the administrators commit together (ADR-046 decision
-            // 6).
+            // In this transaction: the change and the warning to the administrators commit together (ADR-046
+            // decision 6).
             guard.notifyRelaxed(
                     after.requireMfaRoles().isEmpty() && !after.requireMfaAllStaff()
                             ? "two-step sign-in is now optional for everyone"
@@ -143,6 +167,10 @@ class SettingsService implements TenantSettings, ModuleSettings {
         if (changes.get("theme_primary") instanceof String colour) {
             // An empty string clears the colour: back to the platform look.
             changes.put("theme_primary", colour.isEmpty() ? null : colour.toUpperCase(Locale.ROOT));
+        }
+        if (request.goLiveDate() != null) {
+            changes.put("go_live_date", request.goLiveDate().toString());
+            changes.put("go_live_source", "set");
         }
         if (changes.containsKey("require_mfa_roles")) {
             changes.put(
@@ -305,27 +333,17 @@ class SettingsService implements TenantSettings, ModuleSettings {
     }
 
     /**
-     * The administrators with a device are told when a safeguard is loosened (ADR-050): the amount that needs a second person
-     * raised for an action. The person who changed it is not told. The
-     * names of the actions are the ones the approvals inbox shows.
+     * The approval amounts that changed go to the approvals module (ADR-050, ADR-091 decision 8), which tells the administrators
+     * with a device when a rule was loosened: a higher amount, or 0 switching an action off by its default. The person who
+     * changed it is not told.
      */
     private void announceWeakening(SettingsResponse before, SettingsResponse after) {
-        UUID by = CurrentPrincipal.get().map(Principal::userId).orElse(null);
-        List<String> raised = after.approvalThresholdsMinor().entrySet().stream()
-                .filter(e -> e.getValue() > before.approvalThresholdsMinor().getOrDefault(e.getKey(), 0L))
-                .map(e -> e.getKey().replace('_', ' '))
-                .sorted()
-                .toList();
-        if (!raised.isEmpty()) {
-            events.publishEvent(new PushNotice(
-                    "core.approval_policy_weakened",
-                    "settings-v" + after.version(),
-                    new PushNotice.Holders("core.settings.manage", null, by),
-                    Map.of(
-                            "action_label",
-                            String.join(", ", raised.subList(0, Math.min(3, raised.size()))),
-                            "path",
-                            "/staff/setup")));
+        if (!before.approvalThresholdsMinor().equals(after.approvalThresholdsMinor())) {
+            events.publishEvent(new ApprovalAmountsChanged(
+                    before.approvalThresholdsMinor(),
+                    after.approvalThresholdsMinor(),
+                    CurrentPrincipal.get().map(Principal::userId).orElse(null),
+                    after.version()));
         }
     }
 
@@ -334,6 +352,55 @@ class SettingsService implements TenantSettings, ModuleSettings {
     public long approvalThresholdMinor(String actionType) {
         Long threshold = current().approvalThresholdsMinor().get(actionType);
         return threshold == null ? 0 : threshold;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    @SuppressWarnings("unchecked")
+    public Map<String, Boolean> approvalSwitches() {
+        Map<String, Boolean> out = new TreeMap<>();
+        ((Map<String, Object>) load(false).values().getOrDefault(APPROVAL_SWITCHES, Map.of()))
+                .forEach((k, v) -> out.put(k, Boolean.TRUE.equals(v)));
+        return out;
+    }
+
+    @Override
+    @Transactional
+    @SuppressWarnings("unchecked")
+    public int saveApprovalRules(
+            Map<String, Boolean> switches, Map<String, Long> thresholdsMinor, int expectedVersion) {
+        Stored stored = lock();
+        if (stored.version() != expectedVersion) {
+            throw Versions.conflict(stored.version());
+        }
+        Map<String, Object> next = new TreeMap<>(stored.values());
+        Map<String, Object> on = new TreeMap<>((Map<String, Object>) next.getOrDefault(APPROVAL_SWITCHES, Map.of()));
+        on.putAll(switches);
+        Map<String, Object> amounts =
+                new TreeMap<>((Map<String, Object>) next.getOrDefault("approval_thresholds_minor", Map.of()));
+        amounts.putAll(thresholdsMinor);
+        next.put(APPROVAL_SWITCHES, on);
+        next.put("approval_thresholds_minor", amounts);
+        jdbc.sql("UPDATE tenant_settings SET settings = CAST(? AS jsonb), updated_at = now(), version = version + 1")
+                .param(mapper.writeValueAsString(next))
+                .update();
+        return stored.version() + 1;
+    }
+
+    /**
+     * Whether a {@code PATCH /settings} changes an approval amount, which needs the administrator's proof as the approval rules do
+     * (ADR-091 decision 7). Read without a lock, before the transaction; {@link #update} decides again on the locked row.
+     */
+    @Transactional(readOnly = true)
+    boolean changesThresholds(UpdateSettingsRequest request) {
+        return changesThresholds(current(), request);
+    }
+
+    private static boolean changesThresholds(SettingsResponse before, UpdateSettingsRequest request) {
+        return request.approvalThresholdsMinor() != null
+                && request.approvalThresholdsMinor().entrySet().stream()
+                        .anyMatch(e -> !Objects.equals(
+                                e.getValue(), before.approvalThresholdsMinor().getOrDefault(e.getKey(), 0L)));
     }
 
     @Override
@@ -397,6 +464,116 @@ class SettingsService implements TenantSettings, ModuleSettings {
         return current().reportsEnabled();
     }
 
+    // ---- the go-live date (ADR-071) ------------------------------------------------------------
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<Live> get() {
+        Map<String, Object> values = load(false).values();
+        return Optional.ofNullable((String) values.get("go_live_date"))
+                .map(d -> new Live(LocalDate.parse(d), (String) values.getOrDefault("go_live_source", "set")));
+    }
+
+    /**
+     * ADR-071: a later go-live date would let loans disbursed after go-live come in as if from paper, so once a date is
+     * stored the Owner moves it only earlier. The operator moves it later, with a reason ({@link #setByOperator}).
+     */
+    private void requireEarlier(Stored stored, LocalDate date) {
+        Object was = stored.values().get("go_live_date");
+        if (was != null && date.isAfter(LocalDate.parse((String) was))) {
+            throw ApiException.rule(
+                    "go_live_locked",
+                    "The go-live date (" + was + ") only moves earlier. Ask the platform operator to move it later,"
+                            + " with a reason.");
+        }
+    }
+
+    @Override
+    @Transactional
+    public void adminSignedIn(UUID userId, Instant at) {
+        if (load(false).values().get("go_live_date") != null) {
+            return;
+        }
+        Stored stored = lock();
+        if (stored.values().get("go_live_date") != null) {
+            return;
+        }
+        LocalDate day = firstDay(at.atZone(tenant.profile().timezone()).toLocalDate());
+        Map<String, Object> next = new TreeMap<>(stored.values());
+        next.put("go_live_date", day.toString());
+        next.put("go_live_source", "first_admin_sign_in");
+        // The version stays: no administrator's edit of the settings is made stale by a sign-in.
+        jdbc.sql("UPDATE tenant_settings SET settings = CAST(? AS jsonb), updated_at = now() WHERE tenant_id = ?")
+                .params(mapper.writeValueAsString(next), tenant.profile().id())
+                .update();
+        audit.record(
+                AuditLog.Entry.created(
+                        "core.settings.go_live_defaulted",
+                        "core.tenant_settings",
+                        tenant.profile().id(),
+                        null,
+                        Map.of("go_live_date", day.toString(), "source", "first_admin_sign_in")),
+                userId,
+                "staff");
+    }
+
+    /**
+     * The default go-live date never lands later than the real start (ADR-071 decision 5), or a loan made in the app could
+     * come back as a "paper" loan: the earliest of this sign-in, the first session of anyone ever an administrator, the
+     * earliest last sign-in of the staff, the day the business was created, and the first loan made in the app (created
+     * or disbursed). Sessions are pruned and administrators leave, so this sign-in alone may come too late. V89 backfills
+     * the same date.
+     */
+    private LocalDate firstDay(LocalDate signedIn) {
+        return jdbc.sql("""
+                        SELECT LEAST(CAST(? AS date),
+                                     (SELECT (min(s.created_at) AT TIME ZONE t.timezone)::date
+                                        FROM auth_sessions s
+                                       WHERE s.tenant_id = t.id
+                                         AND EXISTS (SELECT 1 FROM user_role_assignments a
+                                                      WHERE a.user_id = s.user_id AND a.role_key = 'tenant_admin')),
+                                     (SELECT (min(u.last_login_at) AT TIME ZONE t.timezone)::date
+                                        FROM users u WHERE u.tenant_id = t.id AND u.kind = 'staff'),
+                                     (t.created_at AT TIME ZONE t.timezone)::date,
+                                     (SELECT least((min(l.created_at) AT TIME ZONE t.timezone)::date, min(l.disbursed_on))
+                                        FROM lending_loans l WHERE l.tenant_id = t.id AND l.go_live_on IS NULL))
+                          FROM tenants t WHERE t.id = ?
+                        """)
+                .params(signedIn, tenant.profile().id())
+                .query(LocalDate.class)
+                .single();
+    }
+
+    @Override
+    @Transactional
+    public void setByOperator(LocalDate date, UUID platformUserId, String reason) {
+        if (date.isAfter(clock.today(tenant.profile().timezone()))) {
+            throw ApiException.validation(List.of(
+                    new FieldProblem("go_live_date", "go_live_in_future", "The go-live date is today or earlier.")));
+        }
+        Stored stored = lock();
+        Object before = stored.values().get("go_live_date");
+        Map<String, Object> next = new TreeMap<>(stored.values());
+        next.put("go_live_date", date.toString());
+        next.put("go_live_source", "set");
+        jdbc.sql(
+                        "UPDATE tenant_settings SET settings = CAST(? AS jsonb), updated_at = now(), version = version + 1 WHERE tenant_id = ?")
+                .params(mapper.writeValueAsString(next), tenant.profile().id())
+                .update();
+        Map<String, Object> was = new LinkedHashMap<>();
+        was.put("go_live_date", before);
+        audit.record(
+                new AuditLog.Entry(
+                        "core.settings.go_live_set",
+                        "core.tenant_settings",
+                        tenant.profile().id(),
+                        null,
+                        was,
+                        Map.of("go_live_date", date.toString(), "reason", reason)),
+                platformUserId,
+                "platform");
+    }
+
     // ---- module settings groups (ADR-033) ---------------------------------------------------
 
     @Override
@@ -404,6 +581,13 @@ class SettingsService implements TenantSettings, ModuleSettings {
     public Map<String, Object> group(String moduleKey) {
         ModuleSettingsGroup group = groupOf(moduleKey);
         return group.normalise(storedGroup(load(false), moduleKey), Map.of());
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> groupHeld(String moduleKey) {
+        ModuleSettingsGroup group = groupOf(moduleKey);
+        return group.normalise(storedGroup(load(" FOR SHARE"), moduleKey), Map.of());
     }
 
     @Override
@@ -419,6 +603,8 @@ class SettingsService implements TenantSettings, ModuleSettings {
         if (after.equals(before)) {
             return after;
         }
+        // Under the row lock: a write that read the group with groupHeld has committed, or waits for this one (#239).
+        changeGuards.orderedStream().forEach(g -> g.check(moduleKey, before, after));
         Map<String, Object> next = new TreeMap<>(stored.values());
         Map<String, Object> all = new TreeMap<>(allGroups(stored));
         all.put(moduleKey, after);
@@ -470,8 +656,11 @@ class SettingsService implements TenantSettings, ModuleSettings {
     }
 
     private Stored load(boolean forUpdate) {
-        return jdbc.sql("SELECT settings::text AS settings, version FROM tenant_settings"
-                        + (forUpdate ? " FOR UPDATE" : ""))
+        return load(forUpdate ? " FOR UPDATE" : "");
+    }
+
+    private Stored load(String lockClause) {
+        return jdbc.sql("SELECT settings::text AS settings, version FROM tenant_settings" + lockClause)
                 .query((rs, n) -> new Stored(mapper.readValue(rs.getString("settings"), MAP), rs.getInt("version")))
                 .optional()
                 .orElse(new Stored(Map.of(), 1));
@@ -508,6 +697,11 @@ class SettingsService implements TenantSettings, ModuleSettings {
             problems.add(
                     new FieldProblem("require_mfa_roles", "invalid", "Choose roles from the list of staff roles."));
         }
+        if (request.goLiveDate() != null
+                && request.goLiveDate().isAfter(clock.today(tenant.profile().timezone()))) {
+            problems.add(
+                    new FieldProblem("go_live_date", "go_live_in_future", "The go-live date is today or earlier."));
+        }
         if (request.displayName() != null && request.displayName().isBlank()) {
             problems.add(new FieldProblem("display_name", "invalid", "Must not be blank."));
         }
@@ -534,8 +728,10 @@ class SettingsService implements TenantSettings, ModuleSettings {
         ((Map<String, Object>) s.getOrDefault("appraisal_weights", DEFAULT_APPRAISAL_WEIGHTS))
                 .forEach((k, v) -> weights.put(k, ((Number) v).intValue()));
         Object maxLoans = s.get("max_active_loans_per_member");
+        String displayName =
+                (String) s.getOrDefault("display_name", tenant.profile().name());
         return new SettingsResponse(
-                (String) s.getOrDefault("display_name", tenant.profile().name()),
+                displayName,
                 (String) s.getOrDefault("receipt_footer", ""),
                 thresholds,
                 ((Number) s.getOrDefault("approval_validity_days", 14)).intValue(),
@@ -546,13 +742,18 @@ class SettingsService implements TenantSettings, ModuleSettings {
                 (Boolean) s.getOrDefault("require_mfa_all_staff", false),
                 s.get("logo_document_id") == null ? null : UUID.fromString((String) s.get("logo_document_id")),
                 (String) s.get("theme_primary"),
-                s.containsKey("display_name"),
+                // Issue #514: the name given at onboarding is the tenant profile's, and counts as set like a saved one.
+                displayName != null && !displayName.isBlank(),
                 (Boolean) s.getOrDefault("setup_dismissed", false),
                 (Boolean) s.getOrDefault("reports_enabled", false),
                 List.copyOf((List<String>) s.getOrDefault("require_mfa_roles", List.of())),
                 s.get("mfa_grace_days") == null ? null : ((Number) s.get("mfa_grace_days")).intValue(),
                 s.get("mfa_enforce_from") == null ? null : Instant.parse((String) s.get("mfa_enforce_from")),
                 tenant.profile().timezone().getId(),
+                s.get("go_live_date") == null ? null : LocalDate.parse((String) s.get("go_live_date")),
+                s.get("financial_year_end_month") == null
+                        ? null
+                        : ((Number) s.get("financial_year_end_month")).intValue(),
                 version);
     }
 }

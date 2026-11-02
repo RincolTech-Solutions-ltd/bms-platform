@@ -8,6 +8,8 @@ import { Empty, Section, ToStock, moneyOrNone } from './analytics-ui';
 import { showQty } from './maths';
 import { TRANSFER, canUse, holdsAt } from './permissions';
 import { Problem, changeFailureText, money, useIsPhone } from './ui';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { showDate } from './maths';
 
 // Slow movers on Stock health (issue #414): items that do sell, but so slowly that the stock lasts more than the
 // business's number of months (or sold fewer than its minimum in 90 days). Separate from dead stock, which did not sell
@@ -72,12 +74,12 @@ export function SlowMoversSection({ data, nameOf }: { data: SlowMovers | undefin
                   <td>
                     <ToStock>{r.description}</ToStock><br />
                     <span className="hint">{r.code}, {nameOf(r.branch_id)}</span>
-                    {phone && <><br /><span className="hint">{showQty(r.qty_on_hand ?? '0')} {r.unit} in stock, last sold {r.last_sold_on}</span></>}
+                    {phone && <><br /><span className="hint">{showQty(r.qty_on_hand ?? '0')} {r.unit} in stock, last sold {showDate(r.last_sold_on)}</span></>}
                     {phone && r.value_at_cost_minor !== undefined && <><br /><span className="hint">Money tied up {money(r.value_at_cost_minor)}</span></>}
                     {r.better_at && <><br /><Better row={r} nameOf={nameOf} /></>}
                   </td>
                   {!phone && <td className="num">{showQty(r.qty_on_hand ?? '0')} {r.unit}</td>}
-                  {!phone && <td>{r.last_sold_on}</td>}
+                  {!phone && <td>{showDate(r.last_sold_on)}</td>}
                   <td className="num">
                     {r.capped ? 'over ' : ''}{r.months_of_stock}
                     {(r.days_counted ?? 90) < 90 && <><br /><span className="hint">new, pace of {r.days_counted} {r.days_counted === 1 ? 'day' : 'days'}</span></>}
@@ -107,6 +109,7 @@ export function SlowMoverSetting({ read, onSaved }: { read: CapabilitiesRead; on
   const problem = !Number.isInteger(m) || m < 1 || m > 24 ? 'Months: a whole number from 1 to 24.'
     : !Number.isInteger(n) || n < 0 || n > 1_000_000 || minSold.trim() === '' ? 'Sold in 90 days: a whole number, 0 for none.' : null;
   const changed = m !== read.capabilities.slow_mover_months || n !== read.capabilities.slow_mover_min_sold;
+  // toast-exempt: the Settings screen shows the success toast through onSaved
   const save = useMutation({
     mutationFn: () => retail.changeCapabilities({ slow_mover_months: m, slow_mover_min_sold: n }, read.version),
     onSuccess: (next) => {
@@ -125,9 +128,10 @@ export function SlowMoverSetting({ read, onSaved }: { read: CapabilitiesRead; on
       {problem && <p className="hint" role="alert">{problem}</p>}
       <Problem error={save.error && new Error(changeFailureText(save.error, queryClient))} />
       <p className="cluster">
-        <button type="button" className="rt-primary" disabled={problem !== null || !changed || save.isPending} onClick={() => save.mutate()}>
-          {save.isPending ? 'Saving' : 'Save'}
-        </button>
+        <BusyButton type="button" className="rt-primary" busy={save.isPending} disabled={problem !== null || !changed} onClick={() => save.mutate()}>
+          Save
+        </BusyButton>
+
       </p>
     </fieldset>
   );

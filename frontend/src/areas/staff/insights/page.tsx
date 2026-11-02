@@ -10,7 +10,9 @@ import {
   type InsightsRevenue,
   type InsightsTable,
 } from '../../../api/insights';
+import { businessToday } from '../../../api/retail';
 import { branchFilter } from '../../../auth/branch';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
 import { BarList, ColumnChart, LineChart, type BarRow } from './charts';
@@ -20,6 +22,7 @@ import { showLending } from '../lending/permissions';
 import { showInvestments } from '../lending/investment-state';
 import { canExport, canManageDigest, canUseAdvisor, ownPortfolioOnly, showInsights } from './permissions';
 import { MetricCard, MetricGrid, drillOf, type DrillTarget } from './ui';
+import { NoAccess } from '../../../app/ui/EmptyState';
 
 // Insights (#153, expectation 7): the morning brief, the loan portfolio, revenue from the ledger
 // and member activity, for the branch chosen in the staff bar and the filters here. Numbers are
@@ -54,7 +57,7 @@ export function Insights() {
     return (
       <main className="rt ln iv">
         <h1>Insights</h1>
-        <p className="empty-state">You do not have access to this page.</p>
+        <NoAccess />
       </main>
     );
   }
@@ -65,7 +68,7 @@ function InsightsPage() {
   const { me, branch } = useStaff();
   const [tab, setTab] = useState<string>('brief');
   const [preset, setPreset] = useState('month');
-  const initial = presetRange('month', new Date());
+  const initial = presetRange('month', businessToday());
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
   const [grain, setGrain] = useState('');
@@ -108,7 +111,7 @@ function InsightsPage() {
   function choosePreset(value: string) {
     setPreset(value);
     if (value !== 'custom') {
-      const r = presetRange(value, new Date());
+      const r = presetRange(value, businessToday());
       setFrom(r.from);
       setTo(r.to);
     }
@@ -151,7 +154,7 @@ function InsightsPage() {
       <div className="iv-head">
         <h1>Insights</h1>
         <p className="ln-muted" aria-live="polite">
-          {updated ? `Updated ${updated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}, refreshes every minute` : 'Loading'}
+          {updated ? `Updated ${updated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}, refreshes every minute` : 'Loading' /* business-day-ok: the time this phone last refreshed, on its own clock */}
         </p>
         <button type="button" className="btn-ghost btn-sm iv-noprint" onClick={() => window.print()}>
           Print
@@ -173,7 +176,7 @@ function InsightsPage() {
         </label>
         <label>
           To
-          <input type="date" value={to} min={from} max={presetRange('today', new Date()).to} onChange={(e) => { setPreset('custom'); setTo(e.target.value); }} />
+          <input type="date" value={to} min={from} max={businessToday()} onChange={(e) => { setPreset('custom'); setTo(e.target.value); }} />
         </label>
         <label>
           Group by
@@ -187,6 +190,7 @@ function InsightsPage() {
         </label>
         <label>
           Product
+          {/* empty: a filter; All products is always there. */}
           <select value={productId} onChange={(e) => setProductId(e.target.value)}>
             <option value="">All products</option>
             {products.map((p) => (
@@ -197,6 +201,7 @@ function InsightsPage() {
         {!own && (
           <label>
             Officer
+            {/* empty: a filter; All officers is always there. */}
             <select value={officerId} onChange={(e) => setOfficerId(e.target.value)}>
               <option value="">All officers</option>
               {officers.map((o) => (
@@ -605,6 +610,7 @@ function DrillPanel({ target, filter, exportable, onClose }: {
     queryFn: () => insights.table(target.table, filter, target.params),
     refetchInterval: REFRESH_MS,
   });
+  // toast-exempt: the browser downloads the CSV file itself, nothing is saved
   const download = useMutation({ mutationFn: () => insights.exportCsv(target.table, filter, target.params) });
   const ref = useRef<HTMLElement>(null);
   // The panel opens below the page: bring it into view and give it focus for keyboard users.
@@ -618,9 +624,9 @@ function DrillPanel({ target, filter, exportable, onClose }: {
         <h2>{target.title}: the rows</h2>
         <div className="rt-row iv-noprint">
           {exportable && (
-            <button type="button" className="btn-sm" disabled={download.isPending} onClick={() => download.mutate()}>
-              {download.isPending ? 'Exporting' : 'Export CSV'}
-            </button>
+            <BusyButton type="button" className="btn-sm" busy={download.isPending} onClick={() => download.mutate()}>
+              Export CSV
+            </BusyButton>
           )}
           <button type="button" className="btn-ghost btn-sm" onClick={onClose}>
             Close
@@ -660,6 +666,7 @@ function DigestSettings() {
       queryClient.setQueryData(['insights', 'digest'], data);
       setDraft(null);
     },
+    meta: { success: 'Digest settings saved' },
   });
   const s = settings.data;
   if (!s) return <>{settings.error ? <Problem error={settings.error} /> : <p className="loading">Loading</p>}</>;
@@ -699,9 +706,8 @@ function DigestSettings() {
           </select>
         </label>
         <Problem error={save.error} />
-        {save.isSuccess && !draft && <p role="status" className="alert alert-success">Saved.</p>}
         <div className="rt-row">
-          <button type="submit" disabled={save.isPending}>{save.isPending ? 'Saving' : 'Save'}</button>
+          <BusyButton type="submit" busy={save.isPending}>Save</BusyButton>
           <button type="button" className="btn-ghost" onClick={() => void preview.refetch()}>Preview today&apos;s text</button>
         </div>
       </form>

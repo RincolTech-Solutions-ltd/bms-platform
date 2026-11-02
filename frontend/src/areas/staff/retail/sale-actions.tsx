@@ -1,14 +1,15 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { RetailError, retail, type Sale } from '../../../api/retail';
+import { RetailError, isWaiting, retail, type Sale } from '../../../api/retail';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
 import { CREDIT_WRITE_OFF, SALE_VOID, holdsAt } from './permissions';
 import {
-  IMPORTED_FULL, IMPORTED_SHORT, MIN_REASON, PAY_METHODS, blankPay, buildPayRequest, fullPay, importedAndOwing, keyReused, owedMinor, paidWords, payFailureWords, payProblem,
+  IMPORTED_FULL, IMPORTED_SHORT, MIN_REASON, PAY_METHODS, blankPay, buildPayRequest, fullPay, importedAndOwing, keyReused, owedMinor, payFailureWords, payProblem,
   saleMovedOn, settledDate, takesPayment, typedAmount, voidBlocked, voidReasonOf, type PayForm,
   WRITE_OFF_CHECKER, WRITE_OFF_PENDING, canWriteOff, writeOffAlreadyPending, writeOffFailureWords, writeOffMovedOn, writeOffReasonOf, writeOffAmount, writeOffWarning, writeOffWords, } from './sale-actions-state';
-import { Problem, Success, money } from './ui';
+import { Problem, Success, WaitingForApproval, money } from './ui';
 
 // Two actions on a sale, for a shop owner (issues #326 and #327): take a payment on a credit sale, from the credit sales list and from
 // the sale itself, and void a sale from the sale itself. The API checks every rule again under the sale's lock; the screens only save a
@@ -55,8 +56,8 @@ export function PayFormView({ sale, today, form, full, busy, error, todayOnly, o
       {problem && <p role="alert" className="rt-flag">{problem}</p>}
       <Problem error={error} />
       <p className="cluster">
-        <button type="submit" className="rt-primary" disabled={problem !== null || busy}>{busy ? 'Saving' : full ? 'Mark as fully paid' : 'Save payment'}</button>
-        <button type="button" className="btn-ghost" disabled={busy} onClick={onCancel}>Cancel</button>
+        <BusyButton type="submit" className="rt-primary" busy={busy === true} notReady={problem !== null}>{full ? 'Mark as fully paid' : 'Save payment'}</BusyButton>
+        <button type="button" /* busy-exempt: cancel waits for the payment */ className="btn-ghost" disabled={busy} onClick={onCancel}>Cancel</button>
       </p>
     </form>
   );
@@ -66,7 +67,7 @@ export function PayFormView({ sale, today, form, full, busy, error, todayOnly, o
  * Mounted only while the form is open. Each way of paying has its own draft and Idempotency-Key, so "Mark as fully paid" never reuses the key
  * of an earlier part payment whose answer was lost. A refusal that says the sale moved on reloads it; a reused key resets the form.
  */
-function PayPanel({ sale, today, full, onDone }: { sale: Sale; today: string; full: boolean; onDone: (message: string | null) => void }) {
+function PayPanel({ sale, today, full, onDone }: { sale: Sale; today: string; full: boolean; onDone: () => void }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const saleId = sale.id ?? '';
@@ -77,16 +78,17 @@ function PayPanel({ sale, today, full, onDone }: { sale: Sale; today: string; fu
   const sending = useRef(false);
   const send = useMutation({
     mutationFn: () => retail.paySale(saleId, buildPayRequest(settledDate(full ? fullPay(draft, sale) : draft, todayOnly, today)), key),
-    onSuccess: (result) => {
+    onSuccess: () => {
       discard();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
-      onDone(paidWords(result.payment?.amount_minor ?? 0, result.sale_balance_minor ?? 0));
+      onDone();
     },
     onError: (error) => {
       if (saleMovedOn(error) || keyReused(error)) void queryClient.invalidateQueries({ queryKey: ['retail'] });
       if (keyReused(error)) discard();
     },
     onSettled: () => { sending.current = false; },
+    meta: { success: (result: { sale_balance_minor?: number }) => ((result.sale_balance_minor ?? 0) <= 0 ? 'Sale paid in full' : 'Payment recorded') },
   });
   // The balance changed under the form (someone else took a payment): a typed amount above the new balance goes back to the balance.
   const owed = owedMinor(sale);
@@ -111,7 +113,7 @@ function PayPanel({ sale, today, full, onDone }: { sale: Sale; today: string; fu
       onCancel={() => {
         // Keep the draft only when a request went out and its answer may have been lost (the same key then makes the retry safe).
         if (!(send.error && !(send.error instanceof RetailError))) discard();
-        onDone(null);
+        onDone();
       }}
     />
   );
@@ -125,23 +127,21 @@ function PayPanel({ sale, today, full, onDone }: { sale: Sale; today: string; fu
 export function PaySaleAction({ sale, today, compact = false }: { sale: Sale; today: string; compact?: boolean }) {
   const { me } = useStaff();
   const [mode, setMode] = useState<'part' | 'full' | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
   if (!holdsAt(me, SALE_CREATE, sale.branch_id)) return null;
   const note = importedAndOwing(sale)
     ? <p className="hint" data-testid="imported-note">{compact ? IMPORTED_SHORT : IMPORTED_FULL}</p>
     : null;
   return (
     <div data-testid="pay-sale">
-      {message && <Success>{message}</Success>}
       {note}
       {takesPayment(sale) && mode === null && (
         <p className="cluster">
-          <button type="button" className="btn-sm" onClick={() => { setMessage(null); setMode('part'); }}>Record payment</button>
-          <button type="button" className="btn-sm" onClick={() => { setMessage(null); setMode('full'); }}>Mark as fully paid</button>
+          <button type="button" className="btn-sm" onClick={() => setMode('part')}>Record payment</button>
+          <button type="button" className="btn-sm" onClick={() => setMode('full')}>Mark as fully paid</button>
         </p>
       )}
       {takesPayment(sale) && mode !== null && (
-        <PayPanel sale={sale} today={today} full={mode === 'full'} onDone={(text) => { setMode(null); setMessage(text); }} />
+        <PayPanel sale={sale} today={today} full={mode === 'full'} onDone={() => setMode(null)} />
       )}
     </div>
   );
@@ -173,8 +173,8 @@ export function VoidFormView({ branchName, busy, error, onVoid, onCancel }: {
       </p>
       <Problem error={error} />
       <p className="cluster">
-        <button type="submit" disabled={ready === null || busy}>{busy ? 'Voiding' : 'Void this sale'}</button>
-        <button type="button" className="btn-ghost" disabled={busy} onClick={onCancel}>Keep the sale</button>
+        <BusyButton type="submit" busy={busy === true} disabled={ready === null}>Void this sale</BusyButton>
+        <button type="button" /* busy-exempt: keep waits for the void */ className="btn-ghost" disabled={busy} onClick={onCancel}>Keep the sale</button>
       </p>
     </form>
   );
@@ -189,26 +189,31 @@ export function VoidSaleAction({ sale, branchName }: { sale: Sale; branchName?: 
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   // Voided, or found already voided: the button stays away until the reloaded sale says Voided.
-  const [done, setDone] = useState(false);
+  const [voided, setVoided] = useState(false);
+  // ADR-091: the void waits for an administrator; the sale stays as it is until then, and the button stays away.
+  const [waiting, setWaiting] = useState(false);
   const sending = useRef(false);
   const send = useMutation({
     mutationFn: (reason: string) => retail.voidSale(sale.id ?? '', reason),
-    onSuccess: () => {
-      setDone(true);
+    onSuccess: (outcome) => {
+      if (isWaiting(outcome)) setWaiting(true);
+      else setVoided(true);
       setOpen(false);
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
     onError: (error) => {
       // A void that already went through (a lost answer, a second person) is done, not an error.
       if (error instanceof RetailError && error.code === 'sale_voided') {
-        setDone(true);
+        setVoided(true);
         setOpen(false);
       }
       if (error instanceof RetailError && ['sale_voided', 'sale_has_payments', 'sale_has_returns'].includes(error.code ?? '')) void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
     onSettled: () => { sending.current = false; },
+    meta: { success: (outcome: object) => (isWaiting(outcome) ? null : 'Sale voided') },
   });
-  if (sale.status !== 'completed' || done || !holdsAt(me, SALE_VOID, sale.branch_id)) return null;
+  if (waiting) return <WaitingForApproval what="The void of this sale waits for an administrator." />;
+  if (sale.status !== 'completed' || voided || !holdsAt(me, SALE_VOID, sale.branch_id)) return null;
   const blocked = voidBlocked(sale);
   if (blocked) return <p className="hint" data-testid="void-blocked">{blocked}</p>;
   if (!open) return <p><button type="button" className="btn-sm" onClick={() => { send.reset(); setOpen(true); }}>Void this sale</button></p>;
@@ -247,8 +252,8 @@ export function WriteOffFormView({ owed, fee, reason, busy, error, onReason, onW
       <p className="hint" data-testid="write-off-checker">{WRITE_OFF_CHECKER}</p>
       <Problem error={error} />
       <p className="cluster">
-        <button type="submit" disabled={ready === null || busy}>{busy ? 'Writing off' : 'Write off'}</button>
-        <button type="button" className="btn-ghost" disabled={busy} onClick={onCancel}>Keep the debt</button>
+        <BusyButton type="submit" busy={busy === true} disabled={ready === null}>Write off</BusyButton>
+        <button type="button" /* busy-exempt: keep waits for the write-off */ className="btn-ghost" disabled={busy} onClick={onCancel}>Keep the debt</button>
       </p>
     </form>
   );
@@ -269,6 +274,7 @@ export function WriteOffSaleAction({ sale }: { sale: Sale }) {
   const saleId = sale.id ?? '';
   const { key, draft, setDraft, discard } = usePersistedDraft<{ reason: string }>(`sale-write-off:${me.user_id ?? ''}:${saleId}`, { reason: '' });
   const sending = useRef(false);
+  // toast-exempt: success screen, the write off words replace the form
   const send = useMutation({
     mutationFn: (reason: string) => retail.writeOffSale(saleId, reason, key),
     onSuccess: (outcome) => {

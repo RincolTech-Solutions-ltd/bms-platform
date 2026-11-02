@@ -1,8 +1,8 @@
 package com.rincoltech.bms.retail.stock.internal;
 
 import com.rincoltech.bms.kernel.Search;
+import com.rincoltech.bms.retail.stock.LowStockRule;
 import com.rincoltech.bms.retail.stock.internal.StockSummaryApi.Group;
-import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,7 +35,7 @@ class StockSummaryRepository {
             UUID categoryId,
             boolean negativeOnly,
             boolean includeInactive,
-            Long atMostMilli,
+            String stockLevel,
             int offset,
             int limit) {}
 
@@ -51,7 +51,7 @@ class StockSummaryRepository {
         sql.append(" coalesce(sum(round(coalesce(b.qty, 0) * p.sell_minor)), 0) AS value_minor,");
         sql.append(
                 spec.withCost()
-                        ? " coalesce(sum(round(coalesce(b.qty, 0) * p.cost_minor)), 0) AS cost_minor"
+                        ? " coalesce(sum(round(coalesce(b.qty, 0) * coalesce(b.avg_cost_minor, 0))), 0) AS cost_minor"
                         : " 0 AS cost_minor");
         sql.append(" FROM branches br CROSS JOIN retail_products p JOIN retail_categories c ON c.id = p.category_id");
         sql.append(" LEFT JOIN retail_stock_balances b ON b.branch_id = br.id AND b.product_id = p.id");
@@ -77,9 +77,18 @@ class StockSummaryRepository {
                             : " AND EXISTS (SELECT 1 FROM retail_stock_balances t WHERE t.product_id = p.id"
                                     + " AND t.branch_id IN (:branchIds) AND t.qty < 0)");
         }
-        if (spec.atMostMilli() != null) {
-            sql.append(" AND ").append(perRow ? "coalesce(b.qty, 0)" : held).append(" <= :atMost");
-            params.put("atMost", BigDecimal.valueOf(spec.atMostMilli(), 3));
+        if (spec.stockLevel() != null) {
+            // As the stock lists judge it (issue #490): only an item held where it is judged, low at or below its
+            // minimum.
+            boolean low = spec.stockLevel().equals(StockService.LEVEL_LOW);
+            sql.append(" AND ")
+                    .append(
+                            perRow
+                                    ? LowStockRule.atBranchSql(
+                                            low, "p.tenant_id", "p.id", "br.id", "coalesce(b.qty, 0)", ":low")
+                                    : LowStockRule.overBranchesSql(
+                                            low, "p.tenant_id", "p.id", "lb.id IN (:branchIds)", held, ":low"));
+            params.put("low", StockService.lowStock());
         }
         sql.append(" GROUP BY 1");
         String names = level.equals("branch")

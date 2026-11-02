@@ -17,6 +17,12 @@ public interface CatalogueHistory {
     Ensured ensureUnit(String name);
 
     /**
+     * Issue #698 (ADR-109): the locks of these units' keys for the rest of the transaction, taken in key order before any
+     * row, as the CSV import takes them, so two imports never wait on each other in a circle.
+     */
+    void lockUnits(java.util.Collection<String> names);
+
+    /**
      * The product with this code ignoring case. A new product gets an {@code initial} history row
      * with these prices. An existing one is left exactly as it is, prices included, and no history
      * row is written (issue #73): {@code changed} only says its prices differ from these.

@@ -16,7 +16,7 @@ puts releases on these hosts is chapter 10 and ADR-006. The step-by-step procedu
 | Local | A developer's machine, `docker-compose.yml` at the repository root (`make dev`) | The developer | Fabricated; the `demo` tenant from `make seed` |
 | CI | Self-hosted runners (Jerome's laptop first, the staging Pi as overflow; ADR-018 amendment 2026-10-16) and, for the deploy jobs only, the dedicated deploy runner on the staging host (ADR-040); PostgreSQL 16 in Testcontainers | Every pull request and push to `main` | Fabricated, per test |
 | Staging | A shared ARM64 host at a Rincol home site (Raspberry Pi 4, Debian 13), `/opt/bms`, behind a Cloudflare Tunnel (section 9.13, ADR-018) | Every green build of `main`: the host pulls the `staging` pointer | Fabricated tenants only (chapter 15 section 15.8) |
-| Production | One cloud VM (Hetzner Cloud, Ubuntu LTS), `/opt/bms` | A `vX.Y.Z` tag, after the dev lead approves | Real tenants |
+| Production | One cloud VM (Ubuntu 24.04 LTS), `/opt/bms`, created by Terraform in `infra/production/` on Hetzner Cloud or AWS EC2, the owner's choice (section 9.3.1, ADR-063); not created yet | Today's pipeline: a `vX.Y.Z` tag, after the dev lead approves (ADR-006); proposed: the host pulls a signed `production` pointer the owner moves (ADR-063) | Real tenants |
 
 Staging and production are separate hosts with separate databases, separate `.env` files,
 separate R2 prefixes and separate host names. Nothing is shared between them. Sections 9.3 to 9.5
@@ -42,7 +42,7 @@ skips with a notice. Staging differs as section 9.13 describes (ADR-018).
 |     |  db-scheduler polling (the worker role, ADR-008)                                      |
 |     v                                                                                      |
 |  postgres (PostgreSQL 16)  volume pgdata       migrate (one-shot, bms_owner) -> postgres   |
-|  web (Caddy serving the PWA bundle)  :8080                                                 |
+|  web (Caddy serving the PWA bundle)  :8080, volume web_assets read-only (ADR-078)          |
 +--------------------------------------------------------------------------------------------+
         |                                                         |
         | nightly backup.sh (pg_dump, encrypted)                   | documents (later)
@@ -53,10 +53,31 @@ skips with a notice. Staging differs as section 9.13 describes (ADR-018).
 Only the proxy publishes ports. The API, web and database are reachable only on the Compose
 network. There is no Redis (ADR-008).
 
+### 9.3.1 Provisioning with Terraform (ADR-063)
+
+The VM and everything it needs outside itself are code in `infra/production/`, reviewed and not applied
+until production day (runbook `docs/runbooks/terraform-production.md`). Two roots create the same host on
+two providers, and the owner applies only the one chosen: `hetzner/` (a server with delete and rebuild
+protection, Hetzner backups only if the owner chooses them, a Hetzner firewall) and `aws/` (EC2 with termination protection, IMDSv2 only,
+an encrypted gp3 disk, an Elastic IP, a security group). Both use two shared modules:
+
+| Module | Creates |
+|---|---|
+| `modules/cloud-init` | The first-boot configuration: the `ops` user for people (SSH keys only, sudo), sshd with no passwords and no root, Docker from Docker's apt repository, unattended upgrades, fail2ban, the `bms` service user in the docker group, `/opt/bms`, and the units in `deploy/systemd` (`bms-pull`, `bms-monitor`, `bms-restore-drill`), installed but not enabled until the host has its `.env` |
+| `modules/cloudflare` | In the existing Cloudflare account: A (and on Hetzner AAAA) records for `bms`, `bms-callbacks` and each `<slug>-bms`, DNS only; the R2 backup bucket with the lock rules (`production/daily/` 30 days, `production/monthly/` 365 days) and lifecycle rules (a day later) of ADR-058; the R2 documents bucket; and three account tokens for the host, each limited to the VM's addresses if Cloudflare enforces the IP condition: object read and write on the backup bucket, the same on the documents bucket, and DNS edit plus zone read on the whole zone for Caddy's DNS-01 challenge (an accepted risk: a host compromise could change mail records; ADR-063 decision 4) |
+
+Firewall on both: inbound 22 from the admin address list only (the whole internet is refused by
+validation), 80 and 443 TCP and 443 UDP from anywhere, nothing else; outbound open. The provider
+location or region, the server size and the R2 location have no default: they are the owner's decisions,
+and the region is the data protection decision of NFR-DP-07. No secret goes into cloud-init (user data
+is readable from the provider's metadata service). The three host tokens are created by Terraform, so
+their values are in Terraform state, which lives in its own private R2 bucket and never in git; the host
+receives them once through `terraform output -raw host_env`.
+
 ## 9.4 Sizing: a 4 GB VM (production)
 
 The starting size is a 2 vCPU, 4 GB, 40 GB disk VM per environment (for example Hetzner
-CX22). Memory is budgeted with container limits so one runaway process cannot starve the rest:
+CX23 or an AWS t3.medium). Memory is budgeted with container limits so one runaway process cannot starve the rest:
 
 | Container | Limit | Notes |
 |---|---|---|
@@ -109,6 +130,17 @@ only, stored in the production host's `.env` only. It cannot read or change anyt
 Policy of `default-src 'self'` with no inline scripts (chapter 8 section 8.8). Request bodies
 are capped at 6 MB (5 MB uploads plus framing). HTTP/3 is enabled on UDP 443.
 
+**Upstreams** (`deploy/caddy/upstreams.caddy`, imported by both Caddyfiles, ADR-083). Every route
+proxies to `dynamic a api 8080` or `dynamic a web 8080`, refreshed each second, so during a deploy
+both the old and the new container of a service take requests. A refused connection marks that
+address down for 2 seconds and the request goes to another; with none answering, Caddy tries again
+every 250 ms for up to 30 seconds before a 502. Only a failed connection is retried, and keep-alive
+to the containers is off so that a POST is never written on a connection the old container is
+closing. Every site also imports `not_delivered`: a 502, 503 or 504 whose error is a failed dial or
+`no upstreams available`, the only case that proves nothing reached a container, answers with the
+header `Bms-Not-Delivered: 1` and an `app_updating` problem; any other proxy error stays bare, and the
+PWA reads it as possibly saved (chapter 7 section 7.8).
+
 ## 9.6 Images and containers
 
 | Image | Built from | Runs as | Health |
@@ -127,9 +159,14 @@ The web image serves the bundle in three classes, which `frontend/Caddyfile` kee
 
 | Path | Cache-Control | Missing file |
 |---|---|---|
-| `/assets/*` and `/workbox-*.js`, everything the build names with a content hash | `public, max-age=31536000, immutable` | 404, `no-store` |
+| `/assets/*` and `/workbox-*.js`, everything the build names with a content hash | `public, max-age=31536000, immutable` | the same path in `/srv/previous` (earlier builds, ADR-078), else 404, `no-store` |
 | `/app-config.json`, built from the container's environment | `no-cache` | not applicable, it is a `respond` and never reads the disk |
-| everything else (`/`, every route, `sw.js`, `push-sw.js`, the manifest, the icons) | `no-cache` | `/index.html`, so the router takes over |
+| everything else (`/`, every route, `sw.js`, `push-sw.js`, the BMS icons) | `no-cache` | `/index.html`, so the router takes over |
+
+The installed app's manifest and its icons are not files of the web image: the API serves them per host
+under `/api/v1/branding/app/` (ADR-066), so the edge proxy sends them to the API with the rest of `/api/*`,
+the manifest `no-cache` with an ETag and the icons drawn from the business's logo for an hour. The BMS icons
+above are their fallback.
 
 Nothing hashed is ever served through the single-page fallback. `index.html` names the hashed
 assets of its own build, so a copy of it kept from an earlier deploy asks for files that are gone;
@@ -143,9 +180,33 @@ loud and lets the next load repair itself. For the same reason every HTML respon
 path matcher cannot do it, because `header /index.html` matches the literal path only while real
 pages arrive as `/` or a route.
 
+Earlier builds' hashed files stay served for 14 days (ADR-078). A page left open, or a service
+worker that has not yet taken the new build, still runs the previous `index.html` and loads its
+screens lazily by hashed names the new image does not carry. So `web` mounts the named volume
+`web_assets` read-only at `/srv/previous`, and the Caddyfile tries a hashed path there after
+`/srv`; `/previous` itself answers 404. `deploy.sh` fills it just before every switch, rollbacks
+included: it runs the outgoing web image, by its local image ID with `pull_policy: never` on the service, once as the
+one-shot `keep-assets` service (no network, no capability, read-only root, 32 MB). That run first
+deletes files whose date is more than `BMS_KEEP_ASSETS_DAYS` (default 14) days old, that is files
+that left the live build more than 14 days ago, then copies that build's `/assets` tree and
+`/workbox-*.js` without overwriting anything, refreshing the date of names it already holds. It has
+60 seconds before a deploy's switch (`BMS_KEEP_ASSETS_TIMEOUT`) and 20 before a rollback's. A
+failure or a timeout is a warning, never a failed deploy or rollback. The volume is not backed up; losing it costs
+a reload on an old copy, not data.
+
+During a deploy a new `api` or `web` container starts beside the old one and the old one stops
+only once the new one's health check passes (`/readyz` for the api, a `wget` of `/` every 5
+seconds for web), ADR-083. Before the new web starts, its own hashed files are copied into
+`web_assets` (`keep-assets` run by the incoming image), so during the overlap the old container also
+serves them and a page from the new one loads whichever container answers; if that copy fails, web
+restarts in place instead. The proxy is recreated only when what it runs changed.
+
 The API image carries two commands: the default starts the application; `migrate` applies the
 Flyway migrations as `bms_owner` and exits (ADR-006, ADR-010). The API image also carries the
-commit it was built from (`BMS_GIT_SHA`), shown by `/version` and `/actuator/info`.
+commit it was built from (`BMS_GIT_SHA`), shown by `/version` and `/actuator/info` and sent on every response as
+`Bms-Build`. The web image is built with the same sha tag and the commit time (`GIT_SHA`, `GIT_TIME`), so a running app
+knows its own build, loads a newer one by itself and can be refused with 426 `app_too_old` below `BMS_MIN_CLIENT_BUILD`
+(ADR-088).
 
 Actuator is locked down: all endpoints are disabled except `health` and `info`, which exist only
 on the management port 8081 (never published). The application port exposes `/healthz`
@@ -179,7 +240,9 @@ migration) with status only, no details.
   the release's proxy image, never from GitHub directly.
 - Host names: `BMS_TENANT_HOST_PATTERN` and `BMS_PLATFORM_HOST` for the API and the web
   container; on the production VM also `BMS_DNS_ZONE` and `BMS_CALLBACK_HOST` for the proxy; on
-  the staging host `CLOUDFLARE_TUNNEL_TOKEN` and `CLOUDFLARED_IMAGE` for cloudflared.
+  the staging host `CLOUDFLARE_TUNNEL_TOKEN` and `CLOUDFLARED_IMAGE` for cloudflared. Optional for the API:
+  `BMS_SHORT_LINK_HOST` (default `rincoltech.com`), the host of the shops' short links; its one Cloudflare redirect rule
+  is set by the operator from `GET /api/v1/platform/short-link-rule` (ADR-108, `docs/runbooks/onboard-tenant.md`).
 - Sign-in limits (ADR-059, issue #426), optional: `BMS_AUTH_SIGN_IN_FAILURES_PER_IP` (FAILED requests from one client
   IP in 10 minutes on the public sign-in, two-step, invitation and setup routes; 300; a success costs nothing, so a
   mobile carrier's NAT address shared by many users is not used up by their sign-ins) and
@@ -219,7 +282,7 @@ migration) with status only, no details.
   stored encrypted, so there is no per-lender variable; the consumer key, secret, IPN id, token and tenant id variables of #213 are gone, #233), `BMS_DATA_KEY_PREVIOUS` (retired data keys during a rotation), `BMS_PESAPAL_PLATFORM_CONSUMER_KEY`, `BMS_PESAPAL_PLATFORM_CONSUMER_SECRET`,
   `BMS_PESAPAL_PLATFORM_IPN_ID`, `BMS_PESAPAL_PLATFORM_IPN_TOKEN` (an IPN registration belongs to one credential pair); SMS `BMS_SMS_PROVIDER`, `BMS_SMS_MODE` (`off` default, `sink` on staging),
   `BMS_SMS_ALLOWLIST`, `BMS_SMS_AT_BASE_URL`, `BMS_SMS_AT_USERNAME`, `BMS_SMS_AT_API_KEY`, `BMS_SMS_CALLBACK_TOKEN`, `BMS_SMS_PLATFORM_DAILY_CAP`; AI (built in #220, `docs/runbooks/ai-assistant.md`)
-  `BMS_AI_PROVIDER` (`off` by default, `openai_compatible`, or `recording` in dev and test only), `BMS_AI_BASE_URL`, `BMS_AI_API_KEY`, `BMS_AI_MODEL`, `BMS_AI_ENABLED_TENANTS` (the platform allow-list), `BMS_AI_PLATFORM_DAILY_TOKENS`, `BMS_AI_PLATFORM_DAILY_COST_MICRO`, `BMS_AI_PRICE_INPUT_MICRO_PER_MILLION`, `BMS_AI_PRICE_OUTPUT_MICRO_PER_MILLION`, `BMS_AI_PRICE_CURRENCY` and the tuning values of the spec's section 9.1; an incomplete provider setting is off, never a startup failure; reports `BMS_REPORTS_MAX_CONCURRENT_RUNS`,
+  `BMS_AI_PROVIDER` (`off` by default, `openai_compatible`, or `recording` in dev and test only), `BMS_AI_BASE_URL`, `BMS_AI_API_KEY`, `BMS_AI_MODEL`, `BMS_AI_ENABLED_TENANTS` (the platform allow-list), `BMS_AI_PLATFORM_DAILY_TOKENS`, `BMS_AI_PLATFORM_DAILY_COST_MICRO`, `BMS_AI_PRICE_INPUT_MICRO_PER_MILLION`, `BMS_AI_PRICE_OUTPUT_MICRO_PER_MILLION`, `BMS_AI_PRICE_CURRENCY` and the tuning values of the spec's section 9.1; an incomplete provider setting is off, never a startup failure; Ask BMS (ADR-096, `docs/runbooks/ask-bms.md`) `BMS_HELP_ASK_TENANTS` (empty: off for every business), `BMS_HELP_ASK_GEMINI_API_KEY`, `BMS_HELP_ASK_GROQ_API_KEY`, `BMS_HELP_ASK_DEEPSEEK_API_KEY` (a provider without a key is skipped), their `_MODEL` names, `BMS_HELP_ASK_GEMINI_REASONING` (`minimal` by default, Gemini only), DeepSeek's prices, `BMS_HELP_ASK_DAILY_QUESTIONS` and `BMS_HELP_ASK_DEEPSEEK_MONTHLY_COST_MICRO`; the provider allow-list (one host each for Gemini, Groq and DeepSeek) is the code constant `AskProviders.ALLOWED`, never configuration or an environment value, a base URL off it or anything naming Anthropic or Claude stops startup, DeepSeek runs only with both `BMS_HELP_ASK_DEEPSEEK_PRICE_*` set, and `BMS_HELP_ASK_USER_HOURLY_QUESTIONS` limits each person; the setup helper (ADR-102) uses those providers and keys with `BMS_SETUP_AI_TENANTS` (empty: off for every business), `BMS_SETUP_AI_DAILY_DRAFTS` (30), `BMS_SETUP_AI_USER_HOURLY_DRAFTS` (10), `BMS_SETUP_AI_BUDGET_SECONDS` (25, at most 30), `BMS_SETUP_AI_MAX_TOKENS` (8000), `BMS_SETUP_AI_MAX_TEXT_CHARS` (30000) and the photo models `BMS_SETUP_AI_GEMINI_PHOTO_MODEL` (empty: Gemini's model) and `BMS_SETUP_AI_GROQ_PHOTO_MODEL` (empty: Groq reads no photos), each checked like the Ask BMS models; reports `BMS_REPORTS_MAX_CONCURRENT_RUNS`,
   `BMS_REPORTS_PDF_ROW_CAP`, `BMS_REPORTS_XLSX_ROW_CAP` (staging 1, 500 and 20,000, because the staging API has about 224 MB of
   heap), `BMS_REPORTS_MAX_FILE_BYTES` (64 MiB; 8 MiB on staging) and `BMS_REPORTS_SPOOL_DIR` (empty: a folder in the temp
   directory). `BMS_REPORTS_XLSX_ROW_CAP` is the row cap of every tabular output (an Excel sheet, a CSV section, a JSON table);
@@ -298,7 +361,10 @@ deletion 90 days after closing), all Africa/Kampala (ADR-024).
    alerts on a failed drill, no good drill in 9 days, or a drill over the RTO. The quarterly timed
    restore onto a fresh VM stays a human drill recorded in `docs/meetings/<date>/`.
 
-The R2 token is scoped to the backup bucket. The encryption key has an offline copy held by
+The R2 token is scoped to the backup bucket; on a host built by `infra/production/` it is an account token
+with object read and write on that bucket only, limited to the VM's addresses if Cloudflare enforces the IP condition, and the lock and
+lifecycle rules are created by the same Terraform (section 9.3.1), so the host's token cannot remove them; an account
+administrator or the Terraform token still can, and both are guarded as root credentials. The encryption key has an offline copy held by
 the dev lead (chapter 8 section 8.7). The restore procedure and the quarterly drill
 (NFR-BAK-04) are `docs/runbooks/restore-from-backup.md`.
 
@@ -344,7 +410,8 @@ logs JSON (ECS format) with the request id on every line in the `server` profile
   current                staging only: symlink to the live releases/<tag>/, updated only on success
   cosign.pub             the signing public key (ADR-018 finding H2): committed at deploy/cosign.pub,
                           provisioned once by hand, never replaced by a release
-  systemd/               the unit files, for reference; installed by hand
+  systemd/               the unit files, for reference; installed by hand, or by cloud-init on a host
+                          built by infra/production (section 9.3.1)
   postgres/initdb/       copied from deploy/ on every deploy. Production: the restore drill reads its init scripts here.
                           Staging: the drill reads releases/<tag>/postgres/initdb (the staged release it matches)
   sql/                   onboarding scripts (docs/runbooks/onboard-tenant.md)
@@ -365,18 +432,18 @@ logs JSON (ECS format) with the request id on every line in the `server` profile
 
 Staging runs on an ARM64 host that already exists at a Rincol home site: a Raspberry Pi 4 with
 8 GB, Debian 13 and SD card storage, shared with an unrelated edge workload and a capped CI runner
-(ADR-018). BMS may use about 900 MB of it, hard-capped. The site has no inbound ports.
+(ADR-018). BMS may use about 1.6 GB of it, hard-capped (900 MB until decision D37, 24 Oct 2026). The site has no inbound ports.
 
 ```
  Visitor --HTTPS--> Cloudflare edge (TLS for *.rincoltech.com; proxied CNAMEs:
                     bms-staging, <slug>-bms-staging  ->  <tunnel id>.cfargotunnel.com)
                                   ^
                                   | outbound-only tunnel, opened by cloudflared
-+------------- ARM64 host, Docker Compose project "bms", all in bms.slice (900 MB) ----------+
++------------- ARM64 host, Docker Compose project "bms", all in bms.slice (1.6 GB) ----------+
 |  cloudflared  --http-->  proxy :8080 (Caddyfile.tunnel; security headers, 6 MB bodies)      |
 |                             |  /api/*, /healthz, /readyz, /version  ->  api:8080            |
 |                             |  everything else                       ->  web:8080            |
-|  api (bms_app)   postgres (volume pgdata)   web   migrate (one-shot, bms_owner)             |
+|  api (bms_app)   postgres (volume pgdata)   web (volume web_assets)   migrate (one-shot)    |
 |  bms-pull.timer (every 2 min) -> pull-staging.sh -> deploy.sh <sha-tag>                     |
 +--------------------------------------------------------------------------------------------+
         | nightly backup.sh (pg_dump, encrypted)  ->  Cloudflare R2: bms-backups/staging/
@@ -405,7 +472,8 @@ Staging runs on an ARM64 host that already exists at a Rincol home site: a Raspb
   | `cloudflared` | 48 MB | |
   | `proxy`, `web` | 32 MB each | Caddy |
   | `migrate` | 160 MB | Only while a deploy runs, next to the old API |
-  | **Total** | 736 MB steady, 896 MB during a deploy | `bms.slice`: `MemoryMax=900M`, `MemoryHigh=860M`, no swap, `CPUQuota=250%` |
+  | second `api`, `web` | 448 MB, 32 MB | Only during a switch, beside the old ones until they are healthy (ADR-083). The second api starts only while its own limit plus 64 MB (512 MB) is free below the slice's `MemoryHigh` and on the host, so its start-up peak can never bring the slice's OOM killer onto the old api or PostgreSQL (reclaim, a slowdown, stays possible); otherwise the api restarts in place, with the old gap. Measured 24 Oct 2026: about 790 MB in use, so about 710 MB free below the 1500 MB `MemoryHigh`: staging overlaps on every deploy. `BMS_ROLL_MIN_FREE_MB` can replace the limit with a measured start-up peak |
+  | **Total** | 736 MB steady, 896 MB while migrations run, 1216 MB by limits during an overlap | `bms.slice`: `MemoryMax=1600M`, `MemoryHigh=1500M` (decision D37), no swap, `CPUQuota=250%` |
 
   Every container is started with `cgroup_parent: bms.slice`, so the slice is a hard cap for the
   whole stack: under pressure the kernel reclaims and then kills inside BMS, never in the other
@@ -422,7 +490,7 @@ Staging runs on an ARM64 host that already exists at a Rincol home site: a Raspb
 
 - Confirm the hosting region against the data protection requirement for processing outside
   Uganda before production data arrives (NFR-DP-07); record the outcome in an ADR.
-- Create the production Cloudflare token scoped to the `rincoltech.com` zone when the production
-  VM is provisioned.
+- Choose the production provider (Hetzner Cloud or AWS), its location or region, the server size and
+  the R2 location, then apply `infra/production/` (ADR-063, `docs/runbooks/terraform-production.md`).
 - Registry retention for old `sha-*` images.
 - Off-host log shipping and an error tracker (NFR-OBS-03).

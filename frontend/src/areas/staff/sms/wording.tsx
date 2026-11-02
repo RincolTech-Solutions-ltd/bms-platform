@@ -10,9 +10,13 @@ import {
   type SmsTestResult,
 } from '../../../api/sms';
 import { SEARCH_DELAY_MS } from '../../../app/ui/useLiveSearch';
+import { useUnsavedWork } from '../../../app/unsaved-work';
 import { formatMinor } from '../../../components/money';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { useStaff } from '../context';
 import { mayManageWording, mayReadNotifications } from './state';
+import { NoAccess } from '../../../app/ui/EmptyState';
+import { Hint } from '../../../app/ui/Hint';
 
 // SMS wording (extras slice B3, issue #218; ADR-036 decision 9): the tenant's own words for each event, built from a short
 // list of placeholders and nothing else (no conditions, no code), with a preview made with fabricated data as you type, the
@@ -109,7 +113,10 @@ function Placeholders({ list, disabled, onInsert }: { list: SmsPlaceholder[]; di
 
 function TestMessage({ eventKey, text, canSend }: { eventKey: string; text: string; canSend: boolean }) {
   const [to, setTo] = useState('');
-  const send = useMutation({ mutationFn: () => sms.testMessage(eventKey, text, to) });
+  const send = useMutation({
+    mutationFn: () => sms.testMessage(eventKey, text, to),
+    meta: { success: (r: SmsTestResult) => (r.outcome === 'sent' ? 'Test message sent' : r.outcome === 'sunk' ? 'Test message recorded' : null) },
+  });
   if (!canSend) return null;
   const error = send.error instanceof SmsError ? send.error : null;
   return (
@@ -128,11 +135,11 @@ function TestMessage({ eventKey, text, canSend }: { eventKey: string; text: stri
       <label htmlFor={`sms-test-${eventKey}`}>Phone number</label>
       <input id={`sms-test-${eventKey}`} inputMode="tel" autoComplete="off" value={to} onChange={(e) => { setTo(e.target.value); send.reset(); }} />
       {error && <p role="alert" className="field-error">{error.fields.to ?? error.message}</p>}
-      {send.data && <p role="status" className="alert alert-info">{testWords(send.data)}</p>}
+      {send.data && send.data.outcome !== 'sent' && send.data.outcome !== 'sunk' && <p role="status" className="alert alert-info">{testWords(send.data)}</p>}
       <p>
-        <button type="submit" className="btn-ghost" disabled={to.trim() === '' || send.isPending}>
-          {send.isPending ? 'Sending' : 'Send a test message'}
-        </button>
+        <BusyButton type="submit" className="btn-ghost" busy={send.isPending} disabled={to.trim() === ''}>
+          Send a test message
+        </BusyButton>
       </p>
     </form>
   );
@@ -163,14 +170,17 @@ export function TemplateEditor({ template, canManage, onNotice, tour = false }: 
     mutationFn: () => sms.saveTemplate(template.event_key, version, text),
     onSuccess: () => { onNotice(null); return refresh(); },
     onError: (error) => { if (error instanceof SmsError && error.code === 'version_conflict') onNotice(error.message); return refresh(); },
+    meta: { success: 'Wording saved' },
   });
   const revert = useMutation({
     mutationFn: () => sms.revertTemplate(template.event_key, version),
     onSuccess: () => { onNotice(null); return refresh(); },
     onError: (error) => { if (error instanceof SmsError && error.code === 'version_conflict') onNotice(error.message); return refresh(); },
+    meta: { success: 'Default wording restored' },
   });
   const saveError = save.error instanceof SmsError ? save.error : null;
   const dirty = text !== saved;
+  useUnsavedWork(dirty);
   const insert = (name: string) => {
     const el = area.current;
     const token = `{${name}}`;
@@ -222,11 +232,11 @@ export function TemplateEditor({ template, canManage, onNotice, tour = false }: 
       {revert.error instanceof Error && <p role="alert" className="field-error">{revert.error.message}</p>}
       {canManage && (
         <p className="cluster">
-          <button type="button" className="rt-primary" data-tour={tour ? 'sms-wording-save' : undefined} disabled={!dirty || previewError !== null || save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? 'Saving' : 'Save my words'}
-          </button>
+          <BusyButton type="button" className="rt-primary" data-tour={tour ? 'sms-wording-save' : undefined} busy={save.isPending} disabled={!dirty || previewError !== null} onClick={() => save.mutate()}>
+            Save my words
+          </BusyButton>
           {dirty && (
-            <button type="button" className="btn-ghost" disabled={save.isPending} onClick={() => { setText(saved); save.reset(); }}>
+            <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={save.isPending} onClick={() => { setText(saved); save.reset(); }}>
               Undo
             </button>
           )}
@@ -237,9 +247,9 @@ export function TemplateEditor({ template, canManage, onNotice, tour = false }: 
           )}
           {template.override && reverting && (
             <>
-              <button type="button" className="btn-ghost" disabled={revert.isPending} onClick={() => revert.mutate()}>
-                {revert.isPending ? 'Going back' : 'Yes, use the default words'}
-              </button>
+              <BusyButton type="button" className="btn-ghost" busy={revert.isPending} onClick={() => revert.mutate()}>
+                Yes, use the default words
+              </BusyButton>
               <button type="button" className="btn-ghost" onClick={() => setReverting(false)}>
                 Keep my words
               </button>
@@ -257,7 +267,7 @@ export function WordingScreen() {
   const list = useQuery({ queryKey: ['sms', 'templates'], queryFn: sms.templates, enabled: mayReadNotifications(me), retry: false });
   // Held here, not in an editor, which starts afresh from every new version (a save, or someone else's change, is one).
   const [notice, setNotice] = useState<string | null>(null);
-  if (!mayReadNotifications(me)) return <p className="empty-state">You do not have access to the SMS wording.</p>;
+  if (!mayReadNotifications(me)) return <NoAccess what="the SMS wording" />;
   if (list.isPending) return <p className="loading">Loading the wording</p>;
   if (list.isError || !list.data) {
     return <p role="alert" className="alert alert-danger">{list.error instanceof Error ? list.error.message : 'Could not load the wording.'}</p>;
@@ -269,7 +279,7 @@ export function WordingScreen() {
         Choose the words each text message uses. Without your own words, the default is sent. Placeholders such as <code>{'{amount}'}</code> are filled in for each message.
       </p>
       {notice && <p role="alert" className="alert alert-warning">{notice}</p>}
-      {!canManage && <p className="hint">You can look at the wording. Only a business administrator can change it.</p>}
+      {!canManage && <Hint full>You can look at the wording. Only a business administrator can change it.</Hint>}
       {list.data.map((t, i) => (
         // Keyed by the saved version, so a fresh read after a save or someone else's change starts from what is saved.
         <TemplateEditor key={`${t.event_key}:${t.override?.version ?? 0}`} template={t} canManage={canManage} onNotice={setNotice} tour={i === 0} />

@@ -11,13 +11,14 @@ draft: names are snake_case and the client is typed by the generated `src/api/sc
 | Route | Screen | Permissions needed |
 |---|---|---|
 | `/staff/retail` | Landing: one tile per screen the user may use | any `retail.*` permission |
-| `/staff/retail/sale` | Record a sale, then the receipt summary | `retail.sale.create` |
-| `/staff/retail/restock` | Restock: supplier, lines, per-branch quantities | `retail.purchase.create` |
+| `/staff/retail/sale` | Record a sale, then the receipt summary; a shop with no items starts with the card Get your shop ready (Quick add an item, the one primary action, then Set up your shop, Add your first items and Import a list, or Ask the owner to add the items first), and a search that finds nothing offers Not in the list? Add it here with what was typed and How many you have here (more than 0), the new item counted and going on the sale; an existing item chosen with Use this item is never counted (issue #615) | `retail.sale.create` (Add it here: `retail.catalogue.manage`, others read Ask the owner to add it; the count: `retail.stocktake.commit` at the branch) |
+| `/staff/retail/restock` | Buy stock: supplier, lines, per-branch quantities; under the item search, Not in the list? Add it here (issue #505): Item code shown as text, made by the app from the category (never typed, issue #562), Category, Description, Counted in, Buying price, Selling price and the quantity at this branch, one Save that makes the item and puts it on the purchase; a line bought in a pack asks How many pieces in each carton? (issue #554, ADR-082: required, filled with the usual size or by a scanned carton barcode, and Use 30 from now on for a different size, offered with `retail.catalogue.manage`) | `retail.purchase.create` (Add it here: `retail.catalogue.manage`, others read Ask your manager to add this item) |
 | `/staff/retail/usage` | Usage and damage | `retail.usage.report` |
 | `/staff/retail/credit-sales` | Credit sales, grouped by a chain of levels the user chooses (issues #328, #341): buyer, date, amount, due date, state; open a sale | `retail.sale.read` |
 | `/staff/retail/sales` | All sales, grouped by a chain of levels the user chooses (issues #328, #341): filters by dates, buyer, paid by and item; open a sale | `retail.sale.read` |
 | `/staff/retail/stock` | Stock per branch or All branches, search, category filter, Out of stock and Low stock tabs, negative flag | `retail.stock.read` |
-| `/staff/retail/stocktake` | Count, review variance, commit | `retail.stocktake.commit` and `retail.stock.read` |
+| `/staff/retail/stocktake` | Count stock: count (each count saved as it is typed and restored after a reload, issue #681), review the difference, commit, then Stock updated for N items; the same Add it here as Buy stock, for a first count, with How many you counted (the buying price only with `retail.profit.read`) (issue #505) | `retail.stocktake.commit` and `retail.stock.read` (Add it here: `retail.catalogue.manage`) |
+| `/staff/retail/quick-add` | Quick add (issue #632, ADR-101): Name, Selling price, Buying price (optional, with `retail.profit.read`), How many do you have here now?, Where (the branch in use first, stores too; the kit's EmptyChoice when there is no branch to add stock at), Category (needed, right under the Name, the last group chosen at this shop chosen again, + Add a group in a sheet; issue #688), the unit (the shop's piece unit; needed while Piece is switched off), with packs on Add an item's packages question and package rows (`NewItemPackages`, issue #695) and How do you usually buy it, and for how much? (`UsualLevel`), all before the prices and How many, which then takes a box per level and the loose pieces (`PacksAndPiecesFields`, as Count stock), and Photo, one Add; it opens with no field focused, so a tour over it never shows an error before the person types (issue #642); then the line "Test bulb added: 600 pc at Test Store" with Add another (category and where kept) and Sell it (the sale opens at the branch the stock was added at; when another branch is in use it says so, with Switch to that branch and Sell here without it; an item the branch's list does not return says "Search for it to add it", never dropped in silence, issue #641); while an Add is not confirmed every field is locked and Add sends exactly the same again (the line names the button that sends again: Add, or the name panel's button while the panel shows, issue #641), and Start again shows only after a certain refusal; a repeated name offers Use the existing one and just add stock, which adds the number typed ("8 pc added at Test Store, 58 pc now"), or Keep the existing one for someone who may not add stock; offline it says it needs the internet. I just bought these, take the money from cash (off by default, for whoever holds `retail.purchase.create` at Where and may see the buying price; issue #646): the Buying price is then needed, Cash or Mobile money is the kit's Segmented (rule 11), a one line note shows the total that comes out and of which account ("UGX 30,000 comes out of Cash at Test Shop") before Add (rule 8, `money()`), and the answer names the purchase; moved to a place where they may not buy, the tick stays with a line saying so and Add sends nothing. Reached from the Stock menu and More, the first-run card (Quick add an item, its first action), the catalogue home, the Items page and Sell's not-found line (with what was typed) | `retail.catalogue.manage` and `retail.stock.read` (the stock: `retail.stocktake.commit` at the branch, without which the item is added with no stock; paid from cash: also `retail.purchase.create` there) |
 | `/staff/retail/transfer` | Move stock: to which branch, items with the source's stock, date and note | `retail.stock.transfer` and `retail.stock.read` |
 | `/staff/retail/transfers` | Stock moves from or to the branch; open one; cancel it | `retail.stock.read` (cancel: `retail.stock.transfer`) |
 | `/staff/retail/stock-by-location` | Stores and shops: every product in each branch, stores first, a subtotal per role, stock on the way, the combined total (#193); only while `branch_roles` is on | `retail.stock.transfer` and `retail.stock.read` (the API needs only the read; value: `retail.profit.read`) |
@@ -30,11 +31,12 @@ draft: names are snake_case and the client is typed by the generated `src/api/sc
 | `/staff/retail/credit-control` | Credit control: what credit buyers owe by age, the overdue list, payments received (#149) | `retail.sale.read` |
 | `/staff/retail/evaluation` | Business evaluation: profit to date, expected profit of the stock at today's prices, a 30 day pace (#149) | `retail.profit.read` |
 | `/staff/retail/catalogue` | Catalogue home: links to the screens below the session may use | any one of the catalogue screens' permissions |
-| `/staff/retail/catalogue/products` | Items: list with search, category and on sale filters; add, edit, change price, price history (#146) | `retail.catalogue.manage` and `retail.stock.read` (Change price: `retail.price.edit`; cost: `retail.profit.read`) |
-| `/staff/retail/catalogue/categories`, `/units` | Add, rename, switch off or on, with the number of items using each | `retail.catalogue.manage` and `retail.stock.read` |
+| `/staff/retail/catalogue/products` | Items: list with search, category and on sale filters; add, edit, change price, price history (#146); the Item code is shown as text on add (the category's next code, made by the app) and on edit (it never changes), never an input (issue #562); Add an item ends with an optional Photo (Take a picture or Choose a photo, sent right after the item is made, issue #617), and Edit shows the photo first, under the name | `retail.catalogue.manage` and `retail.stock.read` (Change price: `retail.price.edit`; cost: `retail.profit.read`) |
+| `/staff/retail/catalogue/categories`, `/units` | Add, rename, switch off or on, with the number of items using each; a category shows its code start and next code and opens the category page (issue #493); the add form does not ask for a code start, it shows the one the app makes from the name (issue #562) | `retail.catalogue.manage` and `retail.stock.read` |
+| `/staff/retail/catalogue/categories/$categoryId` | One category (issue #493, ADR-081): how its item codes are made, its items, Add an item with the category fixed (no dropdown; the Item code is shown as text, the next code such as BLB-0001, made by the app and never typed, issue #562), Change the code start (items made before keep their codes) | `retail.catalogue.manage` and `retail.stock.read` |
 | `/staff/retail/catalogue/suppliers` | Add, edit, switch off or on | `retail.catalogue.manage` and `retail.purchase.create` |
 | `/staff/retail/catalogue/buyers` | Credit buyers with what each owes; add, edit name and contact | `retail.customer.manage` and `retail.sale.read` |
-| `/staff/retail/catalogue/import` | Import items from a CSV file or pasted rows: check first, then add (#146) | `retail.catalogue.manage`, `retail.stock.read` and `core.settings.manage` (administrators) |
+| `/staff/retail/catalogue/import` | Import items from a CSV file or pasted rows: check first, then add (#146); the tick Let the app make the codes, unticked by default, makes every item's code and leaves out the file's, and a file already checked is checked again when the tick changes (owner decision D45, issue #562) | `retail.catalogue.manage`, `retail.stock.read` and `core.settings.manage` (administrators) |
 
 Sale, usage, stock, stock-take, Move stock, valuation and profit work on the branch chosen in the staff header;
 with "All branches" they ask for one branch. Restock takes a quantity per branch the user can see. Stock moves
@@ -47,9 +49,12 @@ branch list for a branch-scoped user yet). Items are added with the same product
 quantity is above that. The date starts on today in the business's timezone (#112) and the note is optional. The form keeps its draft and
 one `Idempotency-Key` in `sessionStorage` like the sale form, and a refusal for stock shows the plain
 `insufficient_stock` message. No cost is shown, except the value at cost on the saved summary for a user with
-`retail.profit.read`. Stock moves opens a transfer and offers "Cancel this move" with a reason to a user who may
+`retail.profit.read`. Stock moves opens a transfer and offers "Undo this move" (the void) with a reason to a user who may
 move stock; the server refuses with `transfer_stock_moved` once the destination has sold, used or moved part of
-it, and that message (naming the branch and the item codes) is shown as the server wrote it.
+it, and that message (naming the branch and the item codes) is shown as the server wrote it. A voided move reads
+"Undone" and a two-step move taken back before it arrived reads "Taken back", so the two never share a word (issue
+#239). Undoing a received move that arrived short sends all of what was sent back to the source, the lost part too;
+this is accepted, and the screen says so above the reason and asks for a count at the source afterwards.
 
 Behaviour worth knowing: the sale, restock and usage forms generate one `Idempotency-Key` per draft and keep it,
 with the draft, in the tab's `sessionStorage` (per user and, for sale and usage, per branch) for every re-render,
@@ -62,7 +67,8 @@ totals shown while typing are a preview; the server's response is the receipt.
 
 ## Branches, dates and the walk-through fixes (#103, #105, #112)
 
-- **Starting branch (#103).** The staff bar's picker (`areas/staff/branch-picker.tsx`) starts on the last
+- **Starting branch (#103).** The branch in use (`useActiveBranch` in `areas/staff/branch-picker.tsx`, switched from the title of
+  the top bar since #526) starts on the last
   branch this user chose in this browser, kept in `localStorage` per tenant (the host) and user, read and
   written inside try/catch. Without one it starts on the user's only branch, else the default branch when it
   holds stock, else the first branch that holds stock, and never on a head office without stock while other
@@ -80,6 +86,36 @@ totals shown while typing are a preview; the server's response is the receipt.
   (`BusinessClock`). Move stock's date and Restock's "Bought on" start on it, and Daily profit's range is the
   last seven days ending on it. Before #112 Restock and Daily profit used the UTC date, which is yesterday
   between midnight and 03:00 in Kampala. Usage, sale and stock-take send no date and take the server's.
+  Since #667 it is the one helper for today in the whole app: the lending forms, the insights quick ranges and
+  the operator screens (`todayInKampala`) take it too, so no screen mixes it with the device's date between
+  21:00 and 24:00 UTC. It takes the business's own zone, `tenant_timezone` on `/me`, which the staff shell
+  passes to `setBusinessZone` once the profile loads (Africa/Kampala until then, or for an unknown zone).
+  `src/api/business-today.test.ts` pins that boundary and guards the app against the device's calendar day: a
+  local date part (`getDate()` and the like), a UTC day cut from an instant (`toISOString().slice(0, 10)`,
+  `split('T')[0]`, also split across lines), `toDateString()`, a date or time formatted without a `timeZone`
+  (`toLocaleString` counts on a `new Date(...)` or with date options), and date-fns on now. A hit that means
+  it (a calendar sum on a UTC midnight, a moment of this phone's own) carries `business-day-ok: <reason>` at
+  the end of its own line or alone in a comment on the line above; an empty reason does not count. The staff
+  screens show the business's own moments (approvals, payments, reports, notifications, feedback, referrals,
+  SMS, price history, cash times) in `businessZone()`. The operator area keeps Africa/Kampala or the operator's
+  own clock, since it spans every business, and the mock server is not scanned (its today is `businessToday`).
+  `business-zone.dom.test.tsx` draws the real staff shell for a business in Africa/Lagos at 22:30 UTC and checks
+  that Insights' To and a savings statement's last day are the 28th.
+  Since #670 the zone goes back to Africa/Kampala on sign out and when the staff shell unmounts. A repayment,
+  disbursement or investment funding draft notes the business day it was started; read back from the tab on a
+  later day its date starts again from today (a date after today becomes today), keeping the amount and the key,
+  and the form says the date is now today. A draft whose key was already sent (the form marks it as it posts) is
+  never changed, so a retry after a lost answer posts the same body under the same key once; restored on a later
+  day, it says above the form "This repayment was sent on 28 Oct 2026 and may already be saved. Send it again to
+  check." with its own kind and day.
+  Since #672 the line that the date is now today goes once the date is changed, and a sent draft's date field has
+  no latest date, so a date after today (sent from a business in a zone ahead) does not stop the retry that posts
+  it as it went. The shell sets the zone as it draws and again in an effect whose cleanup forgets it, so
+  StrictMode's mount, unmount and mount ends on the business's zone.
+  The guard also counts `toLocaleString` on a name the file declares as a Date (`x = new Date(...)`, `x: Date`)
+  and date-fns on `Date.now()` or `now`; it reads brackets, comments and reasons with strings blanked, so a
+  bracket or URL in a string does not throw off a call's options and a reason counts only in a comment. Its known
+  limits (a Date it cannot see by name, a template literal with `${...}`) are listed at the top of the guard.
 - **Stock moves (#112 item 1).** A row reads the date ("6 Oct 2026", on one line), "From X to Y", the item
   count with the first two item names, and "by you" for the user's own moves; tapping it opens the move. The
   API gives a transfer no number of its own and `created_by` is an id, so no number or other name is shown.
@@ -102,10 +138,16 @@ The inline `<style>` element the screens used to render (`RetailStyles`) is gone
 (`style-src 'self'`) refused it, so on a server the screens had no styles at all. `RetailStyles` stays as
 a no-op export.
 
-- The retail home shows one large tile per screen, with an icon, two per row on a phone.
-- On the retail pages the staff layout adds a bottom bar (`retail/nav.tsx`): Retail home plus the first
-  three of Sale, Stock, Restock, Stock-take and Usage that the user may use. It is fixed to the bottom
-  on a phone and a row of pills above the title from 720px wide.
+- The retail home shows one large tile per screen, with an icon, two per row on a phone. Each tile has its own icon
+  (`icons[screen]`, issue #483), the same one its row shows in the staff menu; so do the catalogue tiles (`TILE_ICONS`).
+- The staff menu lists the shop's pages in groups (issue #564, ADR-086): Today (Sell, Orders with the open count),
+  Stock (My stock with "N low", Buy stock, Count stock, Move stock, Items and categories) and Money (Cash book, Expenses,
+  Customers who owe, What I owe suppliers, Savings and advances), then Reports under Business, which opens this retail
+  home with the figures and every shop page. Each row shows only when the session may use its page, with no cap (the five
+  retail shortcuts of issue #455 and the Retail item they hung under are gone). On a phone the bottom tabs hold the daily jobs
+  (issue #539): Sell, My stock (with the count of items low on stock), Buy, Money and More, each shown only when the session
+  may use it, and the sale's sticky total sits on top of them; the menu button at the top left opens the same menu as the
+  laptop's sidebar.
 - Tables sit in a `.table-wrap` that scrolls sideways inside its card on a phone, with a shadow on the
   side that has more columns; quantities and money are right-aligned in tabular figures.
 - Forms end with the main action full width, and any secondary action ("Clear this sale") under it.
@@ -127,6 +169,12 @@ API stays the authority.
 `module_not_enabled`, `branch_required`, `sale_voided`, `stocktake_committed`, `transfer_voided`, `payment_exceeds_balance`, expired
 sessions, and the field messages of `validation_failed`. A code it does not know shows the server's own message,
 so a new refusal (for example a price floor code spelled differently) is never hidden.
+
+A sale line's quantity is the kit's Stepper (issue #520): minus and plus either side of the number, from 1 up, and the
+number can still be typed (1.5 for a part of a kilo). Minus and ArrowDown never go below 1, so on 1.5 kg minus gives 1, and
+below 1 (a typed 0.5 kg) minus is greyed out and ArrowDown does nothing: a part below 1 is typed, never stepped to. This is on
+purpose, not a fault. The Stock screen's All items, Out of stock and Low stock, and every other
+row of pick-one buttons in the retail screens, is the kit's Segmented control.
 
 The sale form also gives early hints that only save a round trip: a quantity above the branch balance, and a
 price not above cost when the cost is known (only with `retail.profit.read`; for anyone else only the server can
@@ -257,9 +305,14 @@ from Town to Second Shop. A Playwright script drove Chromium at 360px and 390px;
   names the branch on each item row; Daily profit adds a By branch table and sums the days across branches. The
   write screens (sale, usage, stock-take, Move stock; Restock already chose its branches per line) still need one
   branch, and now say "Choose a branch to continue:" with a button for each of the user's branches.
-- **Out of stock and Low stock.** Tabs on Stock (`stock_level=out|low`): out is zero or less, low is 5 or fewer
-  and so includes out of stock. The threshold is a constant in the API (`StockService.LOW_STOCK_MILLI`) because
-  the settings catalogue has no retail group (ADR-029); in All branches the level is judged on the total.
+- **Out of stock and Low stock.** Tabs on Stock (`stock_level=out|low`): out is zero or less, low is at or below
+  the item's minimum (the branch's own, else the one for every branch) or 5 or fewer without one, and so includes
+  out of stock. Both keep only items the branch has held (issue #490, ADR-077). The threshold is a constant in the
+  API (`StockService.LOW_STOCK_MILLI`, ADR-029); in All branches an item is low when it is low at any listed branch and out
+  when its total is zero or less. The hints say
+  "Items you have stocked with none left, or less than none." and "Items you have stocked that are at or below their
+  minimum, or 5 or fewer without one, including those out of stock."; the dashboard's Low stock figure says "at their
+  minimum, or 5 or fewer without one".
 - **Credit sales and All sales.** Two screens on the sales list API (new filters `payment_method`, `product_id`,
   `buyer`, `status`, `newest_first`), linked from the retail home. A card shows the buyer, date and amount; a
   credit sale adds the due date, what is still owed and a state badge (Paid, Part paid, Unpaid, Overdue; the
@@ -298,7 +351,10 @@ of the screens under it; the Catalogue home lists only those it may use (a sales
   asks for a selling price; its cost is asked only with `retail.profit.read` (else 0, and a restock sets it).
 - **Categories and Units** (`catalogue-lists.tsx`, one component twice): Add, Rename, Switch off or Switch on,
   with "Used by N items". Nothing is deleted. A switched-off row stays on the items that use it and is not offered
-  for a new item (the server refuses it with 422 `inactive_category`, `inactive_unit`).
+  for a new item (the server refuses it with 422 `inactive_category`, `inactive_unit`). A switched-on unit also has
+  Usual pack (issue #637), offered unless another unit's usual pack counts it (one level only): a Sheet
+  (`unit-usual-pack.tsx`) with It holds (units that are not packs themselves; with none, the kit's EmptyChoice and Add a
+  new unit), How many in one, Used for (Segmented, `PURPOSES`), Save and Remove usual pack; items keep their packs.
 - **Suppliers and Credit buyers** (`catalogue-people.tsx`): Add and Edit name and contact; a supplier can also be
   switched off (it is then refused on a new restock). Credit buyers show what each owes on credit sales in the
   branches the user may read (`balance_minor`). The contact is shown as typed and is not written to the audit log.
@@ -308,7 +364,7 @@ of the screens under it; the Catalogue home lists only those it may use (a sales
   as it stands now. A file with a problem row adds nothing. Adding again skips everything already there. The cost
   price column is accepted only with `retail.profit.read`.
 - **Messages.** Every save shows a green on-screen message (`Success`, `role="status"`) and a toast above the
-  bottom bar (`useToast` in `ui.tsx`, four seconds, hidden from assistive technology since the on-screen message
+  bottom bar (`useToast` in `ui.tsx`, six seconds, hidden from assistive technology since the on-screen message
   carries the same words). There was no toast helper in the app before this (only the `.toast` style), so
   `useToast` is the first and the other retail screens do not use it yet. Refusals use the existing `Problem` alert
   with the server's plain message.
@@ -414,9 +470,10 @@ The administrator's two screens for the trade capabilities, and the rule every c
   the old and new values. Afterwards `/me` is read again, so the menu follows at once. A feature whose pages are not
   released yet says so; it can be switched on and changes nothing visible.
 - **Branch roles** (`/staff/retail/branch-roles`, tile "Branch roles", `retail.branch_role.manage`): one choice per
-  branch (store, shop, both). It exists only while `branch_roles` is on.
+  branch (shop or both). A Store is shown as "Store: keeps stock, does not sell" with a link to Branches, where it is
+  marked and unmarked (ADR-104); it has no choice here. It exists only while `branch_roles` is on.
 - **The rule** (`SCREEN_CAPABILITY` in `retail/permissions.ts`): a screen of a capability is offered, in the tiles,
-  the bottom bar shortcuts and the route gate, only while `/me` lists the capability, whatever permissions the user
+  the menu rows and the route gate, only while `/me` lists the capability, whatever permissions the user
   holds. A screen not listed there behaves as before capabilities existed, so a shop (every capability off) sees the
   same menu as today plus, for the administrator, the Retail settings tile. A later slice adds its screens to that
   map, sets `ready` for its capability in `retail/capabilities-state.ts` and adds its tour; `capabilities.test.tsx`
@@ -479,24 +536,22 @@ example Home / Retail / Catalogue / Items. A new route gets its place by declari
   link. Labels longer than 16rem are cut with an ellipsis (the full text is the title). Below 720px the trail
   collapses to "Back to <parent>" and the current page.
 
-**Category groups.** Stock per branch, stock across branches (table, and cards on a phone), the catalogue
-items and the shared product picker (the sale and Move stock screens) group by category
-(`retail/category-groups.tsx`). The low and out of stock lists are the same Stock screen with its level filter,
+**Category groups.** Stock per branch, stock across branches (table, and cards on a phone) and the catalogue
+items group by category (`retail/category-groups.tsx`). The item pickers no longer do: since issue #534 they
+list matches only while something is typed (see "Item pickers" below). The low and out of stock lists are the same Stock screen with its level filter,
 so they group too.
 
 - A header per category (a button with `aria-expanded` and `aria-controls`) shows the count and, on the stock
   lists, a subtotal: the quantity when every item of the group has the same unit, and what the group holds at
-  the selling price. The catalogue and the pickers show the count only. Expand all and Collapse all sit above
+  the selling price. The catalogue shows the count only. Expand all and Collapse all sit above
   the list.
 - Categories are A to Z; items without one are in "Uncategorised", last; items keep the order the server sent.
-- Sections start open for 30 items or fewer and closed above that. A search (the stock and items search boxes,
-  the picker's) opens them, so a match inside a closed section shows. The default is decided when results first
+- Sections start open for 30 items or fewer and closed above that. A search (the stock and items search boxes)
+  opens them, so a match inside a closed section shows. The default is decided when results first
   arrive for a search and filters and held while more load, so "Show more items" never opens or closes a section.
-- The "Group by category" switch is remembered per screen (`stock`, `items`, `picker`) in `localStorage`, inside
-  try and catch: with storage blocked it defaults to on and is forgotten at reload. The picker shows the switch
-  only when its matches span more than one category.
-- The restock and usage screens have pickers of their own and stay flat for now.
-- Grouping is within the items the screen holds. Stock and the pickers are not paged. The catalogue items list is
+- The "Group by category" switch is remembered per screen (`stock`, `items`) in `localStorage`, inside
+  try and catch: with storage blocked it defaults to on and is forgotten at reload.
+- Grouping is within the items the screen holds. Stock is not paged. The catalogue items list is
   (cursor paging): its hint says "Grouped within the items loaded so far. Show more items loads the rest."
 - Search and filters stay the screen's own (plain component state, sent to the server as before); the grouping
   takes the already filtered items. Grouped lists drop the Category column and the per-row category label,
@@ -512,6 +567,14 @@ item screen (Edit) has a Pack sizes group for a user who may manage the catalogu
 one pack), change the number, switch a pack off. The unit choice on the sale screen carries `data-tour="sale-unit"`. The pack sizes capability has a tour that starts once for
 whoever manages the catalogue (`capability-units`: an introduction and the Catalogue tile); `units` is marked ready in `capabilities-state.ts`.
 It adds no routes, so there is no new breadcrumb: the item screen already adds the item's name as its last crumb.
+
+**Stock in packs and pieces (#650, ADR-103).** An item with a standard pack (the pack the shop counts and sells in, ADR-103, sent as `standard_pack` on the stock rows and `standard` on its packs) shows
+its stock on Stock as "5 Cartons and 7 Pieces" with "(127 Pieces)" under it; less than a carton reads in pieces only, and below zero reads "1 Carton
+and 3 Pieces short (27 Pieces short)"; on a wide screen each branch column reads the same way. On Count stock and Move stock the line has two boxes, Cartons and Pieces, each with its own label; the person types cartons and
+the pieces left, or pieces alone, and the total in pieces shows under the boxes before Review the difference or Move stock. A scan still adds to the
+pieces. What is sent is pieces. A count or a move keeps the pack its cartons were typed in: if the pack changes while the sheet is open, or a saved move is read again after the catalogue changed, the line says so and the quantity stays as typed. A big drop on the review says what it removes in cartons and pieces, and still asks for its tick (#635). One
+formatter and one parser (`packsAndPieces`, `packsAndPiecesMilli` in `units-state.ts`) and one entry (`PacksAndPiecesFields` in `ui.tsx`) serve all
+three screens; `layout/stock-packs.layout.test.ts` lays them out, All branches on a phone too, at 360px at font scale 1 and 2.
 
 ## Price lists (#195, ADR-033)
 
@@ -571,8 +634,8 @@ single units. The credit of each line and the credit note total are shown before
 the last piece taking the remainder). **How the customer is repaid** offers cash, mobile money, bank, or "Take it off what they owe" (only for a credit sale that owes; for a
 cash sale, an imported credit sale or one that is paid up the option is shown and cannot be chosen, with the reason beneath); when the credit is more than is owed, the form says how much comes off the balance and asks how the rest is paid out. A "Pay the money out of the till of" box appears when money is paid out and the person may use more than one branch. The
 button waits for a form the server would accept, and the draft and its Idempotency-Key survive a reload (`usePersistedDraft`). A return that takes the sale's returns to the tenant's
-threshold answers "needs a second administrator" instead of a credit note, and so does voiding a return that was approved. **Retail settings** shows a warning
-while returns are on and no approval limit is set. **The credit note** (`/staff/retail/returns/$returnId`, crumb "Credit note", named after
+threshold answers "needs a second administrator" instead of a credit note, and so does voiding a return that was approved. **Retail settings** shows one neutral Hint line
+while returns are on and no approval limit is set ("Returns need no second administrator yet.", the full explanation behind the Hint's More (its info button, "Show more"); issue #575: no amber on a normal screen, held by `design-guard.test.ts`). No screen sets the limit yet (the approval limits screen is issue #343), so the Hint has no link; it gains the link with #343. **The credit note** (`/staff/retail/returns/$returnId`, crumb "Credit note", named after
 its number) shows the facts, each line with its reason and where the goods went, the total and how it was settled, and for `retail.sale.return` a Void form that needs a
 reason of at least five characters and says what voiding does (the goods come off the shelf again, the money or balance goes back); the printable credit note is the
 documents slice. The customer statement names a return "Goods returned, credit note" and its void "Credit note voided". `returns` is marked ready in
@@ -614,7 +677,7 @@ need `core.settings.manage`. Each page has a breadcrumb and a live search where 
 - **Receive goods** (`/purchase-orders/$orderId/receive`) and **Receive without an order** (`/goods-received/new`) are one form: the branch or store
   the goods go into (only branches in scope), the quantity of each line (pre-filled with what is still to come), its cost (pre-filled from the order)
   and an optional new selling price, the delivery note number and a note. The server's refusals are shown in plain words (more than ordered, not a
-  whole number of base units). **Goods received** (`/goods-received`) lists the deliveries; a delivery (`/goods-received/$receiptId`, crumb "Delivery")
+  whole number of base units). A line in a pack asks How many pieces in each carton? (issue #554, ADR-082), as Buy stock does. **Goods received** (`/goods-received`) lists the deliveries; a delivery (`/goods-received/$receiptId`, crumb "Delivery")
   shows its lines and what is billed, and voids with a reason, with the two refusals (an invoice bills it; some of it is sold) explained.
 - **Supplier invoices** (`/supplier-bills`, open-only toggle) and **New supplier invoice** (`/supplier-bills/new`): choose the supplier, tick the goods
   received and not yet invoiced that the invoice is for, type the invoice number, dates, the supplier's price and the total as printed. The page asks
@@ -626,6 +689,15 @@ need `core.settings.manage`. Each page has a breadcrumb and a live search where 
   checked against the payment before saving). **A payment** (`/supplier-payments/$paymentId`) lists what it paid and reverses with a reason.
   **What you owe suppliers** (`/supplier-payables`) is the report: per supplier what is owed by days past due, the total, and the goods received
   and not yet invoiced beside it; a row starts a payment for that supplier.
+- **Buy on credit and pay suppliers without purchasing** (issue #557, owner decision D15, ADR-084). Buy stock asks **Paid how** (required): Cash,
+  Mobile money, Bank or On credit (owed to the supplier); On credit marks the supplier required and says "On credit needs a supplier" until one
+  is chosen or typed. **What I owe suppliers** (`/supplier-payables`, under the Money tab, no capability) starts with "You owe suppliers UGX X in
+  all." and lists each supplier owed something with the balance and two 48 px buttons, Pay and Statement; with the purchasing capability the
+  ageing table stays, with a Statement link per row. **Pay a supplier** (`/supplier-payments/new`, no capability) marks the supplier, paying
+  branch, Paid how, amount and **Date paid** required (today at first, nothing later; an earlier day lists only what was owed then) and links to
+  What I owe suppliers and the supplier's statement. **Supplier statement** (`/suppliers/$supplierId/statement`): From and To (the last 90 days
+  at first), owed at the start, a card per purchase on credit, payment, void or reversal with what is owed after it, owed at the end, Pay this
+  supplier, and **Share the statement** (the phone's share options with the statement as text, or WhatsApp).
 - **Retail settings** gains the two tolerances in percent (stored as basis points, shown to two decimals) under `If-Match`, and says when no
   order approval limit is set that any administrator can send any order.
 - `purchasing` is marked ready in `capabilities-state.ts` with its tour (`capability-purchasing`) and a Help page tour (`page-purchase-orders`). The
@@ -789,6 +861,43 @@ again under the sale's lock; the screens only save a round trip and say each ref
 - **Tests.** `branches/state.test.ts`, `branches/branches.dom.test.tsx` (confirm once, the refusal in plain words, the badge and the way back),
   `retail/not-stocking.test.tsx`, `auth/branch.test.ts`.
 
+## Add a branch (#581, ADR-089)
+
+- **Screen.** On the Branches screen whoever holds `core.branches.manage` sees Add a branch at the top. The form (Fields marked * are needed) asks for the
+  Name *, What is it? as a segmented control (Shop (sells), Store (keeps stock, does not sell), Head office (keeps no goods)) with a one-line hint for the
+  chosen kind, and Where is it? (the branch `location`). No code is asked for (the owner's rule of #562): the Name's hint shows the code the app makes from
+  it ("Code KASUBI, made by the app from the name", with a number when a listed branch has it). Add the branch sends `sells_goods` and `stocks_goods` for the kind. A full plan shows "Your plan has no room for another branch" with
+  Open Plan and billing for whoever holds `core.billing.read`, else "Ask the owner to change the plan"; a taken code shows its refusal in plain words.
+  On success the form closes, a dark toast says what was added ("Gayaza Store added. It is a store: it keeps stock and does not sell.") and `/me`, the branch
+  list and the retail queries are read again, so the picker and Move stock carry it at once. A reader sees "Only an administrator can add, close or reopen a branch."
+- **Tours.** `page-branches` is version 4 with an Add a branch step.
+- **Business set-up.** The Branches tile reads "Add a shop or a store, close or reopen one, or say a branch keeps no goods".
+- **Tests.** `branches/branches.dom.test.tsx` (each kind with its flags and toast, no code box and the code made from the name, the needed name, the plan limit with and without the billing link, the button only for `core.branches.manage`), `branches/state.test.ts`; backend `AddBranchIT`.
+
+## Entry warnings and name hints (#353, ADR-093)
+
+Rule based only (no AI call): each check is a sentence from the item's own records that the person can check.
+
+- **Before saving, on Buy stock, Sell, Move stock and Count stock.** Each screen reads an item's norms once
+  (`GET /retail/products/{id}/entry-norms`, kept five minutes). On Save, a line that looks wrong shows one plain warning next to its field,
+  a tinted note with the warning icon, Confirm and Change (48px buttons; no stripe, no gradient, no emoji): "You usually buy this in rolls;
+  you entered 200 metres. Is that right?" (a unit other than the usual one, Buy stock and Sell only, where a unit is chosen), "You usually
+  buy about 3.5 rolls of this at a time; you entered 40 rolls. Is that right?" (ten times the usual or a tenth of it), "The records show 10
+  pieces here; you counted 1,000 pieces. Is that right?" (Count stock; where the records hold nothing, against the usual purchase), and on
+  Sell, for a price the seller typed, "You last sold this at UGX 6,000 a piece; you entered UGX 60,000. Is that right?". Confirm checks
+  the screen as it is now (a line edited since loses its warning, a new one shows) and, once none is open, saves what the screen shows;
+  the confirmations are recorded (`POST /retail/entry-warnings/confirmations`) once that save succeeds (Count stock: once the
+  count is committed), and the next entry is asked about afresh; Change takes the warning away and puts the
+  cursor in the field; nothing is saved. The save button is never disabled by a warning. With no history (under 3 lines), offline, or
+  while the norms are still loading, nothing is asked. The price floor stays a refusal, as before.
+- **While naming a new item** (Add an item, the item form in a category, and Not in the list? Add it here on Buy stock and Count stock):
+  from 3 letters, a neutral note "Did you mean this item?" lists up to 5 existing items (case and spacing ignored), each with Open (Items) or
+  Use this item (Buy stock and Count stock, which puts the existing item on the line instead), and a hint "Items like this are in Lighting,
+  such as LED bulb 9W screw." with Choose Lighting, which chooses the category only when tapped (not offered when the form is inside a
+  category). Not shown while an item is changed. The save-time name check of #352 below is unchanged.
+- **Tours.** The page tours of Buy stock (version 5), Move stock (version 4) and Count stock (version 5) say in their save step that an
+  unusual line is asked about first. The selling tour, which starts by itself, is left at its version so sellers are not shown it again.
+
 ## Correcting entry mistakes (#351, #352, ADR-044)
 
 The owner fixes a mistake where he sees it, with a trail the spreadsheet never had. Everything below is phone first, in plain words, and
@@ -847,7 +956,7 @@ An item that is no longer sold is switched off, never deleted.
 
 - Analytics: export to PDF and Excel and the daily WhatsApp summary (#149 items 8), and the cash view per shop per day (item 5), which need the cash book.
 - The component tests render static markup (no DOM in the test setup); the browser run above covers behaviour.
-- Offline use, barcode scanning and receipts to SMS are out of the first release.
+- Offline use and receipts to SMS are out of the first release; barcode scanning is built (issue #345, below).
 - The tenant's timezone and a transfer number are not in the API; when they are, use them (#112).
 
 ## Sales grouped by a chain of levels (issue #341)
@@ -915,8 +1024,9 @@ restock opened for correction and closed finds the same groups open. Nothing is 
   in that order). Every line shows how many restocks, how many were voided and are not counted, what was bought at cost only when the
   server sent it, and at the item level the quantity bought with its unit. The restocks of the last opened group, and "Show the
   restocks here" on a day, on any level of a chain with no day and above a last item level, are the screen's own cards, so **Correct
-  this restock** and its void work inside the groups. Under a category or an item the cards are whole restocks that include it
-  (their totals can be more than the line above). The From, To and Show filters of the page apply to the groups and the cards.
+  this restock** and its void work inside the groups. Under a shop, a category or an item the cards are whole restocks that include
+  it (their totals can be more than the line above); under a shop the note also says each card shows the quantities and the total for
+  every shop the person can see (#372). The From, To and Show filters of the page apply to the groups and the cards.
   Restocks with no supplier are one group, "No supplier".
 - Components: `list-chain.tsx` (the view switch, Group by, the tree), `list-chain-state.ts` (levels, remembered choice, selection),
   `stock-grouped.tsx`, `restocks-grouped.tsx`. The tours `page-stock` (version 3) and `page-restocks` (version 2) have a Grouped step
@@ -985,7 +1095,7 @@ therefore as far as the existing routes go: Stock, and Past restocks and Stock m
 
 | Route | Breadcrumb | Page tour | Cross links added (#336) |
 |---|---|---|---|
-| `/staff` | Home | `page-staff-home` v1 (added) | member name opens the member |
+| `/staff` | Home | `page-staff-home` v1 (added); v2 adds the shop summary step (#485) | member name opens the member; each shop summary card opens its full page (#485) |
 | `/staff/approvals` | Approvals | `page-approvals` v1 (added) | "Open the item" on collateral releases |
 | `/staff/assistant` | AI assistant | `page-assistant` v1 (existing) | none added |
 | `/staff/insights` | Insights | `page-insights` v1 (added) | links to the loan list and to maturities |
@@ -1074,10 +1184,11 @@ therefore as far as the existing routes go: Stock, and Past restocks and Stock m
 | `/staff/retail/supplier-credits` | Supplier credit notes | `page-supplier-credits` v1 (added) | none added |
 | `/staff/retail/supplier-credits/$creditId` | Supplier credit note | `page-supplier-credit` v1 (added) | supplier opens its open items |
 | `/staff/retail/supplier-credits/new` | New credit note | `page-supplier-credit-new` v1 (added) | none added |
-| `/staff/retail/supplier-payables` | What you owe suppliers | `page-supplier-payables` v1 (added) | none added |
-| `/staff/retail/supplier-payments` | Supplier payments | `page-supplier-payments` v1 (added) | none added |
-| `/staff/retail/supplier-payments/$paymentId` | Supplier payment | `page-supplier-payment` v1 (added) | supplier opens its open items |
-| `/staff/retail/supplier-payments/new` | Pay a supplier | `page-supplier-payment-new` v1 (added) | none added |
+| `/staff/retail/supplier-payables` | What I owe suppliers | `page-supplier-payables` v2 (issue #557) | Pay a supplier, Supplier payments; per supplier Pay and Statement |
+| `/staff/retail/supplier-payments` | Supplier payments | `page-supplier-payments` v2 (issue #557) | none added |
+| `/staff/retail/supplier-payments/$paymentId` | Supplier payment | `page-supplier-payment` v2 (issue #557) | supplier opens its open items |
+| `/staff/retail/supplier-payments/new` | Pay a supplier | `page-supplier-payment-new` v2 (issue #557) | What I owe suppliers, Supplier payments, the supplier's Statement |
+| `/staff/retail/suppliers/$supplierId/statement` | Supplier statement | `page-supplier-statement` v1 (added, issue #557) | Pay this supplier, What I owe suppliers |
 | `/staff/retail/transfer` | Move stock | `page-transfer` v1 (added) | branch names on the saved summary open Stock |
 | `/staff/retail/transfers` | Stock moves | `page-transfers` v1 (added) | branch names in a move open Stock; link to Move stock |
 | `/staff/retail/usage` | Usage and damage | `page-usage` v1 (added) | "See the stock" link on the saved summary |
@@ -1099,8 +1210,8 @@ No migration beyond the permission; no write anywhere on the page.
 - **Days.** Today, This week (Monday to today), This month (the 1st to today) or Choose days (two dates, at most 366 days). Every count is
   set against the days just before ("the day before", "the 7 days before"). "Cancelled at once means within" is a choice of 2, 5, 10, 15, 30
   or 60 minutes.
-- **Cards.** One tappable card per kind of thing, in a fixed order: Sales cancelled, Cancelled at once, Goods taken back, Prices changed,
-  Discounts given, and Sold below cost (only when the server sent it, that is for someone who may read profit in every shop shown; a line
+- **Cards.** One tappable card per kind of thing, in a fixed order: Sales cancelled, Cancelled at once, Goods taken back, Credit written off,
+  Prices changed, Discounts given, Purchases cancelled, Quantities corrected, and Sold below cost (only when the server sent it, that is for someone who may read profit in every shop shown; a line
   of words says so otherwise). Each shows the count (for a price, a discount or a cost it says "3 lines in 2 sales, lines worth ..."), what it is worth at sale prices, the rate ("2.5 per 100 sales", always sales with such an event per 100 sales entered, so the units match), the trend ("Up 3, from 5
   in the 7 days before"; "None, and none in ...") and its share of the value of sales. A card whose capability is off and never counted says
   "Not switched on for this business, so nothing is recorded" instead of a calm zero. A card is a button: the chosen one sets the table below.
@@ -1133,8 +1244,12 @@ No migration beyond the permission; no write anywhere on the page.
   cards, Group by, the tables and the patterns.
 - **Stock cards.** Restocks cancelled and Quantities corrected (#356) are cards too: a count and a value, no rate (not about sales), no Open sale
   on their records, and no Approver level for a correction.
-- **Not yet.** Credit write-offs (#349) have no card until that table is on `main`; groups
-  2 to 6 of #357 are separate pages.
+- **Credit written off (issue #357, ADR-087).** A card after Goods taken back: the credit sales written off in the days, worth what the
+  buyers still owed (never the loss, which can be a cost), with the rate per 100 sales and the share of sales like the other sale cards.
+  Person is whose sale it was; the record reads "Written off by ..." and opens the sale. Not in the repeat patterns.
+- **Menu.** Controls is a row of the Business group of the grouped menu (#564, ADR-086), after Reports, for a session that may
+  open the page; on the page, Controls is the current row and Reports is not.
+- **Not yet.** Groups 2 to 6 of #357 are separate pages.
 
 ## Sizes and colours (issue #384, ADR-051, FR-RET-51, FR-RET-52)
 
@@ -1144,19 +1259,33 @@ For a shop that sells one design in several sizes, colours or prints (a romper i
 stock list shows it on its own row.
 
 - **Items** has a second button, **Add an item with sizes and colours** (`/staff/retail/catalogue/products/sizes/new`). The owner types
-  the name, a short code, the category, the unit and the prices once, then the sizes and the colours or prints, each list separated by
-  commas. The list of what will be made shows at once, each with its code (`ROMP-03M-BLUE`) and price, which the owner may change (a
-  bigger size that costs more); two that would share a code are flagged in plain words. **Make these 6** saves exactly that list.
+  the name, the category, the unit and the prices once, then the sizes and the colours or prints, each list separated by
+  commas. The list of what will be made shows at once, each with its item code made by the app from the category's next code
+  (`BLB-0007-03M-BLUE`, shown as text, never typed: issue #562) and its price, which the owner may change (a bigger size that costs
+  more); two that would share a code are flagged in plain words. **Make these 6** saves exactly that list.
 - **The item's page** (`/staff/retail/catalogue/products/sizes/$familyId`, crumbs Catalogue, Items, then the item's name): the stock of
   every size and colour together, per shop or store the person may see and in all; each size and colour with its code, price, cost
-  (with cost read) and stock, with **Change price** and **Change** (its size, colour, code, on sale); **Add more sizes or colours** (a
+  (with cost read) and stock, with **Change price** and **Change** (its size, colour, on sale; the code never changes); **Add more sizes or colours** (a
   new print is made in every size the item has, at the price of its first size); **Change the name or category** (every size and
   colour follows). Links to Items, Record a sale, Restock, Move stock, Stock and Sales.
+- **Add an item asks too** (issue #697, ADR-111, FR-RET-83): after the smallest unit, "Does it come in different sizes, colours or
+  types?" No or Yes. Yes shows "What kind of size?" (Clothes, Shoes, Bulbs (watts), Cable (mm), Other) as chips, that kind's
+  ready sizes as chips, the sizes the shop typed before (Your sizes), the ready colours and the shop's own as chips, and beside
+  each list a box with **Add** to type one more. Every chip is a 48px toggle (`.find-chip` in `.option-chips`), filled when
+  chosen, with no stripe. Under the prices, "Price of each of the 3" is the preview of the sizes screen, each starting at the
+  item's prices; at least two. The packages apply to every size and **Add item** saves it all in one request. Files:
+  `new-item-sizes.tsx`, the ready lists in `api/retail-variants.ts`. Screenshots in `docs/ui/sizes-colours-697`.
 - **An existing item** gets **Give this item sizes and colours** on its edit form: the owner says which size or colour its stock is
   now; it keeps its code, prices, stock and history, and the others are made at its prices.
-- **Join items as sizes of one item** (`/staff/retail/catalogue/products/sizes/join`, a third button on Items): for a shop that
-  typed one item per size. Name the item, pick the items with Add as a size, type each one's size or colour, Join them as one item.
-  Each keeps its code, price, stock and history. Tour `page-sizes-join`; `page-products` is version 3 with a Join step.
+- **Put items together as sizes of one item** (`/staff/retail/catalogue/products/sizes/join`, a third button on Items): for a shop
+  that typed one item per size. Since issue #707 it is three plain steps with one search: **1. Pick the items** (each match says
+  Tick or Ticked, the ticked items are listed with Remove, 2 or more are needed), **2. Name the item** ("What do customers call
+  it?", suggested from the words the ticked items share, `joinSuggestion`), **3. Check the sizes** (each item's size suggested
+  from the part of its name that differs, editable, with an optional colour or print), then **Put them together**. The success
+  screen says "Twin cable now has 2 sizes" with **Open it** and **Put more together**. **Add more sizes to an item that already
+  has sizes** is a small button under the steps: it asks for one size of that item, then the same three steps add to it (the item
+  keeps its name and category). Each item keeps its code, price, stock and history. Tour `page-sizes-join` version 4 follows the
+  steps; `page-products` is version 3 with a Join step.
 - **A name another item has** (on Add an item with sizes and colours and on Join) is refused in plain words naming the one that
   exists; an administrator may use it anyway with a reason.
 - **A size's own edit form** shows its name, category and unit as the item's, with a link to change them on the item's page, and lets
@@ -1230,6 +1359,225 @@ own: the order is copied from the chat, so the form asks for the phone first and
 - Tours: `page-stock-health` v2 adds the Slow movers step (`health-slow`), `page-retail-settings` v4 the settings step
   (`retail-slow-movers`).
 
+## Category picker (issue #578, FR-UXN-10)
+
+The pilot tenant found the category select on Add an item a long list with no search and no way to add a category,
+and showed the sheet of their old AppSheet app: Search, New, the list and Done. Every place a category is chosen now uses one
+`CategoryPicker` (`frontend/src/areas/staff/retail/category-picker.tsx`).
+
+- **Where.** Add an item and an item's own form (Items), the new item on Buy stock and Count stock, Add an item with sizes and
+  colours, Change the name or category of an item with sizes, and the Category filters of Items and Stock (with All
+  categories first and no Add). Expense categories are a different list and keep their select.
+- **The field.** Looks like a select and names the chosen category, or "Choose a category". It is required where the
+  category is, with the red asterisk; a Save with no category goes to it.
+- **Phone (below 720px).** The kit's Sheet at full height, "Choose a category": the search box with the cursor in it, the
+  list in rows of at least 48px with the chosen one tinted and ticked (no stripe), + Add a category at its foot (issue
+  #688), and Done. A tap on a row chooses it and closes the sheet; Done or a swipe down closes it as it was.
+- **Laptop.** The same search, list and Add row open under the field in a card (Radix Popover), as wide as the field or at
+  least 280px.
+- **Search.** Any part of the name, whatever the case, on the categories already loaded (no request per key). Names show as
+  the owner typed them. Nothing matching says `No category called "Rice". Add it?` with an Add Rice button, or without the
+  question and the button for someone who cannot add.
+- **+ Add a category.** Only for `retail.catalogue.manage`. The list closes and the shared add sheet "Add a category" opens
+  over the form (issue #688, below): Name of the new category (the search text filled in), and the line "Item codes here will start with RCE, like RCE-0001, made by the app." from the code start
+  suggestion as the name is typed. No code is typed (#562). Add category creates it (`POST /retail/categories`), chooses it,
+  closes the picker and shows the dark toast "Added the category Rice. Its item codes start with RCE." It is the screen's own
+  toast (`ScreenToast` in `retail/toast.tsx`), so a screen never shows two; the picker says the same in a live region by the
+  field. The new category goes
+  into every category list the screens keep (the catalogue's and the Stock filter's) before they are fetched again, so the
+  field and the item code line name it at once.
+- **A name already used.** Checked against every category, switched-off ones too, whatever the case, before anything is
+  sent: "There is already a category called Bulbs." with Choose Bulbs, or "There is already a category called Torches
+  (switched off)." with Switch Torches on and choose it. A name another phone added a moment ago is refused by the server and
+  reads "A category with this name already exists." in place.
+- **Keyboard and screen reader.** The field is a combobox that opens with a press, Enter, Space or the down arrow. The search
+  is a combobox over the listbox "Categories": Up, Down, Home and End move the highlight (aria-activedescendant), Enter
+  chooses it (or the only match), Escape closes, and the focus goes back to the field. The number found is announced.
+
+## Find items on a phone (issue #690, FR-UXN-13)
+
+The owner, 29 Oct 2026: "On mobile I can't easily find items and categories. It doesn't feel natural."
+
+- **Search first.** On Items and My stock the search box and the category chips sit in `FindBar`
+  (`frontend/src/areas/staff/retail/phone-find.tsx`). Below 720px it is sticky under the top bar on the page's background
+  with a hairline under it, so the list passes under it; its offset is the staff bar's measured height (`--find-top`, 56px
+  until measured), so a bar that grows with a large font never covers it. From 720px it is in the flow.
+- **Barcodes.** Digits only, 8 to 14 of them, are looked up first (`GET /retail/products/by-barcode/{code}`); a known barcode
+  searches the list by its item's code, so typing or scanning a label finds the item. No server change.
+- **Chips.** `CategoryChips`: All (no count: no list shows every item), then each category in the server's order with its item
+  count (`product_count`, every item filed in it, inactive ones too, as the Categories page counts), in one row
+  that scrolls sideways inside itself (the page never does). A switched-off category shows only while it still holds items or
+  is chosen. Each chip is a 48px button with `aria-pressed`; the chosen one is filled. A chip sets the page's own category
+  filter, so the list asks the server as the picker did; the chips replace the category picker of these two filters
+  (FR-UXN-10). Each page remembers its chip on the device (`bms.findChip.items`, `bms.findChip.stock`, read and written
+  inside try and catch); a remembered category that has gone reads as All.
+- **One tap to Categories.** My stock starts with Items and Categories, two 48px rows side by side, for whoever may open
+  them. The My stock tab stays current on Items and Categories.
+- **Rows.** On a phone an item of Items is a `ListRow` (64px): the name, the category and the stock in the branch in use in
+  packs and pieces (`packsAndPieces`, with the unit words of `quantityIn`), and the selling price at the right under the
+  words Selling price. The row opens the item; the opened item has Change price above its form. The laptop keeps the cards.
+  My stock on a phone is one plain list of its cards with the category under each name; the chips stand for the groups.
+  Items asks `GET /retail/products` with `branch_id` only for a session that may read stock at that branch.
+- **Nothing found.** Add it shows only when nothing narrowed the search, so an item a chip or a filter hid is never added
+  twice. Nothing narrowed: `No item called "bulb".` with Add it, which opens Quick add with the name typed through its `name`
+  route parameter (Quick add is the add form that takes a name from the link; Add an item has none; Quick add needs what
+  Items and My stock need), and Clear search; the owner accepted Quick add here (round 2 of the #703 review). A chip chosen:
+  `No item called "bulb" in Cables.` Another filter on (Out of stock, Low stock, negative only, Inactive): `No item called
+  "bulb" with these filters.` Both offer Search all categories, whatever was typed, digits included: it clears the chip and the
+  filters, shows inactive items too, and searches again. Digits of any length are a code or a barcode, never a name to add:
+  `No item with the code or barcode "6001234567890".`, with ` in Cables` under a chip. A known barcode lists its own item alone
+  (`onlyMatch`), not the items whose code only begins the same. The default of hiding inactive items is not a filter here:
+  the server refuses a new item with the same name and unit as any item, switched off or not, so Quick add shows the one that
+  exists instead of making a second.
+- **A remembered chip** holds the list query until the categories arrive, so a category that has gone is never asked for;
+  it then reads as All and its stored key is removed.
+- **On a phone** the Items list follows the search, Quick add and Add an item; the sizes and colours ways to add come after it.
+- **Layout check.** `layout/phone-find.layout.test.ts` at 360, 390 and 412px, at both font scales.
+
+## Add it in place (issue #688, FR-UXN-12)
+
+The owner, 29 Oct 2026 (D75): "if something is not there you have the option to add it in place and then continue with the
+form you were on. That is how AppSheet works."
+
+- **One component.** `PickerWithAdd` and its hook `useAddInPlace` (`frontend/src/app/ui/PickerWithAdd.tsx`). A picker of
+  records ends its list with "+ Add a <thing>". It opens the kit's Sheet "Add a <thing>" over the form with only the fields
+  that record needs. Saved, the record is chosen and named in the field at once and the sheet closes; cancelled, it closes.
+  The form stays mounted under the sheet, so everything typed is still there either way, and nothing navigates.
+- **Who.** The option shows only with the permission of the full add screen (`retail.catalogue.manage` for a category or a
+  unit); anyone else does not see it, and an empty list tells them who to ask (rule 25).
+- **An empty list.** The field is the EmptyChoice: "No units yet." and only + Add a unit, which opens the same sheet.
+- **Converted.** The category picker (its search list keeps its own look; its add row uses the hook), Counted in
+  (`UnitPicker`, which held the first version of this inline), Buy stock's Supplier (the typed "Or add a new supplier" field is
+  gone: + Add a supplier adds and chooses it at once), the purchasing `SupplierField` (purchase orders, goods received,
+  supplier invoices), the customer of Sell's price list, of an order and of a quotation (`CustomerPicker`, by name, for
+  whoever may use Customers), and the unit of an item's pack form (+ Add a unit, the size typed kept). There is no brand
+  record in the app yet, so there is no brand picker to convert.
+- **The guard.** `design-guard.test.ts` (rule 26) fails a hand-built `<select>` over a list of categories, units, suppliers,
+  customers, brands, packs or branches unless it is listed as exempt with its reason. Exempt today: the branch fields (a branch
+  is set up on the Branches screen with its own checks), the pack of a line (it needs a size, a use and a price, so it is
+  added on the item's page), the price list's unit (the item's own unit and packs), the expense category and Sell's credit
+  buyer (which already adds a buyer in place with a phone; both move onto `PickerWithAdd` next) and the offline sale's
+  customers (adding one needs the internet).
+- **Quick add (Part 1).** Category sits right under the Name and is needed: the red star, "Choose a group" in the box, and
+  Add refuses with "Choose a group." and puts the focus on it. The group this person last chose at this shop is chosen for
+  them (kept on the device per business, person and shop, `bms.quickAddGroup.*`). With no groups yet the field offers only +
+  Add a group. The screen never leaves it out, so an item is never filed under General unasked; items already in General stay. The
+  group is remembered once an item is added with it, at the shop the item was added at.
+- **An optional customer.** On an order and a quotation the customer stays optional: with no customers on file the select
+  offers only + Add a customer to whoever may add one, the field is left out for anyone else, it never shows "No customers
+  yet" and Save never goes to it, so the name typed is enough.
+- **Comes in cartons of (D76).** With packs on, an optional field under the unit: "Comes in cartons of how many pieces?". Filled,
+  How many becomes How many full cartons (a whole number) and And how many loose pieces (optional), sent as their total in
+  pieces; once the item is made it gets its own carton pack at that size for selling and buying (`addPack`), the Carton unit
+  made first when the shop has none, and the line says "Test bulb added: 3 cartons and 5 pieces at Test Shop One". A pack that
+  failed leaves the item and says to add it on the item's page. With packs off the field is the Turn on cartons line. A box,
+  carton, dozen or pack is never the item's own unit here: those units are left out of Counted in, and one added in place is
+  refused with a line saying to choose the single piece. Issue #695 later moves the field onto the package rows of #692.
+
+## Item pickers (issue #534, FR-UXN-07)
+
+Hatibu (HATS Gayaza) found the always-open list of items under the search box confusing, and asked for the AppSheet dropdown:
+the items show only while you search, and go away once one is picked. Every item picker is now the one shared component
+`ItemCombobox` (`frontend/src/app/ui/ItemCombobox.tsx`); `ProductPicker` (`retail/ui.tsx`) wraps it with the catalogue search.
+
+- **Where.** Record a sale (and the offline picker, which searches the copy on the phone), restock, usage and damage, Move
+  stock, count stock, price lists, orders and their items, quotations, labels, purchase orders, goods received without an
+  order, joining sizes, and the item chosen for an unknown barcode. Correct stock opens from a line of the Stock page, which
+  keeps its full list with Group by category, Expand all and Collapse all. No picker has the grouped browse list any more.
+- **Empty box.** Only the label "Find an item by name, code or category" and the box: no list, and no request to the server.
+- **Typing.** The term follows 250 ms after the last key (`useLiveSearch`). The matches open under the box, over the page, in
+  a card with the larger shadow (no stripe), with a 150 ms fade and 4px rise that eases out and is off under reduced motion.
+  Each option is a row at least 48px tall: the photo, the name and code with the typed words marked, then the category, the
+  price where the screen shows one and the stock here (a negative balance flagged), and the verb of the screen (Add, Choose,
+  Join this item, Add as a size). At most 10 show; with more the status line says "First 10 items shown. Type more to narrow."
+  No match shows `No item matches "<text>".` in the list and the status line. The offline picker says `No item on this phone
+  matches "<text>".` instead, or that nothing is saved on the phone yet. While more is typed, or the answer is on its way, the
+  list says Searching and holds no option, so a quick tap or Enter can never pick a match of the earlier text; the status line
+  stays quiet until the answer, so a screen reader hears it once per pause.
+- **Picking.** A tap, or Up and Down then Enter, adds the item. The box empties, the list closes and the cursor stays in
+  the box for the next item. Enter with nothing highlighted only settles the search; it never picks. Escape closes the list,
+  and a second Escape empties the box; an Escape that closes the list or empties the box never reaches a panel around the picker, and one with nothing to close goes on to it. The list closes when the cursor leaves the picker and opens again on return.
+- **Accessibility.** The input is `role="combobox"` with `aria-expanded`, `aria-controls` and `aria-autocomplete="list"`; the
+  list is a `listbox` named by its box's label and its rows `option`s, the highlighted one `aria-selected` and named on the
+  input by `aria-activedescendant`; the status line under the box is a polite live region. A second picker on a screen has its
+  own label: the barcode assign panel's is "Find the item this barcode belongs to".
+- **Count stock (owner decision on #535).** The search and Scan boxes sit on top. Below them, **Counted items (N)** holds the
+  lines whose count is in, in the order done, and **Not counted yet (N)** holds every other item of the sheet (active items and
+  inactive ones that still hold stock) with its count box and a **0** button for an item that is gone. A line moves to Counted
+  items when its count is entered (on leaving the box, on Enter, or on 0) and back when the count is emptied. A found item that
+  is not counted yet heads Not counted yet, marked, with the cursor in its count box (the one picker where a pick does not leave it in the search, since the count is the next step); a scan counts one more and moves the
+  line to Counted items. With lines left, Review variance first says "12 items not counted. Review the difference anyway?"
+  with **Keep counting** and **Review the difference anyway** (issue #629, which retired Finish here), as an inline warning, not a dialog. Only counted lines are sent, as before.
+- **Count stock: a count that wipes stock (issue #629).** The count page's note ends "Leave an item empty if you did not count
+  it.": an empty or blank box is never sent, so it never sets an item to 0. On **Review the difference**, a line that takes an
+  item holding stock to 0, or to less than half of what it held, has a note under it in the entry warning's look, with its icon
+  and words ("This removes 8 pieces. Is that right?"), and a 48px tick named for the item ("Yes, Test Plug is right"), so it
+  never rests on colour alone. **Commit the count** passes `notReady` until every such line is ticked: a press sends nothing
+  and goes to the first tick left, and a line under the list says how many are left. A count typed above zero that keeps half
+  or more, and a count that adds, ask nothing. A new review (after **Back to the count**) asks again. The help article and the
+  `page-stocktake` tour (version 6) say both, and name the button **Commit the count**, never Finish; the question before the
+  review names the button it leads to, Review the difference anyway; the server's refusals that
+  told a person to finish a count now say to commit it.
+- **Count stock: every count is kept as it is typed (issue #681, owner 29 Oct 2026).** Each change is written at once to the
+  device's local storage under `bms.count.<host>.<branch>.<user>` (the counts, the cartons with their pack, the lines found
+  and done, and when each item's count last changed), written before the screen is drawn, and the page restores it when it
+  opens again. Nothing goes to the server while counting (owner, round 2 of the review): the draft is made at **Review the
+  difference** and committed only by **Commit the count**, as before. Each valid count shows **Saved** under its box once it
+  is stored, and a polite status line at the top says **Saved on this phone, N items**, or **Not saved on this phone. Keep
+  this page open.** when the device cannot store it. Two tabs of the same count hear each other through the `storage`
+  event and merge item by item, the newer count of each item winning; the page then says "This count is also open in
+  another tab" until that tab has been quiet for a minute. A commit takes away only the counts that went in (an item
+  whose count still equals the committed line); a count changed or added since the review, here or in another tab, stays.
+  The removal is stamped like any change and the stored count carries the commit time, so another tab drops exactly those
+  items and says "Counted and saved in another tab" when nothing is left, or "2 counts were saved from another tab; your
+  other counts are still here" when some of its counts did not go in, or "A count was saved from another tab; your newer
+  counts on this page are kept" when none of its counts went in (each changed here after the other tab's review). Two
+  counts of the same moment go to the greater value and the stored counts compare whatever their order, so two tabs settle
+  after one write each. The page is keyed by branch, so a branch switch
+  opens that branch's own saved count. An item found but not typed yet is kept too. A restored count of an item no longer
+  on the sheet is dropped once the sheet is read. A count saved earlier the same business day (the business's time zone)
+  is filled in with the line "Counted today at 14:05" ("Counted on Monday at 14:05" for an earlier day's count taken
+  with Use them) and **Start again**, which asks "Clear all N
+  counts? Your stock does not change." with **Clear the counts** and **Keep them**, and then removes the saved count (the
+  other tab says "This count was cleared in another tab"). A count from an earlier business day is not filled in
+  silently: the page shows only the question "You have counts from Monday. Use them or start again?" with **Use them** and
+  **Start again**, so nothing is typed before it is answered, and keeps the saved count as it is until then. **Use them**
+  takes the count as stored at that moment, with anything another tab added since the page opened, dates the line from it
+  and drops its items no longer on the sheet; a count committed or cleared in another tab meanwhile starts empty with "Those
+  counts were committed or cleared in another tab, so this count starts empty." A tab that merges a
+  change from another tab writes the merge back when it holds more than that tab stored, so a reload anywhere keeps it. After Commit the count a success screen (the kit's
+  `SuccessScreen`) says **Stock updated for N items** with how many went up, went down and matched and the first five
+  changes in words ("Test Lamp: 2 pieces more"), with **Start another count** and **Back to My stock**, and a success toast.
+- **Count stock: the server checks big drops too (issue #636).** **Commit the count** sends the product ids of the ticked lines,
+  and the server refuses a commit that leaves out a big drop with 409 `big_drop_not_acknowledged`, naming the lines, so a draft
+  committed from another tab or the API never writes one unasked. The screen shows the server's words under the button.
+  The count Sell makes of an item added there is of a new item, which holds nothing, so it is never a big drop; should the
+  records ever hold more, Sell asks that line's tick itself (issue #656), from the balance it reads before any draft exists:
+  the words of Count stock, **Yes, ... is right**, **Commit the count** (which only then makes the count and sends it
+  acknowledged, and puts the item on the sale) and **Not now** (the item stays off the sale, nothing is left open). Each item
+  asks its own tick, makes its own count and has its own press, so a tick or a busy button never carries to another item. A
+  lost commit sends the same draft again, and one the server had already taken (409 `stocktake_committed`) counts as
+  committed. Once a draft exists, **Not now**, **Clear this sale**, leaving the screen and
+  switching branch discard it (`POST /retail/stocktakes/{id}/discard`); a count pressed before the sale was cleared or the
+  branch switched is ignored when its answer comes, and its draft discarded, so the item never lands on another sale. Offline,
+  Not now, Clear this sale and the branch switch wait, with the line "A count on this sale is not committed. Connect to the
+  internet, then commit the count or press Not now, before you clear the sale or switch branch."; a discard lost to leaving the
+  screen offline or a reload is sent again the next time Sell is open and online. A branch taken away from the person while the
+  sale holds it is left once the hold lifts (issue #664). A refusal shows the server's words, discards
+  the draft and leaves the item for Count stock. Stock that arrives between the read and the count, or a balance the search did
+  not return, is never sent to be refused: that draft is discarded and the line has its tick on Count stock. The usual count of
+  a new item (no tick asked) follows the same rules: an answer after **Clear this sale** or leaving the screen puts nothing on
+  the sale (a draft not yet committed is discarded, a commit that landed stands), and a commit whose answer is lost is sent once
+  more on the same draft; still lost, the draft is kept for a later discard and Sell says the count may not be committed. The
+  later discard never takes a draft whose commit is still on its way, so a connection that comes back between the two tries
+  leaves the count to be sent again, and Sell opened again (the screen left and come back to, or a branch switch) leaves the
+  commit of the Sell it replaced to land and stand (issue #664). A sale cleared or a screen left before the lost answer hears nothing of it.
+  Count stock shows a discarded count as cancelled, never as committed, with no tick and no Save the count; the refusal of
+  a commit on it (409 `stocktake_discarded`) says cancelled too, so the owner reads one word for it (issue #664).
+- **Scan box.** Unchanged (ADR-070 decision 11, owner decision D7): a scanner types only into the Scan box, which adds the item or one more.
+- **Tours.** `retail-sales` version 16, `page-stocktake` 3 (the search on top and the list Not counted yet), `page-restock` 3, `page-usage` 2, `page-transfer` 3,
+  `page-sizes-join` 2 and `page-labels` 2 word their search steps for the list that shows while you type.
+
 ## Share the receipt (issue #439, ADR-061, FR-RET-66)
 
 A card **Send the receipt** under the receipt, right after a sale is saved (`sale.tsx`) and on an opened sale (`sales.tsx`, beside
@@ -1239,6 +1587,19 @@ facts (`GET /retail/sales/{sale_id}/receipt`) and shows the server's refusal in 
 whose goods were all taken back. The facts and the PDF are fetched again when the sale's version, paid amount or balance
 changes, so after a payment on the same screen the next share sends the new receipt.
 
+- **View receipt** (issue #500) shows the receipt on the screen as the PDF prints it, in the PDF's order: the logo (the one the PDF
+  prints: the shop's when its stored file can be read, else the business's, by its public cacheable URL), the business, branch and address, the number and date, the title, Bill to, the
+  sale, payment, due date and price list, the items as the PDF's table (No, Item with the code and price list line under it, Quantity with the pack under it, Unit
+  price and Amount), the total in figures and
+  words, the payment status with what was paid and the balance, the credit notes and the net after returns, the notes, Issued
+  by, the received line and the receipt footer. Every one of these strings, the received line and the code and price list line
+  included, is the server's own from the PDF's model; the screen joins and words none of them. It is fetched only when the button is tapped, from
+  `GET /retail/sales/{sale_id}/receipt/printed`, which the server reads off the PDF's own model, so the receipt facts stay a
+  cheap read for Share and WhatsApp and no PDF is fetched to show it: a phone's browser often cannot show a PDF inline (Android
+  Chrome shows a blank box, iOS Safari only the first page). When the receipt cannot be laid out the preview says so and offers
+  **Download the PDF**. The button keeps its label and says open or closed through `aria-expanded` and `aria-controls`; a
+  payment or a return on the same screen closes the preview. Under it, **Download the PDF** fetches the real PDF; it and Share
+  receipt share one fetch, so tapping both fetches the PDF once.
 - **Share receipt** fetches `GET /retail/sales/{sale_id}/receipt/pdf` (never stored, documents capability on or off) and hands the
   PDF to the phone's share sheet as `Receipt <sale no>.pdf` with the caption as its text. On an iPhone (Safari or the installed
   app) and on an Android phone (Chrome or the installed app) the share sheet lists WhatsApp, Gmail, Messages, Telegram and the rest.
@@ -1261,4 +1622,210 @@ changes, so after a payment on the same screen the next share sends the new rece
   `*`, `_`, `~` and the backtick are taken out of the names so they cannot break WhatsApp's bold, and half an emoji is dropped.
 - Nothing is written to the server except the optional number; the typed number is never logged. The tour `retail-sales` is
   version 10: its Save step names Share receipt and WhatsApp customer.
+- **On the sale-complete screen (issue #534)** Share receipt is the first of the receipt actions and the screen's one main
+  action, right under the receipt; View receipt, the WhatsApp number and WhatsApp customer follow, then **New sale** as a full
+  width secondary button 48px tall, and the sale's documents last, so the next sale needs no scroll past them. Until Share receipt is drawn (its facts loading or
+  failed to load), or when the sale has no receipt to share, New sale is the main action, so the screen always has one.
 
+## Sell offline (issue #458, ADR-067, FR-RET-67)
+
+Record a sale works with no network for a cash, mobile money or bank sale. The phone keeps a copy of the active items of each
+branch the person may sell at (with their pack sizes, prices and the stock when saved), the buyers list and the person's
+profile, refreshed when the app comes online, at sign-in and every 15 minutes (`frontend/src/offline/`).
+
+- **Offline**, the form shows "You are offline. This sale is kept on this phone and sent when the phone is back online." with
+  "Prices as of 22 Oct, 09:14". The item search reads the copy ("in stock when saved"); Credit (pay later) is greyed with "A credit
+  sale needs the internet."; price lists are not applied, so a line is priced at the item's price or its pack price saved on the phone; only a holder of
+  `retail.price.override` may type another, with a reason (at least 5 characters), as online; for anyone else the price field is
+  read only with "Offline, the price saved on this phone is used. You do not have permission to change it." and a **Use the price
+  saved on this phone** button on a line typed before the phone went offline;
+  too little stock on the copy does not stop the sale. **Buyer (optional)** offers the customers saved on the phone or a typed
+  name. The button reads **Save on this phone**.
+- After saving, **Sale saved on this phone** with receipt **OFF-0A1B2C3D (provisional)**, the lines and the total, and "Not yet sent."
+  Once sent, the same receipt reads **Sale sent**, **Receipt RS00000042**. A refused sale says why and that a manager decides.
+- **Online**, a save whose answer never came ("The server did not answer. The sale may or may not be saved.") offers **Keep it on
+  this phone** and **Try again**: the form is locked ("The items and the payment cannot be changed now, so the same sale is
+  sent."), and either sends the same request with the same client sale id, so it is recorded once. **Clear this sale** starts a
+  new one.
+- A sale a manager **discarded** shows in the sheet as "Discarded by a manager. It is not recorded and is not sent again." for a
+  day, and on its receipt.
+- **The dot** in the top bar, drawn only while offline, sending, or with sales waiting or failed, and always for a manager (#526): green online, grey
+  offline, amber sending, always with the word **Online**, **Offline** or **Syncing** beside it (below 430 px the dot and the number waiting alone, "3", in every state, issue #605), and "3 waiting to sync" ("3 waiting" at 480 px and below); the button's name says it all. Its sheet lists the waiting and
+  failed sales, **Sync now** and, for a failed one, **Send again**. A manager (`retail.offline.resolve`: administrators and
+  Supervisors) also sees the sales other phones could not record, with **Send it again** and **Discard** (a reason of at least 5
+  characters, never recorded, audited), and the open clashes with **Mark resolved** and a note.
+- **A shared phone**: when someone else signs in on a phone that holds another person's queued sales, a notice says "2 sales
+  from another person are waiting on this phone. They are sent when that person signs in here again." While online the phone
+  tells the server in short, and a manager's sheet lists them under **Waiting on a phone**.
+- **Sign out** with sales waiting asks first: "3 sales are waiting to sync." with Sync now, Keep them and sign out, and Cancel.
+  Kept sales go when the same person signs in on that phone again.
+- **Opened with no network**, the app shows the last person signed in on this phone, with Record a sale and the outbox working;
+  other screens say they cannot load. Back online, the session is restored or the sign-in page shows.
+- The tour `retail-sales` (version 13) and `page-sale` (version 2) gain the step **Online or offline** on the dot.
+
+Tests: `outbox.test.ts`, `sync-engine.test.ts`, `catalogue.test.ts`, `offline-sale.dom.test.tsx`, `sync-status.dom.test.tsx`; backend
+`RetailOfflineSalesIT` and `PushPublishersIT`.
+
+## Barcodes, scanning and labels (issue #345)
+
+ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability switch.
+
+- **Scan box** (`scan.tsx`, data-tour `scan-bar`) under the item search of the sale, restock, goods received without an order (purchasing), move stock and stock count forms
+  (ADR-070 decision 11, owner decision D7): a box labelled **Scan here** ("Scan or type a barcode, then Enter"; "A barcode scanner
+  types into this box. You can also type the barcode and press Enter.") and, beside it, a camera icon button **Scan with the
+  camera** (data-tour `scan-camera`) shown only where the browser can open a camera (`navigator.mediaDevices.getUserMedia`). A USB
+  or Bluetooth scanner types the code into the box and presses Enter, at any speed; a code typed by hand and Enter works the same.
+  Enter in the box looks the code up and never submits the form. On the sale, restock, move stock and stock count forms the box
+  takes the cursor when the form opens on a device with a mouse or trackpad (not on a phone, where it would open the keyboard);
+  after each scan the box is empty and keeps the cursor for the next one (after the camera too, on such a device). Nothing reads keys
+  anywhere else: with the cursor in a quantity, price or count field, whatever is typed stays in that field and Enter submits the
+  form as usual (a scan made there types the code into the field, as any typing would). There is no scanner setting in
+  Notifications and app. A found item is added at 1 or its line gains one, in the pack the barcode is on (the sale and the restock,
+  with pack sizes on); on the stock count it adds one to the count, or the pack factor, and clears the search so the counted line shows, marked with an outline and scrolled into view; an item not on the branch's count sheet is refused with "<item> is not on the count sheet of this branch." On goods received the Scan box itself says "Added <item>." politely; on the
+  sale, restock, move stock and stock count forms the form's dark toast says it instead (issue #498, below), so it is heard once. A
+  scan gives a short beep and buzz where the device allows. On the restock the quantity goes to the branch chosen at the top; with none chosen a scan says "Choose the branch at the top of the page first".
+- **Item added (issue #498, Hillary, 23 Oct 2026).** On Sell, Buy stock, Move stock and Count stock every add, picked from the
+  search, scanned, or a new item made on the form, raises the dark toast (`useItemAdded` in `toast.tsx`, 2.5 seconds) with the
+  quantity the line now has: "Added <item>, now 3" (the count on Count stock, the quantity at the chosen branch on Buy stock). A line
+  with no quantity yet (a pick on Buy stock, an uncounted item picked on Count stock) says "Added <item>. Type how many." The line
+  added or topped up flashes once (`.line-added`, a tint fading over 1.2s on `--ease-out`; under reduced motion a still tint that goes
+  in one step), and a phone that can buzzes for 10ms. The toast is the live region a screen reader hears. An item already on the
+  purchase or the move, picked again, gets an info toast ("<item> is already on the purchase. Change its quantity below.") with no
+  flash, as on the sale.
+- **Unknown code:** "No item has the barcode <code>." An administrator gets **Add this barcode to a product**: the item search
+  opens, Choose puts the barcode on that item and adds it to the form. For a code that looks like spreadsheet damage (all digits of
+  6, 7, 9, 10, 11 or 14, such as a GTIN-14 or a UPC-E) the search shows "This code is exactly as printed (Code 128)", as the item
+  form does, and with it ticked the code is added as Code 128. Anyone else reads "Ask an administrator to add it to the
+  item, or find the item by name above." A scanned code holding % ; ? # / or \ (a foreign Code 128) is
+  never sent to the server: no item can hold it, so it gets the unknown code message at once, without the add button.
+- **Camera** (`camera-scan.tsx`, loaded on Scan): the back camera full screen, "Hold the barcode inside the frame, about a hand
+  away.", Close the camera. The browser's BarcodeDetector reads the frames; on an iPhone Quagga2 (loaded only then) reads a still
+  four times a second. A blocked camera says how to allow it (on an iPhone: Settings, Safari, Camera); a missing or busy camera and
+  an insecure address each have their own sentence.
+- **Offline:** when the lookup cannot reach the server, only the items the screen has already read and cached (with their
+  `barcodes`) are searched; the whole catalogue only once the offline catalogue cache of issue #463 carries `barcodes`.
+- **Item form** (edit an item, `catalogue-barcodes.tsx`, data-tour `item-barcodes`): the barcodes with their format and pack, Remove,
+  Add a barcode (the format and check digit are judged as you type, in the server's words), "This barcode is on" one unit or one
+  pack, and **Make a barcode for labels** for an item with no made code. Administrators only.
+- **Barcode labels** (`/staff/retail/catalogue/labels`, `labels.tsx`, a Catalogue tile, tour `page-labels`): find items and Add, how
+  many labels of each, **Make the labels** (every label carries the item's own `IN` label code in Code 128, made for an item that has none, so one scanner setting reads every label), **Print**: an A4 sheet of 3 by 8
+  labels of 70 by 37 mm with the name, the price and the barcode, black on white whatever the theme. The page states the label stock (A4, 3 by 8 labels of 70 by 37 mm, zero margin, actual size) and offers "My printer cannot print to the edge: keep 4 mm clear inside each label". Print takes everything else out of the layout (display none on the shell, not visibility hidden), so the sheet starts at the corner of the page.
+- **Import:** the item file takes `barcode`, `pack barcode` and `barcode format` columns (several codes separated by spaces or `|`).
+  A code a spreadsheet may have damaged (all digits of 6, 7, 9, 10, 11 or 14, or `4.00638E+12`) is an error row unless the
+  row's `barcode format` is `code128`; on the item form the same code offers "This code is exactly as printed (Code 128)".
+- Tours: a **Scan here** step on the Scan box in `retail-sales` (version 15, from version 14's Scan step), `page-sale` (version 3),
+  `page-restock` (version 2), `page-transfer` (version 2) and `page-stocktake` (version 2); `page-labels` version 1.
+- Tests: `barcode-state.test.ts`, `scan.dom.test.tsx`, `item-added.dom.test.tsx` (#498) (the Scan box; 1256 typed fast into a quantity, price or count field stays
+  there, submits normally and is never looked up), `camera-scan.test.ts`; backend `BarcodesTest`, `RetailBarcodesIT`.
+
+## Shop Home summary cards (issue #485, ADR-076, FR-UXN-06)
+
+- **Where.** The staff Home (`/staff`), after the Shop card and before the Lending card. Every shop figure on Home, the Shop card's
+  included, comes from one read, `GET /retail/reports/home`, under the branch chosen in the header (All branches sends none).
+- **Takings today.** A line each for Cash and Mobile money, then Bank or any other way only when it moved money today (a way the
+  PWA does not name yet reads Other, never its key; #489), and the Total. Read as the cash book reads a day, so it agrees with the cash summary: sales paid at the sale, payments on credit sales and
+  delivery fees in; cancelled sales, reversed payments on account and refunds on goods taken back (yesterday's sale refunded today
+  included) out. Nothing taken: "No money taken yet today." Link: Open the cash summary. The card is drawn
+  only for a session that may read the cash summary (`retail.cashbook.read` in the branches covered and `retail.till.close`,
+  ADR-076 decision 3), so it never waits on a figure the server will leave out.
+- **Credit owed.** What customers owe, with "3 customers" as a hint, and Oldest due with the earliest due date of a sale still owing
+  ("2 Oct 2026"). Nobody owes: "No customer owes you money." Link: Open credit control.
+- **Top items.** Today and This week (from Monday) as two buttons; the five items that sold the most by value, each with its
+  quantity and unit and the amount. Both lists come in the one read, so the switch asks nothing. Nothing sold: "Nothing sold yet
+  today." or "Nothing sold yet this week." Link: Open sales analysis.
+- **Each shop today.** One line per shop with its sales and number of sales, most first, and "No sales yet" for a shop that has
+  sold nothing. Only with All branches chosen, for a session that sees every seller's sales in more than one branch; the server
+  leaves the lines out over fewer than two shops. Link: Open the shop dashboard.
+- **Who sees what.** The four cards and Sales today are money: they need `retail.sale.all_sellers` in the branches covered
+  (ADR-055); Takings today needs besides what the cash summary needs (`retail.cashbook.read` in every branch the money covers, as the server checks, and `retail.till.close`; #489), so a
+  Supervisor without the till sees no Takings card; a seller sees no money card, and now sees Low on stock (with `retail.stock.read`) and the open orders (with
+  `retail.order.manage`) on the Shop card. A session with the orders permission and no sales read still reads the orders board.
+- **States.** "Loading" while the read is on its way, "Could not load" in each card when it fails, the other cards unchanged. A
+  part the server leaves out (no money permission over the branches covered, a branch outside the session's scope) takes its card
+  or figure away instead of showing zeros. Recording a sale or moving an order refreshes the Home summary.
+- **Tour.** `page-staff-home` v2: the step Your shop today on the Takings card (`data-tour="home-shop-today"`), for whoever sees
+  everybody's money.
+- **Screenshot description.** On a phone the cards stack: Shop (Sales today UGX 125,000, 7 sales; Low on stock 3 items; Open
+  customer orders 4), Takings today (Cash 60,000, Mobile money 35,000, Bank 3,000, Total 98,000), Credit owed (450,000, 3
+  customers; Oldest due 2 Oct 2026), Top items (Today pressed, Test Sugar 1kg 4 bag 24,000), Each shop today (Test Shop One
+  100,000, 5 sales; Test Shop Two, No sales yet), each with its link underneath. On a wide screen they sit side by side in columns
+  of at least 280px.
+
+## Last paid and the average buying price (issue #523, ADR-079, FR-RET-69)
+
+- The item's own buying price is the last one paid: the item card says "last paid UGX 750" and the Change price form calls the field
+  **Last paid**, with a hint that profit uses the average buying price of the stock in each shop, which restocks keep up to date. The
+  new item form still asks for the **Buying price**; it becomes the last paid price and the first average of a shop that has none.
+- The stock lists call their cost column **Average cost**: on one shop, that shop's average per smallest unit; on all shops, the
+  average of the shops that hold stock, weighted by what each holds. The phone cards say "Average cost UGX 769, price UGX 1,000 each".
+- A restock line that changes the item's buying price says "Last paid will change from UGX 750 to UGX 800", and the restock's summary
+  "last paid changed from UGX 750 to UGX 800". Nothing else on the screens changes: sale lines, profit and the reports show the cost
+  each sale line kept, which is now the shop's average at the moment of sale.
+
+## One glossary of shop words (issue #547, D24)
+
+- The words a person sees come from `frontend/src/app/glossary.ts` (spec `units-packs-and-costing.md` section 5, PR #513).
+  Restock is now **Buy stock** (the screen) and a record of it is a **purchase** (Past purchases, Save the purchase,
+  Correct this purchase, Stock bought on credit); Stock-take is **Count stock** (a stock count); Variance is
+  **Difference**; Shrinkage is **Lost or damaged stock**; Credit buyers is **Customers who owe**; the Unit of an item is
+  **Counted in**; Pack sizes is **Cartons, boxes and other packs**.
+- Routes (`/staff/retail/restock`, `/restocks`, `/stocktake`, `/catalogue/buyers`), API fields, permission names and error
+  codes are unchanged. The backend's plain-words refusals that a person reads use the same words.
+- `glossary.test.ts` fails when SKU, variance, shrinkage, UOM or restock (any case), or a retired label, shows in the
+  source strings or JSX text of a screen, in a tour or in the menu help. It reads source, not the rendered page: words
+  built at run time and the backend's refusals are worded by hand. The tours whose words changed took a new version.
+
+## Approval rules and actions that wait (issue #343, ADR-091, FR-APR-09)
+
+- **Approval rules** (Business set-up, `/staff/setup/approvals`, administrators): the business's actions grouped as Shop and
+  Lending, one card each. A retail action has a checkbox "Ask an administrator first" and, while on, "<action> from this amount"
+  (the one money field; 0 means every one, or for credit write-offs "a second administrator when the business has two or more", ADR-043's rule). A lending action reads "Always on" and shows only its amount. One Hint line per card says
+  what happens while it waits. Below the shop list: "Selling below cost is not an approval", with a link to Staff users. Review and
+  save reads each change back as "Sale voids: a second person from UGX 50,000 (was no second person).", says when the other
+  administrators will be told, and asks for the administrator's own password, or the authenticator code when they have one.
+- **While an action waits** (void a sale, correct a quantity, record an expense): a neutral note, not a success: "Sent for
+  approval. <what> Nothing changes until an administrator approves it." and the row "See it, or cancel it, on Approvals". The void
+  button stays away; the expense form offers Record another expense.
+- **Approvals** names every action in words ("Void a sale", "Correct a stock quantity", "Record an expense"); an unknown type keeps
+  its identifier.
+- **Retail settings** returns Hint (#575) now links to the returns row of the approval rules ("Set a returns limit in Approval
+  rules").
+
+## Next steps as big buttons (issue #700)
+
+- After **Add an item** saves (on Items and on a category), a card under the toast offers **Count it now** (the one primary
+  action, with a help tip), **Add another** and **Sell it**. Count it now opens Count stock at the branch in use with the item at
+  the top of the sheet and its count box focused (`/staff/retail/stocktake?item=<id>&from=items`); the sheet then shows
+  **Back to Items** next to Review the difference. Quick add keeps Add another and Sell it and adds Count it now when no
+  quantity was typed.
+- **Items**, **Buy stock** done, **Count stock** done and **Move stock** done each show a Next row of plain full size buttons
+  (`NextSteps`, `.next-steps`; a stack of full width buttons on a phone), each only for someone who may use it there.
+- The list, with who sees each button, is `docs/ui/next-steps.md`, the single source; `next-steps.dom.test.tsx` holds the code
+  to it and fails on a success screen drawn with no next step.
+
+## Where is my stock (issue #728)
+
+A shop owner added his items with Quick add at his store, looked at My stock in his main shop, saw 0 and thought his numbers
+were lost; he also left two counts at Review the difference, because the last step said Commit. Pictures in
+`docs/ui/where-is-my-stock`.
+
+- **My stock and the item's page** say where an item is when the shop in use has none of it and another shop has some:
+  "0 here. 456 at Test Store", with **Switch to Test Store**, which changes the shop in use with the house toast (issue #680).
+  The other shops are those the all-branches stock list returns (cut by the server to the shops the person may read stock at)
+  that are in the person's own branch list; the one holding the most is named. A negative balance keeps its own flag. The flat
+  list and the grouped view both say it, and both read the all-branches list under one cache key (`allBranchesKey`).
+- **Quick add** shows the shop beside How many: "Adds to Test Store", with **Change** (the phone's own picker in one tap,
+  `AddsTo` in `branch-picker.tsx`, laid out as the shop under the title). Once added the line names it: "Added 70 pieces at Test
+  Store. Test bulb is saved." **Add an item** inside Count stock ("Counted at") and Sell ("Adds to", no Change: a sale keeps its
+  shop) shows the same line under its quantity; on Count stock Change switches the shop in use.
+- **Counts not saved.** A count reviewed and left without saving (a draft, `GET /retail/stocktakes/unfinished`) shows on My stock
+  and Count stock, to someone who may count at the shop: "You started a count here on 29 Oct and did not finish it" (today, or
+  a weekday within the week; "Someone" for another person's count), with **Finish it** (its review again, ready to save; from My
+  stock it opens `/staff/retail/stocktake?finish=<id>`) and **Throw it away**, which asks "Throw this count away? Your stock stays
+  as it is." with **Yes, throw it away** and **Keep it**. A count Sell started of a new item says "from a sale", and throwing it
+  away adds that the sale cannot save it any more. **Back to the count** throws away the review it leaves, so going back and
+  reviewing again never leaves a count behind; a count opened with Finish it stays as it was. While Save the count is on its way
+  Back to the count is not shown, and after a save whose answer failed it leaves the count, since the save may have landed.
+- **Plain words.** The last step of a count, on Count stock and on Sell's count of a new item, is **Save the count**, with a help
+  tip: "Your stock changes only when you save the count." Review the difference stays the step before. The tour
+  `page-stocktake` is version 8.

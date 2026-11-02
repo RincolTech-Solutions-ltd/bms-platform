@@ -30,6 +30,7 @@ import com.rincoltech.bms.retail.stock.internal.StockRepository.ProductTotal;
 import com.rincoltech.bms.retail.stock.internal.TransferApi.Transfer;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -98,7 +99,7 @@ class LocationService {
         Principal principal = CurrentPrincipal.require();
         List<Branch> visible = context.visible(READ, stockRepo.branchesHoldingBalance(context.inactiveInScope(READ)));
         Map<UUID, BranchRole> role = new LinkedHashMap<>();
-        visible.forEach(b -> role.put(b.id(), roles.roleOf(b.id())));
+        visible.forEach(b -> role.put(b.id(), roles.roleOf(b)));
         List<Branch> columns = ordered(visible, role);
         List<UUID> ids = columns.stream().map(Branch::id).toList();
         String currency = tenant.profile().currency();
@@ -141,6 +142,7 @@ class LocationService {
         List<ProductTotal> page = ranked.stream().map(Search.Ranked::row).toList();
         List<UUID> productIds = page.stream().map(ProductTotal::id).toList();
         Map<UUID, Map<UUID, BigDecimal>> held = stockRepo.balances(productIds, ids);
+        Map<UUID, Map<UUID, Long>> averages = stockRepo.averages(productIds, ids);
         Map<UUID, OnTheWay> way = repo.onTheWay(productIds, ids);
         List<BranchRole> present =
                 columns.stream().map(b -> role.get(b.id())).distinct().sorted().toList();
@@ -156,7 +158,9 @@ class LocationService {
                 BigDecimal q = mine.getOrDefault(b.id(), BigDecimal.ZERO);
                 bySubtotal.merge(role.get(b.id()), q, BigDecimal::add);
                 boolean mayCost = principal.may(PROFIT_READ, b.id());
-                Long branchValue = mayCost ? Quantities.value(q, p.costMinor()) : null;
+                // ADR-079: each branch's stock at that branch's average cost.
+                long average = averages.getOrDefault(p.id(), Map.of()).getOrDefault(b.id(), p.costMinor());
+                Long branchValue = mayCost ? Quantities.value(q, average) : null;
                 if (branchValue != null) {
                     value = Math.addExact(value, branchValue);
                 }
@@ -255,7 +259,8 @@ class LocationService {
         capabilities.require(RetailCapabilities.TRANSFER_RECEIPT);
         Principal principal = CurrentPrincipal.require();
         List<UUID> filter = principal.branchFilter(READ, null);
-        LocalDate today = clock.today(tenant.profile().timezone());
+        ZoneId zone = tenant.profile().timezone();
+        LocalDate today = clock.today(zone);
         List<Transfer> open = transfers.inTransit(filter).stream()
                 .map(TransferService::visible)
                 .toList();
@@ -266,7 +271,11 @@ class LocationService {
                         t.toBranchId(),
                         t.transferDate(),
                         t.createdAt(),
-                        (int) Math.max(0, ChronoUnit.DAYS.between(t.transferDate(), today)),
+                        // From when it was sent, not the transfer date, which may be set in the past (issue #239).
+                        (int) Math.max(
+                                0,
+                                ChronoUnit.DAYS.between(
+                                        t.createdAt().atZone(zone).toLocalDate(), today)),
                         t.note(),
                         t.lines(),
                         t.costTotalMinor()))

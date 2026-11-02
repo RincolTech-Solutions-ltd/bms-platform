@@ -13,6 +13,10 @@ import type { components } from './schema';
 type S = components['schemas'];
 
 export type Product = S['RetailProduct'];
+/** A barcode of an item or one of its pack sizes (ADR-070, issue #345). */
+export type Barcode = S['RetailBarcode'];
+/** The active item a scanned barcode belongs to, and the pack it names (`unit_id`), if any. */
+export type BarcodeMatch = S['RetailBarcodeMatch'];
 /** A pack size of an item (units of measure, ADR-033): `factor` base units in one pack of `unit`, three places ("12.000"). */
 export type Pack = S['RetailPack'];
 export type StockRow = S['RetailStockRow'];
@@ -31,6 +35,7 @@ export type CapabilityChange = S['UpdateRetailCapabilitiesRequest'];
 export interface CapabilitiesRead { capabilities: RetailCapabilities; version: number }
 export type Category = S['RetailCategory'];
 export type Unit = S['RetailUnit'];
+export type UsualPackRequest = S['RetailUsualPackRequest'];
 export type ProductPage = S['RetailProductPage'];
 export type PriceChange = S['RetailPriceChange'];
 export type NewProduct = S['CreateRetailProductRequest'];
@@ -41,6 +46,8 @@ export type NewFamily = S['CreateRetailFamilyRequest'];
 export type FamilyChange = S['UpdateRetailFamilyRequest'];
 export type AddVariants = S['AddRetailVariantsRequest'];
 export type MakeFamily = S['RetailMakeFamilyRequest'];
+/** Issue #697: the sizes and colours the shop's items have, offered again on Add an item. */
+export type VariantOptions = S['RetailVariantOptions'];
 export type VariantLine = S['RetailVariantLine'];
 /** Items kept apart until now (one per size) becoming the sizes and colours of one item (issue #384). */
 export type JoinRequest = S['RetailJoinRequest'];
@@ -50,10 +57,16 @@ export type PriceEdit = S['RetailPriceEditRequest'];
 /** A product with this name or a close one (issue #352): `exact` is the same name in the same unit, which a save refuses. */
 export type SimilarProducts = S['RetailSimilarProducts'];
 export type SimilarProduct = S['RetailSimilarProduct'];
+/** Issue #353, ADR-093: an item's recent history the entry screens warn against, and the hints while naming a new item. */
+export type EntryNorms = S['RetailEntryNorms'];
+export type EntryUsage = S['RetailEntryUsage'];
+export type NameHints = S['RetailNameHints'];
+export type EntryConfirmation = S['RetailEntryConfirmation'];
 export type ImportResult = S['RetailProductImportResult'];
 export type ImportRow = S['RetailProductImportRow'];
 export type Customer = S['RetailCustomer'];
 export type SaleReceipt = S['RetailSaleReceipt'];
+export type ReceiptPreview = S['RetailReceiptPreview'];
 export type CustomerPage = S['RetailCustomerList'];
 /** Customer accounts (ADR-033, issue #196): the credit limit and terms, the statement, payment on account. Money is integer minor units. */
 export type CustomerAccount = S['RetailCustomerAccount'];
@@ -92,6 +105,10 @@ export type SaleReturn = S['RetailSaleReturn'];
 export type ReturnLine = S['RetailReturnLine'];
 /** 201 with the return when it was recorded; 202 with `approval_id` when it waits for a second administrator. */
 export type ReturnOutcome = S['RetailReturnOutcome'];
+/** ADR-091: the 202 of a void, a stock correction or an expense that now waits for an administrator; nothing changed yet. */
+export type ApprovalWaiting = S['ApprovalWaiting'];
+/** True for the 202 of an action that waits for an administrator, rather than the record it would have made (ADR-091). */
+export const isWaiting = <T extends object>(x: T | ApprovalWaiting): x is ApprovalWaiting => 'approval_id' in x && typeof x.approval_id === 'string' && !('id' in x);
 export type ReturnPage = S['RetailReturnList'];
 // JUSTIFICATION-A3: the purchasing capability's types are new API surface (ADR-033, issue #198); nothing existing carries them.
 /**
@@ -128,6 +145,9 @@ export type SupplierOpenItem = S['RetailSupplierOpenItem'];
 export type SupplierOpenItems = S['RetailSupplierOpenItems'];
 export type SupplierPayables = S['RetailSupplierPayables'];
 export type SupplierPayablesRow = S['RetailSupplierPayablesRow'];
+/** A supplier's statement (issue #557): opening balance, each purchase on credit, invoice, payment, void and reversal with the running balance. */
+export type SupplierStatement = S['RetailSupplierStatement'];
+export type SupplierStatementLine = S['RetailSupplierStatementLine'];
 export type PurchasingSettings = S['RetailPurchasingSettings'];
 export type PurchasingSettingsUpdate = S['RetailPurchasingSettingsUpdate'];
 // JUSTIFICATION-A3: landed costs and supplier credit notes are new API surface (issue #199); nothing existing carries these types.
@@ -180,6 +200,10 @@ export type UsageRequest = S['RetailUsageRequest'];
 export type Usage = S['RetailUsageReport'];
 export type StocktakeRequest = S['RetailStocktakeRequest'];
 export type Stocktake = S['RetailStocktake'];
+export type OpenStocktake = S['RetailOpenStocktake'];
+/** Quick add (issue #632): an item, its prices and how many there are at a branch, in one request. */
+export type QuickAddRequest = S['RetailQuickAddRequest'];
+export type QuickAdd = S['RetailQuickAdd'];
 export type StocktakeLine = S['RetailStocktakeLine'];
 export type Valuation = S['RetailValuation'];
 export type ValuationRow = S['RetailValuationRow'];
@@ -229,13 +253,33 @@ export type CashDailyRow = S['RetailCashDailyRow'];
 export const RETAIL_CURRENCY = 'UGX';
 
 /**
- * The tenant's timezone is not on /me or the tenant settings yet; the server dates retail events in
- * Africa/Kampala unless the tenant profile says otherwise (BusinessClock), so the forms do too.
+ * The server dates events in Africa/Kampala unless the tenant profile says otherwise (BusinessClock). The forms take the
+ * tenant's own zone from /me once it loads (setBusinessZone) and this one until then.
  */
 export const RETAIL_ZONE = 'Africa/Kampala';
 
-/** Today as yyyy-mm-dd in the business's timezone, not the browser's or UTC (#112 items 3 and 9). */
-export function businessToday(now: Date = new Date(), zone: string = RETAIL_ZONE): string {
+let zoneNow = RETAIL_ZONE;
+
+/**
+ * The signed-in business's own time zone, `tenant_timezone` on /me, set by the staff shell once the profile loads (#667). The
+ * server dates events in it (BusinessClock), so every default date does too; an empty or unknown zone keeps Africa/Kampala.
+ */
+export function setBusinessZone(zone: string | undefined | null): void {
+  zoneNow = RETAIL_ZONE;
+  if (!zone) return;
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: zone });
+    zoneNow = zone;
+  } catch {
+    // An unknown zone name: Africa/Kampala stays.
+  }
+}
+
+/** The signed-in business's time zone (setBusinessZone), for showing its moments on its own clock. */
+export const businessZone = (): string => zoneNow;
+
+/** Today as yyyy-mm-dd in the business's timezone, not the browser's or UTC (#112 items 3 and 9, #667). */
+export function businessToday(now: Date = new Date(), zone: string = zoneNow): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 }
 
@@ -243,7 +287,7 @@ export function businessToday(now: Date = new Date(), zone: string = RETAIL_ZONE
 export function daysBefore(date: string, days: number): string {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10);
+  return d.toISOString().slice(0, 10); // business-day-ok: a calendar sum on a UTC midnight
 }
 
 /** Stock lists can show only items out of stock (zero or less) or low (at or below the server's threshold, 5). */
@@ -356,16 +400,23 @@ export function cashParams({ branchIds, from, to, includeVoided }: CashQuery) {
 }
 
 export type SalePayment = 'cash' | 'mobile_money' | 'bank' | 'credit';
-export type PurchasePayment = 'cash' | 'bank' | 'credit';
+export type PurchasePayment = 'cash' | 'mobile_money' | 'bank' | 'credit';
 
 export interface RetailApi {
   listProducts(q: { query?: string; branchId?: string; signal?: AbortSignal }): Promise<Product[]>;
   listCategories(): Promise<Category[]>;
   /** Catalogue management (#146): one page of products, with the filters of the Products screen. */
-  listCatalogue(q: { query?: string; categoryId?: string; active?: boolean; cursor?: string; signal?: AbortSignal }): Promise<ProductPage>;
+  /** With `branchId` each item carries its stock there (`qty`), for a session that may read that branch's stock. */
+  listCatalogue(q: { query?: string; categoryId?: string; active?: boolean; branchId?: string; cursor?: string; signal?: AbortSignal }): Promise<ProductPage>;
   getProduct(id: string): Promise<Product>;
   /** Before saving a new or renamed item: the products with this name or a close one (issue #352). */
   similarProducts(q: { description: string; unitId?: string; excludeId?: string }): Promise<SimilarProducts>;
+  /** Issue #353: the item's median quantities, usual units and last price; the screens call it once per item. */
+  entryNorms(productId: string): Promise<EntryNorms>;
+  /** Issue #353: did you mean, and the category of similar items, while a new item's name is typed. */
+  nameHints(description: string): Promise<NameHints>;
+  /** Issue #353: the person confirmed an entry warning; recorded, never needed to save. */
+  confirmEntryWarning(body: EntryConfirmation): Promise<void>;
   createProduct(body: NewProduct): Promise<Product>;
   /** Non-price fields, under If-Match with the version read. */
   updateProduct(id: string, version: number, body: ProductChange): Promise<Product>;
@@ -376,6 +427,8 @@ export interface RetailApi {
   getFamily(id: string): Promise<Family>;
   /** Makes the item and every combination of the sizes and colours chosen once (or the variants named). */
   createFamily(body: NewFamily): Promise<Family>;
+  /** The sizes and colours the shop typed before, most used first (issue #697). */
+  variantOptions(): Promise<VariantOptions>;
   /** A new name renames every variant, a new category moves every variant; under If-Match. */
   updateFamily(id: string, version: number, body: FamilyChange): Promise<Family>;
   /** More sizes or colours; a combination the item has is skipped. */
@@ -395,18 +448,30 @@ export interface RetailApi {
   photo(photoId: string, signal?: AbortSignal, small?: boolean): Promise<Blob>;
   /** The pack sizes of an item (the units capability, issue #194); 404 capability_not_enabled while it is off. */
   listPacks(productId: string): Promise<Pack[]>;
-  addPack(productId: string, body: { unit_id: string; factor: string }): Promise<Pack>;
+  /** Issue #624: `purpose` (buy, sell or both) and the pack's own selling price `sell_minor` are optional. */
+  addPack(productId: string, body: S['RetailPackRequest']): Promise<Pack>;
   /** Under If-Match with the pack's version: a new factor, or switch the pack off or on. */
-  updatePack(productId: string, unitId: string, version: number, body: { factor?: string; active?: boolean }): Promise<Pack>;
+  updatePack(productId: string, unitId: string, version: number, body: S['RetailPackUpdate']): Promise<Pack>;
   /** The CSV item import: a dry run reports, an apply adds the rows that are fine (administrators only). */
-  importProducts(csv: string, dryRun: boolean): Promise<ImportResult>;
-  createCategory(name: string): Promise<Category>;
-  updateCategory(id: string, version: number, body: { name?: string; active?: boolean }): Promise<Category>;
+  /** Owner decision D45 (issue #562): makeCodes is Let the app make the codes, off by default. */
+  importProducts(csv: string, dryRun: boolean, makeCodes?: boolean): Promise<ImportResult>;
+  /** Issue #345: the active item a scanned code belongs to, with the branch's balance when given; null for an unknown code. */
+  findByBarcode(code: string, branchId?: string, signal?: AbortSignal): Promise<BarcodeMatch | null>;
+  addBarcode(productId: string, body: { code: string; format?: string; unit_id?: string }): Promise<Barcode>;
+  removeBarcode(productId: string, barcodeId: string): Promise<void>;
+  /** A Code 128 label code for each item that has no made one yet; an item keeps the one it has. */
+  generateBarcodes(productIds: string[]): Promise<Barcode[]>;
+  /** A blank code start is suggested from the name by the server (issue #493). */
+  createCategory(name: string, codePrefix?: string): Promise<Category>;
+  updateCategory(id: string, version: number, body: { name?: string; active?: boolean; code_prefix?: string }): Promise<Category>;
+  /** The code start a new category of this name would get, free in the business (issue #493). */
+  suggestCategoryPrefix(name: string): Promise<string>;
   listUnits(): Promise<Unit[]>;
-  createUnit(name: string): Promise<Unit>;
-  updateUnit(id: string, version: number, body: { name?: string; active?: boolean }): Promise<Unit>;
+  /** Issue #625: `usualPack` makes the unit a pack with its usual size in a smaller unit and what it is for; never a price. */
+  createUnit(name: string, usualPack?: UsualPackRequest): Promise<Unit>;
+  updateUnit(id: string, version: number, body: { name?: string; active?: boolean; usual_pack?: UsualPackRequest; clear_usual_pack?: boolean }): Promise<Unit>;
   /** Corrects the quantity of an item at a branch (retail.stocktake.commit there); takes the Idempotency-Key of its form (issue #351). */
-  correctStock(body: StockCorrectionRequest, idempotencyKey: string): Promise<StockCorrection>;
+  correctStock(body: StockCorrectionRequest, idempotencyKey: string): Promise<StockCorrection | ApprovalWaiting>;
   /** The stock history of an item at a branch, newest first (issue #351). */
   stockHistory(q: { productId: string; branchId: string; cursor?: string; limit?: number; signal?: AbortSignal }): Promise<{ items: StockMovement[]; next_cursor?: string }>;
   listStock(q: { branchId: string; query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel; includeInactive?: boolean; signal?: AbortSignal }): Promise<StockRow[]>;
@@ -418,7 +483,7 @@ export interface RetailApi {
   /** A payment, partial allowed, against a credit sale (retail.sale.create at the branch); takes the Idempotency-Key of its form. */
   paySale(saleId: string, body: SalePaymentRequest, idempotencyKey: string): Promise<SalePaymentResult>;
   /** Voids a sale by reversal (retail.sale.void at the branch). The schema has no Idempotency-Key for it: a second void is refused as sale_voided. */
-  voidSale(saleId: string, reason: string): Promise<Sale>;
+  voidSale(saleId: string, reason: string): Promise<Sale | ApprovalWaiting>;
   /** Writes off what a credit sale still owes as a loss (retail.credit.manage); takes the Idempotency-Key of its form. */
   writeOffSale(saleId: string, reason: string, idempotencyKey: string): Promise<WriteOffOutcome>;
   listCustomers(): Promise<Customer[]>;
@@ -464,6 +529,8 @@ export interface RetailApi {
   saleReceiptPdf(saleId: string): Promise<Blob>;
   /** The facts of the receipt to share, as its PDF prints them (same check as the PDF; 422 for a voided, written-off or wholly returned sale). */
   saleReceipt(saleId: string): Promise<SaleReceipt>;
+  /** What the receipt PDF prints, for the screen's preview, asked for only when View receipt is tapped (issue #500); without `printed` when it could not be laid out. */
+  saleReceiptPrinted(saleId: string): Promise<ReceiptPreview>;
   /** Optional documents (the documents capability, issue #197); 404 capability_not_enabled while it is off. */
   listSaleDocuments(saleId: string): Promise<RetailDocument[]>;
   /** The invoice or delivery note of a sale, issued once; takes the Idempotency-Key of its button. */
@@ -523,6 +590,8 @@ export interface RetailApi {
   /** The invoices and credit restocks of a supplier that still owe something, oldest due first. */
   supplierOpenItems(supplierId: string): Promise<SupplierOpenItems>;
   supplierPayables(): Promise<SupplierPayables>;
+  /** One supplier's statement between two days, the last 90 days by default (issue #557). */
+  supplierStatement(supplierId: string, q: { from?: string; to?: string }): Promise<SupplierStatement>;
   purchasingSettings(): Promise<PurchasingSettings>;
   /** The tolerances replaced under If-Match with the settings version; an omitted field is unchanged (core.settings.manage). */
   changePurchasingSettings(version: number, body: PurchasingSettingsUpdate): Promise<PurchasingSettings>;
@@ -554,7 +623,15 @@ export interface RetailApi {
   voidPurchase(id: string, reason: string, idempotencyKey: string): Promise<Purchase>;
   createUsage(body: UsageRequest, idempotencyKey: string): Promise<Usage>;
   createStocktake(body: StocktakeRequest): Promise<Stocktake>;
-  commitStocktake(id: string): Promise<Stocktake>;
+  /** Issue #636: `acknowledged` names the big drops ticked on the review; the server refuses with 409 while one is left out. */
+  commitStocktake(id: string, acknowledged?: string[]): Promise<Stocktake>;
+  /** Issue #656: ends a draft count without writing stock; a second call returns it unchanged, a committed one is refused with 409. */
+  discardStocktake(id: string): Promise<Stocktake>;
+  getStocktake(id: string): Promise<Stocktake>;
+  /** Issue #728: the counts started at a branch and neither saved nor thrown away, newest first (retail.stocktake.commit there). */
+  unfinishedStocktakes(branchId: string): Promise<OpenStocktake[]>;
+  /** Quick add (issue #632): makes the item and adds its stock at the branch as opening stock in one transaction; takes the Idempotency-Key of its form. */
+  quickAdd(body: QuickAddRequest, idempotencyKey: string): Promise<QuickAdd>;
   /** Every product with its balance in each branch the caller may read (#144). */
   listStockAllBranches(q: { query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel; includeClosed?: boolean; includeInactive?: boolean; signal?: AbortSignal }): Promise<AllBranchesStock>;
   /** One branch, or every branch in the caller's scope when `branchId` is absent (#144). */
@@ -563,7 +640,8 @@ export interface RetailApi {
   stockedBranches(): Promise<string[]>;
   /** The branches in the caller's stock scope with their roles (ADR-033); 404 capability_not_enabled while branch_roles is off. */
   branchRoles(): Promise<BranchRole[]>;
-  setBranchRole(branchId: string, role: 'store' | 'shop' | 'both'): Promise<BranchRole>;
+  /** A selling branch's role; a store is marked with sells_goods on Branches, never here (ADR-104). */
+  setBranchRole(branchId: string, role: 'shop' | 'both'): Promise<BranchRole>;
   /** The tenant's capabilities and profile (administrators only, ADR-033 section 1). */
   capabilities(): Promise<CapabilitiesRead>;
   /** Switches the profile or flags under If-Match; the server audits the old and new values. */
@@ -604,7 +682,7 @@ export interface RetailApi {
   updateExpenseItem(categoryId: string, itemId: string, body: { name?: string; active?: boolean; requires_explanation?: boolean }, version: number): Promise<ExpenseItem>;
   listCashParties(q?: { kind?: CashPartyKind }): Promise<CashParty[]>;
   createCashParty(body: CashPartyRequest): Promise<CashParty>;
-  createExpense(body: ExpenseRequest, idempotencyKey: string): Promise<Expense>;
+  createExpense(body: ExpenseRequest, idempotencyKey: string): Promise<Expense | ApprovalWaiting>;
   listExpenses(q: CashQuery & { categoryId?: string; itemId?: string }): Promise<Expense[]>;
   voidExpense(id: string, reason: string, idempotencyKey: string): Promise<Expense>;
   createAdvance(body: AdvanceRequest, idempotencyKey: string): Promise<Advance>;
@@ -677,10 +755,10 @@ const realRetail: RetailApi = {
     return unwrap(await api.GET('/api/v1/retail/categories')).items ?? [];
   },
 
-  async listCatalogue({ query, categoryId, active, cursor, signal }) {
+  async listCatalogue({ query, categoryId, active, branchId, cursor, signal }) {
     return unwrap(
       await api.GET('/api/v1/retail/products', {
-        params: { query: { query: query || undefined, category_id: categoryId || undefined, active, limit: 50, cursor } },
+        params: { query: { query: query || undefined, category_id: categoryId || undefined, active, branch_id: branchId || undefined, limit: 50, cursor } },
         signal,
       }),
     );
@@ -694,6 +772,20 @@ const realRetail: RetailApi = {
     return unwrap(
       await api.GET('/api/v1/retail/products/similar', { params: { query: { description, ...(unitId ? { unit_id: unitId } : {}), ...(excludeId ? { exclude_id: excludeId } : {}) } } }),
     );
+  },
+
+  async entryNorms(productId) {
+    return unwrap(await api.GET('/api/v1/retail/products/{product_id}/entry-norms', { params: { path: { product_id: productId } } }));
+  },
+
+  async nameHints(description) {
+    return unwrap(await api.GET('/api/v1/retail/products/name-hints', { params: { query: { description } } }));
+  },
+
+  async confirmEntryWarning(body) {
+    const result = await api.POST('/api/v1/retail/entry-warnings/confirmations', { body });
+    // 204 has no body, so unwrap is only for the refusal.
+    if (!result.response.ok) unwrap(result);
   },
 
   async createProduct(body) {
@@ -722,6 +814,10 @@ const realRetail: RetailApi = {
 
   async createFamily(body) {
     return unwrap(await api.POST('/api/v1/retail/product-families', { body }));
+  },
+
+  async variantOptions() {
+    return unwrap(await api.GET('/api/v1/retail/product-families/options'));
   },
 
   async updateFamily(id, version, body) {
@@ -783,12 +879,41 @@ const realRetail: RetailApi = {
     );
   },
 
-  async importProducts(csv, dryRun) {
-    return unwrap(await api.POST('/api/v1/retail/products/import', { params: { query: { dry_run: dryRun } }, body: { csv } }));
+  async importProducts(csv, dryRun, makeCodes = false) {
+    return unwrap(await api.POST('/api/v1/retail/products/import', { params: { query: { dry_run: dryRun, make_codes: makeCodes } }, body: { csv } }));
   },
 
-  async createCategory(name) {
-    return unwrap(await api.POST('/api/v1/retail/categories', { body: { name } }));
+  async findByBarcode(code, branchId, signal) {
+    const result = await api.GET('/api/v1/retail/products/by-barcode/{code}', {
+      params: { path: { code }, query: { branch_id: branchId } },
+      signal,
+    });
+    if (result.response.status === 404 && problemOf(result.error).code === 'barcode_not_found') return null;
+    return unwrap(result);
+  },
+
+  async addBarcode(productId, body) {
+    return unwrap(await api.POST('/api/v1/retail/products/{product_id}/barcodes', { params: { path: { product_id: productId } }, body }));
+  },
+
+  async removeBarcode(productId, barcodeId) {
+    const result = await api.DELETE('/api/v1/retail/products/{product_id}/barcodes/{barcode_id}', {
+      params: { path: { product_id: productId, barcode_id: barcodeId } },
+    });
+    // 204 has no body, so unwrap is only for the refusal.
+    if (!result.response.ok) unwrap(result);
+  },
+
+  async generateBarcodes(productIds) {
+    return unwrap(await api.POST('/api/v1/retail/products/barcodes/generate', { body: { product_ids: productIds } })).items ?? [];
+  },
+
+  async createCategory(name, codePrefix) {
+    return unwrap(await api.POST('/api/v1/retail/categories', { body: { name, ...(codePrefix?.trim() ? { code_prefix: codePrefix.trim() } : {}) } }));
+  },
+
+  async suggestCategoryPrefix(name) {
+    return unwrap(await api.GET('/api/v1/retail/categories/prefix-suggestion', { params: { query: { name } } })).code_prefix ?? '';
   },
 
   async updateCategory(id, version, body) {
@@ -799,8 +924,8 @@ const realRetail: RetailApi = {
     return unwrap(await api.GET('/api/v1/retail/units')).items ?? [];
   },
 
-  async createUnit(name) {
-    return unwrap(await api.POST('/api/v1/retail/units', { body: { name } }));
+  async createUnit(name, usualPack) {
+    return unwrap(await api.POST('/api/v1/retail/units', { body: { name, ...(usualPack ? { usual_pack: usualPack } : {}) } }));
   },
 
   async updateUnit(id, version, body) {
@@ -1008,6 +1133,10 @@ const realRetail: RetailApi = {
     return unwrap(await api.GET('/api/v1/retail/sales/{sale_id}/receipt', { params: { path: { sale_id: saleId } } }));
   },
 
+  async saleReceiptPrinted(saleId) {
+    return unwrap(await api.GET('/api/v1/retail/sales/{sale_id}/receipt/printed', { params: { path: { sale_id: saleId } } }));
+  },
+
   async saleReceiptPdf(saleId) {
     const result = await api.GET('/api/v1/retail/sales/{sale_id}/receipt/pdf', { params: { path: { sale_id: saleId } }, parseAs: 'blob' });
     return unwrap(result as { data?: Blob; error?: unknown; response: Response });
@@ -1179,6 +1308,10 @@ const realRetail: RetailApi = {
     return unwrap(await api.GET('/api/v1/retail/reports/supplier-payables', { params: { query: {} } }));
   },
 
+  async supplierStatement(supplierId, { from, to }) {
+    return unwrap(await api.GET('/api/v1/retail/suppliers/{supplier_id}/statement', { params: { path: { supplier_id: supplierId }, query: { from: from || undefined, to: to || undefined } } }));
+  },
+
   async purchasingSettings() {
     return unwrap(await api.GET('/api/v1/retail/purchasing/settings'));
   },
@@ -1298,8 +1431,21 @@ const realRetail: RetailApi = {
     return unwrap(await api.POST('/api/v1/retail/stocktakes', { body }));
   },
 
-  async commitStocktake(id) {
-    return unwrap(await api.POST('/api/v1/retail/stocktakes/{stocktake_id}/commit', { params: { path: { stocktake_id: id } } }));
+  async commitStocktake(id, acknowledged = []) {
+    return unwrap(await api.POST('/api/v1/retail/stocktakes/{stocktake_id}/commit', { params: { path: { stocktake_id: id } }, body: { acknowledged } }));
+  },
+  async discardStocktake(id) {
+    return unwrap(await api.POST('/api/v1/retail/stocktakes/{stocktake_id}/discard', { params: { path: { stocktake_id: id } } }));
+  },
+  async getStocktake(id) {
+    return unwrap(await api.GET('/api/v1/retail/stocktakes/{stocktake_id}', { params: { path: { stocktake_id: id } } }));
+  },
+  async unfinishedStocktakes(branchId) {
+    return unwrap(await api.GET('/api/v1/retail/stocktakes/unfinished', { params: { query: { branch_id: branchId } } }));
+  },
+
+  async quickAdd(body, key) {
+    return unwrap(await api.POST('/api/v1/retail/quick-add', { params: { header: { 'Idempotency-Key': key } }, body }));
   },
 
   async valuation({ branchId, asOf }) {

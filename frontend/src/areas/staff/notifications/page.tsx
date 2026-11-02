@@ -1,12 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
+import { businessZone } from '../../../api/retail';
 import { type PushDevice, pushApi } from '../../../api/push';
+import { THEME_LABELS } from '../../../app/shell';
+import { THEME_CHOICES, useThemeChoice } from '../../../app/theme-mode';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { InstallPanel } from '../../../install/InstallPrompt';
 import { isIosDevice } from '../../../install/install';
 import { type PushState, createPush } from '../../../push/push';
 
-// Notifications and app (ADR-050). Two things for the person using this device: install BMS as an app, and turn on notifications
+// Notifications and app (ADR-050). For the person using this device: install BMS as an app, choose how it looks (issue #452), and turn on notifications
 // for the things that need them (a sale voided, a write-off made alone, an approval limit raised, stock sent to their branch, an
 // approval waiting for them). The permission question is asked only when the switch is tapped, never when the page opens. The
 // list below shows the person's own devices and lets them remove one; the server never shows an address or a key.
@@ -18,7 +22,7 @@ const messageOf = (e: unknown) => (e instanceof Error ? e.message : 'Something w
 function When({ iso }: { iso?: string | null }) {
   if (!iso) return null;
   const d = new Date(iso);
-  return <>{Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}</>;
+  return <>{Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: businessZone() })}</>;
 }
 
 /** What the switch says about this device, in plain words. */
@@ -45,6 +49,7 @@ export function PushToggle({ push = defaultPush }: { push?: ReturnType<typeof cr
   const queryClient = useQueryClient();
   const state = useQuery({ queryKey: ['push-state'], queryFn: () => push.state(), retry: false });
   const [error, setError] = useState<string | null>(null);
+  // busy-exempt: the switch sends it on change and says Working itself
   const change = useMutation({
     mutationFn: (on: boolean) => (on ? push.enable() : push.disable()),
     onSuccess: (next) => {
@@ -53,6 +58,7 @@ export function PushToggle({ push = defaultPush }: { push?: ReturnType<typeof cr
       void queryClient.invalidateQueries({ queryKey: ['push-devices'] });
     },
     onError: (e) => setError(messageOf(e)),
+    meta: { success: (_: unknown, on: boolean) => (on ? 'Notifications turned on' : 'Notifications turned off') },
   });
   const current = state.data;
   const on = current === 'on';
@@ -95,6 +101,7 @@ function Devices() {
       void queryClient.invalidateQueries({ queryKey: ['push-state'] });
     },
     onError: (e) => setError(messageOf(e)),
+    meta: { success: 'Device removed' },
   });
   const devices = list.data ?? [];
   return (
@@ -122,13 +129,29 @@ function Devices() {
                   ) : null}
                 </span>
               </span>
-              <button type="button" className="btn-ghost btn-sm" disabled={remove.isPending} onClick={() => remove.mutate(device)}>
+              <BusyButton type="button" className="btn-ghost btn-sm" busy={remove.isPending && remove.variables?.id === device.id} disabled={remove.isPending} onClick={() => remove.mutate(device)}>
                 Remove
-              </button>
+              </BusyButton>
             </li>
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/** Light, Dark or Same as my phone, kept on this device (issue #452): the same choice as the theme button in the header. */
+export function Appearance() {
+  const [choice, setChoice] = useThemeChoice();
+  return (
+    <div role="radiogroup" aria-labelledby="appearance-title" aria-describedby="appearance-words">
+      <p id="appearance-words">How BMS looks on this device.</p>
+      {THEME_CHOICES.map((value) => (
+        <label key={value}>
+          <input type="radio" name="appearance" value={value} checked={choice === value} onChange={() => setChoice(value)} />{' '}
+          {THEME_LABELS[value]}
+        </label>
+      ))}
     </div>
   );
 }
@@ -140,6 +163,10 @@ export function NotificationsPage({ push = defaultPush }: { push?: ReturnType<ty
       <section className="rt-card stack" aria-labelledby="install-title" data-tour="install-app">
         <h2 id="install-title">Install the app</h2>
         <InstallPanel />
+      </section>
+      <section className="rt-card stack" aria-labelledby="appearance-title" data-tour="appearance">
+        <h2 id="appearance-title">Appearance</h2>
+        <Appearance />
       </section>
       <section className="rt-card stack" aria-labelledby="notify-title" data-tour="notifications-toggle">
         <h2 id="notify-title">Notifications on this device</h2>

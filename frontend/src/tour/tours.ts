@@ -1,11 +1,16 @@
 import type { Me } from '../api/client';
+import { showSavings } from '../areas/staff/lending/savings-permissions';
+import { showReceivePayments } from '../areas/staff/payments/state';
+import { MONEY_SCREENS, canUse, showRetail } from '../areas/staff/retail/permissions';
 import type { Tour, TourStep } from './model';
+import { APPLICATION_TOURS } from './tours-applications';
 import { CUSTOMER_TOURS } from './tours-customers';
 import { LENDING_MORE_TOURS } from './tours-lending-more';
 import { OPERATOR_TOURS } from './tours-operator';
 import { PUBLIC_TOURS } from './tours-public';
 import { RETAIL_CASH_TOURS } from './tours-retail-cash';
 import { RETAIL_ORDER_TOURS } from './tours-retail-orders';
+import { RETAIL_QUICK_ADD_TOURS } from './tours-retail-quick-add';
 import { RETAIL_PURCHASING_TOURS } from './tours-retail-purchasing';
 import { RETAIL_REPORT_TOURS } from './tours-retail-reports';
 
@@ -23,6 +28,8 @@ const CATALOGUE = ['retail.catalogue.manage', 'retail.customer.manage'];
 const LOANS = 'lending.loans.read';
 const DISBURSE = 'lending.disbursements.request';
 const REPAY = 'lending.repayments.create';
+const LOANS_CREATE = 'lending.loans.create';
+const MEMBERS_READ = 'lending.members.read';
 
 const held = (me: Me, permission: string) => (me.permissions ?? []).includes(permission);
 const isTenantAdmin = (me: Me) => held(me, SETTINGS);
@@ -30,20 +37,20 @@ const isSeller = (me: Me) => held(me, SELL) && !isTenantAdmin(me);
 /** A retail capability the tenant switched on (ADR-033); /me lists them per module. */
 const capable = (me: Me, capability: string) => (me.module_capabilities?.['retail'] ?? []).includes(capability);
 
+// The one menu at the top right of the staff top bar (issue #526): Help, Light or dark and Sign out live in it.
 const help: TourStep = {
   id: 'help',
-  target: 'help-menu',
-  title: 'Help is always here',
-  body: 'Lost? Tap Help to take this tour again, or to see a short tour of the page you are on.',
+  target: 'top-menu',
+  title: 'Your menu',
+  body: 'Tap the round button at the top right. Help takes this tour again or shows a tour of the page you are on. Theme sets Light, Dark or Same as my phone, kept on this device.',
 };
 
-// The refresh button in the header (issue #430): the installed app has no browser reload.
+// Refresh is a button in the top bar beside Search on every staff screen (issue #631), no longer in the menu.
 const refresh: TourStep = {
   id: 'refresh',
   target: 'refresh',
-  optional: true,
-  title: 'Refresh the page',
-  body: 'The installed app has no reload button, so tap Refresh at the top to get the latest figures. If it cannot refresh, or you are offline, it says so and keeps the figures you already have. On a wider screen it also says when the page was last updated.',
+  title: 'Get the latest figures',
+  body: 'Tap the round arrow at the top, just before Search, to load the latest figures on this page. The installed app has no reload button.',
 };
 
 // The Notifications and app page (ADR-050): install BMS as an app and turn on notifications on this device. Everyone signed in has it.
@@ -51,15 +58,15 @@ const notifications: TourStep = {
   id: 'notifications',
   target: 'nav-notifications',
   title: 'Install the app and get notifications',
-  body: 'Tap Notifications to install BMS on your phone. There you can also turn on a notice for when something needs you, such as an approval.',
+  body: 'Tap Notifications at the bottom of the menu to install BMS on your phone. On a phone the menu is the button at the top left. There you can also turn on a notice for when something needs you, such as an approval.',
 };
 
-// The theme selector in the header (issue #429): System, Light or Dark, kept on this device. Every area has it.
-const theme: TourStep = {
-  id: 'theme',
-  target: 'theme-select',
-  title: 'Light or dark',
-  body: 'Choose System, Light or Dark here, at the top right. System follows your phone or computer, and your choice is kept on this device.',
+// Help and feedback (issues #447 and #598): How do I...? and telling the BMS team an idea, a problem or a question.
+const feedback: TourStep = {
+  id: 'feedback',
+  target: 'nav-feedback',
+  title: 'Help and feedback',
+  body: 'Tap Help and feedback at the bottom of the menu. How do I...? answers common questions with pictures, even offline. Send feedback tells the BMS team an idea, a problem or a question, and you see our reply there too.',
 };
 
 const insights: TourStep = {
@@ -102,11 +109,53 @@ const loanApplications: TourStep = {
   body: 'Pick Submitted or Appraised to see applications waiting for a decision. Pick Approved to see loans ready to pay out.',
 };
 
+// Feature search (issue #551): the Search button in the staff bar finds any screen by what you want to do. Everyone signed in has it.
+const search: TourStep = {
+  id: 'search',
+  target: 'feature-search',
+  title: 'Find any screen',
+  body: 'Tap Search at the top and type what you want to do, like sell, buy stock, expenses or owe. Tap the screen to open it. On a laptop, press / or Ctrl and K (Cmd and K on a Mac). On a phone it is also at the top of More.',
+};
+
+/**
+ * The names of the tabs before More this session gets, by the checks of staffTabs (areas/staff/tabs.tsx), read here without loading
+ * the staff area, which loads the tour host. Sell counts as it would where the session sells. tours.test.tsx proves the two agree.
+ */
+export function tabNamesFor(me: Me): string[] {
+  const retail = showRetail(me);
+  const money = (retail && MONEY_SCREENS.some((screen) => canUse(me, screen))) || showSavings(me) || showReceivePayments(me);
+  const names: (string | false)[] = [retail && canUse(me, 'sale') && 'Sell', retail && canUse(me, 'stock') && 'My stock', retail && canUse(me, 'restock') && 'Buy', money && 'Money'];
+  return names.filter((n): n is string => n !== false);
+}
+
+const listed = (names: string[]) => (names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : (names[0] ?? ''));
+
+// The bottom tabs on a phone (issue #539): the daily jobs one tap away. On a laptop there is no bar and the step is skipped. The
+// words name only the tabs the person has (issue #544): a lending-only session may have Money and More, or More alone.
+const tabs: TourStep = {
+  id: 'tabs',
+  target: 'tab-bar',
+  optional: true,
+  title: 'Your daily jobs at the bottom',
+  body: 'On a phone, the bar at the bottom holds your daily jobs. More has everything else, and Sign out.',
+  bodyFor: (me) => {
+    const names = tabNamesFor(me);
+    return names.length === 0
+      ? 'On a phone, the bar at the bottom holds More: every page your role allows, and Sign out.'
+      : `On a phone, the bar at the bottom holds ${listed(names)}. More has everything else, and Sign out.`;
+  },
+};
+
 const branch: TourStep = {
   id: 'branch',
   target: 'branch-picker',
   title: 'Your branch',
-  body: 'Pick the branch you are working in. What you see and record follows this choice.',
+  body: 'On a laptop the top of the menu names your business and the branch you work in. On a phone it is the top of the page. Tap the branch to switch. What you see and record follows this choice.',
+  // Tap the branch to switch only where there is more than one branch to choose (issue #564).
+  bodyFor: (me) =>
+    (me.branches?.length ?? 0) + (me.all_branches ? 1 : 0) > 1
+      ? 'On a laptop the top of the menu names your business and the branch you work in. On a phone it is the top of the page. Tap the branch to switch. What you see and record follows this choice.'
+      : 'On a laptop the top of the menu names your business and the branch you work in. On a phone it is the top of the page. What you see and record follows this branch.',
 };
 
 // A tenant admin, invited by a colleague or activated from the public sign-up (ADR-024), lands on
@@ -126,7 +175,19 @@ export const adminWelcome: Tour = {
   // Version 15 adds the Notifications step: install the app and turn on notifications (ADR-050).
   // Version 16 adds the Light or dark step (issue #429): the theme selector at the top right.
   // Version 17 adds the Refresh step (issue #430): the button at the top that gets the latest figures.
-  version: 17,
+  // Version 18 adds the Feedback step (issue #447): send the BMS team an idea, a problem or a question.
+  // Version 19 adds the Download my data step (issue #334): the whole business as one Excel workbook, and the weekly copy by email.
+  // Version 20 adds the bottom tabs step (issue #539) and words the phone steps for the tabs and More.
+  // Version 21 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
+  // Version 22 adds the Find any screen step (issue #551): the Search button at the top.
+  // Version 23 puts Help, Refresh and Light or dark in the one menu of the top bar, and the branch in its title (issue #526).
+  // Version 24 words the bottom tabs step for the tabs the person has (issue #544).
+  // Version 25 words the menu, Notifications and Feedback steps for the grouped menu and its footer (issue #564).
+  // Version 26 words the branch step for the menu's top on a laptop and the page's top on a phone (issue #564).
+  // Version 27 says Tap the branch to switch only to someone with more than one branch to choose (issue #564).
+  // Version 28 words the Help and feedback step for How do I...? (issue #598).
+  // Version 29 adds the Refresh step: the button beside Search in the top bar again, taken out of the menu (issue #631).
+  version: 29,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -156,7 +217,7 @@ export const adminWelcome: Tour = {
       route: '/staff/setup',
       target: 'setup-logo',
       title: 'Add your logo',
-      body: 'Upload your logo here. You and your staff will see it at the top of every page.',
+      body: 'Upload your logo here. You and your staff will see it at the top of every page and as the app icon.',
     },
     {
       id: 'colour',
@@ -164,6 +225,15 @@ export const adminWelcome: Tour = {
       target: 'setup-colour',
       title: 'Pick your colour',
       body: 'Choose the colour of your business. We check that text stays easy to read on it.',
+    },
+    {
+      id: 'data-export',
+      route: '/staff/setup',
+      target: 'setup-data-export',
+      needs: ['core.data_export.run'],
+      optional: true,
+      title: 'Download my data',
+      body: 'Get every table of your business in one Excel workbook, a sheet each, like your old spreadsheet. The Owner also gets a copy by email every week; you can switch that off here.',
     },
     {
       id: 'staff',
@@ -190,11 +260,12 @@ export const adminWelcome: Tour = {
       title: 'Two-step sign-in',
       body: 'Ask your staff for a code from their phone as well as the password. It is optional until you choose who must use it.',
     },
+    tabs,
     {
       id: 'modules',
       target: 'nav-areas',
       title: 'Your modules',
-      body: 'Each part of the business you use has a tab here, like Retail or Lending. To add or remove one, contact us.',
+      body: 'The menu groups your pages under Today, Stock, Money and Business, with Lending when you use it. On a phone, tap the menu button at the top left. To add or remove a module, contact us.',
     },
     {
       id: 'billing',
@@ -235,7 +306,7 @@ export const adminWelcome: Tour = {
       target: 'retail-tiles',
       module: 'retail',
       title: 'Your shop each day',
-      body: 'Record sales, check stock and restock from here. One big button for each job.',
+      body: 'Record sales, check stock and buy stock from here. One big button for each job.',
     },
     {
       id: 'sale-change',
@@ -305,7 +376,7 @@ export const adminWelcome: Tour = {
       needs: STOCKTAKE,
       optional: true,
       title: 'Fix a wrong quantity',
-      body: 'On Stock, tap Correct on an item. Give the right quantity and the reason: an entry mistake or a miscount. The old figure stays in its history and does not count as shrinkage. If you may change items, you can fix the category there too.',
+      body: 'On Stock, tap Correct on an item. Give the right quantity and the reason: an entry mistake or a miscount. The old figure stays in its history and does not count as lost or damaged stock. If you may change items, you can fix the category there too.',
     },
     {
       id: 'void-restock',
@@ -314,8 +385,8 @@ export const adminWelcome: Tour = {
       module: 'retail',
       needs: [RESTOCK],
       optional: true,
-      title: 'Fix a restock entered wrongly',
-      body: 'Open Past restocks, tap Correct this restock and give the reason. The stock, the books and the prices go back. The restock stays in the list as Voided. Then enter it again with the right quantity.',
+      title: 'Fix a purchase entered wrongly',
+      body: 'Open Past purchases, tap Correct this purchase and give the reason. The stock, the books and the prices go back. The purchase stays in the list as Voided. Then enter it again with the right quantity.',
     },
     {
       id: 'controls',
@@ -325,7 +396,7 @@ export const adminWelcome: Tour = {
       needs: ['retail.controls.read'],
       optional: true,
       title: 'What deserves a second look',
-      body: 'Open Controls to see sales cancelled, goods taken back, prices changed, restocks cancelled and quantities corrected, by shop and by person. Items about sales are shown per 100 sales, so a busy person and a quiet one can be compared fairly.',
+      body: 'Open Controls to see sales cancelled, goods taken back, prices changed, purchases cancelled and quantities corrected, by shop and by person. Items about sales are shown per 100 sales, so a busy person and a quiet one can be compared fairly.',
     },
     {
       id: 'catalogue',
@@ -335,7 +406,7 @@ export const adminWelcome: Tour = {
       needsAny: CATALOGUE,
       optional: true,
       title: 'Your items and prices',
-      body: 'Add items, change prices, and keep your suppliers and credit buyers here.',
+      body: 'Add items, change prices, and keep your suppliers and customers who owe here.',
     },
     {
       id: 'lending',
@@ -356,9 +427,10 @@ export const adminWelcome: Tour = {
       body: 'Some actions need a second person to agree. They wait for you here.',
     },
     insights,
-    notifications,
+    search,
     refresh,
-    theme,
+    notifications,
+    feedback,
     help,
   ],
 };
@@ -374,7 +446,21 @@ export const retailSales: Tour = {
   // Version 9 adds the Light or dark step (issue #429): the theme selector at the top right.
   // Version 10 words the Save step for Share receipt and WhatsApp customer (issue #439): send the receipt from your phone.
   // Version 11 adds the Refresh step (issue #430): the button at the top that gets the latest figures.
-  version: 11,
+  // Version 12 adds the Feedback step (issue #447): send the BMS team an idea, a problem or a question.
+  // Version 13 adds the Online or offline step (issue #458, ADR-067): the dot, and selling with no network.
+  // Version 14 adds the Scan step (issue #345): a barcode scanner, a typed barcode or the phone camera adds the item.
+  // Version 15 makes it the Scan here step (ADR-070 decision 11): a scanner types only into the Scan box.
+  // Version 16 words the Find the item step for the picker that lists items only while you type (issue #534).
+  // Version 17 adds the bottom tabs step (issue #539) and words the phone steps for the tabs and More.
+  // Version 18 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
+  // Version 19 adds the Find any screen step (issue #551): the Search button at the top.
+  // Version 20 puts Help, Refresh and Light or dark in the one menu of the top bar, and the branch in its title (issue #526).
+  // Version 21 words the bottom tabs step for the tabs the person has (issue #544).
+  // Version 22 words the menu, Notifications and Feedback steps for the grouped menu and its footer (issue #564).
+  // Version 23 words the branch and menu steps for the menu's top on a laptop and the drawer on a phone (issue #564).
+  // Version 24 words the Help and feedback step for How do I...? (issue #598).
+  // Version 25 adds the Refresh step: the button beside Search in the top bar again, taken out of the menu (issue #631).
+  version: 25,
   title: 'Selling tour',
   audience: isSeller,
   autoStart: true,
@@ -382,9 +468,10 @@ export const retailSales: Tour = {
     {
       id: 'welcome',
       title: 'Welcome',
-      body: 'Here is how to sell, check stock and restock. It takes about a minute.',
+      body: 'Here is how to sell, check stock and buy stock. It takes about a minute.',
     },
-    { ...branch, optional: true, body: 'Sales and stock are counted per branch. Check that this shows the shop you are in.' },
+    { ...branch, optional: true, body: 'Sales and stock are counted per branch. Check that this shows the shop you are in.', bodyFor: undefined },
+    tabs,
     {
       id: 'sale',
       route: '/staff/retail',
@@ -400,7 +487,16 @@ export const retailSales: Tour = {
       module: 'retail',
       optional: true,
       title: 'Find the item',
-      body: 'Type part of the name or code, then tap Add.',
+      body: 'Type part of the name, code or category. The matching items show under the box: tap one to add it. The list closes, ready for the next item.',
+    },
+    {
+      id: 'sale-scan',
+      route: '/staff/retail/sale',
+      target: 'scan-bar',
+      module: 'retail',
+      optional: true,
+      title: 'Scan here',
+      body: 'Keep the cursor in the Scan box and scan: the item is added, and scanning it again adds one more. You can also type the barcode and press Enter, or tap the camera button to scan with the phone. Typing in a quantity or price is never taken for a scan.',
     },
     {
       id: 'sale-payment',
@@ -427,7 +523,16 @@ export const retailSales: Tour = {
       module: 'retail',
       optional: true,
       title: 'Save the sale',
-      body: 'Check the total, then tap Save sale. You get a receipt to show the customer. Tap Share receipt to send the PDF from your phone, on WhatsApp or any other app. WhatsApp customer sends the details to their number.',
+      body: 'Check the total, then tap Record sale. You get a receipt to show the customer. Tap Share receipt to send the PDF from your phone, on WhatsApp or any other app. WhatsApp customer sends the details to their number.',
+    },
+    {
+      id: 'sync-status',
+      route: '/staff/retail/sale',
+      target: 'sync-status',
+      module: 'retail',
+      optional: true,
+      title: 'Online or offline',
+      body: 'A dot shows at the top only when there is news. Grey is offline, amber is sending, and a number is sales waiting. With no network you can still save a cash, mobile money or bank sale. It stays on this phone and is sent once you are back online. Tap the dot to see what is waiting.',
     },
     {
       id: 'credit-payments',
@@ -484,7 +589,7 @@ export const retailSales: Tour = {
       target: 'retail-restock',
       module: 'retail',
       needs: [RESTOCK],
-      title: 'Restock',
+      title: 'Buy stock',
       body: 'When new stock comes from a supplier, record it here. The counts stay right.',
     },
     {
@@ -513,12 +618,13 @@ export const retailSales: Tour = {
       target: 'retail-nav',
       module: 'retail',
       optional: true,
-      title: 'Shortcuts',
-      body: 'On a phone, your most used pages are always at the bottom of the screen.',
+      title: 'The menu',
+      body: 'Sell and Orders are under Today in the menu, and your stock pages under Stock. On a phone, the menu button at the top left opens it. The tabs at the bottom hold Sell, My stock, Buy and Money.',
     },
-    notifications,
+    search,
     refresh,
-    theme,
+    notifications,
+    feedback,
     help,
   ],
 };
@@ -528,7 +634,17 @@ export const staffWelcome: Tour = {
   // Version 3 adds the Notifications step: install the app and turn on notifications (ADR-050).
   // Version 4 adds the Light or dark step (issue #429): the theme selector at the top right.
   // Version 5 adds the Refresh step (issue #430): the button at the top that gets the latest figures.
-  version: 5,
+  // Version 6 adds the Feedback step (issue #447): send the BMS team an idea, a problem or a question.
+  // Version 7 adds the bottom tabs step (issue #539) and words the phone steps for the tabs and More.
+  // Version 8 adds the Find any screen step (issue #551): the Search button at the top.
+  // Version 9 puts Help, Refresh and Light or dark in the one menu of the top bar, and the branch in its title (issue #526).
+  // Version 10 words the bottom tabs step for the tabs the person has (issue #544).
+  // Version 11 points the shop step at Today in the grouped menu and words Notifications and Feedback for its footer (issue #564).
+  // Version 12 words the branch step for the menu's top on a laptop and the page's top on a phone (issue #564).
+  // Version 13 says Tap the branch to switch only to someone with more than one branch to choose (issue #564).
+  // Version 14 words the Help and feedback step for How do I...? (issue #598).
+  // Version 15 adds the Refresh step: the button beside Search in the top bar again, taken out of the menu (issue #631).
+  version: 15,
   title: 'Welcome tour',
   audience: (me) => !isTenantAdmin(me) && !isSeller(me),
   autoStart: true,
@@ -539,6 +655,7 @@ export const staffWelcome: Tour = {
       body: 'This short tour shows you the pages you can use. You can stop at any time.',
     },
     { ...branch, optional: true },
+    tabs,
     {
       id: 'members',
       route: '/staff',
@@ -561,22 +678,25 @@ export const staffWelcome: Tour = {
     },
     {
       id: 'retail',
-      target: 'nav-retail',
+      target: 'retail-nav',
       module: 'retail',
       optional: true,
-      title: 'Retail',
-      body: 'Sales and stock live here.',
+      title: 'Your shop',
+      body: 'Sell and Orders are under Today in the menu, and your stock pages under Stock.',
     },
-    notifications,
+    search,
     refresh,
-    theme,
+    notifications,
+    feedback,
     help,
   ],
 };
 
 export const salePage: Tour = {
   id: 'page-sale',
-  version: 1,
+  // Version 2 adds the Online or offline step (issue #458, ADR-067); version 3 the Scan here step (issue #345, ADR-070).
+  // Version 4 words the Online or offline step for the dot that shows only when there is news (issue #526).
+  version: 4,
   title: 'This page: record a sale',
   audience: (me) => held(me, SELL),
   autoStart: false,
@@ -611,15 +731,16 @@ export const stockPage: Tour = {
 export const restocksPage: Tour = {
   id: 'page-restocks',
   // Version 2 adds the grouped view (issue #350).
-  version: 2,
-  title: 'This page: past restocks',
+  // Version 3 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
+  version: 3,
+  title: 'This page: past purchases',
   audience: (me) => held(me, RESTOCK),
   autoStart: false,
   page: '/staff/retail/restocks',
   steps: [
-    { id: 'restocks-filters', target: 'restocks-filters', module: 'retail', title: 'Find the restock', body: 'Choose the first and last day, or show only the voided ones. Every restock is kept, even a voided one.' },
-    { id: 'restocks-list', target: 'restocks-list', module: 'retail', optional: true, title: 'Correct this restock', body: 'Tap Correct this restock, give the reason, then enter it again with the right quantity or unit. If less than its quantity is left, use Correct on the Stock page instead.' },
-    groupedViewStep('your restocks in groups, with how many in each', 'shop, year, month, supplier, day, category and item'),
+    { id: 'restocks-filters', target: 'restocks-filters', module: 'retail', title: 'Find the purchase', body: 'Choose the first and last day, or show only the voided ones. Every purchase is kept, even a voided one.' },
+    { id: 'restocks-list', target: 'restocks-list', module: 'retail', optional: true, title: 'Correct this purchase', body: 'Tap Correct this purchase, give the reason, then enter it again with the right quantity or unit. If less than its quantity is left, use Correct on the Stock page instead.' },
+    groupedViewStep('your purchases in groups, with how many in each', 'shop, year, month, supplier, day, category and item'),
   ],
 };
 
@@ -673,13 +794,20 @@ export const creditSalesPage: Tour = {
 
 export const setupPage: Tour = {
   id: 'page-setup',
-  version: 1,
+  version: 2,
   title: 'This page: business set-up',
   audience: isTenantAdmin,
   autoStart: false,
   page: '/staff/setup',
   steps: [
     ...adminWelcome.steps.filter((s) => s.route === '/staff/setup'),
+    {
+      id: 'plan',
+      target: 'setup-plan',
+      optional: true,
+      title: 'Plan and modules',
+      body: 'Your plan, what you use and the last day paid for. The owner adds or stops a module or cancels here; a change starts after the days already paid for.',
+    },
     {
       id: 'save',
       target: 'setup-save',
@@ -689,22 +817,33 @@ export const setupPage: Tour = {
   ],
 };
 
+// Version 2 adds New loan application (issue #280 slice 3).
 export const loansPage: Tour = {
   id: 'page-loans',
-  version: 1,
+  version: 2,
   title: 'This page: loans',
   audience: (me) => held(me, LOANS),
   autoStart: false,
   page: '/staff/lending',
   steps: [
+    {
+      id: 'apply',
+      target: 'loan-apply',
+      module: 'lending',
+      needs: [LOANS_CREATE, MEMBERS_READ],
+      optional: true,
+      title: 'Start an application',
+      body: 'Tap New loan application to start a loan for a member. You can also start one from the member\'s page.',
+    },
     { ...loanSearch, route: undefined },
     { ...loanApplications, route: undefined },
   ],
 };
 
+// Version 2 adds the application steps (issue #280 slices 3 and 4): where it stands and the next step.
 export const loanPage: Tour = {
   id: 'page-loan',
-  version: 1,
+  version: 2,
   title: 'This page: one loan',
   audience: (me) => held(me, LOANS),
   autoStart: false,
@@ -716,6 +855,21 @@ export const loanPage: Tour = {
       optional: true,
       title: 'What you can do',
       body: 'The buttons here change with the loan. You only see what your role allows.',
+    },
+    {
+      id: 'application',
+      target: 'application-status',
+      optional: true,
+      title: 'The application',
+      body: 'Before the money is paid out, this says where the application stands. It may be a draft, waiting for an appraisal, waiting for a decision, approved or declined.',
+    },
+    {
+      id: 'next',
+      target: 'application-next',
+      needsAny: [LOANS_CREATE, 'lending.loans.appraise', 'lending.loans.approve'],
+      optional: true,
+      title: 'The next step',
+      body: 'The button at the bottom takes the application on: send it for appraisal, appraise it, or decide. You only see the step your role allows.',
     },
     {
       id: 'disburse',
@@ -758,7 +912,8 @@ export const loanPage: Tour = {
 // Version 2 adds the inactive items step (issue #342), so whoever finished version 1 sees it once.
 export const cataloguePage: Tour = {
   id: 'page-catalogue',
-  version: 2,
+  // Version 3 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
+  version: 3,
   title: 'This page: catalogue',
   audience: (me) => CATALOGUE.some((p) => held(me, p)),
   autoStart: false,
@@ -783,7 +938,7 @@ export const cataloguePage: Tour = {
       needs: ['retail.catalogue.manage'],
       optional: true,
       title: 'Items you stopped selling',
-      body: 'Open an item and tick Inactive. It is never deleted: it leaves the sale, restock and move lists, and its history and reports stay. Show inactive items on the Stock page brings it back into view.',
+      body: 'Open an item and tick Inactive. It is never deleted: it leaves the sale, buy stock and move lists, and its history and reports stay. Show inactive items on the Stock page brings it back into view.',
     },
     {
       id: 'importer',
@@ -798,8 +953,15 @@ export const cataloguePage: Tour = {
 
 export const stocktakePage: Tour = {
   id: 'page-stocktake',
-  version: 1,
-  title: 'This page: stock-take',
+  // Version 2 adds the Scan here step (issue #345, ADR-070).
+  // Version 3 words the Count step for the search on top and the list Not counted yet below it (issue #534).
+  // Version 4 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
+  // Version 5 says a count far from the records is asked about before the review (issue #353, ADR-093).
+  // Version 6 says an empty box is not counted and a count that removes most of an item asks for a tick (issue #629).
+  // Version 7 says each count is saved as it is typed and comes back after a reload (issue #681).
+  // Version 8 names the last button Save the count (issue #728).
+  version: 8,
+  title: 'This page: count stock',
   audience: (me) => STOCKTAKE.every((p) => held(me, p)),
   autoStart: false,
   page: '/staff/retail/stocktake',
@@ -808,13 +970,19 @@ export const stocktakePage: Tour = {
       id: 'count',
       target: 'count-search',
       title: 'Count each item',
-      body: 'Find an item and type how many you counted. Leave an item blank to skip it.',
+      body: 'Find an item by typing part of its name, or work down the list Not counted yet. Type how many you counted, or tap 0 for an item that is gone. Leave an item empty if you did not count it. Each count is saved as you type it, so a reload never loses it.',
+    },
+    {
+      id: 'scan',
+      target: 'scan-bar',
+      title: 'Scan here',
+      body: 'Or scan each item in the Scan box as you count it. Each scan adds one to its count and marks the line.',
     },
     {
       id: 'review',
       target: 'count-review',
       title: 'Check before saving',
-      body: 'Tap Review to see what differs. Nothing changes until you commit the count.',
+      body: 'Tap Review the difference to see what differs. A count far from what the records hold is asked about first: Confirm or Change it. A line that takes an item to 0 or removes more than half needs a tick. Nothing changes until you tap Save the count.',
     },
   ],
 };
@@ -824,7 +992,8 @@ export const retailSettingsPage: Tour = {
   // Version 2 adds the credit sale step (issue #340, ADR-043).
   // Version 3 says in that step that the credit rule is one way: once it has started it is not switched off here.
   // Version 4 adds the slow movers step (issue #414).
-  version: 4,
+  // Version 5 names the kinds of business by what the owner has, and says where each branch is set as a store or a shop (issue #424).
+  version: 5,
   title: 'This page: retail settings',
   audience: isTenantAdmin,
   autoStart: false,
@@ -833,8 +1002,14 @@ export const retailSettingsPage: Tour = {
     {
       id: 'profile',
       target: 'retail-profile',
-      title: 'Shop or trade',
-      body: 'Pick Shop for a plain shop. Pick Trade if stores feed a shop and you sell in bulk. It switches on a set of features for you.',
+      title: 'What kind of business is this?',
+      body: 'Pick Shops only, Stores and shops, Wholesale, or Wholesale and shops. Wholesale is selling in bulk to other shops. Your choice switches the features below on or off to suit it.',
+    },
+    {
+      id: 'branches',
+      target: 'retail-profile-branches',
+      title: 'Stores and shops are set per branch',
+      body: 'Any number of stores and shops. Under Branches, set each branch as a store or a shop. A store keeps stock and does not sell.',
     },
     {
       id: 'features',
@@ -939,7 +1114,8 @@ export const usersPage: Tour = {
 // tour in this file is; the new screen needs exactly this one.
 export const notificationsPage: Tour = {
   id: 'page-notifications',
-  version: 2,
+  // Version 3 adds the Appearance step (issue #452), so whoever finished version 2 sees it once.
+  version: 3,
   title: 'This page: notifications and the app',
   audience: () => true,
   autoStart: false,
@@ -949,7 +1125,13 @@ export const notificationsPage: Tour = {
       id: 'install',
       target: 'install-app',
       title: 'Install the app',
-      body: 'Add BMS to your home screen or app list. On an iPhone or iPad use Safari: tap Share (if you do not see it, tap ⋯), then Add to Home Screen.',
+      body: 'Add BMS to your home screen or app list. On an iPhone or iPad use Safari: tap Share, then Add to Home Screen. If you cannot see them, try ⋯ or View More.',
+    },
+    {
+      id: 'appearance',
+      target: 'appearance',
+      title: 'How BMS looks',
+      body: 'Choose Light, Dark or Same as my phone. It changes only this device, like the button at the top right.',
     },
     {
       id: 'toggle',
@@ -973,11 +1155,144 @@ export const notificationsPage: Tour = {
   ],
 };
 
+// The Money and More pages of the phone's bottom tabs (issue #539). JUSTIFICATION-A3: one page tour per new screen, as ADR-049 asks.
+export const moneyPage: Tour = {
+  id: 'page-money',
+  // Version 2 names only the tabs the person has (issue #544).
+  version: 2,
+  title: 'This page: money',
+  audience: () => true,
+  autoStart: false,
+  page: '/staff/money',
+  steps: [
+    {
+      id: 'list',
+      target: 'money-list',
+      optional: true,
+      title: 'Your money pages',
+      body: 'Cash, banking, savings, expenses and who owes you, the ones your role allows. Tap one to open it.',
+    },
+    {
+      ...tabs,
+      id: 'tabs',
+      body: 'Money is one of the tabs at the bottom.',
+      bodyFor: (me) => {
+        const jobs = tabNamesFor(me).filter((n) => n !== 'Money');
+        const back = jobs.length > 1 ? `${jobs.slice(0, -1).join(', ')} or ${jobs[jobs.length - 1]}` : jobs[0];
+        return back ? `Money is one of the tabs at the bottom. Tap ${back} to get back to the daily jobs.` : 'Money is one of the tabs at the bottom. More has everything else.';
+      },
+    },
+  ],
+};
+
+export const morePage: Tour = {
+  id: 'page-more',
+  // Version 2 adds the Search step (issue #551): find any screen by what you want to do.
+  version: 2,
+  title: 'This page: more',
+  audience: () => true,
+  autoStart: false,
+  page: '/staff/more',
+  steps: [
+    {
+      id: 'search',
+      target: 'more-search',
+      title: 'Find any screen',
+      body: 'Tap Search and type what you want to do, like sell, buy stock or owe. Only the screens your role allows show.',
+    },
+    {
+      id: 'list',
+      target: 'more-list',
+      title: 'Everything else',
+      body: 'Every area your role allows that is not a tab: Home, reports, settings, users, and Lending when the business has it.',
+    },
+    {
+      id: 'sign-out',
+      target: 'more-sign-out',
+      optional: true,
+      title: 'Sign out',
+      body: 'Sign out here when you are done on a shared phone. If sales are still waiting to send, you are asked first.',
+    },
+  ],
+};
+
+// How do I...? (issue #598, ADR-095): the help articles, grouped by job and searchable, and one article with its pictures.
+export const helpPage: Tour = {
+  id: 'page-help',
+  version: 1,
+  title: 'This page: how do I...?',
+  audience: () => true,
+  autoStart: false,
+  page: '/staff/help',
+  steps: [
+    { id: 'search', target: 'help-search', title: 'Say what you want to do', body: 'Type a few words, such as move stock or invite. The answers that match show under the box.' },
+    { id: 'groups', target: 'help-groups', optional: true, title: 'Answers by job', body: 'Or open a job, such as Sell or Count stock, and tap a question. You see only the answers for what your role can do.' },
+    { id: 'ask', target: 'help-ask', title: 'Not answered?', body: 'Tap Ask us. Feedback opens as a question, with what you typed already in it.' },
+  ],
+};
+
+export const helpArticlePage: Tour = {
+  id: 'page-help-article',
+  version: 1,
+  title: 'This page: an answer',
+  audience: () => true,
+  autoStart: false,
+  page: '/staff/help/$articleId',
+  steps: [
+    { id: 'steps', target: 'help-article-steps', title: 'Step by step', body: 'Follow the steps in order. Each picture shows the screen, with what to do written on it.' },
+    { id: 'ask', target: 'help-ask', title: 'Still stuck?', body: 'Tap Ask us to send the BMS team your question.' },
+  ],
+};
+
+// Feedback (issue #447, ADR-065): the form and what the person sent before, with the BMS team's reply.
+export const feedbackPage: Tour = {
+  id: 'page-feedback',
+  version: 1,
+  title: 'This page: feedback',
+  audience: () => true,
+  autoStart: false,
+  page: '/staff/feedback',
+  steps: [
+    {
+      id: 'kind',
+      target: 'feedback-kind',
+      title: 'What is it?',
+      body: 'Choose an idea, a problem or a question.',
+    },
+    {
+      id: 'message',
+      target: 'feedback-message',
+      title: 'Your message',
+      body: 'Say it in your own words, up to 2000 characters. For a problem, say what you did and what happened.',
+    },
+    {
+      id: 'screenshot',
+      target: 'feedback-screenshot',
+      title: 'A picture of the screen',
+      body: 'If it helps, add a PNG or JPEG picture of up to 2 MB. The page you came from, the version of BMS and your browser go with it on their own.',
+    },
+    {
+      id: 'send',
+      target: 'feedback-send',
+      title: 'Send it',
+      body: 'Tap Send feedback. It goes to the BMS team, and you can send up to 10 in an hour.',
+    },
+    {
+      id: 'history',
+      target: 'feedback-history',
+      title: 'What you sent',
+      body: 'Everything you sent is here, with whether the team has read it or finished with it, and their reply. Only you see your own.',
+    },
+  ],
+};
+
 // The Branches page (issue #329): a page tour for whoever may read branches; closing and reopening need the manage permission.
 export const branchesPage: Tour = {
   id: 'page-branches',
   // Version 2 adds the Store step (issue #366): a branch that holds stock but does not sell.
-  version: 2,
+  // Version 3 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
+  // Version 4 adds the Add a branch step (issue #581).
+  version: 4,
   title: 'This page: branches',
   audience: (me) => held(me, 'core.branches.read'),
   autoStart: false,
@@ -987,7 +1302,15 @@ export const branchesPage: Tour = {
       id: 'intro',
       target: 'branches-intro',
       title: 'Closing a branch keeps its history',
-      body: 'A closed branch keeps its sales and stock records for your reports. It only leaves the branch lists and the sale, restock and move-stock screens.',
+      body: 'A closed branch keeps its sales and stock records for your reports. It only leaves the branch lists and the sale, buy stock and move stock screens.',
+    },
+    {
+      id: 'add',
+      target: 'branches-add',
+      // Only whoever may add a branch has the button, so only they see the step.
+      needs: ['core.branches.manage'],
+      title: 'Add a shop, a store or a head office',
+      body: 'An administrator taps Add a branch, types the name and picks what it is. The app makes the code from the name. A store keeps stock and does not sell from the moment it is added.',
     },
     {
       id: 'list',
@@ -999,7 +1322,7 @@ export const branchesPage: Tour = {
       id: 'store',
       target: 'branches-list',
       title: 'A store holds stock but does not sell',
-      body: 'Tap Mark as a store (does not sell) for a branch that only keeps stock. It still takes restocks and stock moves, but it leaves the sale screen and the till. Tap Sells again to make it a shop.',
+      body: 'Tap Mark as a store (does not sell) for a branch that only keeps stock. It still takes purchases and stock moves, but it leaves the sale screen and the till. Tap Sells again to make it a shop.',
     },
   ],
 };
@@ -1024,6 +1347,30 @@ export const twoStepPage: Tour = {
       target: 'twostep-choice',
       title: 'Who must use it',
       body: 'Optional means nobody has to. Pick some roles, or everyone, to require it. Before you save, you see who will be asked and from which day.',
+    },
+  ],
+};
+
+// Business set-up > Approval rules (issue #343, ADR-091): which actions need an administrator first, and from what amount.
+export const approvalRulesPage: Tour = {
+  id: 'page-approval-rules',
+  version: 1,
+  title: 'This page: approval rules',
+  audience: isTenantAdmin,
+  autoStart: false,
+  page: '/staff/setup/approvals',
+  steps: [
+    {
+      id: 'intro',
+      target: 'approval-rules-intro',
+      title: 'A second person first',
+      body: 'Choose which actions wait for an administrator before they happen. While one waits, nothing changes, and the administrators are told.',
+    },
+    {
+      id: 'save',
+      target: 'approval-rules-save',
+      title: 'Read it back, then confirm',
+      body: 'Before you save, you read the change in plain words and confirm it with your own password or code. It is recorded with your name.',
     },
   ],
 };
@@ -1058,9 +1405,70 @@ export const businessNotificationsPage: Tour = {
   ],
 };
 
+// Business set-up > Plan and billing (issue #480, ADR-075): the plan, what is paid, how to pay and the receipts.
+export const billingPage: Tour = {
+  id: 'page-billing',
+  version: 2,
+  title: 'This page: plan and billing',
+  audience: (me) => held(me, 'core.billing.read'),
+  autoStart: false,
+  page: '/staff/setup/billing',
+  steps: [
+    {
+      id: 'plan',
+      target: 'billing-plan',
+      title: 'Your plan',
+      body: 'Your plan, its price, and whether you are in your free month, paid up or overdue, with the dates that matter.',
+    },
+    {
+      id: 'how',
+      target: 'billing-how',
+      title: 'How to pay',
+      body: 'How to pay Rincol Tech. When a payment is recorded you get a receipt by email.',
+    },
+    {
+      id: 'contact',
+      target: 'billing-contact',
+      title: 'Who gets the bills',
+      body: 'The owner can send the reminders and receipts to someone else, such as an accountant. Sign-in stays as it is.',
+    },
+    {
+      id: 'payments',
+      target: 'billing-payments',
+      title: 'Payments and receipts',
+      body: 'Every payment recorded for your business. Tap a receipt to save it as a PDF.',
+    },
+  ],
+};
+
+// Business set-up > Close the business (issue #571, ADR-090): what closing means, then a review step and the owner's own proof.
+export const closePage: Tour = {
+  id: 'page-close',
+  version: 1,
+  title: 'This page: close the business',
+  audience: (me) => held(me, 'core.settings.manage'),
+  autoStart: false,
+  page: '/staff/setup/close',
+  steps: [
+    {
+      id: 'about',
+      target: 'close-about',
+      title: 'Only for stopping for good',
+      body: 'Closing removes the business and its personal data after a waiting period. To stop paying and keep everything, cancel the subscription instead.',
+    },
+    {
+      id: 'review',
+      target: 'close-continue',
+      title: 'Check first',
+      body: 'The next step lists exactly what happens and asks for your own password or code. Until the removal, the owner can cancel.',
+    },
+  ],
+};
+
+// Version 2: a store is marked on Branches, not picked here (issue #371, ADR-104).
 export const branchRolesCapability: Tour = {
   id: 'capability-branch-roles',
-  version: 1,
+  version: 2,
   title: 'New: branch roles',
   audience: (me) => held(me, 'retail.branch_role.manage'),
   autoStart: true,
@@ -1069,7 +1477,7 @@ export const branchRolesCapability: Tour = {
     {
       id: 'intro',
       title: 'Branch roles are on',
-      body: 'Each branch can now be a store, a shop or both. Stores keep stock and feed the shop. Only shops sell to customers.',
+      body: 'Each selling branch can now be a shop or both. A store is marked on Branches: it keeps stock, feeds the shop and does not sell.',
     },
     {
       id: 'tile',
@@ -1078,7 +1486,7 @@ export const branchRolesCapability: Tour = {
       module: 'retail',
       optional: true,
       title: 'Set the roles',
-      body: 'Open Branch roles to say which branches are stores and which are shops.',
+      body: 'Open Branch roles to see which branches are stores and say which are shops.',
     },
     {
       id: 'roles',
@@ -1086,7 +1494,42 @@ export const branchRolesCapability: Tour = {
       target: 'retail-roles',
       module: 'retail',
       title: 'Pick a role for each branch',
-      body: 'Until you pick, every branch works as before. A store cannot record a sale.',
+      body: 'Until you pick, every branch works as before. A store cannot record a sale; mark one on Branches.',
+    },
+  ],
+};
+
+// The Wholesale group of the menu (issue #424, ADR-092): it starts once for the administrator of a business with price lists on,
+// the first of the wholesale tools, so a wholesaler who had them before the group existed is shown where they are now.
+export const wholesaleGroup: Tour = {
+  id: 'capability-wholesale',
+  version: 1,
+  title: 'New: your wholesale pages together',
+  audience: (me) => held(me, 'core.settings.manage'),
+  autoStart: true,
+  capability: { module: 'retail', key: 'price_lists' },
+  steps: [
+    {
+      id: 'intro',
+      title: 'Wholesale is in the menu',
+      body: 'Price lists, credit to shops, quotations, invoices and delivery notes, packs and purchase orders are now together under Wholesale.',
+    },
+    {
+      id: 'menu',
+      target: 'nav-wholesale',
+      module: 'retail',
+      optional: true,
+      title: 'Your wholesale pages',
+      body: 'Open the menu and look under Wholesale. Each page shows while its feature is on in Retail settings.',
+    },
+    {
+      id: 'tiles',
+      route: '/staff/retail',
+      target: 'retail-wholesale-tiles',
+      module: 'retail',
+      optional: true,
+      title: 'On the Retail page too',
+      body: 'The same pages are under the Wholesale heading on the Retail page.',
     },
   ],
 };
@@ -1182,16 +1625,18 @@ export const transferReceiptCapability: Tour = {
 // catalogue, when first enabled. Pack sizes are set on each item and chosen on the sale and restock forms.
 export const unitsCapability: Tour = {
   id: 'capability-units',
-  version: 1,
-  title: 'New: pack sizes',
+  // Version 2 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
+  // Version 3: stock is kept in the single unit (issue #709, ADR-110).
+  version: 3,
+  title: 'New: cartons, boxes and other packs',
   audience: (me) => held(me, 'retail.catalogue.manage'),
   autoStart: true,
   capability: { module: 'retail', key: 'units' },
   steps: [
     {
       id: 'intro',
-      title: 'Pack sizes are on',
-      body: 'An item can now have packs, like a carton of 12. Stock is still counted in single items; a sale or a restock can be entered by the pack.',
+      title: 'Packs are on',
+      body: 'An item can now have packs, like a carton of 12. Stock is still kept in the single unit, such as pieces; a sale or a purchase can be entered by the pack.',
     },
     {
       id: 'tile',
@@ -1200,7 +1645,7 @@ export const unitsCapability: Tour = {
       module: 'retail',
       optional: true,
       title: 'Add the packs',
-      body: 'Open Catalogue, then Items. Choose Edit on an item and add its pack sizes. Then the sale and restock screens offer them.',
+      body: 'Open Catalogue, then Items. Choose Edit on an item and add its cartons, boxes and other packs. Then the sale and buy stock screens offer them.',
     },
   ],
 };
@@ -1269,7 +1714,8 @@ export const priceListsPage: Tour = {
 // enabled. A seller meets the same feature on Credit buyers (a limit refuses a credit sale), which the intro says.
 export const customerAccountsCapability: Tour = {
   id: 'capability-customer-accounts',
-  version: 1,
+  // Version 2 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
+  version: 2,
   title: 'New: customer accounts',
   audience: (me) => held(me, 'retail.credit.manage'),
   autoStart: true,
@@ -1278,7 +1724,7 @@ export const customerAccountsCapability: Tour = {
     {
       id: 'intro',
       title: 'Customer accounts are on',
-      body: 'Each credit buyer can now have a credit limit and payment terms. A credit sale needs a buyer from the list. It is refused above their limit, unless someone you allow gives a reason.',
+      body: 'Each customer on the list can now have a credit limit and payment terms. A credit sale needs a customer from the list. It is refused above their limit, unless someone you allow gives a reason.',
     },
     {
       id: 'tile',
@@ -1294,8 +1740,8 @@ export const customerAccountsCapability: Tour = {
       route: '/staff/retail/accounts',
       target: 'accounts-list',
       module: 'retail',
-      title: 'Your credit buyers',
-      body: 'Each buyer shows what they owe, their limit and their terms. Tap Open account to work on one. Sellers reach this page from Credit buyers.',
+      title: 'Your customers who owe',
+      body: 'Each buyer shows what they owe, their limit and their terms. Tap Open account to work on one. Sellers reach this page from Customers who owe.',
     },
   ],
 };
@@ -1474,7 +1920,8 @@ export const quotationsPage: Tour = {
 export const purchasingCapability: Tour = {
   id: 'capability-purchasing',
   // Version 2 adds the landed cost and credit note steps (issue #199), so whoever finished version 1 sees them once.
-  version: 2,
+  // Version 3 follows the glossary: Buy stock, Count stock, Customers who owe and the other plain words (issue #547).
+  version: 3,
   title: 'New: purchase orders',
   audience: (me) => held(me, 'retail.purchase.create'),
   autoStart: true,
@@ -1483,7 +1930,7 @@ export const purchasingCapability: Tour = {
     {
       id: 'intro',
       title: 'Purchase orders are on',
-      body: 'You can order from a supplier, receive what arrives, record the supplier\'s invoice and pay it. You can also add freight and duty to what goods cost, and record credit notes from suppliers. Restock still works as before for buying without an order.',
+      body: 'You can order from a supplier, receive what arrives, record the supplier\'s invoice and pay it. You can also add freight and duty to what goods cost, and record credit notes from suppliers. Buy stock still works as before for buying without an order.',
     },
     {
       id: 'tile',
@@ -1602,12 +2049,42 @@ export const controlsPage: Tour = {
   ],
 };
 
+// Referrals (issue #464, ADR-069): the business's own link to the sign-up and the businesses that signed up with it.
+export const referralsPage: Tour = {
+  id: 'page-referrals',
+  version: 1,
+  title: 'This page: referrals',
+  audience: (me) => held(me, 'core.referrals.read'),
+  autoStart: false,
+  page: '/staff/setup/referrals',
+  steps: [
+    {
+      id: 'intro',
+      target: 'referrals-intro',
+      title: 'Bring a business, earn a commission',
+      body: 'When a business you send signs up and pays for BMS, you earn a commission. The BMS team pays it and marks it paid here.',
+    },
+    {
+      id: 'link',
+      target: 'referrals-link',
+      title: 'Your link',
+      body: 'Tap Copy to paste your link into a message, or Share on WhatsApp to send it. They can also type your code in the Referred by box when they sign up.',
+    },
+    {
+      id: 'list',
+      target: 'referrals-list',
+      title: 'Who signed up',
+      body: 'Each business that signed up with your link, and whether it uses BMS or pays. You see what you earned, were paid and are still owed. You see their name only.',
+    },
+  ],
+};
+
 /** The tours whose screens tours.test.tsx maps one by one; the slices below carry their own test files (test-kit.tsx). */
 export const CORE_TOURS: readonly Tour[] = [
   adminWelcome, retailSales, staffWelcome, salePage, stockPage, restocksPage, salesPage, creditSalesPage, setupPage, loansPage, loanPage, cataloguePage, stocktakePage,
-  retailSettingsPage, branchRolesCapability, stockByLocationPage, inTransitPage, transferReceiptCapability, unitsCapability,
+  retailSettingsPage, branchRolesCapability, wholesaleGroup, stockByLocationPage, inTransitPage, transferReceiptCapability, unitsCapability,
   priceListsCapability, priceListsPage, customerAccountsCapability, accountsPage, returnsCapability, returnsPage, documentsCapability, documentsPage, quotationsPage,
-  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, controlsPage, twoStepPage, businessNotificationsPage, notificationsPage, ...CUSTOMER_TOURS,
+  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, controlsPage, twoStepPage, approvalRulesPage, businessNotificationsPage, billingPage, closePage, notificationsPage, feedbackPage, helpPage, helpArticlePage, moneyPage, morePage, referralsPage, ...CUSTOMER_TOURS,
 ];
 
 const dynamicSegments = (tour: Tour) => (tour.page ?? '').split('/').filter((part) => part.startsWith('$')).length;
@@ -1617,7 +2094,7 @@ const dynamicSegments = (tour: Tour) => (tour.page ?? '').split('/').filter((par
  * segment (`goods-received/new`) must come before its `$` sibling (`goods-received/$receiptId`): the tours with fewer `$` segments go
  * first (the sort is stable, so the order inside each group is the order written). route-coverage.test.ts proves it for every route.
  */
-export const TOURS: readonly Tour[] = [...CORE_TOURS, ...RETAIL_REPORT_TOURS, ...RETAIL_CASH_TOURS, ...RETAIL_PURCHASING_TOURS, ...RETAIL_ORDER_TOURS, ...LENDING_MORE_TOURS, ...PUBLIC_TOURS, ...OPERATOR_TOURS]
+export const TOURS: readonly Tour[] = [...CORE_TOURS, ...RETAIL_REPORT_TOURS, ...RETAIL_CASH_TOURS, ...RETAIL_PURCHASING_TOURS, ...RETAIL_ORDER_TOURS, ...RETAIL_QUICK_ADD_TOURS, ...LENDING_MORE_TOURS, ...APPLICATION_TOURS, ...PUBLIC_TOURS, ...OPERATOR_TOURS]
   .map((tour, order) => ({ tour, order }))
   .sort((a, b) => dynamicSegments(a.tour) - dynamicSegments(b.tour) || a.order - b.order)
   .map(({ tour }) => tour);

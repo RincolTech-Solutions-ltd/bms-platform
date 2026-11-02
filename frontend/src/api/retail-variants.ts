@@ -17,6 +17,23 @@ export const MAX_VARIANTS = 100;
 /** Each of the size and the colour gives at most seven letters or digits to a generated code. */
 export const VARIANT_TOKEN = 7;
 
+/** Issue #697 (D98): the colours every shop is offered as chips on Add an item, shipped with the app. */
+export const READY_COLOURS = ['Black', 'White', 'Red', 'Blue', 'Green', 'Yellow', 'Orange', 'Brown', 'Grey', 'Pink', 'Purple', 'Silver', 'Gold', 'Clear'] as const;
+
+/**
+ * Issue #697 (D98): the kinds of size, each with its ready sizes; Other has none, the shop types its own. Cable starts at 1mm,
+ * not 1.0mm, so it never shares the code 10MM with 10mm (owner, round 2 of #723).
+ */
+export const SIZE_KINDS = [
+  { key: 'clothes', label: 'Clothes', sizes: ['XS', 'S', 'M', 'L', 'XL', 'XXL'] },
+  { key: 'shoes', label: 'Shoes', sizes: Array.from({ length: 11 }, (_, i) => String(36 + i)) },
+  { key: 'bulbs', label: 'Bulbs (watts)', sizes: ['5W', '7W', '9W', '12W', '15W', '18W', '20W', '40W', '60W', '100W'] },
+  { key: 'cable', label: 'Cable (mm)', sizes: ['1mm', '1.5mm', '2.5mm', '4mm', '6mm', '10mm'] },
+  { key: 'other', label: 'Other', sizes: [] },
+] as const satisfies readonly { key: string; label: string; sizes: readonly string[] }[];
+
+export type SizeKind = (typeof SIZE_KINDS)[number]['key'];
+
 /** Trimmed, or undefined when blank. */
 export function cleanOption(s: string | undefined | null): string | undefined {
   const t = (s ?? '').trim();
@@ -50,7 +67,7 @@ export function codeToken(part: string | undefined): string {
   return [...t].slice(0, VARIANT_TOKEN).join('');
 }
 
-/** The code a variant gets unless the owner types one: ROMP, 0-3m and Blue give ROMP-03M-BLUE. */
+/** The code the app gives a variant (issue #562: never typed): ROMP, 0-3m and Blue give ROMP-03M-BLUE. */
 export function variantCode(baseCode: string, size?: string, colour?: string): string {
   return [baseCode.trim(), codeToken(size), codeToken(colour)].filter((p) => p !== '').join('-');
 }
@@ -100,7 +117,7 @@ export function planVariants({ baseCode, sizes, colours, costMinor, sellMinor, e
   return out;
 }
 
-/** The codes that two planned variants share (ignoring case), which the server would refuse: give one of them another code. */
+/** The codes that two planned variants share (ignoring case), which the server would refuse: spell one size or colour differently. */
 export function repeatedCodes(plan: readonly { code: string }[]): string[] {
   const seen = new Set<string>();
   const repeated = new Set<string>();

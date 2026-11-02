@@ -9,6 +9,7 @@ import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.Versions;
+import com.rincoltech.bms.retail.catalogue.CatalogueNames;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.RetailPricing;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.AddVariantsRequest;
@@ -18,11 +19,14 @@ import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Family;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.JoinItem;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.JoinRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.MakeFamilyRequest;
+import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PackRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceChange;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceNotCopied;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Product;
+import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.SizePackPrice;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.TermsCopied;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdateFamilyRequest;
+import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.VariantOptions;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueRepository.FamilyRow;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueRepository.PriceItemTerms;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueRepository.VariantBalance;
@@ -35,9 +39,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.stream.IntStream;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -82,27 +88,97 @@ class FamilyService {
     @Transactional
     Family create(CreateFamilyRequest r) {
         catalogue.requireCategoryAndUnit(r.categoryId(), r.unitId(), null, null);
-        String name = r.name().trim();
-        String base = baseCode(r.baseCode());
+        // Issue #689 (ADR-106): a new item with sizes is never counted in a package either.
+        catalogue.refusePackageUnit(r.unitId());
+        // Issue #698 (D86 = A): the one display style, as the repository stores it.
+        String name = CatalogueNames.display(r.name());
+        // Issue #562: the item's base code is the category's next code, such as BLB-0007, and never typed.
+        if (r.baseCode() != null && !r.baseCode().isBlank()) {
+            throw CatalogueService.codeMadeByApp("base_code", CatalogueService.MADE_BY_APP);
+        }
+        String base = repo.nextItemCode(r.categoryId());
         List<Planned> plan =
                 VariantGrid.plan(base, r.sizes(), r.colours(), r.variants(), r.costMinor(), r.sellMinor(), Set.of(), 0);
         requireSome(plan);
+        // Issue #697 (ADR-111): Add an item's packages, checked before anything is written, then made on every size.
+        List<PackRequest> packs = r.packs() == null ? List.of() : r.packs();
+        List<String> purposes = catalogue.checkPacks(packs);
         String duplicateReason = catalogue.acceptItemName(name, r.unitId(), null, Set.of(), r.duplicateReason());
         UUID id = UUID.randomUUID();
         UUID by = CurrentPrincipal.require().userId();
         repo.insertFamily(id, name, base, r.categoryId(), r.unitId(), by, duplicateReason);
-        insertVariants(id, name, r.categoryId(), r.unitId(), plan, by, true);
+        for (UUID variant : insertVariants(id, name, r.categoryId(), r.unitId(), plan, by, true)) {
+            Product size = repo.find(variant).orElseThrow();
+            catalogue.makePacks(size, pricedFor(packs, size, r.sellMinor(), r.packPrices()), purposes, by);
+        }
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("name", name);
         after.put("base_code", base);
         after.put("category_id", r.categoryId());
         after.put("unit_id", r.unitId());
         after.put("variants", plan.size());
+        if (!packs.isEmpty()) {
+            after.put("packs_each", packs.size());
+        }
         if (duplicateReason != null) {
             after.put("duplicate_reason", duplicateReason);
         }
         audit.record(AuditLog.Entry.created("retail.product_family.created", FAMILY, id, null, after));
         return get(id);
+    }
+
+    // JUSTIFICATION-A3: the owner's clarification on #723 asks each size's package price in proportion, or as typed.
+    /**
+     * Owner, clarification on #723: a package's selling price is given for the item's price, so a size priced differently
+     * gets it in the same proportion, rounded half up (a carton at 96,000 for 4,000 a piece is 144,000 for the size at
+     * 6,000), unless {@code pack_prices} names that size's own price for the package, which the form shows and lets the owner
+     * change. A pack with no price stays without one. Issue #726: a price worked out or sent above
+     * {@link RetailCatalogue#MAX_AMOUNT_MINOR} is refused on its package's row (422) before the package is made.
+     */
+    static List<PackRequest> pricedFor(List<PackRequest> packs, Product size, long itemSell, List<SizePackPrice> own) {
+        String key = Planned.key(size.variant().size(), size.variant().colour());
+        return IntStream.range(0, packs.size())
+                .mapToObj(i -> {
+                    PackRequest k = packs.get(i);
+                    if (k == null || k.sellMinor() == null) {
+                        return k;
+                    }
+                    Long typed = (own == null ? List.<SizePackPrice>of() : own)
+                            .stream()
+                                    .filter(p -> p != null
+                                            && k.unitId().equals(p.unitId())
+                                            && Planned.key(VariantGrid.clean(p.size()), VariantGrid.clean(p.colour()))
+                                                    .equals(key))
+                                    .map(SizePackPrice::sellMinor)
+                                    .findFirst()
+                                    .orElse(null);
+                    BigDecimal worked = typed != null
+                            ? BigDecimal.valueOf(typed)
+                            : itemSell <= 0 || size.sellMinor() == itemSell
+                                    ? BigDecimal.valueOf(k.sellMinor())
+                                    : BigDecimal.valueOf(k.sellMinor())
+                                            .multiply(BigDecimal.valueOf(size.sellMinor()))
+                                            .divide(BigDecimal.valueOf(itemSell), 0, RoundingMode.HALF_UP);
+                    if (worked.compareTo(BigDecimal.valueOf(RetailCatalogue.MAX_AMOUNT_MINOR)) > 0) {
+                        throw CatalogueService.ofPack(
+                                ApiException.validation(List.of(new FieldProblem(
+                                        "sell_minor",
+                                        "invalid",
+                                        "This package's price for " + size.description()
+                                                + " is too large. Lower the package's price or the size's price."))),
+                                i);
+                    }
+                    long price = worked.longValueExact();
+                    return new PackRequest(
+                            k.unitId(), k.factor(), k.purpose(), price, k.holdsUnitId(), k.holdsQty(), k.usualBuy());
+                })
+                .toList();
+    }
+
+    /** Issue #697 (ADR-111): the sizes and colours the shop typed before, offered again beside the app's ready lists. */
+    @Transactional(readOnly = true)
+    VariantOptions options() {
+        return new VariantOptions(repo.variantOptions(true), repo.variantOptions(false));
     }
 
     /**
@@ -283,11 +359,15 @@ class FamilyService {
                 throw ApiException.validation(
                         List.of(new FieldProblem("name", "required", "Give the item a name, such as Twin cable.")));
             }
-            name = r.name().trim();
+            name = CatalogueNames.display(r.name());
             catalogue.requireCategoryAndUnit(categoryId, unitId, null, null);
-            String base = r.baseCode() != null
-                    ? baseCode(r.baseCode())
-                    : first.code().length() > 24 ? first.code().substring(0, 24).strip() : first.code();
+            // Issue #562: later sizes take the first item's code, the one the app gave it; a typed base code is
+            // refused.
+            if (r.baseCode() != null && !r.baseCode().isBlank()) {
+                throw CatalogueService.codeMadeByApp("base_code", CatalogueService.MADE_BY_APP);
+            }
+            String base =
+                    first.code().length() > 24 ? first.code().substring(0, 24).strip() : first.code();
             duplicateReason = catalogue.acceptItemName(name, unitId, null, Set.copyOf(ids), r.duplicateReason());
             id = UUID.randomUUID();
             repo.insertFamily(id, name, base, categoryId, unitId, by, duplicateReason);
@@ -408,7 +488,7 @@ class FamilyService {
         if (before.version() != expected) {
             throw Versions.conflict(before.version());
         }
-        String name = r.name() == null ? before.name() : r.name().trim();
+        String name = r.name() == null ? before.name() : CatalogueNames.display(r.name());
         UUID categoryId = r.categoryId() == null ? before.categoryId() : r.categoryId();
         if (name.isEmpty()) {
             throw ApiException.validation(List.of(new FieldProblem("name", "invalid", "The name must not be blank.")));
@@ -516,8 +596,10 @@ class FamilyService {
         boolean packsOn = catalogue.unitsOn();
         int packs = 0;
         if (packsOn) {
-            for (UUID id : to) {
-                packs += repo.copyPacks(from.id(), id, by);
+            for (int i = 0; i < to.size(); i++) {
+                // Issue #624: a pack's own price goes with it only to a size that sells at the same piece price.
+                packs += repo.copyPacks(
+                        from.id(), to.get(i), Objects.equals(plan.get(i).sellMinor(), from.sellMinor()), by);
             }
         }
         List<PriceItemTerms> items = repo.priceItemsInForce(
@@ -629,13 +711,13 @@ class FamilyService {
                 throw ApiException.validation(List.of(new FieldProblem(
                         "variants",
                         "invalid",
-                        "The code " + code + " is longer than 40 characters. Give a shorter one.")));
+                        "The code " + code + " is longer than 40 characters. Use a shorter size or colour.")));
             }
             if (codes.contains(code.toLowerCase(Locale.ROOT))) {
                 throw CatalogueService.duplicate(
                         "duplicate_product_code",
-                        "A product with the code " + code + " exists. Give " + VariantGrid.label(v.size(), v.colour())
-                                + " another code.");
+                        "A product with the code " + code + " exists. Spell the size or colour of "
+                                + VariantGrid.label(v.size(), v.colour()) + " differently.");
             }
             String description = VariantGrid.description(name, v.size(), v.colour());
             catalogue.acceptName(description, unitId, null, null);
@@ -706,19 +788,6 @@ class FamilyService {
             throw ApiException.validation(
                     List.of(new FieldProblem("sizes", "required", "Give at least one size or one colour.")));
         }
-    }
-
-    private static String baseCode(String raw) {
-        String code = RetailCatalogue.normaliseCode(raw)
-                .orElseThrow(() -> ApiException.validation(List.of(new FieldProblem(
-                        "base_code",
-                        "invalid",
-                        "A code must not be blank or contain control characters or special spaces."))));
-        if (code.length() > 24) {
-            throw ApiException.validation(
-                    List.of(new FieldProblem("base_code", "invalid", "Keep the base code to 24 characters.")));
-        }
-        return code;
     }
 
     private static String qty(BigDecimal q) {

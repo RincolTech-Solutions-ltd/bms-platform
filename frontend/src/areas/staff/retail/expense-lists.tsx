@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useId, useState } from 'react';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { retail, type ExpenseCategory, type ExpenseItem } from '../../../api/retail';
-import { ScreenLink } from './screen-link';
 import { useToast } from './toast';
 import { Gate, Problem } from './ui';
+import { Hint } from '../../../app/ui/Hint';
+import { useComeBack } from '../../../app/ui/EmptyChoice';
 
 // The expense lists (FR-RET-17): categories and the items in them, kept by whoever holds
 // retail.expense.manage. Nothing is deleted: a category or item is switched off and stays on old records.
@@ -21,12 +23,12 @@ function RenameField({ label, value, disabled, onSave }: { label: string; value:
         <label htmlFor={id}>{label}</label>
         <input id={id} value={name} maxLength={120} onChange={(e) => setName(e.target.value)} />
       </div>
-      <button type="button" className="btn-sm" disabled={!changed || disabled} onClick={() => onSave(name.trim())}>Save name</button>
+      <BusyButton busy={disabled} type="button" className="btn-sm" disabled={!changed} onClick={() => onSave(name.trim())}>Save name</BusyButton>
     </div>
   );
 }
 
-export function ItemRow({ category, item, busy, change }: { category: ExpenseCategory; item: ExpenseItem; busy: boolean; change: (run: () => Promise<unknown>) => void }) {
+export function ItemRow({ category, item, busy, change }: { category: ExpenseCategory; item: ExpenseItem; busy: boolean; change: (run: () => Promise<unknown>, item?: boolean) => void }) {
   const id = useId();
   const version = item.version ?? 0;
   const update = (body: { name?: string; active?: boolean; requires_explanation?: boolean }) => change(() => retail.updateExpenseItem(category.id ?? '', item.id ?? '', body, version));
@@ -43,14 +45,14 @@ export function ItemRow({ category, item, busy, change }: { category: ExpenseCat
           onChange={(e) => update({ requires_explanation: e.target.checked })} />
         Needs an explanation when used
       </label>
-      <button type="button" className="btn-sm" disabled={busy} onClick={() => update({ active: item.active === false })}>
+      <BusyButton busy={busy} type="button" className="btn-sm" onClick={() => update({ active: item.active === false })}>
         {item.active === false ? `Switch ${item.name} on` : `Switch ${item.name} off`}
-      </button>
+      </BusyButton>
     </li>
   );
 }
 
-function AddItem({ category, busy, change }: { category: ExpenseCategory; busy: boolean; change: (run: () => Promise<unknown>) => void }) {
+function AddItem({ category, busy, change }: { category: ExpenseCategory; busy: boolean; change: (run: () => Promise<unknown>, item?: boolean) => void }) {
   const nameId = useId();
   const flagId = useId();
   const [name, setName] = useState('');
@@ -59,7 +61,7 @@ function AddItem({ category, busy, change }: { category: ExpenseCategory; busy: 
     <form onSubmit={(e) => {
       e.preventDefault();
       if (name.trim() === '' || busy) return;
-      change(() => retail.createExpenseItem(category.id ?? '', { name: name.trim(), requires_explanation: flag }));
+      change(() => retail.createExpenseItem(category.id ?? '', { name: name.trim(), requires_explanation: flag }), true);
       setName('');
       setFlag(false);
     }}>
@@ -69,12 +71,12 @@ function AddItem({ category, busy, change }: { category: ExpenseCategory; busy: 
         <input id={flagId} type="checkbox" style={{ width: 'auto', minHeight: 24, marginRight: 8 }} checked={flag} onChange={(e) => setFlag(e.target.checked)} />
         Needs an explanation when used
       </label>
-      <button type="submit" className="btn-sm" disabled={name.trim() === '' || busy}>Add item</button>
+      <BusyButton busy={busy} type="submit" className="btn-sm" disabled={name.trim() === ''}>Add item</BusyButton>
     </form>
   );
 }
 
-export function CategoryCard({ category, busy, change }: { category: ExpenseCategory; busy: boolean; change: (run: () => Promise<unknown>) => void }) {
+export function CategoryCard({ category, busy, change }: { category: ExpenseCategory; busy: boolean; change: (run: () => Promise<unknown>, item?: boolean) => void }) {
   const version = category.version ?? 0;
   const update = (body: { name?: string; active?: boolean }) => change(() => retail.updateExpenseCategory(category.id ?? '', body, version));
   return (
@@ -83,9 +85,9 @@ export function CategoryCard({ category, busy, change }: { category: ExpenseCate
         {category.name} {category.active === false && <span className="badge badge-warning">Switched off</span>}
       </strong>
       <RenameField label={`Rename ${category.name}`} value={category.name ?? ''} disabled={busy} onSave={(name) => update({ name })} />
-      <button type="button" className="btn-sm" disabled={busy} onClick={() => update({ active: category.active === false })}>
+      <BusyButton busy={busy} type="button" className="btn-sm" onClick={() => update({ active: category.active === false })}>
         {category.active === false ? `Switch ${category.name} on` : `Switch ${category.name} off`}
-      </button>
+      </BusyButton>
       {(category.items ?? []).length === 0 && <p className="hint">No items yet.</p>}
       <ul style={{ listStyle: 'none', padding: 0 }}>
         {(category.items ?? []).map((i) => <ItemRow key={i.id} category={category} item={i} busy={busy} change={change} />)}
@@ -95,7 +97,7 @@ export function CategoryCard({ category, busy, change }: { category: ExpenseCate
   );
 }
 
-export function ExpenseLists({ categories, busy, error, change }: { categories: ExpenseCategory[]; busy: boolean; error: unknown; change: (run: () => Promise<unknown>) => void }) {
+export function ExpenseLists({ categories, busy, error, change }: { categories: ExpenseCategory[]; busy: boolean; error: unknown; change: (run: () => Promise<unknown>, item?: boolean) => void }) {
   const nameId = useId();
   const [name, setName] = useState('');
   return (
@@ -109,7 +111,7 @@ export function ExpenseLists({ categories, busy, error, change }: { categories: 
       }}>
         <label htmlFor={nameId}>New category</label>
         <input id={nameId} value={name} maxLength={120} onChange={(e) => setName(e.target.value)} />
-        <button type="submit" className="btn-sm" disabled={name.trim() === '' || busy}>Add category</button>
+        <BusyButton busy={busy} type="submit" className="btn-sm" disabled={name.trim() === ''}>Add category</BusyButton>
       </form>
       {categories.length === 0 && <p className="empty-state">No categories yet. Add the first one above.</p>}
       {categories.map((c) => <CategoryCard key={c.id} category={c} busy={busy} change={change} />)}
@@ -120,21 +122,25 @@ export function ExpenseLists({ categories, busy, error, change }: { categories: 
 export function ExpenseListsScreen() {
   const queryClient = useQueryClient();
   const { show, toast } = useToast();
+  const back = useComeBack();
   const categories = useQuery({ queryKey: ['retail', 'expense-categories', false], queryFn: () => retail.listExpenseCategories() });
   const change = useMutation({
-    mutationFn: (run: () => Promise<unknown>) => run(),
-    onSuccess: () => show('Saved.'),
+    mutationFn: ({ run }: { run: () => Promise<unknown>; item?: boolean }) => run(),
+    onSuccess: (_, { item }) => {
+      show('Saved.', 'success');
+      // Opened from an empty list on the expense form (issue #619): the form needs an item, so a new item takes the person back.
+      if (item) back?.();
+    },
     // Success or a refusal (for example a stale version), the lists are read again so the next change uses what is current.
     onSettled: () => void queryClient.invalidateQueries({ queryKey: ['retail', 'expense-categories'] }),
   });
   return (
     <Gate screen="expenseSetup" title="Expense lists">
-      <p className="hint" data-tour="expense-lists-help">Categories and items are what the expense form offers. Switching one off keeps it on old records.</p>
-      <p><ScreenLink screen="expenses" to="/staff/retail/expenses">Record an expense</ScreenLink></p>
+      <Hint tour="expense-lists-help">Categories and items are what the expense form offers. Switching one off keeps it on old records.</Hint>
       <div data-tour="expense-lists-body">
         {categories.isError && <Problem error={categories.error} />}
         {categories.isPending && <p className="loading">Loading</p>}
-        {categories.data && <ExpenseLists categories={categories.data} busy={change.isPending} error={change.error} change={(run) => change.mutate(run)} />}
+        {categories.data && <ExpenseLists categories={categories.data} busy={change.isPending} error={change.error} change={(run, item) => change.mutate({ run, item })} />}
       </div>
       {toast}
     </Gate>

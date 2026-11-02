@@ -1,17 +1,14 @@
-import { Link, createLazyRoute } from '@tanstack/react-router';
+import { createLazyRoute } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import type { Me } from '../../../api/client';
 import { useStaff } from '../context';
 import { icons } from '../../../components/icons';
+import { Tile, TileGrid } from '../../../app/ui/Tile';
 import { CATALOGUE_LINKS, canUse, type RetailScreen } from './permissions';
 import { Gate } from './ui';
 
 // Catalogue (#146): the lists a shop keeps for itself, so it needs no operator to add an item or a
 // supplier. Each link shows only when the session holds the permissions of its screen.
-
-export function BackToCatalogue() {
-  return <p><Link to={'/staff/retail/catalogue' as never}>Back to Catalogue</Link></p>;
-}
 
 /** The catalogue screens a session may use, in the order the Catalogue home lists them. */
 export function catalogueLinksFor(me: Pick<Me, 'permissions'>) {
@@ -31,34 +28,26 @@ export function AddPanel({ label, open, onOpen, onClose, children }: { label: st
   );
 }
 
-const TILE_ICONS: Partial<Record<RetailScreen, keyof typeof icons>> = {
-  products: 'stock', categories: 'catalogue', units: 'valuation', suppliers: 'restock', buyers: 'creditSales', importer: 'stocktake',
+export const TILE_ICONS: Partial<Record<RetailScreen, keyof typeof icons>> = {
+  products: 'stock', categories: 'categories', units: 'units', suppliers: 'restock', buyers: 'customerAccounts', importer: 'importer', labels: 'labels', shopSetup: 'shop',
 };
 
 export function CatalogueLinks() {
   const { me } = useStaff();
   const links = catalogueLinksFor(me);
   return (
-    <ul className="tile-grid" data-tour="catalogue-links">
+    <TileGrid label="Catalogue pages" tour="catalogue-links">
+      {/* Set up your shop (issue #625): the starting categories, units and packs of a kind of shop, first so a new shop finds it. */}
+      {canUse(me, 'shopSetup') && (
+        <Tile to="/staff/retail/catalogue/set-up" icon={icons[TILE_ICONS.shopSetup ?? 'catalogue']} label="Set up your shop" hint="Starting categories, units and packs for your kind of shop" tour="catalogue-shopSetup" />
+      )}
       {links.map((l) => (
-        <li key={l.screen}>
-          <Link className="rt-tile tile" to={l.path as never} data-tour={`catalogue-${l.screen}`}>
-            <span className="icon-chip">{icons[TILE_ICONS[l.screen] ?? 'catalogue']}</span>
-            <strong>{l.label}</strong>
-            <span className="tile-hint">{l.hint}</span>
-          </Link>
-        </li>
+        <Tile key={l.screen} to={l.path} icon={icons[TILE_ICONS[l.screen] ?? 'catalogue']} label={l.label} hint={l.hint} tour={`catalogue-${l.screen}`} />
       ))}
       {canUse(me, 'importer') && (
-        <li>
-          <Link className="rt-tile tile" to={'/staff/retail/catalogue/import' as never} data-tour="catalogue-importer">
-            <span className="icon-chip">{icons.stocktake}</span>
-            <strong>Import items</strong>
-            <span className="tile-hint">Add many items from a spreadsheet file</span>
-          </Link>
-        </li>
+        <Tile to="/staff/retail/catalogue/import" icon={icons[TILE_ICONS.importer ?? 'catalogue']} label="Import items" hint="Add many items from a spreadsheet file" tour="catalogue-importer" />
       )}
-    </ul>
+    </TileGrid>
   );
 }
 

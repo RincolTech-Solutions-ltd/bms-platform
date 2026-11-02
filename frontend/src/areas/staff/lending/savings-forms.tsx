@@ -6,6 +6,7 @@ import { useStaff } from '../context';
 import { usePersistedDraft } from '../retail/idempotency';
 import { Problem } from '../retail/ui';
 import { methodWords, money, parseAmount } from './loan-state';
+import { BusyButton } from '../../../app/ui/BusyButton';
 
 // The money forms of a savings account: deposit, withdrawal, closure, reversal and the status
 // changes. Each money form has two steps: the details, then a confirmation that says exactly what
@@ -88,6 +89,7 @@ export function MoneyForm({ account, kind, onDone }: { account: SavingsAccount; 
   const tooMuch = kind === 'withdraw' && amountMinor !== null && amountMinor > available;
   const valid = amountMinor !== null && !tooMuch;
   const body = () => ({ amount_minor: amountMinor ?? 0, payment_method_key: draft.method, external_reference: draft.reference.trim() || undefined });
+  // toast-exempt: success screen, the receipt with the new balance replaces the form
   const save = useMutation({
     mutationFn: async () => {
       if (kind === 'deposit') {
@@ -134,10 +136,10 @@ export function MoneyForm({ account, kind, onDone }: { account: SavingsAccount; 
         </ul>
         <Problem error={save.error} />
         <div className="sv-confirm-actions">
-          <button type="button" className="rt-primary" disabled={save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? 'Saving' : `Confirm ${label.toLowerCase()}`}
-          </button>
-          <button type="button" disabled={save.isPending} onClick={() => setConfirming(false)}>
+          <BusyButton busy={save.isPending} type="button" className="rt-primary" onClick={() => save.mutate()}>
+            {`Confirm ${label.toLowerCase()}`}
+          </BusyButton>
+          <button type="button" /* busy-exempt: change waits for the save */ disabled={save.isPending} onClick={() => setConfirming(false)}>
             Change
           </button>
         </div>
@@ -175,6 +177,7 @@ export function CloseForm({ account }: { account: SavingsAccount }) {
   const refresh = useRefreshAccount(accountId);
   const { key, draft, setDraft, finish } = usePersistedDraft<CloseDraft>(`savings-close:${me.user_id ?? ''}:${accountId}`, { method: 'cash', reason: '' });
   const [confirming, setConfirming] = useState(false);
+  // toast-exempt: success screen, the Account closed screen with the voucher replaces the form
   const save = useMutation({
     mutationFn: () => savings.close(accountId, { payment_method_key: draft.method, reason: draft.reason.trim() || undefined }, key),
     onSuccess: () => {
@@ -206,10 +209,10 @@ export function CloseForm({ account }: { account: SavingsAccount }) {
         </ul>
         <Problem error={save.error} />
         <div className="sv-confirm-actions">
-          <button type="button" className="btn-danger" disabled={save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? 'Sending' : 'Confirm closure'}
-          </button>
-          <button type="button" disabled={save.isPending} onClick={() => setConfirming(false)}>Change</button>
+          <BusyButton busy={save.isPending} type="button" className="btn-danger" onClick={() => save.mutate()}>
+            Confirm closure
+          </BusyButton>
+          <button type="button" /* busy-exempt: change waits for the closure */ disabled={save.isPending} onClick={() => setConfirming(false)}>Change</button>
         </div>
       </section>
     );
@@ -225,9 +228,9 @@ export function CloseForm({ account }: { account: SavingsAccount }) {
 }
 
 const STATUS_WORDS = {
-  freeze: { label: 'Why freeze this account?', submit: 'Freeze', done: 'Account frozen. Nothing can be taken out until it is unfrozen.' },
-  unfreeze: { label: 'Why unfreeze this account?', submit: 'Unfreeze', done: 'Account unfrozen.' },
-  reactivate: { label: 'How was the member identified?', submit: 'Reactivate', done: 'Account reactivated.' },
+  freeze: { label: 'Why freeze this account?', submit: 'Freeze' },
+  unfreeze: { label: 'Why unfreeze this account?', submit: 'Unfreeze' },
+  reactivate: { label: 'How was the member identified?', submit: 'Reactivate' },
 } as const;
 
 export function StatusForm({ account, change }: { account: SavingsAccount; change: 'freeze' | 'unfreeze' | 'reactivate' }) {
@@ -235,16 +238,20 @@ export function StatusForm({ account, change }: { account: SavingsAccount; chang
   const refresh = useRefreshAccount(accountId);
   const [reason, setReason] = useState('');
   const words = STATUS_WORDS[change];
-  const save = useMutation({ mutationFn: () => savings.setStatus(accountId, change, reason.trim()), onSuccess: refresh });
-  if (save.data) return <p role="status" className="alert alert-success">{words.done}</p>;
+  const save = useMutation({
+    mutationFn: () => savings.setStatus(accountId, change, reason.trim()),
+    onSuccess: refresh,
+    meta: { success: { freeze: 'Account frozen', unfreeze: 'Account unfrozen', reactivate: 'Account reactivated' }[change] },
+  });
+  if (save.data) return null;
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (reason.trim() !== '' && !save.isPending) save.mutate(); }}>
       <label htmlFor={`sv-${change}-reason`}>{words.label}</label>
       <textarea id={`sv-${change}-reason`} rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
       <Problem error={save.error} />
-      <button type="submit" className={change === 'freeze' ? 'btn-danger btn-block' : 'rt-primary btn-block'} disabled={reason.trim() === '' || save.isPending}>
-        {save.isPending ? 'Saving' : words.submit}
-      </button>
+      <BusyButton busy={save.isPending} type="submit" className={change === 'freeze' ? 'btn-danger btn-block' : 'rt-primary btn-block'} disabled={reason.trim() === ''}>
+        {words.submit}
+      </BusyButton>
     </form>
   );
 }
@@ -254,6 +261,7 @@ export function ReverseSavingsForm({ account, txn }: { account: SavingsAccount; 
   const accountId = account.id ?? '';
   const refresh = useRefreshAccount(accountId);
   const { key, draft, setDraft, finish } = usePersistedDraft<string>(`savings-reverse:${me.user_id ?? ''}:${txn.id ?? ''}`, '');
+  // toast-exempt: a reversal waits for a checker, and this form then says it is sent for approval
   const save = useMutation({
     mutationFn: () => savings.reverse(accountId, txn.id ?? '', draft.trim(), key),
     onSuccess: () => {
@@ -270,9 +278,9 @@ export function ReverseSavingsForm({ account, txn }: { account: SavingsAccount; 
       <textarea id={`sv-reverse-${txn.id ?? ''}`} rows={2} maxLength={500} value={draft} onChange={(e) => setDraft(e.target.value)} />
       {txn.txn_type === 'withdrawal' && <p className="field-hint">Its withdrawal fee is reversed with it.</p>}
       <Problem error={save.error} />
-      <button type="submit" className="btn-danger btn-block" disabled={draft.trim() === '' || save.isPending}>
-        {save.isPending ? 'Sending' : 'Request reversal'}
-      </button>
+      <BusyButton busy={save.isPending} type="submit" className="btn-danger btn-block" disabled={draft.trim() === ''}>
+        Request reversal
+      </BusyButton>
     </form>
   );
 }

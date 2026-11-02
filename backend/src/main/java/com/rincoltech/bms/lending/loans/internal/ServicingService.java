@@ -9,8 +9,11 @@ import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.lending.loans.internal.LoanRepository.Loan;
+import com.rincoltech.bms.lending.loans.internal.Servicing.Item;
 import com.rincoltech.bms.lending.loans.internal.Servicing.Quote;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.ActionOutcome;
+import com.rincoltech.bms.lending.loans.internal.ServicingApi.ChargeList;
+import com.rincoltech.bms.lending.loans.internal.ServicingApi.ChargeRow;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.DisbursementRequest;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.PayoffQuote;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.ReasonRequest;
@@ -19,6 +22,7 @@ import com.rincoltech.bms.lending.loans.internal.ServicingApi.RepaymentResult;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.Schedule;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.ScheduleRow;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.TransactionList;
+import com.rincoltech.bms.lending.loans.internal.ServicingApi.WaiverRequest;
 import com.rincoltech.bms.lending.loans.internal.ServicingRepository.Txn;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
@@ -156,6 +160,54 @@ class ServicingService {
         });
     }
 
+    /** FR-ARR-04: waits for a checker above the tenant's threshold (FR-APR-04), else takes effect now. */
+    @Transactional
+    Outcome<ActionOutcome> requestWaiver(UUID id, UUID chargeId, String key, WaiverRequest r) {
+        return idempotency.once(
+                key, "POST", BASE + id + "/charges/" + chargeId + "/waive", r, ActionOutcome.class, () -> {
+                    Loan loan = lock(id, "lending.charges.waive_request");
+                    ServicingRepository.Charge charge = repo.charge(chargeId).orElseThrow(ApiException::notFound);
+                    long amount = servicer.checkWaiver(loan, charge, r.amountMinor());
+                    // The threshold is weighed against everything waived on the loan with this one, so a large waiver
+                    // cannot be split into requests each under it to avoid the checker (the review of #271, as the
+                    // retail returns do).
+                    long cumulative = Math.addExact(repo.waivedOnLoan(loan.id()), amount);
+                    Map<String, Object> payload = new LinkedHashMap<>();
+                    payload.put(WaiverAction.CHARGE, charge.id().toString());
+                    payload.put(WaiverAction.AMOUNT, amount);
+                    payload.put(WaiverAction.REASON, r.reason().trim());
+                    Approvals.Outcome o = approvals.request(new ActionRequest(
+                            WaiverAction.TYPE,
+                            loan.branchId(),
+                            loan.id(),
+                            loan.version(),
+                            amount,
+                            cumulative,
+                            loan.currency(),
+                            payload));
+                    return outcome(id, o);
+                });
+    }
+
+    /** R-PEN: the loan's charges with what each still allows a waiver to take. */
+    @Transactional(readOnly = true)
+    ChargeList charges(UUID id) {
+        Loan loan = inScope(id);
+        boolean active = loan.status().equals("active");
+        List<Item> items = active ? repo.items(id) : List.of();
+        return new ChargeList(repo.charges(id).stream()
+                .map(c -> new ChargeRow(
+                        c.id(),
+                        c.itemNo(),
+                        c.chargeType(),
+                        c.periodNo(),
+                        c.businessDate(),
+                        c.amountMinor(),
+                        c.waivedMinor(),
+                        active && c.chargeType().startsWith("penalty") ? servicer.waivable(loan, c, items) : 0))
+                .toList());
+    }
+
     /** FR-DIS-04: the items and a totals row. */
     @Transactional(readOnly = true)
     Schedule schedule(UUID id) {
@@ -212,7 +264,7 @@ class ServicingService {
     }
 
     private static ScheduleRow totals(List<ScheduleRow> rows) {
-        long[] t = new long[13];
+        long[] t = new long[15];
         for (ScheduleRow r : rows) {
             long[] v = {
                 r.principalDueMinor(),
@@ -227,15 +279,17 @@ class ServicingService {
                 r.totalPaidMinor(),
                 r.waivedMinor(),
                 r.writtenOffMinor(),
-                r.outstandingMinor()
+                r.outstandingMinor(),
+                r.interestOutstandingMinor(),
+                r.feesOutstandingMinor()
             };
             for (int i = 0; i < v.length; i++) {
                 t[i] = Math.addExact(t[i], v[i]);
             }
         }
         return new ScheduleRow(
-                null, null, t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9], t[10], t[11], t[12], null,
-                null);
+                null, null, t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9], t[10], t[11], t[12], null, null,
+                t[13], t[14]);
     }
 
     private static String blankToNull(String s) {

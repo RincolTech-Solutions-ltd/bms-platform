@@ -5,6 +5,7 @@ import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { retail, type Customer } from '../../../api/retail';
 import { limitWords, termsWords } from './account-state';
 import { Gate, Problem, money } from './ui';
+import { Hint } from '../../../app/ui/Hint';
 
 // Customer accounts (customer_accounts capability, ADR-033, issue #196): the credit buyers with what each owes, the limit and
 // the terms. It is the administrator's page (retail.credit.manage); a seller opens one buyer's account from Credit buyers.
@@ -39,12 +40,12 @@ function AccountsPage() {
   const people = (rows.data?.pages ?? []).flatMap((p) => p.items ?? []);
   return (
     <Gate screen="customerAccounts" title="Customer accounts">
-      <p className="hint" data-tour="accounts-help">Open a buyer to set their credit limit and payment terms, take a payment, or read their statement.</p>
+      <Hint tour="accounts-help">Open a buyer to set their credit limit and payment terms, take a payment, or read their statement.</Hint>
       <p><Link to="/staff/retail/customer-ageing">See what every buyer owes, by how late it is</Link></p>
       {rows.isPending && <p className="loading">Loading</p>}
       <Problem error={rows.error} />
       <SearchBox id="search-accounts" label="Search by name or phone" search={search} fetching={finding} count={rows.data ? people.length : undefined} more={rows.hasNextPage} />
-      {rows.data && people.length === 0 && (query ? <NoResults term={query} onClear={search.clear} noun="credit buyers" /> : <p className="empty-state">No credit buyers yet.</p>)}
+      {rows.data && people.length === 0 && (query ? <NoResults term={query} onClear={search.clear} noun="customers who owe" /> : <p className="empty-state">No customers who owe yet.</p>)}
       <SearchResults fetching={finding}>
         <ul style={{ listStyle: 'none', padding: 0 }} data-tour="accounts-list">
           {people.map((r) => <AccountRow key={r.id} row={r} />)}
@@ -52,7 +53,7 @@ function AccountsPage() {
       </SearchResults>
       {rows.hasNextPage && (
         <button type="button" onClick={() => void rows.fetchNextPage()} disabled={rows.isFetchingNextPage || rows.isPlaceholderData}>
-          {rows.isFetchingNextPage ? 'Loading' : 'Show more credit buyers'}
+          {rows.isFetchingNextPage ? 'Loading' : 'Show more customers who owe'}
         </button>
       )}
     </Gate>

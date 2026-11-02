@@ -498,7 +498,7 @@ The twin of 3.14; only what differs is listed.
 ### 3.16 As built in slice #224, part 1 (the unallocated receipts queue, governed reversal, review windows)
 
 Slice #224 is delivered as a stack: this part (the queue, the reversal of a gateway payment, the review windows) and a second part (the nightly reconciliation job and report, the statement upload and the
-fee posting, migration `V85`). Everything here is off with the collections switch: a business that never collected has no receipts and no payments to reverse.
+fee posting, migration `V123`). Everything here is off with the collections switch: a business that never collected has no receipts and no payments to reverse.
 
 - **The queue.** `GET /payments/unallocated` (open by default) lists the money a loan or account would not take, with the order's facts staff match against the provider's statement (order reference, tracking id,
   confirmation code, method, paid time), the refusal code, and the requests waiting on it; never the payer's phone. A receipt is read with `core.payments.read` in its branch (else 404).
@@ -678,6 +678,11 @@ shares the transaction (FR-NTF-01).
 Due in 3 days, due today, overdue at 1, 7 and 30 days past due, written by the nightly arrears job of
 increment 6 (#109), idempotent on (schedule item, reminder type) (FR-NTF-06). The channel is ready
 before the job; the reminders wait for it.
+
+Built in slice #227: the arrears run queues them through `SmsEvents` after each loan's recompute, the due reminders per
+unpaid instalment and the arrears notices at the highest DPD step reached on the oldest unpaid instalment, so a night the job
+missed is caught up. The wording is chapter 11's without "to avoid penalties" (no threats); `loan.overdue_1` says "is
+overdue" with no count.
 
 ### 4.13 Payment link by SMS
 

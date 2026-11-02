@@ -62,7 +62,7 @@ const addDays = (date: string, days: number): string => {
 export function createAccountsMock(env: AccountsEnv): AccountsMock {
   const terms = new Map<string, Terms>();
   const receipts: Receipt[] = [];
-  const gate = <T>(fn: () => T): Promise<T> => env.run(() => (env.on() ? fn() : env.refuse(404, 'capability_not_enabled', 'This capability is not enabled for the tenant.')));
+  const gate = <T>(fn: () => T): Promise<T> => env.run(() => (env.on() ? fn() : env.refuse(404, 'capability_not_enabled', 'This feature is not switched on for your business.')));
   const customer = (id: string): Customer => env.customers().find((c) => c.id === id) ?? env.refuse(404, 'not_found', 'That could not be found.');
   const open = (id: string): Sale[] =>
     env.sales().filter((s) => s.customer_id === id && s.payment_method === 'credit' && s.status === 'completed' && (s.balance_minor ?? 0) > 0);
@@ -98,7 +98,7 @@ export function createAccountsMock(env: AccountsEnv): AccountsMock {
 
     forSale: (body, total, saleDate) => {
       if (!env.on() || body.payment_method !== 'credit') return {};
-      if (!body.customer_id) env.refuse(422, 'customer_required', 'A credit sale names a credit buyer from the list.');
+      if (!body.customer_id) env.refuse(422, 'customer_required', 'A credit sale names a customer from the list.');
       const t = terms.get(body.customer_id ?? '') ?? {};
       if (t.limit !== undefined) {
         const exceeded = owed(body.customer_id ?? '') + total - t.limit;

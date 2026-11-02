@@ -12,6 +12,7 @@ import { PurchaseOrderPage } from './purchase-order';
 import { PurchaseOrderEditPage, PurchaseOrderNewPage } from './purchase-order-form';
 import { SupplierBillNewPage } from './supplier-bill-new';
 import { SupplierPaymentNewPage } from './supplier-payment-new';
+import { pickItem } from '../../../test-utils/item-picker';
 
 // The purchasing pages end to end on the fabricated in-memory API (issue #198): the real pages, their queries, drafts and
 // buttons, against the mock that follows the server's rules in small. Each test mounts one page on a small router that has the
@@ -73,7 +74,7 @@ async function sentOrder(qty = '10', cost = 3500) {
 describe('the purchase order pages', () => {
   it('saves a new order as a draft from the items found, the supplier and the quantities', async () => {
     const { router } = mount('/purchase-orders/new', PurchaseOrderNewPage, '/staff/retail/purchase-orders/new');
-    fireEvent.click(await screen.findByRole('button', { name: 'Add LED bulb 9W screw' }, wait));
+    await pickItem('LED bulb 9W screw');
     await screen.findByRole('option', { name: 'Test Supplier 01' }, wait);
     type('Supplier', SUPPLIER);
     type(/How many LED bulb 9W screw/, '10');
@@ -129,7 +130,7 @@ describe('the purchase order pages', () => {
     const draft = await retail.createPurchaseOrder({ supplier_id: SUPPLIER, branch_id: BRANCH, lines: [{ product_id: await bulbId(), qty: '10', cost_minor: 3500 }] }, 'k-send');
     mount('/purchase-orders/$orderId', PurchaseOrderPage, `/staff/retail/purchase-orders/${draft.id}`);
     fireEvent.click(await screen.findByRole('button', { name: 'Send to the supplier' }, wait));
-    expect((await screen.findByRole('status', undefined, wait)).textContent).toMatch(/Sent .* You can now receive goods against it/);
+    await waitFor(() => expect(screen.getAllByRole('status').some((s) => /Sent .* You can now receive goods against it/.test(s.textContent ?? ''))).toBe(true), wait);
     expect(await screen.findByRole('link', { name: 'Receive goods' }, wait)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Send to the supplier' })).toBeNull();
   });
@@ -138,7 +139,8 @@ describe('the purchase order pages', () => {
     const draft = await retail.createPurchaseOrder({ supplier_id: SUPPLIER, branch_id: BRANCH, lines: [{ product_id: await bulbId(), qty: '1000', cost_minor: 5_000_000 }] }, 'k-big');
     mount('/purchase-orders/$orderId', PurchaseOrderPage, `/staff/retail/purchase-orders/${draft.id}`);
     fireEvent.click(await screen.findByRole('button', { name: 'Send to the supplier' }, wait));
-    expect((await screen.findByRole('status', undefined, wait)).textContent).toMatch(/second person.*stays a draft/);
+    await waitFor(() => expect(screen.getAllByRole('status').some((s) => /second person.*stays a draft/.test(s.textContent ?? ''))).toBe(true), wait);
+
     expect((await retail.getPurchaseOrder(draft.id ?? '')).status).toBe('draft');
     expect(screen.queryByRole('link', { name: 'Receive goods' })).toBeNull();
   });
@@ -213,9 +215,9 @@ describe('the supplier invoice page', () => {
     await waitFor(() => expect(panel.textContent).toContain('UGX 36,000'), wait);
     expect(panel.textContent).toContain('UGX 35,000');
     expect(await screen.findByTestId('bill-reason-required', undefined, wait)).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Save supplier invoice' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Save supplier invoice' }) as HTMLButtonElement).getAttribute('data-not-ready')).toBe('true');
     type(/Why does the invoice differ/, 'Price rose');
-    await waitFor(() => expect((screen.getByRole('button', { name: 'Save supplier invoice' }) as HTMLButtonElement).disabled).toBe(false), wait);
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Save supplier invoice' }) as HTMLButtonElement).getAttribute('data-not-ready')).toBeNull(), wait);
     click('Save supplier invoice');
     await waitFor(() => expect(router.state.location.pathname).toMatch(/\/supplier-bills\/[^/]+$/), wait);
     const bills = (await retail.listSupplierBills({})).items ?? [];
@@ -231,8 +233,8 @@ describe('the supplier payment page', () => {
     await retail.createSupplierBill({ supplier_id: SUPPLIER, supplier_ref: 'INV-1', bill_date: '2026-09-01', due_date: '2026-09-30', total_minor: 35000, lines: [{ receipt_line_id: receipt.lines?.[0]?.id ?? '', qty: '10', unit_price_minor: 3500 }] }, 'k-bill');
     const { router } = mount('/supplier-payments/new', SupplierPaymentNewPage, `/staff/retail/supplier-payments/new?supplier=${SUPPLIER}`);
     expect((await screen.findByTestId('owed-total', undefined, wait)).textContent).toContain('UGX 47,000');
-    expect((screen.getByLabelText('Supplier') as HTMLSelectElement).value).toBe(SUPPLIER);
-    type('Amount paid', '40000');
+    expect((screen.getByLabelText(/^Supplier/) as HTMLSelectElement).value).toBe(SUPPLIER);
+    type(/Amount paid/, '40000');
     click('Save payment');
     await waitFor(() => expect(router.state.location.pathname).toMatch(/\/supplier-payments\/[^/]+$/), wait);
     const payments = (await retail.listSupplierPayments({})).items ?? [];

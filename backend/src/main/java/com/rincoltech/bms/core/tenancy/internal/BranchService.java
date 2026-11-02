@@ -1,6 +1,7 @@
 package com.rincoltech.bms.core.tenancy.internal;
 
 import com.rincoltech.bms.core.audit.AuditLog;
+import com.rincoltech.bms.core.documents.Documents;
 import com.rincoltech.bms.core.tenancy.BranchClosingCheck;
 import com.rincoltech.bms.core.tenancy.BranchClosingCheck.Finding;
 import com.rincoltech.bms.core.tenancy.BranchDeactivationGuard;
@@ -40,7 +41,7 @@ class BranchService implements BranchProvisioning {
 
     private static final String COLUMNS =
             "id, code, name, location, is_head_office, status, stocks_goods, sells_goods, closed_at,"
-                    + " closed_reason, created_at, updated_at, version";
+                    + " closed_reason, logo_document_id, created_at, updated_at, version";
     private static final String READ = "core.branches.read";
 
     private final JdbcClient jdbc;
@@ -50,6 +51,7 @@ class BranchService implements BranchProvisioning {
     private final List<BranchClosingCheck> checks;
     private final List<BranchSellingCheck> sellingChecks;
     private final CurrentTenant tenant;
+    private final Documents documents;
 
     BranchService(
             JdbcClient jdbc,
@@ -58,7 +60,8 @@ class BranchService implements BranchProvisioning {
             List<BranchDeactivationGuard> guards,
             List<BranchClosingCheck> checks,
             List<BranchSellingCheck> sellingChecks,
-            CurrentTenant tenant) {
+            CurrentTenant tenant,
+            Documents documents) {
         this.jdbc = jdbc;
         this.planLimits = planLimits;
         this.audit = audit;
@@ -66,6 +69,7 @@ class BranchService implements BranchProvisioning {
         this.checks = List.copyOf(checks);
         this.sellingChecks = List.copyOf(sellingChecks);
         this.tenant = tenant;
+        this.documents = documents;
     }
 
     @Transactional(readOnly = true)
@@ -102,6 +106,7 @@ class BranchService implements BranchProvisioning {
                         b.closedReason(),
                         f.count(),
                         f.valueMinor(),
+                        b.logoUrl(),
                         b.createdAt(),
                         b.updatedAt(),
                         b.version()))
@@ -116,34 +121,81 @@ class BranchService implements BranchProvisioning {
 
     @Transactional
     BranchResponse create(CreateBranchRequest request) {
-        long active = jdbc.sql("SELECT count(*) FROM branches WHERE status = 'active'")
-                .query(Long.class)
-                .single();
-        planLimits.checkRoomFor(PlanLimits.MAX_BRANCHES, active);
-        boolean codeTaken = jdbc.sql("SELECT count(*) FROM branches WHERE code = ?")
-                        .param(request.code())
-                        .query(Long.class)
-                        .single()
-                > 0;
-        if (codeTaken) {
+        boolean sells = request.sellsGoods() == null || request.sellsGoods();
+        boolean stocks = request.stocksGoods() == null || request.stocksGoods();
+        if (!sells && !stocks) {
+            throw ApiException.rule(
+                    "store_must_stock",
+                    "A Store holds stock, so it cannot also be a branch that keeps no goods. Make it a shop that sells,"
+                            + " or let it keep goods.");
+        }
+        checkRoomForAnOpenBranch();
+        String code = request.code() == null ? codeFrom(request.name()) : request.code();
+        UUID id = UUID.randomUUID();
+        // The lock above serialises adds, so a made code is never taken in between.
+        // A typed code that is taken is refused here with a 409, never a 500.
+        int inserted = jdbc.sql("""
+                        INSERT INTO branches (id, tenant_id, code, name, location, sells_goods, stocks_goods)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
+                        ON CONFLICT (tenant_id, code) DO NOTHING
+                        """)
+                .params(id, code, request.name().trim(), request.location(), sells, stocks)
+                .update();
+        if (inserted == 0) {
             throw new ApiException(
                     HttpStatus.CONFLICT, "duplicate_branch_code", "Duplicate branch code", "The code is in use.");
         }
-        UUID id = UUID.randomUUID();
-        boolean sells = request.sellsGoods() == null || request.sellsGoods();
-        jdbc.sql("""
-                        INSERT INTO branches (id, tenant_id, code, name, location, sells_goods)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?)
-                        """)
-                .params(id, request.code(), request.name().trim(), request.location(), sells)
-                .update();
         Map<String, Object> after = new LinkedHashMap<>();
-        after.put("code", request.code());
+        after.put("code", code);
         after.put("sells_goods", sells);
+        after.put("stocks_goods", stocks);
         after.put("name", request.name().trim());
         after.put("location", request.location());
         audit.record(AuditLog.Entry.created("core.branch.created", "core.branch", id, id, after));
         return find(id).orElseThrow();
+    }
+
+    /**
+     * The plan's branch limit, counted under a lock per business (issue #581, ADR-089): two adds or reopens at the same moment
+     * queue here, and the second counts the first's branch once it commits, so neither goes past {@code max_branches}. The
+     * count is its own statement after the lock, so under read committed it sees what the first committed.
+     */
+    private void checkRoomForAnOpenBranch() {
+        jdbc.sql(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(current_setting('app.tenant_id') || ':core.branch.open', 0))")
+                .query(rs -> {});
+        long active = jdbc.sql("SELECT count(*) FROM branches WHERE status = 'active'")
+                .query(Long.class)
+                .single();
+        planLimits.checkRoomFor(PlanLimits.MAX_BRANCHES, active);
+    }
+
+    private boolean codeTaken(String code) {
+        return jdbc.sql("SELECT count(*) FROM branches WHERE code = ?")
+                        .param(code)
+                        .query(Long.class)
+                        .single()
+                > 0;
+    }
+
+    /**
+     * A code made from the name when none is typed (issue #581, ADR-089): its letters and digits in capitals, at most six, and
+     * a number after them when that is taken ("Gayaza Store" is GAYAZA, a second Gayaza branch GAYAZA2). A name with fewer than
+     * two such characters starts from BR.
+     */
+    private String codeFrom(String name) {
+        String base = name.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "");
+        base = base.length() < 2 ? "BR" : base.substring(0, Math.min(6, base.length()));
+        if (!codeTaken(base)) {
+            return base;
+        }
+        for (int n = 2; ; n++) {
+            String suffix = String.valueOf(n);
+            String code = base.substring(0, Math.min(base.length(), 10 - suffix.length())) + suffix;
+            if (!codeTaken(code)) {
+                return code;
+            }
+        }
     }
 
     @Override
@@ -153,7 +205,7 @@ class BranchService implements BranchProvisioning {
             throw ApiException.rule(
                     "invalid_branch", "A branch needs a code of 2 to 10 capital letters or digits and a name.");
         }
-        return create(new CreateBranchRequest(code, name, null, null)).id();
+        return create(new CreateBranchRequest(code, name, null, null, null)).id();
     }
 
     @Transactional
@@ -251,7 +303,7 @@ class BranchService implements BranchProvisioning {
                         "branch_close_needs_reason",
                         "Confirm closing this branch",
                         describe(before, findings)
-                                + " Closing keeps all of it on record and posts nothing, but nobody can sell, restock"
+                                + " Closing keeps all of it on record and posts nothing, but nobody can sell, buy stock"
                                 + " or transfer there afterwards. To close it anyway, say why.",
                         List.of(),
                         facts);
@@ -282,14 +334,15 @@ class BranchService implements BranchProvisioning {
                     "Invalid status transition",
                     "The branch is already open.");
         }
-        long active = jdbc.sql("SELECT count(*) FROM branches WHERE status = 'active'")
-                .query(Long.class)
-                .single();
-        planLimits.checkRoomFor(PlanLimits.MAX_BRANCHES, active);
-        jdbc.sql("""
+        checkRoomForAnOpenBranch();
+        // Guarded by the version and status read above, so the row is changed exactly once whatever ran in between.
+        int reopened = jdbc.sql("""
                         UPDATE branches SET status = 'active', closed_at = NULL, closed_reason = NULL, updated_at = now(),
-                               version = version + 1 WHERE id = ?
-                        """).param(branchId).update();
+                               version = version + 1 WHERE id = ? AND status = 'inactive' AND version = ?
+                        """).params(branchId, before.version()).update();
+        if (reopened == 0) {
+            throw Versions.conflict(before.version());
+        }
         audit.record(new AuditLog.Entry(
                 "core.branch.reopened",
                 "core.branch",
@@ -315,7 +368,7 @@ class BranchService implements BranchProvisioning {
                 "branch_still_has_stock",
                 "This branch still has goods",
                 describe(branch, findings)
-                        + " Move the stock to a shop, receive or cancel the transfers and finish the stock-takes first,"
+                        + " Move the stock to a shop, receive or cancel the transfers and commit the stock counts first,"
                         + " then mark it as not stocking.",
                 List.of(),
                 facts(findings));
@@ -391,8 +444,8 @@ class BranchService implements BranchProvisioning {
             } else if (f.kind().equals("open_stocktakes")) {
                 words.append("has ")
                         .append(f.count())
-                        .append(f.count() == 1 ? " stock-take" : " stock-takes")
-                        .append(" started and not finished");
+                        .append(f.count() == 1 ? " stock count" : " stock counts")
+                        .append(" started and not saved");
             } else {
                 words.append("has ")
                         .append(f.count())
@@ -431,6 +484,100 @@ class BranchService implements BranchProvisioning {
         long abs = Math.abs(minor);
         return currency + " " + (minor < 0 ? "-" : "")
                 + String.format(Locale.ENGLISH, "%,d.%02d", abs / 100, abs % 100);
+    }
+
+    // ---- The shop's own logo (issue #461, ADR-068) ------------------------------------------------------
+
+    /**
+     * Stores the logo as a core document of the tenant (the subject of the business logo, so the public route reads it the
+     * same way) and points the branch at it; the file was checked and re-encoded before the transaction opened
+     * ({@link BrandingService#uploadBranchLogo}). A branch outside the caller's {@code core.branches.manage} scope is a 404
+     * and a closed branch a 409, both before anything is stored, and the status is checked again on the locked row so a close
+     * that lands while the file is stored is still a 409. No If-Match: the version still goes up, so a form holding the
+     * old one refetches.
+     */
+    @Transactional
+    BranchResponse replaceLogo(UUID branchId, Documents.Prepared prepared) {
+        Principal principal = CurrentPrincipal.require();
+        BranchResponse branch = find(branchId)
+                .filter(b -> principal.may("core.branches.manage", b.id()))
+                .orElseThrow(ApiException::notFound);
+        requireOpenForLogo(branch);
+        // Stored first: the object write does not wait inside the branch row lock.
+        UUID id = documents
+                .store(prepared, TenantDocumentAccess.SUBJECT, tenant.profile().id(), branchId)
+                .id();
+        // Checked again on the locked row: a close that committed while the file was stored refuses here, and the
+        // rollback
+        // removes the stored object (DocumentService.store).
+        BranchResponse locked = lockForUpdate(branchId);
+        requireOpenForLogo(locked);
+        return setLogo(locked, id);
+    }
+
+    private static void requireOpenForLogo(BranchResponse branch) {
+        if (!"active".equals(branch.status())) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "invalid_status_transition",
+                    "Invalid status transition",
+                    "The branch is closed. Reopen it to change its logo.");
+        }
+    }
+
+    /**
+     * The previous logo's document stays (documents are never deleted); only the branch's pointer is cleared. Idempotent on
+     * an open branch; a closed branch's logo is left as it is (409), as for an upload.
+     */
+    @Transactional
+    BranchResponse removeLogo(UUID branchId) {
+        BranchResponse before = lockForUpdate(branchId);
+        requireOpenForLogo(before);
+        return before.logoUrl() == null ? before : setLogo(before, null);
+    }
+
+    private BranchResponse setLogo(BranchResponse before, UUID documentId) {
+        UUID was = logoDocumentId(before.id()).orElse(null);
+        jdbc.sql("""
+                        UPDATE branches SET logo_document_id = ?, updated_at = now(), version = version + 1
+                         WHERE id = ?
+                        """).params(documentId, before.id()).update();
+        Map<String, Object> wasValues = new LinkedHashMap<>();
+        wasValues.put("logo_document_id", was);
+        Map<String, Object> nowValues = new LinkedHashMap<>();
+        nowValues.put("logo_document_id", documentId);
+        audit.record(new AuditLog.Entry(
+                "core.branch.logo_changed", "core.branch", before.id(), before.id(), wasValues, nowValues));
+        return find(before.id()).orElseThrow();
+    }
+
+    /** The branch's logo document, when it has one; row-level security keeps every other business's branches out. */
+    @Transactional(readOnly = true)
+    Optional<UUID> logoDocumentId(UUID branchId) {
+        return jdbc.sql("SELECT logo_document_id FROM branches WHERE id = ?")
+                .param(branchId)
+                .query((rs, n) -> Optional.ofNullable(rs.getObject(1, UUID.class)))
+                .optional()
+                .flatMap(o -> o);
+    }
+
+    /** As {@link #logoDocumentId} by the branch code, which never changes: what an issued document's snapshot keeps. */
+    @Transactional(readOnly = true)
+    Optional<BranchLogo> logoByCode(String code) {
+        return jdbc.sql("SELECT id, logo_document_id FROM branches WHERE code = ? AND logo_document_id IS NOT NULL")
+                .param(code)
+                .query((rs, n) -> new BranchLogo(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)))
+                .optional();
+    }
+
+    /** A branch with its logo document, for the path the logo is served at (issue #500). */
+    record BranchLogo(UUID branchId, UUID documentId) {}
+
+    static final String LOGO_PATH = "/api/v1/branches/%s/logo?v=%s";
+
+    /** The versioned URL the branch response and {@code /me} give for a shop's logo, or null without one. */
+    static String logoUrl(UUID branchId, UUID logoDocumentId) {
+        return logoDocumentId == null ? null : LOGO_PATH.formatted(branchId, logoDocumentId);
     }
 
     private BranchResponse lockForUpdate(UUID branchId) {
@@ -473,6 +620,7 @@ class BranchService implements BranchProvisioning {
                 rs.getString("closed_reason"),
                 null,
                 null,
+                logoUrl(rs.getObject("id", UUID.class), rs.getObject("logo_document_id", UUID.class)),
                 instant(rs.getTimestamp("created_at")),
                 instant(rs.getTimestamp("updated_at")),
                 rs.getInt("version"));

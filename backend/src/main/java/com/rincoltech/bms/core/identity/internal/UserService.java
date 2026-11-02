@@ -40,6 +40,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import org.postgresql.util.PSQLException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -273,6 +275,15 @@ class UserService implements TenantAdmins {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public Optional<Owner> owner() {
+        return jdbc.sql("SELECT id, full_name, email FROM users WHERE kind = 'staff' AND is_owner")
+                .query((rs, n) ->
+                        new Owner(rs.getObject("id", UUID.class), rs.getString("full_name"), rs.getString("email")))
+                .optional();
+    }
+
+    @Override
     @Transactional(propagation = Propagation.MANDATORY, readOnly = true)
     public void requireInvitedFirstAdmin(UUID userId) {
         UserResponse user = find(userId).orElseThrow(ApiException::notFound);
@@ -423,11 +434,15 @@ class UserService implements TenantAdmins {
         String phone = request.phone() == null ? before.phoneE164() : normalisePhone(request.phone());
         checkUnique(email, phone, userId);
         boolean contactChanged = !Objects.equals(email, before.email()) || !Objects.equals(phone, before.phoneE164());
-        jdbc.sql("""
-                        UPDATE users SET full_name = ?, email = ?, phone_e164 = ?, updated_at = now(), version = version + 1,
-                                         contact_changed_at = CASE WHEN ? THEN now() ELSE contact_changed_at END
-                         WHERE id = ?
-                        """).params(fullName, email, phone, contactChanged, userId).update();
+        try {
+            jdbc.sql("""
+                            UPDATE users SET full_name = ?, email = ?, phone_e164 = ?, updated_at = now(), version = version + 1,
+                                             contact_changed_at = CASE WHEN ? THEN now() ELSE contact_changed_at END
+                             WHERE id = ?
+                            """).params(fullName, email, phone, contactChanged, userId).update();
+        } catch (DuplicateKeyException e) {
+            throw duplicateContact(e);
+        }
         if (contactChanged && before.isOwner() && before.email() == null && before.phoneE164() != null) {
             // An Owner with no email hears of it by SMS on the old phone, where the business's SMS is on (ADR-036,
             // ADR-062).
@@ -522,7 +537,11 @@ class UserService implements TenantAdmins {
         return after;
     }
 
-    /** FR-IAM-08: deactivation ends every session at once; the next request is refused. */
+    /**
+     * FR-IAM-08: deactivation ends every session at once; the next request is refused. It takes the user out of the
+     * {@code users_staff_phone} index, so a later reactivation must call {@link #checkUnique} and map the index's refusal
+     * through {@link #duplicateContact} (ADR-085, issue #573).
+     */
     @Transactional
     UserResponse deactivate(UUID userId) {
         owners.lockShared();
@@ -591,6 +610,44 @@ class UserService implements TenantAdmins {
                 null,
                 Map.of("mfa_enabled", before.mfaEnabled()),
                 Map.of("mfa_enabled", false)));
+        return find(userId).orElseThrow();
+    }
+
+    /**
+     * Issue #647: whoever may manage users ends every session of another staff user at once, for a lost or stolen phone. The
+     * person stays active and signs in again with their password; another administrator's sessions only by the Owner, as for
+     * the other changes to an administrator (ADR-062), and only a person inside the caller's branches, as for the reset of a
+     * sign-in (404 otherwise). One's own devices are signed out from the person menu instead.
+     */
+    @Transactional
+    UserResponse signOutDevices(UUID userId) {
+        owners.lockShared();
+        Principal admin = CurrentPrincipal.require();
+        if (admin.userId().equals(userId)) {
+            throw ApiException.rule(
+                    "cannot_sign_out_self_here", "Use Sign out everywhere in your own menu to sign out your devices.");
+        }
+        // 404 for an id that is not a staff user of this business, before anything is revoked.
+        UserResponse before = lockUser(userId);
+        resets.requireInScope(admin, userId);
+        if (!"active".equals(before.status())) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "invalid_status_transition",
+                    "Invalid status transition",
+                    "Only an active person can be signed out; this person has no session.");
+        }
+        if (isTenantAdmin(userId)) {
+            owners.requireMayChangeAdmin(admin, userId, "sign out an administrator's devices");
+        }
+        int ended = accounts.sessions().revokeAllOf(userId, "admin", clock.now());
+        audit.record(new AuditLog.Entry(
+                "core.user.signed_out_everywhere",
+                "core.user",
+                userId,
+                null,
+                Map.of(),
+                Map.of("sessions_ended", ended)));
         return find(userId).orElseThrow();
     }
 
@@ -691,10 +748,14 @@ class UserService implements TenantAdmins {
         planLimits.checkRoomFor(PlanLimits.MAX_STAFF_USERS, staff);
         checkUnique(email, phone, null);
         UUID id = UUID.randomUUID();
-        jdbc.sql("""
-                        INSERT INTO users (id, tenant_id, kind, full_name, email, phone_e164, status)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, 'staff', ?, ?, ?, 'invited')
-                        """).params(id, fullName.trim(), email, phone).update();
+        try {
+            jdbc.sql("""
+                            INSERT INTO users (id, tenant_id, kind, full_name, email, phone_e164, status)
+                            VALUES (?, current_setting('app.tenant_id')::uuid, 'staff', ?, ?, ?, 'invited')
+                            """).params(id, fullName.trim(), email, phone).update();
+        } catch (DuplicateKeyException e) {
+            throw duplicateContact(e);
+        }
         return id;
     }
 
@@ -823,6 +884,28 @@ class UserService implements TenantAdmins {
                         HttpStatus.CONFLICT, "duplicate_phone", "Duplicate phone", "A staff user has this phone.");
             }
         }
+    }
+
+    /**
+     * The unique indexes behind {@link #checkUnique} (issue #323): two requests that passed the check at the same moment
+     * reach the index, the second waits for the first to commit and is refused here with the same 409. The exception's
+     * message carries the database's detail with the full phone or email, so it is never chained as the cause or logged.
+     */
+    static RuntimeException duplicateContact(DuplicateKeyException e) {
+        String constraint = e.getMostSpecificCause() instanceof PSQLException p && p.getServerErrorMessage() != null
+                ? p.getServerErrorMessage().getConstraint()
+                : null;
+        if ("users_staff_email".equals(constraint)) {
+            return new ApiException(
+                    HttpStatus.CONFLICT, "duplicate_email", "Duplicate email", "A staff user has this email.");
+        }
+        if ("users_staff_phone".equals(constraint)) {
+            return new ApiException(
+                    HttpStatus.CONFLICT, "duplicate_phone", "Duplicate phone", "A staff user has this phone.");
+        }
+        // Any other unique key (the id, a later index) is a fault, not a taken contact: a 500 naming only the
+        // constraint.
+        return new IllegalStateException("Unexpected unique violation on users: " + constraint);
     }
 
     private UserResponse lockUser(UUID userId) {

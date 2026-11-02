@@ -1,7 +1,8 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute, useParams } from '@tanstack/react-router';
 import { useState } from 'react';
-import { businessToday, retail, type Product } from '../../../api/retail';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { businessToday, businessZone, retail, type Product } from '../../../api/retail';
 import { retailOrders, type Order } from '../../../api/retail-orders';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { useStaff } from '../context';
@@ -13,6 +14,7 @@ import { SaleLineCard } from './sale';
 import { withUnit, type DraftLine } from './sale-state';
 import { OpenSale } from './sales';
 import { Gate, Note, Problem, ProductPicker, money, useBranchName } from './ui';
+import { Hint } from '../../../app/ui/Hint';
 
 // One customer order (issue #385, ADR-052): what was ordered, where it stands, who did what and when, the delivery details that
 // can still change, and, once delivered, the sale it became (with its receipt, payments, returns and void like any sale). Its items
@@ -53,6 +55,7 @@ function ChangeDetails({ order }: { order: Order }) {
       void client.invalidateQueries({ queryKey: ['retail', 'order', order.id] });
       void client.invalidateQueries({ queryKey: ['retail', 'orders'] });
     },
+    meta: { success: 'Changes saved' },
   });
   const problem = name.trim() === '' ? 'Type the name of the customer.' : feeOf(fee) === null ? 'The delivery fee is a whole number of shillings.' : null;
   if (!open) return <button type="button" className="btn-sm" data-tour="order-change" onClick={() => setOpen(true)}>Change the delivery details</button>;
@@ -74,7 +77,7 @@ function ChangeDetails({ order }: { order: Order }) {
       <p className="hint">To change the items, use Change the items.</p>
       {problem && <p role="alert" className="rt-flag">{problem}</p>}
       <Problem error={save.error} />
-      <button type="button" disabled={problem !== null || save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'Saving' : 'Save the changes'}</button>
+      <BusyButton busy={save.isPending} type="button" disabled={problem !== null} onClick={() => save.mutate()}>Save the changes</BusyButton>
       <button type="button" onClick={() => setOpen(false)}>Close</button>
     </fieldset>
   );
@@ -112,6 +115,7 @@ function ChangeItems({ order }: { order: Order }) {
       void client.invalidateQueries({ queryKey: ['retail', 'orders'] });
       void client.invalidateQueries({ queryKey: ['retail', 'stock'] });
     },
+    meta: { success: 'Items saved' },
   });
   if (!open) return <button type="button" className="btn-sm" data-tour="order-items-change" onClick={() => setOpen(true)}>Change the items</button>;
   const edit = (f: (ls: DraftLine[]) => DraftLine[]) => setLines(f(shown ?? []));
@@ -144,12 +148,12 @@ function ChangeItems({ order }: { order: Order }) {
           <input id="items-reason" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} />
           <label htmlFor="items-note">Why the items changed (optional, it stays in the history)</label>
           <input id="items-note" value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} />
-          <p className="hint">Saving keeps the new items aside and puts back on the shelf what was taken off. An item left as it is on the order keeps the price agreed; a new item, or one whose quantity changed, takes today&apos;s price.</p>
+          <Hint full>Saving keeps the new items aside and puts back on the shelf what was taken off. An item left as it is on the order keeps the price agreed; a new item, or one whose quantity changed, takes today&apos;s price.</Hint>
           {problem && <Note>{problem}</Note>}
         </>
       )}
       <Problem error={save.error} />
-      <button type="button" className="rt-primary" disabled={!shown || problem !== null || save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'Saving' : 'Save the new items'}</button>
+      <BusyButton busy={save.isPending} type="button" className="rt-primary" disabled={!shown} notReady={problem !== null} onClick={() => save.mutate()}>Save the new items</BusyButton>
       <button type="button" onClick={() => { setOpen(false); setLines(null); save.reset(); }}>Close</button>
     </fieldset>
   );
@@ -167,6 +171,7 @@ function PayFee({ order }: { order: Order }) {
       void client.invalidateQueries({ queryKey: ['retail', 'order', order.id] });
       void client.invalidateQueries({ queryKey: ['retail', 'orders'] });
     },
+    meta: { success: 'Delivery fee paid' },
   });
   return (
     <fieldset>
@@ -178,7 +183,7 @@ function PayFee({ order }: { order: Order }) {
         <option value="bank">Bank</option>
       </select>
       <Problem error={pay.error} />
-      <button type="button" disabled={pay.isPending} onClick={() => pay.mutate()}>{pay.isPending ? 'Saving' : 'Save: the fee is paid'}</button>
+      <BusyButton busy={pay.isPending} type="button" onClick={() => pay.mutate()}>Save: the fee is paid</BusyButton>
     </fieldset>
   );
 }
@@ -215,7 +220,7 @@ export function OrderPage({ orderId }: { orderId: string }) {
           <ol>
             {(o.history ?? []).map((e, i) => (
               <li key={`${e.at}-${i}`}>
-                <strong>{STEP_WORDS[e.step ?? ''] ?? e.step}</strong>, {new Date(e.at ?? '').toLocaleString()}{e.by_name ? `, by ${e.by_name}` : ''}
+                <strong>{STEP_WORDS[e.step ?? ''] ?? e.step}</strong>, {new Date(e.at ?? '').toLocaleString(undefined, { timeZone: businessZone() })}{e.by_name ? `, by ${e.by_name}` : ''}
                 {e.note ? <span className="hint">: {e.note}</span> : null}
               </li>
             ))}

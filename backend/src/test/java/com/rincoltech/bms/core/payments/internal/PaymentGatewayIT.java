@@ -11,6 +11,7 @@ import com.rincoltech.bms.core.payments.PurposeHandler;
 import com.rincoltech.bms.testsupport.MovableClock;
 import com.rincoltech.bms.testsupport.MovableClockConfig;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -49,6 +50,13 @@ import tools.jackson.databind.JsonNode;
  * the lost order answer; expiry and a late payment; the database's own guard on transitions; the tenant binding of the
  * merchant account; the daily ceiling across the Kampala midnight; and tenant isolation. No test sleeps: the clock is a
  * bean and the pause between order attempts is replaced. Every name, number and reference is fabricated.
+ *
+ * <p>The clock starts at {@link #BEFORE_MIDNIGHT}, far ahead of the wall clock, never behind it (issue #362). The poller
+ * claims the due checks of every tenant, and a check is due and an intent expired by whatever clock the claimer reads.
+ * On the shared 15 October 2026 of {@link MovableClockConfig}, every intent here was already expired by the wall clock,
+ * so a poller of another cached context could end one {@code expired} between this test's create and its assertion.
+ * IntegrationTest switches the scheduled poller off (#516); ahead of the wall clock, nothing of this class is due or
+ * expired for any claimer on the wall clock even if one ran.
  */
 @Import({PaymentGatewayIT.Config.class, MovableClockConfig.class})
 @ResourceLock(MovableClockConfig.LOCK)
@@ -68,6 +76,12 @@ import tools.jackson.databind.JsonNode;
             "bms.pesapal.refused-key-digests=fd7b571e25333d58599ee989f5fe9b901bead180a0d1b8d839c2bb59d078db49"
         })
 class PaymentGatewayIT extends IntegrationTest {
+
+    /** 20:59 UTC, 23:59 on 2099-10-15 in Kampala: the shape of {@link MovableClockConfig#BEFORE_MIDNIGHT}, ahead of the wall clock. */
+    static final Instant BEFORE_MIDNIGHT = Instant.parse("2099-10-15T20:59:00Z");
+
+    /** 21:01 UTC, 00:01 on 2099-10-16 in Kampala. */
+    static final Instant AFTER_MIDNIGHT = Instant.parse("2099-10-15T21:01:00Z");
 
     static final String PLATFORM_TOKEN = "invented-platform-path-token-for-the-it-0001";
     static final String PERMS =
@@ -209,7 +223,7 @@ class PaymentGatewayIT extends IntegrationTest {
         fake.reset();
         merchantAccounts.forgetTests();
         handler.reset();
-        clock.set(MovableClockConfig.BEFORE_MIDNIGHT);
+        clock.set(BEFORE_MIDNIGHT);
         // Nothing left due from an earlier test: only this test's intents are checked.
         TestDatabase.owner()
                 .sql("UPDATE payment_intents SET next_check_at = NULL")
@@ -397,9 +411,7 @@ class PaymentGatewayIT extends IntegrationTest {
         assertThat(audits(id, "order_created")).isEqualTo(1);
         // The tenant came from the row's host binding, and the expiry is 30 minutes.
         assertThat(row(id).get("expires_at").toString()).isNotNull();
-        assertThat(Duration.between(
-                        MovableClockConfig.BEFORE_MIDNIGHT,
-                        ((java.sql.Timestamp) row(id).get("expires_at")).toInstant()))
+        assertThat(Duration.between(BEFORE_MIDNIGHT, ((java.sql.Timestamp) row(id).get("expires_at")).toInstant()))
                 .isEqualTo(Duration.ofMinutes(30));
     }
 
@@ -872,6 +884,159 @@ class PaymentGatewayIT extends IntegrationTest {
         assertThat(row(id).get("next_check_at")).isNull();
     }
 
+    // ---- a business whose subscription ended (ADR-073 decision 5) ----------------------------------------
+
+    /** The Owner's cancellation took effect: cancelled with an end date, the tenant suspended (read only). */
+    void endSubscription(TestDatabase.Fixture t, boolean byOwner) {
+        TestDatabase.owner()
+                .sql(
+                        "INSERT INTO subscriptions (id, tenant_id, plan_id, status, ended_on)"
+                                + " SELECT gen_random_uuid(), id, plan_id, ?, ? FROM tenants WHERE id = ?"
+                                + " ON CONFLICT (tenant_id) DO UPDATE SET status = EXCLUDED.status, ended_on = EXCLUDED.ended_on")
+                .params(
+                        byOwner ? "cancelled" : "suspended",
+                        byOwner ? java.sql.Date.valueOf("2026-01-31") : null,
+                        t.tenantId())
+                .update();
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET status = 'suspended' WHERE id = ?")
+                .param(t.tenantId())
+                .update();
+    }
+
+    void resume(TestDatabase.Fixture t) {
+        TestDatabase.owner()
+                .sql("UPDATE subscriptions SET status = 'active', ended_on = NULL WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .update();
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET status = 'active' WHERE id = ?")
+                .param(t.tenantId())
+                .update();
+    }
+
+    @Test
+    void aNotificationAfterTheSubscriptionEndedStillBooksThePayment() {
+        JsonNode intent = create(1500);
+        String id = intent.get("id").asString();
+        pay(intent, 1500, "UGX", "CONF-0E01");
+        endSubscription(BOUND, true);
+        try {
+            ResponseEntity<JsonNode> r = ipn(
+                    token(), tracking(intent), intent.get("merchant_reference").asString());
+            assertThat(r.getStatusCode().value()).isEqualTo(200);
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT count(*) FROM payment_callbacks WHERE intent_id = ?")
+                            .param(UUID.fromString(id))
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(1);
+            clock.set(clock.instant().plusSeconds(11));
+            tick();
+            assertThat(statusOf(id)).isEqualTo("booked");
+            assertThat(handler.bookings).hasSize(1);
+        } finally {
+            resume(BOUND);
+        }
+    }
+
+    @Test
+    void aDuePollAfterTheSubscriptionEndedStillBooksThePayment() {
+        JsonNode intent = create(1500);
+        String id = intent.get("id").asString();
+        pay(intent, 1500, "UGX", "CONF-0E02");
+        endSubscription(BOUND, true);
+        try {
+            clock.set(clock.instant().plus(Duration.ofMinutes(3)));
+            tick();
+            assertThat(statusOf(id)).isEqualTo("booked");
+            assertThat(handler.bookings).hasSize(1);
+        } finally {
+            resume(BOUND);
+        }
+    }
+
+    // JUSTIFICATION-A3: one new test method appended beside the ones whose fixtures it reuses; no production code.
+    /**
+     * Independent review of #474: the end made by the real definer (as the plan job does), not by hand. A mobile money
+     * notification after it is recorded and booked, while a new payment request is refused; once the operator suspends the
+     * ended business, the next notification is ignored.
+     */
+    @Test
+    void aNotificationAfterTheRealEndIsRecordedUntilTheOperatorSuspends() {
+        JsonNode first = create(1500);
+        JsonNode second = create(1700);
+        pay(first, 1500, "UGX", "CONF-0E04");
+        pay(second, 1700, "UGX", "CONF-0E05");
+        UUID tenant = BOUND.tenantId();
+        TestDatabase.owner()
+                .sql("DO $$ BEGIN PERFORM set_config('app.tenant_id', '" + tenant + "', true);"
+                        + " PERFORM platform_end_subscription('" + tenant + "', DATE '2026-01-31'); END $$")
+                .update();
+        try {
+            assertThat(TestDatabase.owner()
+                            .sql(
+                                    "SELECT s.status || '/' || t.status FROM subscriptions s JOIN tenants t ON t.id = s.tenant_id"
+                                            + " WHERE t.id = ?")
+                            .param(tenant)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("cancelled/suspended");
+            ResponseEntity<JsonNode> refused = call(
+                    HttpMethod.POST,
+                    "/api/v1/payments/intents",
+                    BOUND,
+                    staff,
+                    Map.of("purpose", PURPOSE, "subject_id", subject, "amount_minor", 900, "payer_phone", "0700000123"),
+                    "key-" + UUID.randomUUID());
+            assertThat(refused.getStatusCode().value()).isEqualTo(423);
+            assertThat(refused.getBody().get("code").asString()).isEqualTo("subscription_ended");
+
+            String firstId = first.get("id").asString();
+            assertThat(ipn(
+                                    token(),
+                                    tracking(first),
+                                    first.get("merchant_reference").asString())
+                            .getStatusCode()
+                            .value())
+                    .isEqualTo(200);
+            clock.set(clock.instant().plusSeconds(11));
+            tick();
+            assertThat(statusOf(firstId)).isEqualTo("booked");
+            assertThat(handler.bookings).hasSize(1);
+
+            TestDatabase.owner()
+                    .sql("SELECT platform_set_subscription_status(?, 'suspended', NULL, NULL)")
+                    .param(tenant)
+                    .query()
+                    .singleRow();
+            ipn(token(), tracking(second), second.get("merchant_reference").asString());
+            clock.set(clock.instant().plus(Duration.ofMinutes(3)));
+            tick();
+            assertThat(statusOf(second.get("id").asString())).isEqualTo("pending");
+            assertThat(handler.bookings).hasSize(1);
+        } finally {
+            resume(BOUND);
+        }
+    }
+
+    @Test
+    void aBusinessTheOperatorSuspendedHasNeitherNotificationNorPollActedOn() {
+        JsonNode intent = create(1500);
+        String id = intent.get("id").asString();
+        pay(intent, 1500, "UGX", "CONF-0E03");
+        endSubscription(BOUND, false);
+        try {
+            ipn(token(), tracking(intent), intent.get("merchant_reference").asString());
+            clock.set(clock.instant().plus(Duration.ofMinutes(3)));
+            tick();
+            assertThat(statusOf(id)).isEqualTo("pending");
+            assertThat(handler.bookings).isEmpty();
+        } finally {
+            resume(BOUND);
+        }
+    }
+
     // ---- the handler -------------------------------------------------------------------------------
 
     @Test
@@ -883,7 +1048,7 @@ class PaymentGatewayIT extends IntegrationTest {
         tick();
         assertThat(statusOf(intent.get("id").asString())).isEqualTo("booked");
         assertThat(handler.calls).hasValue(2);
-        assertThat(handler.bookings.getFirst().valueDate()).isEqualTo(LocalDate.of(2026, 10, 16));
+        assertThat(handler.bookings.getFirst().valueDate()).isEqualTo(LocalDate.of(2099, 10, 16));
     }
 
     @Test
@@ -895,7 +1060,7 @@ class PaymentGatewayIT extends IntegrationTest {
         tick();
         assertThat(statusOf(intent.get("id").asString())).isEqualTo("booked");
         assertThat(handler.calls).hasValue(2);
-        assertThat(handler.bookings.getFirst().valueDate()).isEqualTo(LocalDate.of(2026, 10, 16));
+        assertThat(handler.bookings.getFirst().valueDate()).isEqualTo(LocalDate.of(2099, 10, 16));
     }
 
     @Test
@@ -1456,13 +1621,13 @@ class PaymentGatewayIT extends IntegrationTest {
     void theDailyCeilingCountsTheTenantsOwnDayAndTheNextKampalaDayStartsAtZero() {
         long askedToday = TestDatabase.owner()
                 .sql(
-                        "SELECT coalesce(sum(amount_minor), 0) FROM payment_intents WHERE tenant_id = ? AND status IN ('created','pending','paid','booked','booked_unallocated','needs_attention') AND created_at >= '2026-10-14T21:00:00Z' AND created_at < '2026-10-15T21:00:00Z'")
+                        "SELECT coalesce(sum(amount_minor), 0) FROM payment_intents WHERE tenant_id = ? AND status IN ('created','pending','paid','booked','booked_unallocated','needs_attention') AND created_at >= '2099-10-14T21:00:00Z' AND created_at < '2099-10-15T21:00:00Z'")
                 .param(BOUND.tenantId())
                 .query(Long.class)
                 .single();
         setSettings(BOUND, staff, Map.of("daily_ceiling_minor", askedToday + 5000), 200);
         try {
-            clock.set(MovableClockConfig.BEFORE_MIDNIGHT);
+            clock.set(BEFORE_MIDNIGHT);
             create(3000);
             ResponseEntity<JsonNode> over = call(
                     HttpMethod.POST,
@@ -1482,7 +1647,7 @@ class PaymentGatewayIT extends IntegrationTest {
             assertThat(over.getStatusCode().value()).isEqualTo(422);
             assertThat(over.getBody().get("code").asString()).isEqualTo("daily_ceiling_exceeded");
             // Two minutes later it is 00:01 in Kampala on the 16th: a new day, the same 3000 fits.
-            clock.set(MovableClockConfig.AFTER_MIDNIGHT);
+            clock.set(AFTER_MIDNIGHT);
             create(3000);
         } finally {
             setSettings(BOUND, staff, Map.of("daily_ceiling_minor", 100000000L), 200);
@@ -2198,14 +2363,12 @@ class PaymentGatewayIT extends IntegrationTest {
         String id = intent.get("id").asString();
         TestDatabase.owner()
                 .sql("UPDATE payment_intents SET next_check_at = ? WHERE id = ?")
-                .params(
-                        java.sql.Timestamp.from(MovableClockConfig.BEFORE_MIDNIGHT.minusSeconds(5)),
-                        UUID.fromString(id))
+                .params(java.sql.Timestamp.from(BEFORE_MIDNIGHT.minusSeconds(5)), UUID.fromString(id))
                 .update();
         // The real adapter reports "not_configured" for an account with no credentials; the fake is told the same.
         fake.failQuery(new GatewayException(GatewayException.Kind.UNAVAILABLE, 0, "not_configured"));
         // Past the whole window in which an unreachable provider would close the intent as unpaid.
-        clock.set(MovableClockConfig.BEFORE_MIDNIGHT.plus(Duration.ofDays(5)));
+        clock.set(BEFORE_MIDNIGHT.plus(Duration.ofDays(5)));
         tick();
         assertThat(statusOf(id)).isIn("pending", "expired");
         assertThat(row(id).get("check_failures")).isEqualTo(0);
@@ -2213,10 +2376,10 @@ class PaymentGatewayIT extends IntegrationTest {
         // The credentials come back (the account is connected): the same intent is checked and booked as paid.
         fake.failQuery(null);
         pay(intent, 1500, "UGX", "CONF-NOCRED-1");
-        clock.set(MovableClockConfig.BEFORE_MIDNIGHT.plus(Duration.ofDays(5)).plus(Duration.ofHours(2)));
+        clock.set(BEFORE_MIDNIGHT.plus(Duration.ofDays(5)).plus(Duration.ofHours(2)));
         TestDatabase.owner()
                 .sql("UPDATE payment_intents SET next_check_at = ? WHERE id = ?")
-                .params(java.sql.Timestamp.from(MovableClockConfig.BEFORE_MIDNIGHT), UUID.fromString(id))
+                .params(java.sql.Timestamp.from(BEFORE_MIDNIGHT), UUID.fromString(id))
                 .update();
         tick();
         assertThat(statusOf(id)).isIn("paid", "booked");
@@ -2301,25 +2464,23 @@ class PaymentGatewayIT extends IntegrationTest {
         String id = intent.get("id").asString();
         TestDatabase.owner()
                 .sql("UPDATE payment_intents SET next_check_at = ? WHERE id = ?")
-                .params(
-                        java.sql.Timestamp.from(MovableClockConfig.BEFORE_MIDNIGHT.minusSeconds(5)),
-                        UUID.fromString(id))
+                .params(java.sql.Timestamp.from(BEFORE_MIDNIGHT.minusSeconds(5)), UUID.fromString(id))
                 .update();
         // The lender rotated its secret at Pesapal: every status query is refused as an authentication error.
         fake.failQuery(
                 new GatewayException(GatewayException.Kind.AUTH, 200, "invalid_consumer_key_or_secret_provided"));
         // Past the 48 hours after which an unreachable provider would end the intent unpaid and cancel the order.
-        clock.set(MovableClockConfig.BEFORE_MIDNIGHT.plus(Duration.ofDays(5)));
+        clock.set(BEFORE_MIDNIGHT.plus(Duration.ofDays(5)));
         tick();
         assertThat(statusOf(id)).isIn("pending", "expired");
         assertThat(row(id).get("next_check_at")).isNotNull();
         assertThat(fake.calls()).noneMatch(c -> c.startsWith("cancel:"));
         // The same after the backoff the adapter reports on the next pass.
         fake.failQuery(new GatewayException(GatewayException.Kind.AUTH, 0, "auth_backoff"));
-        clock.set(MovableClockConfig.BEFORE_MIDNIGHT.plus(Duration.ofDays(5)).plus(Duration.ofHours(2)));
+        clock.set(BEFORE_MIDNIGHT.plus(Duration.ofDays(5)).plus(Duration.ofHours(2)));
         TestDatabase.owner()
                 .sql("UPDATE payment_intents SET next_check_at = ? WHERE id = ?")
-                .params(java.sql.Timestamp.from(MovableClockConfig.BEFORE_MIDNIGHT), UUID.fromString(id))
+                .params(java.sql.Timestamp.from(BEFORE_MIDNIGHT), UUID.fromString(id))
                 .update();
         tick();
         assertThat(statusOf(id)).isIn("pending", "expired");
@@ -2327,10 +2488,10 @@ class PaymentGatewayIT extends IntegrationTest {
         // The credentials work again: the payment the borrower made is found and booked.
         fake.failQuery(null);
         pay(intent, 1500, "UGX", "CONF-AUTH-1");
-        clock.set(MovableClockConfig.BEFORE_MIDNIGHT.plus(Duration.ofDays(6)));
+        clock.set(BEFORE_MIDNIGHT.plus(Duration.ofDays(6)));
         TestDatabase.owner()
                 .sql("UPDATE payment_intents SET next_check_at = ? WHERE id = ?")
-                .params(java.sql.Timestamp.from(MovableClockConfig.BEFORE_MIDNIGHT), UUID.fromString(id))
+                .params(java.sql.Timestamp.from(BEFORE_MIDNIGHT), UUID.fromString(id))
                 .update();
         tick();
         assertThat(statusOf(id)).isIn("paid", "booked");

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { businessZone } from '../../../api/retail';
 import {
   OPEN_STATUSES,
   ReportsError,
@@ -10,9 +11,11 @@ import {
   type ReportRun,
 } from '../../../api/reports';
 import { branchFilter } from '../../../auth/branch';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
 import { showReports } from './permissions';
+import { NoAccess } from '../../../app/ui/EmptyState';
 
 // Reports (extras slice D1, issue #214; ADR-038): the catalogue of the reports this user may run, a run per click,
 // and the user's own runs with their status. A run is queued and executed by a job, so the list refreshes every
@@ -41,7 +44,7 @@ const STATUS_BADGE: Record<string, string> = {
 export function when(iso: string | null | undefined): string {
   if (!iso) return '';
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: businessZone() });
 }
 
 /** Rows and size in words: "3 rows, 1 KB". */
@@ -69,7 +72,7 @@ export function Reports() {
     return (
       <main className="rt ln">
         <h1>Reports</h1>
-        <p className="empty-state">You do not have access to this page.</p>
+        <NoAccess />
       </main>
     );
   }
@@ -180,6 +183,7 @@ function RunForm({ entry, branchIds, onQueued }: { entry: ReportCatalogueEntry; 
       return reports.request(entry.key, params, format);
     },
     onSuccess: onQueued,
+    meta: { success: 'Report requested' },
   });
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -195,6 +199,7 @@ function RunForm({ entry, branchIds, onQueued }: { entry: ReportCatalogueEntry; 
           <label key={p.name}>
             {paramLabel(p.name)}
             {p.type === 'enum' ? (
+              // empty: Default is always there; the values come with the report.
               <select value={values[p.name] ?? ''} onChange={(ev) => setValues({ ...values, [p.name]: ev.target.value })}>
                 <option value="">Default</option>
                 {p.values.map((v) => (
@@ -212,13 +217,14 @@ function RunForm({ entry, branchIds, onQueued }: { entry: ReportCatalogueEntry; 
         ))}
       <label>
         File type
+        {/* empty: every report the server lists has at least one file type. */}
         <select value={format} onChange={(ev) => setFormat(ev.target.value)}>
           {entry.formats.map((f) => (
             <option key={f} value={f}>{FORMAT_LABEL[f] ?? f.toUpperCase()}</option>
           ))}
         </select>
       </label>
-      <button type="submit" className="btn-primary" disabled={queue.isPending}>Run report</button>
+      <BusyButton type="submit" className="btn-primary" busy={queue.isPending}>Run report</BusyButton>
       <Problem error={queue.error} />
     </form>
   );
@@ -253,7 +259,7 @@ export function RunsTable({
   onChange: () => void;
 }) {
   const [problem, setProblem] = useState<unknown>(null);
-  const cancel = useMutation({ mutationFn: (id: string) => reports.cancel(id), onSuccess: onChange, onError: setProblem });
+  const cancel = useMutation({ mutationFn: (id: string) => reports.cancel(id), onSuccess: onChange, onError: setProblem, meta: { success: 'Report cancelled' } });
   async function download(run: ReportRun) {
     setProblem(null);
     try {
@@ -303,9 +309,9 @@ export function RunsTable({
                       <button type="button" className="btn-ghost btn-sm" onClick={() => void download(r)}>Download</button>
                     )}
                     {OPEN_STATUSES.includes(r.status) && !r.cancel_requested && (
-                      <button type="button" className="btn-ghost btn-sm" disabled={cancel.isPending} onClick={() => cancel.mutate(r.id)}>
+                      <BusyButton type="button" className="btn-ghost btn-sm" busy={cancel.isPending && cancel.variables === r.id} disabled={cancel.isPending} onClick={() => cancel.mutate(r.id)}>
                         Cancel
-                      </button>
+                      </BusyButton>
                     )}
                   </td>
                 </tr>

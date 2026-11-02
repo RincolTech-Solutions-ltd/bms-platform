@@ -101,7 +101,15 @@ class PlatformController {
             String suspendedFrom,
 
             @Schema(description = "A pilot or complimentary business: free, no free month end (ADR-024 decision 6)")
-            boolean pilot) {}
+            boolean pilot,
+
+            @Schema(
+                    description =
+                            "The kind of business its administrator chose (issue #424, ADR-092): the profile a module's"
+                                    + " settings group stores, read through that module's group, for retail shops,"
+                                    + " stores_and_shops, wholesale or wholesale_and_shops; null when none was saved"
+                                    + " (a retail business is then shops)")
+            String businessType) {}
 
     @Schema(name = "PlatformTenantList")
     record TenantList(List<TenantResponse> items) {}
@@ -183,6 +191,16 @@ class PlatformController {
             LocalDate nextStatusChangeOn,
 
             @NotBlank @Size(min = 5, max = 300) @Schema(description = "Why; kept in the platform audit log")
+            String reason) {}
+
+    @Schema(name = "TenantGoLiveRequest")
+    record GoLiveRequest(
+            @NotNull @Schema(description = "The day the app became the business's register, today or earlier (ADR-071)")
+            LocalDate goLiveDate,
+
+            @NotBlank
+            @Size(min = 5, max = 300)
+            @Schema(description = "Why; kept in the tenant's audit log and the platform's")
             String reason) {}
 
     @Schema(name = "PlatformReasonRequest")
@@ -344,6 +362,32 @@ class PlatformController {
         return new TenantList(service.tenants(q, status, module));
     }
 
+    @Schema(name = "OwnerCandidate", description = "An active administrator of a business with no Owner")
+    record OwnerCandidate(UUID id, String fullName, String email, Instant lastLoginAt) {}
+
+    @Schema(name = "TenantWithoutOwner")
+    record TenantWithoutOwner(
+            UUID tenantId,
+            String slug,
+            String name,
+
+            @Schema(description = "active or suspended") String status,
+
+            Instant createdAt,
+
+            @Schema(description = "Its active administrators, oldest first; any one of them can be made the Owner")
+            List<OwnerCandidate> admins) {}
+
+    @GetMapping("/tenants/without-owner")
+    @RequiresPermission("platform.tenants.read")
+    @Operation(
+            summary =
+                    "Every active or suspended business with no Owner, with its active administrators, so the operator sets the Owner (ADR-062, ADR-090)",
+            operationId = "platformTenantsWithoutOwner")
+    List<TenantWithoutOwner> tenantsWithoutOwner() {
+        return service.tenantsWithoutOwner();
+    }
+
     @PostMapping("/tenants")
     @RequiresPermission("platform.tenants.manage")
     @Operation(
@@ -412,6 +456,17 @@ class PlatformController {
     @Operation(summary = "Switch modules on or off; data is kept (FR-TEN-03)", operationId = "platformSetModules")
     TenantResponse modules(@PathVariable("tenant_id") UUID tenantId, @Valid @RequestBody ModulesRequest request) {
         return service.setModules(tenantId, request.modules(), request.reason());
+    }
+
+    @PutMapping("/tenants/{tenant_id}/go-live")
+    @RequiresPermission("platform.tenants.manage")
+    @Operation(
+            summary =
+                    "Set the business's go-live date, with a reason: an existing loan is brought in only with a disbursement date before it (ADR-071)",
+            operationId = "platformSetGoLiveDate")
+    ResponseEntity<Void> goLive(@PathVariable("tenant_id") UUID tenantId, @Valid @RequestBody GoLiveRequest request) {
+        service.setGoLive(tenantId, request.goLiveDate(), request.reason().trim());
+        return ResponseEntity.noContent().build();
     }
 
     @PutMapping("/tenants/{tenant_id}/pilot")

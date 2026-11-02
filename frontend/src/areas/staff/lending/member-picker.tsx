@@ -1,5 +1,7 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { Highlight, NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
+import { Highlight, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
+import { EmptyChoice } from '../../../app/ui/EmptyChoice';
+import { MEMBERS_CREATE } from './member-permissions';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { useMembersApi } from '../../../api/lending-context';
 import type { MemberListItem } from '../../../api/members';
@@ -9,14 +11,18 @@ import { useStaff } from '../context';
 // Choose a member by searching as you type (number, name, phone or national ID; never in the address). Used where a record
 // belongs to a member, such as new collateral. A chosen member shows as a line with a way to choose another.
 
-export function MemberPicker({ id, chosen, onChoose, error, errorId }: {
+export function MemberPicker({ id, chosen, onChoose, error, errorId, label = 'Find the member (number, name, phone or national ID)', chosenLabel = 'Member', required }: {
   id: string;
   chosen: { id: string; name: string; no: string } | null;
   onChoose: (m: { id: string; name: string; no: string } | null) => void;
   error?: string;
   errorId?: string;
+  /** The search box's label, for a picker that finds someone other than the record's member (a guarantor). */
+  label?: string;
+  chosenLabel?: string;
+  required?: boolean;
 }) {
-  const { branch } = useStaff();
+  const { me, branch } = useStaff();
   const api = useMembersApi();
   const search = useLiveSearch();
   const found = useQuery({
@@ -28,7 +34,7 @@ export function MemberPicker({ id, chosen, onChoose, error, errorId }: {
   if (chosen) {
     return (
       <div className="mf-field" data-tour="member-picker">
-        <p className="ph-label">Member</p>
+        <p className="ph-label">{chosenLabel}</p>
         <p className="cluster">
           <strong>{chosen.name}</strong> ({chosen.no})
           <button type="button" className="btn-sm btn-ghost" onClick={() => onChoose(null)}>Choose another member</button>
@@ -40,12 +46,14 @@ export function MemberPicker({ id, chosen, onChoose, error, errorId }: {
   const fetching = found.isFetching;
   return (
     <div className="mf-field" data-tour="member-picker">
-      <SearchBox id={id} label="Find the member (number, name, phone or national ID)" search={search} fetching={fetching} count={search.term && found.data ? items.length : undefined} />
+      <SearchBox id={id} label={label} required={required} search={search} fetching={fetching} count={search.term && found.data ? items.length : undefined} />
       {error && <p id={errorId} className="field-error" role="alert">{error}</p>}
       {search.term !== '' && found.data && (
         <SearchResults fetching={fetching}>
           {items.length === 0 ? (
-            <NoResults term={search.term} onClear={search.clear} noun="members" />
+            // Issue #619: a search that finds nobody leads to adding the member, and comes back here once they are added.
+            <EmptyChoice id={`${id}-add`} text={`No members for "${search.term}".`} ask="Ask the owner to add the member first."
+              add={(me.permissions ?? []).includes(MEMBERS_CREATE) ? { label: 'Add a member', to: '/staff/lending/members/new' } : null} />
           ) : (
             <ul className="ln-list">
               {items.map((m) => (

@@ -140,6 +140,12 @@ describe('the dark theme tokens', () => {
     expect(contrast(darkToken('--color-focus'), D_BG)).toBeGreaterThanOrEqual(3);
   });
 
+  // Issue #544: the tab badge's small number pairs --color-on-danger with --color-danger-fill, so the pair is proven in both themes.
+  it('the on-danger text reads at 4.5:1 on the danger fill in both themes', () => {
+    expect(contrast(token('--color-on-danger'), token('--color-danger'))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(darkToken('--color-on-danger'), darkToken('--color-danger-fill'))).toBeGreaterThanOrEqual(4.5);
+  });
+
   it('white text on the destructive button fill and the inverse toast text read at 4.5:1', () => {
     expect(contrast(WHITE, darkToken('--color-danger-fill'))).toBeGreaterThanOrEqual(4.5);
     expect(contrast(darkToken('--color-on-inverse'), darkToken('--color-inverse'))).toBeGreaterThanOrEqual(4.5);
@@ -202,5 +208,18 @@ describe('the dark theme tokens', () => {
 
   it('every dark colour is a hex or a derived mix, never a keyword that would skip the tokens', () => {
     expect(dark).not.toMatch(/:\s*(white|black|red|green|blue|gray|grey)\s*;/);
+  });
+});
+
+describe('the toast tokens (#508)', () => {
+  it('white text reads on the dark pill and the icons reach 3:1 on it, in both themes', () => {
+    for (const pill of [token('--rt-grey-900'), darkToken('--color-toast')]) {
+      expect(contrast(WHITE, pill)).toBeGreaterThanOrEqual(4.5);
+      for (const icon of ['--color-toast-success', '--color-toast-error']) expect(contrast(token(icon), pill)).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it('the pill stays dark in the dark theme rather than turning light like the other inverse surfaces', () => {
+    expect(contrast(darkToken('--color-toast'), WHITE)).toBeGreaterThanOrEqual(4.5);
   });
 });

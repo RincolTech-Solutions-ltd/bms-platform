@@ -2,6 +2,7 @@ package com.rincoltech.bms.retail.catalogue.internal;
 
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -29,13 +30,32 @@ class CatalogueLookup implements RetailCatalogue {
     @Transactional(readOnly = true)
     public Optional<PackUnit> packUnit(UUID productId, UUID unitId) {
         return repo.pack(productId, unitId)
-                .map(k -> new PackUnit(k.unitId(), k.unit(), new java.math.BigDecimal(k.factor()), k.active()));
+                .map(k -> new PackUnit(
+                        k.unitId(),
+                        k.unit(),
+                        new java.math.BigDecimal(k.factor()),
+                        k.active(),
+                        k.purpose(),
+                        k.sellMinor()));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long sellMinorAt(UUID productId, java.time.Instant at) {
+        return repo.sellMinorAt(productId, at);
     }
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public Optional<ProductSnapshot> lock(UUID productId) {
         return repo.lock(productId).map(CatalogueLookup::snapshot);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean useBuyingSize(
+            UUID productId, UUID unitId, java.math.BigDecimal factor, String sourceType, UUID sourceId) {
+        return service.useBuyingSize(productId, unitId, factor, sourceType, sourceId);
     }
 
     @Override
@@ -71,6 +91,19 @@ class CatalogueLookup implements RetailCatalogue {
     public void noteCostNotApplied(UUID productId, UUID sourceId, String reason) {
         CatalogueApi.Product locked = repo.lock(productId).orElseThrow(ApiException::notFound);
         service.noteCostUnchanged(locked, sourceId, reason);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public NewItem createItem(
+            String description,
+            UUID categoryId,
+            UUID unitId,
+            long costMinor,
+            long sellMinor,
+            String duplicateReason,
+            List<NewPack> packs) {
+        return service.createItem(description, categoryId, unitId, costMinor, sellMinor, duplicateReason, packs);
     }
 
     static ProductSnapshot snapshot(CatalogueApi.Product p) {

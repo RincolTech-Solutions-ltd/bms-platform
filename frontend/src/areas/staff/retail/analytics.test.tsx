@@ -144,7 +144,7 @@ describe('margins', () => {
     expect(html).toContain('29.69%');
     expect(html).toContain('Test Product ANA-5');
     expect(html).toContain('10%');
-    expect(html).toContain('UGX 1,500 to UGX 2,000 on 2026-10-07');
+    expect(html).toContain('UGX 1,500 to UGX 2,000 on 7 Oct 2026');
     expect(html).toContain('33.33%');
     expect(html).toContain('Showing 1 of 2');
   });
@@ -247,7 +247,7 @@ describe('credit control', () => {
 
   it('shows what is owed with the ageing, the overdue list and the payments by method', () => {
     const html = renderToString(<CreditControlView data={credit} nameOf={nameOf} sort="amount" />);
-    expect(html).toContain('Owed by credit buyers UGX 11,000');
+    expect(html).toContain('<span class="key-figure-label">Owed by customers</span><strong class="key-figure-value">UGX 11,000</strong>');
     expect(html).toContain('Over 90 days late');
     expect(html).toContain('Test Customer Zed');
     expect(html).toContain('S-0001, Head office');
@@ -354,8 +354,8 @@ describe('owner dashboard', () => {
     expect(html).toContain('Same as the 7 days before');
     expect(html).toContain('Top salesperson');
     expect(html).toContain('Profit');
-    expect(html).toContain('Stock at cost');
-    expect(html.indexOf('Stock at cost')).toBeLessThan(html.indexOf('Stock at price'));
+    expect(html).toContain('Stock at buying price');
+    expect(html.indexOf('Stock at buying price')).toBeLessThan(html.indexOf('Stock at selling price'));
     expect(html.match(/<svg/g)?.length).toBe(1);
     expect(html).toContain('class="rc-prev"');
     expect(html).toContain('Wed 7 Oct');
@@ -391,7 +391,7 @@ describe('owner dashboard', () => {
     const html = renderToString(<DashboardView data={seller()} nameOf={nameOf} choice={{ period: '7d' }} />);
     expect(html).toContain('UGX 6,600');
     expect(html).toContain('Best seller');
-    expect(html).not.toMatch(/profit|cost|Stock at price|Top salesperson/i);
+    expect(html).not.toMatch(/profit|cost|buying price|Stock at selling price|Top salesperson/i);
     expect(html).not.toContain('2,200');
     expect(html).not.toContain('31,100');
   });
@@ -400,6 +400,19 @@ describe('owner dashboard', () => {
     const html = renderToString(<DashboardView data={{ ...seller(), shops: [{ branch_id: 'b1', out_of_stock: 0, low_stock: 2 }] }} nameOf={nameOf} choice={{ period: '7d' }} />);
     expect(html).toContain('n/a');
     expect(html).not.toContain('UGX 0');
+  });
+
+  it('leaves the stock cell blank for a shop that has held no goods, next to one that has (issue #490)', () => {
+    const shops = [
+      { branch_id: 'b1', range_sales_minor: 5100, previous_sales_minor: 4000, out_of_stock: 1, low_stock: 3 },
+      { branch_id: 'b2', range_sales_minor: 700, previous_sales_minor: 0 },
+    ];
+    const html = renderToString(<DashboardView data={{ ...seller(), shops }} nameOf={nameOf} choice={{ period: '7d' }} />);
+    expect(html).toContain('Out / low now');
+    expect(html).toContain('1 / 3');
+    expect(html).not.toContain('0 / 0');
+    expect(html).not.toMatch(/undefined|NaN/);
+    expect(html).not.toContain('0 out');
   });
 
   it('shows only the sales parts when stock is not readable', () => {

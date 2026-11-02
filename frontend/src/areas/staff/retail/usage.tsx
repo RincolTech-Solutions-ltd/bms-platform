@@ -1,14 +1,14 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
-import { NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
-import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { retail, type Product, type Usage, type UsageRequest } from '../../../api/retail';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
-import { parseQty, qtyString, showQty } from './maths';
-import { BranchRequired, CategoryLabel, Gate, Problem, useStockingBranch } from './ui';
+import { parseQty, qtyString } from './maths';
+import { BranchRequired, Gate, Problem, ProductPicker, useStockingBranch } from './ui';
 import { canUse, needsOf } from './permissions';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { ActionBar } from '../../../app/ui/ActionBar';
 
 // Usage and damage (FR-RET-07): items taken out of stock for use in the shop or because they are
 // damaged, with a reason. Valued at cost by the server; no cost is shown here.
@@ -35,13 +35,6 @@ export function UsageForm({ branchId, onSaved }: { branchId: string; onSaved?: (
   const setKind = (k: 'used' | 'damaged') => setDraft((d) => ({ ...d, kind: k }));
   const setReason = (r: string) => setDraft((d) => ({ ...d, reason: r }));
   const setLines = (f: (ls: Line[]) => Line[]) => setDraft((d) => ({ ...d, lines: f(d.lines) }));
-  const search = useLiveSearch();
-  const products = useQuery({
-    queryKey: ['retail', 'products', branchId, search.term],
-    queryFn: ({ signal }) => retail.listProducts({ query: search.term, branchId, signal }),
-    placeholderData: keepPreviousData,
-  });
-  const finding = products.isPlaceholderData || products.isFetching;
   const save = useMutation({
     mutationFn: () => retail.createUsage(buildUsage({ branchId, kind, reason, lines }), key),
     onSuccess: (u) => {
@@ -49,6 +42,8 @@ export function UsageForm({ branchId, onSaved }: { branchId: string; onSaved?: (
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onSaved?.(u);
     },
+    // With onSaved the Usage and damage page opens its Saved screen, which says it.
+    meta: { success: (u: Usage) => (onSaved ? null : u?.kind === 'damaged' ? 'Damage recorded' : 'Usage recorded') },
   });
   const valid = lines.length > 0 && reason.trim() !== '' && lines.every((l) => parseQty(l.qty) !== null);
 
@@ -69,22 +64,11 @@ export function UsageForm({ branchId, onSaved }: { branchId: string; onSaved?: (
       </div>
 
       <div data-tour="usage-search">
-      <SearchBox id="usage-search" label="Find an item by name, code or category" search={search} fetching={finding} count={products.data ? Math.min(products.data.length, 20) : undefined} more={(products.data?.length ?? 0) > 20} />
+      <ProductPicker id="usage-search" branchId={branchId} onAdd={(p) => setLines((ls) => (ls.some((l) => l.product.id === p.id) ? ls : [...ls, { product: p, qty: '1' }]))} />
       </div>
-      {products.data && products.data.length === 0 && search.term && <NoResults term={search.term} onClear={search.clear} noun="items" />}
-      <SearchResults fetching={finding}>
-      <ul style={{ listStyle: 'none', padding: 0, maxHeight: 180, overflowY: 'auto' }}>
-        {(products.data ?? []).slice(0, 20).map((p) => (
-          <li key={p.id} className="rt-card rt-row">
-            <span><strong>{p.description}</strong> ({p.code}), in stock {showQty(p.qty ?? '0')} {p.unit}<br /><CategoryLabel category={p.category} /></span>
-            <button type="button" aria-label={`Add ${p.description}`} onClick={() => setLines((ls) => (ls.some((l) => l.product.id === p.id) ? ls : [...ls, { product: p, qty: '1' }]))}>Add</button>
-          </li>
-        ))}
-      </ul>
-      </SearchResults>
 
       <h2>Items</h2>
-      {lines.length === 0 && <p className="empty-state">No items yet.</p>}
+      {lines.length === 0 && <p className="empty-state">No items yet. Type an item above and tap it in the list.</p>}
       {lines.map((l, i) => (
         <div key={l.product.id} className="rt-card">
           <strong>{l.product.description}</strong>
@@ -96,7 +80,10 @@ export function UsageForm({ branchId, onSaved }: { branchId: string; onSaved?: (
         </div>
       ))}
       <Problem error={save.error} />
-      <button type="submit" className="rt-primary" data-tour="usage-save" disabled={!valid || save.isPending}>{save.isPending ? 'Saving' : 'Save'}</button>
+      <ActionBar>
+        <BusyButton type="submit" className="rt-primary" data-tour="usage-save" busy={save.isPending} notReady={!valid}>Save</BusyButton>
+      </ActionBar>
+
       {(lines.length > 0 || reason !== '') && !save.isPending && (
         <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this form</button>
       )}
@@ -106,7 +93,7 @@ export function UsageForm({ branchId, onSaved }: { branchId: string; onSaved?: (
 
 export function UsagePage() {
   const { me } = useStaff();
-  const { branchId, branchName } = useStockingBranch();
+  const { branchId } = useStockingBranch();
   const [done, setDone] = useState<Usage | null>(null);
   const [round, setRound] = useState(0);
   return (
@@ -121,7 +108,6 @@ export function UsagePage() {
         </section>
       ) : (
         <>
-          <p className="branch-line">Branch: <strong>{branchName}</strong></p>
           <UsageForm key={`${branchId}-${round}`} branchId={branchId} onSaved={setDone} />
         </>
       )}

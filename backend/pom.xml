@@ -76,7 +76,6 @@
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
-            <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>org.flywaydb</groupId>
@@ -201,6 +200,32 @@
 
     <build>
         <finalName>bms-api</finalName>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <!-- The How do I...? articles (ADR-095), read by Ask BMS on the server from the very files the app bundles (ADR-096).
+                 The image build supplies the folder as the `help` build context (Dockerfile). Copied as bytes, never filtered,
+                 so the server's corpus revision is the app's. -->
+            <resource>
+                <directory>${project.basedir}/../frontend/src/help/articles</directory>
+                <targetPath>help/articles</targetPath>
+                <includes>
+                    <include>*.md</include>
+                </includes>
+            </resource>
+            <!-- The one list of unit words (ADR-109), read by CatalogueNames, and the standard units (ADR-110), read by
+                 StandardUnits, from the very files the PWA imports. The image build
+                 supplies the folder as the `words` build context (Dockerfile). -->
+            <resource>
+                <directory>${project.basedir}/../frontend/src/words</directory>
+                <targetPath>words</targetPath>
+                <includes>
+                    <include>unit-words.json</include>
+                    <include>standard-units.json</include>
+                </includes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

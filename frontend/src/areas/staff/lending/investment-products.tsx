@@ -6,8 +6,9 @@ import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
 import { PRODUCTS_MANAGE, may, parsePercent, payoutWords, percent } from './investment-state';
 import { InvestmentsGate } from './investments';
-import { formatMinor } from '../../../components/money';
-import { currencyOf, money, parseAmount, words } from './loan-state';
+import { amountText, money, parseAmount, words } from './loan-state';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { useComeBack } from '../../../app/ui/EmptyChoice';
 
 // Investment products setup (FR-INV-01, FR-INV-08): the list for everyone who reads investments,
 // and for a tenant admin the form to create one, edit it (investments already opened keep their
@@ -45,8 +46,6 @@ export const EMPTY: ProductDraft = {
   penalty: '0',
 };
 
-/** Minor units as a person would type them back: "1,500,000" for UGX, no currency code. */
-const amountText = (minor: number, currency: string | undefined) => formatMinor(minor, currencyOf(currency)).replace(/^\S+ /, '');
 
 export function draftOf(p: InvestmentProduct): ProductDraft {
   return {
@@ -98,6 +97,7 @@ export function termsOf(d: ProductDraft, currency: string | undefined): Investme
 
 function ProductForm({ product, currency, onDone }: { product?: InvestmentProduct; currency?: string; onDone: () => void }) {
   const queryClient = useQueryClient();
+  const back = useComeBack();
   const [d, setD] = useState<ProductDraft>(product ? draftOf(product) : EMPTY);
   const update = (patch: Partial<ProductDraft>) => setD((x) => ({ ...x, ...patch }));
   const terms = termsOf(d, currency);
@@ -112,7 +112,10 @@ function ProductForm({ product, currency, onDone }: { product?: InvestmentProduc
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['lending', 'investment-products'] });
       onDone();
+      // Opened from an empty product list (issue #619): a new product takes the person back to the form that needed it.
+      if (!product) back?.();
     },
+    meta: { success: product ? 'Product saved' : 'Product added' },
   });
   const field = (id: string, label: string, value: string, set: (v: string) => void, hint?: string, mode?: 'decimal') => (
     <>
@@ -174,9 +177,9 @@ function ProductForm({ product, currency, onDone }: { product?: InvestmentProduc
       )}
       {problem && d.rate !== '' && <p className="field-hint">{problem}</p>}
       <Problem error={save.error} />
-      <button type="submit" className="rt-primary btn-block" disabled={!!problem || d.name.trim() === '' || save.isPending}>
-        {save.isPending ? 'Saving' : product ? 'Save changes' : 'Create product'}
-      </button>
+      <BusyButton busy={save.isPending} type="submit" className="rt-primary btn-block" notReady={!!problem || d.name.trim() === ''}>
+        {product ? 'Save changes' : 'Create product'}
+      </BusyButton>
       {product && <p className="field-hint">Investments already opened keep the terms they were opened on.</p>}
     </form>
   );
@@ -217,6 +220,7 @@ export function Products() {
   const archive = useMutation({
     mutationFn: (p: InvestmentProduct) => investments.archiveProduct(p.id ?? '', p.version ?? 1),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['lending', 'investment-products'] }),
+    meta: { success: 'Product archived' },
   });
   const currency = list.data?.[0]?.currency;
   return (
@@ -228,9 +232,9 @@ export function Products() {
         <section className="rt-card" aria-label="Product form">
           <ProductForm product={editing === 'new' ? undefined : editing} currency={currency} onDone={() => setEditing(null)} />
           {editing !== 'new' && (
-            <button type="button" className="btn-danger btn-block" disabled={archive.isPending} onClick={() => { archive.mutate(editing); setEditing(null); }}>
+            <BusyButton busy={archive.isPending} type="button" className="btn-danger btn-block" onClick={() => { archive.mutate(editing); setEditing(null); }}>
               Archive this product
-            </button>
+            </BusyButton>
           )}
           <button type="button" className="btn-ghost" onClick={() => setEditing(null)}>Cancel</button>
         </section>

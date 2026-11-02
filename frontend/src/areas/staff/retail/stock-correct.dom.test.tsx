@@ -17,6 +17,8 @@ const correctStock = vi.fn();
 const stockHistory = vi.fn();
 const getProduct = vi.fn();
 const updateProduct = vi.fn();
+let categoriesFail = false;
+let categoriesHang = false;
 
 vi.mock('@tanstack/react-router', async (original) => {
   const real = await original<typeof import('@tanstack/react-router')>();
@@ -33,7 +35,7 @@ vi.mock('../../../api/retail', async (original) => {
       stockHistory: (...a: unknown[]) => stockHistory(...a),
       getProduct: (...a: unknown[]) => getProduct(...a),
       updateProduct: (...a: unknown[]) => updateProduct(...a),
-      listCategories: () => Promise.resolve([{ id: 'c1', name: 'Cables', active: true }, { id: 'c2', name: 'Fittings', active: true }, { id: 'c3', name: 'Old', active: false }]),
+      listCategories: () => (categoriesHang ? new Promise(() => undefined) : categoriesFail ? Promise.reject(new Error('down')) : Promise.resolve([{ id: 'c1', name: 'Cables', active: true }, { id: 'c2', name: 'Fittings', active: true }, { id: 'c3', name: 'Old', active: false }])),
     },
   };
 });
@@ -42,6 +44,7 @@ const { RetailError } = await import('../../../api/retail');
 const { retailMessage } = await import('../../../api/retail-errors');
 const { StockTable } = await import('./stock');
 const { CorrectItem } = await import('./stock-correct');
+const { DoneToast, doneToasts } = await import('./toast');
 const { correctionWords, differenceWords, movementTitle, quantityProblem, signedQty } = await import('./stock-correct-state');
 
 afterEach(() => {
@@ -67,10 +70,22 @@ function screenOf(me: ReturnType<typeof mockMe>, node: ReactElement) {
   );
 }
 
-const open = (name: string) => fireEvent.click(screen.getByRole('button', { name }));
+/** As screenOf, with the app's success toast: one success signal per action (review of #685). */
+function toastScreenOf(me: ReturnType<typeof mockMe>, node: ReactElement) {
+  return render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } }, mutationCache: doneToasts() })}>
+      <StaffContext.Provider value={{ me, branch }}>{node}</StaffContext.Provider>
+      <DoneToast />
+    </QueryClientProvider>,
+  );
+}
+
+const toasts = () => Array.from(document.querySelectorAll('.toast')).map((t) => t.textContent ?? '');
+
+const open = (name: string) => fireEvent.click(screen.getByRole('radio', { name }));
 const qty = () => screen.getByLabelText(/Right quantity/) as HTMLInputElement;
 const reason = () => screen.getByLabelText('Why is it being corrected?') as HTMLSelectElement;
-const save = () => screen.getByRole('button', { name: /Save the right quantity|Saving/ }) as HTMLButtonElement;
+const save = () => screen.getByRole('button', { name: /Save the right quantity/ }) as HTMLButtonElement;
 
 describe('the Correct button on a stock row', () => {
   it('is offered on the list of one branch to someone who may correct there, and opens the choices', () => {
@@ -79,7 +94,7 @@ describe('the Correct button on a stock row', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Correct Cable 2.5mm' }));
     expect(screen.getByTestId('correct-item')).toBeTruthy();
     for (const label of ['The quantity is wrong', 'The category is wrong', 'The unit, name or price is wrong', 'See its history']) {
-      expect(screen.getByRole('button', { name: label })).toBeTruthy();
+      expect(screen.getByRole('radio', { name: label })).toBeTruthy();
     }
     fireEvent.click(screen.getByRole('button', { name: 'Correct Cable 2.5mm' }));
     expect(screen.queryByTestId('correct-item')).toBeNull();
@@ -92,10 +107,10 @@ describe('the Correct button on a stock row', () => {
 
   it('offers a seller the history and the pointers but not the quantity or the category', () => {
     screenOf(seller, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);
-    expect(screen.queryByRole('button', { name: 'The quantity is wrong' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'The category is wrong' })).toBeNull();
+    expect(screen.queryByRole('radio', { name: 'The quantity is wrong' })).toBeNull();
+    expect(screen.queryByRole('radio', { name: 'The category is wrong' })).toBeNull();
     open('The unit, name or price is wrong');
-    expect(screen.getByTestId('correct-other').textContent).toContain('Past restocks');
+    expect(screen.getByTestId('correct-other').textContent).toContain('Past purchases');
     expect(screen.getByTestId('correct-other').textContent).toContain('Items');
   });
 });
@@ -105,25 +120,25 @@ describe('the right quantity', () => {
     screenOf(admin, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);
     open('The quantity is wrong');
     expect(qty().value).toBe('10');
-    expect(save().disabled).toBe(true);
+    expect(save().getAttribute('data-not-ready')).toBe('true');
     fireEvent.change(qty(), { target: { value: '6' } });
-    expect(save().disabled).toBe(true);
+    expect(save().getAttribute('data-not-ready')).toBe('true');
     expect(screen.getByText('That takes away 4 roll.')).toBeTruthy();
     fireEvent.change(reason(), { target: { value: 'entry_mistake' } });
-    expect(save().disabled).toBe(false);
+    expect(save().getAttribute('data-not-ready')).toBeNull();
     fireEvent.change(qty(), { target: { value: '10.0' } });
-    expect(save().disabled).toBe(true);
+    expect(save().getAttribute('data-not-ready')).toBe('true');
     expect(screen.getByRole('alert').textContent).toContain('It is 10 already');
     fireEvent.change(qty(), { target: { value: 'abc' } });
-    expect(save().disabled).toBe(true);
+    expect(save().getAttribute('data-not-ready')).toBe('true');
     fireEvent.change(qty(), { target: { value: '12.5' } });
     expect(screen.getByText('That adds 2.5 roll.')).toBeTruthy();
   });
 
-  it('sends one request however often Save is pressed, then says what happened', async () => {
+  it('sends one request however often Save is pressed, then says what happened in one toast', async () => {
     let finish: (v: unknown) => void = () => undefined;
     correctStock.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
-    screenOf(admin, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);
+    toastScreenOf(admin, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);
     open('The quantity is wrong');
     fireEvent.change(qty(), { target: { value: '6' } });
     fireEvent.change(reason(), { target: { value: 'entry_mistake' } });
@@ -135,9 +150,9 @@ describe('the right quantity', () => {
     expect(correctStock.mock.calls[0]?.[0]).toEqual({ branch_id: branch, product_id: 'p1', new_qty: '6.000', expected_qty: '10.000', reason_code: 'entry_mistake', note: 'Typed ten, really six' });
     expect(typeof correctStock.mock.calls[0]?.[1]).toBe('string');
     finish({ id: 'c1', old_qty: '10.000', new_qty: '6.000', reason_code: 'entry_mistake' });
-    const done = await screen.findByRole('status');
-    expect(done.textContent).toContain('Cable 2.5mm is now 6 roll (it was 10)');
-    expect(done.textContent).toContain('does not count as shrinkage');
+    await waitFor(() => expect(toasts()).toEqual(['Corrected to 6 roll']));
+    // The one signal is the toast: no note beside it says it again.
+    expect(screen.queryByText(/is now 6/)).toBeNull();
   });
 
   it('says a refusal in plain words and a retry keeps the same key', async () => {
@@ -221,7 +236,8 @@ describe('a 409 after the list already moved', () => {
     fireEvent.change(reason(), { target: { value: 'miscount' } });
     view.rerender(tree('8.000'));
     await waitFor(() => expect(qty().value).toBe('8'));
-    expect(screen.getByRole('status').textContent).toContain('changed to 8');
+    expect(screen.getAllByRole('status').some((s) => (s.textContent ?? '').includes('changed to 8'))).toBe(true);
+
     fireEvent.change(reason(), { target: { value: 'miscount' } });
     fireEvent.change(qty(), { target: { value: '5' } });
     fireEvent.click(save());
@@ -238,7 +254,106 @@ describe('a 409 after the list already moved', () => {
   });
 });
 
+// Issue #370: the 409 comes first and the list is read again after it. The notice names the quantity on the shelf now, never
+// the one the form was opened with, and it stays when the list comes back with that quantity.
+describe('a 409 before the list is read again', () => {
+  const tree = (client: QueryClient, q: string) => (
+    <QueryClientProvider client={client}>
+      <StaffContext.Provider value={{ me: admin, branch }}>
+        <CorrectItem row={{ ...row, qty: q }} branchId={branch} onClose={() => undefined} />
+      </StaffContext.Provider>
+    </QueryClientProvider>
+  );
+  const moved = (problem?: Record<string, unknown>) =>
+    new RetailError(retailMessage({ code: 'stock_moved', detail: 'The quantity changed while you were typing: it is 8 roll now, not 10.' }, 409), 409, 'stock_moved', problem);
+  const notice = () => screen.queryAllByRole('status').map((s) => s.textContent ?? '').find((t) => t.includes('changed to')) ?? '';
+
+  it('shows the quantity the refusal names at once, keeps it when the list catches up, and retries against it with a new key', async () => {
+    correctStock.mockRejectedValueOnce(moved({ code: 'stock_moved', current_qty: '8.000' }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(tree(client, '10.000'));
+    open('The quantity is wrong');
+    fireEvent.change(qty(), { target: { value: '6' } });
+    fireEvent.change(reason(), { target: { value: 'entry_mistake' } });
+    fireEvent.click(save());
+    await screen.findByRole('alert');
+    await waitFor(() => expect(notice()).toContain('changed to 8'));
+    expect(notice()).not.toContain('changed to 10');
+    expect(qty().value).toBe('8');
+    expect(screen.getByText(/In stock now/).textContent).toContain('8 roll');
+    view.rerender(tree(client, '8.000'));
+    await waitFor(() => expect(qty().value).toBe('8'));
+    expect(notice()).toContain('changed to 8');
+    correctStock.mockResolvedValueOnce({ id: 'c5', old_qty: '8.000', new_qty: '6.000' });
+    fireEvent.change(qty(), { target: { value: '6' } });
+    fireEvent.change(reason(), { target: { value: 'entry_mistake' } });
+    fireEvent.click(save());
+    await waitFor(() => expect(correctStock).toHaveBeenCalledTimes(2));
+    expect(correctStock.mock.calls[1]?.[0]).toMatchObject({ expected_qty: '8.000', new_qty: '6.000' });
+    expect(correctStock.mock.calls[1]?.[1]).not.toBe(correctStock.mock.calls[0]?.[1]);
+  });
+
+  it('without the number in the refusal, never names the old quantity and keeps the notice once the list shows the new one', async () => {
+    correctStock.mockRejectedValueOnce(moved());
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // As in the app: the list is read again and shows 8 before the read of it has finished.
+    let listRead: () => void = () => undefined;
+    vi.spyOn(client, 'invalidateQueries').mockReturnValue(new Promise<void>((done) => { listRead = done; }));
+    const view = render(tree(client, '10.000'));
+    open('The quantity is wrong');
+    fireEvent.change(qty(), { target: { value: '6' } });
+    fireEvent.change(reason(), { target: { value: 'entry_mistake' } });
+    fireEvent.click(save());
+    await screen.findByRole('alert');
+    expect(notice()).not.toContain('changed to 10');
+    // Until the list comes back, no quantity is shown or offered, and nothing can be saved against the old one.
+    await waitFor(() => expect(qty().value).toBe(''));
+    expect(qty().disabled).toBe(true);
+    expect(screen.queryByText(/In stock now/)).toBeNull();
+    fireEvent.click(save());
+    expect(correctStock).toHaveBeenCalledTimes(1);
+    view.rerender(tree(client, '8.000'));
+    await waitFor(() => expect(qty().value).toBe('8'));
+    expect(notice()).toContain('changed to 8');
+    expect(qty().disabled).toBe(false);
+    expect(screen.getByText(/In stock now/).textContent).toContain('8 roll');
+    listRead();
+    await waitFor(() => expect(notice()).toContain('changed to 8'));
+    expect(qty().value).toBe('8');
+  });
+
+  it('without the number, starts from the list once it has been read again, even when it shows the same quantity', async () => {
+    correctStock.mockRejectedValueOnce(moved());
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(tree(client, '8.000'));
+    open('The quantity is wrong');
+    fireEvent.change(qty(), { target: { value: '6' } });
+    fireEvent.change(reason(), { target: { value: 'entry_mistake' } });
+    fireEvent.click(save());
+    await screen.findByRole('alert');
+    await waitFor(() => expect(qty().value).toBe('8'));
+    expect(qty().disabled).toBe(false);
+    expect(notice()).toContain('changed to 8');
+  });
+});
+
 describe('a unit in use', () => {
+  it('says the correction waits for an administrator when the business asks for approval (issue #343)', async () => {
+    correctStock.mockResolvedValueOnce({ approval_id: 'a1', action_type: 'retail_stock_correction', amount_minor: 4000, currency: 'UGX' });
+    screenOf(admin, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);
+    open('The quantity is wrong');
+    fireEvent.change(qty(), { target: { value: '6' } });
+    fireEvent.change(reason(), { target: { value: 'miscount' } });
+    fireEvent.click(save());
+    const waiting = await screen.findByTestId('approval-waiting');
+    expect(waiting.textContent).toContain('Sent for approval.');
+    expect(waiting.textContent).toContain('Changing Cable 2.5mm to 6 roll waits for an administrator.');
+    expect(waiting.textContent).toContain('Nothing changes until an administrator approves it.');
+    expect(waiting.querySelector('a')?.getAttribute('href')).toBe('/staff/approvals');
+    // Not reported as done: the quantity has not changed.
+    expect(screen.queryByText(/is now 6/)).toBeNull();
+  });
+
   it('sends nobody to change it in Items: a unit is never converted', () => {
     screenOf(admin, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);
     open('The unit, name or price is wrong');
@@ -250,21 +365,22 @@ describe('a unit in use', () => {
 });
 
 describe('the category', () => {
-  it('moves the item to the right category and says from where to where', async () => {
+  it('moves the item to the right category and says where in one toast', async () => {
     getProduct.mockResolvedValue({ id: 'p1', description: 'Cable 2.5mm', category_id: 'c1', category: 'Cables', version: 4 });
     updateProduct.mockResolvedValue({ id: 'p1', description: 'Cable 2.5mm', category: 'Fittings' });
-    screenOf(admin, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);
+    toastScreenOf(admin, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);
     open('The category is wrong');
     const select = (await screen.findByLabelText('The right category')) as HTMLSelectElement;
     expect(Array.from(select.options).map((o) => o.text)).toEqual(['Cables', 'Fittings']);
-    const move = () => screen.getByRole('button', { name: /Move to this category|Saving/ }) as HTMLButtonElement;
-    expect(move().disabled).toBe(true);
+    const move = () => screen.getByRole('button', { name: /Move to this category/ }) as HTMLButtonElement;
+    expect(move().getAttribute('data-not-ready')).toBe('true');
     fireEvent.change(select, { target: { value: 'c2' } });
     fireEvent.click(move());
     fireEvent.submit(screen.getByRole('form', { name: 'Change the category' }));
     await waitFor(() => expect(updateProduct).toHaveBeenCalledTimes(1));
     expect(updateProduct).toHaveBeenCalledWith('p1', 4, { category_id: 'c2' });
-    expect((await screen.findByRole('status')).textContent).toContain('Cable 2.5mm is now in Fittings. It was in Cables.');
+    await waitFor(() => expect(toasts()).toEqual(['Moved to Fittings']));
+    expect(screen.queryByText(/is now in Fittings/)).toBeNull();
   });
 });
 
@@ -287,7 +403,7 @@ describe('the history', () => {
     expect(shown[0]?.textContent).toContain('By you');
     expect(shown[1]?.textContent).toContain('Sale');
     expect(shown[1]?.textContent).toContain('By a colleague');
-    expect(shown[2]?.textContent).toContain('Restock');
+    expect(shown[2]?.textContent).toContain('Purchase');
     expect(shown[2]?.textContent).toContain('+10 roll');
   });
 
@@ -302,13 +418,36 @@ describe('the history', () => {
 describe('the words', () => {
   it('names the kinds of movement', () => {
     const m = (over: Partial<StockMovement>): StockMovement => ({ kind: 'adjustment', qty: '1.000', ...over });
-    expect(movementTitle(m({ source_type: 'retail.stocktake' }))).toBe('Stock-take');
-    expect(movementTitle(m({ source_type: 'retail.purchase_void' }))).toBe('Restock voided');
+    expect(movementTitle(m({ source_type: 'retail.stocktake' }))).toBe('Stock count');
+    expect(movementTitle(m({ source_type: 'retail.purchase_void' }))).toBe('Purchase voided');
     expect(movementTitle(m({ kind: 'usage', qty: '-1.000' }))).toBe('Used');
+    // Quick add's stock (issue #632, ADR-101) is an opening movement of its own source: the history names it Opening stock.
+    expect(movementTitle(m({ kind: 'opening', source_type: 'retail.quick_add', qty: '20.000' }))).toBe('Opening stock');
     expect(signedQty(m({ qty: '2.500' }))).toBe('+2.5');
     expect(signedQty(m({ qty: '-2.000' }))).toBe('-2');
     expect(correctionWords(m({}))).toBeNull();
     expect(differenceWords('10', '10.000', 'roll')).toBeNull();
     expect(quantityProblem('2.5', '10.000')).toBeNull();
+  });
+
+  it('never says there is no other category when the list could not be read (review of #619)', async () => {
+    categoriesFail = true;
+    getProduct.mockResolvedValue({ id: 'p1', description: 'Cable 2.5mm', category_id: 'c1', category: 'Cables', version: 4 });
+    screenOf(admin, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);
+    open('The category is wrong');
+    expect(await screen.findByText('This list could not be loaded. Check the connection.')).toBeTruthy();
+    expect(screen.queryByText('No other category yet.')).toBeNull();
+    categoriesFail = false;
+  });
+
+  it('shows nothing about other categories while they load (review of #619)', async () => {
+    categoriesHang = true;
+    getProduct.mockResolvedValue({ id: 'p1', description: 'Cable 2.5mm', category_id: 'c1', category: 'Cables', version: 4 });
+    screenOf(admin, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);
+    open('The category is wrong');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText('No other category yet.')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add a category' })).toBeNull();
+    categoriesHang = false;
   });
 });

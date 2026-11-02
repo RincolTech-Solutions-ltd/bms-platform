@@ -1,16 +1,41 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, createLazyRoute } from '@tanstack/react-router';
+import { createLazyRoute } from '@tanstack/react-router';
 import { type ChangeEvent, useEffect, useRef, useState } from 'react';
 import { api, fetchSettings, problemOf, type TenantSettings } from '../../api/client';
-import { useShellBrand } from '../../app/branding';
+import { BRANDING_QUERY, appTitle, brandOf, useShellBrand } from '../../app/branding';
 import { checkColour, colourMessage, suggestColour } from '../../app/contrast';
+import { BusyButton } from '../../app/ui/BusyButton';
+import { Tile, TileGrid } from '../../app/ui/Tile';
+import { icons } from '../../components/icons';
+import { DataExportCard } from './data-export';
+import { NewIconNote, rememberIconVersion } from '../../install/NewIcon';
 import { useStaff } from './context';
+import { PlanCard } from './plan';
+import { ShortLinkCard } from './short-link';
+import { Hint } from '../../app/ui/Hint';
+import { sayDone } from './retail/toast';
 
 // Business set-up (FR-TEN-08): name, logo, theme colour and receipt footer, with a checklist a new
 // tenant admin lands on until it is dismissed. The logo is checked and re-encoded by the API; the
 // colour rule is the same one the API enforces (app/contrast.ts), so the preview and the save agree.
 
 const ACCEPT = 'image/png,image/jpeg,image/webp';
+const HINT = { display: 'block', fontSize: '0.875em', opacity: 0.8 } as const;
+
+/** What the reports cover, in the words of the modules the business has on (issue #468); null modules means an older /me without the list. */
+export function reportsWording(modules: string[] | null | undefined): string {
+  const retail = !modules || modules.includes('retail');
+  const lending = !modules || modules.includes('lending');
+  if (retail && lending) return 'sales, stock, profit, portfolio at risk and others';
+  if (lending) return 'portfolio at risk and others';
+  if (retail) return 'sales, stock, profit and others';
+  return 'and others';
+}
+
+/** The business notices are all retail ones today, so a business without retail is not shown their page (issue #468). */
+export function hasRetail(modules: string[] | null | undefined): boolean {
+  return !modules || modules.includes('retail');
+}
 
 /** The dominant colour of a chosen image, from a small copy of it; null when it cannot be read. */
 async function suggestFrom(file: File): Promise<string | null> {
@@ -27,6 +52,20 @@ async function suggestFrom(file: File): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Which of the business's own checklist items are done, from what is saved (issue #514): the name when the business has one
+ * (the one given at onboarding counts), the logo when there is one, the theme colour once one was chosen (none means the
+ * platform look), the receipt footer when it is not blank.
+ */
+export function brandDone(settings: TenantSettings): { name: boolean; logo: boolean; colour: boolean; footer: boolean } {
+  return {
+    name: Boolean(settings.display_name_set) || (settings.display_name ?? '').trim() !== '',
+    logo: Boolean(settings.logo_document_id),
+    colour: (settings.theme_primary ?? '') !== '',
+    footer: (settings.receipt_footer ?? '').trim() !== '',
+  };
 }
 
 export function Setup() {
@@ -52,6 +91,8 @@ export function Setup() {
   const [suggested, setSuggested] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // A saved logo or colour changes the installed app's icon (ADR-066), so the admin is told how it reaches a phone (issue #453).
+  const [iconSaved, setIconSaved] = useState(false);
 
   // The form is filled once from the saved settings and then belongs to the admin: a logo upload,
   // removal or dismissal changes the settings version but must not wipe what has been typed.
@@ -76,11 +117,23 @@ export function Setup() {
     await queryClient.invalidateQueries({ queryKey: ['branding'] });
   }
 
+  /** After a logo or colour save: this device stores the new icon version, so its own new icon card stays away (issue #453). */
+  async function refreshIcon() {
+    await queryClient.invalidateQueries({ queryKey: ['settings'] });
+    try {
+      const branding = await queryClient.fetchQuery({ ...BRANDING_QUERY, staleTime: 0 });
+      rememberIconVersion(brandOf(branding, null).iconVersion ?? '');
+    } catch {
+      // The save itself worked; at worst this device shows the card once.
+    }
+  }
+
   async function run(action: () => Promise<string | null>) {
     setBusy(true);
     setMessage(null);
     try {
-      setMessage(await action());
+      const done = await action();
+      if (done) sayDone(done);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : (problemOf(error).detail ?? 'Something went wrong. Try again.'));
     } finally {
@@ -94,7 +147,10 @@ export function Setup() {
       if (name.trim() !== (current.display_name ?? '')) body.display_name = name.trim();
       if (footer !== (current.receipt_footer ?? '')) body.receipt_footer = footer;
       if (colour.toUpperCase() !== (current.theme_primary ?? '')) body.theme_primary = colour;
-      if (Object.keys(body).length === 0) return 'Nothing to save.';
+      if (Object.keys(body).length === 0) {
+        setMessage('Nothing to save.');
+        return null;
+      }
       const { error } = await api.PATCH('/api/v1/settings', {
         params: { header: { 'If-Match': `"${current.version}"` } },
         body,
@@ -103,8 +159,13 @@ export function Setup() {
         const problem = problemOf(error);
         throw new Error(problem.errors?.[0]?.message ?? problem.detail ?? 'Could not save.');
       }
-      await refresh();
-      return colour === '' ? 'Saved. The platform colour is in use.' : 'Saved.';
+      if (body.theme_primary === undefined) {
+        await refresh();
+      } else {
+        await refreshIcon();
+        setIconSaved(true);
+      }
+      return colour === '' ? 'Saved, platform colour used' : 'Settings saved';
     });
   }
 
@@ -122,14 +183,15 @@ export function Setup() {
         },
       });
       if (error) throw new Error(problemOf(error).detail ?? 'Could not upload the logo.');
-      await refresh();
+      await refreshIcon();
+      setIconSaved(true);
       const found = await suggestFrom(file);
       if (found) {
         setColour(found);
         setSuggested(true);
-        return 'Logo saved. A theme colour was suggested from it: check the preview, then save.';
+        setMessage('A theme colour was suggested from the logo: check the preview, then save.');
       }
-      return 'Logo saved.';
+      return 'Logo saved';
     });
   }
 
@@ -137,8 +199,9 @@ export function Setup() {
     void run(async () => {
       const { error } = await api.DELETE('/api/v1/settings/logo');
       if (error) throw new Error(problemOf(error).detail ?? 'Could not remove the logo.');
-      await refresh();
-      return 'Logo removed.';
+      await refreshIcon();
+      setIconSaved(false);
+      return 'Logo removed';
     });
   }
 
@@ -151,7 +214,40 @@ export function Setup() {
       if (error) throw new Error(problemOf(error).detail ?? 'Could not change the reports setting.');
       await refresh();
       await queryClient.invalidateQueries({ queryKey: ['me'] });
-      return on ? 'Reports are on. The Reports tab is now shown to staff who may run reports.' : 'Reports are off.';
+      return on ? 'Reports turned on' : 'Reports turned off';
+    });
+  }
+
+  // ADR-071: the day the app became the register; only the Owner moves it (the server answers owner_only for anyone else).
+  function setGoLive(date: string) {
+    void run(async () => {
+      const { error } = await api.PATCH('/api/v1/settings', {
+        params: { header: { 'If-Match': `"${current.version}"` } },
+        body: { go_live_date: date },
+      });
+      if (error) {
+        const problem = problemOf(error);
+        throw new Error(problem.errors?.[0]?.message ?? problem.detail ?? 'Could not save the go-live date.');
+      }
+      await refresh();
+      return 'Go live date saved';
+    });
+  }
+
+  // ADR-090 (owner decision D46): the month the financial year ends in; a closed business's money records are kept from its end.
+  // Only the Owner changes it (the server answers owner_only for anyone else).
+  function setYearEnd(month: number) {
+    void run(async () => {
+      const { error } = await api.PATCH('/api/v1/settings', {
+        params: { header: { 'If-Match': `"${current.version}"` } },
+        body: { financial_year_end_month: month },
+      });
+      if (error) {
+        const problem = problemOf(error);
+        throw new Error(problem.errors?.[0]?.message ?? problem.detail ?? 'Could not save the end of the financial year.');
+      }
+      await refresh();
+      return `Year end set to ${MONTHS[month - 1]}`;
     });
   }
 
@@ -167,11 +263,12 @@ export function Setup() {
     });
   }
 
+  const done = brandDone(current);
   const items: { label: string; done: boolean | null }[] = [
-    { label: 'Business name', done: current.display_name_set ?? false },
-    { label: 'Logo', done: Boolean(current.logo_document_id) },
-    { label: 'Theme colour', done: Boolean(current.theme_primary) },
-    { label: 'Receipt footer', done: (current.receipt_footer ?? '') !== '' },
+    { label: 'Business name', done: done.name },
+    { label: 'Logo', done: done.logo },
+    { label: 'Theme colour', done: done.colour },
+    { label: 'Receipt footer', done: done.footer },
     { label: 'First branch (besides the head office)', done: branches.data === undefined ? null : branches.data > 1 },
     { label: 'First staff user (besides you)', done: users.data === undefined ? null : users.data > 1 },
   ];
@@ -191,22 +288,44 @@ export function Setup() {
                 </li>
               ))}
           </ul>
-          <button disabled={busy} onClick={dismiss}>
+          <BusyButton busy={busy} onClick={dismiss}>
             Dismiss the checklist
-          </button>
+          </BusyButton>
         </section>
       )}
 
       <h2>Business</h2>
       <div style={{ display: 'grid', gap: 12, maxWidth: 480 }}>
-        <label data-tour="setup-name">
-          Business name
-          <input value={name} maxLength={100} onChange={(e) => setName(e.target.value)} style={{ display: 'block', width: '100%' }} />
-        </label>
-        <label>
-          Receipt footer
-          <textarea value={footer} maxLength={500} onChange={(e) => setFooter(e.target.value)} style={{ display: 'block', width: '100%' }} />
-        </label>
+        <div data-tour="setup-name">
+          <label>
+            Business name
+            <input value={name} maxLength={100} aria-describedby="name-hint" onChange={(e) => setName(e.target.value)} style={{ display: 'block', width: '100%' }} />
+          </label>
+          <span id="name-hint" style={HINT}>The name your staff and customers see on the app, receipts and text messages.</span>
+        </div>
+        <div>
+          <label>
+            Receipt footer
+            <textarea
+              value={footer}
+              maxLength={500}
+              placeholder="Thank you for shopping with us. Returns within 7 days with this receipt."
+              aria-describedby="footer-hint"
+              onChange={(e) => setFooter(e.target.value)}
+              style={{ display: 'block', width: '100%' }}
+              />
+          </label>
+          <span id="footer-hint" style={HINT}>
+            A short line printed at the bottom of every receipt, for example a thank-you, your phone or Instagram, or how returns work.
+          </span>
+        </div>
+        {footer.trim() !== '' && (
+          <div data-testid="footer-preview" role="group" aria-label="Bottom of a receipt" style={{ fontFamily: 'monospace', border: '1px dashed', padding: 8, maxWidth: 320, textAlign: 'center', whiteSpace: 'pre-wrap' }}>
+            <div>TOTAL ...</div>
+            <div>--------------------</div>
+            {footer.trim()}
+          </div>
+        )}
 
         <fieldset data-tour="setup-logo">
           <legend>Logo</legend>
@@ -222,17 +341,21 @@ export function Setup() {
             <input type="file" accept={ACCEPT} disabled={busy} onChange={upload} style={{ display: 'block' }} />
           </label>
           {current.logo_document_id && (
-            <button disabled={busy} onClick={removeLogo}>
+            <BusyButton busy={busy} onClick={removeLogo}>
               Remove the logo
-            </button>
+            </BusyButton>
           )}
+          {iconSaved && current.logo_document_id && <NewIconNote name={appTitle(brand)} />}
         </fieldset>
 
         <fieldset data-tour="setup-colour">
           <legend>Theme colour</legend>
+          <p id="colour-hint" style={HINT}>
+            The colour of the app's top bar and buttons. The app picks white or dark text for it; colours where neither is readable are refused.
+          </p>
           <label>
             Colour
-            <input type="color" value={check.ok || check.reason === 'contrast' ? colour : '#0d5c75'} onChange={(e) => { setColour(e.target.value.toUpperCase()); setSuggested(false); }} aria-label="Pick a colour" />
+            <input type="color" value={check.ok || check.reason === 'contrast' ? colour : '#0d5c75'} onChange={(e) => { setColour(e.target.value.toUpperCase()); setSuggested(false); }} aria-label="Pick a colour" aria-describedby="colour-hint" />
           </label>{' '}
           <label>
             Hex
@@ -241,12 +364,12 @@ export function Setup() {
               placeholder="#0D5C75"
               maxLength={7}
               aria-invalid={colourProblem !== null}
-              aria-describedby={colourProblem ? 'colour-problem' : undefined}
+              aria-describedby={colourProblem ? 'colour-hint colour-problem' : 'colour-hint'}
               onChange={(e) => { setColour(e.target.value); setSuggested(false); }}
             />
           </label>{' '}
           {current.theme_primary && (
-            <button type="button" disabled={busy} onClick={() => { setColour(''); setSuggested(false); }}>
+            <button type="button" /* busy-exempt: only changes the form */ disabled={busy} onClick={() => { setColour(''); setSuggested(false); }}>
               Use the platform colour
             </button>
           )}
@@ -260,64 +383,92 @@ export function Setup() {
           )}
         </fieldset>
 
+        <ShortLinkCard />
+
         <fieldset>
           <legend>Reports</legend>
           <label>
             <input type="checkbox" checked={current.reports_enabled === true} disabled={busy} onChange={(e) => setReports(e.target.checked)} />{' '}
-            Let staff run reports (portfolio at risk and others), prepared in the background and kept for 30 days
+            Let staff run reports ({reportsWording(me.modules)}), prepared in the background and kept for 30 days
           </label>
         </fieldset>
 
-        {permissions.includes('core.branches.read') && (
+        {permissions.includes('core.data_export.run') && <DataExportCard modules={me.modules} zone={me.tenant_timezone} />}
+
+        {permissions.includes('core.settings.manage') && <PlanCard mfaEnabled={me.mfa_enabled === true} />}
+
+        {(me.modules ?? ['lending']).includes('lending') && (
           <fieldset>
-            <legend>Branches</legend>
-            <p>
-              <Link to={'/staff/setup/branches' as never}>Branches</Link>: close a shop you no longer use and keep its history, reopen it, or say that your head office keeps no goods.
-            </p>
+            <legend>Go-live date</legend>
+            <label htmlFor="go-live-date">The day the app became your register (only the Owner of the business changes it)</label>
+            <input id="go-live-date" type="date" disabled={busy} defaultValue={current.go_live_date ?? ''}
+              onBlur={(e) => { if (e.target.value && e.target.value !== current.go_live_date) setGoLive(e.target.value); }} />
+            <Hint full>
+              Loans given out before this day can be brought in from your paper register with their real dates. Until it is set, the day an
+              administrator first signed in counts.
+            </Hint>
           </fieldset>
         )}
 
-        {permissions.includes('core.users.read') && (
+        {permissions.includes('core.settings.manage') && (
           <fieldset>
-            <legend>Staff</legend>
-            <p>
-              <Link to="/staff/users">Users</Link>: invite your staff, give each person a role, and see who has not joined yet.
-            </p>
+            <legend>Financial year</legend>
+            <label htmlFor="year-end">The month your financial year ends in</label>
+            <select
+              id="year-end"
+              disabled={busy || me.is_owner !== true}
+              value={String(current.financial_year_end_month ?? 6)}
+              onChange={(e) => setYearEnd(Number(e.target.value))}
+            >
+              {MONTHS.map((name, i) => (
+                <option key={name} value={String(i + 1)}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <Hint full>
+              June unless you change it, the end of the Uganda tax year. If the business is ever closed, its money records are kept for five
+              years after the end of that financial year. Only the owner of the business changes it.
+            </Hint>
           </fieldset>
         )}
 
-        <fieldset>
-          <legend>Two-step sign-in</legend>
-          <p>
-            <Link to={'/staff/setup/two-step' as never}>Two-step sign-in</Link>: ask your staff for a code from their phone as well as the password. It is optional until you choose who must use it.
-          </p>
-          <p>
-            <Link to={'/staff/two-step' as never}>Turn it on for yourself</Link>.
-          </p>
-        </fieldset>
-
-        <fieldset>
-          <legend>Notifications</legend>
-          <p>
-            <Link to={'/staff/setup/notifications' as never}>Notifications for the business</Link>: which notices your staff get on their phones (new
-            orders, low stock, credit to collect) and when the daily summary goes.
-          </p>
-        </fieldset>
-
-        <fieldset>
-          <legend>Text messages</legend>
-          <p>
-            <Link to="/staff/sms">SMS settings, wording and opt-outs</Link>: switch text messages on, choose the sender name and sending hours, and reword the messages.
-          </p>
-        </fieldset>
-
-        <button disabled={busy || (colour !== '' && !check.ok)} onClick={save} data-tour="setup-save">
+        <BusyButton busy={busy} disabled={colour !== '' && !check.ok} onClick={save} data-tour="setup-save">
           Save
-        </button>
+        </BusyButton>
         {message && <p role="status">{message}</p>}
       </div>
+
+      <h2>More set-up</h2>
+      <TileGrid label="More set-up">
+        {permissions.includes('core.branches.read') && (
+          <Tile to="/staff/setup/branches" icon={icons.building} label="Branches" hint="Add a shop or a store, close or reopen one, or say a branch keeps no goods" />
+        )}
+        {permissions.includes('core.users.read') && (
+          <Tile to="/staff/users" icon={icons.people} label="Users" hint="Invite your staff, give each a role, see who has not joined" />
+        )}
+        {permissions.includes('core.billing.read') && (
+          <Tile to="/staff/setup/billing" icon={icons.creditSales} label="Plan and billing" hint="Your plan, what is paid and until when, and every receipt" />
+        )}
+        <Tile to="/staff/setup/approvals" icon={icons.approve} label="Approval rules" hint="Which actions need an administrator first, and from what amount" />
+        <Tile to="/staff/setup/two-step" icon={icons.shield} label="Two-step sign-in" hint="Ask your staff for a code from their phone as well" />
+        <Tile to="/staff/two-step" icon={icons.lock} label="Two-step for yourself" hint="Turn on a code from your phone for your own sign-in" />
+        {hasRetail(me.modules) && (
+          <Tile to="/staff/setup/notifications" icon={icons.bell} label="Notifications for the business" hint="Notices for new orders, low stock, credit to collect, and the daily summary" />
+        )}
+        {permissions.includes('core.referrals.read') && (
+          <Tile to="/staff/setup/referrals" icon={icons.arrow} label="Referrals" hint="Your link for other businesses and who signed up with it" />
+        )}
+        <Tile to="/staff/sms" icon={icons.chat} label="Text messages" hint="Switch SMS on, choose the sender name and hours, reword messages" />
+        {permissions.includes('core.settings.manage') && (
+          <Tile to="/staff/setup/close" icon={icons.close} label="Close the business" hint="Stop for good: the data is removed after a waiting period" />
+        )}
+      </TileGrid>
     </main>
   );
 }
+
+/** The months, for the end of the financial year. */
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export const Route = createLazyRoute('/staff/setup')({ component: Setup });

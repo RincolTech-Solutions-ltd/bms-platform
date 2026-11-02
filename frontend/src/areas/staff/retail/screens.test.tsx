@@ -7,7 +7,8 @@ import { createMockRetail, mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 import { Receipt, SaleForm } from './sale';
 import { AllBranchesList, AllBranchesTable, StockLevelFilter, StockPage, StockTable } from './stock';
-import { StocktakeReview } from './stocktake';
+import { StocktakeReview, dropWords } from './stocktake';
+import { bigDrop } from './maths';
 import { BranchTotals, ProfitTable, ValuationTable } from './profit';
 import { RestockForm, RestockSaved, supplierOptions } from './restock';
 import { TransferForm, TransferSummary } from './transfer';
@@ -19,6 +20,12 @@ import { BranchRequired, Gate, NoStockHere, Problem } from './ui';
 import { ALL_BRANCHES } from '../../../auth/branch';
 
 const renderToString = (node: ReactElement) => render(node).replaceAll('<!-- -->', '');
+
+// Issue #690: the Stock page links to Items and Categories, so a link renders as a plain anchor without a router.
+vi.mock('@tanstack/react-router', async (original) => {
+  const real = await original<typeof import('@tanstack/react-router')>();
+  return { ...real, Link: ({ children, to, className }: { children: unknown; to: string; className?: string }) => <a href={to} className={className}>{children as never}</a> };
+});
 
 // Component tests render to static markup (the test setup has no DOM): they prove what each screen
 // shows and, above all, what a user without retail.profit.read never sees.
@@ -54,13 +61,15 @@ describe('sale screen', () => {
   const client = new QueryClient();
   client.setQueryData(['retail', 'products', branch, ''], products);
 
-  it('lists items with the branch balance and a negative flag, labelled inputs', () => {
+  // The items show only while something is typed (issue #534); ItemCombobox.dom.test.tsx and item-picker.dom.test.tsx draws the matches.
+  it('shows a labelled item search with no list of items until something is typed', () => {
     const html = page('sales', <SaleForm branchId={branch} />, client);
-    expect(html).toContain('LED bulb 9W screw');
-    expect(html).toContain('in stock here');
-    expect(html).toContain('(negative)');
+    expect(html).not.toContain('LED bulb 9W screw');
+    expect(html).not.toContain('in stock here');
+    expect(html).not.toContain('Group by category');
     expect(html).toContain('for="sale-search"');
-    expect(html).toContain('Total UGX 0');
+    expect(html).toMatch(/id="sale-search"[^>]*role="combobox"[^>]*aria-expanded="false"/);
+    expect(html).toContain('<span>Total</span> <span class="rt-total-amount">UGX 0</span>');
     expect(html).not.toMatch(/cost|profit/i);
   });
 
@@ -94,23 +103,35 @@ describe('stock screen', () => {
     expect(admin).toContain('UGX 3,500');
   });
 
-  it('says Price and puts Cost before it (issue #330), and says only Price without the permission', () => {
+  it('says Selling price and puts the average buying price before it (issues #330, #680), and only Selling price without the permission', () => {
     const admin = renderToString(<StockTable rows={rows} showCost />);
-    expect(admin.indexOf('>Cost<')).toBeGreaterThan(-1);
-    expect(admin.indexOf('>Cost<')).toBeLessThan(admin.indexOf('>Price<'));
+    // ADR-079: the cost of stock is the shop's average buying price.
+    // Issue #707: each header carries its help tip after the words.
+    expect(admin.indexOf('>Average buying price <')).toBeGreaterThan(-1);
+    expect(admin.indexOf('>Average buying price <')).toBeLessThan(admin.indexOf('>Selling price <'));
+    expect(admin).toContain('aria-label="More about Average buying price"');
     expect(admin.indexOf('UGX 3,500')).toBeLessThan(admin.indexOf('UGX 6,000'));
-    expect(admin).not.toContain('Selling price');
     const sales = renderToString(<StockTable rows={rows} showCost={false} />);
-    expect(sales).toContain('>Price<');
-    expect(sales).not.toContain('Selling');
+    expect(sales).toContain('>Selling price <');
+    expect(sales).toContain('aria-label="More about Selling price"');
+    expect(sales).not.toContain('Buying');
   });
 
   it('shows cost then price on the all-branches table and the phone cards', () => {
     const data = { branches: [{ id: 'b1', code: 'BR1', name: 'Test Branch A' }], items: [{ product_id: 'p1', description: 'Test Item 01', unit: 'piece', total_qty: '3.000', sell_minor: 6000, cost_minor: 3500, balances: [{ branch_id: 'b1', qty: '3.000' }] }] } as AllBranchesStock;
     const table = renderToString(<AllBranchesTable data={data} showCost />);
-    expect(table.indexOf('>Cost<')).toBeLessThan(table.indexOf('>Price<'));
-    expect(renderToString(<AllBranchesList data={data} showCost />)).toContain('Cost UGX 3,500, price UGX 6,000 each');
-    expect(renderToString(<AllBranchesList data={data} showCost={false} />)).toContain('Price UGX 6,000 each');
+    expect(table.indexOf('>Average buying price <')).toBeGreaterThan(-1);
+    expect(table.indexOf('>Average buying price <')).toBeLessThan(table.indexOf('>Selling price <'));
+    const cards = renderToString(<AllBranchesList data={data} showCost />);
+    expect(cards).toContain('Buying price <span class="num">UGX 3,500</span> · Selling price <span class="num">UGX 6,000</span>');
+    // Issue #707: the phone cards carry the same two tips as the table headers, once above the list.
+    expect(cards).toContain('aria-label="More about Average buying price"');
+    expect(cards).toContain('aria-label="More about Selling price"');
+    const sales = renderToString(<AllBranchesList data={data} showCost={false} />);
+    expect(sales).toContain('Selling price <span class="num">UGX 6,000</span>');
+    expect(sales).toContain('aria-label="More about Selling price"');
+    expect(sales).not.toContain('Buying');
+    expect(sales).not.toContain('buying');
   });
 
   it('shows the category of each item in a Category column when the list is not grouped', () => {
@@ -121,13 +142,14 @@ describe('stock screen', () => {
     vi.unstubAllGlobals();
   });
 
-  it('offers a category select with All categories', () => {
+  it('offers the category chips, All first, each category with its item count (#690, which replaces the picker of #578 here)', () => {
     const client = new QueryClient();
-    client.setQueryData(['retail', 'categories'], [{ id: 'c1', name: 'Cables' }, { id: 'c2', name: 'Lighting' }]);
+    client.setQueryData(['retail', 'categories'], [{ id: 'c1', name: 'Cables', product_count: 3 }, { id: 'c2', name: 'Lighting', product_count: 2 }]);
     const html = page('sales', <StockPage />, client);
-    expect(html).toContain('for="stock-category"');
-    expect(html).toContain('All categories');
-    expect(html).toContain('>Lighting</option>');
+    expect(html).toContain('role="group" aria-label="Categories"');
+    expect(html).toContain('aria-pressed="true">All</button>');
+    expect(html).toContain('Cables <span class="find-chip-count num">3</span>');
+    expect(html).not.toContain('id="stock-category"');
   });
 });
 
@@ -136,32 +158,32 @@ describe('low stock and out of stock tabs', () => {
     const html = renderToString(<StockLevelFilter level="low" onChange={() => undefined} />);
     expect(html).toContain('>All items<');
     expect(html).toContain('>Out of stock<');
-    expect(html).toContain('aria-pressed="true">Low stock<');
-    expect(html).toContain('aria-pressed="false">Out of stock<');
-    expect(html).toContain('including those that are out of stock');
+    expect(html).toMatch(/aria-checked="true"[^>]*>Low stock</);
+    expect(html).toMatch(/aria-checked="false"[^>]*>Out of stock</);
+    expect(html).toContain('at or below their minimum, or 5 or fewer without one, including those out of stock');
   });
 
   it('the Stock page starts on all items', () => {
     const client = new QueryClient();
     const html = page('sales', <StockPage />, client);
-    expect(html).toContain('aria-pressed="true">All items<');
+    expect(html).toMatch(/aria-checked="true"[^>]*>All items</);
     expect(html).not.toContain('including those that are out of stock');
   });
 });
 
 describe('category in the pickers', () => {
-  it('shows the category as a small grey label in the sale picker and the usage picker', () => {
+  it('lists no items in the sale picker and the usage picker before a search, even with the whole catalogue loaded', () => {
     const client = new QueryClient();
     client.setQueryData(['retail', 'products', branch, ''], products.map((p) => ({ ...p, category: 'Lighting' })));
-    expect(page('sales', <SaleForm branchId={branch} />, client)).toContain('<span class="hint">Lighting</span>');
-    expect(page('sales', <UsageForm branchId={branch} />, client)).toContain('<span class="hint">Lighting</span>');
+    expect(page('sales', <SaleForm branchId={branch} />, client)).not.toContain('Lighting');
+    expect(page('sales', <UsageForm branchId={branch} />, client)).not.toContain('Lighting');
   });
 });
 
 describe('restock screen', () => {
   it('says that saving updates the product prices', () => {
     const html = page('admin', <RestockForm />);
-    expect(html).toMatch(/changes the cost and sell price/);
+    expect(html).toMatch(/changes the buying and selling price/);
     expect(html).toContain('for="supplier"');
   });
 
@@ -198,11 +220,32 @@ describe('stock-take review', () => {
     expect(html).toContain('LED bulb 9W screw');
     expect(html).not.toContain('LED bulb 15W screw');
     expect(html).toContain('(less)');
-    expect(html).toContain('Commit the count');
+    expect(html).toContain('Save the count');
   });
 
   it('has no commit button once committed', () => {
-    expect(renderToString(<StocktakeReview stocktake={{ ...st, status: 'committed' }} onCommit={() => undefined} />)).not.toContain('Commit the count');
+    expect(renderToString(<StocktakeReview stocktake={{ ...st, status: 'committed' }} onCommit={() => undefined} />)).not.toContain('Save the count');
+  });
+
+  // Issue #629: to 0 or below half of what was held asks first; half or more, an item that held nothing, or a rise does not.
+  it('marks a count that wipes or halves stock, and words what it removes', () => {
+    const l = (expected: string, counted: string) => ({ product_id: 'p', expected_qty: expected, counted_qty: counted });
+    expect(bigDrop(l('8.000', '0.000'))).toBe(true);
+    expect(bigDrop(l('10.000', '4.999'))).toBe(true);
+    expect(bigDrop(l('10.000', '5.000'))).toBe(false);
+    expect(bigDrop(l('1.000', '0.000'))).toBe(true);
+    expect(bigDrop(l('0.000', '0.000'))).toBe(false);
+    expect(bigDrop(l('-2.000', '0.000'))).toBe(false);
+    expect(bigDrop(l('3.000', '7.000'))).toBe(false);
+    expect(dropWords(l('8.000', '0.000'), 'piece')).toBe('This removes 8 pieces. Is that right?');
+    expect(dropWords(l('1.000', '0.000'), 'box')).toBe('This removes 1 box. Is that right?');
+    expect(dropWords(l('2.000', '0.000'), 'box')).toBe('This removes 2 boxes. Is that right?');
+    expect(dropWords(l('2.500', '0.000'), undefined)).toBe('This removes 2.5. Is that right?');
+  });
+
+  it('asks nothing once committed', () => {
+    const wiped: Stocktake = { ...st, status: 'committed', lines: [{ product_id: 'p1', description: 'LED bulb 9W screw', expected_qty: '12.000', counted_qty: '0.000', committed_variance_qty: '-12.000' }] };
+    expect(renderToString(<StocktakeReview stocktake={wiped} />)).not.toContain('Is that right?');
   });
 });
 
@@ -218,13 +261,13 @@ describe('valuation and profit', () => {
     const html = renderToString(<ValuationTable valuation={v} />);
     expect(html).toContain('UGX 7,000');
     expect(html).toContain('UGX 12,000');
-    expect(html).toContain('At cost');
+    expect(html).toContain('At buying price');
   });
 
   it('shows expected profit and its percent over cost in the total, per item and by category', () => {
     const html = renderToString(<ValuationTable valuation={v} />);
-    expect(html).toContain('<td>Expected profit</td><td class="num">UGX 5,000</td>');
-    expect(html).toContain('<td>Expected profit % (over cost)</td><td class="num">71.43%</td>');
+    expect(html).toContain('<dt>Expected profit</dt><dd>UGX 5,000</dd>');
+    expect(html).toContain('<dt>Expected profit % (over buying price)</dt><dd>71.43%</dd>');
     expect(html).toContain('<h2>By category</h2>');
     expect(html).toContain('<td>Lighting</td>');
     expect((html.match(/71\.43%/g) ?? []).length).toBe(3);
@@ -260,7 +303,7 @@ describe('valuation and profit', () => {
     expect(html).toContain('UGX 5,000');
     expect((html.match(/71\.43%/g) ?? []).length).toBe(2);
     // The overall total has no cost, so the headline shows none; the row without cost stays blank.
-    expect(html).not.toContain('<td>Expected profit</td>');
+    expect(html).not.toContain('<dt>Expected profit</dt>');
     expect(html).toContain('UGX 9,000');
   });
 
@@ -280,7 +323,7 @@ describe('valuation and profit', () => {
       rows: [{ branch_id: branch, date: '2026-10-05', sales_minor: 3000, cost_of_sales_minor: 1000, gross_profit_minor: 2000, usage_cost_minor: 0, stocktake_difference_minor: -600, profit_minor: 1400 }],
     };
     const html = renderToString(<ProfitTable report={report} />);
-    expect(html).toContain('Stock-take<br/>difference');
+    expect(html).toContain('Stock count<br/>difference');
     expect(html).toContain('-UGX 600');
     expect(html).toContain('UGX 1,400');
   });
@@ -305,7 +348,7 @@ describe('stock moves', () => {
     expect(html).toContain('for="transfer-to"');
     expect(html).toContain('Test Branch B');
     expect(html).not.toContain('>BR1 Test Branch A</option>');
-    expect(html).toContain('in stock here');
+    expect(html).not.toContain('in stock here');
     expect(html).toContain('for="transfer-search"');
     expect(html).not.toMatch(/each,/);
   });
@@ -313,7 +356,8 @@ describe('stock moves', () => {
   it('lists moves in words and shows the value at cost only with retail.profit.read', () => {
     const list = page('sales', <TransferList items={[moved, { ...moved, id: 'tr2', status: 'voided' }]} onOpen={() => undefined} />);
     expect(list).toContain('From Test Branch A (BR1) to Test Branch B (BR2)');
-    expect(list).toContain('cancelled');
+    expect(list).toContain('undone');
+    expect(list).not.toContain('cancelled');
     expect(page('sales', <TransferSummary transfer={moved} />)).not.toMatch(/cost/i);
     expect(page('admin', <TransferSummary transfer={moved} />)).toContain('Value at cost: UGX 7,000');
   });
@@ -349,7 +393,8 @@ describe('walk-through fixes (#112)', () => {
     vi.stubGlobal('sessionStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: () => undefined, removeItem: () => undefined });
     const html = page('admin', <TransferForm fromBranchId={branch} />);
     expect(html).toContain('Only 12 piece in stock at this branch.');
-    expect(html).toMatch(/<button type="submit" class="rt-primary" disabled="">Move stock<\/button>/);
+    expect(html).toMatch(/<button type="submit" data-tour="transfer-save" class="rt-primary busy-button" data-not-ready="true">Move stock<\/button>/);
+
   });
 
   it('shows the server refusal for stock in plain words when the form let it through (item 2)', async () => {
@@ -399,10 +444,10 @@ describe('walk-through fixes (#112)', () => {
     };
     const context = { supplierName: 'Test Supplier 01', before: { p1: { sell: 1200, cost: 800 }, p2: { sell: 9500, cost: 6000 } } };
     const admin = page('admin', <RestockSaved purchase={purchase} context={context} />);
-    expect(admin).toContain('Restock saved (RP00000042)');
-    expect(admin).toContain('From Test Supplier 01, bought on 2026-10-06: 2 items');
+    expect(admin).toContain('Purchase saved (RP00000042)');
+    expect(admin).toContain('From Test Supplier 01, bought on 6 Oct 2026: 2 items');
     expect(admin).toContain('LED bulb 9W screw: sell price changed from UGX 1,200 to UGX 1,400.');
-    expect(admin).toContain('LED bulb 9W screw: cost changed from UGX 800 to UGX 850.');
+    expect(admin).toContain('LED bulb 9W screw: last paid changed from UGX 800 to UGX 850.');
     expect(admin).not.toContain('LED bulb 15W screw:');
     expect(page('sales', <RestockSaved purchase={purchase} context={context} />)).not.toContain('cost changed');
   });
@@ -460,7 +505,7 @@ describe('All branches (#144)', () => {
     const client = new QueryClient();
     client.setQueryData(['retail', 'stock', 'all-branches', '', '', false, '', false, false], data);
     const html = inAll(<StockPage />, 'admin', client);
-    expect(html).toContain('All branches');
+    expect(html).toContain('Test Branch B (BR2)');
     expect(html).toContain('LED bulb 9W screw');
     expect(html).not.toContain('Choose a branch');
   });
@@ -531,7 +576,7 @@ describe('All branches (#144)', () => {
     expect(html).toContain('Test Branch A');
     expect(html).toContain('UGX 12,000');
     expect(html).toContain('UGX 6,000');
-    expect(html).toContain('<td>At price</td><td class="num">UGX 18,000</td>');
+    expect(html).toContain('<span class="key-figure-label">Stock at selling price</span><strong class="key-figure-value">UGX 18,000</strong>');
   });
 
   it('Daily profit shows each branch and the total of every branch per day', () => {
@@ -547,7 +592,7 @@ describe('All branches (#144)', () => {
     expect(html).toContain('<h2>By branch</h2>');
     expect(html).toContain('<td>Test Branch A</td>');
     expect(html).toContain('<td>Test Branch B</td>');
-    expect(html).toContain('<td>2026-10-05</td>');
+    expect(html).toContain('<td>5 Oct 2026</td>');
     expect(html).toContain('UGX 3,000');
     expect(html).toContain('UGX 1,200');
   });

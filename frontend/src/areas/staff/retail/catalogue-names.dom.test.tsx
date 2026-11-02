@@ -5,6 +5,7 @@ import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
+import { chooseCategory } from '../../../test-utils/category-picker';
 
 // The duplicate-name handling of the Items form (issue #352): the same name is refused in the owner's words with a way to open the
 // item, an administrator may add it anyway with a reason, a close name is a warning, and a press of Save sends one request.
@@ -14,6 +15,12 @@ vi.setConfig({ testTimeout: 20000 });
 
 const similarProducts = vi.fn();
 const createProduct = vi.fn();
+
+// The item form links to its help (issue #630); these tests draw it without a router.
+vi.mock('@tanstack/react-router', async (original) => {
+  const real = await original<typeof import('@tanstack/react-router')>();
+  return { ...real, Link: ({ children, to, className }: { children: unknown; to: string; className?: string }) => <a href={to} className={className}>{children as never}</a> };
+});
 
 vi.mock('../../../api/retail', async (original) => {
   const real = await original<typeof import('../../../api/retail')>();
@@ -52,15 +59,14 @@ function screenOf(me: ReturnType<typeof mockMe>, node: ReactElement) {
 }
 
 async function fillIn(description: string) {
-  fireEvent.change(screen.getByLabelText('Code'), { target: { value: 'NEW-1' } });
-  fireEvent.change(screen.getByLabelText('Description'), { target: { value: description } });
-  await waitFor(() => expect(screen.getAllByRole('option').length).toBeGreaterThan(2));
-  fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'c1' } });
-  fireEvent.change(screen.getByLabelText('Unit'), { target: { value: 'u1' } });
+  fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: description } });
+  await screen.findByRole('option', { name: 'piece' });
+  await chooseCategory(screen.getByLabelText(/^Category/), 'Fittings');
+  fireEvent.change(screen.getByLabelText(/^Single unit/), { target: { value: 'u1' } });
   fireEvent.change(screen.getByLabelText(/Selling price/), { target: { value: '12000' } });
 }
 
-const addButton = () => screen.getByRole('button', { name: /^Add item|Saving$/ }) as HTMLButtonElement;
+const addButton = () => screen.getByRole('button', { name: /^Add item/ }) as HTMLButtonElement;
 
 describe('the same name', () => {
   it('is refused in the owner\'s words with a way to open the existing item', async () => {
@@ -135,7 +141,7 @@ describe('a close name', () => {
     await screen.findByTestId('name-similar');
     fireEvent.click(screen.getByRole('button', { name: 'Change the name' }));
     expect(screen.queryByTestId('name-similar')).toBeNull();
-    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Triple socket 13B' } });
+    fireEvent.change(screen.getByLabelText(/^Description/), { target: { value: 'Triple socket 13B' } });
     similarProducts.mockResolvedValue({ exact: [], similar: [] });
     createProduct.mockResolvedValue({ id: 'new', code: 'NEW-1', description: 'Triple socket 13B', version: 1 });
     fireEvent.click(addButton());

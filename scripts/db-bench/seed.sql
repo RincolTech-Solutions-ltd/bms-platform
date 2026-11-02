@@ -98,8 +98,10 @@ SELECT gen_random_uuid(), bt.id, ts, bt.users[1 + (s % array_length(bt.users, 1)
 -- Retail catalogue
 -- ---------------------------------------------------------------------------------------------
 
-INSERT INTO retail_categories (id, tenant_id, name)
-SELECT gen_random_uuid(), bt.id, 'Category ' || c FROM bt, generate_series(1, 20) c WHERE bt.kind = 'retail';
+-- The prefix trigger of V96 does not fire under session_replication_role = replica, so the seed sets it (CA to CT).
+INSERT INTO retail_categories (id, tenant_id, name, code_prefix)
+SELECT gen_random_uuid(), bt.id, 'Category ' || c, 'C' || chr(64 + c) FROM bt, generate_series(1, 20) c
+ WHERE bt.kind = 'retail';
 INSERT INTO retail_units (id, tenant_id, name)
 SELECT gen_random_uuid(), bt.id, u FROM bt, unnest(ARRAY['pcs', 'kg', 'litre', 'box', 'metre']) u
  WHERE bt.kind = 'retail';
@@ -201,6 +203,19 @@ SELECT l.id, l.tenant_id, s.created_at, l.sale_id, l.line_no, l.product_id, l.qt
        l.line_cost
   FROM bline l JOIN bsale s ON s.id = l.sale_id
  ORDER BY s.created_at, l.line_no;
+
+-- Payments on credit sales (issue #488): what each credit sale has been paid, in one or two payments dated 1 to 60 days
+-- after the sale, as SalesService.pay writes them. Their journal entries are not seeded; no measured query reads them.
+INSERT INTO retail_sale_payments (id, tenant_id, created_at, sale_id, amount_minor, currency, method, paid_on,
+                                  journal_entry_id, historical, created_by)
+SELECT gen_random_uuid(), s.tenant_id, s.created_at + d.days * interval '1 day', s.id,
+       CASE WHEN s.pays = 1 THEN s.paid_minor WHEN k = 1 THEN s.paid_minor / 2 ELSE s.paid_minor - s.paid_minor / 2 END,
+       'UGX', CASE WHEN random() < 0.6 THEN 'cash' WHEN random() < 0.8 THEN 'mobile_money' ELSE 'bank' END,
+       ((s.created_at + d.days * interval '1 day') AT TIME ZONE 'Africa/Kampala')::date, gen_random_uuid(),
+       s.historical, s.created_by
+  FROM (SELECT x.*, CASE WHEN x.paid_minor >= 2 AND random() < 0.5 THEN 2 ELSE 1 END AS pays
+          FROM retail_sales x WHERE x.payment_method = 'credit' AND x.paid_minor > 0) s,
+       generate_series(1, s.pays) k, LATERAL (SELECT k * (1 + floor(random() * 30))::int AS days) d;
 
 -- Movements: one sale movement per line (JdbcStockLedger.record and recordHistorical), and a
 -- reversing return for a voided sale.
@@ -320,9 +335,10 @@ INSERT INTO retail_stock_movements (id, tenant_id, created_at, occurred_at, busi
                                     transfer_id)
 SELECT * FROM bmove ORDER BY created_at;
 
-INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty, updated_at)
-SELECT tenant_id, branch_id, product_id, sum(qty), max(created_at)
-  FROM bmove GROUP BY tenant_id, branch_id, product_id;
+INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty, updated_at, avg_cost_minor)
+SELECT m.tenant_id, m.branch_id, m.product_id, sum(m.qty), max(m.created_at), min(p.cost_minor)
+  FROM bmove m JOIN retail_products p ON p.tenant_id = m.tenant_id AND p.id = m.product_id
+ GROUP BY m.tenant_id, m.branch_id, m.product_id;
 
 -- Stock-takes: monthly per branch, 100 counted products each.
 INSERT INTO retail_stocktakes (id, tenant_id, created_at, branch_id, status, created_by, committed_by, committed_at)
@@ -525,6 +541,17 @@ SELECT s.tenant_id, bt.users[2], 'bench-' || s.id, 'POST', '/api/v1/retail/sales
        '{"id": "x"}', s.created_at, s.created_at + interval '7 days'
   FROM bsale s JOIN bt ON bt.id = s.tenant_id
  WHERE s.created_at > timestamptz '2026-09-23';
+
+-- Low-stock minimums (issue #412, measured for issue #490): an item level on one product in three and a branch level on one
+-- branch and product in eight, between 2 and 20, so the minimum probes of the low-stock rule find rows.
+INSERT INTO retail_stock_minimums (id, tenant_id, product_id, branch_id, min_qty)
+SELECT gen_random_uuid(), p.tenant_id, p.id, NULL, 2 + abs(hashtext(p.id::text)) % 19
+  FROM retail_products p
+ WHERE abs(hashtext(p.id::text)) % 3 = 0
+UNION ALL
+SELECT gen_random_uuid(), p.tenant_id, p.id, b.id, 2 + abs(hashtext(b.id::text || p.id::text)) % 19
+  FROM retail_products p JOIN branches b ON b.tenant_id = p.tenant_id
+ WHERE abs(hashtext(b.id::text || p.id::text)) % 8 = 0;
 
 INSERT INTO tenant_sequences (tenant_id, sequence_key, next_value)
 SELECT tenant_id, 'retail_sale_no', max(i) + 1 FROM bsale GROUP BY tenant_id

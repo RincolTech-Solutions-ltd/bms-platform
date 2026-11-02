@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
+import { RouterProvider, createMemoryHistory, createRootRoute, createRouter } from '@tanstack/react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Sale, SaleReturn } from '../../../api/retail';
 import { CreditNoteView, VoidPanel } from './credit-note';
 import { ReturnsThresholdWarning } from './settings';
 import { ReturnFormView } from './return-new';
 import { backOf, blankReturn, buildReturnRequest, type ReturnForm } from './returns-state';
+
+/** A button that may be pressed: not disabled, and not a primary button whose form is still not ready (issue #526). */
+const ready = (b: unknown) => !(b as HTMLButtonElement).disabled && (b as HTMLElement).getAttribute('data-not-ready') !== 'true';
 
 // The return form as a person uses it (ADR-033, issue #201): the credit shown follows what is typed, the save button waits for
 // a form the server would accept, an account refund asks how the rest is paid out, damaged goods name no branch, and a void
@@ -57,13 +61,13 @@ describe('a sale made at a store (ADR-048)', () => {
 describe('taking goods back', () => {
   it('waits for a quantity, shows the credit, and refuses more than was sold', () => {
     render(<Form s={sale()} onSubmit={() => undefined} />);
-    expect(save().disabled).toBe(true);
+    expect(save().getAttribute('data-not-ready')).toBe('true');
     type(/Quantity to return/, '4');
-    expect(save().disabled).toBe(false);
+    expect(save().getAttribute('data-not-ready')).toBeNull();
     expect(screen.getByTestId('credit-l1').textContent).toContain('UGX 400');
     expect(screen.getByTestId('return-plan').textContent).toContain('UGX 400 paid back');
     type(/Quantity to return/, '10.5');
-    expect(save().disabled).toBe(true);
+    expect(save().getAttribute('data-not-ready')).toBe('true');
     expect(screen.getAllByRole('alert')[0]?.textContent).toMatch(/at most 10/i);
   });
 
@@ -83,7 +87,7 @@ describe('taking goods back', () => {
     type(/What happens to the goods/, 'write_off');
     expect(screen.queryByLabelText(/Put them back at/)).toBeNull();
     expect(screen.getByText(/never go back into stock/i)).toBeTruthy();
-    expect(save().disabled).toBe(false);
+    expect(save().getAttribute('data-not-ready')).toBeNull();
   });
 
   it('takes a return off what a credit buyer owes, and asks how the rest is paid out', () => {
@@ -92,11 +96,11 @@ describe('taking goods back', () => {
     render(<Form s={owing} onSubmit={sent} />);
     type(/Quantity to return/, '5');
     expect((screen.getByLabelText('Repay by') as HTMLSelectElement).value).toBe('account');
-    expect(save().disabled).toBe(true);
+    expect(save().getAttribute('data-not-ready')).toBe('true');
     expect(screen.getByTestId('return-plan').textContent).toContain('UGX 100 taken off what they owe');
     expect(screen.getByTestId('return-plan').textContent).toContain('UGX 400 paid back');
     type(/not taken off the balance is paid back by/, 'mobile_money');
-    expect(save().disabled).toBe(false);
+    expect(save().getAttribute('data-not-ready')).toBeNull();
     fireEvent.click(save());
     expect(buildReturnRequest(owing, sent.mock.calls[0]?.[0] as ReturnForm, backOf([]))).toMatchObject({ refund_method: 'account', money_method: 'mobile_money' });
   });
@@ -132,7 +136,7 @@ describe('taking goods back', () => {
     render(<Form s={sale()} onSubmit={() => undefined} back={backOf([earlier])} />);
     expect(screen.getByTestId('return-row-l1').textContent).toContain('4 can still come back');
     type(/Quantity to return/, '5');
-    expect(save().disabled).toBe(true);
+    expect(save().getAttribute('data-not-ready')).toBe('true');
   });
 });
 
@@ -162,21 +166,40 @@ describe('a credit note on screen', () => {
     fireEvent.change(screen.getByLabelText(/Why is it voided/), { target: { value: 'abcd' } });
     expect(go.disabled).toBe(true);
     fireEvent.change(screen.getByLabelText(/Why is it voided/), { target: { value: 'Sent twice' } });
-    expect(go.disabled).toBe(false);
+    expect(ready(go)).toBe(true);
     fireEvent.click(go);
     expect(onVoid).toHaveBeenCalledWith('Sent twice');
   });
 });
 
-describe('the settings warning', () => {
-  it('says so while returns are on and no approval limit is set, and stays quiet otherwise', () => {
-    const { unmount } = render(<ReturnsThresholdWarning capabilities={{ returns: true } as never} />);
-    expect(screen.getByTestId('returns-no-threshold').textContent).toMatch(/no approval limit/i);
+/** A Link needs a router: the note is drawn as the one page of a memory router. */
+async function inRouter(node: ReactNode) {
+  const root = createRootRoute({ component: () => <div data-testid="page">{node}</div> });
+  const router = createRouter({ routeTree: root, history: createMemoryHistory({ initialEntries: ['/'] }) });
+  const out = render(<RouterProvider router={router} />);
+  await screen.findByTestId('page');
+  return out;
+}
+
+describe('the settings note', () => {
+  it('says so in one neutral Hint line while returns are on and no approval limit is set, and stays quiet otherwise', async () => {
+    const { unmount } = await inRouter(<ReturnsThresholdWarning capabilities={{ returns: true } as never} />);
+    const note = screen.getByTestId('returns-no-threshold');
+    expect(note.textContent).toMatch(/^Returns need no second administrator yet\. /);
+    expect(note.textContent).toMatch(/no approval limit/i);
+    expect(note.getAttribute('role')).toBe('note');
+    // Issue #343: the approval rules set the limit, so the note leads to the returns row there.
+    expect(screen.getByTestId('returns-limit-link').getAttribute('href')).toBe('/staff/setup/approvals#rule-retail_sale_return');
+    expect(note.querySelector('.alert, .alert-warning')).toBeNull();
     unmount();
-    render(<ReturnsThresholdWarning capabilities={{ returns: true, returns_approval_threshold_minor: 500 } as never} />);
+    // Returns ask for approval: from 500, or (0) for every return. Either way there is nothing to warn about.
+    await inRouter(<ReturnsThresholdWarning capabilities={{ returns: true, returns_approval_threshold_minor: 500 } as never} />);
     expect(screen.queryByTestId('returns-no-threshold')).toBeNull();
     cleanup();
-    render(<ReturnsThresholdWarning capabilities={{ returns: false } as never} />);
+    await inRouter(<ReturnsThresholdWarning capabilities={{ returns: true, returns_approval_threshold_minor: 0 } as never} />);
+    expect(screen.queryByTestId('returns-no-threshold')).toBeNull();
+    cleanup();
+    await inRouter(<ReturnsThresholdWarning capabilities={{ returns: false } as never} />);
     expect(screen.queryByTestId('returns-no-threshold')).toBeNull();
   });
 });

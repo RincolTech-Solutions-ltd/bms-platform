@@ -57,7 +57,7 @@ fmt:
 
 ## Build the three images exactly as CI does.
 build:
-	docker build --build-arg GIT_SHA=$$(git rev-parse --short HEAD) -t bms-platform-api:local backend
+	docker build --build-arg GIT_SHA=$$(git rev-parse --short HEAD) --build-context help=frontend/src/help/articles --build-context words=frontend/src/words -t bms-platform-api:local backend
 	docker build -t bms-platform-web:local frontend
 	docker build -t bms-platform-proxy:local -f deploy/caddy/Dockerfile deploy
 
@@ -69,7 +69,7 @@ openapi:
 ## ADR-034 quality bar item 8: render every document template with fabricated data to PDF and to a
 ## PNG per page in backend/target/document-samples, for the visual check before merging.
 document-samples:
-	cd backend && mvn -B verify -Dit.test='LoanServicingIT#frDoc01*,RetailDocumentsIT,ReportFormatsIT,LendingPortfolioReportsIT' -Dtest=CreditNoteTemplateTest -Dsurefire.failIfNoSpecifiedTests=false -Dbms.documents.samples=true
+	cd backend && mvn -B verify -Dit.test='LoanServicingIT#frDoc01*,RetailDocumentsIT,ReportFormatsIT,LendingPortfolioReportsIT,BillingAutomationIT#frSub11*' -Dtest=CreditNoteTemplateTest -Dsurefire.failIfNoSpecifiedTests=false -Dbms.documents.samples=true
 	@echo "Samples: backend/target/document-samples (a PDF and a PNG per page for each document)"
 
 psql:

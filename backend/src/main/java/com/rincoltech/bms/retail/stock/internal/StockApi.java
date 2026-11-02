@@ -2,12 +2,15 @@ package com.rincoltech.bms.retail.stock.internal;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
+import com.rincoltech.bms.retail.catalogue.RetailCatalogue.NewPack;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
@@ -49,14 +52,44 @@ final class StockApi {
                     description =
                             "Issue #385: of qty, what open customer orders keep aside (not free to sell); absent when"
                                     + " nothing is kept")
-            String reservedQty) {}
+            String reservedQty,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = STANDARD_PACK)
+            StandardPack standardPack) {}
+
+    static final String STANDARD_PACK =
+            "Issue #650: the pack the stock is shown in (packs and pieces); absent while the units"
+                    + " capability is off or the item has no active pack holding more than one";
+
+    @Schema(name = "RetailStandardPack", description = "An item's standard pack: its unit and the base units one holds")
+    record StandardPack(
+            String unit,
+
+            @Schema(description = "Base units in one pack, three places, for example 24.000")
+            String factor,
+
+            @Schema(
+                    description = "Issue #699 (ADR-107): every active pack of the item holding a whole number of more"
+                            + " than one base unit, biggest first, so stock is shown and counted at every level")
+            List<PackLevel> levels) {}
+
+    @Schema(
+            name = "RetailPackLevel",
+            description = "Issue #699: one level of an item's packages and the base units in one")
+    record PackLevel(
+            String unit,
+
+            @Schema(description = "Base units in one, three places, for example 120.000")
+            String factor) {}
 
     @Schema(name = "RetailStockPage")
     record StockPage(
             UUID branchId,
             List<StockRow> items,
 
-            @Schema(description = "A quantity at or below this is low stock (FR-RET-03); the same for every branch")
+            @Schema(
+                    description = "A quantity at or below this is low stock (FR-RET-03) for an item with no "
+                            + "minimum set; the same for every branch")
             String lowStockThreshold,
 
             String nextCursor) {}
@@ -101,14 +134,19 @@ final class StockApi {
             Long costMinor,
 
             @Schema(description = "One entry per branch of the page, in the page's branch order")
-            List<BranchBalance> balances) {}
+            List<BranchBalance> balances,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = STANDARD_PACK)
+            StandardPack standardPack) {}
 
     @Schema(name = "RetailAllBranchesStock")
     record AllBranchesPage(
             List<StockBranch> branches,
             List<AllBranchesRow> items,
 
-            @Schema(description = "A total at or below this is low stock; the same for every branch")
+            @Schema(
+                    description = "A balance at or below this is low stock for an item with no minimum set; the "
+                            + "same for every branch")
             String lowStockThreshold,
 
             @Schema(
@@ -148,6 +186,120 @@ final class StockApi {
     record MovementPage(List<MovementRow> items, String nextCursor) {}
 
     @Schema(
+            name = "RetailQuickAddRequest",
+            description =
+                    "Issue #632: an item, its prices and how many there are at a branch, in one tap. With product_id, an item"
+                            + " already in the list, only the quantity is added and the other item fields are ignored")
+    record QuickAddRequest(
+            @Schema(description = "An item already in the list, chosen instead of a new item of the same name")
+            UUID productId,
+
+            @Size(max = 300) @Schema(description = "The new item's name; required without product_id")
+            String description,
+
+            @Schema(description = "Left out: the item goes under General, made when the business has none")
+            UUID categoryId,
+
+            @Schema(description = "Left out: the shop's piece unit (Piece or pc), made when the business has none")
+            UUID unitId,
+
+            @PositiveOrZero @Max(RetailCatalogue.MAX_AMOUNT_MINOR) @Schema(description = "Required without product_id")
+            Long sellMinor,
+
+            @PositiveOrZero
+            @Max(RetailCatalogue.MAX_AMOUNT_MINOR)
+            @Schema(description = "Left out: 0, set by the first restock")
+            Long costMinor,
+
+            @PositiveOrZero
+            @Digits(integer = 11, fraction = 3)
+            @Schema(
+                    type = "string",
+                    example = "600",
+                    description =
+                            "How many to add to the item's stock at the branch (retail.stocktake.commit there), as"
+                                    + " opening stock against opening balance equity; more than 0 with product_id; left out, no"
+                                    + " stock is recorded")
+            BigDecimal qty,
+
+            @Schema(description = "Where the stock is; defaults to the caller's one branch")
+            UUID branchId,
+
+            @Size(max = 300)
+            @Schema(description = "As on a new item: to add a name that exists already, administrators only")
+            String duplicateReason,
+
+            @Pattern(regexp = "cash|mobile_money")
+            @Schema(
+                    description =
+                            "Issue #646: the goods were just bought and paid from the branch's cash or mobile money"
+                                    + " (retail.purchase.create there). qty above 0 and cost_minor above 0 are then needed, and the"
+                                    + " stock is recorded as a purchase, as Buy stock does, never against opening balance equity."
+                                    + " Left out: opening stock, as before")
+            String paidFrom,
+
+            @Size(max = 10)
+            @Schema(
+                    description =
+                            "Issue #695: the new item's packages, as packs of POST /retail/products (issue #689, ADR-106,"
+                                    + " ADR-107), made in the same transaction; a refused package names its pack_index and"
+                                    + " saves nothing. Ignored with product_id. qty stays in the item's smallest unit")
+            @Valid
+            List<@NotNull @Valid NewPack> packs,
+
+            @Schema(
+                    description =
+                            "Issue #695: with paid_from, the package the goods were bought in (one of packs, or a pack of"
+                                    + " product_id); sent with paid_level_cost_minor. The whole packages are then one line at"
+                                    + " that price, as Buy stock records a pack, and only the pieces left over are at"
+                                    + " cost_minor, so the money that leaves is what was paid")
+            UUID paidLevelUnitId,
+
+            @Positive
+            @Max(RetailCatalogue.MAX_AMOUNT_MINOR)
+            @Schema(description = "Issue #695: what one package of paid_level_unit_id cost")
+            Long paidLevelCostMinor) {}
+
+    @Schema(name = "RetailQuickAdd")
+    record QuickAdd(
+            UUID productId,
+            String code,
+            String description,
+            String unit,
+
+            @Schema(description = "False when the item was already in the list")
+            boolean itemMade,
+
+            @Schema(description = "True when this add made the General category")
+            boolean categoryMade,
+
+            @Schema(description = "True when this add made the Piece unit")
+            boolean unitMade,
+
+            UUID branchId,
+
+            @Schema(type = "string", description = "The quantity added; absent when no stock was recorded")
+            String qty,
+
+            @Schema(type = "string", description = "What the branch holds now; absent when no stock was recorded")
+            String totalQty,
+
+            @Schema(
+                    description =
+                            "The opening movement of source retail.quick_add; absent when nothing was added or when"
+                                    + " it was paid for (the purchase's movement)")
+            UUID movementId,
+
+            @Schema(description = "cash or mobile_money when the goods were paid for (issue #646); absent otherwise")
+            String paidFrom,
+
+            @Schema(description = "The purchase recorded when the goods were paid for, as on Buy stock")
+            String purchaseNo,
+
+            @Schema(description = "What left the cash or mobile money account; absent when not paid for")
+            Long paidMinor) {}
+
+    @Schema(
             name = "RetailStockCorrectionRequest",
             description = "Issue #351: the right quantity of an item at a branch, with why it was wrong")
     record CorrectionRequest(
@@ -169,8 +321,8 @@ final class StockApi {
             @Schema(
                     type = "string",
                     example = "12.5",
-                    description =
-                            "The quantity the form showed when it was opened; 409 stock_moved when it has changed since")
+                    description = "The quantity the form showed when it was opened; 409 stock_moved when it has "
+                            + "changed since, with current_qty, the quantity now")
             BigDecimal expectedQty,
 
             @NotNull
@@ -210,6 +362,18 @@ final class StockApi {
             @NotEmpty @Size(max = 2000) List<@Valid @NotNull StocktakeLineRequest> lines,
             @Size(max = 300) String note) {}
 
+    @Schema(
+            name = "RetailStocktakeCommitRequest",
+            description = "Issue #636: the lines of a big drop the person ticked as right on Review the difference")
+    record StocktakeCommitRequest(
+            @Size(max = 2000)
+            @Schema(
+                    description =
+                            "The product ids of the lines that take an item holding stock to 0, or to less than half of"
+                                    + " it, that were ticked as right. Every such line must be here, or the commit is"
+                                    + " refused with 409 big_drop_not_acknowledged")
+            List<@NotNull UUID> acknowledged) {}
+
     @Schema(name = "RetailStocktakeLine")
     record StocktakeLine(
             UUID productId,
@@ -223,12 +387,27 @@ final class StockApi {
             @Schema(description = "counted less expected") String varianceQty,
 
             @Schema(
-                    description =
-                            "The adjustment written at commit: counted less expected, the variance measured when the count was taken; null for a draft")
+                    description = "The adjustment written at commit: counted less expected, the variance "
+                            + "measured when the count was taken; null for a draft")
             String committedVarianceQty,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = COST_ONLY)
             Long unitCostMinor) {}
+
+    @Schema(
+            name = "RetailOpenStocktake",
+            description = "Issue #728: a count started at a branch and neither saved nor thrown away (a draft)")
+    record OpenStocktake(
+            UUID id,
+            UUID branchId,
+            Instant createdAt,
+            UUID createdBy,
+
+            @Schema(description = "How many items it counted")
+            int lines,
+
+            @Schema(description = "The count's note; Sell's count of a new item carries its own (review of #729)")
+            String note) {}
 
     @Schema(name = "RetailStocktake")
     record Stocktake(

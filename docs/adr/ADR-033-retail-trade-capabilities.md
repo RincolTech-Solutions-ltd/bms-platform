@@ -32,6 +32,8 @@ capabilities inside retail.
    `branch_role_forbids_sales`); a store and a shop both restock and transfer. There is no "can
    receive purchases" flag: restocking is the action, permission and branch scope decide who may,
    and the role only removes what a branch cannot do. The core `branches` table is not changed. `retail.stock` owns branch roles and capability reads; sales and purchasing depend only on stock and catalogue for them.
+   *Superseded in part by ADR-104 (issue #371, migration V115): a store is the branch flag `sells_goods = false` of ADR-048, the
+   role keeps only `shop` and `both`, a Store reads as `store`, and a refused sale answers `branch_does_not_sell`.*
 4. **The retail price stays the product's `sell_minor`.** Named lists, quantity breaks, effective
    dates and customer groups add to it; a sale with no list is priced as today. The below-cost rule
    and cost visibility apply to the resolved price.
@@ -48,7 +50,8 @@ capabilities inside retail.
 8. **Optional purchasing sits beside plain restock and never replaces it.** Purchase order, goods
    received, supplier invoice, supplier credit and supplier payment post through goods received not
    invoiced; landed cost is allocated to receipt lines and sets the product cost by the existing
-   latest-receipt-wins rule (weighted average cost stays pending ADR-021).
+   latest-receipt-wins rule (weighted average cost stays pending ADR-021; since settled by ADR-079, where the latest receipt
+   sets only the last price paid and each branch's average is re-averaged).
 9. **Transfers stay atomic by default.** With `transfer_receipt` on they are dispatched and then
    received, and inter-branch clearing is the value in flight.
 10. **Build in ten slices, the first (branch roles) alone enough for the wholesaler flow.**
@@ -241,7 +244,7 @@ Decision 6 is built in slice 6 (migration V44; `docs/specs/trade-capabilities.md
    ordinary `retail_sale_payments` row, linked from `retail_account_payment_allocations`, so every reader of sale payments
    keeps working and no ALTER touches the large sales tables. The allocation skips imported sales and sales outside the caller's
    scope, refuses what cannot be placed (422 `payment_exceeds_allocatable`, with how much can) and holds nothing as a deposit.
-   One ledger entry posts in the receiving branch with a credit to trade debtors for each sale, so cash lands where it is held. It debits the seeded retail account of the method by system key (`cash_on_hand`, `mobile_money`, `bank`) as every retail posting does, and does not read the `payment_methods` mapping (ADR-026: retail keeps its accounts until #236); the mapping already refuses to move `cash` or `bank` elsewhere while retail is on.
+   One ledger entry posts in the receiving branch with a credit to trade debtors for each sale, so cash lands where it is held. It debits the seeded retail account of the method by system key (`cash_on_hand`, `mobile_money`, `bank`) as every retail posting does, and does not read the `payment_methods` mapping (ADR-026: retail keeps its accounts until #236); the mapping already refuses to move `cash` or `bank` elsewhere while retail is on. *Amended by ADR-105: the debit to `cash_on_hand` or `bank` now goes to the account `cash` or `bank` is mapped to at the receiving branch, and the refusal is gone.*
 4. **Reversible as a whole.** `POST .../payments/{id}/reverse` (`retail.sale.void`, a reason) reverses the entry on the business
    day and gives each sale its paid amount back; there is no partial reversal. The V14 guard on `retail_sales` allowed
    `paid_minor` only to rise; it is replaced (a function body, no table lock) so that it may fall only inside the reversal, by exactly that
@@ -380,3 +383,37 @@ Decision 8 is completed in slice 10 (migration V48; `docs/specs/trade-capabiliti
 9. **Expand only, and the lock is honest.** Eight tables, one column on the settings table and the two movement checks; no permission and no chart account. The checks are the one statement on a large table: they take an exclusive lock for the milliseconds of the transaction's end, which is why the file sets `lock_timeout` to five seconds and places the statement last. The new checks are not yet validated; validating them (a later migration) cannot fail, as they are looser than the checks they replace.
 
 **Better:** a wholesaler can spread freight, duty and clearing over what it received with a rule that always adds up, see the cost of stock and of sold goods both carry their share, pay the forwarder like any supplier, and send damaged goods back against a credit note that reduces what is owed; a plain shop sees nothing new. **Worse:** units still on the way between branches are expensed; the first in, first out reading is an approximation of lots that can disagree with the physical units; goods can be sent back to a supplier only out of the receipt's own units still in its branch; a landed cost cannot be voided once its goods have moved; a credit cannot exceed what an invoice leaves to pay; price credits and landed costs cannot be added to a line that has goods sent back. **Watch for:** any reader of the cost of a received line must add the standing landed cost and subtract the price credits (`LotRepository` is the model); a transfer reads the product's cost before it takes its balance locks (existing behaviour), so a transfer that overlaps a change of the cost can carry the older cost between two branches; any new writer of stock movements of a receipt's product that the first in first out reading should count as a later layer; `VALIDATE CONSTRAINT` on the two movement checks is still to run in a later migration; a second place that changes a product's cost must stay outside the history rows of these documents or the guard will read it as a newer event.
+
+## Amendment of 2026-10-25 (issue #424): the kind of business
+
+ADR-092 replaces the two profiles of decision 2 with four kinds named by what the owner has (`shops`, `stores_and_shops`,
+`wholesale`, `wholesale_and_shops`). A kind is still a preset of the flags and never a mode; it sets the six flags it governs and
+leaves `branch_roles` and `returns` as they are. Migration `V103` renames stored profiles without changing a flag.
+
+## Amendment of 2026-10-28 (issue #630, owner decision D64): packs on for a new retail business
+
+Decision 1 kept every flag off by default. Two pilot shops buy by the carton and could not find packs (`units`) until the owner
+switched it on in Retail settings (D63). For `units` only, that default changes: a business that gets the retail module, when it is
+created with it (by sign-up or by the operator) or when retail is switched on later, starts with `units` on. The other seven flags
+stay off.
+
+1. **Set up at the switch, not read as a default.** `retail.manifest` supplies `PacksOnAtStart`, a `core.tenancy.ModuleSetUp`
+   (ADR-098), which writes `units: true` through the core settings write in the switching transaction, audited as
+   `retail.capabilities.changed`. The stored kind is Shops, so a new business does not read as a wholesaler. The core calls the
+   set-up only for a module that was off, so a modules change that keeps retail on leaves packs as the owner set them. An absent
+   flag still reads as off, so no existing business changes and no migration is needed.
+2. **A later switch-on turns packs on again.** A business whose retail was switched off and on again finds packs on, even if the
+   owner had switched them off; they switch them off again in Retail settings. The packs and their prices are kept either way.
+3. **A kind only ever turns packs on.** Wholesale and Wholesale and shops turn packs on as before; Shops and Stores and shops no
+   longer switch them off (`BusinessTypes.NEVER_SWITCHED_OFF`), so a new shop that picks Shops on Retail settings keeps them. The
+   other wholesale tools and the two-step stock move still follow the kind (ADR-092). Neither sign-up nor the first-run set-up asks
+   for the kind; it is chosen only on Retail settings. Packs go off only on their own switch.
+4. **The item form says packs exist.** While `units` is off, Add an item and Edit show one line, "Also sold or bought in cartons
+   or boxes?". Someone with `core.settings.manage` turns packs on there through `PUT /retail/settings/capabilities` with its
+   `If-Match` (sending `units` alone, which the group merges; a version conflict is read again once), and the pack section shows
+   at once; anyone else reads "Ask the owner to turn on cartons in Retail settings." The line
+   links the help article How do I sell or buy in cartons?
+
+**Better:** a new shop that buys by the carton finds packs on the item form from the first day. **Worse:** a shop that never sells a
+pack sees the pack section on Edit until it switches packs off, and choosing a kind no longer switches packs off. **Watch for:** a new path that switches retail on must go through
+`ModuleSetUp`, or the business starts with packs off.

@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mockMe } from '../../../api/retail-mock';
 import type { SmsImportResult, SmsOptOut, SmsSettings, SmsTemplate } from '../../../api/sms';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
+import { DoneToast, doneToasts } from '../retail/toast';
 
 // The SMS screens in a browser (extras slice B3, issue #218), with the API client replaced: switching on needs the notice read
 // and ticked; a cap of 0 is sent as 0; a cap above the ceiling is refused on the screen; a sender name can only be chosen from
@@ -78,11 +79,12 @@ const ADMIN = ['core.settings.read', 'core.settings.manage', 'core.notifications
 function shell(node: ReactElement, permissions: string[] = ADMIN) {
   const me = { ...mockMe('admin'), permissions };
   const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/sms'] }) });
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const client = new QueryClient({ mutationCache: doneToasts(), defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return render(
     <RouterContextProvider router={router}>
       <QueryClientProvider client={client}>
         <StaffContext.Provider value={{ me, branch: null }}>{node}</StaffContext.Provider>
+        <DoneToast />
       </QueryClientProvider>
     </RouterContextProvider>,
   );
@@ -114,7 +116,8 @@ describe('switching SMS on', () => {
     fireEvent.click(confirm);
     await waitFor(() => expect(api.changeSettings).toHaveBeenCalledTimes(1));
     expect(api.changeSettings).toHaveBeenCalledWith(3, { enabled: true, acknowledged_text_version: 'sms-1' });
-    expect(await screen.findByText('SMS is on.')).toBeTruthy();
+    expect(await screen.findByText('SMS turned on')).toBeTruthy();
+    expect(screen.queryByText('SMS is on.')).toBeNull();
   });
 
   it('offers no switch to someone who may only look', async () => {
@@ -328,7 +331,8 @@ describe('the wording', () => {
     shell(<WordingScreen />);
     fireEvent.change(await screen.findByLabelText('Phone number'), { target: { value: '0700000611' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send a test message' }));
-    expect(await screen.findByText('Recorded by the test sink for +256*****0611. Nothing left the platform.')).toBeTruthy();
+    expect(await screen.findByText('Test message recorded')).toBeTruthy();
+    expect(screen.queryByText('Recorded by the test sink for +256*****0611. Nothing left the platform.')).toBeNull();
     expect(api.testMessage).toHaveBeenCalledWith('savings.deposit', template().default_text, '0700000611');
   });
 
@@ -394,9 +398,11 @@ describe('the opt-out list', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add to the list' }));
     expect(await screen.findByText('Use a Uganda mobile number such as 0700 000 001.')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: '0700000601' } });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve)); await new Promise((resolve) => setTimeout(resolve)); });
     fireEvent.click(screen.getByRole('button', { name: 'Add to the list' }));
     await waitFor(() => expect(api.addOptOut).toHaveBeenLastCalledWith('0700000601', 'all', undefined));
-    expect(await screen.findByText('Added.')).toBeTruthy();
+    expect(await screen.findByText('Number added')).toBeTruthy();
+    expect(screen.queryByText('Added.')).toBeNull();
   });
 
   it('checks a pasted list first and adds it only on the second click, naming the lines it could not read', async () => {
@@ -413,7 +419,8 @@ describe('the opt-out list', () => {
     expect(api.importOptOuts).toHaveBeenLastCalledWith('0700000801\nnope\n0700000803', 'all', true);
     fireEvent.click(screen.getByRole('button', { name: 'Add 2 to the list' }));
     await waitFor(() => expect(api.importOptOuts).toHaveBeenLastCalledWith('0700000801\nnope\n0700000803', 'all', false));
-    expect(await screen.findByText(/Done: 3 read, 2 added/)).toBeTruthy();
+    expect(await screen.findByText('2 numbers added')).toBeTruthy();
+    expect(screen.queryByText(/Done: 3 read, 2 added/)).toBeNull();
   });
 
   it('lifts a row, and offers neither adding nor lifting to someone who may only look', async () => {
@@ -424,9 +431,9 @@ describe('the opt-out list', () => {
     // The first click only opens the confirmation: nothing is sent until a reason is given and it is confirmed.
     const confirm = await screen.findByRole('button', { name: 'Lift the opt-out' });
     expect(api.removeOptOut).not.toHaveBeenCalled();
-    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    expect((confirm as HTMLButtonElement).getAttribute('data-not-ready')).toBe('true');
     fireEvent.change(screen.getByLabelText('Why is it lifted?'), { target: { value: 'ab' } });
-    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    expect((confirm as HTMLButtonElement).getAttribute('data-not-ready')).toBe('true');
     fireEvent.change(screen.getByLabelText('Why is it lifted?'), { target: { value: 'Member asked at the counter' } });
     fireEvent.click(confirm);
     await waitFor(() => expect(api.removeOptOut).toHaveBeenCalledWith(row().id, 'Member asked at the counter'));
@@ -475,7 +482,7 @@ describe('the member\'s text-message choice', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Change to: stop reminders' }));
     expect(api.setMemberOptOut).not.toHaveBeenCalled();
     const confirm = screen.getByRole('button', { name: 'Narrow the opt-out' }) as HTMLButtonElement;
-    expect(confirm.disabled).toBe(true);
+    expect(confirm.getAttribute('data-not-ready')).toBe('true');
     fireEvent.change(screen.getByLabelText('Why is it narrowed?'), { target: { value: 'Member asked for reminders only' } });
     api.setMemberOptOut.mockResolvedValue({ opted_out: true, scope: 'reminders', recipient_masked: null, since: '2031-03-10T07:00:00Z' });
     fireEvent.click(confirm);

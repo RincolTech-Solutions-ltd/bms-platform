@@ -169,7 +169,7 @@ class BranchClosingIT extends IntegrationTest {
                         "lines",
                         List.of(Map.of("product_id", product, "counted_qty", "0"))),
                 ADMIN));
-        assertThat(retail.post("/stocktakes/" + count + "/commit", Map.of(), ADMIN)
+        assertThat(retail.post("/stocktakes/" + count + "/commit", Map.of("acknowledged", List.of(product)), ADMIN)
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         long before = movements(t.secondBranch());
@@ -350,8 +350,11 @@ class BranchClosingIT extends IntegrationTest {
         retail.stockUp(t.headOffice(), product, "10");
         assertThat(close(t.secondBranch(), null).getStatusCode()).isEqualTo(HttpStatus.OK);
 
-        assertThat(retail.sell(t.secondBranch(), "cash", product, "1").getStatusCode())
-                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        ResponseEntity<JsonNode> closedSale = retail.sell(t.secondBranch(), "cash", product, "1");
+        assertThat(closedSale.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        // Issue #257: a closed branch inside the scope keeps 422 unknown_branch, with its own plain message.
+        assertThat(closedSale.getBody().get("errors").get(0).get("message").asString())
+                .isEqualTo("That branch is closed.");
         assertThat(restock(t.secondBranch()).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(transfer(t.headOffice(), t.secondBranch()).getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
@@ -433,10 +436,35 @@ class BranchClosingIT extends IntegrationTest {
         assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(refused)).isEqualTo("branch_still_has_stock");
         assertThat(refused.getBody().get("open_stocktakes").asInt()).isEqualTo(1);
-        assertThat(refused.getBody().get("detail").asString()).contains("stock-take");
+        assertThat(refused.getBody().get("detail").asString()).contains("stock count");
         assertThat(retail.post("/stocktakes/" + draft + "/commit", Map.of(), ADMIN)
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
+    }
+
+    /** Issue #656: a discarded count writes nothing later, so it blocks neither a correction of its item nor the closing. */
+    @Test
+    void aDiscardedStockTakeBlocksNeitherACorrectionNorTheClosing() {
+        retail.stockUp(t.secondBranch(), product, "2");
+        UUID draft = RetailTestSupport.id(stocktake(t.secondBranch()));
+        Map<String, Object> correction = Map.of(
+                "branch_id", t.secondBranch(),
+                "product_id", product,
+                "new_qty", "0",
+                "expected_qty", "2",
+                "reason_code", "miscount");
+        ResponseEntity<JsonNode> blocked = retail.postKeyed(
+                "/stock/corrections", correction, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(code(blocked)).isEqualTo("stocktake_in_progress");
+
+        assertThat(retail.post("/stocktakes/" + draft + "/discard", null, ADMIN).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> corrected = retail.postKeyed(
+                "/stock/corrections", correction, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(corrected.getStatusCode()).as("%s", corrected.getBody()).isEqualTo(HttpStatus.CREATED);
+        // The shelves are empty and nothing is left open, so the branch closes with no reason asked.
+        ResponseEntity<JsonNode> closed = close(t.secondBranch(), null);
+        assertThat(closed.getStatusCode()).as("%s", closed.getBody()).isEqualTo(HttpStatus.OK);
     }
 
     /** Marking a branch as not stocking is refused while goods remain, so the stock is not stranded. */

@@ -82,8 +82,8 @@ class PriceListService {
             throw new ApiException(
                     HttpStatus.NOT_FOUND,
                     "capability_not_enabled",
-                    "Capability not enabled",
-                    "This capability is not enabled for the tenant.");
+                    "Not switched on",
+                    "This feature is not switched on for your business.");
         }
     }
 
@@ -221,7 +221,8 @@ class PriceListService {
             if (!packOn
                     || !catalogue
                             .pack(product.id(), r.unitId())
-                            .map(CatalogueApi.Pack::active)
+                            // Issue #624: a pack only for buying is never sold, so a list does not price it.
+                            .map(k -> k.active() && k.sells())
                             .orElse(false)) {
                 throw ApiException.validation(List.of(
                         new FieldProblem("unit_id", "unknown_pack_unit", "This item is not sold in that unit.")));
