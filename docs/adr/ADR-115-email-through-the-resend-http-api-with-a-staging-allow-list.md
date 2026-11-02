@@ -79,6 +79,8 @@ types, which can be a real person's.
    the outbox row itself would need one new `SECURITY DEFINER` function (the application role cannot update
    `notification_outbox`, and `notification_outbox_record_result` only touches rows still `pending`), which is a Flyway
    migration. The rule against a migration in this change came from the lead's brief for issue #333, not from this ADR.
+   That function, marking the row `failed` with `last_error` `bounced` or `complained` and stopping further sends to an
+   address that complained, is issue #767; it reuses this route and its signature check.
 
 ## Consequences
 
@@ -93,4 +95,4 @@ matches the two by the row id.
 **Watch for:** setting `BMS_MAIL_ALLOWLIST` on staging before this release reaches it (an empty list sends nothing, the
 rows show as failed with `not_on_staging_allowlist`); setting `BMS_RESEND_WEBHOOK_SECRET` and adding the webhook in
 Resend on each host; a business name a mail client shows oddly; Resend's limits on attachment size for the weekly
-workbook (ADR-074); whether the owner later wants the bounce on the outbox row itself (one new function, a migration).
+workbook (ADR-074); the bounce on the outbox row itself, with stopping sends after a complaint (issue #767, a migration).
