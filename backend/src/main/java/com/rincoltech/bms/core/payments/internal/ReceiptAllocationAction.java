@@ -1,6 +1,8 @@
 package com.rincoltech.bms.core.payments.internal;
 
 import com.rincoltech.bms.core.approvals.ApprovalAction;
+import com.rincoltech.bms.kernel.Principal;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
@@ -59,6 +61,19 @@ class ReceiptAllocationAction implements ApprovalAction {
     @Override
     public Optional<String> checkerNotice(UUID subjectId, java.util.Map<String, Object> payload) {
         return payload == null ? Optional.empty() : settler.currentCreditNotice(payload);
+    }
+
+    /**
+     * The checker also decides in the branch of the loan or account the money goes to, so one who could not approve can neither
+     * reject nor be offered the decision (the parity {@link GatewayReversalAction} keeps for reversals).
+     * JUSTIFICATION-A3: the one hook the approval service asks; the branch rule existed only at execute time.
+     */
+    @Override
+    public boolean mayDecide(Principal checker, UUID branchId, Map<String, Object> payload) {
+        Object target = payload == null ? null : payload.get(ReceiptSettler.SUBJECT_BRANCH_ID);
+        return ApprovalAction.super.mayDecide(checker, branchId, payload)
+                && (target == null
+                        || checker.may(ReceiptSettler.CHECKER_PERMISSION, UUID.fromString(String.valueOf(target))));
     }
 
     @Override
