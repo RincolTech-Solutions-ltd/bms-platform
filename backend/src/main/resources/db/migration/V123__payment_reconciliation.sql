@@ -114,9 +114,13 @@ SELECT bms_grant_app('payment_statement_rows', 'SELECT, INSERT');
 -- The one change the application makes to a line: the fee a checker approved is posted and its entry recorded, once.
 GRANT UPDATE (fee_entry_id) ON payment_statement_rows TO bms_app;
 
+-- It keeps V102's bypass for the removal and the purge of a closed business (bms_erasing), as V102 asks of every later guard.
 CREATE FUNCTION payment_statement_rows_guard() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
+    IF TG_OP IN ('UPDATE', 'DELETE') AND bms_erasing(to_jsonb(OLD)) THEN
+        RETURN NEW;
+    END IF;
     IF OLD.fee_entry_id IS NOT NULL OR NEW.fee_entry_id IS NULL OR OLD.fee_approval_id IS NULL THEN
         RAISE EXCEPTION 'payment_statement_rows: only a held fee is posted, once, by its approval'
             USING ERRCODE = 'integrity_constraint_violation';
