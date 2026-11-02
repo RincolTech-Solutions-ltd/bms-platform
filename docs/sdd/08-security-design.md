@@ -322,6 +322,7 @@ platform API and holds no tenant permissions.
 | `core.payments.read` | Y | Y | | Y | Y | Y | | | | | | |
 | `core.payments.collect` | Y | Y | | Y | | | | | | | | |
 | `core.payments.allocate` | Y | | | Y | Y | | | | | | | |
+| `core.payments.allocate_approve` | Y | Y | | | Y | | | | | | | |
 | `core.reports.financial` | Y | Y | | | Y | Y | | | | | | |
 | `core.reports.audit` | Y | | | | | Y | | | | | | |
 | `core.data_export.run` | Y | | | | | | | | | | | |
@@ -499,6 +500,11 @@ Notes:
   items securing the requester's own loans; all of it is frozen with the run and checked again at download.
   `lending.regulatory_summary` runs under `lending.reports.compliance` with `lending.insights.read` and its scope. No permission and no
   seeded row are added.
+  Built (extras slice D3, issue #222): `lending.disbursements` runs under `lending.reports.portfolio`, and
+  `lending.expected_vs_collected`, `lending.arrears_list` and `lending.officer_performance` under `lending.reports.collections`; each also
+  needs `lending.insights.read`, and without `lending.insights.all_officers` covers only the caller's own loans. The arrears list prints a
+  borrower's name only in the branches where the requester holds `lending.members.read` and the phone in full only where they hold
+  `lending.members.contact`, both frozen with the run and checked again at download. No permission and no seeded row are added.
   Built (extras slice D2, issue #217): the PDF and Excel renderers and `lending.portfolio_outstanding` add no permission and no seeded
   row either (both lending reports run under `lending.reports.portfolio`); `PermissionMatrixIT` still passes and this matrix equals the
   seeds. A spreadsheet cell is never a formula: text is written as a string cell and text that begins with `=`, `+`, `-`, `@`, a tab or a
@@ -842,6 +848,9 @@ CHECK constraint as well as the service.
 | `period_close` | `core.periods.close` | `core.periods.approve_close` | No |
 | `savings_withdrawal` | `lending.savings.withdraw` | `lending.savings.withdraw_approve` | Yes |
 | `savings_reversal` | `lending.savings.withdraw` | `lending.savings.withdraw_approve` | No (always checked) |
+| `unallocated_allocation` | `core.payments.allocate` | `core.payments.allocate_approve` | No (always checked) |
+| `unallocated_refund` | `core.payments.allocate` | `core.payments.allocate_approve` | No (always checked) |
+| `gateway_payment_reversal` | the tenant's system user (raised by the platform; no person holds the maker permission); when a person asks for it to be put to a checker again (`POST /payments/intents/{id}/reversal-request`), that person is the maker, so they can never decide it, and neither can anyone who rejected an earlier request for the same payment | `core.payments.allocate_approve` and, besides it, the permission that reverses what the money became (`lending.repayments.reverse_approve` on a loan, `lending.savings.withdraw_approve` on a savings account) | No (always checked) |
 | `investment_funding` | `lending.investments.fund` | `lending.investments.fund_approve` | Yes |
 | `investment_early_withdrawal` | `lending.investments.payout` | `lending.investments.early_withdraw_approve` | No |
 | `investment_reversal` | `lending.investments.payout` | `lending.investments.reverse_approve` | No (always checked) |
@@ -857,7 +866,7 @@ CHECK constraint as well as the service.
 | `retail_stock_correction` | `retail.stocktake.commit` | `core.settings.manage` | Yes, on the value of the difference at the branch's average cost, only while the approval rules switch it on (off by default, ADR-091) |
 | `retail_expense` | `retail.expense.record` | `core.settings.manage` | Yes, on the amount, only while the approval rules switch it on (off by default, ADR-091) |
 
-Registered so far: `collateral_release` (#13); `retail_sale_write_off` (#340, `retail.sales`, ADR-043: writing off the unpaid part of a credit sale, with the same open default as returns); `retail_purchase_order` (#198, `retail.purchasing`, ADR-033: sending a purchase order, with the same open default as returns); `retail_sale_return` and `retail_sale_return_void` (#201, `retail.sales`, ADR-033: unlike the lending actions an unset threshold means no checker, so the
+Registered so far: `unallocated_allocation`, `unallocated_refund` and `gateway_payment_reversal` (#224, `core.payments`, ADR-035 amendment of slice A5; migration `V123` adds the checker permission `core.payments.allocate_approve` for the tenant admin, branch manager and accountant, and the `system` user kind that makes the platform's own reversal requests); `collateral_release` (#13); `retail_sale_write_off` (#340, `retail.sales`, ADR-043: writing off the unpaid part of a credit sale, with the same open default as returns); `retail_purchase_order` (#198, `retail.purchasing`, ADR-033: sending a purchase order, with the same open default as returns); `retail_sale_return` and `retail_sale_return_void` (#201, `retail.sales`, ADR-033: unlike the lending actions an unset threshold means no checker, so the
 action pends only at or above a threshold the tenant sets); `loan_disbursement`, `repayment_reversal` and
 `loan_write_off` (#108, `lending.loans`, ADR-026); `investment_funding`, `investment_early_withdrawal`
 and `investment_reversal` (#152, `lending.investments`, ADR-031). Increment 10 adds two checker
