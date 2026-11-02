@@ -92,7 +92,7 @@ describe('the report', () => {
     expect(screen.queryByLabelText('Statement file (CSV)')).toBeNull();
     cleanup();
     shell(['lending.loans.read']);
-    expect(await screen.findByText('You do not have access to this page.')).toBeTruthy();
+    expect(await screen.findByText(/You do not have access to this page\./)).toBeTruthy();
   });
 
   it('runs the reconciliation on request and shows the new report', async () => {

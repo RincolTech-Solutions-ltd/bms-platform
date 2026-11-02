@@ -2,6 +2,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import { FormError, type PaymentStatementDetail, reconciliation, statements } from '../../../api/payments';
+import { businessZone } from '../../../api/retail';
+import { BusyButton } from '../../../app/ui/BusyButton';
+import { NoAccess } from '../../../app/ui/EmptyState';
+import { Hint } from '../../../app/ui/Hint';
 import { money } from '../lending/loan-state';
 import { useStaff } from '../context';
 import { FEE_WORDS, MATCH_WORDS, canManageStatements, fileProblem, findingWords, showReconciliation } from './state';
@@ -15,7 +19,7 @@ const messageOf = (e: unknown) => (e instanceof Error ? e.message : 'Something w
 function when(iso: string | undefined): string {
   if (!iso) return '';
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: businessZone() });
 }
 
 export function UploadStatement({ onUploaded }: { onUploaded: (s: PaymentStatementDetail, replayed: boolean) => void }) {
@@ -29,16 +33,17 @@ export function UploadStatement({ onUploaded }: { onUploaded: (s: PaymentStateme
       return statements.upload(file, file.name, from && to ? { from, to } : undefined);
     },
     onSuccess: (detail) => onUploaded(detail, false),
+    meta: { success: 'Statement uploaded' },
   });
   const problem = file ? fileProblem(file) : null;
   const lines = upload.error instanceof FormError ? Object.entries(upload.error.fields ?? {}) : [];
   return (
-    <section className="rt-card stack" aria-labelledby="stmt-upload">
+    <section className="rt-card stack" aria-labelledby="stmt-upload" data-tour="reconciliation-upload">
       <h2 id="stmt-upload">Upload the provider's statement</h2>
-      <p className="hint">
+      <Hint>
         Export the merchant statement from your payment provider's dashboard as a CSV file and upload it here. Each line is matched to your own payments, and the provider's fee on a
         matching line is recorded once. A file with a line the system cannot read is refused whole, and the lines are named.
-      </p>
+      </Hint>
       <form
         className="stack"
         aria-label="Upload the statement"
@@ -50,9 +55,9 @@ export function UploadStatement({ onUploaded }: { onUploaded: (s: PaymentStateme
         <label htmlFor="stmt-file">Statement file (CSV)</label>
         <input id="stmt-file" type="file" accept=".csv,text/csv,text/plain" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         {problem && <p role="alert" className="field-error">{problem}</p>}
-        <p className="hint">
+        <Hint>
           If you know the export is complete for some days, give the first and last of them: a payment recorded here on those days but missing from the export is then reported. Leave both empty and only the days strictly between the first and the last line count.
-        </p>
+        </Hint>
         <label htmlFor="stmt-from">Complete from (optional)</label>
         <input id="stmt-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
         <label htmlFor="stmt-to">Complete to (optional)</label>
@@ -71,7 +76,7 @@ export function UploadStatement({ onUploaded }: { onUploaded: (s: PaymentStateme
           </div>
         )}
         <p>
-          <button type="submit" className="rt-primary" disabled={!file || problem !== null || coveredProblem !== null || upload.isPending}>{upload.isPending ? 'Uploading' : 'Upload'}</button>
+          <BusyButton type="submit" className="rt-primary" busy={upload.isPending} disabled={!file || problem !== null || coveredProblem !== null}>Upload</BusyButton>
         </p>
       </form>
     </section>
@@ -92,6 +97,7 @@ export function StatementView({ detail, canMark }: { detail: PaymentStatementDet
       setNote('');
       void queryClient.invalidateQueries({ queryKey: ['payments', 'reconciliation'] });
     },
+    meta: { success: 'Asked a second person to confirm' },
   });
   return (
     <section className="rt-card stack" aria-labelledby="stmt-result">
@@ -136,7 +142,7 @@ export function StatementView({ detail, canMark }: { detail: PaymentStatementDet
                       <label htmlFor={`why-${r.row_no}`}>What is it</label>
                       <input id={`why-${r.row_no}`} value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} />
                       {mark.error && <p role="alert" className="field-error">{messageOf(mark.error)}</p>}
-                      <button type="submit" className="rt-primary" disabled={note.trim().length < 3 || mark.isPending}>Save</button>
+                      <BusyButton type="submit" className="rt-primary" busy={mark.isPending} disabled={note.trim().length < 3}>Save</BusyButton>
                     </form>
                   ) : (
                     <button type="button" className="btn-ghost" onClick={() => { setMarking(r.row_no ?? null); setNote(''); }}>Not ours</button>
@@ -162,12 +168,13 @@ export function ReconciliationPage() {
   const run = useMutation({
     mutationFn: reconciliation.run,
     onSuccess: (r) => queryClient.setQueryData(['payments', 'reconciliation'], r),
+    meta: { success: 'Reconciliation run' },
   });
   if (!allowed) {
     return (
       <main className="rt ln">
         <h1>Payment reconciliation</h1>
-        <p className="empty-state">You do not have access to this page.</p>
+        <NoAccess />
       </main>
     );
   }
@@ -176,7 +183,7 @@ export function ReconciliationPage() {
   return (
     <main className="rt ln stack">
       <h1>Payment reconciliation</h1>
-      <p>
+      <p data-tour="reconciliation-intro">
         Every night the system compares what your payment provider says with what is recorded here and what was entered by hand, and lists what differs. It changes nothing by
         itself. A difference goes away on the next run once its cause is put right.
       </p>
@@ -189,7 +196,7 @@ export function ReconciliationPage() {
         />
       )}
       {uploaded && <StatementView detail={uploaded.detail} canMark={manage} />}
-      <section className="rt-card stack" aria-labelledby="recon-report">
+      <section className="rt-card stack" aria-labelledby="recon-report" data-tour="reconciliation-report">
         <h2 id="recon-report">Differences</h2>
         {report.error && <p role="alert" className="alert alert-danger">{messageOf(report.error)}</p>}
         {!data && !report.error && <p className="loading">Loading</p>}
@@ -226,7 +233,7 @@ export function ReconciliationPage() {
         {run.error && <p role="alert" className="alert alert-danger">{messageOf(run.error)}</p>}
         {manage && (
           <p>
-            <button type="button" className="rt-primary" disabled={run.isPending} onClick={() => run.mutate()}>{run.isPending ? 'Running' : 'Run it now'}</button>
+            <BusyButton type="button" className="rt-primary" busy={run.isPending} onClick={() => run.mutate()} data-tour="reconciliation-run">Run it now</BusyButton>
           </p>
         )}
       </section>
