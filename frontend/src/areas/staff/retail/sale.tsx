@@ -222,7 +222,8 @@ export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, fresh,
 }
 
 /** The sale form's draft: once sent with a client sale id, the request and when it was sent (ADR-067 decision 5). */
-type SaleDraft = Draft & { sent?: { body: SaleRequest; at: string } };
+/** `pricesAt` (issue #769): the oldest time the sale's items and prices were read from the server, for a copy kept on the phone. */
+type SaleDraft = Draft & { sent?: { body: SaleRequest; at: string; pricesAt?: string } };
 
 export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startItem, onStarted }: {
   branchId: string;
@@ -281,7 +282,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
   // receipt shows. The answer that comes later is ignored here; the server finds the sale by its client sale id, or answers
   // from the key, whose hash leaves the delivery fields out, so the sale is recorded once (ADR-067 decision 5).
   const save = useMutation({
-    mutationFn: async ({ body, at }: { body: SaleRequest; at: string }): Promise<{ sale: Sale } | { kept: OutboxItem }> => {
+    mutationFn: async ({ body, at, pricesAt }: { body: SaleRequest; at: string; pricesAt?: string }): Promise<{ sale: Sale } | { kept: OutboxItem }> => {
       const asked = retail.createSale(body, key);
       if (!offline || !mayKeepOnPhone({ body })) return { sale: await asked };
       try {
@@ -291,9 +292,10 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         // A write is never refreshed and sent again inside the client (only reads are), so the race is the sale request alone.
         if (!(e instanceof NoAnswer || e instanceof TypeError)) throw e;
         // With no session left (a refused refresh, a sign-out) the sale is never kept as saved: the person is told to sign in.
-        if (!getAccessToken()) throw new RetailError(retailMessage({ code: 'unauthenticated' }, 401), 401, 'unauthenticated');
-        // Priced online from the live items at `at`, so its prices are as of then, not of the copy on the phone.
-        const item = offlineSale({ draft: shown, clientSaleId: key, sent: { body, at }, key, scope: offline.scope, branchName, pricesAsOf: at, now: new Date() });
+        // The request may still have been recorded, so the form stays locked (`sent` kept) and Try again sends the same sale.
+        if (!getAccessToken()) throw new Error(`${retailMessage({ code: 'unauthenticated' }, 401)} Then tap Try again: the same sale is sent, never twice.`);
+        // Priced online from the items as they were read (`pricesAt`), not from the copy on the phone; Save's time if unknown.
+        const item = offlineSale({ draft: shown, clientSaleId: key, sent: { body, at }, key, scope: offline.scope, branchName, pricesAsOf: pricesAt ?? at, now: new Date() });
         await offline.engine.queue(item);
         return { kept: item };
       }
@@ -304,6 +306,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     },
     onSuccess: (done) => {
       if ('kept' in done) {
+        // The sale goes to the server from the outbox: its confirmed warnings are recorded and forgotten, as for a sent sale.
+        entry.saved();
         finish();
         // The connection is weak: the check says so at once, and the outbox sends as soon as it answers.
         if (offline) void offline.connectivity.check().then((ok) => (ok ? offline.engine.sync() : undefined));
@@ -352,13 +356,14 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     setPops((n) => n + 1);
     setFresh((f) => ({ index, n: (f?.n ?? 0) + 1, created }));
   };
-  const add = (p: Product) => {
+  // `readAt`: when the picker's answer was read; the other ways in (scan, Sell it, an item made here) have just read it.
+  const add = (p: Product, readAt?: number) => {
     const now = lines.current;
     if (now.some((l) => l.product.id === p.id) && !(unitsOn && sellingPacks(p).length > 0)) {
       show(`${p.description} is already on the sale. Change its quantity below.`, 'info');
       return;
     }
-    const next = [...now, newLine(p)];
+    const next = [...now, newLine(p, new Date(readAt ?? Date.now()).toISOString())];
     lines.current = next;
     setDraft((d) => ({ ...d, lines: next }));
     mark(next.length - 1, true);
@@ -571,7 +576,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     const unit = unitsOn && sellingPacks(p).some((k) => k.unit_id === unitId) ? unitId : undefined;
     if (unitId && !unit) return PACK_UNUSABLE;
     const now = lines.current;
-    const next = scanInto(now, p, unit, (l) => ({ ...l, qty: plusOne(l.qty) }), () => (unit ? withUnit(newLine(p), unit) : newLine(p)));
+    const read = new Date().toISOString();
+    const next = scanInto(now, p, unit, (l) => ({ ...l, qty: plusOne(l.qty) }), () => (unit ? withUnit(newLine(p, read), unit) : newLine(p, read)));
     const { index, created } = touchedLine(now, next);
     lines.current = next;
     setDraft((d) => ({ ...d, lines: next }));
@@ -603,8 +609,11 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
   const send = () => {
     const body = draft.sent?.body ?? { ...buildSaleRequest(shown, pricing, accounts), ...(offline ? { client_sale_id: key } : {}) };
     const at = draft.sent?.at ?? new Date().toISOString();
-    if (offline) setDraft((d) => ({ ...d, sent: d.sent ?? { body, at } }));
-    save.mutate({ body, at });
+    // The oldest read of the items and, with price lists, of the resolved prices: what the form priced the sale from (#769).
+    const reads = [...draft.lines.map((l) => l.readAt), resolved && resolution.dataUpdatedAt ? new Date(resolution.dataUpdatedAt).toISOString() : undefined];
+    const pricesAt = draft.sent ? draft.sent.pricesAt : reads.filter((r): r is string => !!r).sort()[0];
+    if (offline) setDraft((d) => ({ ...d, sent: d.sent ?? { body, at, ...(pricesAt ? { pricesAt } : {}) } }));
+    save.mutate({ body, at, pricesAt });
   };
   const entry = useEntryChecks('sell', branchId, warnings, send, draft.lines);
   const lost = locked && !save.isPending && !(save.error instanceof RetailError);
@@ -620,7 +629,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         key: draft.sent ? newIdempotencyKey() : key,
         scope: offline.scope,
         branchName,
-        pricesAsOf: offline.catalogue?.pricesAsOf,
+        // A request sent online was priced from the items as read then (#769); offline, from the copy on the phone.
+        pricesAsOf: draft.sent?.pricesAt ?? offline.catalogue?.pricesAsOf,
         buyerName: draft.newBuyerName,
         now: new Date(),
       });

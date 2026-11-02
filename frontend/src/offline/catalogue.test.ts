@@ -170,10 +170,15 @@ describe('the connection', () => {
       // Both cut off: offline.
       expect(await browserConnectivity().check()).toBe(false);
       expect(fetch).toHaveBeenCalledTimes(4);
+      // Older engines name the timeout AbortError: slow too, pinged again.
+      fetch.mockImplementationOnce(() => Promise.reject(new DOMException('The operation was aborted.', 'AbortError')));
+      fetch.mockImplementationOnce(async () => ({ ok: true }) as Response);
+      expect(await browserConnectivity().check()).toBe(true);
+      fetch.mockClear();
       // A failure that is not slowness (no network) is offline at once, with no second ping.
       fetch.mockImplementation(() => Promise.reject(new TypeError('Failed to fetch')));
       expect(await browserConnectivity().check()).toBe(false);
-      expect(fetch).toHaveBeenCalledTimes(5);
+      expect(fetch).toHaveBeenCalledTimes(1);
     } finally {
       vi.unstubAllGlobals();
     }

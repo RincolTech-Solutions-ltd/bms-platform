@@ -224,9 +224,37 @@ describe('Record a sale offline', () => {
     expect(body.client_sale_id).toBe(key);
     const [item] = offline.engine.snapshot().items;
     expect(item).toMatchObject({ id: key, key, state: 'queued' });
-    // Priced online from the live items when Save was pressed, so its prices are as of then, not of the copy on the phone.
-    expect(item?.request).toEqual({ ...body, occurred_at: item?.occurredAt, recorded_offline: true, prices_as_of: item?.occurredAt });
-    expect(item?.occurredAt).not.toBe(catalogue.pricesAsOf);
+    // Priced online from the items as they were read, never from the copy on the phone (the next test pins the time).
+    expect(item?.request).toMatchObject({ ...body, occurred_at: item?.occurredAt, recorded_offline: true });
+    expect(item?.request.prices_as_of).not.toBe(catalogue.pricesAsOf);
+    expect(String(item?.request.prices_as_of) <= String(item?.occurredAt)).toBe(true);
+  });
+
+  // JUSTIFICATION-A3: a new test the review asks for (#769), not a mechanism.
+  it("dates the kept copy's prices when the items were read, not when Save was pressed (issue #769)", async () => {
+    createSale.mockRejectedValue(new TypeError('Failed to fetch'));
+    listProducts.mockResolvedValue([bulb]);
+    const offline = testOffline(seller, { online: true, catalogue });
+    if (!offline) throw new Error('a seller sells offline');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      // 09:00: the cashier finds the bulb, read from the server with its price.
+      vi.setSystemTime(new Date('2026-11-02T09:00:00.000Z'));
+      screenWith(offline);
+      fireEvent.change(screen.getByRole('combobox', { name: 'Find an item by name, code or category' }), { target: { value: 'bulb' } });
+      fireEvent.click(await screen.findByRole('option', { name: /^Test Bulb 9W/ }));
+      // 09:10: Save, and the request is lost on the network.
+      vi.setSystemTime(new Date('2026-11-02T09:10:00.000Z'));
+      const save = screen.getByRole('button', { name: /^Record sale/ }) as HTMLButtonElement;
+      await waitFor(() => expect(ready(save)).toBe(true));
+      fireEvent.click(save);
+      expect(await screen.findByText('Sale saved on this phone')).toBeTruthy();
+      const [item] = offline.engine.snapshot().items;
+      expect(item?.request.prices_as_of).toBe('2026-11-02T09:00:00.000Z');
+      expect(item?.request.occurred_at).toBe('2026-11-02T09:10:00.000Z');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // JUSTIFICATION-A3: a new test the review asks for (#769), not a mechanism.
@@ -286,9 +314,13 @@ describe('Record a sale offline', () => {
     createSale.mockRejectedValue(new TypeError('Failed to fetch'));
     screenWith(offline);
     await addBulbAndRecord();
-    expect(await screen.findByText(/Your session has ended. Sign in again./)).toBeTruthy();
+    expect(await screen.findByText(/Your session has ended. Sign in again. Then tap Try again/)).toBeTruthy();
     expect(screen.queryByText('Sale saved on this phone')).toBeNull();
     expect(offline.engine.snapshot().items).toHaveLength(0);
+    // The request may have been recorded: the form stays locked, so only the same sale can go again.
+    expect(screen.getByTestId('lost-answer')).toBeTruthy();
+    const qty = screen.getAllByRole('textbox').find((i) => (i as HTMLInputElement).value === '1') as HTMLInputElement;
+    expect(qty.matches(':disabled')).toBe(true);
   });
 
   it('keeps a sale with no answer within 8 seconds on the phone, and the late answer makes no second sale (issue #769)', async () => {

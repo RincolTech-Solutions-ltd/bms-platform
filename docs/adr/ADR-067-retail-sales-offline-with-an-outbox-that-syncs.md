@@ -63,8 +63,10 @@ left, the branch, the period, the person's roles.
    answer means a sale would hang, and one slow ping on a cold link does not flip the state. For the same reason a cash,
    mobile money or bank sale sent online with no answer within 8 s, or lost on the network (fetch's `TypeError`; a 401 or
    any refusal is not, and with no session left it is never kept), goes to the outbox at once under the same
-   `Idempotency-Key` and client sale id, with `occurred_at` and `prices_as_of` (both when Save was pressed: it was priced
-   online from the live items then) and `recorded_offline` added, and the seller gets the provisional receipt. So when the first request never arrived, the outbox's send hours later is a sale recorded
+   `Idempotency-Key` and client sale id, with `occurred_at` (when Save was pressed), `prices_as_of` (the oldest time the
+   form read its items, or with price lists its resolved prices, from the server: what it priced the sale from, never the
+   copy on the phone) and `recorded_offline` added, and the seller gets the provisional receipt. With no session left the
+   form stays locked, since the request may have been recorded, and Try again sends the same sale after sign-in. So when the first request never arrived, the outbox's send hours later is a sale recorded
    offline, dated when it was taken. The answer that comes later is ignored on the phone. The server finds the sale by
    its client sale id, or, while the first request still holds the key, answers 409 `idempotency_in_progress` (tried
    again, never a refusal, `classify` in `outbox.ts`) and then replays from the key, whose hash leaves the delivery
