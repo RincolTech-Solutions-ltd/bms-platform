@@ -304,14 +304,15 @@ permission. Parameters `branch_id`, `collateral_type` and `custody_status`; the 
 resolved at request time and frozen with the run, and a download by someone whose access has narrowed since is refused. Not `as_at`: the
 register is the items as they stand when it is made, under the business date of the request, because custody and values are not kept by
 date (the report says so). A requester without `lending.insights.all_officers` gets only the items that secure a loan they are the
-responsible officer for (chapter 7: a loan officer sees only their own loans). Two tables, the short one first so the PDF always prints
-it whole; both are read in the run's one `REPEATABLE READ` snapshot transaction, so the counts are of the very items listed:
+responsible officer for (chapter 7: a loan officer sees only their own loans), and its Loans column names only those loans. Two tables,
+the short one first so the PDF always prints it whole; both are read in the run's one `REPEATABLE READ` snapshot transaction, so the
+counts are of the very items listed. A missing value or date prints blank in the PDF, not as a dash (ADR-038, #225 amendment point 6):
 
 - `flags`: the items with each flag and the items in the register (a total row).
 - `items`, by branch, member number and registration order: branch, member number, the name, type, description, reference, the
   estimated value given at registration, the latest valuation's market value and date, custody status, where it is kept, the linked
-  loans with their status in words ("LN0001 (active)"), and its flags. Who owns an item (the member number, the name, and the
-  reference, which can be an ID number, a plate or a title number) is printed only where the requester holds `lending.members.read`
+  loans with their status in words ("LN0001 (active)"), and its flags. Who owns an item (the member number, the name, the reference,
+  which can be an ID number, a plate or a title number, and the description) is printed only where the requester holds `lending.members.read`
   in the member's branch, and blank elsewhere; the branches are frozen with the run and checked again at download, as is the officer
   limit.
 
@@ -360,10 +361,11 @@ investments held from members (total principal, number); number of branches and 
 
 **Built (extras slice D4, issue #225).** Offered as `pdf`, `xlsx`, `csv` and `json` under `lending.reports.compliance`, and, like the
 portfolio reports, it also needs `lending.insights.read` because its scope is the insights page's (a caller without
-`lending.insights.all_officers` gets their own loans and no savings or investments, which belong to no officer). No migration and no
+`lending.insights.all_officers` gets their own loans and no savings, investments, branches or staff, which belong to no officer). No migration and no
 permission. Parameters `from` (the first of the month of `to` by default), `to` (the period end, today by default) and `branch_id`. Its
 first note is the cover note "Data summary. Not a filed return.", printed on every format; a date in a note is printed `7 Oct 2026`.
-Six tables, a table per kind of figure so that no figure cell is left empty (the PDF would print a missing figure as a dash):
+Six tables, a table per kind of figure; each total is the sum of its own rows, and a figure with nothing to measure (PAR on an empty
+book, the weighted rate of a product owing nothing) prints blank in the PDF, not as a dash (ADR-038, #225 amendment point 6):
 
 - `loans`, a number and an amount per row: active loans and their principal outstanding at the period end; loans disbursed and loans
   written off in the period (the insights page's `portfolio.disbursed` and `portfolio.written_off` rules; V29 allows one disbursement
@@ -372,12 +374,12 @@ Six tables, a table per kind of figure so that no figure cell is left empty (the
   rows are left out for a caller limited to their own loans, and the report says why.
 - `risk`: PAR 30 and PAR 90.
 - `people`: active borrowers at the period end; the active branches of the scope; active staff with a role that is not revoked in
-  those branches or in every branch, now.
+  those branches or in every branch, now. Branches and staff are left out for a caller limited to their own loans.
 - `borrowers`: the distinct borrowers with an active loan by gender (women, men, other, not recorded; a value outside the list counts
   as not recorded) and the total.
 - `products`: by product and rate unit, the active loans, principal outstanding, lowest and highest rate and the rate weighted by
   principal outstanding (half up), in basis points per the unit; rates of different units are never averaged together, so the table has
-  no total row (the `purposes` total is the book's).
+  no total row (the `purposes` total is the book's, summed from its rows).
 - `purposes`: the active loans and principal outstanding by loan purpose (the purpose is the loan's own and never changes, so a past
   date can be grouped by it); a purpose outside the list is one row "Not recorded", so the rows always add up to the total.
 
@@ -479,7 +481,8 @@ migration (the `format` check of `report_runs` already allowed `pdf` and `xlsx`)
   made the file and when, when the data was read, the notes), then each table with its heading repeated on every page, tinted rows and a
   total row set off between rules, and "page x of y" in the footer. A4, landscape when a table has more than seven columns, Open Sans
   embedded. Money is in whole currency units with the currency in the column heading, a rate is a percentage to one decimal made from
-  the integer basis points half up (so 755 basis points reads 7.6%, not 7.5%), a date is `8 Oct 2026`, a missing figure is a dash, and
+  the integer basis points half up (so 755 basis points reads 7.6%, not 7.5%), a date is `8 Oct 2026`, a missing figure is a dash (blank in a report that sets
+  `ReportDefinition.blankMissingFigures()`, ADR-038 #225 amendment point 6), and
   a long unbroken word wraps inside its cell. A table longer than `BMS_REPORTS_PDF_ROW_CAP` (3,000; 500 on staging) is cut to that many
   rows with the printed note "Showing the first 500 of 900 rows. The full detail is in the Excel file." and keeps its total row. A
   character the font lacks prints as "?" (ADR-034). The layout is read from the spool after the snapshot has committed and holds no

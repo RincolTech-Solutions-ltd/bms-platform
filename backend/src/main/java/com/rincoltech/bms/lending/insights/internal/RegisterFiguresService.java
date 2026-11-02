@@ -161,14 +161,18 @@ class RegisterFiguresService implements RegisterFigures {
                             + " WHERE lc.collateral_id = ci.id AND l.officer_user_id = :officer)");
             p.put("officer", filter.officerId());
         }
+        // The Loans column names only the officer's own loans; release overdue still reads every loan of the item.
+        String ownLoans = filter.officerId() != null ? " AND l.officer_user_id = :officer" : "";
         p.put("import_note", IMPORT_NOTE);
-        String sql = """
+        String sql =
+                """
                 SELECT m.branch_id AS member_branch_id, b.name AS branch, m.member_no, m.full_name, ci.collateral_type,
                        ci.description, ci.reference_no,
                        ci.estimated_value_minor, v.market_value_minor, v.valued_on, ci.custody_status, ci.storage_location,
                        (SELECT string_agg(l.loan_no || ':' || l.status, ',' ORDER BY l.loan_no)
                           FROM lending_loan_collateral lc JOIN lending_loans l ON l.id = lc.loan_id
-                         WHERE lc.collateral_id = ci.id) AS loans,
+                         WHERE lc.collateral_id = ci.id""" + ownLoans + """
+                       ) AS loans,
                        (ci.custody_status IN ('pledged', 'in_custody')
                         AND EXISTS (SELECT 1 FROM lending_loan_collateral lc WHERE lc.collateral_id = ci.id)
                         AND NOT EXISTS (SELECT 1 FROM lending_loan_collateral lc JOIN lending_loans l ON l.id = lc.loan_id
@@ -192,8 +196,9 @@ class RegisterFiguresService implements RegisterFigures {
                 .sql(sql)
                 .params(p)
                 .query((rs, n) -> {
-                    // Who owns an item (the member's number and name, and the reference, which can be an ID number, a
-                    // plate or a title number) is shown only in the branches of member access, by the member's branch.
+                    // Who owns an item (the member's number and name, the reference, which can be an ID number, a plate
+                    // or a title number, and the description, where staff often type the same) is shown only in the
+                    // branches of member access, by the member's branch. Where it is kept is ours, so it stays.
                     boolean owner = filter.nameBranchIds() == null
                             || filter.nameBranchIds().contains(rs.getObject("member_branch_id", UUID.class));
                     return new CollateralLine(
@@ -201,7 +206,7 @@ class RegisterFiguresService implements RegisterFigures {
                             owner ? rs.getString("member_no") : null,
                             owner ? rs.getString("full_name") : null,
                             TYPES.getOrDefault(rs.getString("collateral_type"), rs.getString("collateral_type")),
-                            rs.getString("description"),
+                            owner ? rs.getString("description") : null,
                             owner ? rs.getString("reference_no") : null,
                             rs.getObject("estimated_value_minor", Long.class),
                             rs.getObject("market_value_minor", Long.class),

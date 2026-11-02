@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.core.reporting.internal.XlsxReader.Sheet;
+import com.rincoltech.bms.lending.insights.RegisterFigures;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.List;
@@ -45,6 +46,9 @@ class LendingRegistersReportsIT extends LendingBookSupport {
 
     static final String COMPLIANCE = "lending.reports.compliance,lending.insights.read,lending.insights.all_officers";
     static final Map<String, Object> PERIOD = Map.of("from", "2026-10-01", "to", "2026-10-08");
+
+    @org.springframework.beans.factory.annotation.Autowired
+    RegisterFigures registers;
 
     // ---- collateral register --------------------------------------------------------------------------
 
@@ -172,9 +176,9 @@ class LendingRegistersReportsIT extends LendingBookSupport {
         JsonNode items = table(file, "items");
         assertThat(items.get("columns").toString()).doesNotContain("member_name");
         assertThat(rows(items)).hasSize(2).allMatch(r -> r.startsWith("[\"Test Branch Two\",null,"));
-        // Who owns the item stays hidden: no member number, and no reference (here a national ID number).
+        // Who owns the item stays hidden: no member number, description or reference (here a national ID number).
         assertThat(rows(items).get(0))
-                .startsWith("[\"Test Branch Two\",null,\"National ID\",\"National ID card\",null,")
+                .startsWith("[\"Test Branch Two\",null,\"National ID\",null,null,")
                 .doesNotContain("CMTEST");
         assertThat(rows(table(file, "flags"))).contains("[\"Items in the register\",2]");
     }
@@ -212,9 +216,8 @@ class LendingRegistersReportsIT extends LendingBookSupport {
                 .getBody());
         List<String> items = rows(table(file, "items"));
         assertThat(items.get(0)).startsWith("[\"Head Office\",\"MLN0001\",\"Test Borrower LN0001\"");
-        // Test Branch Two's members: no number, no name, no reference.
-        assertThat(items.get(3))
-                .startsWith("[\"Test Branch Two\",null,null,\"National ID\",\"National ID card\",null,");
+        // Test Branch Two's members: no number, no name, no description, no reference.
+        assertThat(items.get(3)).startsWith("[\"Test Branch Two\",null,null,\"National ID\",null,null,");
         assertThat(items.get(4)).startsWith("[\"Test Branch Two\",null,null,\"Household item\"");
 
         // Member access gone: the file made with names is refused.
@@ -250,6 +253,116 @@ class LendingRegistersReportsIT extends LendingBookSupport {
                 .isEqualTo(404);
     }
 
+    // JUSTIFICATION-A3: review round 2 of #754 asked for an item pledged to two officers' loans, blank cells, totals
+    // from their rows and the two passes proven to read one snapshot.
+
+    @Test
+    void anOfficersRegisterNamesOnlyTheirOwnLoansUnderLoans() throws Exception {
+        Book b = registerBook();
+        TestDatabase.Fixture t = b.t();
+        // A bicycle first pledged to officer A's LN0002 and released, then pledged to officer B's LN0006 (one open
+        // pledge per item, V8).
+        UUID bike = item(t, t.secondBranch(), "MLN0006", "other", "Fabricated bicycle", null, "pledged", null, 90_000L);
+        pledge(t, "LN0002", bike);
+        TestDatabase.owner().sql("""
+                        UPDATE lending_loan_collateral SET released_at = now()
+                         WHERE tenant_id = ? AND collateral_id = ?
+                        """).params(t.tenantId(), bike).update();
+        pledge(t, "LN0006", bike);
+
+        String perms = "lending.reports.members,lending.members.read";
+        List<String> own = rows(table(
+                file(b, b.officerB(), perms, runReport(b, b.officerB(), perms, REGISTER, Map.of(), "json")), "items"));
+        assertThat(own).hasSize(2);
+        assertThat(own.get(1))
+                .contains("\"Fabricated bicycle\"")
+                .contains("\"LN0006 (active)\"")
+                .doesNotContain("LN0002");
+        // Every officer's register names both loans.
+        UUID user = UUID.randomUUID();
+        assertThat(rows(table(
+                        file(b, user, MEMBERS, runReport(b, user, MEMBERS, REGISTER, Map.of(), "json")), "items")))
+                .anyMatch(r -> r.contains("\"LN0002 (active), LN0006 (active)\""));
+    }
+
+    @Test
+    void bothPassesOverTheRegisterReadOneSnapshot() {
+        Book b = registerBook();
+        UUID member = TestDatabase.owner()
+                .sql("SELECT id FROM lending_members WHERE tenant_id = ? AND member_no = 'MLN0001'")
+                .param(b.t().tenantId())
+                .query(UUID.class)
+                .single();
+        var tx = new org.springframework.transaction.support.TransactionTemplate(transactions);
+        tx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        tx.setReadOnly(true);
+        RegisterFigures.CollateralFilter all = new RegisterFigures.CollateralFilter(null, null, null, null, null);
+        long[] passes = new long[2];
+        tenantJobs.callAs(
+                b.t().tenantId(),
+                () -> tx.execute(x -> {
+                    registers.collateral(all, () -> {}, l -> {
+                        if (passes[0]++ == 0) {
+                            // Committed by another connection while the first pass reads.
+                            TestDatabase.owner()
+                                    .sql("""
+                                    INSERT INTO lending_collateral_items (id, tenant_id, branch_id, member_id, collateral_type,
+                                                                          description, currency, custody_status)
+                                    VALUES (gen_random_uuid(), ?, ?, ?, 'other', 'Fabricated late item', 'UGX', 'pledged')
+                                    """)
+                                    .params(b.t().tenantId(), b.t().headOffice(), member)
+                                    .update();
+                        }
+                    });
+                    registers.collateral(all, () -> {}, l -> passes[1]++);
+                    return null;
+                }));
+        assertThat(passes[0]).isEqualTo(5);
+        assertThat(passes[1]).isEqualTo(passes[0]);
+        // The late item was committed: a register made afterwards has it.
+        long[] after = {0};
+        tenantJobs.callAs(
+                b.t().tenantId(),
+                () -> tx.execute(x -> {
+                    registers.collateral(all, () -> {}, l -> after[0]++);
+                    return null;
+                }));
+        assertThat(after[0]).isEqualTo(6);
+    }
+
+    @Test
+    void anEmptyBookPrintsNoDashAndAnOfficerGetsNoBranchesOrStaff() throws Exception {
+        Book b = summaryBook();
+        // Every loan closed: nothing owed, so PAR has nothing to measure.
+        TestDatabase.owner().sql("""
+                        UPDATE lending_loans SET status = 'closed', closed_on = DATE '2026-10-05', principal_outstanding_minor = 0
+                         WHERE tenant_id = ? AND status = 'active'
+                        """).param(b.t().tenantId()).update();
+        UUID user = UUID.randomUUID();
+        JsonNode file = file(b, user, COMPLIANCE, runReport(b, user, COMPLIANCE, SUMMARY, PERIOD, "json"));
+        assertThat(rows(table(file, "risk")))
+                .containsExactly(
+                        "[\"Portfolio at risk over 30 days (PAR 30)\",null]",
+                        "[\"Portfolio at risk over 90 days (PAR 90)\",null]");
+        JsonNode pdfRun = runReport(b, user, COMPLIANCE, SUMMARY, PERIOD, "pdf");
+        assertThat(pdfRun.get("status").asString()).as("%s", pdfRun).isEqualTo("ready");
+        String text = new PdfProbe(downloadBytes(
+                        b.t(), user, COMPLIANCE, pdfRun.get("document_id").asString()))
+                .text();
+        assertThat(text)
+                .contains("Portfolio at risk over 30 days (PAR 30) Portfolio at risk over 90 days (PAR 90)")
+                .doesNotContain(" - ")
+                .doesNotContain("-%");
+
+        // Officer B, limited to their own loans: borrowers only, no branch or staff count.
+        String officer = "lending.reports.compliance,lending.insights.read";
+        Book live = summaryBook();
+        JsonNode own = file(
+                live, live.officerB(), officer, runReport(live, live.officerB(), officer, SUMMARY, PERIOD, "json"));
+        assertThat(rows(table(own, "people"))).containsExactly("[\"Active borrowers at the end of the period\",3]");
+        assertThat(own.get("notes").toString()).contains("Savings, investments, branches and staff are not shown");
+    }
+
     @Test
     void onAPastPeriodEndTheSummaryReadsTheSnapshotAndItsParIsThatOfTheParReport() throws Exception {
         Book b = summaryBook();
@@ -280,6 +393,12 @@ class LendingRegistersReportsIT extends LendingBookSupport {
                 .isEqualTo("[\"Active loans and principal outstanding\",6,10000000]");
         assertThat(rows(table(file, "purposes")))
                 .containsExactly("[\"Business\",5,8000000]", "[\"Agriculture\",1,2000000]", "[\"Total\",6,10000000]");
+        // The breakdowns read the snapshot's positions joined to the loans and members, as on the live path.
+        assertThat(rows(table(file, "borrowers")))
+                .containsExactly(
+                        "[\"Women\",3]", "[\"Men\",2]", "[\"Other\",0]", "[\"Not recorded\",1]", "[\"Total\",6]");
+        assertThat(rows(table(file, "products")))
+                .containsExactly("[\"Test Product\",\"per term\",6,10000000,1000,1500,1130]");
     }
 
     @Test
@@ -321,7 +440,9 @@ class LendingRegistersReportsIT extends LendingBookSupport {
                 .contains("COLLATERAL REGISTER")
                 .contains("Items in the register 230")
                 .contains("No valuation 230")
-                .contains("Showing the first 200 of 230 rows. The full detail is in the Excel file.");
+                .contains("Showing the first 200 of 230 rows. The full detail is in the Excel file.")
+                // No item is valued: the empty value and date cells print blank, not as a dash.
+                .doesNotContain(" - ");
 
         JsonNode xlsxRun = runReport(b, user, MEMBERS, REGISTER, Map.of(), "xlsx");
         byte[] x =

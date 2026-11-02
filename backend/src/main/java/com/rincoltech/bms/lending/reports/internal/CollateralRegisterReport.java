@@ -30,7 +30,7 @@ import org.springframework.stereotype.Component;
  * </ul>
  *
  * The branches are those of {@code lending.reports.members} for the caller, resolved at request time and frozen with the
- * run; who owns an item (the member's number and name, and the item's reference) is printed only in the branches where
+ * run; who owns an item (the member's number and name, the item's reference and description) is printed only where
  * the requester holds {@code lending.members.read}, by the member's branch; and a requester without
  * {@code lending.insights.all_officers} gets only the items that secure their own loans. All of it is frozen the same way,
  * and a download by someone whose access to any of it has narrowed since is refused. The PDF cuts a long register at the row cap with a pointer to the Excel file; the
@@ -98,6 +98,12 @@ class CollateralRegisterReport implements ReportDefinition {
                         false,
                         "Only items in this custody status; every status when absent.",
                         RegisterFigures.CUSTODY_STATUSES));
+    }
+
+    /** An item never valued is ordinary, so its empty value cells print blank, not as a dash. */
+    @Override
+    public boolean blankMissingFigures() {
+        return true;
     }
 
     @Override
@@ -205,9 +211,11 @@ class CollateralRegisterReport implements ReportDefinition {
         out.note(
                 RELEASE_OVERDUE + ": still pledged or in our custody, and every loan it secures is closed, cancelled or"
                         + " rejected.");
-        out.note(
-                "Who owns an item (the member, their name and the item's reference) is shown only in the branches where"
-                        + " you may see members.");
+        out.note("Who owns an item (the member, their name, and the item's reference and description) is shown only in"
+                + " the branches where you may see members.");
+        if (officer(prepared) != null) {
+            out.note("Only your own loans are named under Loans.");
+        }
         out.note(UNVERIFIED + ": brought in by an import and not valued, moved or noted since.");
         out.note(NO_VALUATION + ": no valuation recorded; the estimated value is the one given at registration.");
 

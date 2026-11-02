@@ -26,10 +26,11 @@ import tools.jackson.databind.ObjectMapper;
  * the month of {@code to} when absent), {@code to} (today when absent) and {@code branch_id}; the scope is the insights
  * page's, resolved and frozen as for the other lending reports, so it also needs {@code lending.insights.read}.
  *
- * <p>Six tables, none with an empty figure cell: {@code loans} (the book, disbursements, write-offs, savings and
- * investments, each a number and an amount), {@code risk} (PAR 30 and PAR 90), {@code people} (borrowers, branches,
- * staff), {@code borrowers} (active borrowers by gender), {@code products} (the book by product with the rate range and
- * the weighted average rate) and {@code purposes} (the book by loan purpose, its rows adding up to the total).
+ * <p>Six tables: {@code loans} (the book, disbursements, write-offs, savings and investments, each a number and an
+ * amount), {@code risk} (PAR 30 and PAR 90), {@code people} (borrowers, branches, staff), {@code borrowers} (active
+ * borrowers by gender), {@code products} (the book by product with the rate range and the weighted average rate) and
+ * {@code purposes} (the book by loan purpose). Each total is the sum of its rows. A figure with nothing to measure (PAR
+ * on an empty book) prints blank ({@link #blankMissingFigures}).
  */
 @Component
 class RegulatorySummaryReport extends PortfolioReport {
@@ -69,6 +70,12 @@ class RegulatorySummaryReport extends PortfolioReport {
         return "lending.reports.compliance";
     }
 
+    /** PAR on an empty book, or the rate of a product owing nothing, prints blank, not as a dash. */
+    @Override
+    public boolean blankMissingFigures() {
+        return true;
+    }
+
     @Override
     public List<Param> params() {
         return List.of(
@@ -106,12 +113,15 @@ class RegulatorySummaryReport extends PortfolioReport {
                 + (s.source().equals("live") ? "loan tables" : "nightly snapshot of " + DATE.format(s.to()))
                 + " at the end of the period; its PAR 30 and PAR 90 are those of the portfolio at risk report.");
         out.note("Only active loans are in the book; loans written off are not.");
-        if (s.savingsMinor() == null) {
-            out.note(
-                    "Savings and investments are not shown: they belong to no loan officer, and this report covers your"
-                            + " own loans only.");
+        // A caller limited to their own loans gets no savings, investments, branches or staff: none is an officer's.
+        boolean ownLoans = s.savingsMinor() == null;
+        if (ownLoans) {
+            out.note("Savings, investments, branches and staff are not shown: they belong to no loan officer, and this"
+                    + " report covers your own loans only.");
+        } else {
+            out.note("Open investments, branches and staff are counted as they are now.");
         }
-        out.note("Open investments, branches and staff are counted as they are now.");
+        out.note("A figure with nothing to measure, such as PAR on an empty book, is left blank.");
 
         // Three short tables rather than one with a column per kind, so no cell of a figure is left empty.
         ReportOutput.Table loans = out.table(
@@ -141,17 +151,22 @@ class RegulatorySummaryReport extends PortfolioReport {
                 "Borrowers, branches and staff",
                 List.of(new Column("figure", "Figure", Kind.TEXT), new Column("count", "Number", Kind.COUNT)));
         people.row("Active borrowers at the end of the period", s.borrowers());
-        people.row("Branches", s.branches());
-        people.row("Staff", s.staff());
+        if (!ownLoans) {
+            people.row("Branches", s.branches());
+            people.row("Staff", s.staff());
+        }
 
         ReportOutput.Table borrowers = out.table(
                 "borrowers",
                 "Active borrowers by gender",
                 List.of(new Column("gender", "Gender", Kind.TEXT), new Column("borrowers", "Borrowers", Kind.COUNT)));
+        // Each total is the sum of its own rows, so the rows always add up to it.
+        long byGender = 0;
         for (Count c : s.borrowersByGender()) {
             borrowers.row(c.label(), c.count());
+            byGender += c.count();
         }
-        borrowers.total("Total", s.borrowers());
+        borrowers.total("Total", byGender);
 
         ReportOutput.Table products = out.table(
                 "products",
@@ -182,9 +197,13 @@ class RegulatorySummaryReport extends PortfolioReport {
                         new Column("purpose", "Purpose", Kind.TEXT),
                         new Column("loans", "Active loans", Kind.COUNT),
                         new Column("principal_outstanding", "Principal outstanding", Kind.MONEY)));
+        long purposeLoans = 0;
+        long purposePo = 0;
         for (Book b : s.byPurpose()) {
             purposes.row(b.label(), b.loans(), b.principalOutstandingMinor());
+            purposeLoans += b.loans();
+            purposePo += b.principalOutstandingMinor();
         }
-        purposes.total("Total", s.activeLoans(), s.principalOutstandingMinor());
+        purposes.total("Total", purposeLoans, purposePo);
     }
 }
