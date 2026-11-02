@@ -126,6 +126,7 @@ class RetailBriefReader {
         }
         return switch (brief.reason() == null ? "" : brief.reason()) {
             case "validation" -> "validation";
+            case BriefWriter.EMPTY -> "empty";
             case "not_enabled", "not_allowed", "provider_off" -> "off";
             case "tenant_token_cap", "tenant_cost_cap", "platform_token_cap", "platform_cost_cap" -> "cap";
             case "breaker_open", "timeout", "network", "rate_limited", "provider_error", "auth_error", "bad_response" ->
@@ -134,9 +135,16 @@ class RetailBriefReader {
         };
     }
 
-    /** The owner's view: the brief, every seller's sales and profit, each over every branch. */
+    /**
+     * Every permission a figure of the stored brief needs, each over every branch: the brief itself, every seller's sales, cost
+     * and profit, the stock counts, the Controls counts and the open orders (ADR-037 amendment of #422, decision 4).
+     */
+    static final List<String> STORED_BRIEF_NEEDS =
+            List.of(USE, ALL_SELLERS, PROFIT, "retail.stock.read", "retail.controls.read", "retail.order.manage");
+
+    /** The owner's view: every permission of {@link #STORED_BRIEF_NEEDS}, each over every branch. */
     static boolean seesEverything(Principal principal) {
-        for (String permission : List.of(USE, ALL_SELLERS, PROFIT)) {
+        for (String permission : STORED_BRIEF_NEEDS) {
             Optional<Principal.BranchScope> scope = principal.scopeOf(permission);
             if (scope.isEmpty() || !scope.get().all()) {
                 return false;

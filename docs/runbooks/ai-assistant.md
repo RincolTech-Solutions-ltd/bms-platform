@@ -196,9 +196,11 @@ SELECT tenant_id, brief_date, source, reason, facts_as_of, generated_at, call_id
   FROM retail_ai_briefs WHERE brief_date >= current_date - 7 ORDER BY brief_date DESC, tenant_id;
 ```
 
-The signs and steps of section 10 hold. One more: a user who says they see the automatic summary on Home lacks
-`retail.sale.all_sellers` or `retail.profit.read` over every branch. That is expected: a Supervisor sees their shops, a seller their
-own sales and a Storekeeper stock counts only, never money. Item names never leave the server (they are sent as Item A).
+The signs and steps of section 10 hold. The card is for the administrators: `retail.advisor.use` is seeded to them alone, so
+switching the assistant on shows it to no seller or Storekeeper. A user who sees the automatic summary instead of the AI brief lacks
+one of `retail.sale.all_sellers`, `retail.profit.read`, `retail.stock.read`, `retail.controls.read` or `retail.order.manage` over
+every branch, which the stored brief needs; that is expected. A day whose model answer flagged nothing shows the automatic summary
+with the reason `empty`. Item names never leave the server (they are sent as Item A).
 
 To remove one day's brief, lending or shop (for example after a wrong switch-on), delete the row of `lending_ai_briefs` or
 `retail_ai_briefs` as the owner role; the next run of that date makes it again.

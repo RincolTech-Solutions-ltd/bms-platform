@@ -111,8 +111,15 @@ export function AssistantCaps({ saved, busy, error, onSave }: { saved: AdvisorSe
  * the same switch and caps of the business, so a business with both modules has one setting.
  */
 export function settingsClientFor(me: Parameters<typeof canConfigureAdvisor>[0]) {
-  if (canConfigureAdvisor(me)) return { client: advisor, key: ['advisor', 'settings'] };
-  if (canConfigureRetailAdvisor(me)) return { client: retailAdvisor, key: ['retail', 'advisor', 'settings'] };
+  const lendingSide = { client: advisor, key: ['advisor', 'settings'] };
+  const retailSide = { client: retailAdvisor, key: ['retail', 'advisor', 'settings'] };
+  // The module first (review of #735): a business without lending always reads the shop settings and sees the shop notice,
+  // whatever lending permission a role still carries; a business without retail always reads the lending ones.
+  const modules = me.modules;
+  if (modules && !modules.includes('lending')) return canConfigureRetailAdvisor(me) ? retailSide : null;
+  if (modules && !modules.includes('retail')) return canConfigureAdvisor(me) ? lendingSide : null;
+  if (canConfigureAdvisor(me)) return lendingSide;
+  if (canConfigureRetailAdvisor(me)) return retailSide;
   return null;
 }
 

@@ -2167,9 +2167,7 @@ class MigrationOrderIT {
                                     SELECT string_agg(role_key || ':' || permission_key, ',' ORDER BY role_key, permission_key)
                                       FROM role_permissions WHERE role_key IN ('retail_storekeeper', 'retail_purchasing')
                                     """).query(String.class).single())
-                    // V125 (#422) gives the Storekeeper the shop brief, stock counts only.
                     .isEqualTo("retail_purchasing:retail.purchase.create,retail_purchasing:retail.stock.read,"
-                            + "retail_storekeeper:retail.advisor.use,"
                             + "retail_storekeeper:retail.stock.read,retail_storekeeper:retail.stock.transfer,"
                             + "retail_storekeeper:retail.stocktake.commit,retail_storekeeper:retail.usage.report");
             // V74 (slice 2): seeing every seller's sales is the administrator's alone; the Sales role sees its own.
@@ -2925,12 +2923,8 @@ class MigrationOrderIT {
                                     + " WHERE permission_key LIKE 'retail.advisor.%' ORDER BY 1")
                             .query(String.class)
                             .list())
-                    .containsExactly(
-                            "retail_sales retail.advisor.use",
-                            "retail_storekeeper retail.advisor.use",
-                            "retail_supervisor retail.advisor.use",
-                            "tenant_admin retail.advisor.configure",
-                            "tenant_admin retail.advisor.use");
+                    // Administrators only: switching the assistant on shows the brief to nobody else (review of #735).
+                    .containsExactly("tenant_admin retail.advisor.configure", "tenant_admin retail.advisor.use");
             assertThat(owner.sql("SELECT count(*) FROM tenant_settings"
                                     + " WHERE settings -> 'module_groups' -> 'ai' IS NOT NULL")
                             .query(Long.class)

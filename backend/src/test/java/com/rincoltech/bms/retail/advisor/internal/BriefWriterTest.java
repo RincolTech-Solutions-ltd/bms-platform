@@ -163,10 +163,39 @@ class BriefWriterTest {
     }
 
     @Test
-    void anEmptyAnswerShowsTheKeyFigures() {
+    void anEmptyAnswerIsTheAutomaticSummaryNeverLabelledAsAi() {
         Brief brief = BriefWriter.build(facts(), answer("{\"findings\": [], \"watch\": []}"));
-        assertThat(brief.source()).isEqualTo("model");
+        assertThat(brief.source()).isEqualTo("fallback");
+        assertThat(brief.reason()).isEqualTo(BriefWriter.EMPTY);
         assertThat(brief.points().get(0).text()).startsWith("Key figures:");
+        assertThat(RetailBriefReader.reasonOf(brief)).isEqualTo("empty");
+    }
+
+    /**
+     * Rendering itself never writes a stray number; this checks the second line through a fact whose label carries one: a count
+     * of 4 cited once may appear once (review of #735). JUSTIFICATION-A3: a new test case for the counted number check.
+     */
+    @Test
+    void aNumberIsCountedSoAStrayCopyOfACitedCountIsRefused() {
+        FactSet set = new FactSet(
+                LocalDate.of(2026, 10, 20),
+                "UGX",
+                true,
+                List.of(new Fact(
+                        "stock.low",
+                        "Items low on stock, 4 of them",
+                        Kind.COUNT,
+                        Polarity.HIGHER_IS_WORSE,
+                        4,
+                        "4",
+                        null,
+                        null)),
+                List.of());
+        String raw = """
+                {"findings": [{"fact_keys": ["stock.low"], "topic": "stock_levels", "action": "STOCK_RESTOCK_LOW",
+                               "priority": "medium"}], "watch": []}
+                """;
+        assertThat(BriefWriter.build(PromptFacts.of(set), answer(raw)).reason()).isEqualTo(BriefWriter.VALIDATION);
     }
 
     @Test
@@ -205,5 +234,30 @@ class BriefWriterTest {
                                 "b")),
                 List.of(new ItemName("a", "Item B box"), new ItemName("b", "Plain tea")));
         assertThat(PromptFacts.of(set).toNames("Item A and Item B")).isEqualTo("Item B box and Plain tea");
+    }
+
+    /**
+     * The stored brief needs every permission a figure in it needs, over every branch (review of #735, point 8).
+     * JUSTIFICATION-A3: a new test case; no existing test covers who may read the stored brief.
+     */
+    @Test
+    void theStoredBriefNeedsEveryPermissionOfItsFigures() {
+        java.util.Set<String> all = java.util.Set.copyOf(RetailBriefReader.STORED_BRIEF_NEEDS);
+        UUID user = UUID.randomUUID();
+        assertThat(RetailBriefReader.seesEverything(
+                        com.rincoltech.bms.kernel.Principal.uniform(user, "staff", all, true, java.util.Set.of())))
+                .isTrue();
+        for (String missing : all) {
+            java.util.Set<String> less = new java.util.HashSet<>(all);
+            less.remove(missing);
+            assertThat(RetailBriefReader.seesEverything(
+                            com.rincoltech.bms.kernel.Principal.uniform(user, "staff", less, true, java.util.Set.of())))
+                    .as(missing)
+                    .isFalse();
+        }
+        assertThat(RetailBriefReader.seesEverything(com.rincoltech.bms.kernel.Principal.uniform(
+                        user, "staff", all, false, java.util.Set.of(UUID.randomUUID()))))
+                .as("one branch is not every branch")
+                .isFalse();
     }
 }

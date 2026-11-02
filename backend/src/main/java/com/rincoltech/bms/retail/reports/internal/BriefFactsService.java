@@ -273,9 +273,7 @@ class BriefFactsService implements RetailBriefFacts {
                     comparable ? d.moneyChange(listed - listedBefore, "the seven days before") : null));
         }
         if (capabilities.enabled(RetailCapabilities.CUSTOMER_ACCOUNTS)) {
-            long over = credit.customers(f, date, 1000).stream()
-                    .filter(c -> c.creditLimitMinor() != null && c.buckets().owed() > c.creditLimitMinor())
-                    .count();
+            long over = credit.overLimitCount(f, date);
             facts.add(d.count(
                     "credit.over_limit", "Credit customers over their limit", Polarity.HIGHER_IS_WORSE, over, null));
         }
