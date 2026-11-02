@@ -299,14 +299,24 @@ class ReceiptService {
     }
 
     private ActionOutcome outcome(Receipt receipt, String type, Map<String, Object> payload) {
-        Approvals.Outcome o = approvals.request(new ActionRequest(
-                type,
-                receipt.branchId(),
-                receipt.id(),
-                receipt.version(),
-                receipt.amountMinor(),
-                receipt.currency(),
-                payload));
+        // ADR-091: the rule is read once and passed on. Allocations and refunds are not switchable and have no
+        // threshold, so
+        // they always wait for a checker; an answer that it ran at once would mean a broken rule, never a settled
+        // receipt.
+        Approvals.Rule rule = approvals.rule(type);
+        Approvals.Outcome o = approvals.request(
+                new ActionRequest(
+                        type,
+                        receipt.branchId(),
+                        receipt.id(),
+                        receipt.version(),
+                        receipt.amountMinor(),
+                        receipt.currency(),
+                        payload),
+                rule);
+        if (o.executed()) {
+            throw new IllegalStateException(type + " always waits for a checker");
+        }
         return new ActionOutcome(receipt.id(), o.approvalId());
     }
 
