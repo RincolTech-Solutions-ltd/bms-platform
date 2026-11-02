@@ -2793,6 +2793,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/payments/intents/{intent_id}/sms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send the payment link to the payer's number by SMS, once per intent, while it is open; refused when SMS or collections are off */
+        post: operations["textPaymentLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/payments/merchant-account": {
         parameters: {
             query?: never;
@@ -2829,6 +2846,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/payments/reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The latest reconciliation run and its differences */
+        get: operations["getPaymentReconciliation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/reconciliation/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run the reconciliation now and return its report */
+        post: operations["runPaymentReconciliation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/payments/settings": {
         parameters: {
             query?: never;
@@ -2841,6 +2892,58 @@ export interface paths {
         /** Change the tenant's payments settings, audited with before and after (ADR-035) */
         put: operations["updatePaymentsSettings"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/statements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The statements uploaded, newest first */
+        get: operations["listPaymentStatements"];
+        put?: never;
+        /** Upload the merchant statement (CSV, up to 1 MB and 5,000 lines): match its lines to our orders and post each clean line's fee once (FR-PAY-11) */
+        post: operations["uploadPaymentStatement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/statements/{statement_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One statement with how each line matched */
+        get: operations["getPaymentStatement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/statements/{statement_id}/rows/{row_no}/outside-system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark a statement line no order of ours has as money for something outside this system, so it is no longer reported (audited) */
+        post: operations["markStatementLineOutsideSystem"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4448,6 +4551,41 @@ export interface paths {
          * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
          */
         post: operations["voidRetailAdvance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/advisor/brief": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Today's retail brief: the stored AI brief for the owner, else the automatic summary of what the caller may see */
+        get: operations["getRetailAdvisorBrief"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/advisor/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The AI assistant's settings, limits and use today */
+        get: operations["getRetailAdvisorSettings"];
+        /** Switch the assistant on (with the acknowledgement) or off, or set its daily caps; audited */
+        put: operations["updateRetailAdvisorSettings"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -11343,6 +11481,13 @@ export interface components {
             subject_id?: string;
             subject_type?: string;
         };
+        PaymentLinkText: {
+            already_sent?: boolean;
+            /** Format: date-time */
+            expires_at?: string;
+            /** Format: uuid */
+            intent_id?: string;
+        };
         PaymentMethodMapping: {
             account_code?: string;
             /**
@@ -11359,6 +11504,148 @@ export interface components {
         };
         PaymentMethodMappingList: {
             items?: components["schemas"]["PaymentMethodMapping"][];
+        };
+        PaymentReconciliation: {
+            counts_by_kind?: {
+                [key: string]: number;
+            };
+            findings?: components["schemas"]["PaymentReconciliationFinding"][];
+            findings_truncated?: boolean;
+            run?: components["schemas"]["PaymentReconciliationRun"];
+        };
+        PaymentReconciliationFinding: {
+            /** Format: int64 */
+            bms_amount_minor?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            confirmation_code?: string;
+            currency?: string;
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            intent_id?: string;
+            /** @description What differs. completed_not_booked, pending_over_24h, paid_differs, reversed_awaiting_review, reversal_handed_over, reversal_blocked, reversed_after_refund, manual_receipt_duplicate, in_provider_not_in_bms, in_bms_not_in_provider, amount_mismatch, currency_mismatch, ambiguous_statement_row */
+            kind?: string;
+            order_tracking_id?: string;
+            /**
+             * Format: uuid
+             * @description A receipt keyed by hand (manual_receipt_duplicate): its transaction
+             */
+            other_transaction_id?: string;
+            /** Format: int64 */
+            provider_amount_minor?: number;
+            /** Format: uuid */
+            statement_row_id?: string;
+        };
+        /** @description The latest run, or absent before the first */
+        PaymentReconciliationRun: {
+            /** Format: date-time */
+            created_at?: string;
+            /**
+             * Format: int32
+             * @description Differences; for a reader of some branches, those in their branches
+             */
+            finding_count?: number;
+            /** Format: uuid */
+            id?: string;
+            /**
+             * Format: int32
+             * @description Orders looked at; absent for a reader of some branches only
+             */
+            intents_examined?: number;
+            /** Format: date */
+            ran_on?: string;
+            /**
+             * Format: int32
+             * @description Statements looked at; absent for a reader of some branches only
+             */
+            statements_used?: number;
+            /** @enum {string} */
+            trigger?: "job" | "manual";
+            /** @description The run could not read everything: what it lists is partial, and it lists nothing that needs the whole */
+            truncated?: boolean;
+            /** Format: date */
+            window_from?: string;
+        };
+        PaymentStatement: {
+            /**
+             * Format: date
+             * @description The days the export is complete for, where a booked payment missing from it is reported; absent when it covers none
+             */
+            covered_from?: string;
+            /** Format: date */
+            covered_to?: string;
+            /** Format: date-time */
+            created_at?: string;
+            currency?: string;
+            /**
+             * Format: int32
+             * @description Lines whose order is ours but whose amount, currency or paid state differs, or whose code names several orders
+             */
+            different_count?: number;
+            /**
+             * Format: int64
+             * @description The fees posted to the gateway charges account by this upload
+             */
+            fees_posted_minor?: number;
+            file_name?: string;
+            /** Format: uuid */
+            id?: string;
+            /**
+             * Format: int32
+             * @description Lines whose order is ours, paid, with the same amount and currency
+             */
+            matched_count?: number;
+            /** Format: date */
+            period_from?: string;
+            /** Format: date */
+            period_to?: string;
+            /** Format: int32 */
+            row_count?: number;
+            /**
+             * Format: int32
+             * @description Lines no order of ours has
+             */
+            unmatched_count?: number;
+            /** Format: uuid */
+            uploaded_by?: string;
+        };
+        PaymentStatementDetail: {
+            rows?: components["schemas"]["PaymentStatementRow"][];
+            /** @description True when more lines exist than are listed here (the first 1,000 are) */
+            rows_truncated?: boolean;
+            statement?: components["schemas"]["PaymentStatement"];
+        };
+        PaymentStatementList: {
+            items?: components["schemas"]["PaymentStatement"][];
+        };
+        PaymentStatementRow: {
+            /** Format: int64 */
+            amount_minor?: number;
+            confirmation_code?: string;
+            /** Format: int64 */
+            fee_minor?: number;
+            /**
+             * @description posted: the fee was posted from this line; reversed: it was, and has been reversed since (with the payment, or by hand); already_posted: an earlier statement did; reversed_elsewhere: an earlier statement did and that fee was reversed by hand, so this line posts nothing (one fee per order: a wrong fee is corrected by a manual journal entry); none: no fee on the line; held: the line did not match cleanly, or its order was not booked, so no fee was posted; awaiting_approval: the fee is above the automatic rate and waits for a second person; not_approved: that request was rejected, cancelled or expired, so nothing was posted
+             * @enum {string}
+             */
+            fee_status?: "posted" | "reversed" | "already_posted" | "reversed_elsewhere" | "none" | "held" | "awaiting_approval" | "not_approved";
+            /** Format: uuid */
+            intent_id?: string;
+            /** @enum {string} */
+            match_status?: "matched" | "amount_mismatch" | "currency_mismatch" | "not_paid_here" | "ambiguous" | "unmatched";
+            order_tracking_id?: string;
+            /** @description Marked as outside this system and waiting for a second person to confirm; still a finding */
+            outside_awaiting_confirmation?: boolean;
+            /** Format: date */
+            paid_on?: string;
+            payment_method?: string;
+            /** @description Two people agreed the line is money for something outside this system (marked, then confirmed) */
+            reviewed_outside?: boolean;
+            /** Format: int32 */
+            row_no?: number;
+            /** Format: int64 */
+            settled_minor?: number;
         };
         PaymentsSettings: {
             collections_enabled?: boolean;
@@ -12138,6 +12425,8 @@ export interface components {
              * @description When the file is deleted
              */
             expires_at?: string;
+            /** @description The files of a ready run that has not expired: one, or for a pack the PDF and the workbook */
+            files?: components["schemas"]["ReportRunFile"][];
             /** Format: date-time */
             finished_at?: string;
             format?: string;
@@ -12164,6 +12453,13 @@ export interface components {
             /** @description queued, running, ready, failed or cancelled */
             status?: string;
             title?: string;
+        };
+        /** @description The files of a ready run that has not expired: one, or for a pack the PDF and the workbook */
+        ReportRunFile: {
+            /** Format: uuid */
+            document_id?: string;
+            /** @description json, csv, pdf or xlsx */
+            format?: string;
         };
         ReportRunRequest: {
             /** @description json, csv, pdf or xlsx */
@@ -12327,6 +12623,72 @@ export interface components {
             purpose?: string;
             /** Format: uuid */
             taken_by_party_id?: string;
+        };
+        /** @description The text to show before switching on, and its version */
+        RetailAdvisorAcknowledgement: {
+            text?: string;
+            text_version?: string;
+        };
+        RetailAdvisorBrief: {
+            /** @description Always true: every text here is advisory */
+            advisory?: boolean;
+            /**
+             * Format: date-time
+             * @description When the brief was made (a stored brief) or computed (the caller's own summary)
+             */
+            as_of?: string;
+            facts?: components["schemas"]["RetailAdvisorFact"][];
+            /**
+             * Format: date
+             * @description The business date the figures stand at: the end of the day before the brief
+             */
+            facts_as_of?: string;
+            /** @description The label the card carries: AI assistant (advisory) or Automatic summary */
+            label?: string;
+            /** @description The line shown under the text */
+            note?: string;
+            points?: components["schemas"]["RetailAdvisorPoint"][];
+            /** @description Why the automatic summary is shown: off, scope, validation, empty (the model flagged nothing), provider_down, cap, not_ready or unavailable; null for a model brief */
+            reason?: string;
+            /** @description model: written from an accepted structured model answer. fallback: the automatic summary */
+            source?: string;
+            summary?: string;
+        };
+        /** @description A figure the brief rests on; metric is the figure's family, which the screen opens the page of */
+        RetailAdvisorFact: {
+            display?: string;
+            key?: string;
+            label?: string;
+            metric?: string;
+        };
+        /** @description One point of the brief, written by our code from the reviewed catalogue */
+        RetailAdvisorPoint: {
+            facts?: string[];
+            text?: string;
+        };
+        RetailAdvisorSettings: {
+            /** Format: date-time */
+            acknowledged_at?: string;
+            /** Format: uuid */
+            acknowledged_by?: string;
+            acknowledged_text_version?: string;
+            acknowledgement?: components["schemas"]["RetailAdvisorAcknowledgement"];
+            /** @description The platform has opened the assistant for the business; switching on is refused otherwise */
+            allowed?: boolean;
+            cost_currency?: string;
+            /** Format: int64 */
+            cost_used_today_micro?: number;
+            /** Format: int64 */
+            daily_cost_cap_micro?: number;
+            /** Format: int64 */
+            daily_token_cap?: number;
+            enabled?: boolean;
+            /** @description A provider is configured on the platform; false means every brief is the automatic summary */
+            provider_configured?: boolean;
+            /** Format: int64 */
+            tokens_used_today?: number;
+            /** Format: int32 */
+            version?: number;
         };
         /** @description What is owed on completed credit sales, by days past the due date as of today; a sale with no due date counts as not yet due */
         RetailAgeing: {
@@ -17491,11 +17853,13 @@ export interface components {
             day_expenses_minor?: number;
             /**
              * Format: int64
-             * @description Present only with retail.profit.read in the record's branch; the amount of the active record for the day, if any
+             * @description Present only with retail.profit.read in the record's branch, or for a record made while salespeople_see_savings_amount is on (ADR-115); the amount of the active record for the day, if any
              */
             existing_amount_minor?: number;
             /** Format: uuid */
             existing_id?: string;
+            /** @description True when this caller may save an amount different from the suggestion: with retail.savings.overwrite, or with salespeople_see_savings_amount on when no saved record of the day was voided (replacing a saved amount needs retail.savings.overwrite; ADR-115) */
+            may_change_amount?: boolean;
             /**
              * Format: int64
              * @description Present only with retail.profit.read in the record's branch
@@ -19874,6 +20238,9 @@ export interface components {
             /** @description The text as it was (or would be) sent, with the TEST prefix */
             text?: string;
         };
+        StatementLineOutsideRequest: {
+            note?: string;
+        };
         StoredDocument: {
             /** Format: uuid */
             branch_id?: string;
@@ -20107,6 +20474,8 @@ export interface components {
             require_mfa_all_staff?: boolean;
             /** @description Staff role keys whose holders must use two-step sign-in (ADR-046); empty when none is chosen */
             require_mfa_roles?: string[];
+            /** @description Salespeople without profit read see the suggested daily savings amount, may change it within the day's cap and see the saved amount (default false; issue #768, ADR-115) */
+            salespeople_see_savings_amount?: boolean;
             /** @description True once the business set-up checklist has been dismissed */
             setup_dismissed?: boolean;
             /** @description Brand colour #RRGGBB, or null for the platform look (FR-TEN-08) */
@@ -20357,6 +20726,23 @@ export interface components {
              */
             daily_ceiling_minor?: number;
         };
+        /** @description Omitted fields are unchanged */
+        UpdateRetailAdvisorSettingsRequest: {
+            /** @description The version of the acknowledgement text that was shown; required when switching on */
+            acknowledged_text_version?: string;
+            /**
+             * Format: int32
+             * @description Estimated cost a day in millionths of the cost currency, at most the platform ceiling
+             */
+            daily_cost_cap_micro?: number;
+            /**
+             * Format: int32
+             * @description Tokens a day for this business, at most the platform ceiling; 0 stops every call
+             */
+            daily_token_cap?: number;
+            /** @description Switch the assistant on or off; needs core.settings.manage as well */
+            enabled?: boolean;
+        };
         UpdateRetailCapabilitiesRequest: {
             branch_roles?: boolean;
             /** @enum {string} */
@@ -20478,6 +20864,8 @@ export interface components {
             require_mfa_all_staff?: boolean;
             /** @description Staff role keys whose holders must use two-step sign-in; an empty list clears the choice (ADR-046) */
             require_mfa_roles?: string[];
+            /** @description Let salespeople see and change the daily savings amount; they can then work out the day's profit. Only the Owner sets it, 403 owner_only otherwise (issue #768, ADR-115) */
+            salespeople_see_savings_amount?: boolean;
             setup_dismissed?: boolean;
             /** @description #RRGGBB, or an empty string to clear it; white or near-black text on it must reach contrast 4.5 (FR-TEN-08) */
             theme_primary?: string;
@@ -25553,6 +25941,28 @@ export interface operations {
             };
         };
     };
+    textPaymentLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                intent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentLinkText"];
+                };
+            };
+        };
+    };
     getMerchantAccount: {
         parameters: {
             query?: never;
@@ -25641,6 +26051,46 @@ export interface operations {
             };
         };
     };
+    getPaymentReconciliation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentReconciliation"];
+                };
+            };
+        };
+    };
+    runPaymentReconciliation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentReconciliation"];
+                };
+            };
+        };
+    };
     getPaymentsSettings: {
         parameters: {
             query?: never;
@@ -25683,6 +26133,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaymentsSettings"];
+                };
+            };
+        };
+    };
+    listPaymentStatements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentStatementList"];
+                };
+            };
+        };
+    };
+    uploadPaymentStatement: {
+        parameters: {
+            query?: {
+                covered_from?: string;
+                covered_to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentStatementDetail"];
+                };
+            };
+        };
+    };
+    getPaymentStatement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                statement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentStatementDetail"];
+                };
+            };
+        };
+    };
+    markStatementLineOutsideSystem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                statement_id: string;
+                row_no: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StatementLineOutsideRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentStatementRow"];
                 };
             };
         };
@@ -28111,6 +28660,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailAdvance"];
+                };
+            };
+        };
+    };
+    getRetailAdvisorBrief: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailAdvisorBrief"];
+                };
+            };
+        };
+    };
+    getRetailAdvisorSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailAdvisorSettings"];
+                };
+            };
+        };
+    };
+    updateRetailAdvisorSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRetailAdvisorSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailAdvisorSettings"];
                 };
             };
         };
