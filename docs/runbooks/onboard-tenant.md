@@ -113,17 +113,23 @@ The `BMS_SMTP_*` values can stay on the host; they are not used while the provid
   on staging` at every start. To let a tester in, add the address, `docker compose up -d api`, then "Send again". Never
   set the list on production.
 - **Resend down.** Keep the `BMS_SMTP_*` values on the host when switching to Resend: an email that cannot reach Resend
-  at all (`resend_unreachable`) then goes by SMTP at once, and the log says `resend unreachable; sent by smtp instead`.
-  A Resend that answers with errors or times out is not bypassed (it may already hold the email): those rows are tried
-  three times over about six minutes, then show as failed on "Messages not sent". When Resend is back, press "Send
-  again" on them; an activation or reset whose link has expired needs a new one.
+  at all (`resend_unreachable`: refused, no route, DNS, connect timeout or TLS handshake, before any of the request
+  left) then goes by SMTP at once. The log says `resend unreachable; sent by smtp instead` and then
+  `outbox row sent: ... via=smtp`, and the platform audit log has one `platform.outbox.sent_via` row with the outbox row
+  id and `via` `smtp`, which is how to tell afterwards which sender carried an email. A Resend that answers with
+  errors, times out after the request was sent, or drops the connection once made is not bypassed (it may already hold
+  the email, and SMTP would send a second copy): those rows are tried three times over about six minutes, then show as
+  failed on "Messages not sent". When Resend is back, press "Send again" on them; an activation or reset whose link has
+  expired needs a new one.
 - **What a failure means.** `resend_rejected`: Resend refused the message as invalid; it is not retried (a refused
   business from-name is already retried once with `BMS_MAIL_FROM`). `resend_too_large`: the message, usually the weekly
   workbook, is over Resend's attachment limit (about 40 MB once encoded); it is not retried, so ask the business to use
   Download my data instead. `resend_unauthorized`: the key is wrong, revoked or not allowed for the domain; make a new one.
   `resend_timeout`: the request reached Resend and no answer came in time (20 seconds, more for a large attachment).
   `resend_unreachable`: no connection was made at all (DNS, a firewall or proxy blocking `api.resend.com`, a connect
-  timeout); check the host's outbound HTTPS before suspecting Resend. `resend_unavailable` (Resend answered with a
+  timeout, a failed TLS handshake); check the host's outbound HTTPS before suspecting Resend.
+  `resend_connection_lost`: the connection was made and then dropped before an answer (a proxy or a network fault
+  mid-request); the request may have reached Resend. `resend_unavailable` (Resend answered with a
   server error), `resend_idempotency_conflict` (two tries at once) and `resend_interrupted` (the API was stopping during
   the send): all of these are retried twice on their own, and those tries never send a second copy, because the row's key
   (with the environment and the row id in front) is Resend's idempotency key for 24 hours. "Send again" later than that is

@@ -409,6 +409,69 @@ class OutboxIT extends IntegrationTest {
         }
     }
 
+    /**
+     * Issue #333 (ADR-115 decision 1): with Resend chosen and SMTP still set, a row whose request could not reach Resend
+     * goes by SMTP, is marked sent, and the platform audit log records that SMTP carried it.
+     */
+    @Test
+    void aRowThatCannotReachResendGoesBySmtpAndTheSenderIsRecorded() throws Exception {
+        // JUSTIFICATION-A3: the dispatcher-level proof of the fallback and of which sender sent (third #759 review, 3).
+        int closed;
+        try (java.net.ServerSocket probe = new java.net.ServerSocket(0)) {
+            closed = probe.getLocalPort();
+        }
+        NotificationProperties properties = new NotificationProperties(
+                new NotificationProperties.Smtp(
+                        "smtp.example.test", null, "u", "fabricated-01", "no-reply@example.test"),
+                null,
+                "",
+                new NotificationProperties.Mail(
+                        "resend", "re_fabricated_test_key_0005", "http://127.0.0.1:" + closed, null));
+        List<String> carried = Collections.synchronizedList(new ArrayList<>());
+        SmtpEmailChannel smtp =
+                new SmtpEmailChannel(
+                        properties,
+                        new OutboxTemplates(),
+                        EmailLayoutTest.HOSTS,
+                        null,
+                        null,
+                        null,
+                        null,
+                        suppressions,
+                        "") {
+                    @Override
+                    Result transmit(Delivery delivery) {
+                        carried.add(delivery.idempotencyKey());
+                        return Result.SENT;
+                    }
+                };
+        ResendEmailChannel resend = new ResendEmailChannel(
+                smtp,
+                properties,
+                new tools.jackson.databind.ObjectMapper(),
+                new com.rincoltech.bms.kernel.BusinessClock(java.time.Clock.systemUTC()),
+                "");
+        String key = key();
+        enqueue("email", "test-fallback@example.test", key);
+
+        dispatcher.dispatch(List.of(resend), 1000);
+
+        assertThat(carried).contains(key);
+        assertThat(row(key).get("status")).isEqualTo("sent");
+        String id = TestDatabase.owner()
+                .sql("SELECT id::text FROM notification_outbox WHERE idempotency_key = ?")
+                .param(key)
+                .query(String.class)
+                .single();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT data ->> 'via' FROM platform_audit_log"
+                                + " WHERE action = 'platform.outbox.sent_via' AND data ->> 'outbox_id' = ?")
+                        .param(id)
+                        .query(String.class)
+                        .single())
+                .isEqualTo("smtp");
+    }
+
     /** FR-NTF-09: a sent row is marked sent and its parameters (which may hold a link) cleared. */
     @Test
     void aSentRowIsMarkedAndItsParametersCleared() {

@@ -373,6 +373,97 @@ class ResendEmailChannelTest {
                 .hasMessage("resend_unavailable");
     }
 
+    // JUSTIFICATION-A3: the fallback cases the #759 lead set for the third review's must-fix 3.
+    /** An SMTP sender that records what it is given and sends nothing; its refusal check is the real one. */
+    SmtpEmailChannel recordingSmtp(NotificationProperties properties, List<String> carried) {
+        return new SmtpEmailChannel(
+                properties, new OutboxTemplates(), EmailLayoutTest.HOSTS, null, null, null, null, "live") {
+            @Override
+            Result transmit(Delivery delivery) {
+                carried.add(delivery.idempotencyKey());
+                return Result.SENT;
+            }
+        };
+    }
+
+    @Test
+    void onlyAConnectionNeverMadeIsUnreachableAndAnythingAfterTheRequestLeftIsNot() {
+        assertThat(ResendEmailChannel.failure(new java.net.ConnectException("refused")))
+                .isEqualTo("resend_unreachable");
+        assertThat(ResendEmailChannel.failure(new java.net.http.HttpConnectTimeoutException("connect")))
+                .isEqualTo("resend_unreachable");
+        assertThat(ResendEmailChannel.failure(new javax.net.ssl.SSLHandshakeException("handshake")))
+                .isEqualTo("resend_unreachable");
+        assertThat(ResendEmailChannel.failure(new java.nio.channels.UnresolvedAddressException()))
+                .isEqualTo("resend_unreachable");
+        // The request left: Resend may hold it, so these never go by SMTP.
+        assertThat(ResendEmailChannel.failure(new java.net.http.HttpTimeoutException("read")))
+                .isEqualTo("resend_timeout");
+        assertThat(ResendEmailChannel.failure(new IOException("connection reset")))
+                .isEqualTo("resend_connection_lost");
+        assertThat(ResendEmailChannel.failure(null)).isEqualTo("resend_connection_lost");
+    }
+
+    @Test
+    void aFallbackSentBySmtpSaysSoAndATimeoutWithSmtpSetIsNeverSentBySmtp() throws Exception {
+        int closed;
+        try (java.net.ServerSocket probe = new java.net.ServerSocket(0)) {
+            closed = probe.getLocalPort();
+        }
+        NotificationProperties unreachable = new NotificationProperties(
+                new NotificationProperties.Smtp("smtp.example.test", null, "u", "fabricated-01", FROM),
+                null,
+                "",
+                new NotificationProperties.Mail("resend", KEY, "http://127.0.0.1:" + closed, null));
+        List<String> carried = new CopyOnWriteArrayList<>();
+        ResendEmailChannel fallback = new ResendEmailChannel(
+                recordingSmtp(unreachable, carried),
+                unreachable,
+                mapper,
+                CLOCK,
+                "live",
+                java.time.Duration.ofSeconds(2),
+                java.time.Duration.ofMillis(300));
+        // Sent, and the result names SMTP, which the dispatcher logs and records.
+        assertThat(fallback.send(delivery("staff01@example.test", null)))
+                .isEqualTo(OutboxChannel.Result.sentVia("smtp"));
+        assertThat(carried).containsExactly("identity.password_changed:k1");
+
+        // A server that takes the request and never answers: a read timeout, retried as Resend's, never by SMTP.
+        NotificationProperties answering = new NotificationProperties(
+                new NotificationProperties.Smtp("smtp.example.test", null, "u", "fabricated-01", FROM),
+                null,
+                "",
+                new NotificationProperties.Mail("resend", KEY, base, null));
+        java.util.concurrent.CountDownLatch hold = new java.util.concurrent.CountDownLatch(1);
+        server.removeContext("/");
+        server.createContext("/", exchange -> {
+            try {
+                hold.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.close();
+        });
+        List<String> notCarried = new CopyOnWriteArrayList<>();
+        ResendEmailChannel silent = new ResendEmailChannel(
+                recordingSmtp(answering, notCarried),
+                answering,
+                mapper,
+                CLOCK,
+                "live",
+                java.time.Duration.ofSeconds(2),
+                java.time.Duration.ofMillis(300));
+        try {
+            assertThatThrownBy(() -> silent.send(delivery("staff01@example.test", null)))
+                    .isInstanceOf(OutboxChannel.SendFailure.class)
+                    .hasMessage("resend_timeout");
+        } finally {
+            hold.countDown();
+        }
+        assertThat(notCarried).isEmpty();
+    }
+
     @Test
     void anAttachmentOverResendsLimitIsRefusedBeforeAnyUploadAndATimeoutGrowsWithTheBody() throws Exception {
         NotificationProperties properties = new NotificationProperties(

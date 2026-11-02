@@ -27,11 +27,18 @@ types, which can be a real person's.
    `email`; only the chosen one is ever on. The dispatcher keeps the senders that are on before it picks one by channel
    name, so the order of the two beans never decides where a row goes (`OutboxIT` sends a row through the dispatcher
    with SMTP listed first and off). SMTP is unchanged and stays a full choice. **Fallback:** with `resend` chosen and the
-   `BMS_SMTP_*` values still on the host, an email whose request could not reach Resend at all (`resend_unreachable`: no
-   connection, so Resend cannot have sent it) goes by SMTP at once. A timeout, a `5xx` or a `429` never falls back,
-   because Resend may already hold the email and SMTP has no idempotency key; those are retried at 1 and 5 minutes and
-   then show as failed on "Messages not sent" for "Send again". So a Resend outage that answers errors for longer than
-   about six minutes leaves its rows failed there; an outage that refuses connections goes by SMTP.
+   `BMS_SMTP_*` values still on the host, an email whose request could not reach Resend at all goes by SMTP at once.
+   "Could not reach" is `resend_unreachable` and nothing else: the connection was refused, had no route or no name
+   (DNS), timed out while connecting, or failed its TLS handshake, all before a byte of the request left, so Resend cannot
+   have sent it. Every other outcome means a request may have reached Resend and never falls back, because SMTP has no
+   idempotency key and the reader could get two copies: any answer (a `5xx`, which is how an unavailable Resend
+   answers, a `429`, a `4xx`), a read timeout after the request was sent (`resend_timeout`) and a connection lost once
+   made (`resend_connection_lost`). Those are retried under the idempotency key at 1 and 5 minutes and then show as failed
+   on "Messages not sent" for "Send again". So a Resend outage that answers errors for longer than about six minutes
+   leaves its rows failed there; an outage that refuses connections goes by SMTP. The outbox row only says `sent`, so
+   which sender carried a fallback is recorded beside it: the sender's result names SMTP, the dispatcher's log line says
+   `via=smtp`, and one `platform_audit_log` row `platform.outbox.sent_via` holds the row id, the channel and `smtp`
+   (no address, no text), written in the transaction that marks the row sent.
 2. **Resend over HTTP.** `ResendEmailChannel` sends one `POST /emails` to `BMS_RESEND_API_URL` (default
    `https://api.resend.com`; anything but `https`, apart from the loopback a test uses, stops the start, so the key never
    travels in clear) with `Authorization: Bearer <BMS_RESEND_API_KEY>`. The message is the one the SMTP sender builds:

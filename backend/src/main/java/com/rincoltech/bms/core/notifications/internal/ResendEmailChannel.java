@@ -153,7 +153,9 @@ class ResendEmailChannel implements OutboxChannel {
             // already hold it and SMTP has no idempotency key.
             if ("resend_unreachable".equals(e.getMessage()) && smtp.configured()) {
                 log.warn("outbox row {}: resend unreachable; sent by smtp instead", context.outboxId());
-                return email.send(delivery);
+                // The refusals were checked above; the dispatcher records that SMTP carried it.
+                Result bySmtp = email.transmit(delivery);
+                return bySmtp instanceof Result.Sent ? Result.sentVia("smtp") : bySmtp;
             }
             throw e;
         }
@@ -232,18 +234,34 @@ class ResendEmailChannel implements OutboxChannel {
             Thread.currentThread().interrupt();
             throw new SendFailure("resend_interrupted");
         } catch (ExecutionException e) {
-            // A connection never made (refused, no route, DNS, connect timeout) is unreachable; a request sent and not
-            // answered in time is a timeout.
-            throw new SendFailure(
-                    e.getCause() instanceof HttpTimeoutException
-                                    && !(e.getCause() instanceof HttpConnectTimeoutException)
-                            ? "resend_timeout"
-                            : "resend_unreachable");
+            throw new SendFailure(failure(e.getCause()));
         }
         return answer(
                 response.statusCode(),
                 response.body(),
                 response.headers().firstValue("Retry-After").orElse(null));
+    }
+
+    // JUSTIFICATION-A3: the no-request-reached-Resend test the #759 lead set for the SMTP fallback (third review, 3).
+    /**
+     * The label of a request that got no answer (ADR-115 decisions 1 and 3). {@code resend_unreachable} only when no
+     * request can have reached Resend: the connection was refused, had no route or name ({@link java.net.ConnectException}),
+     * timed out while connecting, or its TLS handshake failed, all before a byte of the request was sent. Only this label
+     * falls back to SMTP. A request sent and not answered in time is {@code resend_timeout}; a connection lost once made
+     * ({@code resend_connection_lost}) may have delivered the request. Both are retried under the idempotency key, never
+     * sent by SMTP.
+     */
+    static String failure(Throwable cause) {
+        if (cause instanceof HttpConnectTimeoutException
+                || cause instanceof java.net.ConnectException
+                || cause instanceof javax.net.ssl.SSLHandshakeException
+                || cause instanceof java.nio.channels.UnresolvedAddressException) {
+            return "resend_unreachable";
+        }
+        if (cause instanceof HttpTimeoutException) {
+            return "resend_timeout";
+        }
+        return "resend_connection_lost";
     }
 
     /** Reads only the error name, whether its message is about {@code from}, and the id; nothing else is kept. */
