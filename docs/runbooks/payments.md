@@ -242,9 +242,8 @@ as late; an expired order stays payable on purpose), `needs_attention`, `reverse
   `reversed_pending_review` and the `reversal` counter in `payment_callback_counters` rises.
 * **Built (#224 part 1):** the checker request for a reported reversal (`gateway_payment_reversal`, 4d step 7) and the review windows of
   spec 3.9 (7 days for mobile money, daily for 14 and weekly to 120 days otherwise), which replace the 14 days above.
-* **Not built (part 2, #318):** the nightly reconcile job and report and the statement upload. After its review window a booked payment is
-  no longer re-asked about: a later chargeback is seen only on the provider's statement. Do not activate collections for a real lender until
-  part 2 ships or the person on call reads the `reversal` counter daily.
+* **Built (#224 part 2, #318):** the nightly reconcile job and report and the statement upload (section 4f). After its review window a
+  booked payment is no longer re-asked about: a later chargeback is seen on the uploaded provider statement, which the nightly run compares.
 
 ## 6. Incidents
 
