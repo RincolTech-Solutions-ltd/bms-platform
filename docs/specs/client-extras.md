@@ -689,6 +689,22 @@ overdue" with no count.
 Template `payment.link`: the hosted order URL for an open intent, sent from the collection screen to
 the payer's number, category `transactional`, once per intent, only while the intent is open.
 
+Built in slice #231 (no migration). Where the build sharpens the text above:
+
+- **The route is the payments module's.** `POST /payments/intents/{intent_id}/sms`, `core.payments.collect` in the intent's
+  branch. It queues through `SmsEvents` like the money events; the member for the opt-out comes from the purpose handler's new
+  `memberOf` (a loan's borrower, an account's holder), so the payments core still names no vertical.
+- **Once per intent.** The outbox key is per intent and member; a repeat answers `already_sent: true` and writes nothing.
+- **Open only, and it expires with the intent.** `pending` with a link and before `expires_at`; a transactional message now
+  takes the earlier of its own expiry and its usual hour.
+- **Polite refusals, nothing written.** `collections_disabled`, `sms_off` (either switch off, or a cap of 0),
+  `member_opted_out` (an opt-out of all SMS; a reminders-only opt-out does not block a link), and 429 `too_many_link_texts`
+  above 3 link texts per member in an hour, counted from the audit rows under a lock per member.
+- **Audited** `core.payments.intent.link_texted` with the member id, never the number.
+- **The wording.** `{tenant_name}: Pay {currency} {amount} for {reference} at {link}`, where `reference` is `loan <loan_no>` or
+  `savings account <account_no>`. No name, no balance. The hosted address is about 113 characters, so the text is two GSM-7
+  segments; it is not one of the wordings a tenant can override (section 4.16).
+
 ### 4.14 Threat model (SMS)
 
 | Threat | Control |
