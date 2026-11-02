@@ -426,6 +426,8 @@ platform API and holds no tenant permissions.
 | `retail.document.issue` | Y | | | | | | | | | | | |
 | `retail.controls.read` | Y | | | | | | | | | | | |
 | `retail.order.manage` | Y | | | | | | | Y | | | | |
+| `retail.advisor.use` | Y | | | | | | | Y | Y | | | Y |
+| `retail.advisor.configure` | Y | | | | | | | | | | | |
 
 The staff member and collateral screens (issue #280) offer an action only when the session holds its permission in the record's branch, from `permission_scopes`; the API remains the authority. An ID image is listed and opened only with `lending.members.verify_kyc`. No permission was added.
 
@@ -443,6 +445,15 @@ Notes:
   moves it later (`PUT /platform/tenants/{tenant_id}/go-live`), since a later date reopens the window for bringing loans in. An approved bring-in is reversed only
   through `loan_bring_in_reversal`, with the same maker and checker permissions, never decided by its maker, and only
   while the loan has no transaction in the app and no penalty charge (ADR-071 decision 9).
+- Retail AI brief (issue #422, migration `V124`, ADR-037 as amended): `retail.advisor.use` reads the shop brief on Home
+  (administrators, Supervisors, Sales and Storekeepers) and `retail.advisor.configure` reads and sets the assistant's switch
+  and caps at `/staff/assistant` (administrators; switching on also needs `core.settings.manage`). The stored brief covers every
+  branch, every seller, cost and profit, so it is returned only to a user who holds `retail.advisor.use`,
+  `retail.sale.all_sellers` and `retail.profit.read` over every branch. Everyone else gets the automatic summary of what they
+  may see (ADR-055): money only with `retail.sale.all_sellers` over every branch it covers, cost and profit only with
+  `retail.profit.read` there too, a seller who sees only their own sales their own sales alone, stock counts with
+  `retail.stock.read`, Controls counts with `retail.controls.read` and open orders with `retail.order.manage`. A Storekeeper
+  therefore never sees a money figure in it.
 - A loan officer running `lending.reports.collections` sees only loans where they are
   the responsible officer; branch managers and above see their branch scope.
 - Insights (#153, ADR-030): `lending.insights.read` opens the page in the user's branch scope.
