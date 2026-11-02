@@ -396,8 +396,9 @@ environment, bound to a named tenant"; the rest of the ADR stands.
     because a row sealed before a rotation keeps its old digest until re-sealed. The re-seal runs a tenant's payment accounts and its second-factor seeds in
     separate transactions, so a problem with one can never block the other (or the `remaining` count from reaching 0).
 20. **Step-up cannot be brute-forced.** A locked account (five wrong codes, 15 minutes) refuses step-up and recovery-code regeneration, and the lock ends all of the
-    user's sessions (`revoked_reason = admin`), audited as `core.auth.account_locked`. Amended by decision 26 of review round 4 (issue #311): the
-    step-up lock has its own counter and is audited as `core.auth.step_up_locked`; `core.auth.account_locked` is the password lock only.
+    user's sessions (`revoked_reason = admin`), audited as `core.auth.account_locked`. Since decision 26 of review round 4 (migration V58) the
+    step-up lock has its own counter and is audited as `core.auth.step_up_locked` (`AuthFlow`); `core.auth.account_locked` is the password
+    lock only. This pointer was added under issue #311; the behaviour is round 4's, unchanged.
 21. **A provider refusal of a lender's credentials never ends an intent.** `AUTH` on a tenant account (a rotated secret, a backoff) takes the same path as "no
     credentials": the intent is neither closed nor cancelled at the provider, counter `provider_auth`, asked again in an hour.
 22. **Intents are bound to the merchant account they were made under.** `payment_gateway_accounts.merchant_id` is new when the consumer key changes (not when only the

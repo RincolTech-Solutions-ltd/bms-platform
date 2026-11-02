@@ -83,9 +83,14 @@ class VerifiedAccounts {
                     : Optional.empty();
         } catch (RuntimeException e) {
             Instant now = clock.now();
-            Instant last = lastWarned.get(row.tenantId());
-            if (last == null || !now.isBefore(last.plus(WARN_SPACING))) {
-                lastWarned.put(row.tenantId(), now);
+            // One atomic step per tenant, so two threads at the same moment log once between them. One entry per tenant
+            // that ever had an unreadable box; never pruned, which is small at any expected number of lenders.
+            boolean[] due = {false};
+            lastWarned.compute(row.tenantId(), (tenant, last) -> {
+                due[0] = last == null || !now.isBefore(last.plus(WARN_SPACING));
+                return due[0] ? now : last;
+            });
+            if (due[0]) {
                 log.warn(
                         "a payment account's consumer key could not be opened; the account is treated as refused (tenant {})",
                         row.tenantId());
