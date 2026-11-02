@@ -128,7 +128,8 @@ class ResendEmailChannel implements OutboxChannel {
 
     @Override
     public Result send(Delivery delivery) throws Exception {
-        String refused = email.stagingRefusal(delivery.recipient());
+        // The staging allow-list and the suppressed addresses, as the SMTP sender checks them (ADR-115 decisions 5, 9).
+        String refused = email.refusal(delivery.recipient());
         if (refused != null) {
             return Result.refused(refused);
         }

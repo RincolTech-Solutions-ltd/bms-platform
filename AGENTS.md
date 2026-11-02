@@ -1330,7 +1330,9 @@ Accepted (this list is the ADR index):
   `no-reply@rincoltech.com`; on staging, or wherever `BMS_MAIL_ALLOWLIST` is set, only the list gets mail; bounces and
   complaints come in on the Svix-signed `POST /api/v1/platform/webhooks/resend` (`BMS_RESEND_WEBHOOK_SECRET`) and are
   recorded in the platform audit log with the outbox row id and the recipient's domain only, listed on the operator's
-  "Messages not sent" page (#333; no migration, no new column)
+  "Messages not sent" page; a hard bounce, a complaint or `email.suppressed` stores a keyed hash of the address
+  (`EmailSuppressions`, never the address), both senders then refuse it with `recipient_suppressed`, and
+  `POST /api/v1/platform/outbox/unsuppress` clears it (#333; no migration, no new column)
 
 Pending (cite only as "pending ADR-NNN"):
 

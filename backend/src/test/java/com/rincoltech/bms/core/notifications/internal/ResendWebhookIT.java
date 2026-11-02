@@ -34,6 +34,9 @@ class ResendWebhookIT extends IntegrationTest {
     @Autowired
     TestRestTemplate http;
 
+    @Autowired
+    EmailSuppressions suppressions;
+
     static String sign(byte[] key, String id, long timestamp, String body) throws Exception {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(key, "HmacSHA256"));
@@ -58,12 +61,17 @@ class ResendWebhookIT extends IntegrationTest {
     }
 
     static String event(String type, UUID outboxId, UUID tenantId, String env) {
+        return event(type, outboxId, tenantId, env, "Staff01@Bounce.Example.Test", "Permanent");
+    }
+
+    // JUSTIFICATION-A3: the recipient and bounce type of the suppression tests (third #759 review, must-fix 2).
+    static String event(String type, UUID outboxId, UUID tenantId, String env, String to, String bounceType) {
         return """
                 {"type":"%s","created_at":"2026-11-02T10:00:00.000Z","data":{"email_id":"4ef9a417-02e9-4d39-ad75-9611e0fcc33c",
-                "from":"Test Shop <no-reply@example.test>","to":["Staff01@Bounce.Example.Test"],"subject":"Your BMS password was changed",
-                "bounce":{"type":"Permanent","subType":"General","message":"The address does not exist"},
+                "from":"Test Shop <no-reply@example.test>","to":["%s"],"subject":"Your BMS password was changed",
+                "bounce":{"type":"%s","subType":"General","message":"The address does not exist"},
                 "tags":{"outbox_id":"%s","tenant_id":"%s","template":"identity_password_changed","env":"%s"}}}
-                """.formatted(type, outboxId, tenantId, env);
+                """.formatted(type, to, bounceType, outboxId, tenantId, env);
     }
 
     @Test
@@ -208,5 +216,100 @@ class ResendWebhookIT extends IntegrationTest {
                         .value())
                 .isEqualTo(401);
         assertThat(rows(old)).isZero();
+    }
+
+    // JUSTIFICATION-A3: the suppression cases of the third #759 review's must-fix 2, one per event and the clear.
+    /** A fabricated address of its own per test, in mixed case: the hash is of the lower-cased address. */
+    static String address() {
+        return "Staff-" + UUID.randomUUID().toString().substring(0, 8) + "@Suppress.Example.Test";
+    }
+
+    /** Posts one signed event of this environment; returns its message id. */
+    String deliver(String type, String to, String bounceType) throws Exception {
+        long now = Instant.now().getEpochSecond();
+        String id = "msg_" + UUID.randomUUID().toString().replace("-", "");
+        String body = event(type, UUID.randomUUID(), UUID.randomUUID(), "local", to, bounceType);
+        assertThat(post(id, now, sign(KEY, id, now, body), body).getStatusCode().value())
+                .isEqualTo(204);
+        return id;
+    }
+
+    /** The row's data, which must never hold the address, and its recipient hash (null when none). */
+    String hashOf(String svixId, String address) {
+        String data = TestDatabase.owner()
+                .sql("SELECT data::text FROM platform_audit_log WHERE data ->> 'svix_id' = ?")
+                .param(svixId)
+                .query(String.class)
+                .single();
+        assertThat(data).doesNotContainIgnoringCase(address.substring(0, address.indexOf('@')));
+        return TestDatabase.owner()
+                .sql("SELECT data ->> 'recipient_hash' FROM platform_audit_log WHERE data ->> 'svix_id' = ?")
+                .param(svixId)
+                .query(String.class)
+                .single();
+    }
+
+    @Test
+    void aHardBounceSuppressesTheAddressByItsKeyedHashAndASoftBounceDoesNot() throws Exception {
+        String soft = address();
+        assertThat(hashOf(deliver("email.bounced", soft, "Transient"), soft)).isNull();
+        assertThat(suppressions.suppressed(soft)).isFalse();
+
+        String hard = address();
+        String id = deliver("email.bounced", hard, "Permanent");
+        assertThat(hashOf(id, hard))
+                .isEqualTo(suppressions.hash(hard.toLowerCase(java.util.Locale.ROOT)))
+                .hasSize(64);
+        assertThat(suppressions.suppressed(hard)).isTrue();
+        assertThat(suppressions.suppressed(hard.toLowerCase(java.util.Locale.ROOT)))
+                .isTrue();
+    }
+
+    @Test
+    void aComplaintSuppressesTheAddress() throws Exception {
+        String to = address();
+        assertThat(hashOf(deliver("email.complained", to, "Permanent"), to)).isEqualTo(suppressions.hash(to));
+        assertThat(suppressions.suppressed(to)).isTrue();
+    }
+
+    @Test
+    void resendsSuppressedEventSuppressesTheAddress() throws Exception {
+        String to = address();
+        assertThat(hashOf(deliver("email.suppressed", to, "Permanent"), to)).isEqualTo(suppressions.hash(to));
+        assertThat(suppressions.suppressed(to)).isTrue();
+    }
+
+    @Test
+    void anOperatorClearsASuppressionAndALaterBounceSuppressesAgain() throws Exception {
+        String to = address();
+        deliver("email.complained", to, "Permanent");
+        assertThat(suppressions.suppressed(to)).isTrue();
+
+        Api platform = Api.platform(http);
+        String opEmail = Api.email("operator");
+        UUID opId = Api.platformUser(opEmail);
+        Session op = platform.signIn(opId, opEmail, Api.PASSWORD, null);
+        assertThat(platform.post("/api/v1/platform/outbox/unsuppress", java.util.Map.of("email", to), op.accessToken())
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(204);
+        assertThat(suppressions.suppressed(to)).isFalse();
+        var cleared = TestDatabase.owner()
+                .sql("SELECT platform_user_id, data::text AS data FROM platform_audit_log"
+                        + " WHERE action = 'platform.email.unsuppressed' AND data ->> 'recipient_hash' = ?")
+                .param(suppressions.hash(to))
+                .query()
+                .singleRow();
+        assertThat(cleared.get("platform_user_id")).isEqualTo(opId);
+        assertThat((String) cleared.get("data")).doesNotContainIgnoringCase("staff-");
+        // Clearing an address that is not suppressed writes nothing.
+        assertThat(platform.post("/api/v1/platform/outbox/unsuppress", java.util.Map.of("email", to), op.accessToken())
+                        .getBody()
+                        .get("code")
+                        .asString())
+                .isEqualTo("email_not_suppressed");
+
+        deliver("email.bounced", to, "Permanent");
+        assertThat(suppressions.suppressed(to)).isTrue();
     }
 }

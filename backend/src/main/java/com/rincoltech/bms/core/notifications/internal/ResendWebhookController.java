@@ -69,18 +69,21 @@ class ResendWebhookController {
     private final byte[] secret;
     private final String environment;
     private final org.springframework.jdbc.core.simple.JdbcClient jdbc;
+    private final EmailSuppressions suppressions;
 
     ResendWebhookController(
             PlatformAuditLog audit,
             ObjectMapper mapper,
             BusinessClock clock,
             org.springframework.jdbc.core.simple.JdbcClient jdbc,
+            EmailSuppressions suppressions,
             @Value("${bms.notifications.mail.resend-webhook-secret:}") String secret,
             @Value("${bms.environment:}") String environment) {
         this.audit = audit;
         this.mapper = mapper;
         this.clock = clock;
         this.jdbc = jdbc;
+        this.suppressions = suppressions;
         this.secret = decodeSecret(secret);
         this.environment = ResendEmailChannel.environmentTag(environment);
     }
@@ -166,6 +169,12 @@ class ResendWebhookController {
         details.put("recipient_domain", domain(data.path("to")));
         details.put("bounce_type", safe(data.path("bounce").path("type").asString(null)));
         details.put("bounce_subtype", safe(data.path("bounce").path("subType").asString(null)));
+        // A hard bounce, a complaint or a suppressed send stops later sends to the address (ADR-115 decision 9): its
+        // keyed hash, never the address. A soft bounce is a full mailbox or a passing fault and suppresses nothing.
+        String address = firstAddress(data.path("to"));
+        if (address.contains("@") && (!action.equals(BOUNCED) || "Permanent".equals(details.get("bounce_type")))) {
+            details.put(EmailSuppressions.KEY, suppressions.hash(address));
+        }
         details.values().removeIf(java.util.Objects::isNull);
         UUID tenant = uuidOrNullAsUuid(tags.get("tenant_id"));
         audit.record(action, null, tenant, details);
@@ -230,10 +239,15 @@ class ResendWebhookController {
 
     /** The domain of the first recipient, in lower case; never the address. */
     static String domain(JsonNode to) {
-        String first = to.isArray() && !to.isEmpty() ? to.get(0).asString("") : to.asString("");
+        String first = firstAddress(to);
         int at = first.lastIndexOf('@');
         String domain = at < 0 ? "" : first.substring(at + 1).strip().toLowerCase(Locale.ROOT);
         return domain.matches("^[a-z0-9.-]{1,253}$") ? domain : null;
+    }
+
+    /** The first recipient as Resend gives it, a list or one string; only ever hashed or cut to its domain. */
+    static String firstAddress(JsonNode to) {
+        return to.isArray() && !to.isEmpty() ? to.get(0).asString("") : to.asString("");
     }
 
     private static String uuidOrNull(String value) {

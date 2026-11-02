@@ -75,4 +75,17 @@ class JdbcPlatformAuditLog implements PlatformAuditLog {
                 .query(Boolean.class)
                 .single();
     }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true)
+    public java.util.Optional<String> latestAction(java.util.Set<String> actions, String key, String value) {
+        return jdbc.sql("""
+                        SELECT action FROM platform_audit_log
+                         WHERE action = ANY (?) AND data ->> ? = ?
+                         ORDER BY occurred_at DESC, id DESC LIMIT 1
+                        """)
+                .params(actions.toArray(String[]::new), key, value)
+                .query(String.class)
+                .optional();
+    }
 }

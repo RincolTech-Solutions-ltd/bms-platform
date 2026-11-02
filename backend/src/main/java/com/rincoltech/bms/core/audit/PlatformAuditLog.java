@@ -28,4 +28,10 @@ public interface PlatformAuditLog {
      * repeat delivery); the time bound keeps the search to the recent part of a log that only grows.
      */
     boolean recorded(java.util.Set<String> actions, String key, String value, java.time.Instant since);
+
+    /**
+     * The action of the newest row of these actions that carries {@code value} under {@code key} in its data, or empty
+     * (issue #333: whether an email address is suppressed, by the newest of its suppress and clear entries).
+     */
+    java.util.Optional<String> latestAction(java.util.Set<String> actions, String key, String value);
 }

@@ -151,10 +151,25 @@ The `BMS_SMTP_*` values can stay on the host; they are not used while the provid
   complained before), with the message, the
   recipient's domain only and the time; the full address is never stored. Match it to its outbox row by the row id
   (in the platform audit log, action `platform.email.bounced`, `platform.email.complained` or
-  `platform.email.suppressed`), or in Resend under Emails by the tag `outbox_id`. An address that bounces hard or
-  complains is suppressed by Resend: later emails to it are not sent and show here as suppressed, while the outbox row
-  reads `sent`. Fix the address in BMS (the user's email), or remove it from Resend's suppression list once the mailbox
-  works again. BMS refusing such sends itself, and marking the outbox row, is issue #767.
+  `platform.email.suppressed`), or in Resend under Emails by the tag `outbox_id`.
+- **`recipient_suppressed` on "Messages not sent" (ADR-115 decision 9).** An address that bounced hard, complained, or
+  that Resend reported as suppressed is not sent to again by BMS, over Resend or SMTP: each later email to it is refused
+  and shows here as failed with `recipient_suppressed`, instead of reading `sent` while Resend drops it. BMS keeps only a
+  keyed hash of the address, never the address. A soft bounce (a full mailbox) suppresses nothing. To send to the
+  address again, first make sure it works (or fix the user's email in BMS, which needs no clear), remove it from
+  Resend's suppression list (Resend, Suppressions) if it is there, then clear it in BMS as a platform operator with
+  `platform.tenants.manage`, signed in to the operator portal:
+
+  ```
+  curl -sS -X POST "https://<BMS_PLATFORM_HOST>/api/v1/platform/outbox/unsuppress" \
+    -H "Authorization: Bearer <your operator access token>" -H "Content-Type: application/json" \
+    -d '{"email":"<the address>"}'
+  ```
+
+  204 means cleared (audited as `platform.email.unsuppressed` under your name); 409 `email_not_suppressed` means BMS was
+  not holding it back (check the spelling). Then issue a new link or "Send again" on a newer row; a refused row has had
+  its values cleared and cannot be sent again. Run the command from your own machine, not a shared shell history, since
+  the address is in it.
 - **Rotating the key.** Make the new key, put it in `.env`, `docker compose up -d api`, send yourself a password reset,
   then delete the old key in Resend.
 

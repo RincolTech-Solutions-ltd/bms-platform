@@ -7343,6 +7343,17 @@
           }
         }
       },
+      "OutboxUnsuppressRequest" : {
+        "properties" : {
+          "email" : {
+            "format" : "email",
+            "maxLength" : 254,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "email" ]
+      },
       "OwnerCandidate" : {
         "description" : "An active administrator of a business with no Owner",
         "properties" : {
@@ -34239,6 +34250,28 @@
           }
         },
         "summary" : "Outbox counts and the failed rows (FR-NTF-09)",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/outbox/unsuppress" : {
+      "post" : {
+        "operationId" : "platformUnsuppressEmail",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/OutboxUnsuppressRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          }
+        },
+        "summary" : "Send email to an address again after a bounce, complaint or suppression (ADR-115)",
         "tags" : [ "platform" ]
       }
     },

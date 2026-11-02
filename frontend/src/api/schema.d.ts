@@ -3477,6 +3477,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/outbox/unsuppress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send email to an address again after a bounce, complaint or suppression (ADR-115) */
+        post: operations["platformUnsuppressEmail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/outbox/{outbox_id}/retry": {
         parameters: {
             query?: never;
@@ -11282,6 +11299,10 @@ export interface components {
             /** @description Channels whose sender is configured; rows of the others stay pending */
             enabled_channels?: string[];
             failures?: components["schemas"]["OutboxFailure"][];
+        };
+        OutboxUnsuppressRequest: {
+            /** Format: email */
+            email: string;
         };
         /** @description An active administrator of a business with no Owner */
         OwnerCandidate: {
@@ -26551,6 +26572,28 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["OutboxStatus"];
                 };
+            };
+        };
+    };
+    platformUnsuppressEmail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutboxUnsuppressRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

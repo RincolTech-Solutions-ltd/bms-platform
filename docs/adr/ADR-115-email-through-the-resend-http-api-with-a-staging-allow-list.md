@@ -89,22 +89,42 @@ types, which can be a real person's.
    the outbox row itself would need one new `SECURITY DEFINER` function (the application role cannot update
    `notification_outbox`, and `notification_outbox_record_result` only touches rows still `pending`), which is a Flyway
    migration. The rule against a migration in this change came from the lead's brief for issue #333, not from this ADR.
-   That function, marking the row `failed` with `last_error` `bounced` or `complained` and stopping further sends to an
-   address that complained, is issue #767; it reuses this route and its signature check. Until then BMS does not refuse a
-   send to such an address itself: Resend's own suppression list drops it, and the `email.suppressed` row above makes
-   that visible to the operator next to the email, so a reset that never arrived is never silent.
+   That function, marking the bounced row itself `failed` with `last_error` `bounced` or `complained`, is issue #767; it
+   reuses this route and its signature check. Stopping later sends needs no migration and is decision 9.
+9. **BMS stops sending to an address that hard-bounced, complained or that Resend suppressed, and an operator can lift
+   it.** Without this, Resend's account-level suppression list drops every later email to such an address while the
+   outbox row reads `sent`, so a staff member whose address bounced once never gets a reset and nobody sees why. The
+   webhook rows of a hard bounce (`bounce.type` `Permanent`), a complaint and an `email.suppressed` event also hold
+   `recipient_hash`: HMAC-SHA256 of the address, stripped and in lower case, under a key derived from the existing data
+   key (`BMS_DATA_KEY`) with its own purpose label (`bms.email.recipient-hash.v1`), as ADR-036 hashes SMS numbers. The
+   address itself is never stored, and only a holder of the data key can test one. A soft bounce carries no hash and
+   suppresses nothing. Before sending, both senders (`SmtpEmailChannel` and `ResendEmailChannel`, through one shared
+   check after the staging allow-list) read the newest platform audit row carrying that hash among
+   `platform.email.bounced`, `platform.email.complained`, `platform.email.suppressed` and `platform.email.unsuppressed`;
+   when it is one of the first three the row is refused with `recipient_suppressed`, so it shows as failed on "Messages
+   not sent" and never reaches Resend. An operator clears it with `POST /api/v1/platform/outbox/unsuppress` (body
+   `{email}`, `platform.tenants.manage`), which records `platform.email.unsuppressed` with the hash and the operator
+   (409 `email_not_suppressed`, nothing written, when the address was not suppressed). A later hard bounce or complaint
+   suppresses it again. No migration and no new column: the same audit log, read by the same role. The check is one
+   query per email on a log that holds operator events only, small enough without an index; an index on the hash would
+   be a migration. A rotation of `BMS_DATA_KEY` changes the hash, so suppressions recorded before it stop matching (as
+   SMS opt-outs do under ADR-036); Resend's own list still drops those sends until the next bounce records them again.
 
 ## Consequences
 
 **Better:** staging and production can send without SMTP, through the verified `rincoltech.com` sender. An automatic
 retry after a lost answer cannot send a second copy. Readers see which business wrote. Staging can no longer email a real
 person by accident. The operator sees which emails bounced or were marked as unwanted, by domain, without a migration.
+A later email to an address that bounced hard or complained shows as not sent (`recipient_suppressed`) instead of a
+silent `sent`.
 
 **Worse:** two senders to keep working instead of one. On staging, a tester whose address is not on the list gets nothing,
-and the operator has to add it. A bounce is beside its outbox row, not on it: the row still reads `sent`, and the operator
-matches the two by the row id.
+and the operator has to add it. The bounced email itself is beside its outbox row, not on it: that row still reads
+`sent`, and the operator matches the two by the row id (#767). A fixed mailbox needs the operator's clear before BMS sends
+to it again, and Resend's own suppression list needs clearing in Resend too.
 
 **Watch for:** setting `BMS_MAIL_ALLOWLIST` on staging before this release reaches it (an empty list sends nothing, the
 rows show as failed with `not_on_staging_allowlist`); setting `BMS_RESEND_WEBHOOK_SECRET` and adding the webhook in
 Resend on each host; a business name a mail client shows oddly; Resend's limits on attachment size for the weekly
-workbook (ADR-074); the bounce on the outbox row itself, with stopping sends after a complaint (issue #767, a migration).
+workbook (ADR-074); the bounce on the outbox row itself (issue #767, a migration); the cost of the suppression check if
+the platform audit log ever grows large.

@@ -70,7 +70,10 @@ class SmtpEmailChannel implements OutboxChannel {
     private final CurrentTenant tenant;
     private final Letterheads letterheads;
     private final ObjectProvider<EmailAttachments> attachments;
+    /** The addresses not sent to (ADR-115 decision 9); null only in a unit test that builds the sender itself. */
+    private final EmailSuppressions suppressions;
 
+    /** Without the suppression check: for a unit test that builds the sender itself. */
     SmtpEmailChannel(
             NotificationProperties properties,
             OutboxTemplates templates,
@@ -79,8 +82,23 @@ class SmtpEmailChannel implements OutboxChannel {
             CurrentTenant tenant,
             Letterheads letterheads,
             ObjectProvider<EmailAttachments> attachments,
+            String environment) {
+        this(properties, templates, hosts, tenantJobs, tenant, letterheads, attachments, null, environment);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    SmtpEmailChannel(
+            NotificationProperties properties,
+            OutboxTemplates templates,
+            PlatformHost hosts,
+            TenantJobs tenantJobs,
+            CurrentTenant tenant,
+            Letterheads letterheads,
+            ObjectProvider<EmailAttachments> attachments,
+            EmailSuppressions suppressions,
             @Value("${bms.environment:}") String environment) {
         properties.requireEmailInProduction(environment);
+        this.suppressions = suppressions;
         this.smtp = properties.smtp();
         this.mail = properties.mail();
         this.staging = NotificationProperties.isStaging(environment);
@@ -124,10 +142,28 @@ class SmtpEmailChannel implements OutboxChannel {
 
     @Override
     public Result send(Delivery delivery) throws Exception {
-        String refused = stagingRefusal(delivery.recipient());
+        String refused = refusal(delivery.recipient());
         if (refused != null) {
             return Result.refused(refused);
         }
+        return transmit(delivery);
+    }
+
+    /**
+     * Why this recipient is not sent to, by either sender, or null: off the staging allow-list
+     * ({@code not_on_staging_allowlist}), or suppressed after a hard bounce, a complaint or Resend's suppression
+     * ({@code recipient_suppressed}, ADR-115 decision 9). The row is refused and shows on "Messages not sent".
+     */
+    String refusal(String recipient) {
+        String staging = stagingRefusal(recipient);
+        if (staging != null) {
+            return staging;
+        }
+        return suppressions != null && suppressions.suppressed(recipient) ? "recipient_suppressed" : null;
+    }
+
+    /** Sends over SMTP with no refusal check: {@link #send} has made it, or Resend's fallback has (ADR-115 decision 1). */
+    Result transmit(Delivery delivery) throws Exception {
         Properties props = new Properties();
         props.put("mail.transport.protocol", "smtps");
         props.put("mail.smtps.host", smtp.host());

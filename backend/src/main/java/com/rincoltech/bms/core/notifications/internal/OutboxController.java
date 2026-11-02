@@ -9,6 +9,10 @@ import com.rincoltech.bms.kernel.RequiresPermission;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -23,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -40,13 +45,24 @@ class OutboxController {
     private final OutboxDispatcher dispatcher;
     private final BusinessClock clock;
     private final PlatformAuditLog audit;
+    private final EmailSuppressions suppressions;
 
-    OutboxController(JdbcClient jdbc, OutboxDispatcher dispatcher, BusinessClock clock, PlatformAuditLog audit) {
+    OutboxController(
+            JdbcClient jdbc,
+            OutboxDispatcher dispatcher,
+            BusinessClock clock,
+            PlatformAuditLog audit,
+            EmailSuppressions suppressions) {
         this.jdbc = jdbc;
         this.dispatcher = dispatcher;
         this.clock = clock;
         this.audit = audit;
+        this.suppressions = suppressions;
     }
+
+    @Schema(name = "OutboxUnsuppressRequest")
+    record UnsuppressRequest(
+            @NotBlank @Email @Size(max = 254) String email) {}
 
     @Schema(name = "OutboxFailure")
     record Failure(
@@ -175,6 +191,29 @@ class OutboxController {
                     "This message is older than its link's lifetime. Issue a new link instead, for example with Needs info.");
         }
         audit.record("platform.outbox.retried", CurrentPrincipal.require().userId(), null, Map.of("outbox_id", id));
+        return ResponseEntity.noContent().build();
+    }
+
+    // JUSTIFICATION-A3: the operator's clear of a suppression the #759 lead asked for (third review, must-fix 2).
+    /**
+     * Clears the suppression of one address (ADR-115 decision 9): records {@code platform.email.unsuppressed} with the
+     * address's keyed hash and the operator, so the senders send to it again. The address is in the body, never the path,
+     * and is not stored or logged. 409 {@code email_not_suppressed} when it was not suppressed (a typo writes nothing).
+     */
+    @PostMapping("/unsuppress")
+    @RequiresPermission("platform.tenants.manage")
+    @Operation(
+            summary = "Send email to an address again after a bounce, complaint or suppression (ADR-115)",
+            operationId = "platformUnsuppressEmail")
+    @Transactional
+    public ResponseEntity<Void> unsuppress(@Valid @RequestBody UnsuppressRequest request) {
+        if (!suppressions.clear(request.email(), CurrentPrincipal.require().userId())) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "email_not_suppressed",
+                    "Not suppressed",
+                    "BMS is not holding back email to this address.");
+        }
         return ResponseEntity.noContent().build();
     }
 }

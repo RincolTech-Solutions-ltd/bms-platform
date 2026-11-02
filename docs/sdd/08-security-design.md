@@ -760,7 +760,7 @@ never by a tenant role:
 | `platform.tenants.read` | List plans and tenants, read one tenant |
 | `platform.tenants.read` (also) | The applications queue and one application with its possible repeats; the outbox counts and failed rows (ADR-024) |
 | `platform.tenants.manage` | Create tenants, switch modules, move subscriptions, suspend and resume, reset a tenant admin's second factor |
-| `platform.tenants.manage` (also) | Verify, Needs info, Reject and Activate an application; send a failed outbox row again (ADR-024) |
+| `platform.tenants.manage` (also) | Verify, Needs info, Reject and Activate an application; send a failed outbox row again (ADR-024); clear the suppression of an email address after a bounce or complaint (`POST /platform/outbox/unsuppress`, ADR-115 decision 9) |
 
 The two platform permissions cover onboarding because Activate creates a tenant: a separate
 `platform.applications.*` pair would split one operator duty across two keys with the same holders.
