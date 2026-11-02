@@ -51,6 +51,7 @@ class BusinessService {
     private final Referrals referrals;
     private final TransactionTemplate transactions;
     private final BillingService billing;
+    private final AddonService addons;
 
     BusinessService(
             JdbcClient jdbc,
@@ -61,7 +62,9 @@ class BusinessService {
             BusinessClock clock,
             Referrals referrals,
             PlatformTransactionManager transactionManager,
-            BillingService billing) {
+            BillingService billing,
+            AddonService addons) {
+        this.addons = addons;
         this.jdbc = jdbc;
         this.platform = platform;
         this.priceBook = priceBook;
@@ -131,7 +134,14 @@ class BusinessService {
                 () -> transactions.execute(status -> jdbc.sql(PAYMENT_SELECT + " ORDER BY sp.created_at DESC, sp.id")
                         .query(BusinessService::payment)
                         .list()));
-        return new BusinessDetail(tenant, price, admins, payments, messages, history);
+        return new BusinessDetail(
+                tenant,
+                price,
+                transactions.execute(status -> addons.view(tenant)),
+                admins,
+                payments,
+                messages,
+                history);
     }
 
     /** FR-TEN-04: moves the tenant to another active plan; refused in plain words when the tenant would not fit it. */
@@ -389,8 +399,9 @@ class BusinessService {
      */
     private void checkUsualAmount(TenantResponse tenant, PaymentRequest request, LocalDate today) {
         String currency = tenant.currency();
+        // The plan and, when charged, the AI assistant add-on (ADR-112): what the business owes for a month.
         PriceBookController.PlanPriceResponse price =
-                priceBook.priceOn(tenant.planCode(), currency, today).orElse(null);
+                addons.chargeOn(tenant, today).orElse(null);
         if (price == null) {
             throw ApiException.rule(
                     "payment_amount_unusual",

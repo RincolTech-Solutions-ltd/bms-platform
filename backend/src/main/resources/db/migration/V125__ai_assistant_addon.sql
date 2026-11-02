@@ -1,0 +1,82 @@
+-- V125: the AI assistant as a paid add-on (issue #423, ADR-112). Numbered V125, directly after V124 (the retail AI brief,
+-- issue #422); V122 and V123 are claimed by other open pull requests (AGENTS.md). Flyway runs with outOfOrder off, so the
+-- merger renumbers at merge time if the order changes.
+--
+-- Expand only, safe on a populated database:
+--   1. addon_prices: the add-on's monthly price over time, append-only, like plan_prices (V75). NOTHING IS SEEDED: the price is
+--      a commercial term the operator types in Plans and prices, and a later price never changes what was charged before.
+--   2. Two marks on the subscription, both false for every business: ai_addon (the operator switched the add-on on for the
+--      business) and ai_addon_no_charge (on without charge: a demo or a pilot). No business is switched on here.
+--   3. platform_set_ai_addon, the operator's switch, and platform_add_addon_price, through SECURITY DEFINER functions as every
+--      operator change (ADR-016); each returns what was there before so the application audits before and after.
+--
+-- The add-on is the source of truth for whether a business may use the assistant (ADR-037 decision 7 as amended): the
+-- environment list BMS_AI_ENABLED_TENANTS stays as the platform's kill switch (off) and a demo host's allow-all (*).
+
+SET LOCAL lock_timeout = '5s';
+
+CREATE TABLE addon_prices (
+    id                          uuid         NOT NULL PRIMARY KEY,
+    -- One add-on today; the check names it so a typo is refused, and a later add-on widens the check.
+    addon_code                  varchar(40)  NOT NULL CHECK (addon_code IN ('ai_assistant')),
+    currency                    char(3)      NOT NULL REFERENCES currencies (code),
+    -- At most 50,000,000 minor units, as a plan's price (V75): a typing slip is refused, not stored.
+    monthly_minor               bigint       NOT NULL CHECK (monthly_minor BETWEEN 0 AND 50000000),
+    effective_from              date         NOT NULL,
+    reason                      varchar(300),
+    created_by_platform_user_id uuid         NOT NULL REFERENCES platform_users (id),
+    created_at                  timestamptz  NOT NULL DEFAULT now()
+);
+CREATE INDEX addon_prices_by_code ON addon_prices (addon_code, currency, effective_from DESC, created_at DESC);
+GRANT SELECT ON addon_prices TO bms_app;
+SELECT bms_make_append_only('addon_prices');
+
+ALTER TABLE subscriptions
+    ADD COLUMN ai_addon           boolean NOT NULL DEFAULT false,
+    ADD COLUMN ai_addon_no_charge boolean NOT NULL DEFAULT false;
+
+-- Switches the add-on on or off for a business and marks it charged or not. Returns the marks before, as
+-- (ai_addon, ai_addon_no_charge). Switching off clears the no charge mark, so a later switch on starts charged unless the
+-- operator says otherwise.
+CREATE FUNCTION platform_set_ai_addon(p_tenant_id uuid, p_on boolean, p_no_charge boolean, p_platform_user_id uuid)
+RETURNS TABLE (was_on boolean, was_no_charge boolean)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+    SELECT s.ai_addon, s.ai_addon_no_charge INTO was_on, was_no_charge
+      FROM subscriptions s WHERE s.tenant_id = p_tenant_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'unknown tenant' USING ERRCODE = 'no_data_found';
+    END IF;
+    UPDATE subscriptions s
+       SET ai_addon = p_on,
+           ai_addon_no_charge = p_on AND p_no_charge,
+           updated_by_platform_user_id = p_platform_user_id, updated_at = now()
+     WHERE s.tenant_id = p_tenant_id;
+    RETURN NEXT;
+END
+$$;
+
+-- The add-on marks of one business, for the operator's Business page and the billing job, which run bound to no business.
+CREATE FUNCTION platform_tenant_ai_addon(p_tenant_id uuid)
+RETURNS TABLE (ai_addon boolean, ai_addon_no_charge boolean)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    SELECT s.ai_addon, s.ai_addon_no_charge FROM subscriptions s WHERE s.tenant_id = p_tenant_id
+$$;
+
+CREATE FUNCTION platform_add_addon_price(
+    p_id uuid, p_addon_code text, p_currency text, p_monthly_minor bigint, p_effective_from date, p_reason text,
+    p_platform_user_id uuid)
+RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+    INSERT INTO addon_prices (id, addon_code, currency, monthly_minor, effective_from, reason, created_by_platform_user_id)
+    VALUES (p_id, p_addon_code, p_currency, p_monthly_minor, p_effective_from, p_reason, p_platform_user_id);
+END
+$$;
+
+REVOKE ALL ON FUNCTION platform_set_ai_addon(uuid, boolean, boolean, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION platform_tenant_ai_addon(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION platform_add_addon_price(uuid, text, text, bigint, date, text, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION platform_set_ai_addon(uuid, boolean, boolean, uuid) TO bms_app;
+GRANT EXECUTE ON FUNCTION platform_tenant_ai_addon(uuid) TO bms_app;
+GRANT EXECUTE ON FUNCTION platform_add_addon_price(uuid, text, text, bigint, date, text, uuid) TO bms_app;

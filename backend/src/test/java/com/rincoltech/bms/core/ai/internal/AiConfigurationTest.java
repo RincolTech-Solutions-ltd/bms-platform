@@ -177,6 +177,23 @@ class AiConfigurationTest {
         assertThat(props(null, null, null, null).allowedTenants()).isEmpty();
     }
 
+    /** Issue #423: off is the platform's kill switch, * lets every business in (a demo host); an empty value leaves the add-on. */
+    @Test
+    void theEnvironmentListIsAKillSwitchOrAllowAllBesideTheAddon() {
+        AiProperties off = new AiProperties(
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, " OFF ");
+        assertThat(off.killSwitch()).isTrue();
+        assertThat(off.allowAll()).isFalse();
+        assertThat(off.allowedTenants()).isEmpty();
+        AiProperties all = new AiProperties(
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, "*");
+        assertThat(all.allowAll()).isTrue();
+        assertThat(all.killSwitch()).isFalse();
+        AiProperties none = props(null, null, null, null);
+        assertThat(none.killSwitch()).isFalse();
+        assertThat(none.allowAll()).isFalse();
+    }
+
     @Test
     void aCapOfZeroMeansStopAndANegativeOneFailsStartup() {
         AiProperties stop =
