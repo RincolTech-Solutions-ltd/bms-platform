@@ -31,7 +31,8 @@ class SystemUser {
                         VALUES (?, current_setting('app.tenant_id')::uuid, 'system', 'Payments system', ?, 'active')
                         ON CONFLICT (tenant_id, lower(email)) WHERE kind = 'system' DO NOTHING
                         """).params(UUID.randomUUID(), EMAIL).update();
-        return jdbc.sql("SELECT id FROM users WHERE kind = 'system' AND lower(email) = ?")
+        return jdbc.sql("SELECT id FROM users WHERE kind = 'system' AND lower(email) = ?"
+                        + " AND tenant_id = current_setting('app.tenant_id')::uuid")
                 .param(EMAIL)
                 .query(UUID.class)
                 .single();

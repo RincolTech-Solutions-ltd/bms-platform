@@ -1664,14 +1664,31 @@ class UnallocatedReceiptsIT extends LoanFixtures {
         String approval = requested(askAllocate(receipt, PURPOSE, target));
         String perms = permissionsOf("accountant");
         // The request sits in the receipt's branch; the money goes to a loan of the other. A checker of the receipt's
-        // branch
-        // only is refused when it runs, and so is one of the loan's branch only (it cannot see the request).
+        // branch only may neither approve nor reject it and is not offered it, and one of the loan's branch only
+        // cannot see the request.
         ResponseEntity<JsonNode> hqOnly = send(
                 HttpMethod.POST,
                 "/api/v1/approvals/" + approval + "/approve",
                 as(accountant, perms, hq.toString(), null),
                 Map.of("note", "x"));
-        assertThat(hqOnly.getStatusCode().value()).as("%s", hqOnly.getBody()).isEqualTo(422);
+        assertThat(hqOnly.getStatusCode().value()).as("%s", hqOnly.getBody()).isEqualTo(403);
+        ResponseEntity<JsonNode> hqReject = send(
+                HttpMethod.POST,
+                "/api/v1/approvals/" + approval + "/reject",
+                as(accountant, perms, hq.toString(), null),
+                Map.of("note", "no"));
+        assertThat(hqReject.getStatusCode().value())
+                .as("%s", hqReject.getBody())
+                .isEqualTo(403);
+        assertThat(send(
+                                HttpMethod.GET,
+                                "/api/v1/approvals/" + approval,
+                                as(accountant, perms, hq.toString(), null),
+                                null)
+                        .getBody()
+                        .get("can_decide")
+                        .asBoolean())
+                .isFalse();
         assertThat(repayments(target)).isEmpty();
         assertThat(receiptRow(receipt).get("status")).isEqualTo("open");
         ResponseEntity<JsonNode> otherOnly = send(

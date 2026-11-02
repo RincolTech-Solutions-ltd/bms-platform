@@ -239,12 +239,12 @@ as late; an expired order stays payable on purpose), `needs_attention`, `reverse
 
 * **Built (#213):** every payment is verified by the provider's status query before it is booked, and a booked payment is asked about again
   once a day for 14 days (and sooner when a notification arrives). If the provider then reports a reversal the intent becomes
-  `reversed_pending_review` and the `reversal` counter in `payment_callback_counters` rises: that counter is the only alert today.
-* **Not built (slice #224):** the nightly reconcile job and report, the statement upload, the checker request for a reversal, and any posting
-  to the ledger for one. **The books are never changed by a reversal in #213**: the receipt stays posted until a person reverses it by hand
-  (the loan or savings reversal) after the accountant agrees. After 14 days a booked payment is no longer re-asked about: a later card
-  chargeback is seen only on the provider's statement. Do not activate collections for a real lender until #224 ships or the person on call reads
-  that counter daily.
+  `reversed_pending_review` and the `reversal` counter in `payment_callback_counters` rises.
+* **Built (#224 part 1):** the checker request for a reported reversal (`gateway_payment_reversal`, 4d step 7) and the review windows of
+  spec 3.9 (7 days for mobile money, daily for 14 and weekly to 120 days otherwise), which replace the 14 days above.
+* **Not built (part 2, #318):** the nightly reconcile job and report and the statement upload. After its review window a booked payment is
+  no longer re-asked about: a later chargeback is seen only on the provider's statement. Do not activate collections for a real lender until
+  part 2 ships or the person on call reads the `reversal` counter daily.
 
 ## 6. Incidents
 
@@ -253,9 +253,9 @@ as late; an expired order stays payable on purpose), `needs_attention`, `reverse
 | Payers paid, intents stay `pending` | Provider down or breaker open (log `circuit_open`): nothing is lost, the poller catches up within its schedule. If the provider returned `invalid_order_tracking_id` or a credential error the intent shows no change and the counters `status_mismatch` or `anomaly` rise: check the credentials and which merchant account the order was made under |
 | 401 or `provider_auth` failures | The secret was rotated or revoked. Fix the environment file, restart. The adapter backs off 30 seconds after a refused token |
 | Intent `reversed_pending_review` with `refusal_code` `reversal_unresolved` or `reversal_rejected` | A reversal the provider reported that nobody finished or a checker rejected: look at the requests of the order, then `POST /payments/intents/{id}/reversal-request` (4d step 7) if it should be reversed after all. `completed_after_reversal` on such an order means the provider took the reversal back and there was nothing of ours to carry on with: a person decides |
-| Intent `needs_attention` | Read `refusal_code`: `technical_failures` (five failed bookings: look at the API log for the handler's error, fix, then a person decides how to book it), `reference_mismatch`, `currency_mismatch`, `amount_invalid` (money moved and the evidence is odd: compare with the merchant dashboard before touching anything), or a handler refusal code such as `loan_closed` (allocate by hand; the unallocated receipt screen is slice #224). Never edit the row to push it forward |
+| Intent `needs_attention` | Read `refusal_code`: `technical_failures` (five failed bookings: look at the API log for the handler's error, fix, then a person decides how to book it), `reference_mismatch`, `currency_mismatch`, `amount_invalid` (money moved and the evidence is odd: compare with the merchant dashboard before touching anything), or a handler refusal code such as `loan_closed` (the money is held as an unallocated receipt: allocate or refund it on the screen "Unallocated receipts", section 4d, never by a manual journal). Never edit the row to push it forward |
 | Intent `created` for long | The provider was unreachable when it was asked. The poller retries; after five rounds the intent ends `failed` with `creation_unknown`, and the cashier starts a new intent with a new reference |
-| `reversed_pending_review` | The provider reports a reversal after booking (found by the daily re-ask or by a notification). Nothing is reversed automatically and the ledger is untouched; the checker request is slice #224. Reverse through the loan or savings reversal by hand after the accountant agrees |
+| `reversed_pending_review` | The provider reports a reversal after booking (found by the re-ask or by a notification). Nothing is reversed automatically and the ledger is untouched: a `gateway_payment_reversal` request waits in Approvals, and a holder of `core.payments.allocate_approve` and the reversing permission decides it (4d step 7). Never reverse by hand: the staff reversal answers `gateway_reversal_pending`, and a manual journal would take the money out twice |
 | Flood on the callback path | Answered 429 by the application (separate buckets for the provider's notifications and the payer return page); unknown references make no outbound call. The edge rule is required before activation, see section 3 |
 | Stop everything at once | Set `BMS_PESAPAL_PROVIDER=off` (the gateway is off for every tenant and the platform, intents stay or fail, nothing is sent), restart the API. Collections can also be switched off per business, and a lender's account can be removed by its administrator when nothing is in flight |
 | Counter `provider_auth` rises | Pesapal refused a lender's credentials while checking an order (the lender rotated or revoked the secret). The intent is not closed or cancelled and is asked again hourly. The lender pastes the new secret (same consumer key: allowed) and tests |

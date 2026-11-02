@@ -469,7 +469,7 @@ recordings. Mobile money cannot be tested without an answer to question 9.
 - **Handler refusals** end as the table of 3.4 says, now built: `before_last_repayment` retried once dated today (`booked`, note "dated today"); any other business refusal posts the
   amount debit the account the `gateway` method is mapped to at the branch (`gateway_clearing` when unmapped) credit `unallocated_receipts`, inserts the `unallocated_receipts` row, ends the intent `booked_unallocated` and counts `booking_refused`. The
   allocation screen and the refund are later slices; the table is append-only until then (migration V59).
-- **Not built here.** The non-login system user (spec 3.4, decision 16) is created by the slice that first acts as it, the reversal approval request (#224). A payment in another
+- **Not built here.** The non-login system user (spec 3.4, decision 16) is created by the slice that first acts as it, the reversal approval request (#224, built since: section 3.16). A payment in another
   currency than the intent's still ends `needs_attention` (the status checker never hands it to booking).
 
 ### 3.15 As built in slice #219 (savings deposit by mobile money; differences from, and sharpenings of, the design above)
@@ -492,7 +492,7 @@ The twin of 3.14; only what differs is listed.
   receipts exactly as in 3.14. A payment dated on or before the last end of day written (or before the account opened) is booked dated today (note "dated today"); a closed period is retried
   dated today. Only the allow-listed business refusals become receipts; any other error is retried.
 - **Reversal.** Staff cannot reverse a gateway deposit (`gateway_reversal_pending`) until #224, and the screen hides Reverse.
-- **Not built here.** The same as 3.14 (the system user and the reversal request of #224, a payment in another currency, allocation and refund of a receipt, FR-PAY-04). The savings
+- **Not built here.** The same as 3.14 (a payment in another currency; the system user, the reversal request and the allocation and refund of a receipt, FR-PAY-04, are built since in #224 part 1, section 3.16). The savings
   transaction list does not yet show the provider's payment code (it is on the collect screen and the intent).
 
 ### 3.16 As built in slice #224, part 1 (the unallocated receipts queue, governed reversal, review windows)
