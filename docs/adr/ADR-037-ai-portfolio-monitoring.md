@@ -321,12 +321,23 @@ to give retail its own way to a model or to reuse this one.
    low, out of stock and slow items, credit owed and overdue, the three Controls counts, open orders, and, when the business uses
    them, sales at a price list price and credit customers over their limit. An item is sent as `Item A` and its name never leaves
    the server; there is no buyer, staff member, phone or sale number in any fact.
-4. **Who sees what.** The stored brief covers every branch, every seller, cost and profit, so it is served only to a user holding
-   `retail.advisor.use`, `retail.sale.all_sellers` and `retail.profit.read` over every branch. Anyone else gets the automatic
-   summary of what they may see under ADR-055: no money for a Storekeeper, a seller's own sales for a seller who sees only their
-   own, a Supervisor's shops. There is no small group suppression here, since no figure is about a person.
+4. **Who sees what.** The stored brief covers every branch, every seller, cost, profit, the Controls counts and the open orders,
+   so it is served only to a user holding `retail.advisor.use`, `retail.sale.all_sellers`, `retail.profit.read`,
+   `retail.stock.read`, `retail.controls.read` and `retail.order.manage` over every branch: every permission a figure in it needs.
+   Anyone else holding the brief gets the automatic summary of what they may see under ADR-055: no money for a Storekeeper, a
+   seller's own sales for a seller who sees only their own, a Supervisor's shops. There is no small group suppression here,
+   since no figure is about a person.
 5. **Deferred.** Cash not banked is not in the first release: its figure belongs to `retail.cashbook`, which already depends on
    `retail.reports`, so the port would need a second source. The question box is not offered for retail.
+6. **Administrators only by default (review of #735).** Issue #422 names no role for the brief, so `retail.advisor.use` and
+   `retail.advisor.configure` are seeded to `tenant_admin` alone: an owner who switches the assistant on for their own use shows
+   it to no seller or Storekeeper. Another role holds the brief only when a business grants it on purpose. Roles are not yet
+   editable by a business, so until they are, only administrators see the card; the views of decision 4 are ready for the day a
+   role is given it.
+7. **An empty answer is not an AI brief.** A model answer with no finding and nothing to watch is stored as the automatic
+   summary with the reason `empty`, so the label "AI assistant (advisory)" is never shown over text no model chose.
+8. **A paid day is never paid twice.** When a paid call's brief cannot be stored, even as the facts only row, the job keeps the
+   date in memory and makes no second call for it; the day shows the automatic summary.
 
 **Better:** one switch, one cap and one log for every brief, and the retail card is drawn by the same view as the lending one.
 **Worse:** a business with both modules accepts one notice for both briefs, and the retail catalogue is a second reviewed file.

@@ -13,9 +13,10 @@
 -- administrators). Append-only: the job inserts a day once (ON CONFLICT DO NOTHING) and the application role cannot update or
 -- delete a row.
 --
--- The grants: the brief to the administrators, Supervisors, Sales and Storekeepers, each of whom sees an automatic summary of
--- only what they may see (a Storekeeper stock counts and never money, a seller their own sales, ADR-055); the settings to the
--- administrators.
+-- The grants (ADR-037 amendment of #422, decision 6): both permissions to the administrators only, so switching the assistant
+-- on shows the brief to nobody else. Issue #422 names no other role; another role holds retail.advisor.use only when a business
+-- grants it on purpose, once roles are editable by a business (they are not yet), and then sees the automatic summary of what it
+-- may see (ADR-055).
 
 INSERT INTO permissions (key, module, description, is_money_moving) VALUES
     ('retail.advisor.use', 'retail', 'AI assistant: see the daily shop brief', false),
@@ -23,9 +24,6 @@ INSERT INTO permissions (key, module, description, is_money_moving) VALUES
 
 INSERT INTO role_permissions (role_key, permission_key) VALUES
     ('tenant_admin', 'retail.advisor.use'),
-    ('retail_supervisor', 'retail.advisor.use'),
-    ('retail_sales', 'retail.advisor.use'),
-    ('retail_storekeeper', 'retail.advisor.use'),
     ('tenant_admin', 'retail.advisor.configure')
 ON CONFLICT DO NOTHING;
 

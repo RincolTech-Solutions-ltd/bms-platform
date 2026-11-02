@@ -1548,7 +1548,7 @@ for the business, as for lending.
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/retail/advisor/brief` | `retail.advisor.use` | Today's brief. The stored model brief (one per tenant and day, every branch, every seller, cost and profit) is returned only to a caller holding `retail.advisor.use`, `retail.sale.all_sellers` and `retail.profit.read` over every branch; anyone else, and every day with no model brief, gets `source: fallback` of what they may see (ADR-055) with `reason` `scope`, `not_ready`, `validation`, `provider_down`, `cap` or `unavailable` |
+| GET | `/retail/advisor/brief` | `retail.advisor.use` | Today's brief; `retail.advisor.use` is seeded to the administrators only. The stored model brief (one per tenant and day, every branch, every seller, cost, profit, the Controls counts and the open orders) is returned only to a caller holding `retail.advisor.use`, `retail.sale.all_sellers`, `retail.profit.read`, `retail.stock.read`, `retail.controls.read` and `retail.order.manage` over every branch; anyone else, and every day with no model brief, gets `source: fallback` of what they may see (ADR-055) with `reason` `scope`, `not_ready`, `validation`, `empty` (the model flagged nothing), `provider_down`, `cap` or `unavailable` |
 | GET | `/retail/advisor/settings` | `retail.advisor.configure` | As `/lending/advisor/settings`, the same record, with the shop notice (`retail-advisor-1`) |
 | PUT | `/retail/advisor/settings` | `retail.advisor.configure`; `core.settings.manage` as well to switch on or off | As `/lending/advisor/settings`: `If-Match`, the acknowledgement of the shop notice, the caps, audited as `core.ai.settings.changed` |
 

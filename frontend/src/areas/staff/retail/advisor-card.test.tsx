@@ -58,4 +58,11 @@ describe('the assistant settings of a shop', () => {
     expect(settingsClientFor(me(['retail.stock.read']))).toBeNull();
     expect(canConfigureRetailAdvisor(me(['retail.advisor.configure']))).toBe(true);
   });
+
+  it('reads the shop settings for the administrator of a shop only business, even holding both configure permissions', () => {
+    const both = ['lending.advisor.configure', 'retail.advisor.configure', 'retail.stock.read'];
+    expect(settingsClientFor(me(both, ['retail']))?.client).toBe(retailAdvisor);
+    expect(settingsClientFor(me(both, ['lending']))?.client).toBe(advisor);
+    expect(settingsClientFor(me(['lending.advisor.configure'], ['retail']))).toBeNull();
+  });
 });

@@ -428,7 +428,7 @@ platform API and holds no tenant permissions.
 | `retail.document.issue` | Y | | | | | | | | | | | |
 | `retail.controls.read` | Y | | | | | | | | | | | |
 | `retail.order.manage` | Y | | | | | | | Y | | | | |
-| `retail.advisor.use` | Y | | | | | | | Y | Y | | | Y |
+| `retail.advisor.use` | Y | | | | | | | | | | | |
 | `retail.advisor.configure` | Y | | | | | | | | | | | |
 
 The staff member and collateral screens (issue #280) offer an action only when the session holds its permission in the record's branch, from `permission_scopes`; the API remains the authority. An ID image is listed and opened only with `lending.members.verify_kyc`. No permission was added.
@@ -448,11 +448,13 @@ Notes:
   through `loan_bring_in_reversal`, with the same maker and checker permissions, never decided by its maker, and only
   while the loan has no transaction in the app and no penalty charge (ADR-071 decision 9).
 - Retail AI brief (issue #422, migration `V125`, ADR-037 as amended): `retail.advisor.use` reads the shop brief on Home
-  (administrators, Supervisors, Sales and Storekeepers) and `retail.advisor.configure` reads and sets the assistant's switch
-  and caps at `/staff/assistant` (administrators; switching on also needs `core.settings.manage`). The stored brief covers every
-  branch, every seller, cost and profit, so it is returned only to a user who holds `retail.advisor.use`,
-  `retail.sale.all_sellers` and `retail.profit.read` over every branch. Everyone else gets the automatic summary of what they
-  may see (ADR-055): money only with `retail.sale.all_sellers` over every branch it covers, cost and profit only with
+  and `retail.advisor.configure` reads and sets the assistant's switch and caps at `/staff/assistant` (switching on also needs
+  `core.settings.manage`). Both are seeded to the administrators only, so switching the assistant on shows the brief to nobody
+  else; another role holds `retail.advisor.use` only when a business grants it on purpose, once roles are editable by a business.
+  The stored brief covers every branch, every seller, cost, profit, the Controls counts and the open orders, so it is returned
+  only to a user who holds `retail.advisor.use`, `retail.sale.all_sellers`, `retail.profit.read`, `retail.stock.read`,
+  `retail.controls.read` and `retail.order.manage` over every branch. Anyone else holding `retail.advisor.use` gets the
+  automatic summary of what they may see (ADR-055): money only with `retail.sale.all_sellers` over every branch it covers, cost and profit only with
   `retail.profit.read` there too, a seller who sees only their own sales their own sales alone, stock counts with
   `retail.stock.read`, Controls counts with `retail.controls.read` and open orders with `retail.order.manage`. A Storekeeper
   therefore never sees a money figure in it.

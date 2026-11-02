@@ -5,11 +5,14 @@ import com.rincoltech.bms.core.ai.AiGateway.AiResult;
 import com.rincoltech.bms.core.ai.AiSettings;
 import com.rincoltech.bms.core.ai.LlmClient;
 import com.rincoltech.bms.kernel.BusinessClock;
+import com.rincoltech.bms.kernel.TenantContext;
 import com.rincoltech.bms.retail.advisor.internal.BriefWriter.Brief;
 import com.rincoltech.bms.retail.reports.RetailBriefFacts;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -30,8 +33,15 @@ class RetailDailyBriefService {
         NO_FACTS,
         STORED_MODEL,
         STORED_FALLBACK,
-        NOT_STORED
+        NOT_STORED,
+        /** A paid call's brief could not be stored at all: the day is lost and no second call is made for it. */
+        LOST
     }
+
+    /** The tenant and date of a paid call whose brief could not be stored, so the next tick does not pay for it again. */
+    private record PaidDay(UUID tenant, LocalDate date) {}
+
+    private final Set<PaidDay> lost = ConcurrentHashMap.newKeySet();
 
     private static final Set<AiGateway.Reason> STATE_REFUSALS = Set.of(
             AiGateway.Reason.NOT_ENABLED,
@@ -78,6 +88,10 @@ class RetailDailyBriefService {
         if (!settings.active()) {
             return Outcome.OFF;
         }
+        PaidDay day = new PaidDay(TenantContext.require(), date);
+        if (lost.contains(day)) {
+            return Outcome.LOST;
+        }
         if (store.exists(date)) {
             return Outcome.EXISTS;
         }
@@ -108,7 +122,19 @@ class RetailDailyBriefService {
                     date,
                     e.getClass().getSimpleName());
             brief = BriefWriter.fallback(facts, "internal_error");
-            store.insertOnce(date, brief, now, null, null);
+            try {
+                store.insertOnce(date, brief, now, null, null);
+            } catch (RuntimeException again) {
+                // Even the facts only row failed (the database is down): the day is lost, and remembered so the next
+                // tick
+                // does not make a second paid call for it (review of #735). The card shows the automatic summary.
+                lost.add(day);
+                log.error(
+                        "retail brief lost date={} error={}",
+                        date,
+                        again.getClass().getSimpleName());
+                return Outcome.LOST;
+            }
         }
         log.info("retail brief stored date={} source={} reason={}", date, brief.source(), brief.reason());
         return brief.model() ? Outcome.STORED_MODEL : Outcome.STORED_FALLBACK;

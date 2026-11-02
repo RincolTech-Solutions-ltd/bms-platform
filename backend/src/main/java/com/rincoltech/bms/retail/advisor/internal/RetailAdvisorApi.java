@@ -34,7 +34,7 @@ final class RetailAdvisorApi {
 
             @Schema(
                     description =
-                            "Why the automatic summary is shown: off, scope, validation, provider_down, cap, not_ready or unavailable; null for a model brief")
+                            "Why the automatic summary is shown: off, scope, validation, empty (the model flagged nothing), provider_down, cap, not_ready or unavailable; null for a model brief")
             String reason,
 
             @Schema(description = "The label the card carries: AI assistant (advisory) or Automatic summary")

@@ -12711,7 +12711,7 @@ export interface components {
             /** @description The line shown under the text */
             note?: string;
             points?: components["schemas"]["RetailAdvisorPoint"][];
-            /** @description Why the automatic summary is shown: off, scope, validation, provider_down, cap, not_ready or unavailable; null for a model brief */
+            /** @description Why the automatic summary is shown: off, scope, validation, empty (the model flagged nothing), provider_down, cap, not_ready or unavailable; null for a model brief */
             reason?: string;
             /** @description model: written from an accepted structured model answer. fallback: the automatic summary */
             source?: string;

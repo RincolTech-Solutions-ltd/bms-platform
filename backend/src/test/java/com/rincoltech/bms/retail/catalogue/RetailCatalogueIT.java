@@ -259,8 +259,6 @@ class RetailCatalogueIT extends IntegrationTest {
                 .toList();
         assertThat(held)
                 .containsExactly(
-                        // Migration V125 (#422): the shop brief, the seller's own figures only.
-                        "retail.advisor.use",
                         // Migration V74 (#399, ADR-055): the cash book moved to the till, given per person.
                         "retail.customer.manage",
                         // Migration V70 (#385): the sales role takes and delivers customer orders.

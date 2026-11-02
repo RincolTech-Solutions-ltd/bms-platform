@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -41,7 +42,8 @@ import tools.jackson.databind.json.JsonMapper;
  * catalogue or a key of a fact in the prompt, the action of the topic, each fact of a family the topic may cite, a calm action
  * only at low priority beside no worse change, no duplicates, the counts within limits. Anything else is refused as a whole and
  * the facts only brief is shown. An accepted answer is written by our code from the catalogue and the facts; as a second line
- * every number in what was written must come from a fact it cites or from the date, else it is refused too.
+ * every number in a written point must be a number of a fact it cites, counted, else it is refused too. An answer that flags
+ * nothing is the facts only brief with the reason {@code empty}, never labelled as AI.
  */
 final class BriefWriter {
 
@@ -49,6 +51,9 @@ final class BriefWriter {
     static final String CANARY = "RETAIL-BRIEF-PROMPT-V1";
     static final String RESOURCE = "/retail-advisor/system-prompt.txt";
     static final String VALIDATION = "validation";
+    /** The reason stored when the model's valid answer flagged nothing: the day shows the automatic summary. */
+    static final String EMPTY = "empty";
+
     static final int MAX_RAW_CHARS = 4000;
     static final int MAX_FINDINGS = 6;
     static final int MAX_FACT_KEYS = 3;
@@ -78,7 +83,8 @@ final class BriefWriter {
             .build();
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH);
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{([a-z]+)\\}\\}");
-    private static final Pattern DIGIT = Pattern.compile("\\d");
+    /** A number as our code writes one: digits with their thousands commas and a decimal point, {@code 1,250,000}. */
+    private static final Pattern NUMBER = Pattern.compile("\\d[\\d,]*(?:\\.\\d+)?");
 
     static final String SYSTEM =
             load().replace("@CANARY@", CANARY).replace("@TOPICS@", topics()).replace("@ACTIONS@", actions());
@@ -184,6 +190,11 @@ final class BriefWriter {
         List<Point> points = validate(result.text(), facts);
         if (points == null) {
             return fallback(facts, VALIDATION);
+        }
+        if (points.isEmpty()) {
+            // No finding and nothing to watch: the key figures, labelled as the automatic summary, since no model chose
+            // them.
+            return fallback(facts, EMPTY);
         }
         return of("model", null, points, facts);
     }
@@ -402,23 +413,22 @@ final class BriefWriter {
                     watch));
             cited.add(used);
         }
-        if (points.isEmpty()) {
-            return fallback(facts, null).points();
-        }
-        // The second line: every digit our renderer wrote comes from a fact the point cites.
+        // The second line: every number our renderer wrote is a number of a fact the point cites, counted, so a stray
+        // "4" next
+        // to a cited count of 4 is caught (review of #735). Each cited fact allows the numbers of its display once.
         for (int i = 0; i < points.size(); i++) {
-            String rest = points.get(i).text();
-            // Longest first, so a display that is part of another (1 in UGX 1,200) cannot break it up.
-            List<String> displays = cited.get(i).stream()
-                    .flatMap(f ->
-                            java.util.stream.Stream.of(f.display(), f.display().replaceFirst("^[+-]", "")))
-                    .sorted((a, b) -> b.length() - a.length())
-                    .toList();
-            for (String display : displays) {
-                rest = rest.replace(display, " ");
+            Map<String, Integer> allowed = new HashMap<>();
+            for (PromptFact f : cited.get(i)) {
+                Matcher m = NUMBER.matcher(f.display());
+                while (m.find()) {
+                    allowed.merge(m.group(), 1, Integer::sum);
+                }
             }
-            if (DIGIT.matcher(rest).find()) {
-                return null;
+            Matcher m = NUMBER.matcher(points.get(i).text());
+            while (m.find()) {
+                if (allowed.merge(m.group(), -1, Integer::sum) < 0) {
+                    return null;
+                }
             }
         }
         return points;
