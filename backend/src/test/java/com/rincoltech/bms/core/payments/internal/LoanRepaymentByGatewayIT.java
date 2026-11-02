@@ -838,4 +838,126 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
                         .single())
                 .isEqualTo("dated_today");
     }
+
+    // ---- the payment link by SMS (issue #231) ---------------------------------------------------
+    // JUSTIFICATION-A3: the issue's tests reuse this suite's loan, merchant account and fake gateway setup.
+
+    ResponseEntity<JsonNode> textLink(JsonNode intent) {
+        return call(
+                HttpMethod.POST, "/api/v1/payments/intents/" + intent.get("id").asString() + "/sms", null, null);
+    }
+
+    List<Map<String, Object>> linkTexts(JsonNode intent) {
+        return TestDatabase.owner()
+                .sql("SELECT recipient, params, expires_at, category FROM notification_outbox"
+                        + " WHERE template_key = 'payment.link' AND idempotency_key LIKE ?")
+                .param("sms:payment.link:%:" + intent.get("id").asString() + ":%")
+                .query()
+                .listOfRows();
+    }
+
+    List<String> linkAudits(JsonNode intent) {
+        return TestDatabase.owner()
+                .sql(
+                        "SELECT data::text FROM audit_log WHERE entity_id = ? AND action = 'core.payments.intent.link_texted'")
+                .param(UUID.fromString(intent.get("id").asString()))
+                .query(String.class)
+                .list();
+    }
+
+    @Test
+    void frNtf02_aPaymentLinkIsTextedOncePerIntentToThePayerExpiringWithTheIntentAndAudited() {
+        SmsTenants.operator(t.tenantId(), true, 1000);
+        SmsTenants.enable(t.tenantId());
+        String loan = activeLoan();
+        JsonNode intent = intentFor(loan, 520_000);
+
+        ResponseEntity<JsonNode> sent = textLink(intent);
+        assertThat(sent.getStatusCode().value()).as("%s", sent.getBody()).isEqualTo(200);
+        assertThat(sent.getBody().get("already_sent").asBoolean()).isFalse();
+        List<Map<String, Object>> rows = linkTexts(intent);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.getFirst().get("recipient")).isEqualTo("+256700000216");
+        assertThat(rows.getFirst().get("category")).isEqualTo("transactional");
+        assertThat(rows.getFirst().get("params").toString())
+                .contains(intent.get("redirect_url").asString())
+                .contains("520,000")
+                .contains("loan ");
+        // The text dies with the intent (or after its hour, whichever is first).
+        Instant expires = Instant.parse(intent.get("expires_at").asString());
+        assertThat(((java.sql.Timestamp) rows.getFirst().get("expires_at")).toInstant())
+                .isBeforeOrEqualTo(expires);
+
+        // Again: nothing new is written, and the screen is told it went before.
+        ResponseEntity<JsonNode> again = textLink(intent);
+        assertThat(again.getStatusCode().value()).isEqualTo(200);
+        assertThat(again.getBody().get("already_sent").asBoolean()).isTrue();
+        assertThat(linkTexts(intent)).hasSize(1);
+        // One audit row, with the member and never the number.
+        assertThat(linkAudits(intent))
+                .hasSize(1)
+                .first()
+                .asString()
+                .contains("member_id")
+                .doesNotContain("700000216");
+    }
+
+    @Test
+    void anExpiredIntentsLinkIsNeverTextedAndNeitherIsAPaidOne() {
+        SmsTenants.operator(t.tenantId(), true, 1000);
+        SmsTenants.enable(t.tenantId());
+        String loan = activeLoan();
+        JsonNode expired = intentFor(loan, 100_000);
+        JsonNode paid = intentFor(loan, 100_000);
+        pay(paid, 100_000, "CONF-231-PAID");
+        poller.tick();
+
+        clock.set(Instant.parse(expired.get("expires_at").asString()).plusSeconds(60));
+        ResponseEntity<JsonNode> late = textLink(expired);
+        assertThat(late.getStatusCode().value()).as("%s", late.getBody()).isEqualTo(409);
+        assertThat(late.getBody().get("code").asString()).isEqualTo("intent_not_open");
+        assertThat(linkTexts(expired)).isEmpty();
+
+        ResponseEntity<JsonNode> done = textLink(paid);
+        assertThat(done.getStatusCode().value()).isEqualTo(409);
+        assertThat(linkTexts(paid)).isEmpty();
+        assertThat(linkAudits(expired)).isEmpty();
+    }
+
+    @Test
+    void theLinkIsRefusedPolitelyWhenSmsOrCollectionsAreOffAndNothingIsWritten() {
+        String loan = activeLoan();
+        JsonNode intent = intentFor(loan, 520_000);
+        // SMS was never switched on for this business.
+        ResponseEntity<JsonNode> smsOff = textLink(intent);
+        assertThat(smsOff.getStatusCode().value()).as("%s", smsOff.getBody()).isEqualTo(422);
+        assertThat(smsOff.getBody().get("code").asString()).isEqualTo("sms_off");
+        // The operator's switch alone is not enough: the tenant's own is off.
+        SmsTenants.operator(t.tenantId(), true, 1000);
+        assertThat(textLink(intent).getBody().get("code").asString()).isEqualTo("sms_off");
+        // SMS on, but collecting by mobile money switched off.
+        SmsTenants.enable(t.tenantId());
+        setSettings(Map.of("collections_enabled", false, "daily_ceiling_minor", 100_000_000L));
+        ResponseEntity<JsonNode> moneyOff = textLink(intent);
+        assertThat(moneyOff.getStatusCode().value()).isEqualTo(422);
+        assertThat(moneyOff.getBody().get("code").asString()).isEqualTo("collections_disabled");
+        assertThat(linkTexts(intent)).isEmpty();
+        assertThat(linkAudits(intent)).isEmpty();
+    }
+
+    @Test
+    void aMemberGetsAtMostThreeLinkTextsAnHour() {
+        SmsTenants.operator(t.tenantId(), true, 1000);
+        SmsTenants.enable(t.tenantId());
+        String loan = activeLoan();
+        for (int i = 0; i < PaymentLinkTexts.PER_MEMBER_PER_HOUR; i++) {
+            ResponseEntity<JsonNode> ok = textLink(intentFor(loan, 100_000));
+            assertThat(ok.getStatusCode().value()).as("%s", ok.getBody()).isEqualTo(200);
+        }
+        JsonNode fourth = intentFor(loan, 100_000);
+        ResponseEntity<JsonNode> limited = textLink(fourth);
+        assertThat(limited.getStatusCode().value()).isEqualTo(429);
+        assertThat(limited.getBody().get("code").asString()).isEqualTo("too_many_link_texts");
+        assertThat(linkTexts(fourth)).isEmpty();
+    }
 }
