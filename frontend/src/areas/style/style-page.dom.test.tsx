@@ -4,7 +4,7 @@ import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanst
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RINCOLTECH_LOGO, RINCOLTECH_LOGO_ON_DARK } from '../../app/branding';
 import { LogoImg } from '../../app/shell';
 import { router as appRouter } from '../../app/router';
@@ -15,11 +15,14 @@ import { StylePage } from './route';
 // that suits the theme, and the style page can be looked at in both themes.
 
 beforeEach(() => {
-  window.matchMedia = ((query: string) => ({ media: query, matches: false, addEventListener: () => undefined, removeEventListener: () => undefined })) as unknown as typeof window.matchMedia;
+  vi.stubGlobal('matchMedia', ((query: string) => ({ media: query, matches: false, addEventListener: () => undefined, removeEventListener: () => undefined })) as unknown as typeof window.matchMedia);
   resetThemeMemory();
   document.documentElement.removeAttribute('data-theme');
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('the Rincol Tech logo in both themes (#115)', () => {
   it('draws the black lettering and the light lettering, and a tenant logo once', () => {

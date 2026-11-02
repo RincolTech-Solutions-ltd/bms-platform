@@ -14,7 +14,7 @@ scrolled to the bottom when the page is longer than one screen.
 
 | File prefix | Screen |
 |---|---|
-| `00-landing-platform-host` | The platform host (`localhost`): Rincoltech logo, console placeholder |
+| `00-landing-platform-host` | The platform host (`localhost`): Rincol Tech logo, console placeholder |
 | `01-landing` | The root route on a tenant host: brand mark, Staff sign-in and Member portal |
 | `02-accept-invitation`, `02b-...-incomplete-link`, `02c-...-error`, `02d-...-done` | Accept an invitation: the form, a link without its token, a refused password, success |
 | `03-sign-in`, `03b-sign-in-error` | Staff sign-in and a wrong password |
