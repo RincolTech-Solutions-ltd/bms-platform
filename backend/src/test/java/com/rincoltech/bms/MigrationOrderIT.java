@@ -1444,7 +1444,7 @@ class MigrationOrderIT {
 
     /** The body of the case above, on any empty database that has the roles of {@code 01-roles.sh}. */
     static void verifyUnallocatedReceiptsMigration(String url) {
-        // The version just before V123 (V122 once the onboarding link fix is on main, V121 until then).
+        // The version just before V123 (V122, the onboarding link fix).
         String before = VERSIONS.get(VERSIONS.indexOf("123") - 1);
         assertThat(flyway(url, before).migrate().targetSchemaVersion).isEqualTo(before);
         JdbcClient owner =

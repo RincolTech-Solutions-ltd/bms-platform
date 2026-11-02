@@ -1677,7 +1677,10 @@ class UnallocatedReceiptsIT extends LoanFixtures {
         assertThat(seenByHq.get("checker_notice") == null
                         || seenByHq.get("checker_notice").isNull())
                 .isTrue();
-        assertThat(seenByHq.get("payload").has("checker_notice")).isFalse();
+        for (String key : List.of(
+                "checker_notice", "credit_subject_label", "credit_balance_minor", "subject_id", "subject_branch_id")) {
+            assertThat(seenByHq.get("payload").has(key)).as(key).isFalse();
+        }
         assertThat(send(HttpMethod.GET, "/api/v1/approvals/" + approval, as(staff, adminPerms, "*", null), null)
                         .getBody()
                         .get("checker_notice")

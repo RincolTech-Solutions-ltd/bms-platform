@@ -4,6 +4,7 @@ import com.rincoltech.bms.core.approvals.ApprovalAction;
 import com.rincoltech.bms.kernel.Principal;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 
@@ -71,9 +72,26 @@ class ReceiptAllocationAction implements ApprovalAction {
     @Override
     public boolean mayDecide(Principal checker, UUID branchId, Map<String, Object> payload) {
         Object target = payload == null ? null : payload.get(ReceiptSettler.SUBJECT_BRANCH_ID);
-        return ApprovalAction.super.mayDecide(checker, branchId, payload)
-                && (target == null
-                        || checker.may(ReceiptSettler.CHECKER_PERMISSION, UUID.fromString(String.valueOf(target))));
+        if (!ApprovalAction.super.mayDecide(checker, branchId, payload)) {
+            return false;
+        }
+        try {
+            return target == null
+                    || checker.may(ReceiptSettler.CHECKER_PERMISSION, UUID.fromString(String.valueOf(target)));
+        } catch (IllegalArgumentException malformed) {
+            return false;
+        }
+    }
+
+    /** The loan or account the money goes to, its branch and its payoff (through the excess) are for deciders only. */
+    @Override
+    public Set<String> deciderOnlyPayloadKeys() {
+        return Set.of(
+                CHECKER_NOTICE,
+                ReceiptService.CREDIT_BALANCE,
+                ReceiptService.CREDIT_SUBJECT_LABEL,
+                ReceiptSettler.SUBJECT_ID,
+                ReceiptSettler.SUBJECT_BRANCH_ID);
     }
 
     @Override
