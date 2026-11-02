@@ -74,6 +74,7 @@ const MESSAGES: Record<string, string | undefined> = {
   payer_phone_not_textable: "The payer's number on this payment cannot take a text message. Copy the link instead.",
   link_text_failed: 'The text message could not be sent just now. Nothing was sent. Try again in a moment.',
   link_text_not_offered: 'A link cannot be sent by text message for this kind of payment.',
+  link_text_daily_limit: 'This business sent 200 payment links by text message in the last day. Copy the link or show the QR code instead.',
   link_text_not_queued:
     'The text message was not sent: text messages are off for this business or its limit for today is reached. Copy the link or show the QR code instead.',
 };

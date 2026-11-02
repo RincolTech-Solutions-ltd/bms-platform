@@ -200,7 +200,8 @@ export function CollectStatus({ target, initial, onNew }: { target: CollectTarge
   // the business has text messages or mobile money switched off, and a repeat sends nothing.
   const text = useMutation({
     mutationFn: () => payments.textLink(id),
-    meta: { success: (sent: PaymentLinkText) => (sent.already_sent ? 'Link already sent by text message' : 'Link sent by text message') },
+    // The toast only when the server queued a new text; a repeat is said in the sentence under the link, a refusal in the problem.
+    meta: { success: (sent: PaymentLinkText) => (sent.already_sent ? null : 'Link sent by text message') },
   });
   const link = intent.redirect_url;
   const open = status === 'pending' || status === 'created';

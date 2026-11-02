@@ -82,10 +82,10 @@ class SmsPureTest {
                 "tenant_name", "Test Lender",
                 "currency", "UGX",
                 "amount", "520,000",
-                "reference", "loan LN-HQ-000123",
+                "reference", "loan LN HQ 000123",
                 "link", PAYMENT_LINK);
         String text = templates.render("sms", "payment.link", params).text();
-        assertThat(text).isEqualTo("Test Lender: Pay UGX 520,000 for loan LN-HQ-000123 at " + PAYMENT_LINK);
+        assertThat(text).isEqualTo("Test Lender: Pay UGX 520,000 for loan LN HQ 000123 at " + PAYMENT_LINK);
         SmsSegments.Count count = SmsSegments.count(text);
         assertThat(count.encoding()).isEqualTo(SmsSegments.Encoding.GSM7);
         assertThat(count.segments()).isEqualTo(2);

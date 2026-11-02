@@ -849,8 +849,9 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
 
     List<Map<String, Object>> linkTexts(JsonNode intent) {
         return TestDatabase.owner()
-                .sql("SELECT recipient, params, expires_at, category FROM notification_outbox"
-                        + " WHERE template_key = 'payment.link' AND idempotency_key LIKE ?")
+                .sql(
+                        "SELECT recipient, params, params ->> 'reference' AS reference, expires_at, category FROM notification_outbox"
+                                + " WHERE template_key = 'payment.link' AND idempotency_key LIKE ?")
                 .param("sms:payment.link:%:" + intent.get("id").asString() + ":%")
                 .query()
                 .listOfRows();
@@ -881,8 +882,11 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
         assertThat(rows.getFirst().get("category")).isEqualTo("transactional");
         assertThat(rows.getFirst().get("params").toString())
                 .contains(intent.get("redirect_url").asString())
-                .contains("520,000")
-                .contains("loan ");
+                .contains("520,000");
+        // The loan number is spelled without dashes: no dash in the words of the text.
+        assertThat(rows.getFirst().get("reference").toString())
+                .startsWith("loan ")
+                .doesNotContain("-");
         // The text dies with the intent (or after its hour, whichever is first).
         Instant expires = Instant.parse(intent.get("expires_at").asString());
         assertThat(((java.sql.Timestamp) rows.getFirst().get("expires_at")).toInstant())
@@ -1037,6 +1041,27 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
         ResponseEntity<JsonNode> sent = textLink(allowed);
         assertThat(sent.getStatusCode().value()).as("%s", sent.getBody()).isEqualTo(200);
         assertThat(linkTexts(allowed)).hasSize(1);
+    }
+
+    // JUSTIFICATION-A3: the lead's round asks for a per-business daily cap; this proves it with this suite's setup.
+    @Test
+    void aBusinessSendsAtMostItsDailyNumberOfLinkTextsWhateverMembersOrNumbersTheyAreFor() {
+        SmsTenants.operator(t.tenantId(), true, 1000);
+        SmsTenants.enable(t.tenantId());
+        String loan = activeLoan();
+        // The day's link texts so far, each for a different member (as many payments typed with one number would be).
+        TestDatabase.owner()
+                .sql("INSERT INTO audit_log (id, tenant_id, actor_kind, action, entity_type, entity_id, data)"
+                        + " SELECT gen_random_uuid(), ?, 'staff', 'core.payments.intent.link_texted', 'payment_intent',"
+                        + " gen_random_uuid(), jsonb_build_object('after', jsonb_build_object('member_id',"
+                        + " gen_random_uuid()::text)) FROM generate_series(1, ?)")
+                .params(t.tenantId(), PaymentLinkTexts.PER_BUSINESS_PER_DAY)
+                .update();
+        JsonNode intent = intentFor(loan, 100_000);
+        ResponseEntity<JsonNode> r = textLink(intent);
+        assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(429);
+        assertThat(r.getBody().get("code").asString()).isEqualTo("link_text_daily_limit");
+        assertThat(linkTexts(intent)).isEmpty();
     }
 
     @Test

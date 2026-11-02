@@ -169,7 +169,9 @@ default, and on staging the SMS mode is `sink` against the provider's sandbox.
 2. **Only while open.** A link that expired, or a payment that was paid or cancelled, is refused (`intent_not_open`); the text
    itself expires with the payment, so the outbox never sends a lapsed link.
 3. **Refusals in plain words, nothing written:** `collections_disabled`, `sms_off`, `member_opted_out` (the member asked for no
-   SMS at all; a reminders-only opt-out does not block it), and `too_many_link_texts` above 3 link texts to one member in an hour.
+   SMS at all; a reminders-only opt-out does not block it), `too_many_link_texts` above 3 link texts to one member in an hour,
+   `link_text_daily_limit` above 200 link texts for the business in 24 hours, and `link_text_not_queued` when the SMS channel
+   would not take it (never shown as sent).
 4. **Where to look.** The audit log (`core.payments.intent.link_texted`, with the member id and never the number), the outbox
    row (`template_key = 'payment.link'`) and its `sms_deliveries` row, as for any SMS.
 

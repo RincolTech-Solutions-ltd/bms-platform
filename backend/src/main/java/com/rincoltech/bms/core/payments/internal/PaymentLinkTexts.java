@@ -36,8 +36,11 @@ import org.springframework.transaction.support.TransactionTemplate;
  *   <li>Only while the intent is open: {@code pending} with a link and before its expiry; the text expires with the
  *       intent, so a link that has lapsed is never sent ({@code intent_not_open}).
  *   <li>A member who asked for no SMS at all is not texted ({@code member_opted_out}).
- *   <li>At most {@value #PER_MEMBER_PER_HOUR} link texts per member in an hour ({@code too_many_link_texts}), counted
- *       under a lock per member so two requests together cannot both pass.
+ *   <li>At most {@value #PER_MEMBER_PER_HOUR} link texts per member in an hour ({@code too_many_link_texts}) and
+ *       {@value #PER_BUSINESS_PER_DAY} per business in 24 hours ({@code link_text_daily_limit}), so a user who types
+ *       one number on many payments cannot spend the business's SMS credit on it. Both are counted from the audit rows
+ *       through the index {@code audit_log_by_time (tenant_id, created_at)}, under one lock per business so two
+ *       requests together cannot both pass.
  *   <li>A text the channel would not queue (a switch turned off in between, a cap reached) is refused
  *       ({@code link_text_not_queued}), never reported as sent.
  *   <li>Each text sent is audited ({@code core.payments.intent.link_texted}) with the member and never the number.
@@ -51,6 +54,8 @@ class PaymentLinkTexts {
     static final String ACTION = "core.payments.intent.link_texted";
 
     static final int PER_MEMBER_PER_HOUR = 3;
+
+    static final int PER_BUSINESS_PER_DAY = 200;
 
     /** What the screen is told. {@code alreadySent}: this intent's link had been texted before and nothing new went. */
     @Schema(name = "PaymentLinkText")
@@ -114,9 +119,9 @@ class PaymentLinkTexts {
         UUID member = handler.memberOf(intent.subjectId())
                 .orElseThrow(() -> ApiException.rule(
                         "link_text_not_offered", "A link cannot be sent by text message for this kind of payment."));
-        // One request at a time per member through the checks and the count below.
+        // One link text at a time per business through the checks and the counts below.
         jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))")
-                .param("payments:link-text:" + intent.tenantId() + ":" + member)
+                .param("payments:link-text:" + intent.tenantId())
                 .query((rs, n) -> 0)
                 .list();
         if (alreadyTexted(intentId)) {
@@ -141,7 +146,15 @@ class PaymentLinkTexts {
                     "member_opted_out",
                     "This member asked not to get text messages. Copy the link or show the QR code instead.");
         }
-        if (textedInLastHour(member) >= PER_MEMBER_PER_HOUR) {
+        if (texted("24 hours", null) >= PER_BUSINESS_PER_DAY) {
+            throw new ApiException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "link_text_daily_limit",
+                    "Too many texts today",
+                    "This business sent " + PER_BUSINESS_PER_DAY
+                            + " payment links by text message in the last day. Copy the link or show the QR code instead.");
+        }
+        if (texted("1 hour", member) >= PER_MEMBER_PER_HOUR) {
             throw new ApiException(
                     HttpStatus.TOO_MANY_REQUESTS,
                     "too_many_link_texts",
@@ -152,7 +165,10 @@ class PaymentLinkTexts {
         Map<String, String> params = new LinkedHashMap<>();
         params.put("currency", intent.currency());
         params.put("amount", sms.amount(intent.amountMinor(), intent.currency()));
-        params.put("reference", handler.label(intent.subjectId()).orElse("your payment"));
+        // No dashes in the text: a loan number such as LN-HQ-000123 is written LN HQ 000123.
+        params.put(
+                "reference",
+                handler.label(intent.subjectId()).orElse("your payment").replace('-', ' '));
         params.put("link", intent.redirectUrl());
         SmsEvents.Result result = sms.queue(new SmsEvents.MemberSms(
                 TEMPLATE,
@@ -199,12 +215,25 @@ class PaymentLinkTexts {
                         """).params(intentId, ACTION).query(Boolean.class).single());
     }
 
-    /** On the database's clock, the one the audit rows are stamped with. */
-    private long textedInLastHour(UUID member) {
+    /**
+     * Link texts of the bound business in the last {@code window} ({@code 1 hour} or {@code 24 hours}, constants of this
+     * class), for one member or all. The tenant and the time come first, so the index {@code audit_log_by_time} bounds
+     * the rows read to that window of one business; on the database's clock, the one the audit rows are stamped with.
+     */
+    private long texted(String window, UUID member) {
         return jdbc.sql("""
                         SELECT count(*) FROM audit_log
-                        WHERE created_at > now() - interval '1 hour' AND entity_type = 'payment_intent' AND action = ?
-                          AND data -> 'after' ->> 'member_id' = ?
-                        """).params(ACTION, member.toString()).query(Long.class).single();
+                        WHERE tenant_id = current_setting('app.tenant_id')::uuid
+                          AND created_at > now() - CAST(? AS interval)
+                          AND entity_type = 'payment_intent' AND action = ?
+                          AND (CAST(? AS text) IS NULL OR data -> 'after' ->> 'member_id' = ?)
+                        """)
+                .params(
+                        window,
+                        ACTION,
+                        member == null ? null : member.toString(),
+                        member == null ? null : member.toString())
+                .query(Long.class)
+                .single();
     }
 }
