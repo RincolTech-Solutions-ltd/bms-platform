@@ -1,3 +1,4 @@
+import type { QueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { api, type Me } from '../api/client';
 import { retail } from '../api/retail';
@@ -5,6 +6,7 @@ import { getAccessToken, refreshFailedOffline, refreshSession, subscribe as onTo
 import { REFRESH_EVERY_MS, refreshCatalogue, type CatalogueSource } from './catalogue';
 import { browserConnectivity, type Connectivity } from './connectivity';
 import { waiting, type OutboxItem } from './outbox';
+import { followConnectivity, keepReads, restore, type ReadKeeper } from './read-cache';
 import { deviceStore, scopeOf, type Catalogue, type OfflineStore } from './store';
 import { SyncEngine, browserTabLock, type SyncDeps, type SyncSnapshot } from './sync-engine';
 
@@ -53,7 +55,7 @@ export interface Offline {
   othersWaiting: number;
   /** Fetches the catalogue copy again (when online). */
   refresh(): Promise<void>;
-  /** At sign-out: the catalogue copy, the saved profile and its pointer go; the outbox stays for their next sign-in here. */
+  /** At sign-out: the figures kept for reading, the catalogue copy, the saved profile and its pointer go; the outbox stays for their next sign-in here. */
   forget(): Promise<void>;
 }
 
@@ -178,7 +180,7 @@ export function browserServices(): OfflineServices {
  * The offline support of the signed-in person, or null when they do not sell. Loads their outbox, watches the connection,
  * refreshes the catalogue when online (at once, then every 15 minutes) and sends the outbox whenever the app comes online.
  */
-export function useOfflineSupport(me: Me | undefined, signedIn: boolean, services: () => OfflineServices = browserServices): Offline | null {
+export function useOfflineSupport(me: Me | undefined, signedIn: boolean, services: () => OfflineServices = browserServices, client?: QueryClient): Offline | null {
   const userId = me?.user_id;
   const sells = me !== undefined && sellsOffline(me);
   const svc = useMemo(() => (sells && userId ? services() : null), [sells, userId, services]);
@@ -246,6 +248,23 @@ export function useOfflineSupport(me: Me | undefined, signedIn: boolean, service
     };
   }, [svc, scope, engine, refresh, lookAtOthers]);
 
+  // Reading offline (issue #763, ADR-116): the figures last loaded come back from this person's copy on this business, new
+  // ones are written to it, and reads pause while offline instead of failing.
+  const reads = useRef<ReadKeeper | null>(null);
+  useEffect(() => {
+    if (!svc || !scope || !client) return;
+    let live = true;
+    void svc.store.readCache(scope).then((c) => live && restore(client, c, svc.now().getTime()), () => undefined);
+    const keeper = keepReads(client, svc.store, scope, () => svc.now().getTime());
+    reads.current = keeper;
+    const unfollow = followConnectivity(client, svc.connectivity);
+    return () => {
+      live = false;
+      keeper.stop();
+      unfollow();
+    };
+  }, [svc, scope, client]);
+
   // Whenever a new access token arrives (a sign-in, a refresh by any screen), a stopped engine goes on sending.
   useEffect(() => {
     if (!engine) return;
@@ -278,6 +297,8 @@ export function useOfflineSupport(me: Me | undefined, signedIn: boolean, service
       catalogue,
       refresh,
       forget: async () => {
+        await reads.current?.forget();
+        await svc.store.deleteReadCache(scope);
         await svc.store.deleteCatalogue(scope);
         await svc.store.deleteProfile(scope);
         await svc.store.setLastPerson(svc.host, null);

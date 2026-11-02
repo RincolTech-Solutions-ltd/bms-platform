@@ -18,6 +18,7 @@ import { plural } from '../../../app/glossary';
 import { BRANCH_ROLES, branchesWhere, canSeeProfit, canUse, capabilityOn, sellingBranches, type RetailScreen } from './permissions';
 import { keptWords } from './orders-state';
 import { NoAccess } from '../../../app/ui/EmptyState';
+import { useOnline } from '../../../offline/offline-context';
 
 // Shared pieces of the retail screens. Phone first: one column, 44px tap targets, labels on every
 // input, a visible focus ring, and state shown in words as well as colour.
@@ -101,7 +102,10 @@ export function changeFailureText(error: unknown, queryClient: QueryClient): str
 }
 
 export function Problem({ error }: { error: unknown }) {
+  const online = useOnline();
   if (!error) return null;
+  // Offline, a read that could not reach the server is said once, by the banner under the bar (issue #763).
+  if (!online && !(error instanceof RetailError && error.status >= 400 && error.status < 500)) return null;
   return <p role="alert" className="alert alert-danger">{error instanceof Error ? error.message : 'Something went wrong.'}</p>;
 }
 

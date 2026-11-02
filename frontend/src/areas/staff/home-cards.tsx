@@ -7,6 +7,7 @@ import { retailAnalytics, type HomeSummary, type HomeTopItem } from '../../api/r
 import { retailOrders } from '../../api/retail-orders';
 import { ALL_BRANCHES, branchFilter } from '../../auth/branch';
 import { icons } from '../../components/icons';
+import { sellsOffline } from '../../offline/offline-context';
 import { useStaff } from './context';
 import { money as lendingMoney } from './lending/loan-state';
 import { showLending } from './lending/permissions';
@@ -112,7 +113,9 @@ function useHomeSummary(parts: Parts) {
 }
 
 function ShopCard({ parts, home }: { parts: Parts; home: Summary }) {
-  const { branch } = useStaff();
+  const { me, branch } = useStaff();
+  // The shop owner did not know Sell works with no data (issue #763): one short line says so to whoever may sell.
+  const sells = sellsOffline(me) && canUse(me, 'sale');
   const branchId = branch && branch !== ALL_BRANCHES ? branch : undefined;
   // Only a session that cannot read the summary (no sales read) asks the orders board for the open orders.
   const board = useQuery({
@@ -137,6 +140,7 @@ function ShopCard({ parts, home }: { parts: Parts; home: Summary }) {
         {parts.lowStock && answered(home, 'low_stock') && <Figure label="Low on stock" query={home}>{() => plural(home.data?.low_stock ?? 0, 'item', 'items')}</Figure>}
         {parts.orders && (!parts.summary || answered(home, 'open_orders')) && <Figure label="Open customer orders" query={ordersFrom}>{() => open}</Figure>}
       </dl>
+      {sells && <p className="hint">Sell works offline too. Sales made with no data stay on this phone and send when you are back online.</p>}
       <Link className="link-row" to="/staff/retail">Open the shop<RowChevron /></Link>
     </article>
   );

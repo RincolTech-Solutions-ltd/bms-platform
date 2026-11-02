@@ -102,7 +102,7 @@ function StaffLayout() {
   const { branch, ready } = active;
   const { choose, toast: switchToast } = useBranchSwitch(profileNow, branch, active.choose);
   const signedIn = me.data !== undefined;
-  const offline = useOfflineSupport(mock ? undefined : profileNow, signedIn);
+  const offline = useOfflineSupport(mock ? undefined : profileNow, signedIn, undefined, queryClient);
   useEffect(() => {
     // Back online after opening offline: restore the session, or ask for a sign-in.
     if (!offline || !offlineMe || token !== null) return;

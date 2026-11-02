@@ -1,7 +1,10 @@
-import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { QueryClientContext } from '@tanstack/react-query';
+import { type ReactNode, useContext, useEffect, useId, useRef, useState } from 'react';
 import type { Me } from '../../api/client';
 import { useShellBrand } from '../../app/branding';
-import { useDeviceOnline } from '../../app/refresh-button';
+import { useDeviceOnline, useLoadedAt } from '../../app/refresh-button';
+import { useOffline, useOnline } from '../../offline/offline-context';
+import { figuresTime } from '../../offline/read-cache';
 import { THEME_LABELS } from '../../app/shell';
 import { THEME_CHOICES, type ThemeChoice, useThemeChoice } from '../../app/theme-mode';
 import { BusyButton } from '../../app/ui/BusyButton';
@@ -172,14 +175,23 @@ export function SignOutEverywhere({ open, waiting, busy, onConfirm, onClose }: {
   );
 }
 
-/** Under the bar while the device has no network: what still works, in one line. Nothing at all while online. */
+/**
+ * Under the bar while the device has no network or cannot reach the server: what still works and how old the figures are,
+ * in one line, the page's only offline notice (issue #763). Nothing at all while online.
+ */
 export function OfflineBanner() {
-  const online = useDeviceOnline();
-  if (online) return null;
+  const deviceOnline = useDeviceOnline();
+  const reachable = useOnline();
+  const offline = useOffline();
+  const loadedAt = useLoadedAt(useContext(QueryClientContext)?.getQueryCache());
+  if (deviceOnline && reachable) return null;
+  // Only a person who may sell has the sale screen offline (ADR-067).
+  const sell = offline ? ' You can still sell; your sales will send when you are back online.' : ' You see what was loaded before.';
+  const figures = loadedAt > 0 ? ` Figures are from ${figuresTime(loadedAt, Date.now())}.` : '';
   return (
     <p role="status" className="offline-banner">
       {icons.info}
-      <span>You are offline. You see what was loaded before, and the figures update once you are back online.</span>
+      <span>{`You are offline.${sell}${figures}`}</span>
     </p>
   );
 }
