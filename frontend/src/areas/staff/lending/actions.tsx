@@ -52,10 +52,12 @@ export function DateReset() {
 }
 
 /**
- * The latest date a money form's date field takes: today, but none on a draft whose key was sent (#672). That draft keeps the body it
- * went with, so a date after today (a business in a zone ahead) must not stop the retry that posts it once.
+ * The latest date a money form's date field takes: today, but the draft's own date on a draft whose key was sent with a date after
+ * today (#672, #674). That draft keeps the body it went with, so its date (a business in a zone ahead) must not stop the retry that
+ * posts it once, yet it cannot be moved to a later future date. `sentDate` is the date the draft had as the form opened, which for a
+ * restored sent draft is the date it went with; a draft sent from this form is dated today or earlier, so its latest is today.
  */
-export const sentMax = (sent: boolean, today: string): string | undefined => (sent ? undefined : today);
+export const sentMax = (sent: boolean, today: string, sentDate: string): string => (sent && sentDate > today ? sentDate : today);
 
 /** Said above a form whose draft went to the server on an earlier day without an answer (#670): its body is kept as sent. */
 export function SentBefore({ kind, on }: { kind: string; on: string | null }) {
@@ -117,6 +119,7 @@ export function RepaymentForm({ loan, onDone }: { loan: Loan; onDone: (r: Repaym
     reference: '',
     startedOn: today,
   }, (d) => onToday(d, 'valueDate', today));
+  const sentDate = useState(draft.valueDate)[0];
   const update = (patch: Partial<RepayDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const amountMinor = parseAmount(draft.amount, loan.currency);
   const valid = amountMinor !== null && isIsoDate(draft.valueDate);
@@ -147,7 +150,7 @@ export function RepaymentForm({ loan, onDone }: { loan: Loan; onDone: (r: Repaym
         {amountMinor !== null ? `Will record ${money(amountMinor, loan.currency)}` : 'Enter an amount above zero.'}
       </p>
       <label htmlFor="repay-date">Date paid</label>
-      <input id="repay-date" type="date" max={sentMax(sent, today)} value={draft.valueDate} onChange={(e) => { update({ valueDate: e.target.value }); unmend(); }} />
+      <input id="repay-date" type="date" max={sentMax(sent, today, sentDate)} value={draft.valueDate} onChange={(e) => { update({ valueDate: e.target.value }); unmend(); }} />
       {mended && <DateReset />}
       <MethodChoice name="repay-method" value={draft.method} onChange={(m) => update({ method: m })} />
       <ReferenceInput id="repay-ref" value={draft.reference} onChange={(v) => update({ reference: v })} />
@@ -175,6 +178,7 @@ export function DisburseForm({ loan }: { loan: Loan }) {
     reference: '',
     startedOn: today,
   }, (d) => onToday(d, 'date', today));
+  const sentDate = useState(draft.date)[0];
   const update = (patch: Partial<DisburseDraft>) => setDraft((d) => ({ ...d, ...patch }));
   // toast-exempt: success screen, the Disbursed screen replaces the form
   const save = useMutation({
@@ -201,7 +205,7 @@ export function DisburseForm({ loan }: { loan: Loan }) {
         Pays out {money(loan.approved_principal_minor, loan.currency)} to the member.
       </p>
       <label htmlFor="disburse-date">Disbursement date</label>
-      <input id="disburse-date" type="date" max={sentMax(sent, today)} value={draft.date} onChange={(e) => { update({ date: e.target.value }); unmend(); }} />
+      <input id="disburse-date" type="date" max={sentMax(sent, today, sentDate)} value={draft.date} onChange={(e) => { update({ date: e.target.value }); unmend(); }} />
       {mended && <DateReset />}
       <MethodChoice name="disburse-method" value={draft.method} onChange={(m) => update({ method: m })} />
       <ReferenceInput id="disburse-ref" value={draft.reference} onChange={(v) => update({ reference: v })} />

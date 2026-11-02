@@ -60,6 +60,7 @@ export function FundForm({ inv }: { inv: Investment }) {
     reference: '',
     startedOn: today,
   }, (d) => onToday(d, 'date', today));
+  const sentDate = useState(draft.date)[0];
   const update = (patch: Partial<FundDraft>) => setDraft((d) => ({ ...d, ...patch }));
   // toast-exempt: success screen, the Funded screen replaces the form
   const save = useMutation({
@@ -81,7 +82,7 @@ export function FundForm({ inv }: { inv: Investment }) {
         approves it first.
       </p>
       <label htmlFor="fund-date">Date received</label>
-      <input id="fund-date" type="date" max={sentMax(sent, today)} value={draft.date} onChange={(e) => { update({ date: e.target.value }); unmend(); }} />
+      <input id="fund-date" type="date" max={sentMax(sent, today, sentDate)} value={draft.date} onChange={(e) => { update({ date: e.target.value }); unmend(); }} />
       {mended && <DateReset />}
       <MethodChoice name="fund-method" value={draft.method} onChange={(m) => update({ method: m })} />
       <label htmlFor="fund-ref">Reference (optional)</label>
