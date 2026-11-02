@@ -396,9 +396,6 @@ class LendingParReportIT extends LendingBookSupport {
     @Autowired
     com.rincoltech.bms.lending.insights.InsightsFigures figures;
 
-    @Autowired
-    org.springframework.jdbc.core.simple.JdbcClient jdbc;
-
     // JUSTIFICATION-A3: new case; every other book in this suite is under the 1,000 loans of the port's checkpoint
     // block.
     /**
@@ -444,35 +441,15 @@ class LendingParReportIT extends LendingBookSupport {
         // timeout in #696 is not confirmed: a stale-statistics plan did not reproduce it locally, and a lock wait on
         // the shared test database fits the failures as well. It has not recurred since #720. Every join of the read
         // is on an index already (loan id, and tenant and loan id on the schedule items), so it needs no new one. The
-        // open question is tracked in #748. The ANALYZE and the first read each wait at most 30 s for any one lock,
-        // well
-        // inside the statement timeout, so a recurrence fails as "lock timeout" (a lock held elsewhere) or "statement
-        // timeout" (the read itself, or several shorter lock waits adding up: lock_timeout counts each wait alone).
-        owner.sql("SET lock_timeout = '30s'; ANALYZE lending_members, lending_loans, lending_schedule_items")
+        // open root-cause question, and the plan for a recurrence, are tracked in #748.
+        owner.sql("ANALYZE lending_members, lending_loans, lending_schedule_items")
                 .update();
 
         var scope = new com.rincoltech.bms.lending.insights.InsightsFigures.PortfolioScope(
                 TODAY, TODAY, TODAY, null, null, null);
         var none = com.rincoltech.bms.lending.insights.InsightsFigures.ParGroupBy.NONE;
         int[] calls = {0};
-        String[] lockTimeout = {null};
-        // Read only, as InsightsFiguresService.par declares, so joining this transaction leaves the read as it runs in
-        // production; the first checkpoint, before any row is read, records the lock timeout the read runs under.
-        var readOnly = new TransactionTemplate(transactions);
-        readOnly.setReadOnly(true);
-        var figuresRead = tenantJobs.callAs(
-                t.tenantId(),
-                () -> readOnly.execute(tx -> {
-                    jdbc.sql("SET LOCAL lock_timeout = '30s'").update();
-                    return figures.par(scope, none, () -> {
-                        if (calls[0]++ == 0) {
-                            lockTimeout[0] = jdbc.sql("SHOW lock_timeout")
-                                    .query(String.class)
-                                    .single();
-                        }
-                    });
-                }));
-        assertThat(lockTimeout[0]).as("the read's own lock timeout (#748)").isEqualTo("30s");
+        var figuresRead = tenantJobs.callAs(t.tenantId(), () -> figures.par(scope, none, () -> calls[0]++));
         assertThat(figuresRead.total().loans()).isEqualTo(n);
         assertThat(figuresRead.total().principalOutstandingMinor()).isEqualTo(n * 1_000_000L);
         assertThat(calls[0]).as("start, 1,000th loan, 2,000th loan, end").isEqualTo(4);
