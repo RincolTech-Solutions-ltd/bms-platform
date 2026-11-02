@@ -4,7 +4,7 @@
 
 Proposed (2026-11-02, issue #423). Amends ADR-037 decision 7 (the platform allow-list) and builds on ADR-056 (the price book by
 plan), ADR-075 (what a business owes, the reminders and the list for suspension) and ADR-016 (platform changes through definer
-functions). Migration `V125`, directly after `V124` (the retail AI brief, issue #422, ADR-037 amendment of 2026-11-02).
+functions). Migration `V126`, directly after `V125` (the retail AI brief, issue #422, ADR-037 amendment of 2026-11-02).
 
 ## Context
 

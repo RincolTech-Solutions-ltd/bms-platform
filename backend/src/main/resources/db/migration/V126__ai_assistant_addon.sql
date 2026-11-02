@@ -1,5 +1,5 @@
--- V125: the AI assistant as a paid add-on (issue #423, ADR-112). Numbered V125, directly after V124 (the retail AI brief,
--- issue #422); V122 and V123 are claimed by other open pull requests (AGENTS.md). Flyway runs with outOfOrder off, so the
+-- V126: the AI assistant as a paid add-on (issue #423, ADR-112). Numbered V126, directly after V125 (the retail AI brief,
+-- issue #422), in the merge order the coordinator set (AGENTS.md). Flyway runs with outOfOrder off, so the
 -- merger renumbers at merge time if the order changes.
 --
 -- Expand only, safe on a populated database:

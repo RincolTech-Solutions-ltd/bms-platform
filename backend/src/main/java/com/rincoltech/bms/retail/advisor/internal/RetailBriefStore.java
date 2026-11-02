@@ -17,7 +17,7 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * The stored daily retail brief (table {@code retail_ai_briefs}, V124, issue #422): one row per tenant and business date over
+ * The stored daily retail brief (table {@code retail_ai_briefs}, V125, issue #422): one row per tenant and business date over
  * every branch, inserted once. It holds the text our code wrote, never anything the model wrote.
  */
 @Repository

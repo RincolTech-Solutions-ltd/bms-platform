@@ -9,7 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Whether a business may use the assistant (ADR-037 decision 7 as amended by ADR-112, issue #423). The source of truth is the AI
- * assistant add-on, which the platform operator switches on per business ({@code subscriptions.ai_addon}, V125), read again on
+ * assistant add-on, which the platform operator switches on per business ({@code subscriptions.ai_addon}, V126), read again on
  * every call, so a business the operator switches off stops at once. The environment value {@code BMS_AI_ENABLED_TENANTS} stays
  * as the platform's own control: {@code off} is the kill switch (nobody, whatever the add-on), {@code *} lets every business in
  * (a demo host only), and tenant ids (never slugs) are let in beside the add-on, as before it existed. Read at start; a change

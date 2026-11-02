@@ -959,7 +959,7 @@ public class RlsIsolationIT {
                         VALUES (?, current_date, 'fallback', 'validation', 'Summary for a fabricated day.', '[]'::jsonb,
                                 '[]'::jsonb, current_date, now())
                         """).params(t.tenantId()).update();
-        // The stored shop brief (migration V124, #422), the same shape.
+        // The stored shop brief (migration V125, #422), the same shape.
         owner.sql("""
                         INSERT INTO retail_ai_briefs (tenant_id, brief_date, source, reason, summary, points, chips,
                                                       facts_as_of, generated_at)

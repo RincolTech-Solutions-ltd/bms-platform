@@ -1,5 +1,5 @@
--- V124: the retail AI brief (issue #422; ADR-037 as amended for retail). Numbered V124: V122 and V123 are claimed by other
--- open pull requests (AGENTS.md); Flyway runs with outOfOrder off, so the merger renumbers at merge time if the order changes.
+-- V125: the retail AI brief (issue #422; ADR-037 as amended for retail). Numbered V125 in the merge order the coordinator set
+-- (AGENTS.md); Flyway runs with outOfOrder off, so the merger renumbers at merge time if the order changes.
 --
 -- Expand only, safe on a populated database: one new empty tenant table with the standard row-level security and two
 -- permission rows with their default grants. No existing object is touched and no tenant is switched on: the assistant
