@@ -38,7 +38,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * The Resend sender of issue #333 (ADR-115) against a local stand-in for the API: what it sends (the key only in the
+ * The Resend sender of issue #333 (ADR-117) against a local stand-in for the API: what it sends (the key only in the
  * header, the environment and outbox key as the idempotency key, the business's name as the from-name, the row id as a
  * tag), what each answer comes to, the provider choice, the production guard, the staging allow-list, and the same from-name
  * and allow-list on the SMTP path. Fabricated names, addresses and keys only.

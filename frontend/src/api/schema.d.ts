@@ -3589,7 +3589,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Send email to an address again after a bounce, complaint or suppression (ADR-115) */
+        /** Send email to an address again after a bounce, complaint or suppression (ADR-117) */
         post: operations["platformUnsuppressEmail"];
         delete?: never;
         options?: never;
@@ -11382,7 +11382,7 @@ export interface components {
             /** Format: uuid */
             product_id: string;
         };
-        /** @description The latest 100 bounces and complaints Resend reported (issue #333, ADR-115) */
+        /** @description The latest 100 bounces and complaints Resend reported (issue #333, ADR-117) */
         OutboxBounce: {
             /** @description Resend's bounce type, for example Permanent or Transient; null for a complaint */
             bounce_type?: string;
@@ -11428,7 +11428,7 @@ export interface components {
             tenant_id?: string;
         };
         OutboxStatus: {
-            /** @description The latest 100 bounces and complaints Resend reported (issue #333, ADR-115) */
+            /** @description The latest 100 bounces and complaints Resend reported (issue #333, ADR-117) */
             bounces?: components["schemas"]["OutboxBounce"][];
             /** @description Rows per status: pending, sent, failed */
             counts?: {

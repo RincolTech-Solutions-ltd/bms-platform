@@ -18,7 +18,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Email addresses BMS no longer sends to (issue #333, ADR-115 decision 9), kept in the platform audit log with no
+ * Email addresses BMS no longer sends to (issue #333, ADR-117 decision 9), kept in the platform audit log with no
  * migration. A hard bounce, a complaint or Resend's {@code email.suppressed} event writes its row
  * ({@link ResendWebhookController}) with {@code recipient_hash}: the keyed hash of the lower-cased address, HMAC-SHA256
  * under a key derived from the application data key ({@code BMS_DATA_KEY}) with a purpose label of its own, as

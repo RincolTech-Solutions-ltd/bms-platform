@@ -70,7 +70,7 @@ class SmtpEmailChannel implements OutboxChannel {
     private final CurrentTenant tenant;
     private final Letterheads letterheads;
     private final ObjectProvider<EmailAttachments> attachments;
-    /** The addresses not sent to (ADR-115 decision 9); null only in a unit test that builds the sender itself. */
+    /** The addresses not sent to (ADR-117 decision 9); null only in a unit test that builds the sender itself. */
     private final EmailSuppressions suppressions;
 
     /** Without the suppression check: for a unit test that builds the sender itself. */
@@ -152,7 +152,7 @@ class SmtpEmailChannel implements OutboxChannel {
     /**
      * Why this recipient is not sent to, by either sender, or null: off the staging allow-list
      * ({@code not_on_staging_allowlist}), or suppressed after a hard bounce, a complaint or Resend's suppression
-     * ({@code recipient_suppressed}, ADR-115 decision 9). The row is refused and shows on "Messages not sent".
+     * ({@code recipient_suppressed}, ADR-117 decision 9). The row is refused and shows on "Messages not sent".
      */
     String refusal(String recipient) {
         String staging = stagingRefusal(recipient);
@@ -162,7 +162,7 @@ class SmtpEmailChannel implements OutboxChannel {
         return suppressions != null && suppressions.suppressed(recipient) ? "recipient_suppressed" : null;
     }
 
-    /** Sends over SMTP with no refusal check: {@link #send} has made it, or Resend's fallback has (ADR-115 decision 1). */
+    /** Sends over SMTP with no refusal check: {@link #send} has made it, or Resend's fallback has (ADR-117 decision 1). */
     Result transmit(Delivery delivery) throws Exception {
         Properties props = new Properties();
         props.put("mail.transport.protocol", "smtps");
@@ -189,7 +189,7 @@ class SmtpEmailChannel implements OutboxChannel {
     // JUSTIFICATION-A3: the staging allow-list and business from-name are new (#333), shared by both senders.
     /**
      * On staging, or on any host where {@code BMS_MAIL_ALLOWLIST} is set, the reason a recipient is not sent to
-     * ({@code not_on_staging_allowlist}) unless the list names the address or its domain (issue #333, ADR-115); null when
+     * ({@code not_on_staging_allowlist}) unless the list names the address or its domain (issue #333, ADR-117); null when
      * it may be sent. The row is refused, never sent elsewhere, and nothing about the address is logged.
      */
     String stagingRefusal(String recipient) {
@@ -198,7 +198,7 @@ class SmtpEmailChannel implements OutboxChannel {
     }
 
     /**
-     * The From of a row (issue #333, ADR-115): the address of {@code BMS_MAIL_FROM} with the business's name as the
+     * The From of a row (issue #333, ADR-117): the address of {@code BMS_MAIL_FROM} with the business's name as the
      * from-name for a row of a tenant, so a reader sees who wrote; {@code BMS_MAIL_FROM} as set for a platform row. A name
      * that cannot be read (a suspended tenant) falls back to the platform's From, like {@link #brand}.
      */
@@ -304,7 +304,7 @@ class SmtpEmailChannel implements OutboxChannel {
             Session session, String from, Delivery delivery, Body body, EmailAttachments.Attachment attachment)
             throws MessagingException {
         MimeMessage message = new IdMessage(session, messageId(delivery.idempotencyKey()));
-        // Built again from its parts so a business's name is RFC 2047 encoded in the header (ADR-115), not sent as raw
+        // Built again from its parts so a business's name is RFC 2047 encoded in the header (ADR-117), not sent as raw
         // UTF-8, which parsing the string alone would keep.
         InternetAddress sender = new InternetAddress(from, true);
         if (sender.getPersonal() != null) {

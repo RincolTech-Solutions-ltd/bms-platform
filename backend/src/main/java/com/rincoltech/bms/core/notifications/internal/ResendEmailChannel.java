@@ -28,7 +28,7 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Email through the Resend HTTP API (issue #333, ADR-115), the other choice beside SMTP behind the same outbox channel
+ * Email through the Resend HTTP API (issue #333, ADR-117), the other choice beside SMTP behind the same outbox channel
  * ({@code email}): on while {@code BMS_MAIL_PROVIDER=resend} and {@code BMS_RESEND_API_KEY} and {@code BMS_MAIL_FROM} are
  * set. Only one of the two email senders is ever on, and the dispatcher keeps only the senders that are on before it
  * picks one by name, so which bean comes first never matters. The message is the one {@link SmtpEmailChannel} builds (the
@@ -128,7 +128,7 @@ class ResendEmailChannel implements OutboxChannel {
 
     @Override
     public Result send(Delivery delivery) throws Exception {
-        // The staging allow-list and the suppressed addresses, as the SMTP sender checks them (ADR-115 decisions 5, 9).
+        // The staging allow-list and the suppressed addresses, as the SMTP sender checks them (ADR-117 decisions 5, 9).
         String refused = email.refusal(delivery.recipient());
         if (refused != null) {
             return Result.refused(refused);
@@ -244,7 +244,7 @@ class ResendEmailChannel implements OutboxChannel {
 
     // JUSTIFICATION-A3: the no-request-reached-Resend test the #759 lead set for the SMTP fallback (third review, 3).
     /**
-     * The label of a request that got no answer (ADR-115 decisions 1 and 3). {@code resend_unreachable} only when no
+     * The label of a request that got no answer (ADR-117 decisions 1 and 3). {@code resend_unreachable} only when no
      * request can have reached Resend: the connection was refused, had no route or name ({@link java.net.ConnectException}),
      * timed out while connecting, or its TLS handshake failed, all before a byte of the request was sent. Only this label
      * falls back to SMTP. A request sent and not answered in time is {@code resend_timeout}; a connection lost once made

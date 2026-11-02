@@ -78,7 +78,7 @@ internet for the images to show: a host behind an access gate shows the alt text
 email still reads correctly. To check a change, send yourself a password reset and open it in a
 web mail and a phone mail app, in light and dark mode.
 
-### Email through Resend (issue #333, ADR-115)
+### Email through Resend (issue #333, ADR-117)
 
 The sender is `no-reply@rincoltech.com` on the Rincol Resend account. `rincoltech.com` is verified in Resend and its
 records are in Cloudflare (DNS of the `rincoltech.com` zone); do not change them without the owner:
@@ -143,7 +143,7 @@ The `BMS_SMTP_*` values can stay on the host; they are not used while the provid
   "Send again", which within 24 hours ends the same way. It is rare: it needs a lost answer and a change within minutes.
 - **`BMS_RESEND_API_URL`** stays unset on every host. It must be an `https` address; the only exception is a test's
   `http://127.0.0.1` or `http://localhost` stand-in, and production refuses even that at start.
-- **Bounces and complaints (ADR-115 decision 8).** Set it up once per host: in Resend, Webhooks, add the endpoint
+- **Bounces and complaints (ADR-117 decision 8).** Set it up once per host: in Resend, Webhooks, add the endpoint
   `https://<BMS_PLATFORM_HOST>/api/v1/platform/webhooks/resend` with the events `email.bounced`, `email.complained` and
   `email.suppressed`,
   copy its Signing secret (`whsec_...`) into `/opt/bms/.env` as `BMS_RESEND_WEBHOOK_SECRET`, then
@@ -158,7 +158,7 @@ The `BMS_SMTP_*` values can stay on the host; they are not used while the provid
   recipient's domain only and the time; the full address is never stored. Match it to its outbox row by the row id
   (in the platform audit log, action `platform.email.bounced`, `platform.email.complained` or
   `platform.email.suppressed`), or in Resend under Emails by the tag `outbox_id`.
-- **`recipient_suppressed` on "Messages not sent" (ADR-115 decision 9).** An address that bounced hard, complained, or
+- **`recipient_suppressed` on "Messages not sent" (ADR-117 decision 9).** An address that bounced hard, complained, or
   that Resend reported as suppressed is not sent to again by BMS, over Resend or SMTP: each later email to it is refused
   and shows here as failed with `recipient_suppressed`, instead of reading `sent` while Resend drops it. BMS keeps only a
   keyed hash of the address, never the address. A soft bounce (a full mailbox) suppresses nothing. To send to the

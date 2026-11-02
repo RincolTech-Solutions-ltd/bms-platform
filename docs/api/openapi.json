@@ -7233,7 +7233,7 @@
         "required" : [ "member_id", "product_id" ]
       },
       "OutboxBounce" : {
-        "description" : "The latest 100 bounces and complaints Resend reported (issue #333, ADR-115)",
+        "description" : "The latest 100 bounces and complaints Resend reported (issue #333, ADR-117)",
         "properties" : {
           "bounce_type" : {
             "description" : "Resend's bounce type, for example Permanent or Transient; null for a complaint",
@@ -7312,7 +7312,7 @@
       "OutboxStatus" : {
         "properties" : {
           "bounces" : {
-            "description" : "The latest 100 bounces and complaints Resend reported (issue #333, ADR-115)",
+            "description" : "The latest 100 bounces and complaints Resend reported (issue #333, ADR-117)",
             "items" : {
               "$ref" : "#/components/schemas/OutboxBounce"
             },
@@ -34963,7 +34963,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Send email to an address again after a bounce, complaint or suppression (ADR-115)",
+        "summary" : "Send email to an address again after a bounce, complaint or suppression (ADR-117)",
         "tags" : [ "platform" ]
       }
     },

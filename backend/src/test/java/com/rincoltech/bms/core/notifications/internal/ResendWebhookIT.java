@@ -22,7 +22,7 @@ import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
 
 /**
- * The Resend webhook of issue #333 (ADR-115 decision 8) over HTTP: a signed bounce and a signed complaint each become one
+ * The Resend webhook of issue #333 (ADR-117 decision 8) over HTTP: a signed bounce and a signed complaint each become one
  * platform audit row with the outbox row id and the recipient's domain only, a repeat writes nothing more, a wrong
  * signature or an old timestamp gets 401 and writes nothing, and the operator's outbox view lists them. The secret is
  * the test profile's fabricated one; addresses are fabricated.

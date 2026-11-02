@@ -268,7 +268,7 @@ migration) with status only, no details.
   `BMS_SMTP_PASSWORD` and `BMS_MAIL_FROM` (an address) are set, naming the unset ones (ADR-059, issue #426).
   The staging host's `/opt/bms/.env` holds them since 2026-10-06 (issue #89). Outbound traffic is
   SMTPS to the mail provider and HTTPS to `api.telegram.org`; nothing is opened inbound.
-  Email can go by the Resend HTTP API instead (issue #333, ADR-115): `BMS_MAIL_PROVIDER=resend` (default `smtp`; any
+  Email can go by the Resend HTTP API instead (issue #333, ADR-117): `BMS_MAIL_PROVIDER=resend` (default `smtp`; any
   other value stops the start) with `BMS_RESEND_API_KEY`, a send-only key the operator puts on the host, and
   `BMS_MAIL_FROM`; production then needs those two instead of the SMTP values. Outbound traffic is then HTTPS to
   `api.resend.com`, and inbound HTTPS from Resend to `POST /api/v1/platform/webhooks/resend` on the platform host for

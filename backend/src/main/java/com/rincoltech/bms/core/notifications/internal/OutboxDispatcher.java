@@ -236,7 +236,7 @@ class OutboxDispatcher {
                     .optional()
                     .orElse("none");
             if (sentVia != null && recorded.equals("sent")) {
-                // A row sent by another sender than the channel's chosen one (ADR-115 decision 1): the row only says
+                // A row sent by another sender than the channel's chosen one (ADR-117 decision 1): the row only says
                 // sent, so which sender carried it is kept in the platform audit log, with no address and no text.
                 jdbc.sql("""
                                 INSERT INTO platform_audit_log (id, action, tenant_id, data)

@@ -119,7 +119,7 @@ services:
       BMS_SMTP_USER: ${BMS_SMTP_USER:-}
       BMS_SMTP_PASSWORD: ${BMS_SMTP_PASSWORD:-}
       BMS_MAIL_FROM: ${BMS_MAIL_FROM:-}
-      # Email by the Resend HTTP API instead of SMTP (issue #333, ADR-115): BMS_MAIL_PROVIDER=resend and a send-only
+      # Email by the Resend HTTP API instead of SMTP (issue #333, ADR-117): BMS_MAIL_PROVIDER=resend and a send-only
       # key; production then needs the key and BMS_MAIL_FROM instead of the SMTP values.
       BMS_MAIL_PROVIDER: ${BMS_MAIL_PROVIDER:-smtp}
       BMS_RESEND_API_KEY: ${BMS_RESEND_API_KEY:-}

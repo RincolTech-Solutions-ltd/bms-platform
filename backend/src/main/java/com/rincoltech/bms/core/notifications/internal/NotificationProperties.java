@@ -20,7 +20,7 @@ import org.springframework.boot.context.properties.bind.ConstructorBinding;
  * @param telegram {@code BMS_TELEGRAM_BOT_TOKEN}, {@code BMS_TELEGRAM_OPERATOR_CHAT_ID}
  * @param supportContact {@code BMS_SUPPORT_CONTACT}: how a reader reaches support, shown in the footer of every email
  *     (issue #396), for example an address and a phone number; empty by default, and then the line is left out
- * @param mail which sender carries email and who may get it on staging (issue #333, ADR-115)
+ * @param mail which sender carries email and who may get it on staging (issue #333, ADR-117)
  */
 @ConfigurationProperties("bms.notifications")
 record NotificationProperties(Smtp smtp, Telegram telegram, String supportContact, Mail mail) {
@@ -40,7 +40,7 @@ record NotificationProperties(Smtp smtp, Telegram telegram, String supportContac
     }
 
     /**
-     * The production startup guard of the chosen sender (ADR-059, ADR-115): SMTP's own, or for Resend the API key and
+     * The production startup guard of the chosen sender (ADR-059, ADR-117): SMTP's own, or for Resend the API key and
      * {@code BMS_MAIL_FROM}. Names the unset variables, never a value.
      */
     void requireEmailInProduction(String environment) {

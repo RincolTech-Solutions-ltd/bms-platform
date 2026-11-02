@@ -33,7 +33,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * {@code POST /api/v1/platform/webhooks/resend} (issue #333, ADR-115 decision 8): Resend's events about the emails it
+ * {@code POST /api/v1/platform/webhooks/resend} (issue #333, ADR-117 decision 8): Resend's events about the emails it
  * sent. Public by design: Resend calls it, with no session. It trusts nothing it has not checked. The body must carry a
  * Svix signature made with {@code BMS_RESEND_WEBHOOK_SECRET}, over the message id, its timestamp and the exact body, and
  * the timestamp must be within five minutes of now; anything else gets 401 and writes nothing. With the secret unset the
@@ -169,7 +169,7 @@ class ResendWebhookController {
         details.put("recipient_domain", domain(data.path("to")));
         details.put("bounce_type", safe(data.path("bounce").path("type").asString(null)));
         details.put("bounce_subtype", safe(data.path("bounce").path("subType").asString(null)));
-        // A hard bounce, a complaint or a suppressed send stops later sends to the address (ADR-115 decision 9): its
+        // A hard bounce, a complaint or a suppressed send stops later sends to the address (ADR-117 decision 9): its
         // keyed hash, never the address. A soft bounce is a full mailbox or a passing fault and suppresses nothing.
         String address = firstAddress(data.path("to"));
         if (address.contains("@") && (!action.equals(BOUNCED) || "Permanent".equals(details.get("bounce_type")))) {

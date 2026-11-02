@@ -120,7 +120,7 @@ class OutboxController {
 
             List<Failure> failures,
 
-            @Schema(description = "The latest 100 bounces and complaints Resend reported (issue #333, ADR-115)")
+            @Schema(description = "The latest 100 bounces and complaints Resend reported (issue #333, ADR-117)")
             List<Bounce> bounces) {}
 
     @GetMapping
@@ -196,14 +196,14 @@ class OutboxController {
 
     // JUSTIFICATION-A3: the operator's clear of a suppression the #759 lead asked for (third review, must-fix 2).
     /**
-     * Clears the suppression of one address (ADR-115 decision 9): records {@code platform.email.unsuppressed} with the
+     * Clears the suppression of one address (ADR-117 decision 9): records {@code platform.email.unsuppressed} with the
      * address's keyed hash and the operator, so the senders send to it again. The address is in the body, never the path,
      * and is not stored or logged. 409 {@code email_not_suppressed} when it was not suppressed (a typo writes nothing).
      */
     @PostMapping("/unsuppress")
     @RequiresPermission("platform.tenants.manage")
     @Operation(
-            summary = "Send email to an address again after a bounce, complaint or suppression (ADR-115)",
+            summary = "Send email to an address again after a bounce, complaint or suppression (ADR-117)",
             operationId = "platformUnsuppressEmail")
     @Transactional
     public ResponseEntity<Void> unsuppress(@Valid @RequestBody UnsuppressRequest request) {

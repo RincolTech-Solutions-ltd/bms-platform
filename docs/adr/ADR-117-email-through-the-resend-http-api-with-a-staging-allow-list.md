@@ -1,4 +1,4 @@
-# ADR-115: Email through the Resend HTTP API, with each business's name as the from-name and a staging allow-list
+# ADR-117: Email through the Resend HTTP API, with each business's name as the from-name and a staging allow-list
 
 ## Status
 
@@ -6,7 +6,8 @@ Accepted (issue #333; owner decision of 21 Oct 2026, recorded on the issue on 2 
 `no-reply@rincoltech.com` on Resend, `rincoltech.com` is verified there and its SPF, DKIM and DMARC records are live in
 Cloudflare). Builds on ADR-036 (the outbox and its channels), ADR-054 (branded emails) and ADR-059 (email required in
 production). Supersedes the 20 Oct plan on #333 to send through a shared Rincol mail service: the owner chose Resend
-directly. No migration.
+directly. No migration. Written as ADR-115 on pull request #759 and renumbered 117 when main took ADR-115 (the
+savings setting, #768) and ADR-116 (offline reading, #763) first.
 
 ## Context
 

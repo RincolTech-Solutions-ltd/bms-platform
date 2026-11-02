@@ -162,7 +162,7 @@ class OutboxIT extends IntegrationTest {
     }
 
     /**
-     * Issue #333 (ADR-115): with the provider {@code resend} the SMTP sender is off and the dispatcher sends an email row
+     * Issue #333 (ADR-117): with the provider {@code resend} the SMTP sender is off and the dispatcher sends an email row
      * through Resend, whichever of the two {@code email} senders is listed first.
      */
     @Test
@@ -247,7 +247,7 @@ class OutboxIT extends IntegrationTest {
     }
 
     /**
-     * Issue #333 (ADR-115): a 429 from Resend gives the attempt back. The row waits for Retry-After, and the next run sends
+     * Issue #333 (ADR-117): a 429 from Resend gives the attempt back. The row waits for Retry-After, and the next run sends
      * it, so a burst of rate limits never uses up a reset email's three tries.
      */
     @Test
@@ -328,7 +328,7 @@ class OutboxIT extends IntegrationTest {
     EmailSuppressions suppressions;
 
     /**
-     * Issue #333 (ADR-115 decision 9): an address suppressed after a complaint is refused by both senders with
+     * Issue #333 (ADR-117 decision 9): an address suppressed after a complaint is refused by both senders with
      * {@code recipient_suppressed}, so the row is failed on "Messages not sent" and nothing reaches Resend; once an operator
      * clears it, a new row to it is sent.
      */
@@ -410,7 +410,7 @@ class OutboxIT extends IntegrationTest {
     }
 
     /**
-     * Issue #333 (ADR-115 decision 1): with Resend chosen and SMTP still set, a row whose request could not reach Resend
+     * Issue #333 (ADR-117 decision 1): with Resend chosen and SMTP still set, a row whose request could not reach Resend
      * goes by SMTP, is marked sent, and the platform audit log records that SMTP carried it.
      */
     @Test

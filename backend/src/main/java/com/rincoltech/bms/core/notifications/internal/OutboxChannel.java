@@ -54,7 +54,7 @@ interface OutboxChannel {
 
         /**
          * @param via the sender that carried it when not the channel's chosen one (Resend's SMTP fallback,
-         *     ADR-115 decision 1), or null; the dispatcher logs it and records a platform audit row
+         *     ADR-117 decision 1), or null; the dispatcher logs it and records a platform audit row
          */
         record Sent(String via) implements Result {
 
