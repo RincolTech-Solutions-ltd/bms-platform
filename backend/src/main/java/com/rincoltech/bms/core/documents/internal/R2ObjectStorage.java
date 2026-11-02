@@ -87,6 +87,13 @@ class R2ObjectStorage implements ObjectStorage {
     }
 
     @Override
+    public java.util.stream.Stream<Listed> list(String prefix) {
+        // The paginator fetches the next page of 1000 only when the stream reaches it.
+        return s3.listObjectsV2Paginator(b -> b.bucket(bucket).prefix(prefix)).contents().stream()
+                .map(o -> new Listed(o.key(), o.lastModified()));
+    }
+
+    @Override
     public String signedGetUrl(String key, Duration ttl, String downloadName, String contentType) {
         return presigner
                 .presignGetObject(p -> p.signatureDuration(ttl)

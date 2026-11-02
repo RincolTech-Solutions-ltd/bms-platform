@@ -156,6 +156,11 @@ bms:
       access-key-id: ${R2_DOCUMENTS_ACCESS_KEY_ID:}
       secret-access-key: ${R2_DOCUMENTS_SECRET_ACCESS_KEY:}
       bucket: ${R2_DOCUMENTS_BUCKET:}
+  # The daily sweep of orphaned uploads (issue #39): objects under tenants/<id>/upload/ older than 24 hours that no
+  # documents row names. Dry run logs what it would remove and removes nothing.
+  documents:
+    orphan-sweep-enabled: ${BMS_DOCUMENTS_ORPHAN_SWEEP_ENABLED:true}
+    orphan-sweep-dry-run: ${BMS_DOCUMENTS_ORPHAN_SWEEP_DRY_RUN:false}
   # Report runs (ADR-038, docs/specs/client-extras.md sections 6 and 9.1). Not secrets. These are the production
   # defaults; the staging host (a 448 MB container with about 224 MB of heap) sets 1 run, 20000 rows and 8 MiB.
   reports:
