@@ -100,7 +100,7 @@ class RegulatorySummaryReport extends PortfolioReport {
         out.note("The loan book is read from the "
                 + (s.source().equals("live") ? "loan tables" : "nightly snapshot of " + s.to())
                 + " at the end of the period; its PAR 30 and PAR 90 are those of the portfolio at risk report.");
-        out.note("Only active loans are in the book; written-off loans are not.");
+        out.note("Only active loans are in the book; loans written off are not.");
         if (s.savingsMinor() == null) {
             out.note(
                     "Savings and investments are not shown: they belong to no loan officer, and this report covers your"

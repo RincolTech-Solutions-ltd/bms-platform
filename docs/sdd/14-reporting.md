@@ -301,8 +301,8 @@ register is the items as they stand when it is made, under the business date of 
 date (the report says so). Two tables, the short one first so the PDF always prints it whole:
 
 - `flags`: the items with each flag and the items in the register (a total row).
-- `items`, by branch, member number and registration order: branch, member number, the name (only for a holder of
-  `lending.members.read`), type, description, reference, the estimated value given at registration, the latest valuation's market value
+- `items`, by branch, member number and registration order: branch, member number, the name (only in the branches where the requester
+  holds `lending.members.read`, frozen with the run and checked again at download), type, description, reference, the estimated value given at registration, the latest valuation's market value
   and date, custody status, where it is kept, the linked loans with their status in words ("LN0001 (active)"), and its flags.
 
 The flags: **Release overdue**, an item still pledged or in custody that secures at least one loan and whose loans are all closed,

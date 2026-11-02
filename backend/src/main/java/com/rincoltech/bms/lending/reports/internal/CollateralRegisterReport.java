@@ -30,8 +30,8 @@ import org.springframework.stereotype.Component;
  * </ul>
  *
  * The branches are those of {@code lending.reports.members} for the caller, resolved at request time and frozen with the
- * run; the member's name is printed only for a holder of {@code lending.members.read}. A download by someone whose access
- * has narrowed since is refused. The PDF cuts a long register at the row cap with a pointer to the Excel file; the
+ * run; the member's name is printed only in the branches where the requester holds {@code lending.members.read}, frozen
+ * the same way. A download by someone whose access to either has narrowed since is refused. The PDF cuts a long register at the row cap with a pointer to the Excel file; the
  * summary table comes first so it is always printed whole.
  */
 @Component
@@ -121,16 +121,26 @@ class CollateralRegisterReport implements ReportDefinition {
             normalised.put("custody_status", custody);
         }
         Map<String, Object> frozen = new LinkedHashMap<>();
-        frozen.put(
-                "branch_ids",
-                scope == null ? null : scope.stream().map(UUID::toString).toList());
-        frozen.put("names", principal.hasPermission(MEMBERS_READ));
+        frozen.put(BRANCHES, ids(scope));
+        frozen.put(NAME_BRANCHES, ids(principal.branchFilter(MEMBERS_READ, scope)));
         // The register is the items as they stand now; the business date of the request is printed as its date.
         return new Prepared(normalised, frozen, figures.today());
     }
 
+    static final String BRANCHES = "branch_ids";
+    static final String NAME_BRANCHES = "name_branch_ids";
+
+    private static List<String> ids(List<UUID> branches) {
+        return branches == null ? null : branches.stream().map(UUID::toString).toList();
+    }
+
     private static List<UUID> branches(Prepared run) {
-        Object value = run.scope().get("branch_ids");
+        return branches(run, BRANCHES);
+    }
+
+    /** The frozen branches of {@code key}: null for every branch, empty for none. */
+    private static List<UUID> branches(Prepared run, String key) {
+        Object value = run.scope().get(key);
         if (value == null) {
             return null;
         }
@@ -141,17 +151,20 @@ class CollateralRegisterReport implements ReportDefinition {
         return out;
     }
 
-    private static boolean names(Prepared run) {
-        return Boolean.TRUE.equals(run.scope().get("names"));
-    }
-
     @Override
     public boolean stillAllowed(Prepared run) {
         Principal principal = CurrentPrincipal.require();
-        List<UUID> frozen = branches(run);
-        List<UUID> now = principal.branchFilter(PERMISSION, frozen);
-        boolean branchesOk = frozen == null ? now == null : now == null || new HashSet<>(now).containsAll(frozen);
-        return branchesOk && (!names(run) || principal.hasPermission(MEMBERS_READ));
+        return stillCovers(principal, PERMISSION, branches(run))
+                && stillCovers(principal, MEMBERS_READ, branches(run, NAME_BRANCHES));
+    }
+
+    /** True when the caller still holds {@code permission} in every branch the run was made with it in. */
+    private static boolean stillCovers(Principal principal, String permission, List<UUID> frozen) {
+        if (frozen != null && frozen.isEmpty()) {
+            return true;
+        }
+        List<UUID> now = principal.branchFilter(permission, frozen);
+        return frozen == null ? now == null : now == null || new HashSet<>(now).containsAll(frozen);
     }
 
     @Override
@@ -164,7 +177,8 @@ class CollateralRegisterReport implements ReportDefinition {
 
     @Override
     public void query(Prepared prepared, ReportOutput out) {
-        boolean names = names(prepared);
+        List<UUID> nameBranches = branches(prepared, NAME_BRANCHES);
+        boolean names = nameBranches == null || !nameBranches.isEmpty();
         out.note(
                 "The items as they stand when the report is made; custody and values are not read back to a past date.");
         out.note(RELEASE_OVERDUE + ": still pledged or in our custody, and every loan it secures is closed.");
@@ -174,7 +188,7 @@ class CollateralRegisterReport implements ReportDefinition {
         // The counts are written first, from a first pass over the items, so the PDF prints them whole however long
         // the register is.
         long[] counts = new long[4];
-        CollateralFilter filter = filter(prepared, names);
+        CollateralFilter filter = filter(prepared, nameBranches);
         figures.collateral(filter, out::checkpoint, l -> {
             counts[0]++;
             counts[1] += l.releaseOverdue() ? 1 : 0;
@@ -238,11 +252,11 @@ class CollateralRegisterReport implements ReportDefinition {
         });
     }
 
-    private static CollateralFilter filter(Prepared prepared, boolean names) {
+    private static CollateralFilter filter(Prepared prepared, List<UUID> nameBranches) {
         return new CollateralFilter(
                 branches(prepared),
                 (String) prepared.params().get("collateral_type"),
                 (String) prepared.params().get("custody_status"),
-                names);
+                nameBranches);
     }
 }

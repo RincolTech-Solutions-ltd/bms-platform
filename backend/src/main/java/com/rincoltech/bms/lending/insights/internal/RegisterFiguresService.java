@@ -152,7 +152,8 @@ class RegisterFiguresService implements RegisterFigures {
             p.put("custody", filter.custodyStatus());
         }
         String sql = """
-                SELECT b.name AS branch, m.member_no, m.full_name, ci.collateral_type, ci.description, ci.reference_no,
+                SELECT ci.branch_id, b.name AS branch, m.member_no, m.full_name, ci.collateral_type, ci.description,
+                       ci.reference_no,
                        ci.estimated_value_minor, v.market_value_minor, v.valued_on, ci.custody_status, ci.storage_location,
                        (SELECT string_agg(l.loan_no || ':' || l.status, ',' ORDER BY l.loan_no)
                           FROM lending_loan_collateral lc JOIN lending_loans l ON l.id = lc.loan_id
@@ -182,7 +183,10 @@ class RegisterFiguresService implements RegisterFigures {
                 .query((rs, n) -> new CollateralLine(
                         rs.getString("branch"),
                         rs.getString("member_no"),
-                        filter.names() ? rs.getString("full_name") : null,
+                        filter.nameBranchIds() == null
+                                        || filter.nameBranchIds().contains(rs.getObject("branch_id", UUID.class))
+                                ? rs.getString("full_name")
+                                : null,
                         TYPES.getOrDefault(rs.getString("collateral_type"), rs.getString("collateral_type")),
                         rs.getString("description"),
                         rs.getString("reference_no"),

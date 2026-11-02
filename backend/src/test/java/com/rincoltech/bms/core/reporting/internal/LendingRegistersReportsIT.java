@@ -6,6 +6,7 @@ import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.core.reporting.internal.XlsxReader.Sheet;
 import java.sql.Date;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -160,6 +161,53 @@ class LendingRegistersReportsIT extends LendingBookSupport {
         assertThat(items.get("columns").toString()).doesNotContain("member_name");
         assertThat(rows(items)).hasSize(2).allMatch(r -> r.startsWith("[\"Test Branch Two\""));
         assertThat(rows(table(file, "flags"))).contains("[\"Items in the register\",2]");
+    }
+
+    // JUSTIFICATION-A3: as the review of #750 asked for the arrears list, names follow the branches of their permission
+    // and a download is refused once that access narrows.
+
+    @Test
+    void namesFollowTheBranchesOfMemberAccessAndANarrowedDownloadIsRefused() throws Exception {
+        Book b = registerBook();
+        UUID user = UUID.randomUUID();
+        var h = headers(b.t(), user, MEMBERS);
+        h.set("X-Dev-Scopes", "lending.members.read=" + b.t().headOffice());
+        var posted = http.exchange(
+                "/api/v1/report-runs",
+                HttpMethod.POST,
+                new HttpEntity<>(body(REGISTER, Map.of(), "json"), h),
+                JsonNode.class);
+        assertThat(posted.getStatusCode().value()).as("%s", posted.getBody()).isEqualTo(202);
+        drain();
+        String doc = run(b.t(), user, MEMBERS, posted.getBody().get("id").asString())
+                .get("document_id")
+                .asString();
+        var url = http.exchange(
+                "/api/v1/documents/" + doc + "/download-url", HttpMethod.POST, new HttpEntity<>(h), JsonNode.class);
+        assertThat(url.getStatusCode().value()).as("%s", url.getBody()).isEqualTo(200);
+        var plain = new org.springframework.http.HttpHeaders();
+        plain.add("X-Tenant", b.t().slug());
+        JsonNode file = mapper.readTree(http.exchange(
+                        java.net.URI.create(
+                                http.getRootUri() + url.getBody().get("url").asString()),
+                        HttpMethod.GET,
+                        new HttpEntity<>(plain),
+                        String.class)
+                .getBody());
+        List<String> items = rows(table(file, "items"));
+        assertThat(items.get(0)).startsWith("[\"Head Office\",\"MLN0001\",\"Test Borrower LN0001\"");
+        assertThat(items.get(3)).startsWith("[\"Test Branch Two\",\"MLN0004\",null,");
+        assertThat(items.get(4)).startsWith("[\"Test Branch Two\",\"MLN0005\",null,");
+
+        // Member access gone: the file made with names is refused.
+        assertThat(http.exchange(
+                                "/api/v1/documents/" + doc + "/download-url",
+                                HttpMethod.POST,
+                                new HttpEntity<>(headers(b.t(), user, "lending.reports.members")),
+                                JsonNode.class)
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(404);
     }
 
     @Test

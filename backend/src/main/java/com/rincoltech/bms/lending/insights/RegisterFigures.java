@@ -42,12 +42,13 @@ public interface RegisterFigures {
      * @param branchIds the branches, null for every branch, empty for none
      * @param type one of {@link #COLLATERAL_TYPES}, or null for all
      * @param custodyStatus one of {@link #CUSTODY_STATUSES}, or null for all
-     * @param names whether the member's name is printed
+     * @param nameBranchIds the branches whose items print the member's name, null for every branch, empty for none
      */
-    record CollateralFilter(List<UUID> branchIds, String type, String custodyStatus, boolean names) {
+    record CollateralFilter(List<UUID> branchIds, String type, String custodyStatus, List<UUID> nameBranchIds) {
 
         public CollateralFilter {
             branchIds = branchIds == null ? null : List.copyOf(branchIds);
+            nameBranchIds = nameBranchIds == null ? null : List.copyOf(nameBranchIds);
         }
     }
 
