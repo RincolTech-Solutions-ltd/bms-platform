@@ -266,6 +266,26 @@ describe('Record a sale offline', () => {
   });
 
   // JUSTIFICATION-A3: a new test the review asks for (#769), not a mechanism.
+  it("dates an item scanned from the phone's copy as of the copy (issue #769)", async () => {
+    createSale.mockRejectedValue(new TypeError('Failed to fetch'));
+    const labelled = { ...bulb, barcodes: [{ id: 'b-bulb', product_id: 'p2', code: 'IN00007690', format: 'code128', generated: true }] } as Product;
+    const offline = testOffline(seller, { online: false, catalogue: { ...catalogue, products: { [branch]: [labelled] } } });
+    if (!offline) throw new Error('a seller sells offline');
+    screenWith(offline);
+    // The lookup fails with no network, so the scan finds the bulb in the copy saved at 09:14 on 22 Oct.
+    const box = await screen.findByLabelText('Scan here');
+    fireEvent.change(box, { target: { value: 'IN00007690' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await waitFor(() => expect(screen.getAllByRole('textbox').some((i) => (i as HTMLInputElement).value === '1')).toBe(true));
+    act(() => offline.connectivity.set(true));
+    const save = (await screen.findByRole('button', { name: /^Record sale/ })) as HTMLButtonElement;
+    await waitFor(() => expect(ready(save)).toBe(true));
+    fireEvent.click(save);
+    expect(await screen.findByText('Sale saved on this phone')).toBeTruthy();
+    expect(offline.engine.snapshot().items[0]?.request.prices_as_of).toBe(catalogue.pricesAsOf);
+  });
+
+  // JUSTIFICATION-A3: a new test the review asks for (#769), not a mechanism.
   it("dates the kept copy's prices when the items were read, not when Save was pressed (issue #769)", async () => {
     createSale.mockRejectedValue(new TypeError('Failed to fetch'));
     listProducts.mockResolvedValue([bulb]);

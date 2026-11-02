@@ -459,8 +459,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
     drop(h.product.id);
     countsChanged();
     for (const key of [['retail', 'products'], ['retail', 'stocked-branches']]) void queryClient.invalidateQueries({ queryKey: key });
-    // Its price was read with an earlier search whose time is not kept here: not known (#769).
-    add({ ...h.product, qty: qtyString(h.counted) }, undefined);
+    add({ ...h.product, qty: qtyString(h.counted) }, h.readAt);
   };
   const countFailed = (h: HeldCount, e: unknown) => {
     if (e instanceof StaleCount) return;
@@ -507,7 +506,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
         if (stale()) throw new StaleCount();
         const expected = here?.qty ?? '0';
         if (bigDrop({ expected_qty: expected, counted_qty: qtyString(counted) })) {
-          setHeld((l) => [...l.filter((x) => x.product.id !== product.id), { product, counted, expected }]);
+          setHeld((l) => [...l.filter((x) => x.product.id !== product.id), { product, counted, expected, readAt: new Date().toISOString() }]);
           asks = true;
         } else {
           const count = await retail.createStocktake({ branch_id: branchId, lines: [{ product_id: product.id ?? '', counted_qty: qtyString(counted) }], note: SELL_COUNT_NOTE });
@@ -943,7 +942,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued, startIt
 }
 
 /** Issue #656: a new item counted on Sell, waiting for its tick. */
-type HeldCount = { product: Product; counted: number; expected: string };
+/** `readAt` (#769): when the item was read with its balance, just before the count was held. */
+type HeldCount = { product: Product; counted: number; expected: string; readAt: string };
 
 /** Issue #656: the answer of a count pressed before the sale was cleared or the screen closed, which is ignored. */
 class StaleCount extends Error {}

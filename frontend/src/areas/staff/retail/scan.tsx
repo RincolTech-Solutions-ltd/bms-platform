@@ -123,13 +123,20 @@ export function ScanBar({ id, branchId, onFound, autoFocus = false, toasts = fal
       // No answer from the server (offline): the items this screen has already read carry their barcodes.
       // The phone's offline catalogue (issue #458) holds the items of each selling branch with their barcodes too.
       const onPhone = offline?.catalogue?.products ?? {};
-      const cached = [
-        ...(branchId ? onPhone[branchId] ?? [] : Object.values(onPhone).flat()),
-        ...queryClient.getQueriesData<Product[] | { items?: Product[] }>({ queryKey: ['retail', 'products'] })
-          .flatMap(([, data]) => (Array.isArray(data) ? data : data?.items ?? [])),
-      ];
-      const hit = error instanceof TypeError ? findByBarcodeIn(cached, code) : null;
-      if (hit) found(hit.product, hit.unitId);
+      // Each copy's item keeps when that copy was read (issue #769): the phone's copy as of its prices, a screen's answer
+      // as of its query.
+      const readAt = new Map<Product, number>();
+      const phoneAt = offline?.catalogue?.pricesAsOf ? Date.parse(offline.catalogue.pricesAsOf) : undefined;
+      const phone = branchId ? onPhone[branchId] ?? [] : Object.values(onPhone).flat();
+      if (phoneAt) phone.forEach((p) => readAt.set(p, phoneAt));
+      const screens = queryClient.getQueryCache().findAll({ queryKey: ['retail', 'products'] }).flatMap((q) => {
+        const data = q.state.data as Product[] | { items?: Product[] } | undefined;
+        const rows = Array.isArray(data) ? data : data?.items ?? [];
+        rows.forEach((p) => q.state.dataUpdatedAt && readAt.set(p, q.state.dataUpdatedAt));
+        return rows;
+      });
+      const hit = error instanceof TypeError ? findByBarcodeIn([...phone, ...screens], code) : null;
+      if (hit) found(hit.product, hit.unitId, readAt.get(hit.product));
       else {
         feedback(false);
         setOutcome({ kind: 'failed', error });
