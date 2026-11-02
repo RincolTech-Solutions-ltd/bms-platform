@@ -116,7 +116,9 @@ types, which can be a real person's.
    webhook rows of a hard bounce (`bounce.type` `Permanent`), a complaint and an `email.suppressed` event also hold
    `recipient_hash`: HMAC-SHA256 of the address, stripped and in lower case, under a key derived from the existing data
    key (`BMS_DATA_KEY`) with its own purpose label (`bms.email.recipient-hash.v1`), as ADR-036 hashes SMS numbers. The
-   address itself is never stored, and only a holder of the data key can test one. A soft bounce carries no hash and
+   address itself is never stored, and only a holder of the data key can test one. The hash key is never random: a
+   blank `BMS_DATA_KEY` stops the start outside the dev and test profiles (`EmailSuppressionsTest`), so a restart can
+   never silently forget every suppression, and dev and test use one fixed key of their own. A soft bounce carries no hash and
    suppresses nothing. Before sending, both senders (`SmtpEmailChannel` and `ResendEmailChannel`, through one shared
    check after the staging allow-list) read the newest platform audit row carrying that hash among
    `platform.email.bounced`, `platform.email.complained`, `platform.email.suppressed` and `platform.email.unsuppressed`;

@@ -4,7 +4,6 @@ import com.rincoltech.bms.core.audit.PlatformAuditLog;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Map;
@@ -13,6 +12,8 @@ import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -28,7 +29,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  * {@code platform.email.unsuppressed} row (OutboxController) clears it, and a later bounce suppresses it again. Both
  * email senders ask {@link #suppressed} before they send, and refuse with {@code recipient_suppressed}, so the row shows
  * on "Messages not sent" instead of reading {@code sent} while Resend drops it. A soft bounce carries no hash and
- * suppresses nothing. In the dev and test profiles a blank data key gives a random key per run.
+ * suppresses nothing. A blank data key stops the start outside the dev and test profiles, and is never replaced by a
+ * random key; dev and test use one fixed key of their own.
  */
 @Component
 class EmailSuppressions {
@@ -43,6 +45,8 @@ class EmailSuppressions {
             UNSUPPRESSED);
 
     private static final String PURPOSE = "bms.email.recipient-hash.v1";
+    /** The key of the dev and test profiles when no data key is set: public, fixed, and refused everywhere else. */
+    private static final String DEV_AND_TEST_KEY = "bms-dev-and-test-only-email-suppression-key";
 
     private final PlatformAuditLog audit;
     private final TransactionTemplate reads;
@@ -51,17 +55,22 @@ class EmailSuppressions {
     EmailSuppressions(
             PlatformAuditLog audit,
             PlatformTransactionManager transactionManager,
-            @Value("${bms.auth.data-key:}") String dataKey) {
+            @Value("${bms.auth.data-key:}") String dataKey,
+            Environment environment) {
         this.audit = audit;
         this.reads = new TransactionTemplate(transactionManager);
         this.reads.setReadOnly(true);
         if (dataKey == null || dataKey.isBlank()) {
-            byte[] random = new byte[32];
-            new SecureRandom().nextBytes(random);
-            this.key = random;
-        } else {
-            this.key = hmac(dataKey.getBytes(StandardCharsets.UTF_8), PURPOSE.getBytes(StandardCharsets.UTF_8));
+            // Never a random key: a restart would silently forget every suppression. Outside dev and test the start
+            // stops; dev and test use one fixed key, so their suppressions survive a restart too.
+            if (!environment.acceptsProfiles(Profiles.of("dev", "test"))) {
+                throw new IllegalStateException(
+                        "BMS_DATA_KEY must be set outside the dev and test profiles: suppressed email addresses are"
+                                + " matched by a hash under it");
+            }
+            dataKey = DEV_AND_TEST_KEY;
         }
+        this.key = hmac(dataKey.getBytes(StandardCharsets.UTF_8), PURPOSE.getBytes(StandardCharsets.UTF_8));
     }
 
     /** 64 lower case hex characters for the address, stripped and in lower case. */
