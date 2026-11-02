@@ -46,8 +46,8 @@ sometimes twice: the banner under the bar and the screen's own red error. The ow
    the business's time zone; a person who does not sell reads "You are offline. You see what was loaded before."). Offline, a
    read that could not reach the server draws no error of its own (decision 6), and the Refresh button no longer repeats the
    time.
-8. **Home says Sell works offline.** The Shop card on Home carries one short line for whoever may sell: "Sell works offline too.
-   Sales made with no data stay on this phone and send when you are back online."
+8. **Home says Sell works offline.** The Shop card on Home carries one short line for whoever may sell: "Sell works offline too:
+   your sales send when you are back online."
 
 ## Consequences
 

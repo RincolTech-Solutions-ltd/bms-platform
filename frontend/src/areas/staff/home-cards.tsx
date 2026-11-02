@@ -140,7 +140,7 @@ function ShopCard({ parts, home }: { parts: Parts; home: Summary }) {
         {parts.lowStock && answered(home, 'low_stock') && <Figure label="Low on stock" query={home}>{() => plural(home.data?.low_stock ?? 0, 'item', 'items')}</Figure>}
         {parts.orders && (!parts.summary || answered(home, 'open_orders')) && <Figure label="Open customer orders" query={ordersFrom}>{() => open}</Figure>}
       </dl>
-      {sells && <p className="hint">Sell works offline too. Sales made with no data stay on this phone and send when you are back online.</p>}
+      {sells && <p className="hint">Sell works offline too: your sales send when you are back online.</p>}
       <Link className="link-row" to="/staff/retail">Open the shop<RowChevron /></Link>
     </article>
   );

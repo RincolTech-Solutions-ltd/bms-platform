@@ -173,7 +173,7 @@ describe('the Home cards (issue #471)', () => {
   it('tells whoever may sell that Sell works offline, and nobody else (issue #763)', async () => {
     show(admin as unknown as Me);
     const shop = await screen.findByRole('article', { name: 'Shop' });
-    expect(within(shop).getByText(/^Sell works offline too\./)).toBeTruthy();
+    expect(within(shop).getByText('Sell works offline too: your sales send when you are back online.')).toBeTruthy();
     cleanup();
     const watcher = { ...admin, permissions: (admin.permissions ?? []).filter((p) => p !== 'retail.sale.create') } as unknown as Me;
     show(watcher);

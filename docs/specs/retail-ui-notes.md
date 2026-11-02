@@ -1676,8 +1676,7 @@ profile, refreshed when the app comes online, at sign-in and every 15 minutes (`
   (neutral grey, the info icon; "You are offline. You see what was loaded before." for a person who does not sell). No red
   error under it, and the Refresh button says only **Offline**. The copy is per business and person, capped, never lending, and
   goes at sign-out.
-- **Home** says on the Shop card, to whoever may sell: "Sell works offline too. Sales made with no data stay on this phone and
-  send when you are back online."
+- **Home** says on the Shop card, to whoever may sell: "Sell works offline too: your sales send when you are back online."
 - The tour `retail-sales` (version 13) and `page-sale` (version 2) gain the step **Online or offline** on the dot.
 
 Tests: `outbox.test.ts`, `sync-engine.test.ts`, `catalogue.test.ts`, `offline-sale.dom.test.tsx`, `sync-status.dom.test.tsx`,

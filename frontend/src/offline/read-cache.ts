@@ -177,7 +177,11 @@ export function followConnectivity(client: QueryClient, connectivity: Connectivi
     tell();
     return connectivity.subscribe(tell);
   });
-  return () => onlineManager.setEventListener(browserEvents);
+  return () => {
+    onlineManager.setEventListener(browserEvents);
+    // The browser's own state again, so a later sign-in never starts paused by the last person's ping.
+    onlineManager.setOnline(typeof navigator === 'undefined' || navigator.onLine !== false);
+  };
 }
 
 /**
