@@ -3,8 +3,9 @@
 -- FR-PAY-05, FR-PAY-06, FR-PAY-11). Flyway runs with outOfOrder off: V122 is the onboarding link fix (#747), V123 the
 -- unallocated receipts queue (#315, part 1) and this file takes V124. The number is checked again at merge time.
 --
--- Expand only, safe on a populated database. Five tenant tables, all created empty, one permission, and two indexes on
--- `payment_intents` (item 5); no existing column, constraint or row is touched:
+-- Expand only, safe on a populated database. Five tenant tables, all created empty, one permission, and four indexes on
+-- existing tables (item 5): two on `payment_intents`, one on `lending_loan_transactions` and one on
+-- `lending_savings_transactions`. No existing column, constraint or row is touched:
 --
 --   1. `payment_statements`: one row per merchant statement a person uploaded (CSV). Identified by the SHA-256 of its bytes, unique
 --      per tenant, so the same file uploaded twice is one statement.
@@ -22,7 +23,9 @@
 --      (audited; the line itself is never changed).
 --   5. Two expression indexes on `payment_intents`, over `(tenant_id, lower(provider_reference))` and `(tenant_id,
 --      upper(confirmation_code))`, which the statement matching reads through (a lookup by a lower-cased value cannot use the plain
---      unique index).
+--      unique index). And two partial indexes over `(tenant_id, upper(btrim(external_reference)))`,
+--      `lending_loan_transactions_manual_reference` and `lending_savings_transactions_manual_reference`, which the manual receipt
+--      duplicate check reads through. All four are built without CONCURRENTLY (see the locks below and runbook 4f, step 6).
 --   6. The permission `core.payments.manage` (tenant admin and accountant): upload a statement, run the reconciliation now, and mark a
 --      line as outside this system; all three need the permission in every branch. Reading the report needs `core.payments.read`,
 --      which V2 seeded.
