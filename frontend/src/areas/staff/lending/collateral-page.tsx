@@ -218,7 +218,7 @@ function ReleaseRequest({ id, version, onDone }: { id: string; version: number; 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (busy || by.trim() === '') return;
-    // toast-exempt: success screen, the request sent screen replaces the form
+    // toast-exempt: it only asks for approval, and the note in its place says a second person must agree first
     setBusy(true);
     setFailure(null);
     try {

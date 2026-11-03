@@ -404,7 +404,10 @@ function doubled(text: string, hooks: string[] = mutationHooks(text), hookOpts =
 }
 
 const hookOpts = new Map(sources.flatMap(({ text }) => hookOptions(text)));
-const staff = sources.filter((s) => s.file.startsWith('areas/staff/'));
+// Issue #824: every screen with a mutation, so the operator console and the offline sales screen too. Writes by hand are
+// checked in the staff area and the offline sales screen.
+const staff = sources.filter((s) => /^(?:areas\/staff|areas\/platform|offline)\//.test(s.file));
+const shop = staff.filter((s) => !s.file.startsWith('areas/platform/'));
 
 describe('success toast guard', () => {
   it('finds the staff mutations it guards', () => {
@@ -420,12 +423,12 @@ describe('success toast guard', () => {
   });
 
   it('no staff write by hand says its success twice, in a toast and a success note', () => {
-    expect(staff.flatMap(({ file, text }) => doubledByHand(text).map((m) => `${file}:${m}`))).toEqual([]);
+    expect(shop.flatMap(({ file, text }) => doubledByHand(text).map((m) => `${file}:${m}`))).toEqual([]);
   });
 
   it('every staff write by hand says in a toast when it worked, or says why not', () => {
-    expect(staff.flatMap(({ text }) => [...text.matchAll(BUSY_ON)]).length).toBeGreaterThan(20);
-    expect(staff.flatMap(({ file, text }) => silentByHand(text).map((m) => `${file}:${m}`))).toEqual([]);
+    expect(shop.flatMap(({ text }) => [...text.matchAll(BUSY_ON)]).length).toBeGreaterThan(20);
+    expect(shop.flatMap(({ file, text }) => silentByHand(text).map((m) => `${file}:${m}`))).toEqual([]);
   });
 
   it('never takes a success screen as a reason to say nothing (#824)', () => {

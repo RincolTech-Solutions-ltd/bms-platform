@@ -22,8 +22,10 @@ function Business({ t }: { t: TenantWithoutOwner }) {
   const [code, setCode] = useState('');
   const [codeProblem, setCodeProblem] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  // success-screen: the note saying who is now the owner takes the place of the choice
   const set = useMutation({
     mutationFn: (reason: string) => makeOwner(t.tenant_id ?? '', chosen?.id ?? '', code.trim(), reason),
+    meta: { success: 'Owner set' },
     onSuccess: () => {
       setDone(`${chosen?.full_name ?? 'The administrator'} is now the owner of ${t.name ?? 'the business'}.`);
       setChosen(null);
