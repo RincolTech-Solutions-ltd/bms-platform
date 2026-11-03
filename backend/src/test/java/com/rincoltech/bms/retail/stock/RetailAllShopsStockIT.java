@@ -1,0 +1,152 @@
+package com.rincoltech.bms.retail.stock;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.rincoltech.bms.IntegrationTest;
+import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.retail.RetailTestSupport;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import tools.jackson.databind.JsonNode;
+
+/**
+ * Issue #807 (ADR-119): My stock lists, on every row, the quantity in every active shop of the business, this shop first and
+ * marked here, to everyone who may read stock at the shop listed, scoped to one shop or not. Quantities only: no cost of any
+ * shop for a role without it. Read for the whole page in one request; only the caller's own business. The owner's switch
+ * {@code other_shops_stock} (on by default) takes the list away. Figures fabricated.
+ */
+class RetailAllShopsStockIT extends IntegrationTest {
+
+    /** A seller: stock read and selling, no cost, scoped to head office only. */
+    static final String SELLER = RetailTestSupport.SALES;
+
+    @Autowired
+    TestRestTemplate http;
+
+    TestDatabase.Fixture t;
+    RetailTestSupport api;
+    UUID product;
+
+    @BeforeEach
+    void setUp() {
+        t = TestDatabase.tenant("all-shops", false, true);
+        api = new RetailTestSupport(http, t);
+        product = api.product("ASH-1", 400, 700);
+        api.stockUp(t.secondBranch(), product, "1");
+    }
+
+    /** The stock of head office, read by a seller whose role covers head office only. */
+    JsonNode sellerStock() {
+        ResponseEntity<JsonNode> r = api.call(
+                HttpMethod.GET,
+                "/stock?branch_id=" + t.headOffice(),
+                null,
+                SELLER,
+                t.headOffice().toString(),
+                Map.of());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+        return r.getBody();
+    }
+
+    JsonNode row(JsonNode page, UUID id) {
+        for (JsonNode item : page.get("items")) {
+            if (item.get("product_id").asString().equals(id.toString())) {
+                return item;
+            }
+        }
+        throw new AssertionError("no row for " + id + " in " + page);
+    }
+
+    @Test
+    void aSellerAtOneShopSeesEveryShopsCountHereFirst() {
+        JsonNode item = row(sellerStock(), product);
+        assertThat(item.get("qty").asString()).isEqualTo("0.000");
+        JsonNode shops = item.get("shops");
+        assertThat(shops).hasSize(2);
+        assertThat(shops.get(0).get("branch_id").asString())
+                .isEqualTo(t.headOffice().toString());
+        assertThat(shops.get(0).get("here").asBoolean()).isTrue();
+        assertThat(shops.get(0).get("qty").asString())
+                .as("a shop with none shows 0")
+                .isEqualTo("0.000");
+        assertThat(shops.get(1).get("branch_id").asString())
+                .isEqualTo(t.secondBranch().toString());
+        assertThat(shops.get(1).get("here").asBoolean()).isFalse();
+        assertThat(shops.get(1).get("qty").asString()).isEqualTo("1.000");
+        assertThat(shops.get(1).get("negative").asBoolean()).isFalse();
+        assertThat(shops.get(1).get("name").asString()).isEqualTo("Test Branch Two");
+    }
+
+    @Test
+    void quantitiesOnlyAndNoCostForARoleWithoutIt() {
+        JsonNode item = row(sellerStock(), product);
+        assertThat(item.has("cost_minor")).isFalse();
+        assertThat(item.get("sell_minor").asLong())
+                .as("selling price as before")
+                .isEqualTo(700);
+        for (JsonNode shop : item.get("shops")) {
+            List<String> fields = new ArrayList<>(shop.propertyNames());
+            assertThat(fields).containsExactlyInAnyOrder("branch_id", "name", "qty", "negative", "here");
+        }
+    }
+
+    @Test
+    void onlyTheCallersOwnBusiness() {
+        TestDatabase.Fixture other = TestDatabase.tenant("all-shops-other", false, true);
+        RetailTestSupport elsewhere = new RetailTestSupport(http, other);
+        UUID theirs = elsewhere.product("ASH-1", 400, 700);
+        elsewhere.stockUp(other.headOffice(), theirs, "9");
+        elsewhere.stockUp(other.secondBranch(), theirs, "9");
+
+        JsonNode page = sellerStock();
+        List<String> ours = List.of(t.headOffice().toString(), t.secondBranch().toString());
+        for (JsonNode item : page.get("items")) {
+            assertThat(item.get("product_id").asString()).isNotEqualTo(theirs.toString());
+            for (JsonNode shop : item.get("shops")) {
+                assertThat(ours).contains(shop.get("branch_id").asString());
+            }
+        }
+        // Another business's shop cannot be asked for by its id.
+        ResponseEntity<JsonNode> theirShop =
+                api.call(HttpMethod.GET, "/stock?branch_id=" + other.secondBranch(), null, SELLER, "*", Map.of());
+        assertThat(theirShop.getStatusCode()).isNotEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void theOwnerSwitchIsOnByDefaultAndOffTakesTheListAway() {
+        ResponseEntity<JsonNode> read = api.get("/settings/capabilities", "core.settings.manage");
+        assertThat(read.getBody().get("other_shops_stock").asBoolean()).isTrue();
+
+        ResponseEntity<JsonNode> off = api.call(
+                HttpMethod.PUT,
+                "/settings/capabilities",
+                Map.of("other_shops_stock", false),
+                "core.settings.manage",
+                "*",
+                Map.of("If-Match", read.getHeaders().getETag()));
+        assertThat(off.getStatusCode()).as("%s", off.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(off.getBody().get("other_shops_stock").asBoolean()).isFalse();
+
+        JsonNode item = row(sellerStock(), product);
+        assertThat(item.has("shops")).isFalse();
+        assertThat(item.get("qty").asString()).isEqualTo("0.000");
+
+        ResponseEntity<JsonNode> wrong = api.call(
+                HttpMethod.PUT,
+                "/settings/capabilities",
+                Map.of("other_shops_stock", "yes"),
+                "core.settings.manage",
+                "*",
+                Map.of("If-Match", off.getHeaders().getETag()));
+        assertThat(wrong.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+}
