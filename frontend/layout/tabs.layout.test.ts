@@ -84,10 +84,21 @@ describe.each([360, 412])('the bottom tabs at %ipx wide', (width) => {
       const page = await open(width, font, 12, true);
       const toast = await box(page, '.toast');
       expect(toast.y + toast.height).toBeLessThanOrEqual((await box(page, '.action-bar')).y + 0.5);
+      expect(toast.y + toast.height).toBeLessThanOrEqual((await box(page, 'nav.tab-bar')).y + 0.5);
       expect(toast.x).toBeGreaterThanOrEqual(15.5);
       expect(toast.x + toast.width).toBeLessThanOrEqual(width - 15.5);
-      const look = await page.locator('.toast').evaluate((t) => [getComputedStyle(t).color, getComputedStyle(t).backgroundImage, getComputedStyle(t).borderLeftWidth]);
-      expect(look).toEqual(['rgb(255, 255, 255)', 'none', '0px']);
+      const style = () => page.locator('.toast').evaluate((t) => { const s = getComputedStyle(t); return [s.color, s.backgroundImage, s.borderLeftWidth, s.backgroundColor, s.borderTopLeftRadius, s.animationDuration]; });
+      const [color, image, edge, background, radius] = await style();
+      expect([color, image, edge]).toEqual(['rgb(255, 255, 255)', 'none', '0px']);
+      // A dark neutral pill (the cool near black --rt-grey-900): every channel low and close together, no colour, and the
+      // corners rounded to at least half its height.
+      const rgb = (background ?? '').match(/\d+/g)?.slice(0, 3).map(Number) ?? [];
+      expect(Math.max(...rgb)).toBeLessThan(80);
+      expect(Math.max(...rgb) - Math.min(...rgb)).toBeLessThan(40);
+      expect(Number.parseFloat(radius ?? '0')).toBeGreaterThanOrEqual(toast.height / 2 - 0.5);
+      // Reduced motion: the rise-in ends at once.
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      expect(Number.parseFloat((await style())[5] ?? '1') * 1000).toBeLessThanOrEqual(1);
       await page.close();
     });
   });

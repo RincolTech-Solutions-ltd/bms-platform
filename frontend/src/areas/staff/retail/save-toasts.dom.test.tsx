@@ -25,6 +25,8 @@ const api = vi.hoisted(() => ({
   listSavings: vi.fn(),
   bankingExpected: vi.fn(),
   createBanking: vi.fn(),
+  createWithdrawal: vi.fn(),
+  createAdvance: vi.fn(),
 }));
 
 vi.mock('@tanstack/react-router', async (original) => {
@@ -59,7 +61,9 @@ const { UsageForm } = await import('./usage');
 const { ExpenseForm } = await import('./expenses');
 const { SavingsScreen } = await import('./savings');
 const { BankingForm } = await import('./banking');
-const { DoneToast, doneToasts } = await import('./toast');
+const { WithdrawalForm } = await import('./withdrawals');
+const { AdvanceForm } = await import('./advances');
+const { DoneToast, TOAST_MS, doneToasts } = await import('./toast');
 
 afterEach(() => {
   cleanup();
@@ -174,6 +178,8 @@ describe('a toast after every save on the daily shop screens (#824)', () => {
     const waiting = vi.fn();
     expenseForm(() => undefined, waiting);
     await waitFor(() => expect(waiting).toHaveBeenCalledTimes(1));
+    // Asserted after the toast has had time to come, so a late toast would fail it (review of #828).
+    await new Promise((done) => setTimeout(done, 100));
     expect(successToasts()).toEqual([]);
   });
 
@@ -202,5 +208,27 @@ describe('a toast after every save on the daily shop screens (#824)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save banking' }));
     await toastSays('Banking saved');
     expect(saved).toHaveBeenCalledTimes(1);
+    // It closes by itself after about four seconds.
+    await waitFor(() => expect(document.querySelector('.toast')).toBeNull(), { timeout: TOAST_MS + 2000 });
+  });
+
+  // JUSTIFICATION-A3: the review of #828 asks for DOM tests of withdrawals and advances, one test per screen.
+  it('Withdrawals says the withdrawal is saved', async () => {
+    api.createWithdrawal.mockResolvedValue({ id: 'w1', branch_id: branch, business_date: today, amount_minor: 20000 });
+    screenOf(<WithdrawalForm branchId={branch} onSaved={() => undefined} />);
+    fireEvent.change(screen.getByLabelText('Amount withdrawn'), { target: { value: '20000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save withdrawal' }));
+    await toastSays('Withdrawal saved');
+  });
+
+  it('Advances says the advance is saved', async () => {
+    api.createAdvance.mockResolvedValue({ id: 'a1', branch_id: branch, business_date: today, principal_minor: 15000 });
+    const queries = client();
+    queries.setQueryData(['retail', 'cash-parties'], [{ id: 'cp1', name: 'Test Staff 07', kind: 'staff', active: true }]);
+    screenOf(<AdvanceForm branchId={branch} onSaved={() => undefined} />, queries);
+    fireEvent.change(screen.getByLabelText('Who is the advance for?'), { target: { value: 'cp1' } });
+    fireEvent.change(screen.getByLabelText('Amount advanced'), { target: { value: '15000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save advance' }));
+    await toastSays('Advance saved');
   });
 });
