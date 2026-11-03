@@ -75,9 +75,12 @@ describe.each([1, 2])('The item page at 412px, font scale %i', (font) => {
     await page.close();
   });
 
-  it('shows a seller the quantities and no buying figure or profit', async () => {
+  it('shows a seller the quantities and no buying figure or profit, with the same full size targets', async () => {
     const page = await open(font, '&seller=1');
     expect(await pageWidth(page), 'page width').toBeLessThanOrEqual(WIDTH);
+    for (const target of [page.locator('#item-shop'), page.getByRole('button', { name: 'Show older movements' })]) {
+      expect((await target.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(48);
+    }
     const text = (await page.locator('body').textContent()) ?? '';
     expect(text).toContain('In stock after');
     expect(text).not.toMatch(/buying price|profit/i);

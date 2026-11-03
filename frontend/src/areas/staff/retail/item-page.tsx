@@ -3,6 +3,7 @@ import { createLazyRoute, getRouteApi } from '@tanstack/react-router';
 import { useState } from 'react';
 import { type ItemShop, type ItemStock, itemPageApi } from '../../../api/item-page';
 import { businessToday, type StockMovement } from '../../../api/retail';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { EmptyState } from '../../../app/ui/EmptyState';
 import { PeriodPicker } from '../../../app/ui/PeriodPicker';
 import { Hint } from '../../../app/ui/Hint';
@@ -40,6 +41,11 @@ export function movementWords(m: Pick<StockMovement, 'kind' | 'source_type' | 'r
     case 'return_to_supplier': return 'Sent back to the supplier';
     default: return 'Stock change';
   }
+}
+
+/** The query key of the item's movements; `until` is empty for up to today, so the key never carries today's date. */
+export function movementsKey(productId: string, branchId: string, from: string, until: string) {
+  return ['retail', 'item-movements', productId, branchId || 'all', from, until] as const;
 }
 
 /** "In 5 pc" or "Out 2.5 pc": the quantity of a movement without a sign, and which way it went. */
@@ -95,10 +101,12 @@ export function ItemPageView({ item, productId }: { item: ItemStock; productId: 
   const today = businessToday();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState(today);
+  // Up to today is sent as no last day, so the key holds no date and a copy kept yesterday is still found offline today.
+  const until = to === today ? '' : to;
   const moves = useInfiniteQuery({
-    queryKey: ['retail', 'item-movements', productId, branchId || 'all', from, to],
+    queryKey: movementsKey(productId, branchId, from, until),
     queryFn: ({ pageParam, signal }) =>
-      itemPageApi.movements({ productId, ...(branchId ? { branchId } : {}), ...(from ? { from } : {}), ...(to ? { to } : {}), ...(pageParam ? { cursor: pageParam } : {}), signal }),
+      itemPageApi.movements({ productId, ...(branchId ? { branchId } : {}), ...(from ? { from } : {}), ...(until ? { to: until } : {}), ...(pageParam ? { cursor: pageParam } : {}), signal }),
     initialPageParam: '',
     getNextPageParam: (last) => last.next_cursor || undefined,
   });
@@ -150,9 +158,9 @@ export function ItemPageView({ item, productId }: { item: ItemStock; productId: 
           {items.map((m) => <MoveCard key={m.id} m={m} shop={nameOf(m.branch_id)} />)}
         </ul>
         {moves.hasNextPage && (
-          <button type="button" onClick={() => void moves.fetchNextPage()} disabled={moves.isFetchingNextPage}>
-            {moves.isFetchingNextPage ? 'Loading' : 'Show older movements'}
-          </button>
+          <BusyButton type="button" busy={moves.isFetchingNextPage} onClick={() => void moves.fetchNextPage()}>
+            Show older movements
+          </BusyButton>
         )}
       </section>
     </>

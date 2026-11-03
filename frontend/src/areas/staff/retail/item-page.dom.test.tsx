@@ -7,7 +7,8 @@ import { businessToday, type StockMovement } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 import { ItemPageLink } from './ui';
-import { ItemPageView, inOrOut, movementWords } from './item-page';
+import { keptForReading } from '../../../offline/read-cache';
+import { ItemPageView, inOrOut, movementWords, movementsKey } from './item-page';
 
 // The item page (issue #813, FR-RET-85): the stock in each shop, then every movement newest first with what the shop held after
 // it. Buying figures and profit are drawn only when the server sent them, which it does only for retail.profit.read; a seller's
@@ -40,7 +41,8 @@ function moves(cost: boolean): StockMovement[] {
 function show(role: 'admin' | 'sales', cost: boolean) {
   const me = mockMe(role);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
-  client.setQueryData(['retail', 'item-movements', 'p1', 'all', '', businessToday()], { pages: [{ items: moves(cost) }], pageParams: [''] });
+  // The key the screen builds for every day up to today: no date in it, so a copy kept on an earlier day is found (ADR-116).
+  client.setQueryData(movementsKey('p1', '', '', ''), { pages: [{ items: moves(cost) }], pageParams: [''] });
   render(
     <QueryClientProvider client={client}>
       <StaffContext.Provider value={{ me, branch: me.branches?.[0]?.id ?? '' }}>
@@ -83,6 +85,16 @@ describe('the item page (issue #813)', () => {
     expect(page).not.toMatch(/buying price/i);
     expect(page).not.toMatch(/profit/i);
     expect(page).not.toMatch(/UGX/);
+  });
+
+  it('reads the movements kept offline on an earlier day: the key of every day up to today holds no date', () => {
+    const key = movementsKey('p1', '', '', '');
+    expect(key).toEqual(['retail', 'item-movements', 'p1', 'all', '', '']);
+    expect(keptForReading(key)).toBe(true);
+    expect(JSON.stringify(key)).not.toContain(businessToday());
+    // The page above was drawn from a copy under exactly this key, with no request.
+    show('sales', false);
+    expect(screen.getAllByTestId('item-move')).toHaveLength(4);
   });
 
   it('says each kind of movement in plain words', () => {

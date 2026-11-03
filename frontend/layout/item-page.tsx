@@ -6,7 +6,7 @@ import type { ItemStock } from '../src/api/item-page';
 import { businessToday, type StockMovement } from '../src/api/retail';
 import { mockMe } from '../src/api/retail-mock';
 import { StaffContext } from '../src/areas/staff/context';
-import { ItemPageView } from '../src/areas/staff/retail/item-page';
+import { ItemPageView, movementsKey } from '../src/areas/staff/retail/item-page';
 import '../src/app/theme.css';
 import '../src/app/ui/index.css';
 import { layoutRouter } from './router';
@@ -39,7 +39,7 @@ const rows: StockMovement[] = [
   { id: 'm3', at, branch_id: 'b1', product_id: 'p1', unit: 'piece', kind: 'purchase', qty: '1235767.500', balance_after: '1235767.500', source_type: 'retail.purchase', historical: false, ...money(154470937500) },
 ];
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
-client.setQueryData(['retail', 'item-movements', 'p1', 'all', '', today], { pages: [{ items: rows, next_cursor: 'more' }], pageParams: [''] });
+client.setQueryData(movementsKey('p1', '', '', ''),{ pages: [{ items: rows, next_cursor: 'more' }], pageParams: [''] });
 const router = layoutRouter('/staff/retail/items/p1');
 
 createRoot(document.getElementById('root') as HTMLElement).render(

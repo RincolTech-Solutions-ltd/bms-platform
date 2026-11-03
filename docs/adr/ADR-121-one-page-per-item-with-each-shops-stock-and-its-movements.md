@@ -29,8 +29,10 @@ puts one item's whole story in one place with a running balance, so the owner co
    average buying price of each shop, a movement's cost and a sale's profit (the sale line's total less its cost) come only
    with `retail.profit.read` in that shop, by the server's rule of the movements read; a seller's answer carries none, so the
    screen has nothing to hide. A branch asked for outside the caller's scope is 404, as an item of another business is (row
-   level security); an item with no movement in scope is looked up only when the first page is empty, so a page with rows stays
-   one query.
+   level security); the item itself is looked up only when a page comes back empty (the first or a later one, so a cursor
+   never turns an unknown item into an empty page), so a page with rows stays one query. A sale's `profit_minor` is the line
+   as sold (its total less its cost at the time); a later customer return or void is its own row on the page with its own
+   balance, and is not netted into the sale's figure.
 4. **Where it opens from.** Open the item on each item of My stock (one shop, every shop, the phone cards and the table), on each
    item of Items, and on each line of a sale opened from Sales history or Credit sales. My stock's card gains only that link.
 5. **Offline.** The two reads join the ADR-116 allowlist (`item-stock`, `item-movements`), so an item opened online is shown
@@ -41,8 +43,11 @@ puts one item's whole story in one place with a running balance, so the owner co
 **Better:** the owner sees in one place how an item's count came to be, shop by shop, and can find the movement where it went
 wrong; the balance is the ledger's own sum, so it always agrees with My stock.
 
-**Worse:** a long history is summed in full on every page (bounded by one item's movements in the caller's branches, on the
-`(tenant_id, branch_id, product_id, business_date)` index); the page shows no money to a seller even for a sale they made.
+**Worse:** a long history is summed in full on every page: the sum reads every movement of one item in the caller's branches
+(found through the `(tenant_id, branch_id, product_id, business_date)` index, then sorted by `occurred_at`, `id`), which is a
+few thousand rows for an item sold every day for years, against the hundreds of thousands a stock list reads; the page shows
+no money to a seller even for a sale they made. The list, the window and the cursor all order by `occurred_at`, then `id`
+(the cursor carries the last row's `occurred_at`), so the balances on a page always chain.
 
 **Watch for:** an item with a very long history in one shop (the window sum grows with it; a stored running balance would be
 a migration); a movement written with an `occurred_at` earlier than one already there (an imported history), which the balance

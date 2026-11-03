@@ -8,6 +8,8 @@ import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.retail.RetailTestSupport;
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -162,6 +164,69 @@ class RetailItemPageIT extends IntegrationTest {
                 .toList();
     }
 
+    // JUSTIFICATION-A3: a new test case the review of #829 asks for; no existing test narrows by dates and still
+    // returns rows.
+    /**
+     * The balances under a date filter or a shop with a cursor are those of the whole history: a balance brought in 40 days
+     * ago at the head office is left out of the rows by the dates, yet every balance after it still counts it.
+     */
+    @Test
+    void frRet85_aDateFilterOrAShopWithACursorKeepsTheBalancesOfTheWholeHistory() {
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO retail_stock_movements (id, tenant_id, occurred_at, business_date, branch_id, product_id, kind, qty,
+                            unit_cost_minor, source_type, historical)
+                        VALUES (gen_random_uuid(), ?, now() - interval '40 days', current_date - 40, ?, ?, 'legacy_balance', 7, 0,
+                            'retail.import', true)
+                        """)
+                .params(t.tenantId(), t.headOffice(), product)
+                .update();
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, qty, avg_cost_minor)
+                        SELECT ?, ?, p.id, 7, p.cost_minor FROM retail_products p WHERE p.id = ?
+                        """)
+                .params(t.tenantId(), t.headOffice(), product)
+                .update();
+        history();
+        Map<String, String> whole = new HashMap<>();
+        List<JsonNode> all = allRows(ADMIN);
+        assertThat(all).hasSize(9);
+        all.forEach(
+                m -> whole.put(m.get("id").asString(), m.get("balance_after").asString()));
+        // The head office's count of 10 is what it held; the 7 brought in before stays in every later balance.
+        assertThat(inShop(all, t.headOffice(), "balance_after"))
+                .containsExactly("10.000", "13.000", "17.000", "20.000", "7.000");
+
+        LocalDate from = LocalDate.now(ZoneId.of("Africa/Kampala")).minusDays(30);
+        List<JsonNode> dated = new ArrayList<>();
+        page("?from=" + from, ADMIN, "*").getBody().get("items").forEach(dated::add);
+        assertThat(dated).hasSize(8);
+        assertThat(inShop(dated, t.headOffice(), "balance_after"))
+                .containsExactly("10.000", "13.000", "17.000", "20.000");
+        dated.forEach(m -> assertThat(m.get("balance_after").asString())
+                .as("%s", m)
+                .isEqualTo(whole.get(m.get("id").asString())));
+
+        // One shop, one row a page, followed by the cursor: the same balances as the whole list.
+        List<JsonNode> two = new ArrayList<>();
+        String cursor = null;
+        do {
+            JsonNode body = page(
+                            "?branch_id=" + t.secondBranch() + "&limit=1" + (cursor == null ? "" : "&cursor=" + cursor),
+                            ADMIN,
+                            "*")
+                    .getBody();
+            body.get("items").forEach(two::add);
+            JsonNode next = body.get("next_cursor");
+            cursor = next == null || next.isNull() ? null : next.asString();
+        } while (cursor != null);
+        assertThat(two.stream().map(m -> m.get("balance_after").asString()).toList())
+                .containsExactly("6.000", "8.000", "9.000", "5.000");
+        two.forEach(m -> assertThat(m.get("balance_after").asString())
+                .isEqualTo(whole.get(m.get("id").asString())));
+    }
+
     @Test
     void frRet85_aSellerSeesQuantitiesButNoBuyingFigureOrProfit() {
         history();
@@ -204,6 +269,13 @@ class RetailItemPageIT extends IntegrationTest {
                         .getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(api.get("/stock/items/" + UUID.randomUUID() + "/movements", ADMIN)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        // A cursor does not turn an unknown item into an empty page.
+        api.stockUp(t.secondBranch(), product, "4");
+        String cursor =
+                page("?limit=1", ADMIN, "*").getBody().get("next_cursor").asString();
+        assertThat(api.get("/stock/items/" + UUID.randomUUID() + "/movements?cursor=" + cursor, ADMIN)
                         .getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
     }

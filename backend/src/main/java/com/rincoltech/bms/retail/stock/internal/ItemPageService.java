@@ -127,8 +127,8 @@ class ItemPageService {
 
     /**
      * The item's movements newest first with each one's balance after it. A branch asked for outside the caller's scope is
-     * 404, as an item of another business is; an item with no movement in scope is checked only when the first page is
-     * empty, so a page with rows is one query.
+     * 404, as an item of another business is; the item itself is looked up only when a page comes back
+     * empty (first page or a later one), so a page with rows is one query.
      */
     @Transactional(readOnly = true)
     MovementPage movements(
@@ -138,7 +138,7 @@ class ItemPageService {
             throw ApiException.notFound();
         }
         MovementPage page = stock.movements(branchIds, productId, from, to, null, true, limit, cursor, true);
-        if (page.items().isEmpty() && cursor == null && header(productId).isEmpty()) {
+        if (page.items().isEmpty() && header(productId).isEmpty()) {
             throw ApiException.notFound();
         }
         return page;
