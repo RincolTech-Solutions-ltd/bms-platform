@@ -274,6 +274,11 @@ describe('busy guard on fixtures', () => {
 // JUSTIFICATION-A3: #682 asks for this guard; it reuses the busy guard's mutation parser rather than a second copy.
 
 const TOAST_EXEMPT = /^\/\/\s*toast-exempt:\s*\S/;
+// Issue #824: the owner wants a toast after every save, a success screen too, so a success screen is no reason to say nothing.
+// A write whose screen replaces the form carries `// success-screen: <what>` above it: it still toasts, and the screen it
+// sets is not read as a second success note.
+const SUCCESS_SCREEN = /^\/\/\s*success-screen:\s*\S/;
+const SCREEN_AS_EXEMPT = /\/\/\s*toast-exempt:\s*success screen/;
 // meta.success that is not a bare `() => null`; a toast call whose own parentheses (one level of nesting) hold the 'success'
 // tone; sayDone(; or useItemAdded's added(.
 const SAYS_DONE =
@@ -378,7 +383,7 @@ function withoutCatch(code: string): string {
 /** The writes by hand of one file whose success path both shows a toast and sets a success note. */
 function doubledByHand(text: string): string[] {
   return [...text.matchAll(BUSY_ON)]
-    .filter((m) => !exempted(text, m.index, TOAST_EXEMPT))
+    .filter((m) => !exempted(text, m.index, TOAST_EXEMPT) && !exempted(text, m.index, SUCCESS_SCREEN))
     .filter((m) => {
       // Stripped after following too: following a name can bring back the whole function the write sits in.
       const code = withoutCatch(withoutOnError(follow(text, [withoutCatch(restOfBlock(text, m.index))], true)));
@@ -390,7 +395,7 @@ function doubledByHand(text: string): string[] {
 /** The mutations of one file whose success path both shows a toast and sets, or draws, a success note. */
 function doubled(text: string, hooks: string[] = mutationHooks(text), hookOpts = new Map(hookOptions(text))): string[] {
   return mutations(text, hooks)
-    .filter((m) => !exempted(text, m.index, TOAST_EXEMPT))
+    .filter((m) => !exempted(text, m.index, TOAST_EXEMPT) && !exempted(text, m.index, SUCCESS_SCREEN))
     .filter((m) => {
       const code = successCode(text, m, hookOpts, true);
       return SAYS_DONE.test(code) && (SUCCESS_NOTE.test(code) || notesItself(text, m));
@@ -422,6 +427,10 @@ describe('success toast guard', () => {
     expect(staff.flatMap(({ text }) => [...text.matchAll(BUSY_ON)]).length).toBeGreaterThan(20);
     expect(staff.flatMap(({ file, text }) => silentByHand(text).map((m) => `${file}:${m}`))).toEqual([]);
   });
+
+  it('never takes a success screen as a reason to say nothing (#824)', () => {
+    expect(staff.filter(({ text }) => SCREEN_AS_EXEMPT.test(text)).map(({ file }) => file)).toEqual([]);
+  });
 });
 
 describe('success toast guard on fixtures', () => {
@@ -450,7 +459,8 @@ describe('success toast guard on fixtures', () => {
     expect(doubled(`const save = useMutation({ mutationFn: send, onSuccess: () => { setMessage(t); show(t, 'success'); } });`)).toEqual(['1 save']);
     expect(doubled(`const save = useMutation({ mutationFn: send, onSuccess: () => setMessage(null), meta: { success: 'Saved' } });`)).toEqual([]);
     expect(doubled(`const save = useMutation({ mutationFn: send, onError: (e) => setMessage(e.message), meta: { success: 'Saved' } });`)).toEqual([]);
-    expect(doubled(`// toast-exempt: success screen, the receipt replaces the form\nconst save = useMutation({ mutationFn: send, onSuccess: () => setDone(r) });`)).toEqual([]);
+    expect(doubled(`// success-screen: the receipt replaces the form\nconst save = useMutation({ mutationFn: send, onSuccess: () => setDone(r), meta: { success: 'Saved' } });`)).toEqual([]);
+    expect(silent(`// success-screen: the receipt replaces the form\nconst save = useMutation({ mutationFn: send, onSuccess: () => setDone(r) });`)).toEqual(['2 save']);
     expect(doubled(`const save = useMutation({ mutationFn: send, meta: { success: 'Saved' } });\nreturn save.isSuccess && <Success>Saved.</Success>;`)).toEqual(['1 save']);
   });
 
