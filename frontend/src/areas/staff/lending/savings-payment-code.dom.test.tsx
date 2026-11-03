@@ -37,7 +37,7 @@ const txns: SavingsTransaction[] = [
   },
   {
     id: 't1', seq: 1, txn_type: 'deposit', amount_minor: 20000, credit: true, currency: 'UGX', balance_after_minor: 20000,
-    value_date: '2026-10-01', receipt_no: 'RC-HQ-000001', payment_method_key: 'cash', payment_code: null,
+    value_date: '2026-10-01', receipt_no: 'RC-HQ-000001', payment_method_key: 'cash',
   },
 ];
 
