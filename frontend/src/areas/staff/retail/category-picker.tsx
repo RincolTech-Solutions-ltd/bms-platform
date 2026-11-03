@@ -154,8 +154,10 @@ function Choices({ id, thing, categories, value, noneLabel, canAdd, onPick, onAd
   const listId = `${id}-list`;
   const optionId = useId();
   const term = text.trim();
-  // Issue #830: a deleted (switched off) category is hidden from the picker, unless it is the one already chosen.
-  const matches = matchCategories(categories.filter((c) => c.active !== false || c.id === value), text);
+  // Issue #830: a deleted (switched off) category is hidden when choosing one for an item, unless it is the one already chosen; a
+  // filter (one with an empty choice, such as All categories) keeps it, so its history and reports can still be found.
+  const shown = noneLabel !== undefined ? categories : categories.filter((c) => c.active !== false || c.id === value);
+  const matches = matchCategories(shown, text);
   // The empty choice ("All categories" on a filter) is offered only while nothing is typed.
   const options: { id: string; label: string }[] = [
     ...(noneLabel !== undefined && term === '' ? [{ id: '', label: noneLabel }] : []),

@@ -5,9 +5,9 @@ import { RETAIL_CURRENCY, businessToday, retail, type Product, type Supplier, ty
 import { branchLabel } from '../../../auth/branch';
 import { parseMinor } from '../../../components/money';
 import { useStaff } from '../context';
-import { newIdempotencyKey, usePersistedDraft } from './idempotency';
+import { usePersistedDraft } from './idempotency';
 import { lineTotalMinor, parseQty, qtyString, showDate, showQty } from './maths';
-import { EDIT_REASON, alreadyVoided, chosenUnitHint, editNote, listIsStale, redraftOf } from './restock-correct-state';
+import { chosenUnitHint, listIsStale, redraftOf } from './restock-correct-state';
 import { Gate, Money, Note, Problem, ProductPicker, money, useProfitAccess } from './ui';
 import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne, scanInto, touchedLine } from './barcode-state';
@@ -197,10 +197,10 @@ export function RestockForm({ onSaved, draftName, initial, again = false, replac
     mutationFn: async () => {
       const supplierName = (suppliers.data ?? []).find((x) => x.id === supplierId)?.name ?? '';
       const before = Object.fromEntries(lines.map((l) => [l.product.id ?? '', { sell: l.product.sell_minor, cost: l.product.cost_minor }]));
-      // Edit (issue #830): the old delivery is voided first, as Correct this purchase does, so a refusal (its stock moved) saves
-      // nothing new; a void that already went through, from an earlier press whose answer was lost, is the same end state.
-      if (replaces?.id) await retail.voidPurchase(replaces.id, EDIT_REASON, newIdempotencyKey()).catch((e: unknown) => { if (!alreadyVoided(e)) throw e; });
-      const saved = await retail.createPurchase({ ...buildPurchase({ supplierId, purchasedOn, method, lines }), ...(replaces ? { note: editNote(replaces) } : {}) }, key);
+      // Edit (issue #830): one call voids the old delivery and saves this one naming it, in one transaction on the server, so
+      // any refusal (its stock moved, an item switched off) leaves the old delivery as it was. The draft's key covers a retry.
+      const request = buildPurchase({ supplierId, purchasedOn, method, lines });
+      const saved = replaces?.id ? await retail.replacePurchase(replaces.id, request, key) : await retail.createPurchase(request, key);
       return { saved, context: { supplierName, before } };
     },
     onSuccess: ({ saved, context }) => {
@@ -491,7 +491,13 @@ export function RestockSaved({ purchase, context, onNew }: { purchase: Purchase;
  * A voided restock entered again (issue #351): the form opens with its lines, supplier, date and payment, in a draft of its own, and
  * a line says which restock it replaces. Nothing is saved until the person saves it.
  */
-export function Again({ purchaseId, onSaved, edit = false }: { purchaseId: string; onSaved: (p: Purchase, context: RestockContext) => void; edit?: boolean }) {
+export function Again({ purchaseId, onSaved, edit = false, onEdited }: {
+  purchaseId: string;
+  onSaved: (p: Purchase, context: RestockContext) => void;
+  edit?: boolean;
+  /** An edit saved (issue #830); a delivery found voided already is entered again instead and ends in onSaved. */
+  onEdited?: (p: Purchase, context: RestockContext) => void;
+}) {
   const { me } = useStaff();
   const loaded = useQuery({
     queryKey: ['retail', edit ? 'restock-edit' : 'restock-again', purchaseId],
@@ -514,7 +520,7 @@ export function Again({ purchaseId, onSaved, edit = false }: { purchaseId: strin
         <Note>
           You are editing delivery {purchase.purchase_no}. Change what was wrong, then save. The old entry is kept in Past purchases, marked Voided, and the new one says it replaces it.
         </Note>
-        <RestockForm draftName={`restock-edit:${me.user_id ?? ''}:${purchaseId}`} initial={loaded.data.draft} onSaved={onSaved} again replaces={purchase} />
+        <RestockForm draftName={`restock-edit:${me.user_id ?? ''}:${purchaseId}`} initial={loaded.data.draft} onSaved={onEdited ?? onSaved} again replaces={purchase} />
       </>
     );
   }
@@ -540,7 +546,7 @@ export function RestockPage() {
         <RestockSaved purchase={done.purchase} context={done.context} onNew={() => { setDone(null); setRound((n) => n + 1); }} />
       ) : typeof edit === 'string' && edit !== '' ? (
         // Issue #830: as in the old app, saving an edit goes back to the list, where the new delivery names the one it replaces.
-        <Again purchaseId={edit} edit onSaved={() => void navigate({ to: '/staff/retail/restocks' })} />
+        <Again purchaseId={edit} edit onEdited={() => void navigate({ to: '/staff/retail/restocks' })} onSaved={(purchase, context) => setDone({ purchase, context })} />
       ) : typeof again === 'string' && again !== '' ? (
         <Again purchaseId={again} onSaved={(purchase, context) => setDone({ purchase, context })} />
       ) : (

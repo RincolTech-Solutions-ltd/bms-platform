@@ -159,22 +159,41 @@ class RetailOldAppWordsIT extends IntegrationTest {
         return r.getBody();
     }
 
+    Map<String, Object> delivery(String qty) {
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("product_id", product);
+        line.put("cost_minor", 1_000);
+        line.put("sell_minor", 1_500);
+        line.put("qty_by_branch", List.of(Map.of("branch_id", hq, "qty", qty)));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("purchased_on", LocalDate.now(BusinessClock.DEFAULT_ZONE).toString());
+        body.put("payment_method", "cash");
+        body.put("lines", List.of(line));
+        return body;
+    }
+
+    /** Save changes on an edited delivery: the one call the screen makes. */
+    ResponseEntity<JsonNode> replace(JsonNode old, String qty, String perms) {
+        return api.postKeyed(
+                "/purchases/" + old.get("id").asString() + "/replace",
+                delivery(qty),
+                perms,
+                "*",
+                UUID.randomUUID().toString());
+    }
+
     @Test
-    void editADeliveryVoidsTheOldOneAndSavesTheNewOneNamingIt() {
+    void editADeliveryVoidsTheOldOneAndSavesTheNewOneNamingItInOneCall() {
         JsonNode old = buy("10", null);
         String oldNo = old.get("purchase_no").asString();
         assertThat(qtyAtHq()).isEqualTo("30.000");
 
-        // Save changes: the old delivery is voided first, through the correct-this-purchase path.
-        ok(api.postKeyed(
-                "/purchases/" + old.get("id").asString() + "/void",
-                Map.of("reason", EDITED),
-                ADMIN,
-                "*",
-                UUID.randomUUID().toString()));
-        assertThat(qtyAtHq()).isEqualTo("20.000");
-        // Then the form is saved as a new delivery whose note names the one it replaces.
-        JsonNode edited = buy("8", "Replaces " + oldNo + ", edited");
+        // Owner-level as Correct this purchase: the sales role may not.
+        assertThat(replace(old, "8", SALES).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        // Save changes: one call voids the old delivery and saves the new one, whose note names it.
+        ResponseEntity<JsonNode> r = replace(old, "8", ADMIN);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode edited = r.getBody();
         assertThat(qtyAtHq()).isEqualTo("28.000");
 
         JsonNode kept = ok(api.get("/purchases/" + old.get("id").asString(), ADMIN));
@@ -203,18 +222,40 @@ class RetailOldAppWordsIT extends IntegrationTest {
         JsonNode old = buy("5", null);
         // The 25 now at head office are counted down to 3: the 5 the delivery added cannot be taken back out.
         api.stockUp(hq, product, "3");
-        ResponseEntity<JsonNode> refused = api.postKeyed(
-                "/purchases/" + old.get("id").asString() + "/void",
-                Map.of("reason", EDITED),
-                ADMIN,
-                "*",
-                UUID.randomUUID().toString());
+        ResponseEntity<JsonNode> refused = replace(old, "4", ADMIN);
         assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(refused.getBody().get("code").asString()).isEqualTo("purchase_stock_moved");
         assertThat(ok(api.get("/purchases/" + old.get("id").asString(), ADMIN))
                         .get("status")
                         .asString())
                 .isEqualTo("posted");
+        assertThat(qtyAtHq()).isEqualTo("3.000");
+    }
+
+    @Test
+    void anEditWhoseNewDeliveryIsRefusedLeavesTheOldOneAsItWas() {
+        // The review of #830: the item was deleted (switched off) after the delivery; the new restock is refused
+        // (product_inactive), so the void rolls back with it and the old delivery, its stock and its entries stay.
+        JsonNode old = buy("10", null);
+        patch("/products/" + product, Map.of("active", false));
+        ResponseEntity<JsonNode> refused = replace(old, "8", ADMIN);
+        assertThat(refused.getStatusCode().is4xxClientError())
+                .as("%s", refused.getBody())
+                .isTrue();
+        assertThat(refused.getBody().toString()).contains("product_inactive");
+        JsonNode kept = ok(api.get("/purchases/" + old.get("id").asString(), ADMIN));
+        assertThat(kept.get("status").asString()).isEqualTo("posted");
+        assertThat(qtyAtHq()).isEqualTo("30.000");
+        assertThat(count(
+                        "SELECT count(*) FROM journal_entries WHERE tenant_id = ? AND source_id = ? AND reverses_entry_id IS"
+                                + " NOT NULL",
+                        t.tenantId(),
+                        UUID.fromString(old.get("id").asString())))
+                .isZero();
+        assertThat(count(
+                        "SELECT count(*) FROM retail_purchases WHERE tenant_id = ? AND note LIKE 'Replaces %'",
+                        t.tenantId()))
+                .isZero();
     }
 
     // ---- 4. Edit or delete an expense -----------------------------------------------------------
@@ -226,16 +267,21 @@ class RetailOldAppWordsIT extends IntegrationTest {
         UUID first = RetailTestSupport.id(cash.expense(hq, list[0], list[1], 7_000, day));
         long before = cash.cashOnHand(hq, day);
 
-        // Edit: the old one is voided, the new one saved with the words that name it.
-        ok(cash.voidIt("/expenses/" + first, EDITED, CashbookTestSupport.CASHBOOK_ADMIN));
+        // Edit: one call voids the old one and saves the new one with the words that name it.
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("branch_id", hq);
         body.put("business_date", day.toString());
         body.put("category_id", list[0]);
         body.put("item_id", list[1]);
         body.put("amount_minor", 6_500);
-        body.put("explanation", "Replaces the Test Fuel entry of today, edited.");
-        UUID second = RetailTestSupport.id(cash.post("/expenses", body, CashbookTestSupport.CASHBOOK_ADMIN));
+        // The till role records expenses but may not void one, so it may not edit one either.
+        assertThat(cash.post("/expenses/" + first + "/replace", body, CashbookTestSupport.CASHIER)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        ResponseEntity<JsonNode> replaced =
+                cash.post("/expenses/" + first + "/replace", body, CashbookTestSupport.CASHBOOK_ADMIN);
+        assertThat(replaced.getStatusCode()).as("%s", replaced.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID second = RetailTestSupport.id(replaced);
         // The cash book: 7,000 back, 6,500 out.
         assertThat(cash.cashOnHand(hq, day)).isEqualTo(before + 500);
 
@@ -264,6 +310,61 @@ class RetailOldAppWordsIT extends IntegrationTest {
         assertThat(denied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         ok(cash.voidIt("/expenses/" + second, EXPENSE_DELETED, CashbookTestSupport.CASHBOOK_ADMIN));
         assertThat(cash.cashOnHand(hq, day)).isEqualTo(before + 7_000);
+    }
+
+    // JUSTIFICATION-A3: the review of #830 asks the tests to prove a refused or waiting edit leaves the old expense.
+    @Test
+    void anExpenseEditThatIsRefusedOrWouldWaitForApprovalLeavesTheOldOneAsItWas() {
+        UUID[] list = cash.categoryWithItem("Test Repairs", "Test Parts", false);
+        LocalDate day = CashbookTestSupport.daysAgo(0);
+        UUID first = RetailTestSupport.id(cash.expense(hq, list[0], list[1], 7_000, day));
+        long before = cash.cashOnHand(hq, day);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("business_date", day.toString());
+        body.put("category_id", list[0]);
+        body.put("item_id", UUID.randomUUID());
+        body.put("amount_minor", 6_500);
+
+        // A new expense the server refuses (an item not in the category): the void rolls back with it.
+        ResponseEntity<JsonNode> refused =
+                cash.post("/expenses/" + first + "/replace", body, CashbookTestSupport.CASHBOOK_ADMIN);
+        assertThat(refused.getStatusCode().is4xxClientError())
+                .as("%s", refused.getBody())
+                .isTrue();
+        assertThat(cash.cashOnHand(hq, day)).isEqualTo(before);
+
+        // Expenses from 5,000 ask for an administrator (ADR-091): the old one is never voided while its replacement
+        // waits.
+        approvalRule("retail_expense", 5_000);
+        body.put("item_id", list[1]);
+        ResponseEntity<JsonNode> waits =
+                cash.post("/expenses/" + first + "/replace", body, CashbookTestSupport.CASHBOOK_ADMIN);
+        assertThat(waits.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(waits.getBody().get("code").asString()).isEqualTo("edit_needs_approval");
+        assertThat(cash.cashOnHand(hq, day)).isEqualTo(before);
+        assertThat(count(
+                        "SELECT count(*) FROM retail_expenses WHERE tenant_id = ? AND voided_at IS NULL", t.tenantId()))
+                .isEqualTo(1);
+    }
+
+    /** Switches on the approval of an action from an amount, as RetailApprovalRulesIT does. */
+    void approvalRule(String action, long amount) {
+        TestDatabase.owner()
+                .sql("INSERT INTO tenant_settings (id, tenant_id) VALUES (?, ?) ON CONFLICT (tenant_id) DO NOTHING")
+                .params(UUID.randomUUID(), t.tenantId())
+                .update();
+        TestDatabase.owner()
+                .sql("""
+                        UPDATE tenant_settings SET settings = settings
+                               || jsonb_build_object('approval_switches',
+                                      coalesce(settings->'approval_switches', '{}'::jsonb) || jsonb_build_object(?::text, true))
+                               || jsonb_build_object('approval_thresholds_minor',
+                                      coalesce(settings->'approval_thresholds_minor', '{}'::jsonb) || jsonb_build_object(?::text, ?))
+                         WHERE tenant_id = ?
+                        """)
+                .params(action, action, amount, t.tenantId())
+                .update();
     }
 
     // ---- 5. Delete an item, category or unit ----------------------------------------------------

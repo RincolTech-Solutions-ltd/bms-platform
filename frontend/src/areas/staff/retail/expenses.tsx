@@ -3,11 +3,11 @@ import { createLazyRoute } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { BusyButton } from '../../../app/ui/BusyButton';
 import { Segmented } from '../../../app/ui/Segmented';
-import { RetailError, businessToday, isWaiting, retail, type Expense, type ExpenseCategory, type ExpenseGroup, type ExpenseItem } from '../../../api/retail';
+import { businessToday, isWaiting, retail, type ApprovalWaiting, type Expense, type ExpenseCategory, type ExpenseGroup, type ExpenseItem } from '../../../api/retail';
 import { useStaff } from '../context';
 import { DateField, RecordsByShop, Saved, WindowFields, useReadScope, useSavedFor, useWindow } from './cash-ui';
 import {
-  EXPENSE_DELETE_REASON, EXPENSE_EDIT_REASON, MIN_EXPLANATION, activeCategories, draftOfExpense, editedRequest, itemsOf, needsExplanation, planExpense, withItem,
+  MIN_EXPLANATION, activeCategories, deleteExpenseReason, draftOfExpense, itemsOf, needsExplanation, planExpense, withItem,
 } from './expenses-state';
 import { newIdempotencyKey, usePersistedDraft } from './idempotency';
 import { PartyPicker, useCashParties } from './party-picker';
@@ -47,11 +47,9 @@ export function ExpenseForm({ branchId, onSaved, onWaiting, replaces, onCancel }
   const plan = planExpense({ branchId, ...draft }, list);
   // The Saved panel replaces the form of a new expense; an edited one says "Expense updated" (issue #830).
   const save = useMutation({
-    mutationFn: async () => {
-      // Edit: the old expense is voided first (FR-RET-28), so a refusal saves nothing new; one found voided already is the same end state.
-      if (replaces?.id) await retail.voidExpense(replaces.id, EXPENSE_EDIT_REASON, newIdempotencyKey()).catch((e: unknown) => { if (!(e instanceof RetailError && e.code === 'cash_record_voided')) throw e; });
-      return retail.createExpense(replaces ? editedRequest(plan.request, replaces) : plan.request, key);
-    },
+    // Edit (issue #830): one call voids the old expense and saves this one naming it, in one transaction on the server, so any
+    // refusal (an amount that would wait for an administrator, an item switched off) leaves the old expense as it was.
+    mutationFn: async (): Promise<Expense | ApprovalWaiting> => (replaces?.id ? retail.replaceExpense(replaces.id, plan.request, key) : retail.createExpense(plan.request, key)),
     onSuccess: (saved) => {
       finish();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
@@ -158,7 +156,7 @@ export function ExpenseRowActions({ row, onDeleted }: { row: Expense; onDeleted?
   const key = useRef(newIdempotencyKey());
   // toast-exempt: the Expenses screen says it through onDeleted (show with success)
   const remove = useMutation({
-    mutationFn: () => retail.voidExpense(row.id ?? '', reason.trim() || EXPENSE_DELETE_REASON, key.current),
+    mutationFn: () => retail.voidExpense(row.id ?? '', deleteExpenseReason(reason), key.current),
     onSuccess: () => {
       setMode(null);
       void queryClient.invalidateQueries({ queryKey: ['retail'] });

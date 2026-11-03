@@ -6,7 +6,8 @@ Proposed (2026-10-20, issue #342). Builds on ADR-020 (retail stock and cost, the
 
 Screens amended by issue #830 (the decision is unchanged): the button says **Delete**, the owner's old app's word, on an item, a
 category and a unit, and asks first; underneath it is this record's switch off, so nothing is removed and history and reports keep
-the row. A deleted row is hidden from the lists and the pickers; **Show deleted** brings it into view, where Bring back switches it on.
+the row. A deleted row is hidden from the lists and the pickers that choose one for an item (a filter still lists it, so history can be
+found); **Show deleted** brings it into view, where Bring back switches it on.
 
 ## Context
 

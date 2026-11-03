@@ -395,6 +395,15 @@ describe('voiding a sale', () => {
     await waitFor(() => expect(voidSale).toHaveBeenCalledWith('s1', 'Deleted from the sale screen'));
   });
 
+  it('keeps a reason shorter than five characters after the default, so the void always has a full reason (review of #830)', async () => {
+    voidSale.mockResolvedValue({ ...cash, status: 'voided' });
+    screenOf(admin, <VoidSaleAction sale={cash} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete this sale' }));
+    fireEvent.change(screen.getByLabelText(/Why\? \(optional\)/), { target: { value: ' dup ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, delete it' }));
+    await waitFor(() => expect(voidSale).toHaveBeenCalledWith('s1', 'Deleted from the sale screen: dup'));
+  });
+
   it('says why a sale cannot be deleted, in plain words', async () => {
     voidSale.mockRejectedValueOnce(refusal('sale_has_returns')).mockRejectedValueOnce(refusal('sale_voided', 409)).mockRejectedValueOnce(refusal('permission_denied', 403));
     screenOf(admin, <VoidSaleAction sale={cash} />);

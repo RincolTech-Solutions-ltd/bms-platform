@@ -6,7 +6,8 @@ Proposed (2026-10-20, issues #351 and #352; not yet accepted by the product owne
 
 Screens amended by issue #830 (the decision is unchanged): Past purchases also offers **Edit**, the owner's old app's word. It opens
 Buy stock filled in with the delivery; Save changes voids it through this record's void and saves the form as a new restock whose
-note names the one it replaces. A sale void says **Delete this sale**, and a voided sale reads Deleted in the lists; it is still the
+note names the one it replaces, in one transaction (`POST /retail/purchases/{id}/replace`), so a refusal of either changes nothing.
+An expense is edited the same way (`POST /retail/expenses/{id}/replace`, FR-RET-28). A sale void says **Delete this sale**, and a voided sale reads Deleted in the lists; it is still the
 void of FR-RET-04, kept and reversed, never removed.
 
 ## Context

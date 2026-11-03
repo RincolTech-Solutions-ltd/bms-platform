@@ -93,8 +93,14 @@ export const voidReasonOf = (text: string): string | null => reasonOf(text);
 /** The reason kept on a deleted sale when none was typed (issue #830: the reason is optional; the void still records one). */
 export const DELETE_REASON = 'Deleted from the sale screen';
 
-/** The reason sent with Delete this sale: what was typed, trimmed, else the plain default. */
-export const deleteReasonOf = (text: string): string => text.trim() || DELETE_REASON;
+/**
+ * The reason sent with Delete this sale: what was typed, trimmed, when it is a full reason ({@link MIN_REASON} characters, the void
+ * rule); else the plain default, with any shorter words typed kept after it ("Deleted from the sale screen: dup").
+ */
+export const deleteReasonOf = (text: string, fallback = DELETE_REASON): string => {
+  const typed = text.trim();
+  return typed.length >= MIN_REASON ? typed : typed ? `${fallback}: ${typed}` : fallback;
+};
 
 const codeOf = (error: unknown): string | undefined => (error instanceof RetailError ? error.code : undefined);
 

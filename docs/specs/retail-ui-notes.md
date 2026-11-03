@@ -965,7 +965,10 @@ An item that is no longer sold is switched off, never deleted.
 
 The owner's old app let people edit and delete records directly. BMS still corrects by voiding and switching off (the void model,
 ADR-044 and ADR-045, is unchanged); the screens now use the old app's buttons and words, and every one keeps the record and the audit
-trail underneath. No endpoint and no migration changed.
+trail underneath. No migration; two endpoints were added for the edits (review of #830), so an edit is one transaction:
+`POST /retail/purchases/{id}/replace` and `POST /retail/expenses/{id}/replace` void the old record and save the new one together, and
+any refusal changes nothing. A typed reason shorter than five characters is kept after the plain default ("Deleted from the sale
+screen: dup"), so a void always has a full reason.
 
 - **Delete this sale** (`VoidSaleAction`, an opened sale; `retail.sale.void` at the sale's branch, the owner's, as before). It asks
   "Delete this sale? The stock goes back to <branch>." with a line that the sale stays in the lists marked Deleted, and an optional
@@ -976,20 +979,25 @@ trail underneath. No endpoint and no migration changed.
   picked; it is the same payment as Record payment (`POST /retail/sales/{id}/payments`).
 - **Edit a delivery** (Past purchases, beside Correct this purchase, for the same people). Edit goes to `/staff/retail/restock?edit=<id>`:
   Buy stock opens filled in with that delivery, its own date kept (the date warning says when that day may be banked), under "You are
-  editing delivery RP...". **Save changes** first voids the old one through the correct-this-purchase path with the reason "Edited:
-  entered again with the changes", then saves the form as a new delivery whose note is "Replaces RP..., edited", and goes back to Past
-  purchases with the toast "Delivery updated". A refused void (its stock moved) saves nothing new and says why; a void found already
-  done is the same end state. The card shows the note, so the new delivery names the old one, which stays marked Voided.
+  editing delivery RP...". **Save changes** is one call (`POST /retail/purchases/{id}/replace`): the old one is voided through the
+  correct-this-purchase void with the reason "Edited: entered again with the changes" and the form is saved as a new delivery whose
+  note is "Replaces RP..., edited", in one transaction; then Past purchases opens with the toast "Delivery updated". A refusal (its stock
+  moved, an item deleted since) changes nothing, and the person stays on the edit form with the reason. A delivery found voided already
+  is entered again instead and ends in the saved screen. The card shows the note, so the new delivery names the old one, which stays
+  marked Voided.
 - **Edit or delete an expense** (Expense records, in place of Void, where the expense may be voided: `retail.cashbook.void`, the
   owner's). **Delete** asks "Delete this expense? It stops counting in the cash book and the reports." with an optional reason (default
   "Deleted from the expenses screen") and voids it; the screen says "Expense deleted." **Edit** (also needs `retail.expense.record` there)
-  opens the expense form filled in; Save changes voids the old one ("Edited: entered again with the changes") and saves the new one with
-  "Replaces the <item> entry of <date>, edited." after any explanation, and says "Expense updated".
+  opens the expense form filled in; Save changes is one call (`POST /retail/expenses/{id}/replace`) that voids the old one ("Edited:
+  entered again with the changes") and saves the new one with "Replaces the <item> entry of <date>, edited." after any explanation, and
+  says "Expense updated". An amount that would wait for an administrator is refused (`edit_needs_approval`: delete it and record it
+  again), so an expense is never voided while its replacement waits; the form stays with the reason.
 - **Delete an item, category or unit.** Categories and Units say **Delete** (asked first: "Delete <name>? It is hidden from lists and
   pickers. Items, history and reports keep it, and Show deleted brings it back.") and **Bring back**; the item's edit form says **Delete
   this item** (asked first, with the stock warning when it holds stock) and Bring back. Underneath each is the switch off
   (`PATCH ... {active: false}`). A deleted row is hidden from the list until **Show deleted (N)** is ticked, and from the category and
-  unit pickers unless it is the row already chosen; the Items filter offers On sale, Deleted only and Show deleted too.
+  unit pickers unless it is the row already chosen (a category filter, one with All categories, still lists it, so its history and
+  reports can be found); the Items filter offers On sale, Deleted only and Show deleted too.
 - **Low stock.** The default level for an item with no minimum of its own is 10, the old app's rule (ADR-029 amended); an item's own
   minimum still wins.
 - **Tests.** `sale-actions.dom.test.tsx`, `sales-wiring.dom.test.tsx`, `edit-delivery.dom.test.tsx`, `edit-expense.dom.test.tsx`,

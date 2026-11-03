@@ -8,8 +8,10 @@ import { createMockRetail, mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 
 // Edit a delivery as in the owner's old app (issue #830): Past purchases offers Edit to whoever may correct the purchase; it opens
-// Buy stock filled in with that delivery; Save changes voids the old one through the correct-this-purchase path and saves the new
-// one naming it, with the toast "Delivery updated". The old one is kept, marked Voided. The retail adapter is the fabricated mock.
+// Buy stock filled in with that delivery; Save changes is one call (POST /retail/purchases/{id}/replace) that voids the old one and
+// saves the new one naming it, in one transaction, with the toast "Delivery updated". A refusal (here an item switched off since)
+// changes nothing: the old delivery stays recorded and the person stays on the edit form with the reason. The retail adapter is the
+// fabricated mock.
 
 vi.setConfig({ testTimeout: 20000 });
 
@@ -22,7 +24,7 @@ vi.mock('@tanstack/react-router', async (original) => {
 const { RestockCard } = await import('./restocks');
 const { Again } = await import('./restock');
 const { DoneToast, doneToasts } = await import('./toast');
-const { EDIT_REASON, editNote } = await import('./restock-correct-state');
+const { editNote } = await import('./restock-correct-state');
 
 const admin = mockMe('admin');
 const seller = mockMe('sales');
@@ -75,36 +77,54 @@ describe('Edit a delivery (issue #830)', () => {
     expect(screen.queryByRole('button', { name: /^Edit delivery/ })).toBeNull();
   });
 
-  it('fills the form in, and Save changes voids the old delivery and saves the new one naming it, with one toast', async () => {
+  it('fills the form in; Save changes is one call that voids the old delivery and saves the new one naming it, with one toast', async () => {
     const purchase = await delivery();
+    const replaceSpy = vi.spyOn(retail, 'replacePurchase');
     const voidSpy = vi.spyOn(retail, 'voidPurchase');
     const createSpy = vi.spyOn(retail, 'createPurchase');
-    const saved = vi.fn();
-    screenOf(admin, <Again purchaseId={purchase.id ?? ''} edit onSaved={saved} />);
+    const edited = vi.fn();
+    screenOf(admin, <Again purchaseId={purchase.id ?? ''} edit onEdited={edited} onSaved={() => undefined} />);
     expect(await screen.findByText(new RegExp(`You are editing delivery ${purchase.purchase_no ?? ''}`))).toBeTruthy();
-    const qty = (await screen.findByDisplayValue('4')) as HTMLInputElement;
-    fireEvent.change(qty, { target: { value: '3' } });
+    fireEvent.change((await screen.findByDisplayValue('4')) as HTMLInputElement, { target: { value: '3' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    await waitFor(() => expect(saved).toHaveBeenCalledTimes(1));
-    expect(voidSpy).toHaveBeenCalledWith(purchase.id, EDIT_REASON, expect.any(String));
-    expect(createSpy.mock.calls[0]?.[0]).toMatchObject({ note: editNote(purchase), lines: [expect.objectContaining({ qty_by_branch: [{ branch_id: branch, qty: '3.000' }] })] });
-    expect(voidSpy.mock.invocationCallOrder[0]).toBeLessThan(createSpy.mock.invocationCallOrder[0] ?? 0);
+    await waitFor(() => expect(edited).toHaveBeenCalledTimes(1));
+    expect(replaceSpy).toHaveBeenCalledTimes(1);
+    expect(replaceSpy.mock.calls[0]?.[0]).toBe(purchase.id);
+    expect(replaceSpy.mock.calls[0]?.[1]).toMatchObject({ lines: [expect.objectContaining({ qty_by_branch: [{ branch_id: branch, qty: '3.000' }] })] });
+    // The screen never voids or creates on its own: the server does both in one transaction.
+    expect(voidSpy).not.toHaveBeenCalled();
+    expect(createSpy).not.toHaveBeenCalled();
     await waitFor(() => expect(toastText()).toBe('Delivery updated'));
-    // The old delivery is kept, marked Voided, its reason saying it was edited; the new one says which it replaces.
     const old = await retail.getPurchase(purchase.id ?? '');
     expect(old.status).toBe('voided');
-    expect(old.void_reason).toBe(EDIT_REASON);
-    expect(editNote(purchase)).toBe(`Replaces ${purchase.purchase_no ?? ''}, edited`);
+    expect(old.void_reason).toBe('Edited: entered again with the changes');
+    expect(edited.mock.calls[0]?.[0]?.note).toBe(editNote(purchase));
   });
 
-  it('saves nothing new when the old delivery cannot be voided (its stock moved), and says why', async () => {
+  it('changes nothing when the new delivery is refused, and keeps the person on the edit form with the reason', async () => {
     const purchase = await delivery();
-    const createSpy = vi.spyOn(retail, 'createPurchase');
-    // The stock this delivery added has gone: the void is refused, so nothing is entered twice.
-    vi.spyOn(retail, 'voidPurchase').mockRejectedValue(Object.assign(new Error('Only 1 are in stock there now. It cannot be voided.'), { code: 'purchase_stock_moved' }));
-    screenOf(admin, <Again purchaseId={purchase.id ?? ''} edit onSaved={() => undefined} />);
+    // The review of #830: the item was deleted (switched off) after the delivery, so a new delivery of it is refused.
+    const item = await retail.getProduct(purchase.lines?.[0]?.product_id ?? '');
+    await retail.updateProduct(item.id ?? '', item.version ?? 1, { active: false });
+    const edited = vi.fn();
+    screenOf(admin, <Again purchaseId={purchase.id ?? ''} edit onEdited={edited} onSaved={() => undefined} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Save changes' }));
-    expect((await screen.findByRole('alert')).textContent).toContain('cannot be voided');
-    expect(createSpy).not.toHaveBeenCalled();
+    expect((await screen.findByRole('alert')).textContent).toMatch(/switched off/);
+    expect(edited).not.toHaveBeenCalled();
+    expect((await retail.getPurchase(purchase.id ?? '')).status).toBe('posted');
+    expect(screen.getByText(new RegExp(`You are editing delivery ${purchase.purchase_no ?? ''}`))).toBeTruthy();
+    expect(toastText()).toBeNull();
+  });
+
+  it('enters a delivery found voided already again, ending in the saved screen rather than as an edit', async () => {
+    const purchase = await delivery();
+    await retail.voidPurchase(purchase.id ?? '', 'Voided by a colleague', 'k-colleague');
+    const edited = vi.fn();
+    const saved = vi.fn();
+    screenOf(admin, <Again purchaseId={purchase.id ?? ''} edit onEdited={edited} onSaved={saved} />);
+    expect(await screen.findByText(/which you voided/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save the purchase' }));
+    await waitFor(() => expect(saved).toHaveBeenCalledTimes(1));
+    expect(edited).not.toHaveBeenCalled();
   });
 });

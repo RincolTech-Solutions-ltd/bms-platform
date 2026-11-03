@@ -161,7 +161,7 @@ const PRODUCTS: MockProduct[] = [
   costMinor: costMinor as number, sellMinor: sellMinor as number,
 }));
 
-/** The server's level filter: out is zero or less, low is at or below 5 (so it includes out). */
+/** The server's level filter: out is zero or less, low is at or below 10 (issue #830; so it includes out). */
 const atLevel = (qty: number, level?: 'out' | 'low'): boolean => level === undefined || qty <= (level === 'out' ? 0 : 10);
 const toMilli = (text: string): number => Math.round(Number(text) * 1000);
 /** A quantity without trailing zeros: 10.000 is 10. */
@@ -1368,6 +1368,13 @@ export function createMockRetail(): RetailApi {
         const { before: _before, ...voided } = found;
         return voided;
       })),
+
+    // Issue #830: as the server's one transaction, a new delivery the mock would refuse is refused before the old one is voided.
+    replacePurchase: async (id, body, key) => {
+      for (const l of body.lines) if (find(l.product_id).active === false) refuse(422, 'product_inactive', 'This item is switched off.');
+      const old = await mock.voidPurchase(id, 'Edited: entered again with the changes', `${key}-void`);
+      return mock.createPurchase({ ...body, note: `Replaces ${old.purchase_no ?? ''}, edited` }, key);
+    },
 
     createUsage: (body, key) =>
       run(() => once(`usage|${key}`, body, (): Usage => {

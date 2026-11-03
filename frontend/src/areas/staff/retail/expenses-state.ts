@@ -1,7 +1,6 @@
 import type { Expense, ExpenseCategory, ExpenseItem, ExpenseRequest } from '../../../api/retail';
 import { amountOrNull } from './cash-state';
-import { showDate } from './maths';
-import { typedAmount } from './sale-actions-state';
+import { deleteReasonOf, typedAmount } from './sale-actions-state';
 
 // The expense form's rules (FR-RET-17, FR-RET-24): the items offered depend on the chosen category and only
 // active ones are offered, and an item flagged "needs an explanation" makes the explanation field appear and
@@ -63,19 +62,15 @@ export function planExpense(input: ExpenseInput, categories: ExpenseCategory[]):
   return { problem: null, request };
 }
 
-// Edit and Delete an expense as in the owner's old app (issue #830). Underneath, Delete is the void of FR-RET-28 and Edit is that
-// void and a new expense: the old one is kept, marked Voided, its reason saying it was edited; the new one names it.
-// JUSTIFICATION-A3: #830 asks for Edit and Delete on an expense; these are the pure rules of the two forms, beside the form's own.
-
-/** The reason an expense is voided with when it is edited. */
-export const EXPENSE_EDIT_REASON = 'Edited: entered again with the changes';
+// Edit and Delete an expense as in the owner's old app (issue #830). Underneath, Delete is the void of FR-RET-28 and Edit is
+// POST /retail/expenses/{id}/replace, the void and a new expense in one transaction: the old one is kept, marked Voided, its
+// reason saying it was edited; the new one's explanation names it ("Replaces the Fuel entry of 2026-11-02, edited.").
 
 /** The reason kept on a deleted expense when none was typed. */
 export const EXPENSE_DELETE_REASON = 'Deleted from the expenses screen';
 
-/** The words that link an edited expense to the one it replaces. */
-export const replacesWords = (old: Pick<Expense, 'business_date' | 'item_name'>): string =>
-  `Replaces the ${old.item_name ?? 'expense'} entry of ${showDate(old.business_date)}, edited.`;
+/** The reason sent with Delete: a full typed reason, else the default with any shorter words kept after it. */
+export const deleteExpenseReason = (text: string): string => deleteReasonOf(text, EXPENSE_DELETE_REASON);
 
 /** The form filled in with an expense, to be edited. */
 export const draftOfExpense = (e: Expense) => ({
@@ -84,11 +79,6 @@ export const draftOfExpense = (e: Expense) => ({
   itemId: e.item_id ?? '',
   partyId: e.party_id ?? '',
   amount: typedAmount(e.amount_minor ?? 0),
+  // The words the server adds to name the expense it replaced are not the person's own: the next edit adds them afresh.
   explanation: (e.explanation ?? '').replace(/\s*Replaces the .* entry of .*, edited\.$/, ''),
 });
-
-/** The request of an edited expense: the plan's, with the words that name the one it replaces after any explanation. */
-export function editedRequest(request: ExpenseRequest, old: Expense): ExpenseRequest {
-  const own = request.explanation?.trim() ?? '';
-  return { ...request, explanation: `${own ? `${own} ` : ''}${replacesWords(old)}`.slice(0, 500) };
-}
