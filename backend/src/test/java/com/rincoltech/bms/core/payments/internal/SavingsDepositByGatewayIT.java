@@ -744,8 +744,13 @@ class SavingsDepositByGatewayIT extends LoanFixtures {
         assertThat(items.get(0).get("payment_code").asString()).isEqualTo("CONF-314-0001");
         assertThat(items.get(1).get("payment_method_key").asString()).isEqualTo("cash");
         assertThat(items.get(1).get("payment_code").isNull()).isTrue();
-        // Only the code: the payer's number appears nowhere, in full or masked.
-        assertThat(r.getBody().toString()).doesNotContain("700000219").doesNotContain("payer_phone");
+        // Only the code: the payer's number this intent was made with appears nowhere, in full or masked.
+        String phone = (String) row(intent).get("payer_phone_e164");
+        assertThat(phone).isEqualTo("+256700000219");
+        assertThat(r.getBody().toString())
+                .doesNotContain(phone.substring(4))
+                .doesNotContain("*" + phone.substring(phone.length() - 4))
+                .doesNotContain("payer_phone");
 
         // A caller who may not read the account (another branch, or no savings read at all) gets no code.
         ResponseEntity<JsonNode> otherBranch = send(

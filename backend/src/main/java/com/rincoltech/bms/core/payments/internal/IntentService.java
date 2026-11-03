@@ -237,6 +237,8 @@ class IntentService implements PaymentCollections {
     }
 
     // JUSTIFICATION-A3: one query for a page of transactions instead of one per row; nothing existing batches it.
+    // One intent per transaction: unique index payment_intents_one_booking_per_txn (V59). The tenant is the forced RLS
+    // of V54.
     @Override
     public Map<UUID, String> confirmationCodesOf(java.util.Collection<UUID> bookedTransactionIds) {
         Map<UUID, String> codes = new HashMap<>();
@@ -244,8 +246,9 @@ class IntentService implements PaymentCollections {
             jdbc.sql("SELECT booked_subject_txn_id, confirmation_code FROM payment_intents"
                             + " WHERE booked_subject_txn_id IN (:ids) AND confirmation_code IS NOT NULL")
                     .param("ids", List.copyOf(bookedTransactionIds))
-                    .query((rs, n) -> codes.put(rs.getObject(1, UUID.class), rs.getString(2)))
-                    .list();
+                    .query(rs -> {
+                        codes.put(rs.getObject(1, UUID.class), rs.getString(2));
+                    });
         }
         return codes;
     }

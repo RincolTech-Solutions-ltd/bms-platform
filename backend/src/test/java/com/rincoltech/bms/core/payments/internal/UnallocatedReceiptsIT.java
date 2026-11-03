@@ -733,6 +733,19 @@ class UnallocatedReceiptsIT extends LoanFixtures {
                         .query(String.class)
                         .single())
                 .isEqualTo("gateway:gateway");
+        // Issue #314: the allocated deposit shows the payment code in the account's transaction list, as one booked at
+        // once does.
+        JsonNode items = send(
+                        HttpMethod.GET,
+                        ACCOUNTS + "/" + account + "/transactions",
+                        as(cashier, cashierPerms, "*", null),
+                        null)
+                .getBody()
+                .get("items");
+        assertThat(items).hasSize(1);
+        assertThat(items.get(0).get("id").asString())
+                .isEqualTo(row.get("allocated_txn_id").toString());
+        assertThat(items.get(0).get("payment_code").asString()).isEqualTo("CONF-224-0011");
         // A second approval of the same request books nothing more.
         assertThat(decide(approval, "approve").getStatusCode().is2xxSuccessful())
                 .isFalse();

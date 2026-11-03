@@ -34,6 +34,8 @@ const txns: SavingsTransaction[] = [
     id: 't2', seq: 2, txn_type: 'deposit', amount_minor: 50000, credit: true, currency: 'UGX', balance_after_minor: 70000,
     value_date: '2026-10-20', receipt_no: 'RC-HQ-000002', payment_method_key: 'gateway',
     external_reference: '00000000-0000-4000-8000-0000000003a1', payment_code: 'TEST314CODE',
+    // Not in the API: here only to prove the screen shows the code alone, whatever else a row might carry.
+    ...({ payer_phone: '+256700000314', payer_phone_masked: '********0314' } as object),
   },
   {
     id: 't1', seq: 1, txn_type: 'deposit', amount_minor: 20000, credit: true, currency: 'UGX', balance_after_minor: 20000,
@@ -69,8 +71,13 @@ describe('the payment code on the savings account screen (#314)', () => {
   it('shows the code next to a deposit paid by mobile money or card', async () => {
     await shell();
     const row = rowOf('RC-HQ-000002');
-    expect(within(row).getByText(/Payment code/)).toBeTruthy();
-    expect(within(row).getByText('TEST314CODE').tagName).toBe('STRONG');
+    // The same markup as the loan collect screen (collect.tsx): <p className="ln-muted">Payment code <strong>code</strong></p>.
+    const code = within(row).getByText('TEST314CODE');
+    expect(code.tagName).toBe('STRONG');
+    const line = code.parentElement as HTMLElement;
+    expect(line.tagName).toBe('P');
+    expect(line.className).toBe('ln-muted');
+    expect(line.textContent).toBe('Payment code TEST314CODE');
   });
 
   it('shows no code on a cash deposit', async () => {
@@ -79,8 +86,10 @@ describe('the payment code on the savings account screen (#314)', () => {
     expect(screen.getAllByText(/Payment code/)).toHaveLength(1);
   });
 
-  it('never shows the payer\'s number', async () => {
+  it('never shows the payer\'s number, even when a row carries one', async () => {
     await shell();
-    expect(document.body.textContent ?? '').not.toMatch(/07\d{8}|\+?2567\d{8}|\*{4,}/);
+    const text = document.body.textContent ?? '';
+    expect(text).not.toContain('700000314');
+    expect(text).not.toContain('*0314');
   });
 });

@@ -19988,7 +19988,7 @@ export interface components {
             external_reference?: string;
             /** Format: uuid */
             id?: string;
-            /** @description The provider's payment code (confirmation code) of a deposit paid by mobile money or card, as on the member's text message; in the transaction list only, null otherwise */
+            /** @description The provider's payment code (confirmation code) of a deposit paid by mobile money or card, as on the member's text message. Filled only by GET .../transactions; always null in the answers of a deposit, withdrawal, reversal or action, which do not look it up */
             payment_code?: string;
             payment_method_key?: string;
             reason?: string;

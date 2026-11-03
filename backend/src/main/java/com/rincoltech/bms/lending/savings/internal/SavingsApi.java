@@ -245,7 +245,8 @@ final class SavingsApi {
             @Schema(
                     description =
                             "The provider's payment code (confirmation code) of a deposit paid by mobile money or card, as on"
-                                    + " the member's text message; in the transaction list only, null otherwise")
+                                    + " the member's text message. Filled only by GET .../transactions; always null in the"
+                                    + " answers of a deposit, withdrawal, reversal or action, which do not look it up")
             String paymentCode) {
 
         Transaction withPaymentCode(String code) {
