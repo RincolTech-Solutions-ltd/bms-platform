@@ -26,13 +26,18 @@ typed so the receipt shows it instead of Cash customer.
    Cloudflare rule with no change to it. The message reads "See your receipt: <link>". The link is made only when
    WhatsApp customer is tapped, never by viewing the screen, so no link exists that nobody sent (review of #762). The
    chat's window is opened inside the tap, so a phone does not block it as a pop-up while the link is made, and is sent
-   to WhatsApp when the link is back; when the link cannot be made the message goes without it and the screen says so.
-   A second tap on the same sale reuses the link.
-3. **The token is unguessable, stored only as a hash, and lives 90 days.** 26 random characters of lower case base32 (130
-   bits), longer than any new short name (ADR-108 decision 1) so the two never meet, and lower case because the rule's
-   endpoint reads names in lower case. Only its SHA-256 is stored (`retail_receipt_links`), so the table cannot be turned
-   back into links. The hash is a `text` column checked to 64 hex digits, so the lookups, bound as text, use its unique
-   index and a stream of wrong links never scans the table. Links are never changed and simply expire.
+   to WhatsApp when the link is back; when the link cannot be made, or is not back within 8 seconds on a stalled
+   connection, the message goes without it and the screen says so.
+3. **The token is unguessable, stored only as a hash, and lives 90 days; a sale has one link.** 26 characters of lower
+   case base32 (130 bits), longer than any new short name (ADR-108 decision 1) so the two never meet, and lower case
+   because the rule's endpoint reads names in lower case. The token is an HMAC of the link row's random id under a key
+   made for this purpose from the data key (`bms.auth.data-key`, as `CashbookSupport` keys its tokens), so the server can
+   give a live link again while storing only its SHA-256 (`retail_receipt_links`): the table cannot be turned back into
+   links without the data key. Every share of a sale, from any phone or person, gets the sale's live link while it has
+   at least 30 days left; after that the next share makes a new one for 90 days, and only a new one is audited. A link
+   made under a data key since rotated is not given again (a new one is made), though it still opens. The hash is a
+   `text` column checked to 64 hex digits, so the lookups, bound as text, use its unique index and a stream of wrong
+   links never scans the table. Links are never changed and simply expire.
 4. **The platform forwards, the shop's host renders.** The short link endpoint asks the shops first, then each module's
    `ShortLinkTarget` (a hook in `core.tenancy`, so the core names no vertical). Retail answers a token-shaped name: a live
    link is a 302 to `<shop host>/api/v1/retail/receipt-links/<token>`, found with the definer function
@@ -44,7 +49,9 @@ typed so the receipt shows it instead of Cash customer.
    neither the business nor the sale, on both hosts. A name of the token's shape that is no link gets this page too, not
    ADR-108's "No shop uses this link"; no new short name is that long.
 6. **The public routes are limited.** On the platform host a name no shop has (a receipt link or a mistyped name) counts
-   against 60 a client address may ask in ten minutes (429 beyond). On the shop's host one link may be opened 20 times
+   against 60 a client address may ask in ten minutes (429 beyond, with a plain "Too many tries" page). An address over
+   its limit adds no count for a link, so one client sending many random tokens cannot fill the limiter and turn every
+   customer away. On the shop's host one link may be opened 20 times
    and one address may open 30 in ten minutes; beyond that the answer is 429 with a plain "Too many tries" page, before
    anything is read or drawn, so one leaked link cannot fill the render places the sellers' own receipts share. Both are in
    memory per instance, behind the edge's own limits. The definer function relies on its owner `bms_owner` having

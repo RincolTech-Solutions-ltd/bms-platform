@@ -34,7 +34,7 @@ vi.mock('../../../api/retail', async (original) => {
   };
 });
 
-const { ShareReceipt, NOT_DRAWN, DOWNLOADED, SHARE_AGAIN, SHARE_REFUSED, WHATSAPP_HINT, NO_LINK } = await import('./receipt-share');
+const { ShareReceipt, NOT_DRAWN, DOWNLOADED, SHARE_AGAIN, SHARE_REFUSED, WHATSAPP_HINT, NO_LINK, LINK_WAIT_MS } = await import('./receipt-share');
 
 const seller = mockMe('sales');
 const admin = mockMe('admin');
@@ -323,6 +323,25 @@ describe('WhatsApp customer', () => {
     screenOf(seller, sale);
     fireEvent.click(await whatsAppButton());
     expect(open).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(sentTo()).toMatch(/^https:\/\/wa\.me\/256700000031\?text=/));
+    expect(decodeURIComponent(sentTo())).not.toContain('See your receipt');
+    expect((await screen.findByRole('status')).textContent).toBe(NO_LINK);
+  });
+
+  it('sends the details without the link when the link has not come back in time, on a stalled connection', async () => {
+    saleReceiptLink.mockReturnValue(new Promise(() => {}));
+    screenOf(seller, sale);
+    const button = await whatsAppButton();
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    try {
+      fireEvent.click(button);
+      expect(open).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(LINK_WAIT_MS - 1);
+      expect(chat.location.href).toBe('');
+      await vi.advanceTimersByTimeAsync(1);
+    } finally {
+      vi.useRealTimers();
+    }
     await waitFor(() => expect(sentTo()).toMatch(/^https:\/\/wa\.me\/256700000031\?text=/));
     expect(decodeURIComponent(sentTo())).not.toContain('See your receipt');
     expect((await screen.findByRole('status')).textContent).toBe(NO_LINK);

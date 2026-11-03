@@ -38,6 +38,18 @@ class ShortLinkRedirectController {
 
     private final SignUpRateLimiter limiter;
 
+    /** What a phone shows when one address asked for too many names no shop has; it names no business. */
+    static final String TOO_MANY_PAGE = """
+            <!doctype html>
+            <html lang="en">
+            <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta name="robots" content="noindex"><title>Too many tries</title>
+            <style>body { margin: 0; padding: 32px 16px; font: 16px/1.5 system-ui, sans-serif; color: #1f2328;
+            background: #ffffff; } main { max-width: 32rem; margin: 0 auto; } h1 { font-size: 1.4rem; }</style></head>
+            <body><main><h1>Too many tries</h1><p>Wait a few minutes and open the link again.</p></main></body>
+            </html>
+            """;
+
     ShortLinkRedirectController(
             ShortNames names, PlatformHost hosts, List<ShortLinkTarget> targets, SignUpRateLimiter limiter) {
         this.names = names;
@@ -77,6 +89,10 @@ class ShortLinkRedirectController {
             responseCode = "404",
             description = "A module's link that is wrong or has expired, such as a receipt link (issue #760)",
             content = @Content(mediaType = "text/html", schema = @Schema(type = "string")))
+    @ApiResponse(
+            responseCode = "429",
+            description = "Too many names no shop has from this address in ten minutes: a plain page",
+            content = @Content(mediaType = "text/html", schema = @Schema(type = "string")))
     ResponseEntity<String> follow(@PathVariable("name") String name) {
         // JUSTIFICATION-A3: after the shops, the modules' own links, such as a receipt link (issue #760, ADR-116).
         String shop = names.target(name).orElse(null);
@@ -84,7 +100,14 @@ class ShortLinkRedirectController {
             // A name no shop has may be a module's link, looked up in every business's rows: limited per address
             // (review
             // of #762). A shop's own short link never is.
-            limiter.acquire(SignUpRateLimiter.MODULE_LINK_PER_IP, RequestContext.clientIp());
+            if (!limiter.tryAcquire(SignUpRateLimiter.MODULE_LINK_PER_IP, RequestContext.clientIp())) {
+                // A plain page, since a customer's phone opens this address (second review of #762).
+                return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                        .contentType(new MediaType(MediaType.TEXT_HTML, StandardCharsets.UTF_8))
+                        .header("Cache-Control", "no-store")
+                        .header("Retry-After", "600")
+                        .body(TOO_MANY_PAGE);
+            }
         }
         ShortLinkTarget.Answer other = shop != null
                 ? null

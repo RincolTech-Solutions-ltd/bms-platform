@@ -61,6 +61,11 @@ describe('sale form', () => {
     expect(credit.buyer_name).toBe('Test Buyer 03');
     const listed = buildSaleRequest(draft({ customerId: 'c1', cashName: 'Test Customer 10' }), { checking: false, resolved: [] });
     expect(listed).not.toHaveProperty('buyer_name');
+    // A customer left over from a credit choice is not sent on a cash sale with price lists off, so the name is the
+    // sale's only buyer: never both together (second review of #762).
+    const leftOver = buildSaleRequest(draft({ customerId: 'c1', cashName: 'Test Customer 11' }));
+    expect(leftOver).not.toHaveProperty('customer_id');
+    expect(leftOver.buyer_name).toBe('Test Customer 11');
     expect(draftProblem(draft({ cashName: 'Test Customer 07' }))).toBeNull();
   });
 

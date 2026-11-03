@@ -860,19 +860,22 @@ class DocumentsService {
     // JUSTIFICATION-A3: the receipt link of issue #760 (ADR-116) reuses the receipt's checks and model above.
     /**
      * A link to the sale's receipt for a message to a typed WhatsApp number (issue #760, ADR-116): whoever may share the
-     * receipt may make one, with the same 404 and 422 refusals. Each call makes a new link, valid for 90 days.
+     * receipt may ask for it, with the same 404 and 422 refusals. The sale's live link is given again while it has 30 days
+     * left; otherwise a new one is made for 90 days, and only a new one is audited.
      */
     ReceiptLinks.Minted receiptLink(UUID saleId) {
         return writing.execute(status -> {
             Sale sale = receipt(saleId).sale();
             ReceiptLinks.Minted minted =
                     links.mint(sale.id(), CurrentPrincipal.require().userId());
-            audit.record(AuditLog.Entry.created(
-                    "retail.receipt_link.created",
-                    "retail.sale",
-                    sale.id(),
-                    sale.branchId(),
-                    Map.of("expires_at", minted.expiresAt().toString())));
+            if (minted.created()) {
+                audit.record(AuditLog.Entry.created(
+                        "retail.receipt_link.created",
+                        "retail.sale",
+                        sale.id(),
+                        sale.branchId(),
+                        Map.of("expires_at", minted.expiresAt().toString())));
+            }
             return minted;
         });
     }

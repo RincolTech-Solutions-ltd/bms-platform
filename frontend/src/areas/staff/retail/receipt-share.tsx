@@ -18,7 +18,9 @@ export const DOWNLOADED = 'This browser cannot share files, so the receipt PDF w
 export const SHARE_AGAIN = 'The receipt is ready. Tap Share receipt again to send it.';
 export const SHARE_REFUSED = 'Your phone would not open its share options, so the receipt PDF was downloaded. Send it from your downloads.';
 export const WHATSAPP_HINT = 'WhatsApp opens with the receipt details and a link to the receipt PDF. The link works for 90 days.';
-export const NO_LINK = 'The link to the receipt could not be made, so the message has the receipt details only.';
+/** How long the tap waits for the receipt link before the message goes without it. */
+export const LINK_WAIT_MS = 8000;
+export const NO_LINK ='The link to the receipt could not be made, so the message has the receipt details only.';
 export const WHATSAPP_FAILED = 'WhatsApp could not be opened with these details. Check the number and try again.';
 
 export const NOT_DRAWN = 'The receipt could not be shown on the screen. Download the PDF to see it.';
@@ -297,10 +299,15 @@ export function ShareReceipt({ sale, madeHere = false }: { sale: Sale; madeHere?
     }
     // The window is opened inside the tap, so a phone never blocks it as a pop-up, and is sent to WhatsApp once the link is
     // made; when it cannot be made the message goes without it, with a note saying so (review of #762).
+    // Opened without noopener on purpose: noopener would give no window to send on. The opener is cleared at once; a
+    // browser that ignores that still only ever loads wa.me in it.
     const chat = window.open('', '_blank');
     if (chat) chat.opener = null;
     setLinking(true);
-    void queryClient.fetchQuery(linkQuery).then((l) => l.url, () => undefined).then((url) => {
+    // On a stalled connection the chat never waits more than LINK_WAIT_MS: it then goes without the link (second review).
+    const link = queryClient.fetchQuery(linkQuery).then((l) => l.url, () => undefined);
+    const waited = new Promise<undefined>((done) => setTimeout(() => done(undefined), LINK_WAIT_MS));
+    void Promise.race([link, waited]).then((url) => {
       setLinking(false);
       if (!url) setNote(NO_LINK);
       const to = url ? chatWith(url) : address;

@@ -194,8 +194,33 @@ class ReceiptLinkIT extends IntegrationTest {
         assertThat(row.get("created_by")).isEqualTo(seller.userId());
         assertThat(String.valueOf(row.get("token_hash"))).hasSize(64).isNotEqualTo(token);
 
-        // Each tap makes a new link to the same receipt.
-        assertThat(token(makeLink(seller, sale, SALES))).isNotEqualTo(token);
+        // JUSTIFICATION-A3: second review of #762, item 1: one link per sale, given again, renewed near its end.
+        // A second share, and another person's, give the same link and write no row; once it has less than 30 days
+        // left,
+        // the next share makes a new one for 90 days.
+        assertThat(token(makeLink(seller, sale, SALES))).isEqualTo(token);
+        assertThat(token(makeLink(other, sale, SaleReceiptPdfIT.SUPERVISOR))).isEqualTo(token);
+        assertThat(links(sale)).isEqualTo(1);
+        TestDatabase.owner()
+                .sql("UPDATE retail_receipt_links SET created_at = created_at - interval '61 days',"
+                        + " expires_at = expires_at - interval '61 days' WHERE sale_id = ?")
+                .param(sale)
+                .update();
+        String renewed = token(makeLink(seller, sale, SALES));
+        assertThat(renewed).isNotEqualTo(token);
+        assertThat(links(sale)).isEqualTo(2);
+        assertThat(token(makeLink(seller, sale, SALES))).isEqualTo(renewed);
+        assertThat(open(t, token).getStatusCode())
+                .as("the older link still opens until it expires")
+                .isEqualTo(HttpStatus.OK);
+    }
+
+    static long links(UUID sale) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM retail_receipt_links WHERE sale_id = ?")
+                .param(sale)
+                .query(Long.class)
+                .single();
     }
 
     @Test
