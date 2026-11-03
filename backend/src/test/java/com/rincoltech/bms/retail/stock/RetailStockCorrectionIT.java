@@ -209,6 +209,18 @@ class RetailStockCorrectionIT extends IntegrationTest {
     }
 
     @Test
+    void anItemBelowZeroCanBeCorrectedToNone() {
+        // Issue #804: the form sends the quantity it showed, -1 here, and the correction must not refuse it.
+        api.importedBalance(hq, product, "-1");
+        assertThat(stockAt(hq)).isEqualByComparingTo("-1");
+        ResponseEntity<JsonNode> done = correct(hq, "0", "miscount", null);
+        assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(done.getBody().get("old_qty").asString()).isEqualTo("-1.000");
+        assertThat(done.getBody().get("new_qty").asString()).isEqualTo("0.000");
+        assertThat(stockAt(hq)).isEqualByComparingTo("0");
+    }
+
+    @Test
     void aCorrectionIsNeitherShrinkageNorUsageInTheReports() {
         // A stock-take finds one of another item missing: that is shrinkage, and the control for the figures below.
         UUID other = api.product("SC-2", 400, 600);

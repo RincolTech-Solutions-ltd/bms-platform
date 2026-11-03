@@ -327,8 +327,9 @@ final class StockApi {
                     description = "The quantity there should be, not the difference")
             BigDecimal newQty,
 
+            // No lower bound: a quantity below zero (imported history, ADR-020 decision 4) is the one most in need of a
+            // correction, and the form sends it as it showed it (issue #804).
             @NotNull
-            @PositiveOrZero
             @Digits(integer = 11, fraction = 3)
             @Schema(
                     type = "string",
